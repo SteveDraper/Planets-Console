@@ -25,6 +25,7 @@ TimelineEventKind = Literal[
     "abort",
     "epoch_retry",
     "persist_deferred",
+    "step_parked",
     "pool_finish_ignored",
 ]
 

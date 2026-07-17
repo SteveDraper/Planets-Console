@@ -39,6 +39,7 @@ from api.compute.diagnostics.scope import (
     player_id_from_scope,
     scope_in_diagnostic_scope,
 )
+from api.compute.diagnostics.scope_key import enrich_lifecycle_detail
 from api.compute.diagnostics.single_step_preview import (
     SingleStepArm,
     SingleStepDisabledReason,
@@ -1023,7 +1024,7 @@ class ComputeDiagnosticsController:
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
             return
-        payload = dict(detail) if isinstance(detail, dict) else {}
+        payload = enrich_lifecycle_detail(detail) if isinstance(detail, dict) else {}
         step_kind = payload.get("stepKind")
         if not isinstance(step_kind, str):
             pool_step_kind = payload.get("poolStepKind")

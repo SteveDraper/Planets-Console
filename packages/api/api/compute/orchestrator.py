@@ -12,9 +12,9 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.compute.dag import PlannedComputeNode, plan_compute_dag
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
+from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
 from api.compute.orchestrator_observers import (
     InlineStartListener,
-    LifecycleEventKind,
     LifecycleListener,
     NodeCompleteListener,
     NodeDispatchCommitHook,
@@ -29,7 +29,7 @@ from api.compute.orchestrator_step_execution import (
     _PendingInlineExecution,
     _PendingPoolSubmission,
 )
-from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.persistence import PersistDeferredError
 from api.compute.pools import (
     PRIORITY_BAND_RANK,
     ComputePriorityBand,
@@ -156,7 +156,7 @@ class OrchestratorDiagnosticsSnapshot:
     ready_scopes: tuple[ComputeScope, ...]
 
 
-class ComputeOrchestrator(OrchestratorStepExecutionMixin):
+class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleMixin):
     """Process-wide DAG scheduler with singleflight per normalized compute scope.
 
     One instance schedules every analytic's compute work. Concurrent
@@ -549,29 +549,6 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         self._observers.drain_post_lock_callbacks()
         return True
 
-    def _emit_force_fresh_lifecycle(
-        self,
-        *,
-        kind: LifecycleEventKind,
-        node: ComputeNodeRun,
-        request: ComputeRequest,
-    ) -> None:
-        """Record force_fresh replace vs attach (caller holds the orchestrator lock)."""
-        self._observers.notify_lifecycle(
-            kind,
-            node.scope,
-            node=node,
-            detail={
-                "reason": "submit_force_fresh",
-                "priorState": node.state,
-                "priorStepIndex": node.step_index,
-                "priorProfileStepIndex": node.profile_step_index,
-                "wasRunning": node.state == "running",
-                "entryStepKind": request.step_kind,
-                "priorityBand": request.priority_band,
-            },
-        )
-
     def _ctx_for_bundle(self, bundle: OrchestrationBundle) -> AnalyticQueryContext:
         """Return a ctx view of ``bundle`` with the process-wide turn cache spliced in."""
         game_id = bundle.game_id
@@ -783,132 +760,6 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         if node.generation_at_submit is None:
             return False
         return self._current_invalidation_generation(node) != node.generation_at_submit
-
-    def _retry_step_after_epoch_bump(self, node: ComputeNodeRun) -> None:
-        self._metrics.epoch_discards += 1
-        prior_step_index = node.step_index
-        prior_generation = node.generation_at_submit
-        current_generation = self._current_invalidation_generation(node)
-        node.generation_at_submit = None
-        node.parked_until_wake = False
-        node.state = "ready"
-        node.execution_sealed = False
-        self._enqueue_ready(node.scope)
-        self._observers.notify_ready(node)
-        self._observers.notify_lifecycle(
-            "epoch_retry",
-            node.scope,
-            node=node,
-            detail={
-                "reason": "invalidation_generation_bump",
-                "priorStepIndex": prior_step_index,
-                "priorProfileStepIndex": node.profile_step_index,
-                "generationAtSubmit": prior_generation,
-                "currentGeneration": current_generation,
-            },
-        )
-        # Never call pool.submit under the orchestrator lock (deadlocks with workers).
-        self._observers.schedule_post_lock(self.dispatch_ready_work)
-
-    def _recover_after_persist_deferred(
-        self,
-        node: ComputeNodeRun,
-        recovery: PersistDependencyRecovery,
-    ) -> None:
-        """Park the node on ``waiting_deps`` and optionally force_fresh a dependency.
-
-        Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
-        when a durable write cannot complete until a dependency re-closes.
-        Failing the node left dependents waiting with no wake for background DAG
-        nodes (no table-stream controller). Force-freshing the declared dependency
-        reopens the ENSURE edge; when it completes, readiness promotes this node.
-        """
-        priority_band = node.priority_band
-        bundle = node.bundle
-        with self._condition:
-            if node.state != "running":
-                return
-            prior_step_index = node.step_index
-            node.generation_at_submit = None
-            node.error = None
-            node.parked_until_wake = False
-            node.state = "waiting_deps"
-            node.execution_sealed = False
-            self._dequeue_ready(node.scope)
-            self._metrics.epoch_discards += 1
-            from api.compute.diagnostics.scope_key import format_compute_scope_key
-
-            self._observers.notify_lifecycle(
-                "persist_deferred",
-                node.scope,
-                node=node,
-                detail={
-                    "reason": "persist_deferred",
-                    "priorStepIndex": prior_step_index,
-                    "priorProfileStepIndex": node.profile_step_index,
-                    "relatedScopeKey": format_compute_scope_key(recovery.dependency_scope),
-                    "forceFresh": recovery.force_fresh,
-                    "dependencyStepKind": recovery.step_kind,
-                    "priorityBand": priority_band,
-                },
-            )
-
-        if not recovery.force_fresh:
-            return
-
-        dependency_scope = recovery.dependency_scope
-        step_kind = recovery.step_kind
-
-        def _force_fresh_dependency() -> None:
-            self.submit(
-                ComputeRequest(
-                    scope=dependency_scope,
-                    priority_band=priority_band,
-                    force_fresh=True,
-                    step_kind=step_kind,
-                    bundle=bundle,
-                )
-            )
-
-        self._observers.schedule_post_lock(_force_fresh_dependency)
-
-    def _park_node_step(self, node: ComputeNodeRun) -> None:
-        """Park a non-progressing step on ``waiting_deps`` until ``force_fresh`` wake."""
-        if node.state != "running":
-            return
-        prior_step_index = node.step_index
-        node.generation_at_submit = None
-        node.error = None
-        node.parked_until_wake = True
-        node.state = "waiting_deps"
-        node.execution_sealed = False
-        self._dequeue_ready(node.scope)
-        self._metrics.epoch_discards += 1
-        self._observers.notify_lifecycle(
-            "persist_deferred",
-            node.scope,
-            node=node,
-            detail={
-                "reason": "step_parked",
-                "priorStepIndex": prior_step_index,
-                "priorProfileStepIndex": node.profile_step_index,
-            },
-        )
-
-    def _maybe_wake_parked_node(self, node: ComputeNodeRun) -> None:
-        """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""
-        if not node.parked_until_wake:
-            return
-        node.parked_until_wake = False
-        node.generation_at_submit = None
-        node.execution_sealed = False
-        if self._deps_complete(node):
-            node.state = "ready"
-            self._enqueue_ready(node.scope)
-            self._observers.notify_ready(node)
-        else:
-            node.state = "waiting_deps"
-            self._dequeue_ready(node.scope)
 
     def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
         if self._is_epoch_stale(node):

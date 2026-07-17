@@ -42,6 +42,7 @@ LifecycleEventKind = Literal[
     "abort",
     "epoch_retry",
     "persist_deferred",
+    "step_parked",
     "pool_finish_ignored",
 ]
 # Causal restart / abort / stale-finish events for compute diagnostics.
