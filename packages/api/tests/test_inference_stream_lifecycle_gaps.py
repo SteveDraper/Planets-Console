@@ -276,7 +276,9 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     replacement.close()
 
     assert persistence.get_row(628580, 1, turn_number, completed_player_id) is not None
-    assert in_flight_session.cancel_token.is_cancelled()
+    # Reconnect detach drops stream ownership without cancelling solve tokens.
+    assert not in_flight_session.cancel_token.is_cancelled()
+    assert in_flight_session.run_id not in scheduler._runs
     assert not scheduler.owns_table_stream(first_token)
 
 

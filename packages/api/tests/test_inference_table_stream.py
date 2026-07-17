@@ -178,7 +178,9 @@ def test_table_stream_reconnect_preempts_in_flight_rows_for_same_scope(sample_tu
 
     assert not scheduler.owns_table_stream(stream_token)
     for session in sessions:
-        assert session.cancel_token.is_cancelled()
+        # Reconnect detach must not cancel solve tokens (persist may still write).
+        assert not session.cancel_token.is_cancelled()
+        assert session.run_id not in scheduler._runs
 
 
 def test_tag_inference_stream_event_adds_player_id_except_global_pause():

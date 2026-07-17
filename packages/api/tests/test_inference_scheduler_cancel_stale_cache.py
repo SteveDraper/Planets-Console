@@ -21,7 +21,10 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
-from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_NO_EXACT_SOLUTION,
+)
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.compute.pools import reset_compute_worker_pool_for_tests
@@ -275,7 +278,7 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
                 turn_number=turn_number,
             )
         )
-        # Switch away from prior turn -- only that turn is preempted.
+        # Switch away from prior turn -- only that turn is detached (not cancelled).
         scheduler.begin_scope(
             InferenceStreamScope(
                 game_id=628580,
@@ -284,13 +287,120 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
             )
         )
 
-        assert prior_session.cancel_token.is_cancelled()
+        assert not prior_session.cancel_token.is_cancelled()
         assert prior_session.run_id not in scheduler._runs
         assert get_row_run(prior_session.run_id) is None
 
         assert not other_session.cancel_token.is_cancelled()
         assert other_session.run_id in scheduler._runs
         assert get_row_run(other_session.run_id) is not None
+    finally:
+        reset_inference_row_scheduler_for_tests()
+        reset_tier_row_run_registry_for_tests()
+
+
+def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
+    sample_turn,
+):
+    """Detach must not cancel; a still-registered RowRun must still persist.
+
+    Fingerprint: cancel-on-detach raced with ScoresPersistencePolicy, which skips
+    when ``run is not None and cancel_token.is_cancelled()`` -- durable evidence
+    dropped even though the worker finished a RowComplete.
+    """
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.tier_row_run_registry import (
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+    from api.storage.memory_asset import MemoryAssetBackend
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    scheduler = InferenceRowScheduler()
+    try:
+        turn_number = sample_turn.settings.turn
+        player_id = sample_turn.scores[0].ownerid
+        scope = InferenceStreamScope(
+            game_id=628580,
+            perspective=1,
+            turn_number=turn_number,
+        )
+        first_token = scheduler.begin_scope(scope)
+        session = _session_for_player(sample_turn, player_id=player_id)
+        row_run = RowRun(session)
+        register_row_run(row_run)
+        with scheduler._lock:
+            scheduler._runs[session.run_id] = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            )
+
+        # Same-scope preempt detaches stream ownership without cancelling solve.
+        second_token = scheduler.begin_scope(scope)
+        assert second_token != first_token
+        assert not scheduler.owns_table_stream(first_token)
+        assert not session.cancel_token.is_cancelled()
+        assert session.run_id not in scheduler._runs
+        assert get_row_run(session.run_id) is None
+
+        # Race window: RowRun still visible to persist, token not cancelled.
+        register_row_run(row_run)
+        assert get_row_run(session.run_id) is row_run
+        assert not session.cancel_token.is_cancelled()
+
+        ctx = make_analytic_query_context(
+            sample_turn,
+            TurnAnalyticsOptions(),
+            export_services={
+                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+            },
+        )
+        row_complete = row_complete_with_summary(
+            InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+            summary="detach must not block persist",
+        )
+        ScoresPersistencePolicy().persist(
+            ctx,
+            ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            ),
+            {"runId": session.run_id, "rowComplete": row_complete},
+        )
+
+        stored = persistence.get_row(628580, 1, turn_number, player_id)
+        assert stored is not None
+        assert stored.summary == "detach must not block persist"
+
+        # Explicit cancel still blocks persist while the run is registered.
+        persistence.delete_row(628580, 1, turn_number, player_id)
+        session.cancel_token.cancel()
+        ScoresPersistencePolicy().persist(
+            ctx,
+            ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            ),
+            {"runId": session.run_id, "rowComplete": row_complete},
+        )
+        assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:
         reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()

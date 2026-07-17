@@ -266,7 +266,9 @@ def test_begin_scope_preempts_stale_stream_for_same_scope(sample_turn):
     assert second_token != first_token
     assert not scheduler.owns_table_stream(first_token)
     assert scheduler.owns_table_stream(second_token)
-    assert session.cancel_token.is_cancelled()
+    # Detach drops stream ownership without cancelling in-flight solve work.
+    assert not session.cancel_token.is_cancelled()
+    assert session.run_id not in scheduler._runs
     status = scheduler.global_pause_status(scope)
     assert status["activeSessionCount"] == 0
 
