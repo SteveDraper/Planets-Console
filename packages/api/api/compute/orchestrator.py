@@ -426,7 +426,7 @@ class ComputeOrchestrator(
         """
         with self._condition:
             node = self._nodes.get(scope)
-            if node is None or node.state in {"complete", "failed"}:
+            if node is None or node.is_terminal:
                 return False
             if (
                 expected_execution_generation is not None
@@ -495,12 +495,12 @@ class ComputeOrchestrator(
 
     def _refresh_all_readiness(self) -> None:
         for node in self._nodes.values():
-            if node.state in {"complete", "failed", "running", "parked"}:
+            if node.blocks_readiness_refresh:
                 continue
             self._refresh_node_readiness(node)
 
     def _refresh_node_readiness(self, node: ComputeNodeRun) -> None:
-        if node.state in {"complete", "failed", "running", "parked"}:
+        if node.blocks_readiness_refresh:
             return
         failed_dependency_error = self._failed_dependency_error(node)
         if failed_dependency_error is not None:
@@ -715,7 +715,7 @@ class ComputeOrchestrator(
         for node in self._nodes.values():
             if completed_scope not in node.dependency_scopes:
                 continue
-            if node.state in {"complete", "failed", "running", "parked"}:
+            if node.blocks_readiness_refresh:
                 continue
             self._refresh_node_readiness(node)
         # Defer dispatch: this runs under the orchestrator lock via

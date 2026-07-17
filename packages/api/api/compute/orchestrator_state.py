@@ -39,7 +39,7 @@ class ComputeHandle:
 
     @property
     def state(self) -> NodeState:
-        if self.is_waiter and self._node.state not in {"complete", "failed"}:
+        if self.is_waiter and not self._node.is_terminal:
             return "attach_inflight"
         return self._node.state
 
@@ -67,3 +67,30 @@ class ComputeNodeRun:
     bundle: OrchestrationBundle | None = None
     # Closes priority adoption once expensive work begins.
     execution_sealed: bool = False
+
+    @property
+    def is_terminal(self) -> bool:
+        """Whether this node has reached a final outcome.
+
+        ``parked`` is a soft pause, not terminal -- dependents stay blocked
+        until an explicit ``force_fresh`` wake.
+        """
+        return self.state in {"complete", "failed"}
+
+    @property
+    def blocks_readiness_refresh(self) -> bool:
+        """Whether readiness refresh should skip this node.
+
+        True once the node is terminal, already running, or parked -- only
+        ``waiting_deps`` and ``ready`` nodes need their dependencies re-checked.
+        """
+        return self.state in {"complete", "failed", "running", "parked"}
+
+    @property
+    def allows_priority_adopt(self) -> bool:
+        """Whether an attaching request may still upgrade this node's priority band.
+
+        Closed once the node is terminal. Callers also gate on
+        ``execution_sealed`` separately.
+        """
+        return self.state in {"waiting_deps", "parked", "ready", "running"}

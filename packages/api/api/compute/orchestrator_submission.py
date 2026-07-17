@@ -64,7 +64,7 @@ class OrchestratorSubmissionMixin:
         pending_inline: tuple[_PendingInlineExecution, ...] = ()
         pending_pool: tuple[_PendingPoolSubmission, ...] = ()
         if existing is not None:
-            if not (request.force_fresh and existing.state in {"complete", "failed"}):
+            if not (request.force_fresh and existing.is_terminal):
                 if request.force_fresh:
                     self._emit_force_fresh_lifecycle(
                         kind="force_fresh_attach",
@@ -136,7 +136,7 @@ class OrchestratorSubmissionMixin:
         node: ComputeNodeRun,
         request: ComputeRequest,
     ) -> ComputeHandle:
-        if node.state in {"complete", "failed"}:
+        if node.is_terminal:
             return ComputeHandle(scope=node.scope, _node=node)
         handle = ComputeHandle(scope=node.scope, _node=node, is_waiter=True)
         node.waiters.append(handle)
@@ -151,14 +151,14 @@ class OrchestratorSubmissionMixin:
         """Upgrade a node's priority from a higher-priority attachment."""
         if node.execution_sealed:
             return
-        if node.state not in {"waiting_deps", "parked", "ready", "running"}:
+        if not node.allows_priority_adopt:
             return
         if PRIORITY_BAND_RANK[priority_band] >= PRIORITY_BAND_RANK[node.priority_band]:
             return
         node.priority_band = priority_band
 
     def _replace_terminal_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        if node.state not in {"complete", "failed"}:
+        if not node.is_terminal:
             raise RuntimeError(f"cannot replace non-terminal node in state {node.state!r}")
         self._dequeue_ready(node.scope)
         node.waiters.clear()
