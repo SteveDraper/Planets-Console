@@ -264,8 +264,9 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     Soft / empty terminals must not ``complete`` the scores node while turn
     evidence is still open: that unlocks same-turn fleet ENSURE and triggers the
     fleet ``persist_deferred`` → force_fresh scores reopen loop. Persist only
-    statuses that close evidence on disk; otherwise ``continue`` so the wire
-    rebuilds (admit, adopt RowRun, or evidence-closed skip).
+    statuses that close evidence on disk. Non-durable or empty outcomes park on
+    ``waiting_deps`` until ``force_fresh`` wake (admit, adopt RowRun, or
+    evidence-closed skip) -- not hot ``continue``.
     """
     if outcome.enqueue_continuation:
         if outcome.next_ladder_state is not None:
@@ -277,9 +278,9 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
         status = outcome.row_complete.wire_payload.status
         if is_durable_turn_evidence_row_status(status):
             return StepResult(outcome="persist", payload=payload)
-        return StepResult(outcome="continue", payload=payload)
+        return StepResult(outcome="park", payload=payload)
 
-    return StepResult(outcome="continue")
+    return StepResult(outcome="park")
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
@@ -287,9 +288,8 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
 
     Empty complete is allowed only for the evidence-closed skip sentinel. Open-evidence
     wait wires (``runId: None`` without ``evidenceClosed``) and missing ``RowRun``
-    lookups return ``continue`` so the orchestrator rebuilds: evidence closes (skip),
-    a RowRun is scheduled/adopted, or wire-build raises only when ensure still needs
-    work after admit failed.
+    lookups park so the orchestrator does not hot-redispatch ``tier_solve``; a later
+    ``force_fresh`` submit rebuilds wire after admit, adopt, or evidence close.
     """
     run_id = job_wire.get("runId")
     if run_id is None:
@@ -297,17 +297,17 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
             # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn
             # evidence is already closed -- no CP-SAT.
             return StepResult(outcome="complete")
-        # Open-evidence wait / stale skip without closed marker: rebuild wire.
-        return StepResult(outcome="continue")
+        # Open-evidence wait / stale skip without closed marker: park until wake.
+        return StepResult(outcome="park")
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
         # Cross-binding race: peer may have finalized/unregistered the shared RowRun.
         # Do not empty-complete here -- that unlocked fleet with open scores evidence
-        # and left the scoreboard in-progress. Continue so wire-build re-checks
+        # and left the scoreboard in-progress. Park until wire-build can re-check
         # ``is_satisfied`` / re-ensures a RowRun.
-        return StepResult(outcome="continue")
+        return StepResult(outcome="park")
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:

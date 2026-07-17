@@ -12,7 +12,7 @@ from api.compute.scope import ComputeScope
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
-StepOutcome = Literal["continue", "persist", "complete"]
+StepOutcome = Literal["continue", "persist", "complete", "park"]
 
 # Compute plane: job payload -> serializable result payload.
 RunStepFn = Callable[[Any], Any]
@@ -32,7 +32,7 @@ def coerce_step_result(result_wire: object) -> StepResult:
         return result_wire
     if isinstance(result_wire, dict) and "outcome" in result_wire:
         outcome = result_wire["outcome"]
-        if outcome not in {"continue", "persist", "complete"}:
+        if outcome not in {"continue", "persist", "complete", "park"}:
             raise ValueError(f"invalid step outcome {outcome!r}")
         return StepResult(outcome=outcome, payload=result_wire.get("payload"))
     return StepResult(outcome="persist", payload=result_wire)

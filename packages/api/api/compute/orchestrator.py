@@ -120,6 +120,10 @@ class ComputeNodeRun:
     # True once expensive inline/pool work has started (job wire built or handed
     # to the pool); closes the priority-adopt window for later attaches.
     execution_sealed: bool = False
+    # Soft-terminal park: stay ``waiting_deps`` until an explicit ``force_fresh``
+    # submit wakes the node. Prevents hot ``continue`` when deps are satisfied
+    # but the step has no durable progress yet.
+    parked_until_wake: bool = False
 
 
 @dataclass
@@ -360,6 +364,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
                             node=existing,
                             request=request,
                         )
+                        self._maybe_wake_parked_node(existing)
                     handle = self._attach_to_existing(existing, request)
                     pending_inline, pending_pool = self._dispatch()
                     should_plan = False
@@ -726,6 +731,10 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
             self._fail_node(node, failed_dependency_error)
             return
         if self._deps_complete(node):
+            if node.parked_until_wake:
+                node.state = "waiting_deps"
+                self._dequeue_ready(node.scope)
+                return
             if node.state != "ready":
                 node.state = "ready"
                 self._enqueue_ready(node.scope)
@@ -781,6 +790,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         prior_generation = node.generation_at_submit
         current_generation = self._current_invalidation_generation(node)
         node.generation_at_submit = None
+        node.parked_until_wake = False
         node.state = "ready"
         node.execution_sealed = False
         self._enqueue_ready(node.scope)
@@ -821,6 +831,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
             prior_step_index = node.step_index
             node.generation_at_submit = None
             node.error = None
+            node.parked_until_wake = False
             node.state = "waiting_deps"
             node.execution_sealed = False
             self._dequeue_ready(node.scope)
@@ -861,6 +872,44 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
 
         self._observers.schedule_post_lock(_force_fresh_dependency)
 
+    def _park_node_step(self, node: ComputeNodeRun) -> None:
+        """Park a non-progressing step on ``waiting_deps`` until ``force_fresh`` wake."""
+        if node.state != "running":
+            return
+        prior_step_index = node.step_index
+        node.generation_at_submit = None
+        node.error = None
+        node.parked_until_wake = True
+        node.state = "waiting_deps"
+        node.execution_sealed = False
+        self._dequeue_ready(node.scope)
+        self._metrics.epoch_discards += 1
+        self._observers.notify_lifecycle(
+            "persist_deferred",
+            node.scope,
+            node=node,
+            detail={
+                "reason": "step_parked",
+                "priorStepIndex": prior_step_index,
+                "priorProfileStepIndex": node.profile_step_index,
+            },
+        )
+
+    def _maybe_wake_parked_node(self, node: ComputeNodeRun) -> None:
+        """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""
+        if not node.parked_until_wake:
+            return
+        node.parked_until_wake = False
+        node.generation_at_submit = None
+        node.execution_sealed = False
+        if self._deps_complete(node):
+            node.state = "ready"
+            self._enqueue_ready(node.scope)
+            self._observers.notify_ready(node)
+        else:
+            node.state = "waiting_deps"
+            self._dequeue_ready(node.scope)
+
     def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
@@ -874,6 +923,12 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
             if step_result.payload is not None:
                 node.result_wire = step_result.payload
             self._continue_node_step(node, registration)
+            return
+
+        if step_result.outcome == "park":
+            if step_result.payload is not None:
+                node.result_wire = step_result.payload
+            self._park_node_step(node)
             return
 
         if step_result.outcome == "persist":
@@ -962,12 +1017,14 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
                 node.profile_step_index = next_profile_index
         node.state = "ready"
         node.execution_sealed = False
+        node.parked_until_wake = False
         self._enqueue_ready(node.scope)
         self._observers.notify_ready(node)
         # Defer dispatch so pool submit is never nested under this lock.
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _complete_node(self, node: ComputeNodeRun) -> None:
+        node.parked_until_wake = False
         node.state = "complete"
         self._dequeue_ready(node.scope)
         for waiter in node.waiters:

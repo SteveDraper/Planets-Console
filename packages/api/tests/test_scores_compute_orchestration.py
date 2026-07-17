@@ -155,7 +155,7 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
 
     empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome())
     # Empty terminals must not DAG-complete (unlocks fleet with open evidence).
-    assert empty_result.outcome == "continue"
+    assert empty_result.outcome == "park"
 
 
 def test_run_scores_materialize_continues_to_tier_solve() -> None:
@@ -290,13 +290,13 @@ def test_build_scores_tier_solve_job_wire_continues_when_ensure_admitted_without
     sample_turn,
     persistence,
 ) -> None:
-    """Transient ensure-satisfied / no-RowRun race waits via continue, not hard-fail.
+    """Transient ensure-satisfied / no-RowRun race parks via tier_solve, not hard-fail.
 
     Permanent cheap ImmediateRowAdmission is durable on ensure and skip-completes
     (see ``test_cheap_immediate_admission_closes_materialization_evidence_and_skip_completes``).
     This covers the remaining open-evidence path: ensure reports satisfied while no
     registry/scheduler RowRun is visible yet and materialization evidence is still
-    open -- rebuild via continue; do not ``RuntimeError`` or empty-complete.
+    open -- park until ``force_fresh`` wake; do not ``RuntimeError`` or empty-complete.
     """
     from api.analytics.military_score_inference.inference_scheduler import (
         InferenceRowScheduler,
@@ -342,7 +342,7 @@ def test_build_scores_tier_solve_job_wire_continues_when_ensure_admitted_without
         )
     assert wait_wire == {"runId": None}
     assert get_row_run_for_scope(scope) is None
-    assert run_scores_tier_solve(wait_wire).outcome == "continue"
+    assert run_scores_tier_solve(wait_wire).outcome == "park"
 
 
 def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_completes(
@@ -845,6 +845,103 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
 
     assert handle.state == "complete", handle.error
     assert handle.result_wire is not None
+
+
+def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) -> None:
+    """Empty tier outcomes park on waiting_deps instead of hot-continue tier_solve."""
+    from api.analytics.catalog import TurnAnalyticCatalogEntry
+    from api.analytics.exports.catalog import AnalyticExportCatalog
+    from api.analytics.exports.registry import EXPORT_REGISTRY
+    from api.analytics.registration import TurnAnalyticRegistration
+    from api.compute import AnalyticComputeProfile, ComputeStepSpec
+
+    tier_catalog = AnalyticExportCatalog(
+        analytic_id="scores-tier-probe",
+        is_ensure_satisfied=lambda _ctx, _scope: False,
+    )
+    run = _register_run(sample_turn)
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_registry={**EXPORT_REGISTRY, "scores-tier-probe": tier_catalog},
+        export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
+    )
+    tier_registration = TurnAnalyticRegistration(
+        catalog_entry=TurnAnalyticCatalogEntry(
+            id="scores-tier-probe",
+            name="scores-tier-probe",
+            supports_table=True,
+            supports_map=False,
+            type="selectable",
+        ),
+        compute=lambda _ctx: {"analyticId": "scores-tier-probe"},
+        export_catalog=tier_catalog,
+        scope_key_spec=SCORES_REGISTRATION.scope_key_spec,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind=SCORES_TIER_SOLVE, backend="thread"),),
+        ),
+        persistence_policy=SCORES_REGISTRATION.persistence_policy,
+        build_step_job_wires=((SCORES_TIER_SOLVE, build_scores_tier_solve_job_wire),),
+        run_steps=((SCORES_TIER_SOLVE, run_scores_tier_solve),),
+    )
+    compute_registry = build_compute_registry((tier_registration,))
+    submitted_scopes: list[ComputeScope] = []
+
+    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
+        del step, job_wire, run_step
+        submitted_scopes.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    scope = ComputeScope(
+        analytic_id="scores-tier-probe",
+        game_id=628580,
+        perspective=1,
+        turn=sample_turn.settings.turn,
+        player_id=run.session.player_id,
+    )
+
+    with patch(
+        "api.analytics.scores.compute_orchestration.run_inference_tier_job",
+        return_value=TierJobOutcome(),
+    ):
+        handle = orchestrator.submit(
+            ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE),
+        )
+        assert submitted_scopes == [scope]
+        result_wire = run_scores_tier_solve({"runId": run.run_id})
+        assert result_wire.outcome == "park"
+        orchestrator.complete_pool_step(scope, result_wire=result_wire)
+
+    node = orchestrator.nodes[scope]
+    assert node.state == "waiting_deps"
+    assert node.parked_until_wake is True
+    assert handle.state == "waiting_deps"
+    assert submitted_scopes == [scope]
+
+    with patch(
+        "api.analytics.scores.compute_orchestration.run_inference_tier_job",
+        return_value=TierJobOutcome(
+            row_complete=row_complete_with_summary(
+                InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+                summary="done",
+            ),
+        ),
+    ):
+        orchestrator.submit(
+            ComputeRequest(
+                ctx=ctx,
+                scope=scope,
+                step_kind=SCORES_TIER_SOLVE,
+                force_fresh=True,
+            ),
+        )
+
+    assert submitted_scopes == [scope, scope]
+    assert node.parked_until_wake is False
+    assert node.state == "running"
 
 
 def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
