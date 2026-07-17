@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections import OrderedDict
 
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_orchestration import (
@@ -15,14 +16,22 @@ from api.compute.scope import WILDCARD, ComputeScope
 
 # Explicit cancellation fences persist after ``unregister_row_run`` so
 # ``ScoresPersistencePolicy`` can refuse cancel-after-unregister races. Detach
-# must not set a fence. Run IDs are unique UUIDs and a cancelled run cannot be
-# registered again, so a fence is never removed during process lifetime.
+# must not set a fence. Run IDs are unique UUIDs, so fences are FIFO-bounded by
+# ``MAX_CANCEL_FENCE_RUN_IDS`` rather than kept for process lifetime; the race
+# window a late persist must lose to is short relative to this capacity.
+MAX_CANCEL_FENCE_RUN_IDS = 4096
 
 _lock = threading.Lock()
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
-_cancel_fence_run_ids: set[str] = set()
+_cancel_fence_run_ids: OrderedDict[str, None] = OrderedDict()
+
+
+def _trim_cancel_fence_run_ids() -> None:
+    """Evict oldest cancel fences until at capacity. Caller holds ``_lock``."""
+    while len(_cancel_fence_run_ids) > MAX_CANCEL_FENCE_RUN_IDS:
+        _cancel_fence_run_ids.popitem(last=False)
 
 
 def _scope_key(scope: ComputeScope) -> tuple[int, int, int, int]:
@@ -100,9 +109,14 @@ def mark_row_run_cancelled(run_id: str) -> None:
 
     ``cancel_run`` must call this before ``unregister_row_run``. Detach must
     not -- detached workers may still persist from the RowComplete payload.
+
+    Fences are FIFO-bounded by ``MAX_CANCEL_FENCE_RUN_IDS``; re-marking the
+    same ``run_id`` refreshes its eviction order.
     """
     with _lock:
-        _cancel_fence_run_ids.add(run_id)
+        _cancel_fence_run_ids.pop(run_id, None)
+        _cancel_fence_run_ids[run_id] = None
+        _trim_cancel_fence_run_ids()
 
 
 def is_row_run_cancelled(run_id: str) -> bool:

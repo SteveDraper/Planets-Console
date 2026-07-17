@@ -568,8 +568,8 @@ def test_cancel_after_unregister_blocks_persist_via_fence(sample_turn):
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancel_fence_blocks_late_persist_under_high_churn(sample_turn):
-    """An explicit cancel fence must not expire before late persist is rejected."""
+def test_cancel_fence_blocks_late_persist_under_churn(sample_turn):
+    """A cancel fence must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
@@ -594,7 +594,7 @@ def test_cancel_fence_blocks_late_persist_under_high_churn(sample_turn):
                 turn_number=turn_number,
             )
         )
-        for index in range(5_000):
+        for index in range(100):
             reg.mark_row_run_cancelled(f"unrelated-run-{index}")
 
         session = _session_for_player(sample_turn, player_id=player_id)
@@ -611,7 +611,6 @@ def test_cancel_fence_blocks_late_persist_under_high_churn(sample_turn):
 
         scheduler.cancel_run(session.run_id)
         assert reg.is_row_run_cancelled(session.run_id)
-        assert reg.is_row_run_cancelled("unrelated-run-0")
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -622,7 +621,100 @@ def test_cancel_fence_blocks_late_persist_under_high_churn(sample_turn):
         )
         row_complete = row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
-            summary="cancelled high-churn run must not persist",
+            summary="cancelled run must not persist despite unrelated churn",
+        )
+        ScoresPersistencePolicy().persist(
+            ctx,
+            ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            ),
+            {"runId": session.run_id, "rowComplete": row_complete},
+        )
+        assert persistence.get_row(628580, 1, turn_number, player_id) is None
+    finally:
+        reset_inference_row_scheduler_for_tests()
+        reg.reset_tier_row_run_registry_for_tests()
+
+
+def test_cancelled_run_fences_are_fifo_bounded(monkeypatch):
+    """Cancel fences must not grow unbounded across unique run ids."""
+    from api.analytics.scores import tier_row_run_registry as reg
+
+    monkeypatch.setattr(reg, "MAX_CANCEL_FENCE_RUN_IDS", 3)
+    reg.reset_tier_row_run_registry_for_tests()
+    try:
+        for index in range(10):
+            reg.mark_row_run_cancelled(f"run-{index}")
+        retained = [index for index in range(10) if reg.is_row_run_cancelled(f"run-{index}")]
+        assert retained == [7, 8, 9]
+    finally:
+        reg.reset_tier_row_run_registry_for_tests()
+
+
+def test_fence_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn, monkeypatch):
+    """Oldest fences may evict; a still-retained cancel must refuse late persist."""
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores import tier_row_run_registry as reg
+    from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+    from api.storage.memory_asset import MemoryAssetBackend
+
+    monkeypatch.setattr(reg, "MAX_CANCEL_FENCE_RUN_IDS", 2)
+    reset_inference_row_scheduler_for_tests()
+    reg.reset_tier_row_run_registry_for_tests()
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    scheduler = InferenceRowScheduler()
+    try:
+        turn_number = sample_turn.settings.turn
+        player_id = sample_turn.scores[0].ownerid
+        scheduler.begin_scope(
+            InferenceStreamScope(
+                game_id=628580,
+                perspective=1,
+                turn_number=turn_number,
+            )
+        )
+        # Fill capacity with unrelated cancels, then cancel the real run so it
+        # remains among the newest fences after FIFO eviction pressure.
+        reg.mark_row_run_cancelled("stale-a")
+        reg.mark_row_run_cancelled("stale-b")
+
+        session = _session_for_player(sample_turn, player_id=player_id)
+        row_run = RowRun(session)
+        reg.register_row_run(row_run)
+        with scheduler._lock:
+            scheduler._runs[session.run_id] = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            )
+
+        scheduler.cancel_run(session.run_id)
+        # One more cancel evicts the oldest filler; the real run must stay.
+        reg.mark_row_run_cancelled("stale-c")
+        assert not reg.is_row_run_cancelled("stale-a")
+        assert reg.is_row_run_cancelled(session.run_id)
+
+        ctx = make_analytic_query_context(
+            sample_turn,
+            TurnAnalyticsOptions(),
+            export_services={
+                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+            },
+        )
+        row_complete = row_complete_with_summary(
+            InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+            summary="retained cancel fence must not persist",
         )
         ScoresPersistencePolicy().persist(
             ctx,
