@@ -28,6 +28,7 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_row_run_for_scope,
     get_tier_callbacks,
+    is_row_run_cancelled,
     register_row_run,
 )
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
@@ -370,9 +371,13 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
+        # Cancel vs detach: cancel_run marks a tombstone before unregister so a
+        # late persist after RowRun removal still skips. Detach only unregisters
+        # (no tombstone) so finish-after-detach may persist from the payload.
+        if is_row_run_cancelled(run_id):
+            return
         run = get_row_run(run_id)
         if run is not None and run.session.cancel_token.is_cancelled():
-            # Explicit cancel_run aborted the scope before persist; no-op is safe.
             return
 
         services.persistence.persist_row_complete_for_scope(

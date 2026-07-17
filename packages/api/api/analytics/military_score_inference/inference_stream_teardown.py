@@ -52,9 +52,10 @@ class InferenceStreamTeardownMixin:
         (no prior scope) leaves retained runs alone.
 
         Detach drops RowRun registrations and stream bindings but does **not**
-        cancel solve tokens or abort orchestrator nodes -- in-flight tier workers
-        may still finish, persist from the RowComplete payload, and complete the
-        DAG node. ``cancel_run`` is the explicit cancel intent (token + abort).
+        cancel solve tokens, mark cancelled-run tombstones, or abort orchestrator
+        nodes -- in-flight tier workers may still finish, persist from the
+        RowComplete payload, and complete the DAG node. ``cancel_run`` is the
+        explicit cancel intent (token + tombstone + abort).
         """
         with self._lock:
             prior = self._scope_guard.active_scope
@@ -78,16 +79,21 @@ class InferenceStreamTeardownMixin:
 
         Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
         only drops stream ownership without cancelling solve work, cancel cancels
-        the RowRun token and aborts in-flight orchestrator nodes so a later
-        ``force_fresh`` submit cannot attach to a still-running node with a
-        missing RowRun.
+        the RowRun token, marks a cancelled-run tombstone (survives unregister so
+        ``ScoresPersistencePolicy`` refuses late persist), and aborts in-flight
+        orchestrator nodes so a later ``force_fresh`` submit cannot attach to a
+        still-running node with a missing RowRun.
         """
+        from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
+
         abort_scope: ComputeScope | None = None
         with self._lock:
             row_run = self._adapter_row_run(run_id)
             root_scope = self._runs.get(run_id)
             if row_run is not None:
                 row_run.session.cancel_token.cancel()
+            # Tombstone before unregister: persist must not race on missing RowRun.
+            mark_row_run_cancelled(run_id)
             self._remove_run_locked(run_id)
             abort_scope = root_scope
         # Abort outside the scheduler lock: ``abort_scope`` drains node-complete
@@ -106,11 +112,10 @@ class InferenceStreamTeardownMixin:
 
         Used by ``begin_scope`` when switching table streams. Unregisters RowRuns
         and drops stream bindings for ``turn`` only; other turns are untouched.
-        Does **not** cancel RowRun tokens or call ``abort_scope`` -- in-flight
-        tier workers may still finish, persist from the RowComplete payload, and
-        complete the DAG node. Cancelling the token here would race with persist
-        (``ScoresPersistencePolicy`` skips when a still-registered run looks
-        cancelled). ``cancel_run`` is the explicit cancel intent (token + abort).
+        Does **not** cancel RowRun tokens, mark cancelled-run tombstones, or call
+        ``abort_scope`` -- in-flight tier workers may still finish, persist from
+        the RowComplete payload, and complete the DAG node. ``cancel_run`` is the
+        explicit cancel intent (token + tombstone + abort).
         """
         self._globally_paused = False
         self._held_initial_submissions.clear()

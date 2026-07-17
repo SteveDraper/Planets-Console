@@ -305,8 +305,8 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
     """Detach must not cancel; a still-registered RowRun must still persist.
 
     Fingerprint: cancel-on-detach raced with ScoresPersistencePolicy, which skips
-    when ``run is not None and cancel_token.is_cancelled()`` -- durable evidence
-    dropped even though the worker finished a RowComplete.
+    cancelled runs -- durable evidence dropped even though the worker finished a
+    RowComplete. Detach must leave no cancel tombstone.
     """
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
@@ -401,6 +401,164 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
             {"runId": session.run_id, "rowComplete": row_complete},
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
+    finally:
+        reset_inference_row_scheduler_for_tests()
+        reset_tier_row_run_registry_for_tests()
+
+
+def test_cancel_after_unregister_blocks_persist_via_tombstone(sample_turn):
+    """cancel_run tombstone must survive RowRun removal so late persist skips.
+
+    Fingerprint: cancel cancelled the token and unregistered before abort; persist
+    saw ``get_row_run is None`` and wrote durable evidence for cancelled work.
+    """
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.tier_row_run_registry import (
+        get_row_run,
+        is_row_run_cancelled,
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+    from api.storage.memory_asset import MemoryAssetBackend
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    scheduler = InferenceRowScheduler()
+    try:
+        turn_number = sample_turn.settings.turn
+        player_id = sample_turn.scores[0].ownerid
+        scheduler.begin_scope(
+            InferenceStreamScope(
+                game_id=628580,
+                perspective=1,
+                turn_number=turn_number,
+            )
+        )
+        session = _session_for_player(sample_turn, player_id=player_id)
+        row_run = RowRun(session)
+        register_row_run(row_run)
+        with scheduler._lock:
+            scheduler._runs[session.run_id] = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            )
+
+        scheduler.cancel_run(session.run_id)
+        assert get_row_run(session.run_id) is None
+        assert is_row_run_cancelled(session.run_id)
+        assert session.cancel_token.is_cancelled()
+
+        ctx = make_analytic_query_context(
+            sample_turn,
+            TurnAnalyticsOptions(),
+            export_services={
+                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+            },
+        )
+        row_complete = row_complete_with_summary(
+            InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+            summary="cancel-after-unregister must not persist",
+        )
+        ScoresPersistencePolicy().persist(
+            ctx,
+            ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            ),
+            {"runId": session.run_id, "rowComplete": row_complete},
+        )
+        assert persistence.get_row(628580, 1, turn_number, player_id) is None
+    finally:
+        reset_inference_row_scheduler_for_tests()
+        reset_tier_row_run_registry_for_tests()
+
+
+def test_detach_missing_run_still_persists_from_payload(sample_turn):
+    """Detach unregisters without a cancel tombstone; finish may persist."""
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.tier_row_run_registry import (
+        get_row_run,
+        is_row_run_cancelled,
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+    from api.storage.memory_asset import MemoryAssetBackend
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    scheduler = InferenceRowScheduler()
+    try:
+        turn_number = sample_turn.settings.turn
+        player_id = sample_turn.scores[0].ownerid
+        scope = InferenceStreamScope(
+            game_id=628580,
+            perspective=1,
+            turn_number=turn_number,
+        )
+        first_token = scheduler.begin_scope(scope)
+        session = _session_for_player(sample_turn, player_id=player_id)
+        row_run = RowRun(session)
+        register_row_run(row_run)
+        with scheduler._lock:
+            scheduler._runs[session.run_id] = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            )
+
+        second_token = scheduler.begin_scope(scope)
+        assert second_token != first_token
+        assert get_row_run(session.run_id) is None
+        assert not is_row_run_cancelled(session.run_id)
+        assert not session.cancel_token.is_cancelled()
+
+        ctx = make_analytic_query_context(
+            sample_turn,
+            TurnAnalyticsOptions(),
+            export_services={
+                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+            },
+        )
+        row_complete = row_complete_with_summary(
+            InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+            summary="detach-missing-run may persist",
+        )
+        ScoresPersistencePolicy().persist(
+            ctx,
+            ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            ),
+            {"runId": session.run_id, "rowComplete": row_complete},
+        )
+        stored = persistence.get_row(628580, 1, turn_number, player_id)
+        assert stored is not None
+        assert stored.summary == "detach-missing-run may persist"
     finally:
         reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()

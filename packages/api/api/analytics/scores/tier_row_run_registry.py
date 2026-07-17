@@ -17,6 +17,9 @@ _lock = threading.Lock()
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
+# Survives ``unregister_row_run`` so ``ScoresPersistencePolicy`` can refuse
+# cancel-after-unregister races. Detach must not mark entries here.
+_cancelled_run_ids: set[str] = set()
 
 
 def _scope_key(scope: ComputeScope) -> tuple[int, int, int, int]:
@@ -72,6 +75,7 @@ def register_row_run(
     if initialize_ladder and run.ladder_state is None:
         initialize_tier_ladder_state(run, orchestration=orchestration)
     with _lock:
+        _cancelled_run_ids.discard(run.run_id)
         _runs_by_id[run.run_id] = run
         _run_id_by_scope_key[_session_scope_key(run.session)] = run.run_id
 
@@ -87,6 +91,22 @@ def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
         if run_id is None:
             return None
         return _runs_by_id.get(run_id)
+
+
+def mark_row_run_cancelled(run_id: str) -> None:
+    """Record explicit cancel intent that survives RowRun unregister.
+
+    ``cancel_run`` must call this before ``unregister_row_run``. Detach must
+    not -- detached workers may still persist from the RowComplete payload.
+    """
+    with _lock:
+        _cancelled_run_ids.add(run_id)
+
+
+def is_row_run_cancelled(run_id: str) -> bool:
+    """True when ``mark_row_run_cancelled`` was called for ``run_id``."""
+    with _lock:
+        return run_id in _cancelled_run_ids
 
 
 def unregister_row_run(run_id: str) -> None:
@@ -115,3 +135,4 @@ def reset_tier_row_run_registry_for_tests() -> None:
         _runs_by_id.clear()
         _run_id_by_scope_key.clear()
         _tier_callbacks_by_run_id.clear()
+        _cancelled_run_ids.clear()
