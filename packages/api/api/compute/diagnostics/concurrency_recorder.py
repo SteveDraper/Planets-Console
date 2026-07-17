@@ -14,7 +14,6 @@ from api.compute.diagnostics.history import (
 )
 from api.compute.diagnostics.in_flight import InFlightPoolExecution
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.timeline import (
     ComputeConcurrencyTimeline,
     OccupancyGauges,
@@ -25,7 +24,7 @@ from api.compute.diagnostics.timeline import (
 )
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.pools import ComputePriorityBand
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, format_compute_scope_key
 
 
 class ConcurrencyTimelineRecorder:

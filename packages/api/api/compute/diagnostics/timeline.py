@@ -8,26 +8,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
+from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.pools import ComputePriorityBand
 
 DEFAULT_TIMELINE_CAPACITY = 5000
 
-TimelineEventKind = Literal[
+# Occupancy / scheduling events recorded by the concurrency timeline.
+OccupancyTimelineEventKind = Literal[
     "ready",
     "enqueue",
     "start",
     "complete",
     "inline_start",
     "inline_complete",
-    # Causal / restart diagnostics (not occupancy lifecycle).
-    "force_fresh_replace",
-    "force_fresh_attach",
-    "abort",
-    "epoch_retry",
-    "persist_deferred",
-    "step_parked",
-    "pool_finish_ignored",
 ]
+# Occupancy plus causal lifecycle kinds owned by orchestrator observers.
+TimelineEventKind = OccupancyTimelineEventKind | LifecycleEventKind
 
 
 @dataclass(frozen=True)

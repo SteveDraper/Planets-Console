@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.remote_futures import (
     RemotePoolFutureRecord,
     classify_future_state,
@@ -13,6 +12,7 @@ from api.compute.remote_futures import (
     future_exception_type,
     remote_future_key,
 )
+from api.compute.scope import format_compute_scope_key
 
 
 def index_remote_futures_by_key(

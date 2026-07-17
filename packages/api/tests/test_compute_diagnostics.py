@@ -30,10 +30,10 @@ from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
     scope_in_diagnostic_scope,
 )
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.pools import ComputePriorityBand, PoolWorkItem
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
+from api.compute.scope import format_compute_scope_key
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
@@ -1758,7 +1758,6 @@ def test_completion_history_via_orchestrator_step_complete(sample_turn):
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import merge_export_registry
     from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
-    from api.compute.diagnostics.scope_key import format_compute_scope_key
 
     scores_stub_export = AnalyticExportCatalog(
         analytic_id="scores",
@@ -1830,7 +1829,6 @@ def test_concurrency_timeline_records_inline_lifecycle_and_shares_finish_sink(sa
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import merge_export_registry
     from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
-    from api.compute.diagnostics.scope_key import format_compute_scope_key
 
     scores_stub_export = AnalyticExportCatalog(
         analytic_id="scores",

@@ -1,8 +1,8 @@
 """Lifecycle emission helpers for ComputeOrchestrator.
 
 Owns park, epoch-retry, persist-deferred recovery, and force_fresh lifecycle
-detail assembly. Core emits structured scope fields; diagnostics listeners
-format wire scope keys when recording timeline events.
+detail assembly. Emits wire-ready scope keys on lifecycle details so listeners
+need not reconstruct ``ComputeScope`` from dict fields.
 """
 
 from __future__ import annotations
@@ -11,27 +11,10 @@ from typing import TYPE_CHECKING
 
 from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.persistence import PersistDependencyRecovery
-from api.compute.scope import WILDCARD, ComputeScope
+from api.compute.scope import format_compute_scope_key
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
-
-
-def compute_scope_lifecycle_detail(scope: ComputeScope) -> dict[str, object]:
-    """Return structured scope fields for lifecycle event detail payloads."""
-    detail: dict[str, object] = {
-        "analyticId": scope.analytic_id,
-        "gameId": scope.game_id,
-    }
-    if scope.perspective != WILDCARD:
-        detail["perspective"] = scope.perspective
-    if scope.turn != WILDCARD:
-        detail["turn"] = scope.turn
-    if scope.player_id != WILDCARD:
-        detail["playerId"] = scope.player_id
-    if scope.parameters:
-        detail["parameters"] = dict(scope.parameters)
-    return detail
 
 
 class OrchestratorLifecycleMixin:
@@ -119,7 +102,7 @@ class OrchestratorLifecycleMixin:
                     "reason": "persist_deferred",
                     "priorStepIndex": prior_step_index,
                     "priorProfileStepIndex": node.profile_step_index,
-                    "relatedScope": compute_scope_lifecycle_detail(recovery.dependency_scope),
+                    "relatedScopeKey": format_compute_scope_key(recovery.dependency_scope),
                     "forceFresh": recovery.force_fresh,
                     "dependencyStepKind": recovery.step_kind,
                     "priorityBand": priority_band,

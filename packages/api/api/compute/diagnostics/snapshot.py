@@ -20,7 +20,6 @@ from api.compute.diagnostics.rollup import (
     rollup_to_wire,
 )
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.single_step_preview import (
     SingleStepDisabledReason,
     SingleStepPreview,
@@ -34,7 +33,7 @@ from api.compute.remote_futures import (
     classify_future_state,
     future_exception_type,
 )
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.streaming.table_stream.registry_catalog import active_table_stream_bindings
 
 

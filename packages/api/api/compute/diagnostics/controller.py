@@ -39,7 +39,6 @@ from api.compute.diagnostics.scope import (
     player_id_from_scope,
     scope_in_diagnostic_scope,
 )
-from api.compute.diagnostics.scope_key import enrich_lifecycle_detail
 from api.compute.diagnostics.single_step_preview import (
     SingleStepArm,
     SingleStepDisabledReason,
@@ -50,8 +49,8 @@ from api.compute.diagnostics.single_step_preview import (
     resolve_single_step_preview,
     single_step_pin_matches,
 )
-from api.compute.diagnostics.timeline import TimelineEventKind
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OrchestratorNodeSnapshot
+from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.pools import (
     ComputeWorkerPool,
     PoolWorkItem,
@@ -1022,7 +1021,7 @@ class ComputeDiagnosticsController:
 
     def _on_lifecycle(
         self,
-        kind: TimelineEventKind,
+        kind: LifecycleEventKind,
         scope: ComputeScope,
         node: ComputeNodeRun | None,
         detail: object,
@@ -1032,7 +1031,7 @@ class ComputeDiagnosticsController:
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
             return
-        payload = enrich_lifecycle_detail(detail) if isinstance(detail, dict) else {}
+        payload = dict(detail) if isinstance(detail, dict) else {}
         step_kind = payload.get("stepKind")
         if not isinstance(step_kind, str):
             pool_step_kind = payload.get("poolStepKind")
