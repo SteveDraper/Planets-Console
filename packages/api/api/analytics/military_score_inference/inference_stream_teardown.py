@@ -148,32 +148,15 @@ class InferenceStreamTeardownMixin:
         into a user-visible fleet table error.
 
         Must run without the scheduler lock held (see ``cancel_run``). Always targets the
-        process-wide orchestrator so abort still works when stream bindings were cleared.
+        process-wide singleton orchestrator (#209).
         """
         from api.compute.errors import ComputeScopeAbortedError
         from api.compute.runtime import get_compute_orchestrator
 
-        orchestrators: list[object] = []
-        seen: set[int] = set()
-        with self._lock:
-            for binding in self._stream_bindings.values():
-                orch = binding.orchestrator
-                orch_id = id(orch)
-                if orch_id in seen:
-                    continue
-                seen.add(orch_id)
-                orchestrators.append(orch)
-        singleton = get_compute_orchestrator()
-        if id(singleton) not in seen:
-            orchestrators.append(singleton)
-        for orchestrator in orchestrators:
-            abort = getattr(orchestrator, "abort_scope", None)
-            if not callable(abort):
-                continue
-            abort(
-                root_scope,
-                ComputeScopeAbortedError(SCORES_ROW_RUN_CANCELLED_MESSAGE),
-            )
+        get_compute_orchestrator().abort_scope(
+            root_scope,
+            ComputeScopeAbortedError(SCORES_ROW_RUN_CANCELLED_MESSAGE),
+        )
 
     def _release_stream_binding_locked(
         self: InferenceRowScheduler,
