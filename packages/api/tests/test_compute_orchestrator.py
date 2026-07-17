@@ -506,11 +506,15 @@ def test_submit_reuses_terminal_node_unless_fresh_requested(sample_turn):
 
     first = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     duplicate = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    not_woken = orchestrator.wake_if_parked(
+        ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True)
+    )
     fresh = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
 
     assert run_payloads == [1, 2]
     assert first.result_wire == {"run": 1}
     assert duplicate.result_wire == {"run": 1}
+    assert not_woken is None
     assert fresh.result_wire == {"run": 2}
     assert orchestrator.nodes[shared_scope] is fresh._node
 

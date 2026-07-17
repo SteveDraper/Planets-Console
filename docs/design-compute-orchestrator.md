@@ -161,14 +161,15 @@ Analytics own **what** `persist` writes and **how readers** gate on terminal qua
 - **Fleet** -- `persist` on every materialization leg; `provenance.is_final` distinguishes gap-fill intermediates from ensure-satisfied finals. Readers use `has_final_ledger` / `is_fleet_export_ensure_satisfied`, not raw `has_ledger`, where terminal quality matters.
 - **Scores inference** -- `persist` for durable turn-evidence row statuses (`exact`, `no_exact_solution`, stopped / `time_limited`, and fallback terminals per `is_durable_turn_evidence_row_status`). Soft / empty non-durable outcomes use `park` until a later `force_fresh` wake -- not hot `continue`. Evidence-closed skip may still `complete` without persist. Ladder state between tiers stays in the stream adapter (`RowRun`), not on the wire.
 
-**Scores `park` wake ownership** (every former `continue` / soft-`complete` site must name a wake publisher):
+**Scores `park` wake ownership** is encoded by `ScoresParkReason` and
+`ScoresWakeReason`; `wake_scores_scope` is the only scores wake coordinator:
 
 | Park site | Soft stream on park? | Mandatory wake owner |
 |-----------|----------------------|----------------------|
-| Non-durable `rowComplete` | Yes (upgradable) | Stream reschedule / evidence close / fleet `PersistDeferredError` reopen |
-| Empty `TierJobOutcome` | Cheap admission only (else silent) | Stream reschedule / RowRun re-adopt |
-| Open-evidence wait (`runId: null`) | No (wait for work) | Ensure admit / RowRun adopt (`wake_parked_scores_scope_if_needed`) or evidence close |
-| Missing `RowRun` | No | Replacement `RowRun` register (`enqueue_tier_ladder`) or evidence close |
+| Non-durable `rowComplete` | Yes (upgradable) | `STREAM_RESCHEDULED` / `EVIDENCE_CLOSED` / `FLEET_REOPENED` |
+| Empty `TierJobOutcome` | Cheap admission only (else silent) | `STREAM_RESCHEDULED` / `ROW_RUN_ADOPTED` |
+| Open-evidence wait (`runId: null`) | No (wait for work) | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
+| Missing `RowRun` | No | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
 
 Park never marks the node `complete`, so same-turn fleet ENSURE stays blocked until durable persist or evidence-closed skip. Soft stream delivery rides on process-wide park notify, not on `complete`.
 

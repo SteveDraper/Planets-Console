@@ -1078,7 +1078,7 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
     from api.analytics.military_score_inference.inference_scheduler import (
         reset_inference_row_scheduler_for_tests,
     )
-    from api.analytics.scores.compute_orchestration import wake_parked_scores_scope_if_needed
+    from api.analytics.scores.compute_orchestration import ScoresWakeReason, wake_scores_scope
     from api.compute import runtime as compute_runtime
     from api.compute.orchestrator import ComputeNodeRun
     from api.compute.runtime import reset_orchestrators_for_tests
@@ -1120,12 +1120,20 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
     )
     orchestrator._nodes[scope] = parked
 
-    assert wake_parked_scores_scope_if_needed(scope, ctx=ctx) is True
+    assert wake_scores_scope(
+        scope,
+        ctx=ctx,
+        reason=ScoresWakeReason.ROW_RUN_ADOPTED,
+    ) is True
     assert parked.state in {"ready", "running"}
     assert submitted_scopes == [scope]
 
     # Already woken -- not parked anymore.
-    assert wake_parked_scores_scope_if_needed(scope, ctx=ctx) is False
+    assert wake_scores_scope(
+        scope,
+        ctx=ctx,
+        reason=ScoresWakeReason.ROW_RUN_ADOPTED,
+    ) is False
 
 
 def test_enqueue_without_stream_token_wakes_parked_scores_node(

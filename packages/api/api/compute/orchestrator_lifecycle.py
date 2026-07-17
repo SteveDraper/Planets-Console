@@ -130,7 +130,12 @@ class OrchestratorLifecycleMixin:
 
         self._observers.schedule_post_lock(_force_fresh_dependency)
 
-    def _park_node_step(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+    def _park_node_step(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        *,
+        reason: str | None,
+    ) -> None:
         """Park a non-progressing step until an explicit ``force_fresh`` wake.
 
         Soft park does **not** complete the node (dependents stay blocked), but still
@@ -152,7 +157,7 @@ class OrchestratorLifecycleMixin:
             node.scope,
             node=node,
             detail={
-                "reason": "step_parked",
+                "reason": reason or "step_parked",
                 "priorStepIndex": prior_step_index,
                 "priorProfileStepIndex": node.profile_step_index,
             },

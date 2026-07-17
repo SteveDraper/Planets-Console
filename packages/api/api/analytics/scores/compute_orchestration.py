@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
@@ -37,11 +38,33 @@ from api.compute.wire import DependencyOutputs, StepResult
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 
+if TYPE_CHECKING:
+    from api.compute.orchestrator import ComputeOrchestrator
+
 SCORES_MATERIALIZE = "materialize"
 SCORES_TIER_SOLVE = "tier_solve"
 SCORES_TIER_SOLVE_PROFILE_INDEX = 1
 
 SCORES_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
+
+
+class ScoresParkReason(StrEnum):
+    """Reasons scores tier solving intentionally waits for a later wake."""
+
+    NON_DURABLE_ROW_COMPLETE = "scores_non_durable_row_complete"
+    EMPTY_TIER_OUTCOME = "scores_empty_tier_outcome"
+    OPEN_EVIDENCE_WAIT = "scores_open_evidence_wait"
+    MISSING_ROW_RUN = "scores_missing_row_run"
+
+
+class ScoresWakeReason(StrEnum):
+    """Publishers allowed to resume scores tier solving after a soft park."""
+
+    ROW_RUN_ADOPTED = "scores_row_run_adopted"
+    EVIDENCE_CLOSED = "scores_evidence_closed"
+    STREAM_RESCHEDULED = "scores_stream_rescheduled"
+    FLEET_REOPENED = "scores_fleet_reopened"
+
 
 SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
     steps=(
@@ -259,42 +282,33 @@ def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
     return StepResult(outcome="continue", payload=export_tree)
 
 
-def wake_parked_scores_scope_if_needed(
+def wake_scores_scope(
     scope: ComputeScope,
     *,
     ctx: AnalyticQueryContext,
+    reason: ScoresWakeReason,
     priority_band: str = "background",
+    orchestrator: ComputeOrchestrator | None = None,
 ) -> bool:
-    """``force_fresh``-wake a soft-parked scores node; no-op when not parked.
-
-    Mandatory wake owners for scores ``park`` sites (see
-    :func:`tier_job_outcome_to_step_result` / :func:`run_scores_tier_solve`):
-
-    - **RowRun adopt** -- ``InferenceRowScheduler.enqueue_tier_ladder`` after register
-      (stream submit path, or background wake when no stream token)
-    - **Evidence close** -- cheap ``ImmediateRowAdmission`` disk admit in ensure
-    - **Stream reschedule** -- ``_submit_tier_solve_locked`` (already ``force_fresh``)
-    - **Fleet reopen** -- ``PersistDeferredError`` recovery force_freshes scores
-
-    Soft park never ``complete``s the node, so same-turn fleet ENSURE stays blocked
-    until a durable persist or evidence-closed skip.
-    """
+    """Submit an encoded scores wake publisher through one coordinator."""
     from api.compute.orchestrator import ComputeRequest
     from api.compute.runtime import get_compute_orchestrator
 
-    orchestrator = get_compute_orchestrator()
-    node = orchestrator.nodes.get(scope)
-    if node is None or node.state != "parked":
-        return False
-    orchestrator.submit(
-        ComputeRequest(
-            scope=scope,
-            step_kind=SCORES_TIER_SOLVE,
-            force_fresh=True,
-            ctx=ctx,
-            priority_band=priority_band,
-        )
+    resolved_orchestrator = orchestrator or get_compute_orchestrator()
+    request = ComputeRequest(
+        scope=scope,
+        step_kind=SCORES_TIER_SOLVE,
+        force_fresh=True,
+        ctx=ctx,
+        priority_band=priority_band,
     )
+    if reason in {
+        ScoresWakeReason.ROW_RUN_ADOPTED,
+        ScoresWakeReason.EVIDENCE_CLOSED,
+        ScoresWakeReason.FLEET_REOPENED,
+    }:
+        return resolved_orchestrator.wake_if_parked(request) is not None
+    resolved_orchestrator.submit(request)
     return True
 
 
@@ -325,9 +339,13 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
         status = outcome.row_complete.wire_payload.status
         if is_durable_turn_evidence_row_status(status):
             return StepResult(outcome="persist", payload=payload)
-        return StepResult(outcome="park", payload=payload)
+        return StepResult(
+            outcome="park",
+            payload=payload,
+            park_reason=ScoresParkReason.NON_DURABLE_ROW_COMPLETE,
+        )
 
-    return StepResult(outcome="park")
+    return StepResult(outcome="park", park_reason=ScoresParkReason.EMPTY_TIER_OUTCOME)
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
@@ -340,7 +358,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     Park sites and wake owners (no soft stream terminal -- wait for work):
 
     - Open-evidence wait → park; wake when ensure admits / adopts a ``RowRun`` or
-      closes evidence (``wake_parked_scores_scope_if_needed``)
+      closes evidence (``wake_scores_scope``)
     - Missing ``RowRun`` → park; wake when a replacement ``RowRun`` is registered
       (``enqueue_tier_ladder``) or evidence closes
     """
@@ -351,7 +369,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
             # evidence is already closed -- no CP-SAT.
             return StepResult(outcome="complete")
         # Open-evidence wait / stale skip without closed marker: park until wake.
-        return StepResult(outcome="park")
+        return StepResult(outcome="park", park_reason=ScoresParkReason.OPEN_EVIDENCE_WAIT)
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
@@ -360,7 +378,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         # Do not empty-complete here -- that unlocked fleet with open scores evidence
         # and left the scoreboard in-progress. Park until wire-build can re-check
         # ``is_satisfied`` / re-ensures a RowRun.
-        return StepResult(outcome="park")
+        return StepResult(outcome="park", park_reason=ScoresParkReason.MISSING_ROW_RUN)
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:

@@ -663,11 +663,15 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
         session: InferenceRowStreamSession,
     ) -> None:
         """Wake a soft-parked scores node after background RowRun register."""
-        from api.analytics.scores.compute_orchestration import wake_parked_scores_scope_if_needed
+        from api.analytics.scores.compute_orchestration import (
+            ScoresWakeReason,
+            wake_scores_scope,
+        )
 
-        wake_parked_scores_scope_if_needed(
+        wake_scores_scope(
             root_scope,
             ctx=_query_context_for_session(session, scheduler=self),
+            reason=ScoresWakeReason.ROW_RUN_ADOPTED,
             priority_band="background",
         )
 
@@ -877,20 +881,20 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin):
     ) -> None:
         if self._defer_orchestrator_submit:
             return
-        from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
-        from api.compute.orchestrator import ComputeRequest
+        from api.analytics.scores.compute_orchestration import (
+            ScoresWakeReason,
+            wake_scores_scope,
+        )
 
         # force_fresh may replace a prior empty/admission terminal. Reopen the multiplex
         # row so progress drains and a later RowComplete can upgrade the soft terminal.
         self._reopen_stream_row_for_force_fresh(root_scope)
-        binding.orchestrator.submit(
-            ComputeRequest(
-                scope=root_scope,
-                step_kind=SCORES_TIER_SOLVE,
-                priority_band="stream_attached",
-                force_fresh=True,
-                ctx=binding.query_context,
-            )
+        wake_scores_scope(
+            root_scope,
+            ctx=binding.query_context,
+            reason=ScoresWakeReason.STREAM_RESCHEDULED,
+            priority_band="stream_attached",
+            orchestrator=binding.orchestrator,
         )
 
     def _reopen_stream_row_for_force_fresh(self, scope: ComputeScope) -> None:

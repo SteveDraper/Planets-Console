@@ -331,10 +331,10 @@ def _wake_parked_scores_after_evidence_close(
     """force_fresh wake soft-parked scores after cheap admit closes turn evidence."""
     if scope.player_id is None:
         return
-    from api.analytics.scores.compute_orchestration import wake_parked_scores_scope_if_needed
+    from api.analytics.scores.compute_orchestration import ScoresWakeReason, wake_scores_scope
     from api.compute.scope import ComputeScope
 
-    wake_parked_scores_scope_if_needed(
+    wake_scores_scope(
         ComputeScope(
             analytic_id=ANALYTIC_ID,
             game_id=scope.game_id,
@@ -343,6 +343,7 @@ def _wake_parked_scores_after_evidence_close(
             player_id=scope.player_id,
         ),
         ctx=ctx,
+        reason=ScoresWakeReason.EVIDENCE_CLOSED,
     )
 
 

@@ -265,24 +265,34 @@ class FleetPersistencePolicy:
             # Same-turn scores evidence is still open. Persisting and completing the
             # fleet node would unlock dependents and leave a non-final ledger with no
             # automatic rematerialization (empty scores complete hang fingerprint).
-            # Recovery is owned here: orchestrator only sees PersistDeferredError.
+            from api.analytics.scores.compute_orchestration import (
+                ScoresWakeReason,
+                wake_scores_scope,
+            )
             from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
             from api.compute.persistence import PersistDependencyRecovery
             from api.errors import FleetScoresEvidenceOpenError
 
+            scores_scope = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=scope.game_id,
+                perspective=scope.perspective,
+                turn=scope.turn,
+                player_id=scope.player_id,
+                parameters=scope.parameters,
+            )
+            wake_scores_scope(
+                scores_scope,
+                ctx=ctx,
+                reason=ScoresWakeReason.FLEET_REOPENED,
+                priority_band="background",
+            )
             raise FleetScoresEvidenceOpenError(
                 f"fleet persist refused for game {scope.game_id} perspective "
                 f"{scope.perspective} player {scope.player_id} turn {scope.turn}: "
                 "scores turn evidence is not closed",
                 recovery=PersistDependencyRecovery(
-                    dependency_scope=ComputeScope(
-                        analytic_id=SCORES_ANALYTIC_ID,
-                        game_id=scope.game_id,
-                        perspective=scope.perspective,
-                        turn=scope.turn,
-                        player_id=scope.player_id,
-                        parameters=scope.parameters,
-                    ),
+                    dependency_scope=scores_scope,
                     force_fresh=True,
                     step_kind="tier_solve",
                 ),

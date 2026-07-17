@@ -24,6 +24,7 @@ class StepResult:
 
     outcome: StepOutcome
     payload: object | None = None
+    park_reason: str | None = None
 
 
 def coerce_step_result(result_wire: object) -> StepResult:
@@ -34,7 +35,14 @@ def coerce_step_result(result_wire: object) -> StepResult:
         outcome = result_wire["outcome"]
         if outcome not in {"continue", "persist", "complete", "park"}:
             raise ValueError(f"invalid step outcome {outcome!r}")
-        return StepResult(outcome=outcome, payload=result_wire.get("payload"))
+        park_reason = result_wire.get("parkReason")
+        if park_reason is not None and not isinstance(park_reason, str):
+            raise ValueError("parkReason must be a string when provided")
+        return StepResult(
+            outcome=outcome,
+            payload=result_wire.get("payload"),
+            park_reason=park_reason,
+        )
     return StepResult(outcome="persist", payload=result_wire)
 
 

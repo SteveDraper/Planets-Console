@@ -351,45 +351,89 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
     def submit(self, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""
         with self._condition:
-            scope = request.scope
-            existing = self._nodes.get(scope)
-            pending_inline: tuple[_PendingInlineExecution, ...] = ()
-            pending_pool: tuple[_PendingPoolSubmission, ...] = ()
-            if existing is not None:
-                if not (request.force_fresh and existing.state in {"complete", "failed"}):
-                    if request.force_fresh:
-                        self._emit_force_fresh_lifecycle(
-                            kind="force_fresh_attach",
-                            node=existing,
-                            request=request,
-                        )
-                        self._maybe_wake_parked_node(existing)
-                    handle = self._attach_to_existing(existing, request)
-                    pending_inline, pending_pool = self._dispatch()
-                    should_plan = False
-                else:
+            submission = self._submit_locked(request, wake_if_parked_only=False)
+        return self._finish_submission(submission)
+
+    def wake_if_parked(self, request: ComputeRequest) -> ComputeHandle | None:
+        """Atomically wake a soft-parked scope, or no-op for every other state."""
+        if not request.force_fresh:
+            raise ValueError("wake_if_parked requires force_fresh=True")
+        with self._condition:
+            submission = self._submit_locked(request, wake_if_parked_only=True)
+        return None if submission is None else self._finish_submission(submission)
+
+    def _submit_locked(
+        self,
+        request: ComputeRequest,
+        *,
+        wake_if_parked_only: bool,
+    ) -> tuple[
+        ComputeHandle,
+        tuple[_PendingInlineExecution, ...],
+        tuple[_PendingPoolSubmission, ...],
+    ] | None:
+        """Apply one submission under the orchestrator lock."""
+        scope = request.scope
+        existing = self._nodes.get(scope)
+        if wake_if_parked_only and (existing is None or existing.state != "parked"):
+            return None
+
+        pending_inline: tuple[_PendingInlineExecution, ...] = ()
+        pending_pool: tuple[_PendingPoolSubmission, ...] = ()
+        if existing is not None:
+            if not (request.force_fresh and existing.state in {"complete", "failed"}):
+                if request.force_fresh:
                     self._emit_force_fresh_lifecycle(
-                        kind="force_fresh_replace",
+                        kind="force_fresh_attach",
                         node=existing,
                         request=request,
                     )
-                    self._replace_terminal_node(existing)
-                    should_plan = True
-            else:
-                should_plan = True
-
-            if should_plan:
-                bundle = self._require_bundle(request)
-                self._plan_and_register(
-                    scope,
-                    bundle=bundle,
-                    priority_band=request.priority_band,
-                    entry_step_kind=request.step_kind,
-                )
-                for node in self._nodes.values():
-                    self._refresh_node_readiness(node)
-                handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
+                    self._maybe_wake_parked_node(existing)
+                handle = self._attach_to_existing(existing, request)
                 pending_inline, pending_pool = self._dispatch()
+            else:
+                self._emit_force_fresh_lifecycle(
+                    kind="force_fresh_replace",
+                    node=existing,
+                    request=request,
+                )
+                self._replace_terminal_node(existing)
+                handle, pending_inline, pending_pool = self._plan_submission_locked(request)
+        else:
+            handle, pending_inline, pending_pool = self._plan_submission_locked(request)
+        return handle, pending_inline, pending_pool
+
+    def _plan_submission_locked(
+        self,
+        request: ComputeRequest,
+    ) -> tuple[
+        ComputeHandle,
+        tuple[_PendingInlineExecution, ...],
+        tuple[_PendingPoolSubmission, ...],
+    ]:
+        """Plan a fresh scope and select its first dispatchable work."""
+        scope = request.scope
+        bundle = self._require_bundle(request)
+        self._plan_and_register(
+            scope,
+            bundle=bundle,
+            priority_band=request.priority_band,
+            entry_step_kind=request.step_kind,
+        )
+        for node in self._nodes.values():
+            self._refresh_node_readiness(node)
+        return ComputeHandle(scope=scope, _node=self._nodes[scope]), *self._dispatch()
+
+    def _finish_submission(
+        self,
+        submission: tuple[
+            ComputeHandle,
+            tuple[_PendingInlineExecution, ...],
+            tuple[_PendingPoolSubmission, ...],
+        ],
+    ) -> ComputeHandle:
+        """Run work selected by a submission after releasing the lock."""
+        handle, pending_inline, pending_pool = submission
         self._execute_pending_inlines(pending_inline)
         self._flush_pending_pool_submissions(pending_pool)
         self._observers.drain_post_lock_callbacks()
@@ -799,7 +843,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
         if step_result.outcome == "park":
             if step_result.payload is not None:
                 node.result_wire = step_result.payload
-            self._park_node_step(node)
+            self._park_node_step(node, reason=step_result.park_reason)
             return
 
         if step_result.outcome == "persist":
