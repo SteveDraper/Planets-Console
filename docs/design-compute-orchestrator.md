@@ -154,11 +154,12 @@ Every `run_step` result wire carries an explicit **step outcome** the orchestrat
 | **`continue`** | Increment `step_index`; re-queue the same `step_kind` for the same node |
 | **`persist`** | After epoch re-check, call analytic `PersistencePolicy.persist`, then mark node `complete` |
 | **`complete`** | Mark node `complete` **without** calling `persist` |
+| **`park`** | Demote node to `parked` until an explicit `force_fresh` wake. May store an optional `result_wire` payload; does **not** call `persist`. Not hot `continue`; not `complete`. |
 
 Analytics own **what** `persist` writes and **how readers** gate on terminal quality. Examples:
 
 - **Fleet** -- `persist` on every materialization leg; `provenance.is_final` distinguishes gap-fill intermediates from ensure-satisfied finals. Readers use `has_final_ledger` / `is_fleet_export_ensure_satisfied`, not raw `has_ledger`, where terminal quality matters.
-- **Scores inference** -- `persist` only for terminal `exact` / `no_exact_solution`; `stopped` uses `complete` without persist. Ladder state between tiers stays in the stream adapter (`RowRun`), not on the wire.
+- **Scores inference** -- `persist` for durable turn-evidence row statuses (`exact`, `no_exact_solution`, stopped / `time_limited`, and fallback terminals per `is_durable_turn_evidence_row_status`). Soft / empty non-durable outcomes use `park` until a later `force_fresh` wake (admit, adopt `RowRun`, or evidence close) -- not hot `continue`. Evidence-closed skip may still `complete` without persist. Ladder state between tiers stays in the stream adapter (`RowRun`), not on the wire.
 
 Fleet and scores share the orchestrator contract; persistence semantics differ by domain.
 
@@ -205,11 +206,13 @@ Fleet ledger persist notifications must **not** use `id(AnalyticQueryContext)` a
 ```text
 waiting_deps → ready → running → complete | failed
                     ↘ attach_inflight (waiter; no pool worker)
+running → parked   (soft park; wake only on force_fresh → ready | waiting_deps)
 ```
 
 | State | Meaning |
 |-------|---------|
 | **waiting_deps** | Ancestor nodes incomplete; not in ready queue |
+| **parked** | Soft-parked after a `park` step outcome; idle until explicit `force_fresh` wake (not dispatchable; distinct from dependency wait) |
 | **ready** | Dependencies satisfied; eligible for pool |
 | **running** | Leader step executing on a worker (or inline) |
 | **attach_inflight** | Duplicate request joins leader; **no second pool worker** |
@@ -217,13 +220,13 @@ waiting_deps → ready → running → complete | failed
 
 **Hard invariant:** pool workers never call `ensure_export` or block on another node's completion.
 
-Same-scope dedupe is **only** in-orchestrator singleflight on the singleton DAG. The former process-wide scope lease / `parked` state ([#222](https://github.com/SteveDraper/Planets-Console/issues/222)) is **retired** by [#209](https://github.com/SteveDraper/Planets-Console/issues/209) -- it compensated for multiple per-context orchestrator DAGs.
+Same-scope dedupe is **only** in-orchestrator singleflight on the singleton DAG. The former process-wide scope lease ([#222](https://github.com/SteveDraper/Planets-Console/issues/222)) is **retired** by [#209](https://github.com/SteveDraper/Planets-Console/issues/209) -- it compensated for multiple per-context orchestrator DAGs. Soft-park uses the first-class node state `parked` above (see [Compute step outcome](#compute-step-outcome)), not that retired lease.
 
 ### Priority adopt on attach
 
 When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `stream_attached` joining `background` warm) and the node is not yet past the point where adopt is allowed (not mid expensive inline/pool execution -- same rule as the former lease “seal”), upgrade `node.priority_band` and adjust ready-queue ordering as needed. No mid-run preempt once expensive work has started.
 
-**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; a missing `RowRun` while evidence is still open must `continue` (rebuild wire / re-ensure), not empty-complete -- that falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
+**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; a missing `RowRun` or open-evidence wait wire while evidence is still open must `park` until a later `force_fresh` wake (rebuild wire / re-ensure), not empty-complete -- that falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
 
 ### Terminal reuse and `force_fresh`
 
@@ -233,8 +236,10 @@ When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `str
 |---------------|---------------------|----------|
 | `False` (default) | `complete` or `failed` | Attach to the terminal node; return its cached `result_wire` or error. No new pool work. |
 | `False` (default) | `waiting_deps`, `ready`, `running` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. May **priority-adopt** (see above). |
+| `False` (default) | `parked` | Attach / singleflight; node stays `parked` (no wake without `force_fresh`). |
 | `True` | `complete` or `failed` | **Supersede** the terminal node: remove it from the orchestrator map, clear any waiters, re-plan the DAG from the request's entry `step_kind`, and dispatch fresh work. |
-| `True` | non-terminal | Same as default -- singleflight preserved; in-flight work is never superseded. |
+| `True` | `parked` | **Wake** the soft-parked node: re-ready if deps complete, else `waiting_deps`; then attach / dispatch. |
+| `True` | other non-terminal | Same as default -- singleflight preserved; in-flight work is never superseded. |
 
 Default behavior treats terminal nodes as a **cache hit**: repeat callers for the same normalized `ComputeScope` get the prior outcome without re-execution. Opt-in `force_fresh=True` is the generic lifecycle primitive for callers that need a new run after terminal completion or failure (for example scores inference stream reschedule paths that must re-enter `tier_solve` on an already-failed or completed scope).
 
@@ -261,7 +266,7 @@ Interpreter/process steps:
 
 - Receive **serializable `JobWire`** (orchestrator may prefetch `turn_wire`, `prior_ledger_wire`, dependency slices).
 - May read storage via worker-local `StorageBackend(storage_root)` when wire omits large payloads (ancestor already **complete**).
-- Return **`ResultWire`** with an explicit **step outcome** (`continue`, `persist`, or `complete`); see [Compute step outcome](#compute-step-outcome).
+- Return **`ResultWire`** with an explicit **step outcome** (`continue`, `persist`, `complete`, or `park`); see [Compute step outcome](#compute-step-outcome).
 - **Never** hold `AnalyticQueryContext`, schedulers, or gap-fill coordinators.
 
 Thread steps (scores tiers) resolve per-row adapter state (`RowRun`) by `run_id` on the job wire; ladder progress stays adapter-owned between continuations. They must not block on cross-node ensure or call `ensure_fleet_export` in the worker.
@@ -401,7 +406,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 - Register process-wide `node_complete` / related listeners (and pause **dispatch gates**) with analytic/scope filters; unregister on disconnect. Adapters do **not** own an orchestrator instance.
 - Retain stream-only state (scope guard, per-row run registry, global pause gate).
 - **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
-- Stream teardown does not cancel in-flight singleton DAG work solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240).
+- Stream teardown **detaches** observers only -- it does not cancel in-flight singleton DAG work (or abort a pending `persist`) solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240).
 
 **Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `stream_attached` `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
 
