@@ -774,12 +774,8 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
         pool.set_on_item_finished(on_finished)
         orch_id = pool.register(OkOrch())  # type: ignore[arg-type]
         scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
-        pool.enqueue_for_tests(
-            _work_item(scope=scope, orchestrator_id=orch_id, step_index=0)
-        )
-        pool.enqueue_for_tests(
-            _work_item(scope=scope, orchestrator_id=orch_id, step_index=1)
-        )
+        pool.enqueue_for_tests(_work_item(scope=scope, orchestrator_id=orch_id, step_index=0))
+        pool.enqueue_for_tests(_work_item(scope=scope, orchestrator_id=orch_id, step_index=1))
 
         assert second_finished.wait(timeout=3.0), "worker did not recover after on_dequeued boom"
         health = pool.worker_health()
