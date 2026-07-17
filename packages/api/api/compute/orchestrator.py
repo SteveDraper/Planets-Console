@@ -5,11 +5,9 @@ from __future__ import annotations
 import threading
 from collections import deque
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Literal
+from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.compute.dag import PlannedComputeNode, plan_compute_dag
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
@@ -25,32 +23,26 @@ from api.compute.orchestrator_observers import (
     ScopeOutcomeListener,
     StepCompleteListener,
 )
-from api.compute.orchestrator_step_execution import (
-    OrchestratorStepExecutionMixin,
-    _PendingInlineExecution,
-    _PendingPoolSubmission,
-)
+from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun, NodeState
+from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
+from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.compute.persistence import PersistDeferredError
-from api.compute.pools import (
-    PRIORITY_BAND_RANK,
-    ComputePriorityBand,
-    ComputeWorkerPool,
-    PoolSubmitter,
-)
+from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.registry import AnalyticComputeRegistration
-from api.compute.scope import ComputeScope, compute_scope_to_export_scope
+from api.compute.scope import ComputeScope
 from api.compute.turn_cache import OrchestratorTurnCache
 from api.compute.wire import coerce_step_result
 from api.models.game import TurnInfo
 
-NodeState = Literal[
-    "waiting_deps",
-    "parked",
-    "ready",
-    "running",
-    "attach_inflight",
-    "complete",
-    "failed",
+__all__ = [
+    "ComputeHandle",
+    "ComputeNodeRun",
+    "ComputeOrchestrator",
+    "ComputeRequest",
+    "NodeState",
+    "OrchestratorDiagnosticsSnapshot",
+    "OrchestratorMetrics",
+    "OrchestratorNodeSnapshot",
 ]
 
 
@@ -72,56 +64,6 @@ class ComputeRequest:
         if self.ctx is not None:
             return OrchestrationBundle.from_context(self.ctx)
         return None
-
-
-@dataclass
-class ComputeHandle:
-    """Caller-visible orchestrator handle for one submission."""
-
-    scope: ComputeScope
-    _node: ComputeNodeRun
-    is_waiter: bool = False
-    _waiter_error: BaseException | None = field(default=None, compare=False)
-
-    @property
-    def error(self) -> BaseException | None:
-        if self.is_waiter:
-            return self._waiter_error
-        if self._node.state == "failed":
-            return self._node.error
-        return None
-
-    @property
-    def state(self) -> NodeState:
-        if self.is_waiter and self._node.state not in {"complete", "failed"}:
-            return "attach_inflight"
-        return self._node.state
-
-    @property
-    def result_wire(self) -> object | None:
-        return self._node.result_wire
-
-
-@dataclass
-class ComputeNodeRun:
-    """Mutable orchestrator state for one compute scope."""
-
-    scope: ComputeScope
-    dependency_scopes: tuple[ComputeScope, ...]
-    state: NodeState = "waiting_deps"
-    profile_step_index: int = 0
-    step_index: int = 0
-    priority_band: ComputePriorityBand = "background"
-    execution_generation: int = 0
-    generation_at_submit: int | None = None
-    result_wire: object | None = None
-    error: BaseException | None = None
-    waiters: list[ComputeHandle] = field(default_factory=list)
-    # Leader-retained query context / export services (see OrchestrationBundle).
-    bundle: OrchestrationBundle | None = None
-    # True once expensive inline/pool work has started (job wire built or handed
-    # to the pool); closes the priority-adopt window for later attaches.
-    execution_sealed: bool = False
 
 
 @dataclass
@@ -154,7 +96,11 @@ class OrchestratorDiagnosticsSnapshot:
     ready_scopes: tuple[ComputeScope, ...]
 
 
-class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleMixin):
+class ComputeOrchestrator(
+    OrchestratorStepExecutionMixin,
+    OrchestratorLifecycleMixin,
+    OrchestratorSubmissionMixin,
+):
     """Process-wide DAG scheduler with singleflight per normalized compute scope.
 
     One instance schedules every analytic's compute work. Concurrent
@@ -355,100 +301,6 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
             )
             return OrchestratorDiagnosticsSnapshot(nodes=nodes, ready_scopes=ready_scopes)
 
-    def submit(self, request: ComputeRequest) -> ComputeHandle:
-        """Submit or attach to in-flight work for one compute scope."""
-        with self._condition:
-            submission = self._submit_locked(request, wake_if_parked_only=False)
-        return self._finish_submission(submission)
-
-    def wake_if_parked(self, request: ComputeRequest) -> ComputeHandle | None:
-        """Atomically wake a soft-parked scope, or no-op for every other state."""
-        if not request.force_fresh:
-            raise ValueError("wake_if_parked requires force_fresh=True")
-        with self._condition:
-            submission = self._submit_locked(request, wake_if_parked_only=True)
-        return None if submission is None else self._finish_submission(submission)
-
-    def _submit_locked(
-        self,
-        request: ComputeRequest,
-        *,
-        wake_if_parked_only: bool,
-    ) -> (
-        tuple[
-            ComputeHandle,
-            tuple[_PendingInlineExecution, ...],
-            tuple[_PendingPoolSubmission, ...],
-        ]
-        | None
-    ):
-        """Apply one submission under the orchestrator lock."""
-        scope = request.scope
-        existing = self._nodes.get(scope)
-        if wake_if_parked_only and (existing is None or existing.state != "parked"):
-            return None
-
-        pending_inline: tuple[_PendingInlineExecution, ...] = ()
-        pending_pool: tuple[_PendingPoolSubmission, ...] = ()
-        if existing is not None:
-            if not (request.force_fresh and existing.state in {"complete", "failed"}):
-                if request.force_fresh:
-                    self._emit_force_fresh_lifecycle(
-                        kind="force_fresh_attach",
-                        node=existing,
-                        request=request,
-                    )
-                    self._maybe_wake_parked_node(existing)
-                handle = self._attach_to_existing(existing, request)
-                pending_inline, pending_pool = self._dispatch()
-            else:
-                self._emit_force_fresh_lifecycle(
-                    kind="force_fresh_replace",
-                    node=existing,
-                    request=request,
-                )
-                self._replace_terminal_node(existing)
-                handle, pending_inline, pending_pool = self._plan_submission_locked(request)
-        else:
-            handle, pending_inline, pending_pool = self._plan_submission_locked(request)
-        return handle, pending_inline, pending_pool
-
-    def _plan_submission_locked(
-        self,
-        request: ComputeRequest,
-    ) -> tuple[
-        ComputeHandle,
-        tuple[_PendingInlineExecution, ...],
-        tuple[_PendingPoolSubmission, ...],
-    ]:
-        """Plan a fresh scope and select its first dispatchable work."""
-        scope = request.scope
-        bundle = self._require_bundle(request)
-        self._plan_and_register(
-            scope,
-            bundle=bundle,
-            priority_band=request.priority_band,
-            entry_step_kind=request.step_kind,
-        )
-        for node in self._nodes.values():
-            self._refresh_node_readiness(node)
-        return ComputeHandle(scope=scope, _node=self._nodes[scope]), *self._dispatch()
-
-    def _finish_submission(
-        self,
-        submission: tuple[
-            ComputeHandle,
-            tuple[_PendingInlineExecution, ...],
-            tuple[_PendingPoolSubmission, ...],
-        ],
-    ) -> ComputeHandle:
-        """Run work selected by a submission after releasing the lock."""
-        handle, pending_inline, pending_pool = submission
-        self._execute_pending_inlines(pending_inline)
-        self._flush_pending_pool_submissions(pending_pool)
-        self._observers.drain_post_lock_callbacks()
-        return handle
-
     def execute_pool_step(self, scope: ComputeScope) -> object:
         """Run the current pool step for one scope on the calling thread."""
         with self._condition:
@@ -635,142 +487,11 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin, OrchestratorLifecycleM
             raise RuntimeError(f"compute node {node.scope!r} has no orchestration bundle")
         return self._ctx_for_bundle(node.bundle)
 
-    def _require_bundle(self, request: ComputeRequest) -> OrchestrationBundle:
-        bundle = request.resolved_bundle()
-        if bundle is None:
-            raise ValueError("ComputeRequest requires bundle= or ctx= for new work")
-        return bundle
-
-    def _attach_to_existing(
-        self,
-        node: ComputeNodeRun,
-        request: ComputeRequest,
-    ) -> ComputeHandle:
-        if node.state in {"complete", "failed"}:
-            return ComputeHandle(scope=node.scope, _node=node)
-        handle = ComputeHandle(scope=node.scope, _node=node, is_waiter=True)
-        node.waiters.append(handle)
-        self._maybe_adopt_priority(node, request.priority_band)
-        return handle
-
-    def _maybe_adopt_priority(
-        self,
-        node: ComputeNodeRun,
-        priority_band: ComputePriorityBand,
-    ) -> None:
-        """Upgrade a non-terminal node's priority band to match a higher-priority attach.
-
-        Closed once the node has sealed for execution: adopting after job-wire
-        build has started (or after the step is handed to the pool) could race
-        the in-flight work, so later attaches simply wait for that leader.
-        """
-        if node.execution_sealed:
-            return
-        if node.state not in {"waiting_deps", "parked", "ready", "running"}:
-            return
-        if PRIORITY_BAND_RANK[priority_band] >= PRIORITY_BAND_RANK[node.priority_band]:
-            return
-        node.priority_band = priority_band
-
-    def _replace_terminal_node(self, node: ComputeNodeRun) -> None:
-        if node.state not in {"complete", "failed"}:
-            raise RuntimeError(f"cannot replace non-terminal node in state {node.state!r}")
-        self._dequeue_ready(node.scope)
-        node.waiters.clear()
-        self._nodes.pop(node.scope, None)
-
-    def _plan_and_register(
-        self,
-        root_scope: ComputeScope,
-        *,
-        bundle: OrchestrationBundle,
-        priority_band: ComputePriorityBand,
-        entry_step_kind: str | None = None,
-    ) -> None:
-        export_scope = compute_scope_to_export_scope(root_scope)
-        ctx = self._ctx_for_bundle(bundle)
-        planned_nodes = plan_compute_dag(
-            ctx,
-            root_scope.analytic_id,
-            export_scope,
-            compute_registry=self._compute_registry,
-            force_root=entry_step_kind is not None,
-        )
-        self._turn_cache.prefetch_planned_nodes(
-            planned_nodes,
-            load_turn=bundle.query_context.load_turn,
-            game_id=bundle.game_id,
-            perspective=bundle.perspective,
-        )
-        for planned in planned_nodes:
-            self._register_planned_node(
-                planned,
-                bundle=bundle,
-                priority_band=priority_band,
-                entry_step_kind=entry_step_kind if planned.scope == root_scope else None,
-            )
-        if root_scope not in self._nodes:
-            self._nodes[root_scope] = ComputeNodeRun(
-                scope=root_scope,
-                dependency_scopes=(),
-                state="complete",
-                priority_band=priority_band,
-                execution_generation=self._allocate_execution_generation(),
-                bundle=bundle,
-            )
-
-    def _register_planned_node(
-        self,
-        planned: PlannedComputeNode,
-        *,
-        bundle: OrchestrationBundle,
-        priority_band: ComputePriorityBand,
-        entry_step_kind: str | None = None,
-    ) -> None:
-        if planned.scope in self._nodes:
-            # Existing node keeps the bundle of whichever submission first
-            # registered it -- the leader is sticky.
-            return
-        registration = self._compute_registry[planned.scope.analytic_id]
-        profile_step_index = self._resolve_profile_step_index(
-            registration,
-            entry_step_kind,
-        )
-        node = ComputeNodeRun(
-            scope=planned.scope,
-            dependency_scopes=planned.dependency_scopes,
-            priority_band=priority_band,
-            profile_step_index=profile_step_index,
-            execution_generation=self._allocate_execution_generation(),
-            bundle=bundle,
-        )
-        self._nodes[planned.scope] = node
-
     def execution_generation_for_scope(self, scope: ComputeScope) -> int | None:
         """Return the current execution identity for ``scope``."""
         with self._condition:
             node = self._nodes.get(scope)
             return None if node is None else node.execution_generation
-
-    def _allocate_execution_generation(self) -> int:
-        generation = self._next_execution_generation
-        self._next_execution_generation += 1
-        return generation
-
-    def _resolve_profile_step_index(
-        self,
-        registration: AnalyticComputeRegistration,
-        entry_step_kind: str | None,
-    ) -> int:
-        steps = registration.compute_profile.steps
-        if entry_step_kind is None:
-            return 0
-        for index, step in enumerate(steps):
-            if step.step_kind == entry_step_kind:
-                return index
-        raise ValueError(
-            f"unknown entry step_kind {entry_step_kind!r} for analytic {registration.analytic_id!r}"
-        )
 
     def _refresh_all_readiness(self) -> None:
         for node in self._nodes.values():
