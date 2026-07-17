@@ -447,11 +447,11 @@ class ScoresPersistencePolicy:
         if fleet_services is None:
             return 0
 
-        return fleet_services.persistence.invalidation_generation(
+        return fleet_services.persistence.turn_invalidation_generation(
             scope.game_id,
             scope.perspective,
             export_scope.player_id,
-            turn=export_scope.turn - 1,
+            export_scope.turn - 1,
         )
 
 

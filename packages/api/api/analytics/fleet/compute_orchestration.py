@@ -327,7 +327,7 @@ class FleetPersistencePolicy:
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return 0
         services = resolve_fleet_services(ctx)
-        return services.persistence.invalidation_generation(
+        return services.persistence.player_invalidation_generation(
             scope.game_id,
             scope.perspective,
             scope.player_id,

@@ -207,7 +207,7 @@ class FleetGapFillCoordinator:
     @property
     def epoch(self) -> int:
         """Current invalidation generation for this player scope."""
-        return self._persistence.invalidation_generation(
+        return self._persistence.player_invalidation_generation(
             self._game_id,
             self._perspective,
             self._player_id,

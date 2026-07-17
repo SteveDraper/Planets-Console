@@ -106,12 +106,11 @@ class FleetSnapshotPersistenceService:
         persisted = persisted_fleet_ledger_from_json(ledger_wire)
         if not is_current_fleet_materialization_version(persisted.materialization_version):
             self._delete_ledger_entry(game_id, perspective, turn_number, player_id)
-            self._bump_invalidation_generation(game_id, perspective, player_id)
-            self._bump_invalidation_generation(
+            self.bump_player_and_turn_invalidations(
                 game_id,
                 perspective,
                 player_id,
-                turn=turn_number,
+                (turn_number,),
             )
             return None
         return persisted
@@ -405,23 +404,25 @@ class FleetSnapshotPersistenceService:
         except NotFoundError:
             pass
 
-    def invalidation_generation(
+    def player_invalidation_generation(
         self,
         game_id: int,
         perspective: int,
         player_id: int,
-        *,
-        turn: int | None = None,
     ) -> int:
-        """Return the current invalidation generation for one player (or player+turn).
-
-        When ``turn`` is omitted, returns the player-scoped epoch used by fleet
-        compute and gap-fill. When ``turn`` is set, returns the turn-scoped epoch
-        that scores@N reads for prior fleet@(N-1).
-        """
+        """Return the player-scoped epoch used by fleet compute and gap-fill."""
         with self._generation_lock:
-            if turn is None:
-                return self._invalidation_generation.get((game_id, perspective, player_id), 0)
+            return self._invalidation_generation.get((game_id, perspective, player_id), 0)
+
+    def turn_invalidation_generation(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        turn: int,
+    ) -> int:
+        """Return the turn-scoped epoch that scores@N reads for prior fleet@(N-1)."""
+        with self._generation_lock:
             return self._turn_invalidation_generation.get(
                 (game_id, perspective, player_id, turn),
                 0,
@@ -449,14 +450,12 @@ class FleetSnapshotPersistenceService:
             cleared.add(stored_turn)
             cleared_player_ids.update(player_ids)
         for cleared_player_id in cleared_player_ids:
-            self._bump_invalidation_generation(game_id, perspective, cleared_player_id)
-            for stored_turn in cleared:
-                self._bump_invalidation_generation(
-                    game_id,
-                    perspective,
-                    cleared_player_id,
-                    turn=stored_turn,
-                )
+            self.bump_player_and_turn_invalidations(
+                game_id,
+                perspective,
+                cleared_player_id,
+                cleared,
+            )
         return cleared
 
     def invalidate_player_ledgers_from_turn(
@@ -484,46 +483,59 @@ class FleetSnapshotPersistenceService:
             if invalidate_turn(stored_turn):
                 cleared.add(stored_turn)
         if cleared:
-            self._bump_invalidation_generation(game_id, perspective, player_id)
-            for stored_turn in cleared:
-                self._bump_invalidation_generation(
-                    game_id,
-                    perspective,
-                    player_id,
-                    turn=stored_turn,
-                )
+            self.bump_player_and_turn_invalidations(
+                game_id,
+                perspective,
+                player_id,
+                cleared,
+            )
         return cleared
 
-    def bump_invalidation_generation(
+    def bump_player_invalidation_generation(
         self,
         game_id: int,
         perspective: int,
         player_id: int,
-        *,
-        turn: int | None = None,
     ) -> None:
-        """Advance materialization epoch (player-scoped and optionally turn-scoped)."""
-        self._bump_invalidation_generation(game_id, perspective, player_id, turn=turn)
-
-    def _bump_invalidation_generation(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        *,
-        turn: int | None = None,
-    ) -> None:
+        """Advance the player-scoped materialization epoch."""
         with self._generation_lock:
-            if turn is None:
-                player_key = (game_id, perspective, player_id)
-                self._invalidation_generation[player_key] = (
-                    self._invalidation_generation.get(player_key, 0) + 1
-                )
-                return
+            player_key = (game_id, perspective, player_id)
+            self._invalidation_generation[player_key] = (
+                self._invalidation_generation.get(player_key, 0) + 1
+            )
+
+    def bump_turn_invalidation_generation(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        turn: int,
+    ) -> None:
+        """Advance the turn-scoped materialization epoch for one fleet turn."""
+        with self._generation_lock:
             turn_key = (game_id, perspective, player_id, turn)
             self._turn_invalidation_generation[turn_key] = (
                 self._turn_invalidation_generation.get(turn_key, 0) + 1
             )
+
+    def bump_player_and_turn_invalidations(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        turns: Iterable[int],
+    ) -> None:
+        """Bump player epoch once and each turn epoch under a single lock."""
+        with self._generation_lock:
+            player_key = (game_id, perspective, player_id)
+            self._invalidation_generation[player_key] = (
+                self._invalidation_generation.get(player_key, 0) + 1
+            )
+            for turn in turns:
+                turn_key = (game_id, perspective, player_id, turn)
+                self._turn_invalidation_generation[turn_key] = (
+                    self._turn_invalidation_generation.get(turn_key, 0) + 1
+                )
 
     def _read_document_raw(
         self,
@@ -557,16 +569,11 @@ class FleetSnapshotPersistenceService:
                 player_ids = self._player_ids_in_document(data)
                 self.delete_snapshot(game_id, perspective, turn_number)
                 for document_player_id in player_ids:
-                    self._bump_invalidation_generation(
+                    self.bump_player_and_turn_invalidations(
                         game_id,
                         perspective,
                         document_player_id,
-                    )
-                    self._bump_invalidation_generation(
-                        game_id,
-                        perspective,
-                        document_player_id,
-                        turn=turn_number,
+                        (turn_number,),
                     )
                 return None
             upgraded = upgrade_legacy_fleet_turn_document(data)
@@ -662,12 +669,11 @@ class FleetSnapshotPersistenceService:
         else:
             self.delete_snapshot(game_id, perspective, turn_number)
         for stale_player_id in stale_player_ids:
-            self._bump_invalidation_generation(game_id, perspective, stale_player_id)
-            self._bump_invalidation_generation(
+            self.bump_player_and_turn_invalidations(
                 game_id,
                 perspective,
                 stale_player_id,
-                turn=turn_number,
+                (turn_number,),
             )
         return False
 

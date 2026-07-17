@@ -143,7 +143,7 @@ class _GapFillCoherence:
 
     def _assert_unchanged(self) -> None:
         if (
-            self.persistence.invalidation_generation(
+            self.persistence.player_invalidation_generation(
                 self.game_id,
                 self.perspective,
                 self.player_id,
@@ -587,7 +587,7 @@ def _materialize_fleet_snapshot_chain(
     """Gap-fill fleet ledgers for every roster player through turn T."""
     turn_context_cache: dict[int, FleetTurnContext] = {}
     for player_id in _roster_player_ids(turn):
-        generation = persistence.invalidation_generation(game_id, perspective, player_id)
+        generation = persistence.player_invalidation_generation(game_id, perspective, player_id)
         player_coherence = _GapFillCoherence(
             persistence,
             game_id,

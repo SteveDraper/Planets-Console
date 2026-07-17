@@ -77,16 +77,11 @@ class InferenceInvalidationService:
             # No ledger deleted -- still bump player epoch so in-flight fleet@N can
             # discard before writing, and turn-scoped epoch so scores@(N+1) sees
             # evidence change at N. Then wake the open stream / force_fresh path.
-            self._fleet_persistence.bump_invalidation_generation(
+            self._fleet_persistence.bump_player_and_turn_invalidations(
                 game_id,
                 perspective,
                 player_id,
-            )
-            self._fleet_persistence.bump_invalidation_generation(
-                game_id,
-                perspective,
-                player_id,
-                turn=host_turn,
+                (host_turn,),
             )
         turns_to_reschedule = set(cleared_turns)
         turns_to_reschedule.add(host_turn)

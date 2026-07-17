@@ -706,16 +706,16 @@ def test_scores_invalidation_generation_tracks_fleet_epoch(sample_turn, persiste
     # Same-player activity on an unrelated turn (or player-scoped only) must not
     # advance scores@N's prior-fleet epoch.
     gen_after_prior = policy.invalidation_generation(ctx, scope)
-    fleet_services.persistence.bump_invalidation_generation(
+    fleet_services.persistence.bump_player_invalidation_generation(
         ctx.game_id,
         ctx.perspective,
         player_id,
     )
-    fleet_services.persistence.bump_invalidation_generation(
+    fleet_services.persistence.bump_turn_invalidation_generation(
         ctx.game_id,
         ctx.perspective,
         player_id,
-        turn=HOST_TURN + 5,
+        HOST_TURN + 5,
     )
     assert policy.invalidation_generation(ctx, scope) == gen_after_prior
 
