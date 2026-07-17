@@ -187,13 +187,11 @@ def solve_with_policy_ladder(
             state.time_limited = True
             state.ladder_complete = True
             break
-        # Pass remaining whole-ladder budget; tier step measures from dispatch so
-        # the shared case budget is preserved without double-counting wait time.
         run_policy_ladder_tier_step(
             state,
             observation,
             turn,
-            time_limit_seconds=remaining,
+            time_limit_seconds=time_limit_seconds,
             cancel_token=cancel_token,
             on_admitted=on_admitted,
         )

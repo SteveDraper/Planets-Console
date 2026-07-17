@@ -404,10 +404,10 @@ def _make_incremental_admitter(
 class _TierStepRun:
     """Cancel and time-budget guards shared across one tier step.
 
-    ``budget_started_at`` is the anchor for ``time_limit_seconds`` -- stream tiers
-    pass the tier dispatch instant so waiting_deps / queue delay cannot exhaust a
-    per-tier CP-SAT budget before work begins. Batch callers pass remaining budget
-    with a fresh tier anchor (see ``solve_with_policy_ladder``).
+    ``budget_started_at`` is the ladder clock (stamped on first dispatch). Stream and
+    batch both share one wall budget across continues so waiting_deps delay cannot
+    burn the allotment before work starts, without giving every tier a fresh full
+    ``time_limit_seconds`` window.
     """
 
     state: PolicyLadderState
@@ -463,21 +463,21 @@ def run_policy_ladder_tier_step(
 ) -> None:
     """Run one inference search tier step; mutates ``state`` in place.
 
-    The CP-SAT budget for this call is measured from this dispatch instant, not
-    from ladder construction, so SPA stream rows that sat in ``waiting_deps`` do
-    not instantly ``time_limited`` on first tier.
+    The wall budget is shared across continues and anchored at first dispatch
+    (``state.started_at``), so SPA rows that sat in ``waiting_deps`` do not
+    instantly ``time_limited``, and multi-tier climbs do not get a fresh full
+    limit on every step.
     """
     if state.ladder_complete or state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True
         return
 
-    tier_started_at = time.monotonic()
-    ensure_ladder_clock_started(state, now=tier_started_at)
+    ladder_started_at = ensure_ladder_clock_started(state)
     run = _TierStepRun(
         state,
         time_limit_seconds,
         cancel_token,
-        budget_started_at=tier_started_at,
+        budget_started_at=ladder_started_at,
     )
     if run.should_stop():
         return
