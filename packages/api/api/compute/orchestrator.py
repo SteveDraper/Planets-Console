@@ -357,26 +357,28 @@ class ComputeOrchestrator(
                 self._observers.notify_lifecycle(
                     "pool_finish_ignored",
                     scope,
+                    step_kind=step_kind,
+                    step_index=step_index,
                     detail={
                         "reason": "missing_node",
-                        "poolStepKind": step_kind,
-                        "poolStepIndex": step_index,
                         "hadError": error is not None,
                     },
                 )
             elif node.state != "running":
                 # Already aborted/cancelled/replaced while the pool worker was finishing.
+                # step_kind / step_index identify the finishing pool work item, which
+                # may differ from the node's current (already-moved-on) step.
                 self._observers.notify_lifecycle(
                     "pool_finish_ignored",
                     scope,
                     node=node,
+                    step_kind=step_kind,
+                    step_index=step_index,
                     detail={
                         "reason": "node_not_running",
                         "priorState": node.state,
                         "priorStepIndex": node.step_index,
                         "priorProfileStepIndex": node.profile_step_index,
-                        "poolStepKind": step_kind,
-                        "poolStepIndex": step_index,
                         "hadError": error is not None,
                     },
                 )
@@ -452,13 +454,13 @@ class ComputeOrchestrator(
                 "abort",
                 scope,
                 node=node,
+                step_kind=finished_step_kind,
+                step_index=finished_step_index,
                 detail={
                     "reason": "abort_scope",
                     "priorState": prior_state,
-                    "priorStepIndex": finished_step_index,
                     "priorProfileStepIndex": node.profile_step_index,
                     "wasRunning": was_running,
-                    "stepKind": finished_step_kind,
                     "errorType": type(error).__name__,
                 },
             )

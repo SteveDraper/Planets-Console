@@ -29,6 +29,7 @@ from tests.test_compute_orchestrator import (
     _compute_scope,
     _export_scope,
     _pool_compute_registration,
+    _RecordingPersistencePolicy,
 )
 
 
@@ -101,10 +102,16 @@ def test_force_fresh_replace_and_stale_pool_finish_appear_on_timeline(sample_tur
     replace = next(e for e in wire["concurrencyTimeline"] if e["kind"] == "force_fresh_replace")
     assert replace["detail"]["reason"] == "submit_force_fresh"
     assert replace["detail"]["priorState"] == "complete"
+    assert replace["stepIndex"] == 0
+
+    abort = next(e for e in wire["concurrencyTimeline"] if e["kind"] == "abort")
+    assert abort["stepKind"] == "materialize"
+    assert abort["stepIndex"] == 0
 
     ignored = next(e for e in wire["concurrencyTimeline"] if e["kind"] == "pool_finish_ignored")
     assert ignored["detail"]["reason"] == "node_not_running"
-    assert ignored["detail"]["poolStepIndex"] == 0
+    assert ignored["stepKind"] == "materialize"
+    assert ignored["stepIndex"] == 0
 
 
 def test_persist_deferred_lifecycle_event_includes_related_scope(sample_turn):
@@ -176,4 +183,82 @@ def test_persist_deferred_lifecycle_event_includes_related_scope(sample_turn):
     deferred = [e for e in wire["concurrencyTimeline"] if e["kind"] == "persist_deferred"]
     assert deferred
     assert deferred[0]["detail"]["relatedScopeKey"].startswith(f"{SHARED_ID}@")
+    assert deferred[0]["stepIndex"] == 0
     assert any(e["kind"] == "force_fresh_replace" for e in wire["concurrencyTimeline"])
+
+
+def test_epoch_retry_lifecycle_event_reports_canonical_step_index(sample_turn):
+    """Stale-epoch retry reports the retried step via the canonical stepIndex field."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    persistence = _RecordingPersistencePolicy()
+
+    def pool_submitter(node, step) -> None:
+        del node, step
+
+    registry = build_compute_registry(
+        (_pool_compute_registration(SHARED_ID, backend="thread", persistence_policy=persistence),)
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=shared_scope.game_id,
+        perspective=shared_scope.perspective,
+        turn=shared_scope.turn,
+    )
+    controller.on_shell_context(shell)
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    persistence.invalidate(ctx, shared_scope)
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    retried = next(e for e in wire["concurrencyTimeline"] if e["kind"] == "epoch_retry")
+    assert retried["detail"]["reason"] == "invalidation_generation_bump"
+    assert retried["stepIndex"] == 0
+
+
+def test_step_parked_lifecycle_event_reports_canonical_step_index(sample_turn):
+    """Soft-park reports the parked step via the canonical stepIndex field."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    def pool_submitter(node, step) -> None:
+        del node, step
+
+    registry = build_compute_registry((_pool_compute_registration(SHARED_ID, backend="thread"),))
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=shared_scope.game_id,
+        perspective=shared_scope.perspective,
+        turn=shared_scope.turn,
+    )
+    controller.on_shell_context(shell)
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire=StepResult(outcome="park", park_reason="test_park"),
+    )
+
+    wire = snapshot_to_wire(controller.snapshot(shell))
+    parked = next(e for e in wire["concurrencyTimeline"] if e["kind"] == "step_parked")
+    assert parked["detail"]["reason"] == "test_park"
+    assert parked["stepIndex"] == 0

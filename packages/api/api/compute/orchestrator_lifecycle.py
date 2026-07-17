@@ -32,10 +32,10 @@ class OrchestratorLifecycleMixin:
             kind,
             node.scope,
             node=node,
+            step_index=node.step_index,
             detail={
                 "reason": "submit_force_fresh",
                 "priorState": node.state,
-                "priorStepIndex": node.step_index,
                 "priorProfileStepIndex": node.profile_step_index,
                 "wasRunning": node.state == "running",
                 "entryStepKind": request.step_kind,
@@ -57,9 +57,9 @@ class OrchestratorLifecycleMixin:
             "epoch_retry",
             node.scope,
             node=node,
+            step_index=prior_step_index,
             detail={
                 "reason": "invalidation_generation_bump",
-                "priorStepIndex": prior_step_index,
                 "priorProfileStepIndex": node.profile_step_index,
                 "generationAtSubmit": prior_generation,
                 "currentGeneration": current_generation,
@@ -98,9 +98,9 @@ class OrchestratorLifecycleMixin:
                 "persist_deferred",
                 node.scope,
                 node=node,
+                step_index=prior_step_index,
                 detail={
                     "reason": "persist_deferred",
-                    "priorStepIndex": prior_step_index,
                     "priorProfileStepIndex": node.profile_step_index,
                     "relatedScopeKey": format_compute_scope_key(recovery.dependency_scope),
                     "forceFresh": recovery.force_fresh,
@@ -155,9 +155,9 @@ class OrchestratorLifecycleMixin:
             "step_parked",
             node.scope,
             node=node,
+            step_index=prior_step_index,
             detail={
                 "reason": reason or "step_parked",
-                "priorStepIndex": prior_step_index,
                 "priorProfileStepIndex": node.profile_step_index,
             },
         )

@@ -61,8 +61,18 @@ LifecycleEventKind = Literal[
     "pool_finish_ignored",
 ]
 # Causal restart / abort / stale-finish events for compute diagnostics.
+# ``step_kind`` / ``step_index`` are the canonical step identity for the event
+# (e.g. the step that was aborted, or the step a stale pool finish reported);
+# ``detail`` carries only kind-specific auxiliary fields, never step identity.
 LifecycleListener = Callable[
-    [LifecycleEventKind, ComputeScope, "ComputeNodeRun | None", Mapping[str, Any]],
+    [
+        LifecycleEventKind,
+        ComputeScope,
+        "ComputeNodeRun | None",
+        str | None,
+        int | None,
+        Mapping[str, Any],
+    ],
     None,
 ]
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
@@ -333,19 +343,35 @@ class OrchestratorObservers:
         scope: ComputeScope,
         *,
         node: ComputeNodeRun | None = None,
+        step_kind: str | None = None,
+        step_index: int | None = None,
         detail: Mapping[str, Any] | None = None,
     ) -> None:
-        """Schedule causal lifecycle listeners (force_fresh / abort / stale finish)."""
+        """Schedule causal lifecycle listeners (force_fresh / abort / stale finish).
+
+        ``step_kind`` / ``step_index`` are the canonical step identity for this
+        event; every call site passes them explicitly rather than burying a
+        differently-named equivalent inside ``detail``. ``detail`` is reserved
+        for kind-specific auxiliary fields (reason, prior state, and similar).
+        """
         listeners = tuple(self._lifecycle_listeners)
         if not listeners:
             return
         payload = dict(detail or {})
         for listener in listeners:
-            self._post_lock_callbacks.append(
-                lambda listener=listener, kind=kind, scope=scope, node=node, payload=payload: (
-                    listener(kind, scope, node, payload)
-                ),
-            )
+
+            def _notify(
+                listener=listener,
+                kind=kind,
+                scope=scope,
+                node=node,
+                step_kind=step_kind,
+                step_index=step_index,
+                payload=payload,
+            ):
+                listener(kind, scope, node, step_kind, step_index, payload)
+
+            self._post_lock_callbacks.append(_notify)
 
     def drain_post_lock_callbacks(self) -> None:
         while True:

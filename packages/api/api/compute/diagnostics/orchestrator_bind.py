@@ -7,6 +7,7 @@ step-complete, ready, inline-start, and lifecycle forwarding onto the timeline.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -122,12 +123,16 @@ class DiagnosticsOrchestratorBindMixin:
             )
         )
         unregister_lifecycle = orchestrator.register_lifecycle_listener(
-            lambda kind, scope, node, detail, _orch_id=registration_id: self._on_lifecycle(
-                kind,
-                scope,
-                node,
-                detail,
-                orchestrator_id=_orch_id,
+            lambda kind, scope, node, step_kind, step_index, detail, _orch_id=registration_id: (
+                self._on_lifecycle(
+                    kind,
+                    scope,
+                    node,
+                    step_kind,
+                    step_index,
+                    detail,
+                    orchestrator_id=_orch_id,
+                )
             )
         )
         with self._lock:
@@ -373,22 +378,15 @@ class DiagnosticsOrchestratorBindMixin:
         kind: LifecycleEventKind,
         scope: ComputeScope,
         node: ComputeNodeRun | None,
-        detail: object,
+        step_kind: str | None,
+        step_index: int | None,
+        detail: Mapping[str, object],
         *,
         orchestrator_id: int | None = None,
     ) -> None:
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
             return
-        payload = dict(detail) if isinstance(detail, dict) else {}
-        step_kind = payload.get("stepKind")
-        if not isinstance(step_kind, str):
-            pool_step_kind = payload.get("poolStepKind")
-            step_kind = pool_step_kind if isinstance(pool_step_kind, str) else None
-        step_index = payload.get("priorStepIndex")
-        if not isinstance(step_index, int):
-            pool_step_index = payload.get("poolStepIndex")
-            step_index = pool_step_index if isinstance(pool_step_index, int) else None
         priority_band = node.priority_band if node is not None else None
         self._timeline.record_lifecycle(
             shell,
@@ -398,5 +396,5 @@ class DiagnosticsOrchestratorBindMixin:
             step_kind=step_kind,
             step_index=step_index,
             priority_band=priority_band,
-            detail=payload,
+            detail=dict(detail),
         )
