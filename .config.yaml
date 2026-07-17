@@ -8,6 +8,8 @@ api:
   storage_root: ./.data
   storage_asset_path: null   # ephemeral only; ignored for file backend
   include_dummy_data: false   # seed sample paths if missing (set false for production)
+  compute_diagnostics: true   # Compute tab + freeze/single-step (off by default in ApiConfig)
+  compute_diagnostics_start_frozen: true  # When diagnostics on: arm freeze on first game contact
 
 bff:
   cors_origins:
