@@ -519,6 +519,57 @@ def test_submit_reuses_terminal_node_unless_fresh_requested(sample_turn):
     assert orchestrator.nodes[shared_scope] is fresh._node
 
 
+def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
+    """A soft-parked node reruns its current step and completes after wake."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    call_count = 0
+
+    def run_step(_job):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return StepResult(outcome="park", park_reason="not_ready")
+        return {"run": call_count}
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", run_step),),
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((registration,)),
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    parked = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+
+    assert parked.state == "parked"
+    assert parked.error is None
+    assert shared_scope not in orchestrator.ready_scopes()
+
+    woken = orchestrator.wake_if_parked(
+        ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True)
+    )
+
+    assert call_count == 2
+    assert woken.state == "complete"
+    assert woken.result_wire == {"run": 2}
+    assert orchestrator.nodes[shared_scope] is parked._node
+
+
 def test_fresh_submit_replaces_failed_terminal_node(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,

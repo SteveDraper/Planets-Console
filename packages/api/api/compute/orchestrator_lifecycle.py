@@ -147,10 +147,13 @@ class OrchestratorLifecycleMixin:
 
         prior_step_index = node.step_index
         node.generation_at_submit = None
-        node.error = None
-        node.state = "parked"
         node.execution_sealed = False
-        self._dequeue_ready(node.scope)
+        self._settle_node(
+            node,
+            state="parked",
+            release_waiters=False,
+            notify_dependents=False,
+        )
         self._observers.notify_lifecycle(
             "step_parked",
             node.scope,
@@ -161,7 +164,6 @@ class OrchestratorLifecycleMixin:
                 "priorProfileStepIndex": node.profile_step_index,
             },
         )
-        self._observers.notify_scope_outcome(node)
 
     def _maybe_wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""

@@ -6,6 +6,7 @@ import threading
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.errors import ComputeScopeAbortedError
@@ -670,34 +671,47 @@ class ComputeOrchestrator(
         # Defer dispatch so pool submit is never nested under this lock.
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
-    def _complete_node(self, node: ComputeNodeRun) -> None:
-        node.state = "complete"
+    def _settle_node(
+        self,
+        node: ComputeNodeRun,
+        *,
+        state: Literal["complete", "failed", "parked"],
+        error: BaseException | None = None,
+        release_waiters: bool = True,
+        notify_dependents: bool = True,
+    ) -> None:
+        """Transition ``node`` out of active dispatch and publish its outcome.
+
+        Shared by complete, fail, and park -- the three states that stop a
+        node's dispatch loop and report a :class:`ScopeLifecycleSnapshot`.
+        Park passes ``release_waiters=False`` (waiters keep waiting for a real
+        terminal outcome, not a soft pause) and ``notify_dependents=False``
+        (dependents stay blocked rather than promoted); the caller emits its
+        own lifecycle event and resets ``generation_at_submit`` around this
+        call.
+        """
+        node.state = state
+        node.error = error
         self._dequeue_ready(node.scope)
-        for waiter in node.waiters:
-            waiter._waiter_error = None
-        node.waiters.clear()
-        self._observers.notify_node_complete(node)
+        if release_waiters:
+            for waiter in node.waiters:
+                waiter._waiter_error = error
+            node.waiters.clear()
+            self._observers.notify_node_complete(node)
         self._observers.notify_scope_outcome(node)
-        completed_scope = node.scope
-        self._observers.schedule_post_lock(
-            lambda: self._handle_dependency_terminal(completed_scope),
-        )
+        if notify_dependents:
+            completed_scope = node.scope
+            self._observers.schedule_post_lock(
+                lambda: self._handle_dependency_terminal(completed_scope),
+            )
+
+    def _complete_node(self, node: ComputeNodeRun) -> None:
+        self._settle_node(node, state="complete")
 
     def _fail_node(self, node: ComputeNodeRun, error: BaseException) -> None:
         if node.state == "failed":
             return
-        node.state = "failed"
-        node.error = error
-        self._dequeue_ready(node.scope)
-        for waiter in node.waiters:
-            waiter._waiter_error = error
-        node.waiters.clear()
-        self._observers.notify_node_complete(node)
-        self._observers.notify_scope_outcome(node)
-        completed_scope = node.scope
-        self._observers.schedule_post_lock(
-            lambda: self._handle_dependency_terminal(completed_scope),
-        )
+        self._settle_node(node, state="failed", error=error)
 
     def _ready_depth(self) -> int:
         return sum(1 for scope in self._ready_queue if self._nodes[scope].state == "ready")
