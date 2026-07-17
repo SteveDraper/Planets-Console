@@ -119,24 +119,29 @@ class InferenceRowScheduler:
         )
 
     def begin_scope(self, scope: InferenceStreamScope) -> str:
-        """Claim the active table-stream scope, preempting the prior stream's row runs.
+        """Claim the active table-stream scope, detaching the prior stream's row runs.
 
-        Background ensure RowRuns for *other* turns must survive. Wiping them on
+        Background ensure RowRuns for *other* turns must survive. Detaching them on
         ``begin_scope`` (e.g. opening the turn-8 stream while turn-3 background
         warm is in flight) left fleet waiting forever on aborted/missing scores
-        deps. Only the prior active stream turn is preempted; a first claim
+        deps. Only the prior active stream turn is detached; a first claim
         (no prior scope) leaves retained runs alone.
+
+        Detach drops RowRun registrations and cancels tokens but does **not**
+        abort orchestrator nodes -- in-flight tier workers may still finish,
+        persist from the RowComplete payload, and complete the DAG node.
+        ``cancel_run`` is the explicit cancel intent that aborts orchestrator scope.
         """
         with self._lock:
             prior = self._scope_guard.active_scope
 
             def on_same_scope_preempt() -> None:
-                self._preempt_active_table_stream_locked(only_turn=scope.turn_number)
+                self._detach_stream_runs_locked(turn=scope.turn_number)
 
             def on_scope_change() -> None:
                 if prior is None:
                     return
-                self._preempt_active_table_stream_locked(only_turn=prior.turn_number)
+                self._detach_stream_runs_locked(turn=prior.turn_number)
 
             return self._scope_guard.begin_scope_locked(
                 scope,
@@ -372,6 +377,12 @@ class InferenceRowScheduler:
         return True
 
     def cancel_run(self, run_id: str) -> None:
+        """Cancel one row run and abort its orchestrator scope.
+
+        Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope),
+        cancel aborts in-flight orchestrator nodes so a later ``force_fresh``
+        submit cannot attach to a still-running node with a missing RowRun.
+        """
         abort_scope: ComputeScope | None = None
         with self._lock:
             row_run = self._adapter_row_run(run_id)
@@ -841,28 +852,24 @@ class InferenceRowScheduler:
             binding.unregister_dispatch_gate()
             binding.unregister_dispatch_gate = None
 
-    def _preempt_active_table_stream_locked(
+    def _detach_stream_runs_locked(
         self,
         *,
-        only_turn: int | None = None,
+        turn: int | None = None,
     ) -> None:
-        """Cancel retained row runs for a preempted table stream.
+        """Detach stream row runs for one turn without aborting orchestrator nodes.
 
-        When ``only_turn`` is set, background ensure runs for other turns are kept
-        so cross-turn DAG warm is not torn down by opening a different turn's stream.
-        Orchestrator nodes are not aborted here: in-flight tier workers may still
-        finish and persist via the orphan RowComplete path. ``cancel_run`` remains
-        the path that aborts a specific scope for force_fresh replacement.
+        Used by ``begin_scope`` when switching table streams. Cancels RowRun
+        tokens and unregisters runs for ``turn`` only; other turns are untouched.
+        Does **not** call ``abort_scope`` -- in-flight tier workers may still
+        finish, persist from the RowComplete payload, and complete the DAG node.
+        ``cancel_run`` is the explicit cancel intent that aborts orchestrator scope.
         """
         self._globally_paused = False
         self._held_initial_submissions.clear()
         for run_id in list(self._runs):
             root_scope = self._runs.get(run_id)
-            if (
-                only_turn is not None
-                and root_scope is not None
-                and root_scope.turn != only_turn
-            ):
+            if turn is not None and root_scope is not None and root_scope.turn != turn:
                 continue
             row_run = self._adapter_row_run(run_id)
             if row_run is not None:
@@ -875,8 +882,8 @@ class InferenceRowScheduler:
             self._release_stream_binding_locked(binding)
 
     def _invalidate_retained_state_locked(self) -> None:
-        # Full clear for shutdown / hard invalidate -- not used by begin_scope.
-        self._preempt_active_table_stream_locked(only_turn=None)
+        # Full detach for shutdown / hard invalidate -- not used by begin_scope.
+        self._detach_stream_runs_locked(turn=None)
 
     def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
         event = GlobalPauseChanged(paused=paused)

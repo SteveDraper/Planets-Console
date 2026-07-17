@@ -324,37 +324,6 @@ def _tier_persist_payload(run: RowRun, row_complete: RowComplete) -> dict[str, o
     return {"runId": run.run_id, "rowComplete": row_complete}
 
 
-def _persist_orphan_row_complete(
-    services: object,
-    scope: ComputeScope,
-    row_complete: RowComplete,
-) -> None:
-    """Write a persistable RowComplete when the live RowRun is already gone."""
-    from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
-    from api.serialization.inference_row_persistence import (
-        persisted_inference_row_from_wire_complete,
-    )
-    from api.transport.inference_stream_wire import row_complete_to_complete_wire_event
-
-    export_scope = _export_scope_for_compute(scope)
-    if export_scope is None or export_scope.player_id is None:
-        return
-    persistence = getattr(services, "persistence", None)
-    if persistence is None:
-        return
-    status = row_complete.wire_payload.status
-    if not is_durable_turn_evidence_row_status(status):
-        return
-    wire_event = row_complete_to_complete_wire_event(row_complete)
-    persistence.put_row(
-        export_scope.game_id,
-        export_scope.perspective,
-        export_scope.turn,
-        export_scope.player_id,
-        persisted_inference_row_from_wire_complete(wire_event),
-    )
-
-
 class ScoresPersistencePolicy:
     """Orchestrator persistence hooks for per-player scores inference scopes."""
 
@@ -393,22 +362,26 @@ class ScoresPersistencePolicy:
         if not isinstance(row_complete, RowComplete):
             raise TypeError("scores persist result wire missing RowComplete payload")
 
+        export_scope = _export_scope_for_compute(scope)
+        if export_scope is None or export_scope.player_id is None:
+            return
+
         services = resolve_scores_services(ctx)
         if services.persistence is None:
             return
 
         run = get_row_run(run_id)
-        if run is not None:
-            if run.session.cancel_token.is_cancelled():
-                # Cancelled rows are aborted off ``running`` before persist; no-op is safe.
-                return
-            services.persistence.persist_row_complete(run.session, row_complete)
+        if run is not None and run.session.cancel_token.is_cancelled():
+            # Explicit cancel_run aborted the scope before persist; no-op is safe.
             return
 
-        # Peer preempt/finalize may have unregistered the RowRun after the tier
-        # produced a persistable outcome. The RowComplete payload is still enough
-        # to close turn evidence; writing avoids unlocking fleet with open evidence.
-        _persist_orphan_row_complete(services, scope, row_complete)
+        services.persistence.persist_row_complete_for_scope(
+            row_complete,
+            game_id=export_scope.game_id,
+            perspective=export_scope.perspective,
+            host_turn=export_scope.turn,
+            player_id=export_scope.player_id,
+        )
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
         export_scope = _export_scope_for_compute(scope)

@@ -154,27 +154,37 @@ class InferenceRowPersistenceService:
             cleared.add(host_turn)
         return cleared
 
-    def persist_row_complete(
+    def persist_row_complete_for_scope(
         self,
-        session: InferenceRowStreamSession,
         event: RowComplete,
+        *,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
     ) -> None:
+        """Write durable turn evidence from a RowComplete payload alone."""
         status = event.wire_payload.status
         # Lazy: avoid scores package import cycle at module load.
         from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 
         if not is_durable_turn_evidence_row_status(status):
             return
-        wire_event = row_complete_to_complete_wire_event(
-            event,
-            observation=session.observation,
-            turn=session.turn,
-        )
+        wire_event = row_complete_to_complete_wire_event(event)
         row = persisted_inference_row_from_wire_complete(wire_event)
-        self.put_row(
-            session.game_id,
-            session.perspective,
-            session.turn_number,
-            session.player_id,
-            row,
+        self.put_row(game_id, perspective, host_turn, player_id, row)
+
+    def persist_row_complete(
+        self,
+        session: InferenceRowStreamSession,
+        event: RowComplete,
+    ) -> None:
+        if session.cancel_token.is_cancelled():
+            return
+        self.persist_row_complete_for_scope(
+            event,
+            game_id=session.game_id,
+            perspective=session.perspective,
+            host_turn=session.turn_number,
+            player_id=session.player_id,
         )
