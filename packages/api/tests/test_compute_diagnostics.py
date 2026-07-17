@@ -1400,6 +1400,12 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
             "counts": {"pending": 0, "running": 0, "done": 0, "cancelled": 0},
             "futures": [],
         },
+        "dispatch": {
+            "configuredWorkers": 1,
+            "aliveWorkers": 1,
+            "workerExceptionCount": 0,
+            "lastDequeueMonotonic": None,
+        },
     }
     assert wire["nextSingleStep"] == {
         "target": None,
