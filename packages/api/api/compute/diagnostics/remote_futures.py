@@ -52,6 +52,7 @@ def build_remote_pool_wire(
     process_max_workers: int | None,
     interpreter_queue_depth: int | None,
     process_queue_depth: int | None,
+    dispatch_workers: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     """Build the ``remotePool`` diagnostics snapshot section."""
     by_backend: dict[str, list[RemotePoolFutureRecord]] = {
@@ -62,7 +63,7 @@ def build_remote_pool_wire(
         if record.backend in by_backend:
             by_backend[record.backend].append(record)
 
-    return {
+    wire: dict[str, Any] = {
         "interpreter": {
             "maxWorkers": interpreter_max_workers,
             "queueDepth": interpreter_queue_depth,
@@ -76,3 +77,6 @@ def build_remote_pool_wire(
             "futures": [remote_future_to_wire(record) for record in by_backend["process"]],
         },
     }
+    if dispatch_workers is not None:
+        wire["dispatch"] = dispatch_workers
+    return wire

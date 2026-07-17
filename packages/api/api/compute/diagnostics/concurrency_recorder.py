@@ -57,6 +57,8 @@ class ConcurrencyTimelineRecorder:
         self._timeline_capacity = timeline_capacity
         self._bound_orchestrators = bound_orchestrators
         self._in_flight_records = in_flight_records
+        # Retained for call-site compatibility; gauges must never invoke this
+        # (``snapshot_work_queue`` takes the pool lock -- ABBA with dequeue hooks).
         self._global_queue_depth = global_queue_depth
         self._configured_workers = configured_workers
         self._ancestor_turns = ancestor_turns
@@ -67,12 +69,17 @@ class ConcurrencyTimelineRecorder:
         # Per-shell ready depth as sum of per-orchestrator contributions from
         # ready-queue-changed snapshots (complete lifecycle, no ±1 drift).
         self._ready_depth_parts: dict[ShellContextKey, dict[int, int]] = {}
+        # Last depth from enqueue/start (explicit). Listener paths must not call
+        # ``_global_queue_depth`` (pool lock): workers hold the pool condition while
+        # taking the controller lock in the dequeue predicate / on_dequeued hooks.
+        self._last_known_global_queue_depth = 0
         self._lock = threading.Lock()
 
     def clear(self) -> None:
         with self._lock:
             self._timelines.clear()
             self._ready_depth_parts.clear()
+            self._last_known_global_queue_depth = 0
         self._open_executions.clear()
 
     def clear_orchestrator_ready_depth(self, orchestrator_id: int) -> None:
@@ -334,6 +341,13 @@ class ConcurrencyTimelineRecorder:
         ``sample_ready_from_orchestrators`` is true (snapshot assembly only, never
         from drain_post_lock listeners), live orchestrator ready queues are used
         and the cache is refreshed to match.
+
+        Global queue depth must be passed explicitly from enqueue/start (already
+        under or after a pool snapshot) or falls back to the last known value.
+        Listener callbacks must never call into the pool for a live queue depth:
+        workers hold the pool condition while taking the diagnostics controller
+        lock (predicate / on_dequeued), so pool sampling here is controller→pool
+        under drain and ABBA-deadlocks the dequeue path.
         """
         ancestor_turns = self._ancestor_turns(shell)
         if sample_ready_from_orchestrators:
@@ -377,7 +391,9 @@ class ConcurrencyTimelineRecorder:
         )
         global_in_flight = len(in_flight)
         if global_queue_depth is None:
-            global_queue_depth = self._global_queue_depth()
+            global_queue_depth = self._last_known_global_queue_depth
+        else:
+            self._last_known_global_queue_depth = global_queue_depth
         return OccupancyGauges(
             scoped_ready_depth=ready_depth,
             scoped_in_flight_count=scoped_in_flight,

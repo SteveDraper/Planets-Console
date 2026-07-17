@@ -168,6 +168,7 @@ def build_compute_diagnostics_snapshot(
     configured_workers: int = 0,
     remote_futures: tuple[RemotePoolFutureRecord, ...] = (),
     remote_executor_probe: dict[str, object] | None = None,
+    dispatch_workers: dict[str, object] | None = None,
 ) -> ComputeDiagnosticsSnapshot:
     dag_nodes: list[dict[str, Any]] = []
     ready_queue: list[dict[str, Any]] = []
@@ -252,6 +253,7 @@ def build_compute_diagnostics_snapshot(
         process_max_workers=_optional_int(probe.get("processMaxWorkers")),
         interpreter_queue_depth=_optional_int(probe.get("interpreterQueueDepth")),
         process_queue_depth=_optional_int(probe.get("processQueueDepth")),
+        dispatch_workers=dispatch_workers,
     )
 
     backend_mix: dict[str, int] = {}

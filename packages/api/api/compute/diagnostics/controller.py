@@ -331,6 +331,7 @@ class ComputeDiagnosticsController:
         remote_executor_probe = (
             self._pool.remote_executor_probe() if self._pool is not None else None
         )
+        dispatch_workers = self._pool.worker_health() if self._pool is not None else None
         return build_compute_diagnostics_snapshot(
             shell=shell,
             ancestor_turns=ancestor_turns,
@@ -348,6 +349,7 @@ class ComputeDiagnosticsController:
             configured_workers=self._configured_workers(),
             remote_futures=remote_futures,
             remote_executor_probe=remote_executor_probe,
+            dispatch_workers=dispatch_workers,
         )
 
     def preview_single_step(
