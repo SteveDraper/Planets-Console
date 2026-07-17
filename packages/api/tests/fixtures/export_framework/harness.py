@@ -58,10 +58,14 @@ def make_fixture_query_context(
 
 
 def clone_turn_at(turn: TurnInfo, turn_number: int) -> TurnInfo:
-    """Shallow clone with a different settings.turn for multi-turn fixture chains."""
+    """Shallow clone with a different settings.turn for multi-turn fixture chains.
+
+    Forces acceleratedturns=0 so export-framework harnesses are isolated from
+    accelerated-start ensure-floor semantics (covered by dedicated accel tests).
+    """
     from dataclasses import replace
 
-    settings = replace(turn.settings, turn=turn_number)
+    settings = replace(turn.settings, turn=turn_number, acceleratedturns=0)
     game = replace(turn.game, turn=turn_number)
     return replace(turn, settings=settings, game=game)
 

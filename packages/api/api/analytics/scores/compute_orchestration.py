@@ -36,6 +36,8 @@ from api.analytics.scores.tier_row_run_registry import (
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
+from api.models.game import GameSettings
 
 SCORES_MATERIALIZE = "materialize"
 SCORES_TIER_SOLVE = "tier_solve"
@@ -53,12 +55,16 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
 _PERSISTABLE_ROW_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 
 
-def _scores_prior_fleet_scope(scope: ComputeScope) -> ComputeScope | None:
+def _scores_prior_fleet_scope(
+    scope: ComputeScope,
+    *,
+    settings: GameSettings,
+) -> ComputeScope | None:
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
         return None
-    if scope.turn <= 1:
-        return None
     if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
+        return None
+    if scope.turn <= accelerated_ensure_floor(settings, scope.turn):
         return None
     return ComputeScope(
         analytic_id=FLEET_ANALYTIC_ID,
@@ -96,10 +102,12 @@ def _resolve_prior_fleet_for_tier_wire(
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
         raise ValueError("scores tier_solve requires concrete scores scope")
-    if export_scope.turn <= 1:
-        return PriorTurnFleetTorpResolution(overlay=None, input_status="not_applicable")
 
-    prior_fleet_scope = _scores_prior_fleet_scope(scope)
+    turn = ctx.load_turn(export_scope.turn)
+    if turn is None:
+        return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
+
+    prior_fleet_scope = _scores_prior_fleet_scope(scope, settings=turn.settings)
     if prior_fleet_scope is None:
         return PriorTurnFleetTorpResolution(overlay=None, input_status="not_applicable")
 
@@ -114,10 +122,6 @@ def _resolve_prior_fleet_for_tier_wire(
                 prior_export_scope,
                 prior_turn=prior_turn,
             )
-
-    turn = ctx.load_turn(export_scope.turn)
-    if turn is None:
-        return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
 
     return resolve_prior_turn_fleet_torp_overlay(
         turn=turn,

@@ -26,6 +26,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.analytics.turn_roster import iter_turn_players
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.errors import ConflictError, NotFoundError, ValidationError
 from api.models.game import TurnInfo
 
@@ -241,8 +242,10 @@ def _find_chain_anchor_for_player(
     perspective: int,
     player_id: int,
     turn_number: int,
+    *,
+    min_anchor_turn: int = 1,
 ) -> tuple[int, PersistedFleetLedger | None]:
-    for prior_turn_number in range(turn_number - 1, 0, -1):
+    for prior_turn_number in range(turn_number - 1, min_anchor_turn - 1, -1):
         prior_ledger = persistence.get_ledger(
             game_id,
             perspective,
@@ -257,9 +260,11 @@ def _find_chain_anchor_for_player(
 def _first_stored_rst_turn(
     load_turn: Callable[[int], TurnInfo | None],
     turn_number: int,
+    *,
+    min_turn: int = 1,
 ) -> int | None:
-    """Return the lowest stored RST turn in ``1..turn_number``, if any."""
-    for stored_turn_number in range(1, turn_number + 1):
+    """Return the lowest stored RST turn in ``min_turn..turn_number``, if any."""
+    for stored_turn_number in range(min_turn, turn_number + 1):
         if load_turn(stored_turn_number) is not None:
             return stored_turn_number
     return None
@@ -269,6 +274,17 @@ def _roster_player_ids(turn: TurnInfo) -> list[int]:
     return [player.id for player in iter_turn_players(turn)]
 
 
+def _chain_floor(
+    load_turn: Callable[[int], TurnInfo | None],
+    target_turn: int,
+) -> int:
+    """Lowest turn fleet gap-fill may require when targeting ``target_turn``."""
+    target_info = load_turn(target_turn)
+    if target_info is None:
+        return 1
+    return accelerated_ensure_floor(target_info.settings, target_turn)
+
+
 def _find_gap_start_turn(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
@@ -276,8 +292,9 @@ def _find_gap_start_turn(
     target_turn: int,
     load_turn: Callable[[int], TurnInfo | None],
 ) -> int:
-    """Return the first turn in ``1..target_turn`` lacking an ensure-final snapshot."""
-    for turn_number in range(1, target_turn + 1):
+    """Return the first turn in ``floor..target_turn`` lacking an ensure-final snapshot."""
+    chain_floor = _chain_floor(load_turn, target_turn)
+    for turn_number in range(chain_floor, target_turn + 1):
         turn_info = load_turn(turn_number)
         if turn_info is None:
             continue
@@ -302,8 +319,9 @@ def _find_gap_start_turn_for_player(
     target_turn: int,
     load_turn: Callable[[int], TurnInfo | None],
 ) -> int:
-    """Return the first turn in ``1..target_turn`` lacking ensure-final ledger for P."""
-    for turn_number in range(1, target_turn + 1):
+    """Return the first turn in ``floor..target_turn`` lacking ensure-final ledger for P."""
+    chain_floor = _chain_floor(load_turn, target_turn)
+    for turn_number in range(chain_floor, target_turn + 1):
         if load_turn(turn_number) is None:
             continue
         if not persistence.has_final_ledger(game_id, perspective, turn_number, player_id):
@@ -446,11 +464,13 @@ def _materialize_fleet_ledger_chain_for_player(
             turn_context_cache[materialize_turn] = FleetTurnContext.from_turn(turn_info)
         return turn_context_cache[materialize_turn]
 
-    def require_prior_rst(materialize_turn: int, *, allow_missing_prefix_rst: bool) -> None:
-        if materialize_turn <= 1:
+    chain_floor = accelerated_ensure_floor(turn.settings, turn_number)
+
+    def require_prior_rst(materialize_turn: int, *, allow_missing_prior_rst: bool) -> None:
+        if materialize_turn <= chain_floor:
             return
         prior_turn_number = materialize_turn - 1
-        if allow_missing_prefix_rst:
+        if allow_missing_prior_rst:
             return
         if cached_load(prior_turn_number) is None:
             raise NotFoundError(
@@ -464,15 +484,20 @@ def _materialize_fleet_ledger_chain_for_player(
         perspective,
         player_id,
         turn_number,
+        min_anchor_turn=chain_floor,
     )
-    first_stored_rst = _first_stored_rst_turn(cached_load, turn_number)
+    first_stored_rst = _first_stored_rst_turn(
+        cached_load,
+        turn_number,
+        min_turn=chain_floor,
+    )
     skip_missing_prefix_rst = (
         anchor_turn == 0
-        and turn_number > 1
+        and turn_number > chain_floor
         and first_stored_rst is not None
-        and first_stored_rst > 1
+        and first_stored_rst > chain_floor
     )
-    start_turn = anchor_turn + 1
+    start_turn = anchor_turn + 1 if anchor_turn >= chain_floor else chain_floor
     current_ledger = anchor_persisted.ledger if anchor_persisted is not None else None
     current_persisted = anchor_persisted
 
@@ -499,36 +524,36 @@ def _materialize_fleet_ledger_chain_for_player(
         )
         current_persisted = None
     elif anchor_turn == 0:
-        turn_one = require_turn(1)
+        baseline_turn = require_turn(chain_floor)
         current_persisted = _materialize_and_persist_player_turn(
             coherence,
-            materialize_turn=1,
+            materialize_turn=chain_floor,
             player_id=player_id,
             prior_persisted=None,
             prior_ledger=ensure_fleet_baseline_for_player(
                 game_id,
                 perspective,
-                turn_one,
+                baseline_turn,
                 player_id,
             ),
-            turn_info=turn_one,
-            turn_context=cached_turn_context_for(1, turn_one),
+            turn_info=baseline_turn,
+            turn_context=cached_turn_context_for(chain_floor, baseline_turn),
             game_id=game_id,
             perspective=perspective,
             load_turn=cached_load,
             inference_materialization=resolved_inference_materialization,
         )
-        emit_leg_progress(current_persisted, 1)
-        if turn_number == 1:
+        emit_leg_progress(current_persisted, chain_floor)
+        if turn_number == chain_floor:
             return current_persisted
-        start_turn = 2
+        start_turn = chain_floor + 1
 
     assert current_ledger is not None
 
     for materialize_turn in range(start_turn, turn_number + 1):
         require_prior_rst(
             materialize_turn,
-            allow_missing_prefix_rst=skip_missing_prefix_rst and materialize_turn == start_turn,
+            allow_missing_prior_rst=skip_missing_prefix_rst and materialize_turn == start_turn,
         )
         turn_info = require_turn(materialize_turn)
         current_persisted = _materialize_and_persist_player_turn(

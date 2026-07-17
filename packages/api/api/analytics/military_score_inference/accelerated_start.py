@@ -27,6 +27,12 @@ from api.analytics.military_score_inference.scoring import (
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
 )
+from api.concepts.accelerated_scoreboard import (
+    accelerated_turn_count,  # noqa: F401
+    first_reliable_accelerated_scoreboard_turn,  # noqa: F401
+    is_first_reliable_scoreboard_turn,
+    is_unreliable_accelerated_scoreboard_turn,
+)
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
 
@@ -88,29 +94,6 @@ class AcceleratedWindowShipBuilds:
     warships_built_before_reported_host_turn: int
     freighters_built_on_reported_host_turn: int
     warships_built_on_reported_host_turn: int
-
-
-def accelerated_turn_count(settings: GameSettings) -> int:
-    """Return N when accelerated start is enabled, else 0."""
-    return max(0, settings.acceleratedturns)
-
-
-def is_unreliable_accelerated_scoreboard_turn(turn_number: int, settings: GameSettings) -> bool:
-    """Return whether persisted scoreboard rows omit reliable totals on this turn."""
-    accelerated = accelerated_turn_count(settings)
-    return accelerated > 0 and 1 <= turn_number < accelerated
-
-
-def is_first_reliable_scoreboard_turn(turn_number: int, settings: GameSettings) -> bool:
-    """Return whether this is the first host turn with a filled-in scoreboard row."""
-    accelerated = accelerated_turn_count(settings)
-    return accelerated > 0 and turn_number == accelerated
-
-
-def first_reliable_accelerated_scoreboard_turn(settings: GameSettings) -> int | None:
-    """Scoreboard turn that runs the accelerated split solve, when accelerated start is enabled."""
-    accelerated = accelerated_turn_count(settings)
-    return accelerated if accelerated > 0 else None
 
 
 def scoreboard_host_turn(scoreboard_turn: int) -> int | None:

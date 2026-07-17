@@ -177,7 +177,7 @@ Idempotent producer step before materialization: bring one **analytic export** s
 _Avoid_: mutating query (vague), read-only export materializer, user visit order as prerequisite, sync CP-SAT inside scores ensure/materialize
 
 **Analytic export ensure baseline**:
-The point where an ensure-unwind chain stops without further **analytic export ensure dependencies**. **Analytic-specific:** e.g. **fleet** at turn 1 has no prior fleet (implicit empty composition); **scores** at turn 1 does not require **fleet** at turn 0 -- game-start neutral priors apply. **Storage floor:** if turn *T−1* is not stored for the **perspective**, probe reports `turn_not_stored` (root **unavailable**), not a neutral baseline -- distinct from authoritative empty export data at turn 1.
+The point where an ensure-unwind chain stops without further **analytic export ensure dependencies**. **Analytic-specific:** e.g. **fleet** at turn 1 has no prior fleet (implicit empty composition); **scores** at turn 1 does not require **fleet** at turn 0 -- game-start neutral priors apply. **Accelerated-start floor:** when `acceleratedturns = N` (`N > 0`) and the requesting scope is at or above **N**, turn **N** is the ensure/materialization baseline (deps on turns `1..N-1` are skipped). **Storage floor:** if a dependency turn at or above the ensure floor is not stored for the **perspective**, probe reports `turn_not_stored` (root **unavailable**), not a neutral baseline -- distinct from authoritative empty export data at turn 1 / accelerated turn N.
 _Avoid_: global turn-1 shortcut without per-analytic rules, silent fallback to ambient turn when a prior turn is missing
 
 **Analytic export ensure dependency**:

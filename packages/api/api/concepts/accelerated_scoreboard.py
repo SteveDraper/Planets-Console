@@ -56,6 +56,32 @@ def accelerated_turn_count(settings: GameSettings) -> int:
     return max(0, settings.acceleratedturns)
 
 
+def first_reliable_accelerated_scoreboard_turn(settings: GameSettings) -> int | None:
+    """Scoreboard turn N when accelerated start is enabled; otherwise None."""
+    accelerated = accelerated_turn_count(settings)
+    return accelerated if accelerated > 0 else None
+
+
+def accelerated_ensure_floor(settings: GameSettings, scope_turn: int) -> int:
+    """Lowest turn ensure/fleet may require when targeting ``scope_turn``.
+
+    Normal games and unreliable accelerated turns (``scope_turn < N``): turn 1.
+    Once the target is at or above the first reliable scoreboard turn N, floor is
+    N so missing/unreliable turns ``1..N-1`` are not required.
+
+    Call sites compare directly: ``dep_turn < floor`` or ``turn == floor``.
+    """
+    accelerated = accelerated_turn_count(settings)
+    if accelerated > 0 and scope_turn >= accelerated:
+        return accelerated
+    return 1
+
+
+def is_unreliable_accelerated_scoreboard_turn(turn_number: int, settings: GameSettings) -> bool:
+    accelerated = accelerated_turn_count(settings)
+    return accelerated > 0 and 1 <= turn_number < accelerated
+
+
 def is_first_reliable_scoreboard_turn(turn_number: int, settings: GameSettings) -> bool:
     accelerated = accelerated_turn_count(settings)
     return accelerated > 0 and turn_number == accelerated

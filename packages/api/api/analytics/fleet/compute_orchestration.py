@@ -21,6 +21,8 @@ from api.compute.scope import (
     compute_scope_to_export_scope,
 )
 from api.compute.wire import DependencyOutputs
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
+from api.models.game import GameSettings
 from api.serialization.turn import turn_info_to_json
 
 FLEET_MATERIALIZATION_LEG = "materialization_leg"
@@ -38,10 +40,14 @@ FLEET_COMPUTE_PROFILE = AnalyticComputeProfile(
 )
 
 
-def _fleet_prior_scope(scope: ComputeScope) -> ComputeScope | None:
+def _fleet_prior_scope(
+    scope: ComputeScope,
+    *,
+    settings: GameSettings,
+) -> ComputeScope | None:
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
         return None
-    if scope.turn <= 1:
+    if scope.turn <= accelerated_ensure_floor(settings, scope.turn):
         return None
     return ComputeScope(
         analytic_id=scope.analytic_id,
@@ -85,7 +91,7 @@ def build_fleet_materialization_leg_job_wire(
 
     player_id = scope.player_id
     services = resolve_fleet_services(ctx)
-    prior_scope = _fleet_prior_scope(scope)
+    prior_scope = _fleet_prior_scope(scope, settings=turn.settings)
     prior_persisted: PersistedFleetLedger | None = None
     if prior_scope is not None:
         prior_wire = dependency_outputs.get(prior_scope)
@@ -233,7 +239,7 @@ class FleetPersistencePolicy:
                 inference_materialization=services.inference_materialization,
             )
             turn_context = FleetTurnContext.from_turn(turn)
-            prior_scope = _fleet_prior_scope(scope)
+            prior_scope = _fleet_prior_scope(scope, settings=turn.settings)
             prior_persisted = None
             if prior_scope is not None:
                 prior_ledger = services.persistence.get_ledger(

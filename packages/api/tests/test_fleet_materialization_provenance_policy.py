@@ -32,6 +32,7 @@ from tests.scores_exports_helpers import (
 def _turn_context() -> FleetTurnContext:
     turn = MagicMock()
     turn.scores = []
+    turn.settings.acceleratedturns = 0
     return FleetTurnContext(turn=turn, max_ship_id_bound=100)
 
 

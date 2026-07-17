@@ -1124,6 +1124,66 @@ def test_accelerated_first_reliable_refines_without_scores_diagnostics():
         assert record.build_option_sets[0].combo_id == "combo_96_9_5_6_4_2"
 
 
+def test_accelerated_window_refine_when_intermediate_scoreboard_turn_missing():
+    """680224 shape: turn 2 absent; refine builtTurn=1 from scores@3 hostTurnTargets."""
+    turn = load_turn_fixture("628580/1/turns/3.json")
+    player_id = 2
+    score = next(entry for entry in turn.scores if entry.ownerid == player_id)
+    inference_payload = infer_military_score_build(score, turn)
+    wire_complete = inference_api_payload_to_wire_complete(inference_payload)
+    host_turn_targets = list(host_turn_targets_from_wire_event(wire_complete))
+    assert host_turn_targets
+    assert any(target.host_turn == 1 for target in host_turn_targets)
+
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    persistence.put_row(
+        628580,
+        1,
+        3,
+        player_id,
+        PersistedInferenceRow(
+            status=str(inference_payload["status"]),
+            summary=str(inference_payload["summary"]),
+            solution_count=int(inference_payload["solutionCount"]),
+            is_complete=True,
+            solutions=inference_payload["solutions"],
+            diagnostics=None,
+            host_turn_targets=host_turn_targets,
+        ),
+    )
+
+    def load_turn(turn_number: int):
+        # Mid-accelerated storage: first reliable turn present, unreliable turn 2 absent.
+        if turn_number == 3:
+            return turn
+        return None
+
+    snapshot = apply_fleet_turn_delta(
+        ensure_fleet_baseline(628580, 1, turn),
+        turn,
+        inference_materialization=FleetInferenceMaterialization(
+            inference=FleetInferenceSupport(
+                scores_services=ScoresExportContext(persistence=persistence)
+            ),
+            load_turn=load_turn,
+        ),
+    )
+
+    ledger = ledger_for_player(snapshot, player_id)
+    starting_rows = _homeworld_starting_freighter_rows(ledger, shell_turn=3)
+    window_row = next(
+        record
+        for record in _inferred_freighter_rows(ledger, shell_turn=3)
+        if record not in starting_rows and _known_built_turn(record) == 1
+    )
+    assert window_row.build_option_sets
+    assert window_row.build_option_sets[0].combo_id == "combo_freighter"
+    assert window_row.build_option_sets[0].label == "Freighter"
+    inference_event = next(event for event in window_row.events if event.kind == "inference_update")
+    assert inference_event.payload["acceleratedIngest"] is True
+    assert inference_event.payload["segmentHostTurn"] == 1
+
+
 def test_accelerated_first_reliable_window_freighter_placeholder():
     turn = load_turn_fixture("628580/1/turns/3.json")
     player_id = 2

@@ -15,12 +15,39 @@ from api.analytics.export_types import (
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.ensure_validation import validate_ensure_dependency_target
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
+from api.models.game import GameSettings
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
 T = TypeVar("T")
 K = TypeVar("K")
+
+
+def _settings_for_ensure_scope(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> GameSettings | None:
+    turn = ctx.load_turn(scope.turn)
+    if turn is None:
+        turn = ctx.load_turn(ctx.ambient_turn)
+    return turn.settings if turn is not None else None
+
+
+def ensure_dependency_turn_floor(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> int:
+    """Return the ensure floor for dependency edges (1, or accelerated N).
+
+    Floor is a game-domain rule from settings + requesting scope turn -- not
+    gated by analytic id.
+    """
+    settings = _settings_for_ensure_scope(ctx, scope)
+    if settings is None:
+        return 1
+    return accelerated_ensure_floor(settings, scope.turn)
 
 
 @dataclass
@@ -60,7 +87,8 @@ def walk_dependency_tree(
 
         for dependency in catalog.ensure_dependencies:
             dependency_scope = dependency_scope_for(scope, dependency)
-            if dependency_scope.turn < 1:
+            turn_floor = ensure_dependency_turn_floor(ctx, scope)
+            if dependency_scope.turn < turn_floor:
                 continue
 
             if ctx.load_turn(dependency_scope.turn) is None:
@@ -170,6 +198,7 @@ def _is_at_baseline(
     scope: ExportScope,
     catalog: AnalyticExportCatalog,
 ) -> bool:
+    """Game-start baseline only (turn 1). Accelerated floor N still needs ensure work."""
     if scope.turn <= 1 and not catalog.ensure_dependencies:
         return True
     if scope.turn <= 1:

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.military_score_inference.accelerated_start import (
-    first_reliable_accelerated_scoreboard_turn,
     needs_accelerated_backfill,
     scoreboard_host_turn,
 )
@@ -19,7 +18,8 @@ from api.analytics.military_score_inference.solver import (
     STATUS_TIME_LIMITED,
 )
 from api.analytics.scores.export_wire import ranked_solutions_from_wire
-from api.models.game import TurnInfo
+from api.concepts.accelerated_scoreboard import first_reliable_accelerated_scoreboard_turn
+from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
@@ -112,6 +112,38 @@ def _payload_for_host_turn_from_row(
 PersistedRowLoader = Callable[[int, int], PersistedInferenceRow | None]
 
 
+def accelerated_backfill_host_turn_payload(
+    *,
+    scoreboard_turn: int,
+    settings: GameSettings,
+    get_persisted_row: PersistedRowLoader,
+    player_id: int,
+) -> FunctionalHostTurnPayload | None:
+    """Load ``hostTurnTargets`` for an unreliable scoreboard turn from ``scores@N``.
+
+    Unreliable accelerated scoreboard turns (``1..N-1``) may lack their own row
+    while accelerated start is still open. Both scores export and fleet held-
+    solution lookup resolve the functional payload from the first reliable
+    scoreboard row's ``hostTurnTargets``.
+    """
+    if not needs_accelerated_backfill(scoreboard_turn, settings):
+        return None
+    target_host_turn = scoreboard_host_turn(scoreboard_turn)
+    if target_host_turn is None:
+        return None
+    source_turn_number = first_reliable_accelerated_scoreboard_turn(settings)
+    if source_turn_number is None:
+        return None
+    source_row = get_persisted_row(source_turn_number, player_id)
+    if source_row is None:
+        return None
+    return _payload_for_host_turn_from_row(
+        source_row,
+        scoreboard_turn=source_turn_number,
+        target_host_turn=target_host_turn,
+    )
+
+
 def resolve_functional_host_turn_payload(
     *,
     scoreboard_turn: int,
@@ -135,24 +167,12 @@ def resolve_functional_host_turn_payload(
         if payload is not None:
             return payload
 
-    if (
-        score is None
-        or load_scoreboard_turn is None
-        or get_persisted_row is None
-        or not needs_accelerated_backfill(scoreboard_turn, turn.settings)
-    ):
+    if score is None or load_scoreboard_turn is None or get_persisted_row is None:
         return None
 
-    source_turn_number = first_reliable_accelerated_scoreboard_turn(turn.settings)
-    if source_turn_number is None:
-        return None
-
-    source_row = get_persisted_row(source_turn_number, score.ownerid)
-    if source_row is None:
-        return None
-
-    return _payload_for_host_turn_from_row(
-        source_row,
-        scoreboard_turn=source_turn_number,
-        target_host_turn=target_host_turn,
+    return accelerated_backfill_host_turn_payload(
+        scoreboard_turn=scoreboard_turn,
+        settings=turn.settings,
+        get_persisted_row=get_persisted_row,
+        player_id=score.ownerid,
     )

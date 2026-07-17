@@ -19,6 +19,7 @@ from api.analytics.scores.export_precedence import (
 from api.analytics.scores.export_snapshot import (
     gather_scores_materialization_probe_snapshot,
 )
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import TurnInfo
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
@@ -43,9 +44,9 @@ def resolve_fleet_materialization_provenance(
     terminal ``scores@N`` evidence for this player (not merely an ensure-admitted
     in-progress ``RowRun``); ingest and sightings are not re-verified here.
     """
-    prior_ledger_at_n_minus_1 = materialize_turn == 1 or (
-        prior_persisted is not None and prior_persisted.provenance.is_final
-    )
+    prior_ledger_at_n_minus_1 = (
+        materialize_turn == accelerated_ensure_floor(turn_context.turn.settings, materialize_turn)
+    ) or (prior_persisted is not None and prior_persisted.provenance.is_final)
     turn_evidence_at_n = _is_turn_evidence_closed(
         materialize_turn=materialize_turn,
         turn_context=turn_context,
