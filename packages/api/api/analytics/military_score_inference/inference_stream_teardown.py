@@ -99,12 +99,10 @@ class InferenceStreamTeardownMixin:
                 run_id,
                 RowStreamResolutionTrigger.CANCELED,
             )
-            if root_scope is not None:
-                from api.compute.runtime import get_compute_orchestrator
-
-                abort_generation = get_compute_orchestrator().execution_generation_for_scope(
-                    root_scope
-                )
+            # Use the generation cached at submit/wake -- never call into the
+            # orchestrator while holding the scheduler lock (ABBA with orch drain
+            # paths that take this lock, and with diagnostics snapshot on orch).
+            abort_generation = self._execution_generation_by_run_id.get(run_id)
             if row_run is not None:
                 row_run.session.cancel_token.cancel()
             # Fence before unregister: persist must not race on missing RowRun.
@@ -186,6 +184,7 @@ class InferenceStreamTeardownMixin:
         from api.analytics.scores.tier_row_run_registry import unregister_row_run
 
         root_scope = self._runs.pop(run_id, None)
+        self._execution_generation_by_run_id.pop(run_id, None)
         unregister_row_run(run_id)
         # Keep resolution state so a late peer binding cannot supersede an already
         # resolved row after its RowRun registration has gone away.

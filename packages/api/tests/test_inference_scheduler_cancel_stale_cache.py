@@ -703,3 +703,67 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
         assert run_id not in scheduler._runs
     finally:
         reset_inference_row_scheduler_for_tests()
+
+
+def test_cancel_run_uses_cached_generation_without_orch_lookup(sample_turn, monkeypatch, request):
+    """cancel_run must not call execution_generation_for_scope (scheduler→orch nest).
+
+    Fingerprint: generation lookup under the scheduler lock ABBA-deadlocks with an
+    orch holder that drains listeners needing the scheduler, and hangs diagnostics
+    snapshot on the same orch condition.
+    """
+    from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
+    from api.compute.scope import ComputeScope
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    scheduler = InferenceRowScheduler()
+
+    def cleanup() -> None:
+        reset_inference_row_scheduler_for_tests()
+        reset_tier_row_run_registry_for_tests()
+        reset_orchestrators_for_tests()
+        reset_compute_worker_pool_for_tests(worker_count=1)
+
+    request.addfinalizer(cleanup)
+
+    turn_number = sample_turn.settings.turn
+    player_id = sample_turn.scores[0].ownerid
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=turn_number,
+        player_id=player_id,
+    )
+    session = _session_for_player(sample_turn, player_id=player_id)
+    orchestrator = get_compute_orchestrator()
+    with orchestrator._condition:
+        orchestrator._nodes[scope] = ComputeNodeRun(
+            scope=scope,
+            dependency_scopes=(),
+            state="running",
+            execution_generation=7,
+        )
+    with scheduler._lock:
+        scheduler._runs[session.run_id] = scope
+        scheduler._execution_generation_by_run_id[session.run_id] = 7
+
+    def forbid_generation_lookup(_scope: ComputeScope) -> int | None:
+        raise AssertionError(
+            "cancel_run must use cached execution generation; "
+            "orchestrator lookup under scheduler lock deadlocks"
+        )
+
+    monkeypatch.setattr(orchestrator, "execution_generation_for_scope", forbid_generation_lookup)
+    scheduler.cancel_run(session.run_id)
+
+    assert session.run_id not in scheduler._runs
+    assert orchestrator.nodes[scope].state == "failed"
+    assert isinstance(orchestrator.nodes[scope].error, ComputeScopeAbortedError)

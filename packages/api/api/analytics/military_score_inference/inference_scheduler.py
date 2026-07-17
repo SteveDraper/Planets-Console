@@ -39,6 +39,7 @@ from api.analytics.military_score_inference.row_stream_resolution import (
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
@@ -71,6 +72,11 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
         self._runs: dict[str, ComputeScope] = {}
+        # Execution identity for cancel abort, captured after submit/wake *outside*
+        # the scheduler lock. ``cancel_run`` must never call into the orchestrator
+        # while holding ``_lock`` (scheduler → orch nests ABBA with orch drain →
+        # scheduler listeners, which also hangs diagnostics snapshot on orch).
+        self._execution_generation_by_run_id: dict[str, int] = {}
         # RLock: adapter methods hold this lock across orchestrator calls. When resume_globally
         # calls _dispatch_ready_orchestrator_work_locked, dispatch_ready_work drains post-lock
         # callbacks in the caller thread and the node-complete listener
@@ -602,6 +608,7 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
             reason=ScoresWakeReason.ROW_RUN_ADOPTED,
             priority_band="background",
         )
+        self._remember_execution_generation_for_scope(root_scope)
 
     def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
         with self._lock:
@@ -638,6 +645,7 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         binding: InferenceStreamOrchestratorBinding,
         root_scope: ComputeScope,
     ) -> None:
+        """Submit/wake tier_solve for ``root_scope``. Caller must not hold ``_lock``."""
         if self._defer_orchestrator_submit:
             return
         from api.analytics.scores.compute_orchestration import (
@@ -655,6 +663,31 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
             priority_band="stream_attached",
             orchestrator=binding.orchestrator,
         )
+        self._remember_execution_generation_for_scope(
+            root_scope,
+            orchestrator=binding.orchestrator,
+        )
+
+    def _remember_execution_generation_for_scope(
+        self,
+        root_scope: ComputeScope,
+        *,
+        orchestrator: ComputeOrchestrator | None = None,
+    ) -> None:
+        """Cache orchestrator execution identity for later generation-scoped cancel.
+
+        Must run without the scheduler lock held: samples the orchestrator condition.
+        """
+        from api.compute.runtime import get_compute_orchestrator
+
+        orch = orchestrator if orchestrator is not None else get_compute_orchestrator()
+        generation = orch.execution_generation_for_scope(root_scope)
+        if generation is None:
+            return
+        with self._lock:
+            for run_id, scope in self._runs.items():
+                if scope == root_scope:
+                    self._execution_generation_by_run_id[run_id] = generation
 
     def _drop_held_for_stream_locked(self, stream_token: str) -> None:
         self._held_initial_submissions = [
