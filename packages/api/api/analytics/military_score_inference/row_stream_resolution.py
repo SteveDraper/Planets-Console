@@ -87,14 +87,28 @@ class RowStreamResolution:
                 return RowStreamDelivery.DELIVER
             case (
                 RowStreamResolutionState.SOFT_PROVISIONAL,
-                RowStreamResolutionTrigger.ADMISSION_MISSED,
+                RowStreamResolutionTrigger.ADMISSION_MISSED
+                | RowStreamResolutionTrigger.DURABLE_FAILURE,
             ):
                 self.state = RowStreamResolutionState.HARD_TERMINAL
                 return RowStreamDelivery.DELIVER
             case _, RowStreamResolutionTrigger.CANCELED:
                 self.state = RowStreamResolutionState.CANCELED
                 return RowStreamDelivery.SILENCE
+            case (
+                RowStreamResolutionState.HARD_TERMINAL | RowStreamResolutionState.CANCELED,
+                _,
+            ):
+                # Already resolved; every later trigger is a silenced no-op.
+                return RowStreamDelivery.SILENCE
+            case (
+                RowStreamResolutionState.SOFT_PROVISIONAL,
+                RowStreamResolutionTrigger.SOFT_PROVISIONAL,
+            ):
+                # Duplicate soft-provisional signal; the first one already delivered.
+                return RowStreamDelivery.SILENCE
             case _:
+                # Unreachable: every (state, trigger) pair is enumerated above.
                 return RowStreamDelivery.SILENCE
 
 

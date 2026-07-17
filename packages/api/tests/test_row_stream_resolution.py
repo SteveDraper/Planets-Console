@@ -35,6 +35,18 @@ def test_hard_terminal_silences_later_peer_failure() -> None:
     assert resolution.state is RowStreamResolutionState.HARD_TERMINAL
 
 
+def test_soft_provisional_delivers_later_durable_failure() -> None:
+    resolution = RowStreamResolution()
+
+    resolution.transition(RowStreamResolutionTrigger.SOFT_PROVISIONAL)
+
+    assert (
+        resolution.transition(RowStreamResolutionTrigger.DURABLE_FAILURE)
+        is RowStreamDelivery.DELIVER
+    )
+    assert resolution.state is RowStreamResolutionState.HARD_TERMINAL
+
+
 def test_missed_admission_replaces_provisional_claim_with_failure() -> None:
     resolution = RowStreamResolution()
 
