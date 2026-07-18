@@ -505,9 +505,7 @@ class ComputeOrchestrator(
 
     def _ready_scopes_snapshot(self) -> tuple[ComputeScope, ...]:
         """Return ready-queue scopes still in ``ready`` state (caller holds lock)."""
-        return tuple(
-            scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
-        )
+        return tuple(scope for scope in self._ready_queue if self._nodes[scope].state == "ready")
 
     def _notify_ready_queue_changed(self) -> None:
         """Push the current ready-scopes snapshot to depth listeners (caller holds lock)."""

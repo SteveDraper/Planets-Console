@@ -39,6 +39,7 @@ class _AdmitOnlyOrchestrator:
         node = ComputeNodeRun(scope=request.scope, dependency_scopes=())
         return ComputeHandle(scope=request.scope, _node=node)
 
+
 def _install_admit_only_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:
     """Real enqueue_player_run; stub orchestrator submit so events stay test-driven."""
     from api.compute.runtime import reset_orchestrators_for_tests

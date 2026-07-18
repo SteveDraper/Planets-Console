@@ -94,9 +94,7 @@ class InferenceStreamResolutionMixin:
 
         if source is TerminalSource.ORPHAN:
             with self._lock:
-                state = self._stream_resolutions.get(
-                    resolved.run_id, RowStreamResolution()
-                ).state
+                state = self._stream_resolutions.get(resolved.run_id, RowStreamResolution()).state
             if state in {
                 RowStreamResolutionState.HARD_TERMINAL,
                 RowStreamResolutionState.CANCELED,

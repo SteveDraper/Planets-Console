@@ -79,13 +79,14 @@ def _scope_for(session: InferenceRowStreamSession) -> ComputeScope:
         player_id=session.player_id,
     )
 
+
 def _outcome_snapshot(
     scope: ComputeScope,
     *,
     state: Literal["parked", "complete", "failed"],
     result_wire: object | None = None,
     error: BaseException | None = None,
-    execution_generation: int = 0
+    execution_generation: int = 0,
 ) -> ScopeLifecycleSnapshot:
     return ScopeLifecycleSnapshot(
         scope=scope,
@@ -106,7 +107,7 @@ def _set_scope_node(
     *,
     state: str,
     priority_band: str = "background",
-    **kwargs: object
+    **kwargs: object,
 ) -> ComputeNodeRun:
     node = ComputeNodeRun(
         scope=scope,
@@ -284,9 +285,7 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
     assert get_row_run(run.run_id) is None
 
 
-def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
-    sample_turn
-) -> None:
+def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn) -> None:
     """Regression: DAG terminal after idempotent empty complete must finish open stream.
 
     Cross-binding race: peer finalizes/unregisters the shared RowRun (and scheduler
@@ -362,9 +361,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
     assert isinstance(domain_terminals[0], RowFailed)
 
 
-def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
-    sample_turn
-) -> None:
+def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(sample_turn) -> None:
     """After a successful peer delivery+finalize, a late empty peer must not RowFailed."""
     session = _session(sample_turn)
     run = RowRun(session)
@@ -430,9 +427,7 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
     assert [e for e in queued if isinstance(e, RowFailed)] == []
 
 
-def test_empty_complete_delivers_to_stream_session_not_ensure_session(
-    sample_turn
-) -> None:
+def test_empty_complete_delivers_to_stream_session_not_ensure_session(sample_turn) -> None:
     """Regression: DAG complete with no rowComplete must finish the multiplex session.
 
     Background/ensure can register a different ``RowRun`` session than the table stream
@@ -506,9 +501,7 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(
     assert isinstance(stream_terminals[0], RowFailed)
 
 
-def test_stale_scheduler_run_without_registry_still_finishes_stream(
-    sample_turn
-) -> None:
+def test_stale_scheduler_run_without_registry_still_finishes_stream(sample_turn) -> None:
     """Stale ``_runs`` entry with no registry RowRun must not skip stream terminal."""
     session = _session(sample_turn)
     scope = _scope_for(session)
@@ -562,8 +555,7 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(
 
 
 def test_matching_run_empty_complete_uses_admission_before_row_failed(
-    sample_turn,
-    monkeypatch
+    sample_turn, monkeypatch
 ) -> None:
     """Matching-run empty complete must try admission before RowFailed (orphan parity)."""
     from api.analytics.military_score_inference.inference_stream_rows import (
@@ -636,7 +628,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
 
 
 def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event(
-    sample_turn
+    sample_turn,
 ) -> None:
     """Cancel-silent finished_run_ids must not suppress the orphan stream terminal.
 
@@ -689,10 +681,7 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
     )
 
 
-def test_row_complete_upgrades_prior_empty_admission_terminal(
-    sample_turn,
-    monkeypatch
-) -> None:
+def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monkeypatch) -> None:
     """Regression: force_fresh RowComplete must upgrade a soft empty/admission terminal.
 
     Fingerprint (game 628580 t8 Fury): evidenceClosed skip empty-completes and pushes
@@ -811,9 +800,7 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
     )
 
 
-def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
-    sample_turn
-) -> None:
+def test_soft_empty_park_delivers_stream_terminal_without_completing_node(sample_turn) -> None:
     """Non-durable rowComplete park soft-delivers without DAG complete (fleet blocked)."""
     session = _session(sample_turn)
     run = RowRun(session)
@@ -878,9 +865,7 @@ def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
     )
 
 
-def test_empty_park_schedule_row_stays_silent_for_wake(
-    sample_turn
-) -> None:
+def test_empty_park_schedule_row_stays_silent_for_wake(sample_turn) -> None:
     """Empty park with schedule-only row stays silent; wake owns progress (no RowFailed)."""
     session = _session(sample_turn)
     run = RowRun(session)
@@ -925,9 +910,7 @@ def test_empty_park_schedule_row_stays_silent_for_wake(
     assert session.run_id not in scheduler._stream_resolutions
 
 
-def test_open_evidence_park_stays_silent_without_matching_row_run(
-    sample_turn
-) -> None:
+def test_open_evidence_park_stays_silent_without_matching_row_run(sample_turn) -> None:
     """Open-evidence wait park must not soft-admit; wake owns progress."""
     session = _session(sample_turn)
     scope = _scope_for(session)

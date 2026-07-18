@@ -423,7 +423,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 **Thin adapters** (same template for fleet and scores):
 
 - Submit `ComputeRequest` scopes to the **process-wide** orchestrator (`stream_attached` band for interactive work; `background` for warm-up deps).
-- Register process-wide `node_complete` / related listeners (and pause **dispatch gates**) with analytic/scope filters; unregister on disconnect. Adapters do **not** own an orchestrator instance.
+- Register process-wide `scope_outcome` / related listeners (and pause **dispatch gates**) with analytic/scope filters; unregister on disconnect. Adapters do **not** own an orchestrator instance.
 - Retain stream-only state (scope guard, per-row run registry, global pause gate).
 - **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
 - Stream teardown **detaches** observers only -- it does not cancel in-flight singleton DAG work (or abort a pending `persist`) solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240). Scores **cancel** (not detach) applies one cancel intent under the scheduler lock: cancel token + durable cancel fence + stream-resolution `CANCELED`, then aborts the orchestrator scope outside that lock. Cancel fences are FIFO-bounded (`MAX_CANCEL_FENCE_RUN_IDS`); capacity eviction is an accepted risk for very long-lived processes.
