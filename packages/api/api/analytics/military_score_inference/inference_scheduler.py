@@ -13,7 +13,6 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
     GlobalPauseChanged,
     HeldSolutionsUpdated,
     RowComplete,
-    RowFailed,
     TierProgress,
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
@@ -21,9 +20,11 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 )
 from api.analytics.military_score_inference.inference_stream_resolution import (
     InferenceStreamResolutionMixin,
-    TerminalSource,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_scope_outcomes import (
+    InferenceStreamScopeOutcomesMixin,
+)
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
@@ -41,7 +42,6 @@ from api.analytics.military_score_inference.row_stream_resolution import RowStre
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
-from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
@@ -56,7 +56,11 @@ __all__ = [
 OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
 
 
-class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolutionMixin):
+class InferenceRowScheduler(
+    InferenceStreamTeardownMixin,
+    InferenceStreamScopeOutcomesMixin,
+    InferenceStreamResolutionMixin,
+):
     """Fair orchestrator adapter: one tier_solve submission per scoreboard row."""
 
     def __init__(
@@ -498,115 +502,6 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         self._apply_dispatch_gates_locked()
         return binding
 
-    def _on_orchestrator_scope_outcome(
-        self,
-        snapshot: ScopeLifecycleSnapshot,
-    ) -> None:
-        scope = snapshot.scope
-        if scope.analytic_id != SCORES_ANALYTIC_ID:
-            return
-        if scope.turn == "*" or not isinstance(scope.turn, int):
-            return
-        if scope.player_id == "*" or not isinstance(scope.player_id, int):
-            return
-        # Intentional row-run cancel aborts in-flight DAG nodes. Do not fail (or
-        # orphan-complete) the open multiplex -- reschedule will admit a replacement.
-        if self._is_cancel_abort_failure(snapshot):
-            return
-
-        # Soft park: reattach empty/non-durable stream delivery without completing
-        # the scores node (fleet ENSURE stays blocked until durable close).
-        if snapshot.state == "parked":
-            self._deliver_row_terminal(
-                source=TerminalSource.PARKED,
-                scope=scope,
-                snapshot=snapshot,
-            )
-            return
-
-        wire_run_id = self._run_id_from_result_wire(snapshot.result_wire)
-        sibling_still_active = self._scope_has_live_nonterminal_work(scope)
-
-        with self._lock:
-            matching_run_ids = [
-                run_id
-                for run_id, root_scope in self._runs.items()
-                if root_scope.player_id == scope.player_id
-                and root_scope.game_id == scope.game_id
-                and root_scope.perspective == scope.perspective
-                and scope.turn == root_scope.turn
-            ]
-            if wire_run_id is not None:
-                matching_run_ids = [run_id for run_id in matching_run_ids if run_id == wire_run_id]
-
-        for run_id in matching_run_ids:
-            row_run = self._adapter_row_run(run_id)
-            if row_run is None:
-                # Stale scheduler entry (registry already dropped). Remove it so the
-                # ensure-terminal fallback below can finish an open multiplex row.
-                with self._lock:
-                    self._remove_run_locked(run_id)
-                continue
-            session = row_run.session
-            deliver_session = self._open_stream_session_for_scope(scope) or session
-            if snapshot.state == "failed":
-                if sibling_still_active:
-                    # Peer binding (e.g. stream_attached) still owns the shared RowRun.
-                    # Do not fail the stream or unregister -- the peer may still succeed.
-                    continue
-                detail = (
-                    str(snapshot.error)
-                    if snapshot.error is not None
-                    else "Inference tier solve failed"
-                )
-                self._deliver_row_terminal(
-                    source=TerminalSource.NODE_COMPLETE,
-                    scope=scope,
-                    session=deliver_session,
-                    event=RowFailed(detail=detail),
-                )
-                self._finalize_row_run(session)
-                continue
-            if snapshot.state != "complete":
-                continue
-            row_complete = self._row_complete_from_result_wire(snapshot.result_wire)
-            if row_complete is None:
-                if sibling_still_active:
-                    continue
-                # Parity with orphan empty-complete: admission before RowFailed.
-                self._deliver_row_terminal(
-                    source=TerminalSource.NODE_COMPLETE,
-                    scope=scope,
-                    session=deliver_session,
-                )
-                self._finalize_row_run(session)
-                continue
-            # Always attempt delivery: RowComplete may upgrade a prior empty/admission
-            # terminal for the same stream session after force_fresh re-solve.
-            self._deliver_row_terminal(
-                source=TerminalSource.NODE_COMPLETE,
-                scope=scope,
-                session=deliver_session,
-                event=row_complete,
-            )
-            if sibling_still_active:
-                # Keep the process-wide RowRun registered until the last binding
-                # for this scope reaches a terminal state (background + stream share it).
-                continue
-            self._finalize_row_run(session)
-
-        # Always re-check after matching-run handling. Empty / idempotent tier_solve can
-        # leave the DAG terminal while multiplex still waits (stale ``_runs``, cancelled
-        # session skip, or peer unregister). Do not rely on matching_run_ids alone.
-        if snapshot.state in {"complete", "failed"} and not (
-            self._scope_has_live_nonterminal_work(scope)
-        ):
-            self._deliver_row_terminal(
-                source=TerminalSource.ORPHAN,
-                scope=scope,
-                snapshot=snapshot,
-            )
-
     def _wake_parked_scores_after_row_run_adopt(
         self,
         root_scope: ComputeScope,
@@ -625,29 +520,6 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
             priority_band="background",
         )
         self._remember_execution_generation_for_scope(root_scope)
-
-    def _finalize_row_run(self, session: InferenceRowStreamSession) -> None:
-        with self._lock:
-            self._remove_run_locked(session.run_id)
-
-    @staticmethod
-    def _run_id_from_result_wire(result_wire: object | None) -> str | None:
-        if not isinstance(result_wire, dict):
-            return None
-        run_id = result_wire.get("runId")
-        return run_id if isinstance(run_id, str) else None
-
-    @staticmethod
-    def _scope_has_live_nonterminal_work(scope: ComputeScope) -> bool:
-        """True when the singleton orchestrator still has non-terminal work for scope.
-
-        Background warm and stream_attached bindings share the singleton orchestrator's
-        one DAG per scope; a still-running node means a sibling submission is in flight.
-        """
-        from api.compute.runtime import get_compute_orchestrator
-
-        node = get_compute_orchestrator().nodes.get(scope)
-        return node is not None and node.state not in {"complete", "failed"}
 
     def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
         event = GlobalPauseChanged(paused=paused)
