@@ -491,33 +491,6 @@ class FleetSnapshotPersistenceService:
             )
         return cleared
 
-    def bump_player_invalidation_generation(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-    ) -> None:
-        """Advance the player-scoped materialization epoch."""
-        with self._generation_lock:
-            player_key = (game_id, perspective, player_id)
-            self._invalidation_generation[player_key] = (
-                self._invalidation_generation.get(player_key, 0) + 1
-            )
-
-    def bump_turn_invalidation_generation(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        turn: int,
-    ) -> None:
-        """Advance the turn-scoped materialization epoch for one fleet turn."""
-        with self._generation_lock:
-            turn_key = (game_id, perspective, player_id, turn)
-            self._turn_invalidation_generation[turn_key] = (
-                self._turn_invalidation_generation.get(turn_key, 0) + 1
-            )
-
     def bump_player_and_turn_invalidations(
         self,
         game_id: int,

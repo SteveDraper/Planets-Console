@@ -9,7 +9,6 @@ from api.analytics.military_score_inference.inference_turn_lookup import (
     player_by_id,
     race_by_id_or_none,
 )
-from api.models.components import Hull
 from api.models.game import GameSettings, TurnInfo
 
 BIRD_ENLIGHTEN_HULL_ID = 106
@@ -29,11 +28,6 @@ STANDARD_HULL_REPLACEMENT_SWAPS: tuple[tuple[str, int, int], ...] = (
     ("quietusplusreplacesquietus", 58, 1058),  # Quietus -> Quietus+
     ("cybernautlightreplacescybernaut", 83, 2083),  # Cybernaut -> Light Baseship
     ("ironslavescoutreplacesironslave", 85, 2085),  # Iron Slave -> Scout
-)
-
-# Backward-compatible alias for callers that iterate setting field names only.
-REPLACEMENT_SETTING_FIELDS: tuple[str, ...] = tuple(
-    field for field, _parent_id, _child_id in STANDARD_HULL_REPLACEMENT_SWAPS
 )
 
 
@@ -84,15 +78,11 @@ def swaps_for_enabled_settings(
     *,
     settings: GameSettings,
     base_hull_ids: frozenset[int],
-    hulls_by_id: dict[int, Hull] | None = None,
-    race_hull_ids: frozenset[int] | None = None,
 ) -> list[tuple[int, int]]:
     """Return enabled standard (parent, child) swaps for hulls in ``base_hull_ids``.
 
-    ``hulls_by_id`` and ``race_hull_ids`` remain accepted for call-site compatibility;
-    child presence in the race hull list is enforced by ``_apply_parent_child_swap``.
+    Child presence in the race hull list is enforced by ``_apply_parent_child_swap``.
     """
-    _ = hulls_by_id, race_hull_ids
     swaps: list[tuple[int, int]] = []
     for field, parent_id, child_id in STANDARD_HULL_REPLACEMENT_SWAPS:
         if not getattr(settings, field, False):
@@ -109,7 +99,6 @@ def standard_settings_adjusted_basehulls(
     race_basehulls_csv: str,
     race_hulls_csv: str,
     catalog_ids: frozenset[int],
-    hulls_by_id: dict[int, Hull],
     settings: GameSettings,
 ) -> frozenset[int]:
     result = set(parse_component_id_csv(race_basehulls_csv) & catalog_ids)
@@ -118,8 +107,6 @@ def standard_settings_adjusted_basehulls(
 
     for parent_id, child_id in swaps_for_enabled_settings(
         settings=settings,
-        hulls_by_id=hulls_by_id,
-        race_hull_ids=race_hull_ids,
         base_hull_ids=base_hull_ids,
     ):
         _apply_parent_child_swap(
@@ -150,13 +137,11 @@ def default_enabled_hull_ids_for_player(turn: TurnInfo, player_id: int) -> froze
     if turn.settings.campaignmode:
         return frozenset(parse_component_id_csv(race.hulls) & catalog_ids) & master
 
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
     enabled = standard_settings_adjusted_basehulls(
         race_id=player.raceid,
         race_basehulls_csv=race.basehulls,
         race_hulls_csv=race.hulls,
         catalog_ids=catalog_ids,
-        hulls_by_id=hulls_by_id,
         settings=turn.settings,
     )
     return enabled & master

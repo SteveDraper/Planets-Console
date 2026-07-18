@@ -44,11 +44,7 @@ def test_stream_inference_ndjson_yields_ndjson_lines() -> None:
     assert last["solutions"] == [{"objectiveValue": 5, "actions": []}]
 
 
-def test_row_complete_to_complete_wire_event_includes_solutions(sample_turn) -> None:
-    score = next(row for row in sample_turn.scores if row.ownerid == sample_turn.scores[0].ownerid)
-    from api.analytics.military_score_inference.analytic import build_inference_observation
-
-    observation = build_inference_observation(score, sample_turn)
+def test_row_complete_to_complete_wire_event_includes_solutions() -> None:
     solution = InferenceSolution(
         objective_value=42,
         actions=(InferenceSolutionAction(action_id="action_a", label="Build fighter", count=2),),
@@ -58,8 +54,6 @@ def test_row_complete_to_complete_wire_event_includes_solutions(sample_turn) -> 
             InferenceResult(status=STATUS_EXACT, solutions=(solution,), diagnostics={}),
             summary="Best: built fighters",
         ),
-        observation=observation,
-        turn=sample_turn,
     )
 
     assert wire["type"] == "complete"

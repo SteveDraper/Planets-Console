@@ -387,17 +387,18 @@ def test_invalidation_bumps_epoch_for_target_player_only(persistence):
 
 
 def test_player_scoped_and_turn_scoped_invalidation_generations_are_independent(persistence):
-    """Player-wide and turn-scoped fleet epochs bump separately."""
+    """Player-wide and turn-scoped fleet epochs bump on distinct keys via the combined API."""
     assert persistence.player_invalidation_generation(628580, 1, 8) == 0
     assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == 0
     assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 0
 
-    persistence.bump_player_invalidation_generation(628580, 1, 8)
+    persistence.bump_player_and_turn_invalidations(628580, 1, 8, turns=())
     assert persistence.player_invalidation_generation(628580, 1, 8) == 1
     assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == 0
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 0
 
-    persistence.bump_turn_invalidation_generation(628580, 1, 8, 4)
-    assert persistence.player_invalidation_generation(628580, 1, 8) == 1
+    persistence.bump_player_and_turn_invalidations(628580, 1, 8, turns=(4,))
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 2
     assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == 1
     assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 0
 
@@ -409,7 +410,7 @@ def test_player_scoped_and_turn_scoped_invalidation_generations_are_independent(
         PersistedFleetLedger(ledger=FleetAcquisitionLedger(player_id=8)),
     )
     persistence.invalidate_player_ledgers_from_turn(628580, 1, 5, 8)
-    assert persistence.player_invalidation_generation(628580, 1, 8) == 2
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 3
     assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == 1
     assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 1
 

@@ -138,13 +138,11 @@ def proposed_cross_player_hull_ids(
     if settings.campaignmode:
         return frozenset(parse_component_id_csv(race.hulls) & catalog_ids)
 
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
     return standard_settings_adjusted_basehulls(
         race_id=player.raceid,
         race_basehulls_csv=race.basehulls,
         race_hulls_csv=race.hulls,
         catalog_ids=catalog_ids,
-        hulls_by_id=hulls_by_id,
         settings=settings,
     )
 
@@ -208,7 +206,6 @@ def build_heuristic_sets(
         )
         race_union &= catalog_ids
 
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
     standard_adjusted = frozenset()
     if race is not None:
         standard_adjusted = standard_settings_adjusted_basehulls(
@@ -216,7 +213,6 @@ def build_heuristic_sets(
             race_basehulls_csv=race.basehulls,
             race_hulls_csv=race.hulls,
             catalog_ids=catalog_ids,
-            hulls_by_id=hulls_by_id,
             settings=settings,
         )
 

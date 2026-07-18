@@ -46,13 +46,12 @@ def test_swaps_for_enabled_settings_are_fixed_pairs_not_parentid_walk():
 def test_standard_settings_rebel_keeps_falcon_and_swaps_only_sage():
     turn = _load_standard_fixture_turn()
     race = next(entry for entry in turn.races if entry.id == 10)
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
+    catalog_ids = frozenset(hull.id for hull in turn.hulls)
     adjusted = standard_settings_adjusted_basehulls(
         race_id=10,
         race_basehulls_csv=race.basehulls,
         race_hulls_csv=race.hulls,
-        catalog_ids=frozenset(hulls_by_id),
-        hulls_by_id=hulls_by_id,
+        catalog_ids=catalog_ids,
         settings=turn.settings,
     )
     assert 87 in adjusted
