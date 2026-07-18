@@ -34,6 +34,9 @@ from api.analytics.military_score_inference.row_stream_resolution import (
     RowStreamResolutionState,
     RowStreamResolutionTrigger,
 )
+from api.analytics.military_score_inference.row_stream_resolution_registry import (
+    get_stream_resolution,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
@@ -415,7 +418,9 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(sample_tur
         ),
     )
     assert get_row_run(run.run_id) is None
-    assert scheduler._stream_resolutions[run.run_id].state is RowStreamResolutionState.HARD_TERMINAL
+    resolution = get_stream_resolution(run.run_id)
+    assert resolution is not None
+    assert resolution.state is RowStreamResolutionState.HARD_TERMINAL
 
     scheduler._on_orchestrator_scope_outcome(
         _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
@@ -757,10 +762,9 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
         _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
 
-    assert (
-        scheduler._stream_resolutions[session.run_id].state
-        is RowStreamResolutionState.SOFT_PROVISIONAL
-    )
+    soft_resolution = get_stream_resolution(session.run_id)
+    assert soft_resolution is not None
+    assert soft_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
     assert session.run_id in controller.finished_run_ids
 
     # Simulate force_fresh re-solve: reopen multiplex drain, then deliver RowComplete.
@@ -798,10 +802,9 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
         "expected RowComplete upgrade on pending wire after soft empty admission "
         f"(pending={pending!r})"
     )
-    assert (
-        scheduler._stream_resolutions[session.run_id].state
-        is RowStreamResolutionState.HARD_TERMINAL
-    )
+    hard_resolution = get_stream_resolution(session.run_id)
+    assert hard_resolution is not None
+    assert hard_resolution.state is RowStreamResolutionState.HARD_TERMINAL
 
 
 def test_soft_empty_park_delivers_stream_terminal_without_completing_node(sample_turn) -> None:
@@ -863,10 +866,9 @@ def test_soft_empty_park_delivers_stream_terminal_without_completing_node(sample
     )
     assert isinstance(domain_terminals[0], RowComplete)
     assert orchestrator.nodes[scope].state == "parked"
-    assert (
-        scheduler._stream_resolutions[session.run_id].state
-        is RowStreamResolutionState.SOFT_PROVISIONAL
-    )
+    soft_resolution = get_stream_resolution(session.run_id)
+    assert soft_resolution is not None
+    assert soft_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
 
 
 def test_empty_park_schedule_row_stays_silent_for_wake(sample_turn) -> None:
@@ -911,7 +913,7 @@ def test_empty_park_schedule_row_stays_silent_for_wake(sample_turn) -> None:
             break
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals == []
-    assert session.run_id not in scheduler._stream_resolutions
+    assert get_stream_resolution(session.run_id) is None
 
 
 def test_soft_park_revert_preserves_hard_terminal_claimed_during_admission(
@@ -960,10 +962,9 @@ def test_soft_park_revert_preserves_hard_terminal_claimed_during_admission(
     admitted = scheduler._admit_after_soft_provisional(scope, session, on_miss="revert")
 
     assert admitted is False
-    assert (
-        scheduler._stream_resolutions[session.run_id].state
-        is RowStreamResolutionState.HARD_TERMINAL
-    )
+    hard_resolution = get_stream_resolution(session.run_id)
+    assert hard_resolution is not None
+    assert hard_resolution.state is RowStreamResolutionState.HARD_TERMINAL
 
 
 def test_open_evidence_park_stays_silent_without_matching_row_run(sample_turn) -> None:
@@ -1005,4 +1006,4 @@ def test_open_evidence_park_stays_silent_without_matching_row_run(sample_turn) -
             break
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals == []
-    assert session.run_id not in scheduler._stream_resolutions
+    assert get_stream_resolution(session.run_id) is None

@@ -102,20 +102,6 @@ class InferenceRowScheduler(
             self._on_orchestrator_scope_outcome,
         )
 
-    @property
-    def _stream_resolutions(self):
-        """Process-wide bounded resolution table (shared cancel fence + stream FSM).
-
-        Production code mutates via ``transition_stream_resolution`` /
-        ``discard_stream_resolution_if_state`` / ``clear_stream_resolutions``.
-        Tests may inspect or seed this map directly.
-        """
-        from api.analytics.military_score_inference.row_stream_resolution_registry import (
-            _resolutions,
-        )
-
-        return _resolutions
-
     def owns_table_stream(self, stream_token: str) -> bool:
         with self._lock:
             return self._scope_guard.owns_table_stream_locked(stream_token)

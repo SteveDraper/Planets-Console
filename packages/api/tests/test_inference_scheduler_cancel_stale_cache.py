@@ -234,13 +234,17 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
     """Switching stream turns preempts the prior turn's runs, not other turns.
 
     Also covers stream resolution state: a turn-scoped detach must not wipe
-    ``_stream_resolutions`` for other-turn rows (background warm) or undo the
+    stream resolutions for other-turn rows (background warm) or undo the
     keep-resolution-after-unregister invariant for the detached turn's own row.
     """
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.military_score_inference.row_stream_resolution import (
-        RowStreamResolution,
         RowStreamResolutionState,
+        RowStreamResolutionTrigger,
+    )
+    from api.analytics.military_score_inference.row_stream_resolution_registry import (
+        get_stream_resolution,
+        transition_stream_resolution,
     )
     from api.analytics.scores.tier_row_run_registry import (
         register_row_run,
@@ -281,13 +285,14 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
         prior_session = _register_for_turn(turn_number)
         other_session = _register_for_turn(turn_number + 5)
 
-        with scheduler._lock:
-            scheduler._stream_resolutions[prior_session.run_id] = RowStreamResolution(
-                state=RowStreamResolutionState.SOFT_PROVISIONAL
-            )
-            scheduler._stream_resolutions[other_session.run_id] = RowStreamResolution(
-                state=RowStreamResolutionState.SOFT_PROVISIONAL
-            )
+        transition_stream_resolution(
+            prior_session.run_id,
+            RowStreamResolutionTrigger.SOFT_PROVISIONAL,
+        )
+        transition_stream_resolution(
+            other_session.run_id,
+            RowStreamResolutionTrigger.SOFT_PROVISIONAL,
+        )
 
         scheduler.begin_scope(
             InferenceStreamScope(
@@ -314,16 +319,14 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
         assert get_row_run(other_session.run_id) is not None
 
         # Other-turn resolution must survive untouched (background warm row).
-        assert (
-            scheduler._stream_resolutions[other_session.run_id].state
-            is RowStreamResolutionState.SOFT_PROVISIONAL
-        )
+        other_resolution = get_stream_resolution(other_session.run_id)
+        assert other_resolution is not None
+        assert other_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
         # Detached-turn resolution is kept too, matching _remove_run_locked's
         # keep-resolution-after-unregister invariant (late peer events silenced).
-        assert (
-            scheduler._stream_resolutions[prior_session.run_id].state
-            is RowStreamResolutionState.SOFT_PROVISIONAL
-        )
+        prior_resolution = get_stream_resolution(prior_session.run_id)
+        assert prior_resolution is not None
+        assert prior_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
     finally:
         reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
@@ -500,6 +503,9 @@ def test_cancel_intent_sets_token_fence_and_resolution(sample_turn):
     from api.analytics.military_score_inference.row_stream_resolution import (
         RowStreamResolutionState,
     )
+    from api.analytics.military_score_inference.row_stream_resolution_registry import (
+        get_stream_resolution,
+    )
     from api.analytics.scores.tier_row_run_registry import (
         is_row_run_cancelled,
         register_row_run,
@@ -534,13 +540,13 @@ def test_cancel_intent_sets_token_fence_and_resolution(sample_turn):
 
         assert not session.cancel_token.is_cancelled()
         assert not is_row_run_cancelled(session.run_id)
-        assert session.run_id not in scheduler._stream_resolutions
+        assert get_stream_resolution(session.run_id) is None
 
         scheduler.cancel_run(session.run_id)
 
         assert session.cancel_token.is_cancelled()
         assert is_row_run_cancelled(session.run_id)
-        resolution = scheduler._stream_resolutions.get(session.run_id)
+        resolution = get_stream_resolution(session.run_id)
         assert resolution is not None
         assert resolution.state is RowStreamResolutionState.CANCELED
         assert session.run_id not in scheduler._runs
@@ -554,6 +560,9 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.military_score_inference.row_stream_resolution import (
         RowStreamResolutionState,
+    )
+    from api.analytics.military_score_inference.row_stream_resolution_registry import (
+        get_stream_resolution,
     )
     from api.analytics.scores.tier_row_run_registry import (
         is_row_run_cancelled,
@@ -592,7 +601,7 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
         assert not session.cancel_token.is_cancelled()
         assert not is_row_run_cancelled(session.run_id)
         # Unregister seeds OPEN (positive allow); detach must not set CANCELED.
-        resolution = scheduler._stream_resolutions.get(session.run_id)
+        resolution = get_stream_resolution(session.run_id)
         assert resolution is not None
         assert resolution.state is RowStreamResolutionState.OPEN
         assert session.run_id not in scheduler._runs
@@ -905,6 +914,9 @@ def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn
     from api.analytics.military_score_inference.row_stream_resolution import (
         RowStreamResolutionState,
     )
+    from api.analytics.military_score_inference.row_stream_resolution_registry import (
+        get_stream_resolution,
+    )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -948,7 +960,7 @@ def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn
         assert not is_row_run_cancelled(session.run_id)
         assert not session.cancel_token.is_cancelled()
         # Unregister seeds OPEN as the positive finish-after-detach allow.
-        resolution = scheduler._stream_resolutions.get(session.run_id)
+        resolution = get_stream_resolution(session.run_id)
         assert resolution is not None
         assert resolution.state is RowStreamResolutionState.OPEN
 
