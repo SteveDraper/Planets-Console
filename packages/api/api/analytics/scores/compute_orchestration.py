@@ -439,10 +439,11 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
-        # Cancel vs detach: cancel intent (token + fence + resolution) sets a
-        # durable fence before unregister so a late persist after RowRun removal
-        # still skips. Detach only unregisters (no fence) so finish-after-detach
-        # may persist from the payload.
+        # Cancel vs detach: cancel intent (token + resolution CANCELED) sets a
+        # durable fence in the shared bounded resolution registry before
+        # unregister so a late persist after RowRun removal still skips. Detach
+        # only unregisters (no CANCELED) so finish-after-detach may persist from
+        # the payload.
         if is_row_run_cancelled(run_id):
             return
         run = get_row_run(run_id)

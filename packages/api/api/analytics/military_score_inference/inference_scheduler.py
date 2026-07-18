@@ -38,7 +38,6 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.row_stream_resolution import RowStreamResolution
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
@@ -94,7 +93,6 @@ class InferenceRowScheduler(
         self._stream_bindings: dict[str, InferenceStreamOrchestratorBinding] = {}
         self._globally_paused = False
         self._held_initial_submissions: list[HeldTierSubmission] = []
-        self._stream_resolutions: dict[str, RowStreamResolution] = {}
         from api.compute.runtime import get_compute_orchestrator
 
         # All production score bindings share the process orchestrator. Its outcome
@@ -103,6 +101,20 @@ class InferenceRowScheduler(
         self._unregister_scope_outcome = orch.observers.register_scope_outcome_listener(
             self._on_orchestrator_scope_outcome,
         )
+
+    @property
+    def _stream_resolutions(self):
+        """Process-wide bounded resolution table (shared cancel fence + stream FSM).
+
+        Production code mutates via ``transition_stream_resolution`` /
+        ``discard_stream_resolution_if_state`` / ``clear_stream_resolutions``.
+        Tests may inspect or seed this map directly.
+        """
+        from api.analytics.military_score_inference.row_stream_resolution_registry import (
+            _resolutions,
+        )
+
+        return _resolutions
 
     def owns_table_stream(self, stream_token: str) -> bool:
         with self._lock:
@@ -733,6 +745,9 @@ def get_inference_row_scheduler(
 def reset_inference_row_scheduler_for_tests() -> None:
     """Drop the process-wide scheduler (tests only)."""
     global _scheduler
+    from api.analytics.military_score_inference.row_stream_resolution_registry import (
+        reset_stream_resolution_registry_for_tests,
+    )
     from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
@@ -742,6 +757,7 @@ def reset_inference_row_scheduler_for_tests() -> None:
         _scheduler = None
     reset_orchestrators_for_tests()
     reset_tier_row_run_registry_for_tests()
+    reset_stream_resolution_registry_for_tests()
     from api.compute.pools import shutdown_compute_worker_pool_for_tests
 
     shutdown_compute_worker_pool_for_tests()

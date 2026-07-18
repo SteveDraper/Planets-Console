@@ -53,7 +53,7 @@ class InferenceStreamTeardownMixin:
         (no prior scope) leaves retained runs alone.
 
         Detach drops RowRun registrations and stream bindings but does **not**
-        cancel solve tokens, set cancellation fences, or abort orchestrator
+        cancel solve tokens, set resolution ``CANCELED``, or abort orchestrator
         nodes -- in-flight tier workers may still finish, persist from the
         RowComplete payload, and complete the DAG node. ``cancel_run`` is the
         explicit cancel path (cancel intent then abort).
@@ -80,7 +80,7 @@ class InferenceStreamTeardownMixin:
 
         Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
         only drops stream ownership without cancelling solve work, cancel applies
-        cancel intent (token + fence + resolution CANCELED) then aborts in-flight
+        cancel intent (token + resolution CANCELED fence) then aborts in-flight
         orchestrator nodes so a later ``force_fresh`` submit cannot attach to a
         still-running node with a missing RowRun.
         """
@@ -104,17 +104,19 @@ class InferenceStreamTeardownMixin:
             self._abort_orchestrator_scope(abort_scope, abort_generation)
 
     def _apply_cancel_intent_locked(self: InferenceRowScheduler, run_id: str) -> None:
-        """Set token + fence + resolution CANCELED as one cancel intent.
+        """Set token + resolution CANCELED as one cancel intent.
 
-        Caller must hold ``self._lock``. Does not unregister the RowRun or abort
-        orchestrator scopes -- ``cancel_run`` owns those next steps. Detach must
-        never call this: detached workers may still finish and persist.
+        ``CANCELED`` in the shared bounded resolution registry is the cancel
+        fence: it survives RowRun unregister so late persist skips. Caller must
+        hold ``self._lock``. Does not unregister the RowRun or abort orchestrator
+        scopes -- ``cancel_run`` owns those next steps. Detach must never call
+        this: detached workers may still finish and persist.
         """
         from api.analytics.military_score_inference.row_stream_resolution import (
             RowStreamResolutionTrigger,
         )
-        from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
 
+        # Fence before unregister: resolution CANCELED outlives the RowRun.
         self._transition_stream_resolution_locked(
             run_id,
             RowStreamResolutionTrigger.CANCELED,
@@ -122,7 +124,6 @@ class InferenceStreamTeardownMixin:
         row_run = self._adapter_row_run(run_id)
         if row_run is not None:
             row_run.session.cancel_token.cancel()
-        mark_row_run_cancelled(run_id)
 
     def _detach_stream_runs_locked(
         self: InferenceRowScheduler,
@@ -133,17 +134,21 @@ class InferenceStreamTeardownMixin:
 
         Used by ``begin_scope`` when switching table streams. Unregisters RowRuns
         and drops stream bindings for ``turn`` only; other turns are untouched.
-        Does **not** cancel RowRun tokens, set cancellation fences, or call
+        Does **not** cancel RowRun tokens, set resolution ``CANCELED``, or call
         ``abort_scope`` -- in-flight tier workers may still finish, persist from
         the RowComplete payload, and complete the DAG node. ``cancel_run`` is the
         explicit cancel path (cancel intent then abort).
 
-        ``_stream_resolutions`` is left untouched for a turn-scoped detach:
+        Stream resolutions are left untouched for a turn-scoped detach:
         ``_remove_run_locked`` already keeps each detached run's resolution so a
         late peer binding cannot supersede an already-resolved row, and other-turn
         resolutions must survive a preempt. A full invalidate (``turn is None``,
         e.g. shutdown) clears every resolution along with everything else.
         """
+        from api.analytics.military_score_inference.row_stream_resolution_registry import (
+            clear_stream_resolutions,
+        )
+
         self._globally_paused = False
         if turn is None:
             self._held_initial_submissions.clear()
@@ -157,7 +162,7 @@ class InferenceStreamTeardownMixin:
                 continue
             self._remove_run_locked(run_id)
         if turn is None:
-            self._stream_resolutions.clear()
+            clear_stream_resolutions()
         for stream_token in list(self._stream_bindings):
             binding = self._stream_bindings.pop(stream_token)
             self._release_stream_binding_locked(binding)

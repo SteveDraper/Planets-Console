@@ -18,9 +18,13 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.military_score_inference.row_stream_resolution import (
     RowStreamDelivery,
-    RowStreamResolution,
     RowStreamResolutionState,
     RowStreamResolutionTrigger,
+)
+from api.analytics.military_score_inference.row_stream_resolution_registry import (
+    discard_stream_resolution_if_state,
+    get_stream_resolution,
+    transition_stream_resolution,
 )
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
@@ -94,7 +98,12 @@ class InferenceStreamResolutionMixin:
 
         if source is TerminalSource.ORPHAN:
             with self._lock:
-                state = self._stream_resolutions.get(resolved.run_id, RowStreamResolution()).state
+                resolution = get_stream_resolution(resolved.run_id)
+                state = (
+                    resolution.state
+                    if resolution is not None
+                    else RowStreamResolutionState.OPEN
+                )
             if state in {
                 RowStreamResolutionState.HARD_TERMINAL,
                 RowStreamResolutionState.CANCELED,
@@ -145,12 +154,10 @@ class InferenceStreamResolutionMixin:
             # Compare-and-pop: a peer may have advanced to HARD_TERMINAL /
             # CANCELED between claim and this miss; that marker must survive.
             with self._lock:
-                resolution = self._stream_resolutions.get(session.run_id)
-                if (
-                    resolution is not None
-                    and resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
-                ):
-                    del self._stream_resolutions[session.run_id]
+                discard_stream_resolution_if_state(
+                    session.run_id,
+                    RowStreamResolutionState.SOFT_PROVISIONAL,
+                )
             return False
         with self._lock:
             delivery = self._transition_stream_resolution_locked(
@@ -199,8 +206,7 @@ class InferenceStreamResolutionMixin:
         run_id: str,
         trigger: RowStreamResolutionTrigger,
     ) -> RowStreamDelivery:
-        resolution = self._stream_resolutions.setdefault(run_id, RowStreamResolution())
-        return resolution.transition(trigger)
+        return transition_stream_resolution(run_id, trigger)
 
     def _controller_for_stream_session(
         self: InferenceRowScheduler,
@@ -259,7 +265,7 @@ class InferenceStreamResolutionMixin:
         if session is None:
             return
         with self._lock:
-            resolution = self._stream_resolutions.get(session.run_id)
+            resolution = get_stream_resolution(session.run_id)
             if (
                 resolution is None
                 or resolution.state is not RowStreamResolutionState.SOFT_PROVISIONAL

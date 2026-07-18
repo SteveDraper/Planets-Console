@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from collections import OrderedDict
 
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_orchestration import (
@@ -11,27 +10,17 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.row_stream_resolution_registry import (
+    is_stream_resolution_canceled,
+    mark_stream_resolution_canceled,
+)
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.compute.scope import WILDCARD, ComputeScope
-
-# Explicit cancellation fences persist after ``unregister_row_run`` so
-# ``ScoresPersistencePolicy`` can refuse cancel-after-unregister races. Detach
-# must not set a fence. Run IDs are unique UUIDs, so fences are FIFO-bounded by
-# ``MAX_CANCEL_FENCE_RUN_IDS`` rather than kept for process lifetime; the race
-# window a late persist must lose to is short relative to this capacity.
-MAX_CANCEL_FENCE_RUN_IDS = 4096
 
 _lock = threading.Lock()
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
-_cancel_fence_run_ids: OrderedDict[str, None] = OrderedDict()
-
-
-def _trim_cancel_fence_run_ids() -> None:
-    """Evict oldest cancel fences until at capacity. Caller holds ``_lock``."""
-    while len(_cancel_fence_run_ids) > MAX_CANCEL_FENCE_RUN_IDS:
-        _cancel_fence_run_ids.popitem(last=False)
 
 
 def _scope_key(scope: ComputeScope) -> tuple[int, int, int, int]:
@@ -105,29 +94,19 @@ def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
 
 
 def mark_row_run_cancelled(run_id: str) -> None:
-    """Set an explicit cancellation fence that survives RowRun unregister.
+    """Set stream-resolution ``CANCELED`` that survives RowRun unregister.
 
-    Production cancel goes through
-    ``InferenceStreamTeardownMixin._apply_cancel_intent_locked``, which sets
-    this fence together with the cancel token and stream-resolution CANCELED.
-    Call this directly only for fence-capacity tests. Detach must not set a
-    fence -- detached workers may still persist from the RowComplete payload.
-
-    Fences are FIFO-bounded by ``MAX_CANCEL_FENCE_RUN_IDS`` (accepted capacity;
-    late-persist races are short relative to it). Re-marking the same
-    ``run_id`` refreshes its eviction order. Always call before
-    ``unregister_row_run``.
+    Thin facade over the shared bounded resolution registry. Production cancel
+    goes through ``InferenceStreamTeardownMixin._apply_cancel_intent_locked``,
+    which transitions to ``CANCELED`` before unregister. Call this directly only
+    for fence-capacity tests. Detach must not set ``CANCELED``.
     """
-    with _lock:
-        _cancel_fence_run_ids.pop(run_id, None)
-        _cancel_fence_run_ids[run_id] = None
-        _trim_cancel_fence_run_ids()
+    mark_stream_resolution_canceled(run_id)
 
 
 def is_row_run_cancelled(run_id: str) -> bool:
-    """True when an explicit cancellation fence was set for ``run_id``."""
-    with _lock:
-        return run_id in _cancel_fence_run_ids
+    """True when stream resolution for ``run_id`` is ``CANCELED``."""
+    return is_stream_resolution_canceled(run_id)
 
 
 def unregister_row_run(run_id: str) -> None:
@@ -156,4 +135,3 @@ def reset_tier_row_run_registry_for_tests() -> None:
         _runs_by_id.clear()
         _run_id_by_scope_key.clear()
         _tier_callbacks_by_run_id.clear()
-        _cancel_fence_run_ids.clear()

@@ -489,10 +489,11 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
 
 
 def test_cancel_intent_sets_token_fence_and_resolution(sample_turn):
-    """cancel_run applies token + fence + resolution CANCELED as one intent.
+    """cancel_run applies token + resolution CANCELED as one intent.
 
-    Detach must not set any of these three; cancel must set all three before
-    unregister so late persist and stream delivery cannot race on a partial cancel.
+    Detach must not set either; cancel must set both before unregister so late
+    persist and stream delivery cannot race on a partial cancel. Resolution
+    ``CANCELED`` is the cancel fence (shared bounded resolution registry).
     """
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.military_score_inference.row_stream_resolution import (
@@ -548,7 +549,7 @@ def test_cancel_intent_sets_token_fence_and_resolution(sample_turn):
 
 
 def test_detach_does_not_apply_cancel_intent(sample_turn):
-    """begin_scope detach drops ownership without token, fence, or CANCELED."""
+    """begin_scope detach drops ownership without token or CANCELED fence."""
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.military_score_inference.row_stream_resolution import (
         RowStreamResolutionState,
@@ -598,7 +599,7 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
 
 
 def test_cancel_after_unregister_blocks_persist_via_fence(sample_turn):
-    """cancel_run fence must survive RowRun removal so late persist skips.
+    """cancel_run CANCELED fence must survive RowRun removal so late persist skips.
 
     Fingerprint: cancel cancelled the token and unregistered before abort; persist
     saw ``get_row_run is None`` and wrote durable evidence for cancelled work.
@@ -681,6 +682,9 @@ def test_cancel_fence_blocks_late_persist_under_churn(sample_turn):
     """A cancel fence must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_stream_resolution_registry import (
+        reset_stream_resolution_registry_for_tests,
+    )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores import tier_row_run_registry as reg
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
@@ -691,6 +695,7 @@ def test_cancel_fence_blocks_late_persist_under_churn(sample_turn):
 
     reset_inference_row_scheduler_for_tests()
     reg.reset_tier_row_run_registry_for_tests()
+    reset_stream_resolution_registry_for_tests()
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     scheduler = InferenceRowScheduler()
     try:
@@ -747,26 +752,72 @@ def test_cancel_fence_blocks_late_persist_under_churn(sample_turn):
     finally:
         reset_inference_row_scheduler_for_tests()
         reg.reset_tier_row_run_registry_for_tests()
+        reset_stream_resolution_registry_for_tests()
 
 
 def test_cancelled_run_fences_are_fifo_bounded(monkeypatch):
-    """Cancel fences must not grow unbounded across unique run ids."""
+    """Stream resolutions (including CANCELED fences) must not grow unbounded."""
+    from api.analytics.military_score_inference import row_stream_resolution_registry as resolutions
     from api.analytics.scores import tier_row_run_registry as reg
 
-    monkeypatch.setattr(reg, "MAX_CANCEL_FENCE_RUN_IDS", 3)
-    reg.reset_tier_row_run_registry_for_tests()
+    monkeypatch.setattr(resolutions, "MAX_STREAM_RESOLUTIONS", 3)
+    resolutions.reset_stream_resolution_registry_for_tests()
     try:
         for index in range(10):
             reg.mark_row_run_cancelled(f"run-{index}")
         retained = [index for index in range(10) if reg.is_row_run_cancelled(f"run-{index}")]
         assert retained == [7, 8, 9]
     finally:
-        reg.reset_tier_row_run_registry_for_tests()
+        resolutions.reset_stream_resolution_registry_for_tests()
+
+
+def test_stream_resolutions_are_fifo_bounded_across_states(monkeypatch):
+    """Non-cancel resolutions share the same FIFO capacity as CANCELED fences."""
+    from api.analytics.military_score_inference import row_stream_resolution_registry as resolutions
+    from api.analytics.military_score_inference.row_stream_resolution import (
+        RowStreamResolutionState,
+        RowStreamResolutionTrigger,
+    )
+
+    monkeypatch.setattr(resolutions, "MAX_STREAM_RESOLUTIONS", 3)
+    resolutions.reset_stream_resolution_registry_for_tests()
+    try:
+        for index in range(5):
+            resolutions.transition_stream_resolution(
+                f"soft-{index}",
+                RowStreamResolutionTrigger.SOFT_PROVISIONAL,
+            )
+        for index in range(5):
+            resolutions.transition_stream_resolution(
+                f"hard-{index}",
+                RowStreamResolutionTrigger.DURABLE_COMPLETE,
+            )
+        soft_retained = [
+            index
+            for index in range(5)
+            if (
+                (r := resolutions.get_stream_resolution(f"soft-{index}")) is not None
+                and r.state is RowStreamResolutionState.SOFT_PROVISIONAL
+            )
+        ]
+        hard_retained = [
+            index
+            for index in range(5)
+            if (
+                (r := resolutions.get_stream_resolution(f"hard-{index}")) is not None
+                and r.state is RowStreamResolutionState.HARD_TERMINAL
+            )
+        ]
+        assert soft_retained == []
+        assert hard_retained == [2, 3, 4]
+    finally:
+        resolutions.reset_stream_resolution_registry_for_tests()
 
 
 def test_fence_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn, monkeypatch):
     """Oldest fences may evict; a still-retained cancel must refuse late persist."""
     from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference import row_stream_resolution_registry as resolutions
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores import tier_row_run_registry as reg
@@ -776,9 +827,10 @@ def test_fence_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn, mon
     from api.compute.scope import ComputeScope
     from api.storage.memory_asset import MemoryAssetBackend
 
-    monkeypatch.setattr(reg, "MAX_CANCEL_FENCE_RUN_IDS", 2)
+    monkeypatch.setattr(resolutions, "MAX_STREAM_RESOLUTIONS", 2)
     reset_inference_row_scheduler_for_tests()
     reg.reset_tier_row_run_registry_for_tests()
+    resolutions.reset_stream_resolution_registry_for_tests()
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     scheduler = InferenceRowScheduler()
     try:
@@ -840,6 +892,7 @@ def test_fence_fifo_eviction_still_blocks_recent_cancel_persist(sample_turn, mon
     finally:
         reset_inference_row_scheduler_for_tests()
         reg.reset_tier_row_run_registry_for_tests()
+        resolutions.reset_stream_resolution_registry_for_tests()
 
 
 def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn):
