@@ -1,8 +1,8 @@
 """Observer registration and notify surface for ComputeOrchestrator.
 
-Owns listener lists, dispatch gates/hooks, and post-lock callbacks. The
-orchestrator remains the public ``register_*`` API via thin wrappers; notify
-and drain run through this collaborator so lock-order semantics stay in one place.
+Owns listener lists, dispatch gates/hooks, and post-lock callbacks. Callers
+register via ``ComputeOrchestrator.observers.register_*`` so lock-order
+semantics stay in one place without thin wrappers on the orchestrator.
 """
 
 from __future__ import annotations

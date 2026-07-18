@@ -64,13 +64,13 @@ class DiagnosticsOrchestratorBindMixin:
         # Gate and commit both capture pool_registration_id so an armed single-step
         # pin rejects wrong-orchestrator nodes before commit (avoids ready-queue thrash).
         registration_id = orchestrator.pool_registration_id
-        unregister_dispatch_gate = orchestrator.register_dispatch_gate(
+        unregister_dispatch_gate = orchestrator.observers.register_dispatch_gate(
             lambda node, _orch_id=registration_id: self._dispatch_gate(
                 node,
                 orchestrator_id=_orch_id,
             )
         )
-        unregister_dispatch_commit = orchestrator.register_dispatch_commit_hook(
+        unregister_dispatch_commit = orchestrator.observers.register_dispatch_commit_hook(
             lambda node, _orch_id=registration_id: self._commit_single_step_dispatch(
                 node,
                 orchestrator_id=_orch_id,
@@ -96,17 +96,17 @@ class DiagnosticsOrchestratorBindMixin:
                 orchestrator_id=_orch_id,
             )
 
-        unregister_step_complete = orchestrator.register_step_complete_listener(
+        unregister_step_complete = orchestrator.observers.register_step_complete_listener(
             _on_step_complete_listener
         )
-        unregister_ready = orchestrator.register_ready_listener(
+        unregister_ready = orchestrator.observers.register_ready_listener(
             lambda scope, node, _orch_id=registration_id: self._on_node_ready(
                 scope,
                 node,
                 orchestrator_id=_orch_id,
             )
         )
-        unregister_ready_queue = orchestrator.register_ready_queue_listener(
+        unregister_ready_queue = orchestrator.observers.register_ready_queue_listener(
             self._timeline.bind_ready_queue_listener(
                 orchestrator_id=registration_id,
                 game_id=game_id,
@@ -114,7 +114,7 @@ class DiagnosticsOrchestratorBindMixin:
                 fallback_id=id(orchestrator),
             )
         )
-        unregister_inline_start = orchestrator.register_inline_start_listener(
+        unregister_inline_start = orchestrator.observers.register_inline_start_listener(
             lambda scope, node, step_kind, _orch_id=registration_id: self._on_inline_start(
                 scope,
                 node,
@@ -122,7 +122,7 @@ class DiagnosticsOrchestratorBindMixin:
                 orchestrator_id=_orch_id,
             )
         )
-        unregister_lifecycle = orchestrator.register_lifecycle_listener(
+        unregister_lifecycle = orchestrator.observers.register_lifecycle_listener(
             lambda kind, scope, node, step_kind, step_index, detail, _orch_id=registration_id: (
                 self._on_lifecycle(
                     kind,

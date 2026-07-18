@@ -908,7 +908,7 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
         if snapshot.scope.analytic_id == "scores-tier-probe":
             park_notifications.append(snapshot.state)
 
-    unregister = orchestrator.register_scope_outcome_listener(
+    unregister = orchestrator.observers.register_scope_outcome_listener(
         record_park,
     )
 

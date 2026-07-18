@@ -1,24 +1,28 @@
-"""Lifecycle emission helpers for ComputeOrchestrator.
+"""Lifecycle and terminal-outcome helpers for ComputeOrchestrator.
 
-Owns park, epoch-retry, persist-deferred recovery, and force_fresh lifecycle
-detail assembly. Emits wire-ready scope keys on lifecycle details so listeners
-need not reconstruct ``ComputeScope`` from dict fields.
+Owns park, settle (complete/fail/park), post-step success handling, epoch-retry,
+persist-deferred recovery, and force_fresh lifecycle detail assembly. Emits
+wire-ready scope keys on lifecycle details so listeners need not reconstruct
+``ComputeScope`` from dict fields.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from api.compute.orchestrator_observers import LifecycleEventKind
-from api.compute.persistence import PersistDependencyRecovery
+from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.scope import format_compute_scope_key
+from api.compute.wire import coerce_step_result
 
 if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
+    from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
+    from api.compute.orchestrator_state import ComputeNodeRun
+    from api.compute.registry import AnalyticComputeRegistration
 
 
 class OrchestratorLifecycleMixin:
-    """Park, epoch-retry, persist-deferred, and force_fresh lifecycle emission."""
+    """Park, settle, after-step success, epoch-retry, and persist-deferred recovery."""
 
     def _emit_force_fresh_lifecycle(
         self: ComputeOrchestrator,
@@ -129,6 +133,165 @@ class OrchestratorLifecycleMixin:
             )
 
         self._observers.schedule_post_lock(_force_fresh_dependency)
+
+    def _after_step_success(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        result_wire: object | None,
+    ) -> None:
+        if self._is_epoch_stale(node):
+            self._retry_step_after_epoch_bump(node)
+            return
+
+        step_result = coerce_step_result(result_wire)
+        registration = self._compute_registry[node.scope.analytic_id]
+        node.generation_at_submit = None
+
+        if step_result.outcome == "continue":
+            if step_result.payload is not None:
+                node.result_wire = step_result.payload
+            self._continue_node_step(node, registration)
+            return
+
+        if step_result.outcome == "park":
+            if step_result.payload is not None:
+                node.result_wire = step_result.payload
+            self._park_node_step(node, reason=step_result.park_reason)
+            return
+
+        if step_result.outcome == "persist":
+            node.result_wire = step_result.payload
+            self._metrics.persist_calls += 1
+            # Persist must not run under the orchestrator lock: fleet refine/scores
+            # probes take the inference scheduler lock, and scheduler paths call back
+            # into dispatch / observer registration (ABBA deadlock).
+            #
+            # Ordering invariant (even outside the lock): persist must finish before
+            # ``_complete_node``. Completing first would wake dependents / allow
+            # ``has_final_ledger`` readers to observe a terminal node whose durable
+            # artifact is not written yet (missed overlay, false unsatisfied probes,
+            # or skipped scores reschedule decisions). Notifications returned from
+            # ``persist`` run only after complete so skip-reschedule sees ``complete``.
+            payload = step_result.payload
+
+            def _persist_then_complete(
+                completed_node: ComputeNodeRun = node,
+                completed_payload: object = payload,
+                completed_registration: AnalyticComputeRegistration = registration,
+            ) -> None:
+                # Cancel/preempt may have aborted this node after the step succeeded
+                # but before post-lock persist. Do not persist or complete in that case.
+                with self._condition:
+                    if completed_node.state != "running":
+                        return
+                ctx = self._ctx_for_node(completed_node)
+                try:
+                    post_lock_callback = completed_registration.persistence_policy.persist(
+                        ctx,
+                        completed_node.scope,
+                        completed_payload,
+                    )
+                except BaseException as exc:
+                    # Persist runs after step-complete success; a raise must not leave a
+                    # ghost ``running`` node (empty queues, freeze ``nothing_steppable``).
+                    # Do not re-raise: pool workers call complete_pool_step on this thread
+                    # and an escaping exception would kill the worker loop.
+                    if isinstance(exc, PersistDeferredError):
+                        # Analytic-owned recovery: demote to waiting_deps and optionally
+                        # force_fresh the declared dependency (e.g. open scores evidence).
+                        self._recover_after_persist_deferred(
+                            completed_node,
+                            exc.recovery,
+                        )
+                        return
+                    with self._condition:
+                        if completed_node.state == "running":
+                            self._fail_node(completed_node, exc)
+                    return
+                with self._condition:
+                    if completed_node.state != "running":
+                        return
+                    self._complete_node(completed_node)
+                    if post_lock_callback is not None:
+                        self._observers.schedule_post_lock(post_lock_callback)
+
+            self._observers.schedule_post_lock(_persist_then_complete)
+            return
+
+        if step_result.outcome == "complete":
+            # Keep a provisional continue payload when the terminal step has none
+            # (e.g. scores materialize export tree then tier_solve skip).
+            if step_result.payload is not None:
+                node.result_wire = step_result.payload
+            self._complete_node(node)
+            return
+
+        raise RuntimeError(f"unsupported step outcome {step_result.outcome!r}")
+
+    def _continue_node_step(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        registration: AnalyticComputeRegistration,
+    ) -> None:
+        node.step_index += 1
+        steps = registration.compute_profile.steps
+        current_step = steps[node.profile_step_index]
+        next_profile_index = node.profile_step_index + 1
+        if next_profile_index < len(steps):
+            next_step = steps[next_profile_index]
+            if next_step.step_kind != current_step.step_kind:
+                # Advance profile; retain prior step claims until node terminal so
+                # peers cannot rematerialize while this node is still non-terminal.
+                node.profile_step_index = next_profile_index
+        node.state = "ready"
+        node.execution_sealed = False
+        self._enqueue_ready(node.scope)
+        self._observers.notify_ready(node)
+        # Defer dispatch so pool submit is never nested under this lock.
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
+
+    def _settle_node(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        *,
+        state: Literal["complete", "failed", "parked"],
+        error: BaseException | None = None,
+        release_waiters: bool = True,
+        notify_dependents: bool = True,
+    ) -> None:
+        """Transition ``node`` out of active dispatch and publish its outcome.
+
+        Shared by complete, fail, and park -- the three states that stop a
+        node's dispatch loop and report a :class:`ScopeLifecycleSnapshot`.
+        Park passes ``release_waiters=False`` (waiters keep waiting for a real
+        terminal outcome, not a soft pause) and ``notify_dependents=False``
+        (dependents stay blocked rather than promoted); the caller emits its
+        own lifecycle event and resets ``generation_at_submit`` around this
+        call.
+        """
+        node.state = state
+        node.error = error
+        if state in {"complete", "failed"}:
+            node.park_auto_wake_issued = False
+        self._dequeue_ready(node.scope)
+        if release_waiters:
+            for waiter in node.waiters:
+                waiter._waiter_error = error
+            node.waiters.clear()
+        self._observers.notify_scope_outcome(node)
+        if notify_dependents:
+            completed_scope = node.scope
+            self._observers.schedule_post_lock(
+                lambda: self._handle_dependency_terminal(completed_scope),
+            )
+
+    def _complete_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        self._settle_node(node, state="complete")
+
+    def _fail_node(self: ComputeOrchestrator, node: ComputeNodeRun, error: BaseException) -> None:
+        if node.state == "failed":
+            return
+        self._settle_node(node, state="failed", error=error)
 
     def _park_node_step(
         self: ComputeOrchestrator,

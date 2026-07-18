@@ -121,9 +121,11 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn):
                 )
             }
             self.dispatch_calls = 0
-
-        def register_dispatch_gate(self, _gate: object):
-            return lambda: None
+            self.observers = type(
+                "FakeObservers",
+                (),
+                {"register_dispatch_gate": lambda _self, _gate: lambda: None},
+            )()
 
         def dispatch_ready_work(self) -> None:
             self.dispatch_calls += 1
@@ -202,9 +204,11 @@ def test_resume_dispatches_orchestrator_ready_work(sample_turn):
 
         def __init__(self) -> None:
             self.dispatch_calls = 0
-
-        def register_dispatch_gate(self, _gate: object):
-            return lambda: None
+            self.observers = type(
+                "FakeObservers",
+                (),
+                {"register_dispatch_gate": lambda _self, _gate: lambda: None},
+            )()
 
         def dispatch_ready_work(self) -> None:
             self.dispatch_calls += 1

@@ -99,7 +99,8 @@ class InferenceRowScheduler(
 
         # All production score bindings share the process orchestrator. Its outcome
         # observer delivers immutable parked and terminal snapshots exactly once.
-        self._unregister_scope_outcome = get_compute_orchestrator().register_scope_outcome_listener(
+        orch = get_compute_orchestrator()
+        self._unregister_scope_outcome = orch.observers.register_scope_outcome_listener(
             self._on_orchestrator_scope_outcome,
         )
 
@@ -619,7 +620,8 @@ class InferenceRowScheduler(
         for binding in bindings:
             if paused:
                 if binding.unregister_dispatch_gate is None:
-                    binding.unregister_dispatch_gate = binding.orchestrator.register_dispatch_gate(
+                    observers = binding.orchestrator.observers
+                    binding.unregister_dispatch_gate = observers.register_dispatch_gate(
                         self._pause_dispatch_gate
                     )
             elif binding.unregister_dispatch_gate is not None:

@@ -1189,7 +1189,7 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
         assert snapshot.state == "complete"
         assert durable_ready is True
 
-    orchestrator.register_scope_outcome_listener(on_outcome)
+    orchestrator.observers.register_scope_outcome_listener(on_outcome)
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
 
     assert handle.state == "complete"
@@ -1202,7 +1202,7 @@ def test_scope_outcome_listener_receives_park_snapshot_after_node_wakes(sample_t
     scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(compute_registry={})
     observed = []
-    orchestrator.register_scope_outcome_listener(observed.append)
+    orchestrator.observers.register_scope_outcome_listener(observed.append)
 
     from api.compute.orchestrator import ComputeNodeRun
 
@@ -1377,7 +1377,7 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
-    orchestrator.register_dispatch_gate(
+    orchestrator.observers.register_dispatch_gate(
         lambda node: node.scope.analytic_id != gated_analytic_id,
     )
 
@@ -1582,7 +1582,7 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
     def on_step_complete(_scope, _node, step_kind, _step_index, surface, terminal_state) -> None:
         step_completions.append(f"{surface}:{step_kind}:{terminal_state}")
 
-    orchestrator.register_step_complete_listener(on_step_complete)
+    orchestrator.observers.register_step_complete_listener(on_step_complete)
 
     orchestrator.complete_pool_step(
         scope,
@@ -1726,7 +1726,7 @@ def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_tur
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
-    orchestrator.register_dispatch_gate(
+    orchestrator.observers.register_dispatch_gate(
         lambda node: node.scope.analytic_id != BRANCH_B_ID,
     )
 
@@ -1769,7 +1769,7 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
-    unregister_pause = orchestrator.register_dispatch_gate(lambda _node: not is_paused)
+    unregister_pause = orchestrator.observers.register_dispatch_gate(lambda _node: not is_paused)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -1867,8 +1867,8 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
-    unregister_pause = orchestrator.register_dispatch_gate(lambda _node: not pause_blocks)
-    unregister_freeze = orchestrator.register_dispatch_gate(
+    unregister_pause = orchestrator.observers.register_dispatch_gate(lambda _node: not pause_blocks)
+    unregister_freeze = orchestrator.observers.register_dispatch_gate(
         lambda node: not (freeze_blocks_branch_b and node.scope.analytic_id == BRANCH_B_ID),
     )
 

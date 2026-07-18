@@ -6,11 +6,8 @@ from typing import TYPE_CHECKING
 
 from api.compute.dag import PlannedComputeNode, plan_compute_dag
 from api.compute.orchestration_bundle import OrchestrationBundle
+from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun
-from api.compute.orchestrator_step_execution import (
-    _PendingInlineExecution,
-    _PendingPoolSubmission,
-)
 from api.compute.pools import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
@@ -50,8 +47,8 @@ class OrchestratorSubmissionMixin:
     ) -> (
         tuple[
             ComputeHandle,
-            tuple[_PendingInlineExecution, ...],
-            tuple[_PendingPoolSubmission, ...],
+            tuple[PendingInlineExecution, ...],
+            tuple[PendingPoolSubmission, ...],
         ]
         | None
     ):
@@ -61,8 +58,8 @@ class OrchestratorSubmissionMixin:
         if wake_if_parked_only and (existing is None or existing.state != "parked"):
             return None
 
-        pending_inline: tuple[_PendingInlineExecution, ...] = ()
-        pending_pool: tuple[_PendingPoolSubmission, ...] = ()
+        pending_inline: tuple[PendingInlineExecution, ...] = ()
+        pending_pool: tuple[PendingPoolSubmission, ...] = ()
         if existing is not None:
             if not (request.force_fresh and existing.is_terminal):
                 if request.force_fresh:
@@ -91,8 +88,8 @@ class OrchestratorSubmissionMixin:
         request: ComputeRequest,
     ) -> tuple[
         ComputeHandle,
-        tuple[_PendingInlineExecution, ...],
-        tuple[_PendingPoolSubmission, ...],
+        tuple[PendingInlineExecution, ...],
+        tuple[PendingPoolSubmission, ...],
     ]:
         """Plan a fresh scope and select its first dispatchable work."""
         scope = request.scope
@@ -111,8 +108,8 @@ class OrchestratorSubmissionMixin:
         self: ComputeOrchestrator,
         submission: tuple[
             ComputeHandle,
-            tuple[_PendingInlineExecution, ...],
-            tuple[_PendingPoolSubmission, ...],
+            tuple[PendingInlineExecution, ...],
+            tuple[PendingPoolSubmission, ...],
         ],
     ) -> ComputeHandle:
         """Run work selected by a submission after releasing the lock."""

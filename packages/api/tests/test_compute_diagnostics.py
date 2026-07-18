@@ -469,7 +469,7 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
     def _on_step_complete(_scope, _node, step_kind, _step_index, surface, terminal_state):
         step_completions.append(f"{surface}:{step_kind}:{terminal_state}")
 
-    orchestrator.register_step_complete_listener(_on_step_complete)
+    orchestrator.observers.register_step_complete_listener(_on_step_complete)
     controller = get_compute_diagnostics_controller()
     controller.bind_orchestrator(orchestrator, ctx)
     shell = ShellContextKey(
@@ -1012,7 +1012,7 @@ def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
     controller = get_compute_diagnostics_controller()
     controller.bind_orchestrator(orchestrator, ctx)
     # Reject every node -- models scores pause blocking the selected profile step.
-    orchestrator.register_dispatch_gate(lambda _node: False)
+    orchestrator.observers.register_dispatch_gate(lambda _node: False)
     shell = ShellContextKey(
         game_id=ctx.game_id,
         perspective=ctx.perspective,

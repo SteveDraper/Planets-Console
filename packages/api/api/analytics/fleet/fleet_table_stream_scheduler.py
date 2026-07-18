@@ -217,7 +217,7 @@ class FleetTableStreamScheduler:
             return existing
         query_ctx = _query_context_for_services(fleet_services, host_turn=host_turn)
         orchestrator = get_compute_orchestrator()
-        unregister = orchestrator.register_scope_outcome_listener(
+        unregister = orchestrator.observers.register_scope_outcome_listener(
             self._on_orchestrator_scope_outcome,
         )
         binding = _FleetStreamOrchestratorBinding(

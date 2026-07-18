@@ -295,7 +295,11 @@ def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
                             profile_step_index=1,
                         ),
                     },
-                    "register_dispatch_gate": lambda _gate: lambda: None,
+                    "observers": type(
+                        "FakeObservers",
+                        (),
+                        {"register_dispatch_gate": lambda _self, _gate: lambda: None},
+                    )(),
                     "dispatch_ready_work": lambda: None,
                 },
             )(),
