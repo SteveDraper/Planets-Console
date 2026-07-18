@@ -67,6 +67,10 @@ class ComputeNodeRun:
     bundle: OrchestrationBundle | None = None
     # Closes priority adoption once expensive work begins.
     execution_sealed: bool = False
+    # One orchestrator-issued wake per soft-park episode when a dependent is
+    # waiting_deps. Prevents park→wake→park thrash while still breaking the
+    # parked-ENSURE idle hang (empty ready/in-flight, no CPU).
+    park_auto_wake_issued: bool = False
 
     @property
     def is_terminal(self) -> bool:

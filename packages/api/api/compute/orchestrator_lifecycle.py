@@ -164,6 +164,11 @@ class OrchestratorLifecycleMixin:
                 "priorProfileStepIndex": node.profile_step_index,
             },
         )
+        # Soft-park does not complete, so ENSURE dependents stay waiting_deps with
+        # no dependency-terminal refresh. If any dependent is already waiting,
+        # issue one auto-wake so the DAG cannot go idle (Birds hang fingerprint).
+        if self._scope_has_waiting_dependent(node.scope):
+            self._schedule_parked_auto_wake(node)
 
     def _maybe_wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""

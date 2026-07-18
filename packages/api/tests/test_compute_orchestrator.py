@@ -570,6 +570,62 @@ def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
     assert orchestrator.nodes[shared_scope] is parked._node
 
 
+def test_parked_ensure_dependency_auto_wakes_when_dependent_is_waiting(sample_turn):
+    """Parked ENSURE deps must not leave dependents idle forever (Birds hang).
+
+    Soft-park is intentionally non-complete, so fleet-style dependents stay
+    ``waiting_deps``. If nothing wakes the parked dependency, ready/in-flight go
+    empty and the scoreboard/fleet streams hang with no CPU.
+    """
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_calls = 0
+
+    def run_shared(_job):
+        nonlocal shared_calls
+        shared_calls += 1
+        if shared_calls == 1:
+            return StepResult(outcome="park", park_reason="scores_open_evidence_wait")
+        return {"result": SHARED_ID}
+
+    registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=_StubPersistencePolicy(),
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", run_shared),),
+            ),
+            _inline_compute_registration(BRANCH_B_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(compute_registry=registry)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
+
+    assert shared_calls >= 2, (
+        f"expected parked ENSURE dependency to auto-wake; shared_calls={shared_calls} "
+        f"shared_state={orchestrator.nodes[shared_scope].state} "
+        f"branch_state={orchestrator.nodes[branch_b_scope].state}"
+    )
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert handle.state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
+
+
 def test_fresh_submit_replaces_failed_terminal_node(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,
