@@ -337,6 +337,8 @@ class OrchestratorLifecycleMixin:
         """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""
         if node.state != "parked":
             return
+        # Leaving parked starts a new soft-park episode; allow one auto-wake again.
+        node.park_auto_wake_issued = False
         node.generation_at_submit = None
         node.execution_sealed = False
         if self._deps_complete(node):
