@@ -174,7 +174,9 @@ def _apply_observed_option_set(
 
     Full-information sightings replace any prior sets with the single confirmed fit.
     Partial sightings only lock positively observed axes onto existing inferred
-    alternates (or seed a hull-centric set when none exist yet).
+    alternates that already match the observed hull (or seed a hull-centric set
+    when none exist / none match). Never rewrite a foreign hull id onto a
+    Deep-Space-Scout-style fit -- that produced Falcon rows with 4 X-Rays.
     """
     if full_information:
         record.build_option_sets = [observed_option_set]
@@ -182,6 +184,23 @@ def _apply_observed_option_set(
         return
     if not record.build_option_sets:
         record.build_option_sets = [observed_option_set]
+        record.display_default_option_set_index = 0
+        return
+    observed_hull_id = observed_option_set.hull_id
+    if observed_hull_id is not None:
+        matching = [
+            existing
+            for existing in record.build_option_sets
+            if existing.hull_id == observed_hull_id
+        ]
+        if not matching:
+            record.build_option_sets = [observed_option_set]
+            record.display_default_option_set_index = 0
+            return
+        record.build_option_sets = [
+            _merge_option_set_observation_locks(existing, observed_option_set)
+            for existing in matching
+        ]
         record.display_default_option_set_index = 0
         return
     record.build_option_sets = [
@@ -194,6 +213,11 @@ def _merge_option_set_observation_locks(
     existing: FleetBuildOptionSet,
     observed: FleetBuildOptionSet,
 ) -> FleetBuildOptionSet:
+    """Merge positively observed component ids onto one already-compatible set.
+
+    Callers must only pass ``existing`` sets whose ``hull_id`` already matches
+    ``observed.hull_id`` when the observation locked a hull.
+    """
     return replace(
         existing,
         hull_id=observed.hull_id if observed.hull_id is not None else existing.hull_id,

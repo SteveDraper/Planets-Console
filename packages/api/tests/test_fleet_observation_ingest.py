@@ -349,6 +349,80 @@ def test_partial_sighting_does_not_lock_fog_zero_weapons():
     ]
 
 
+def test_partial_sighting_drops_prior_option_sets_for_other_hulls():
+    """Fog hull lock must not stamp Falcon onto prior Deep Space Scout inference fits."""
+    turn = single_ship_turn(
+        turn_number=6,
+        ship_id=47,
+        owner_id=8,
+        x=2521,
+        y=1943,
+        hull_id=87,
+    )
+    ship = replace(
+        turn.ships[0],
+        beams=0,
+        beamid=0,
+        torps=0,
+        torpedoid=0,
+        bays=0,
+        engineid=0,
+    )
+    turn = replace(turn, ships=[ship])
+    snapshot = ensure_fleet_baseline(628580, 1, turn)
+    ledger_for_player(snapshot, 8).records.append(
+        FleetShipRecord(
+            record_id="placeholder-warship",
+            fields=FleetShipRecordFields(
+                ship_id=FleetFieldBounded(operator="lte", value=53),
+                built_turn=FleetFieldKnown(5),
+            ),
+            build_option_sets=[
+                FleetBuildOptionSet(
+                    combo_id="combo_91_1_2_none_4_0",
+                    label="Build Deep Space Scout: 1x StarDrive 1, 4x X-Ray Laser",
+                    solution_rank_weight=-350,
+                    hull_id=91,
+                    engine_id=1,
+                    beam_id=2,
+                    beam_count=4,
+                    launcher_count=0,
+                ),
+                FleetBuildOptionSet(
+                    combo_id="combo_91_7_2_none_4_0",
+                    label="Build Deep Space Scout: 1x Quantam Drive 7, 4x X-Ray Laser",
+                    solution_rank_weight=-418,
+                    hull_id=91,
+                    engine_id=7,
+                    beam_id=2,
+                    beam_count=4,
+                    launcher_count=0,
+                ),
+            ],
+            display_default_option_set_index=0,
+        )
+    )
+
+    result = ingest_turn_ship_observations(snapshot, turn)
+
+    record = ledger_for_player(result, 8).records[0]
+    assert record.fields.ship_id == FleetFieldKnown(value=47)
+    assert record.fields.hull == FleetFieldKnown(value=87)
+    assert record.fields.engine == FleetFieldUnknown()
+    assert record.fields.beams == FleetFieldUnknown()
+    assert record.build_option_sets == [
+        FleetBuildOptionSet(
+            hull_id=87,
+            engine_id=None,
+            beam_id=None,
+            torp_id=None,
+            beam_count=None,
+            launcher_count=None,
+        )
+    ]
+    assert record.display_default_option_set_index == 0
+
+
 def test_alibi_from_scoreboard_delta_event_on_record():
     turn_five = single_ship_turn(turn_number=5, ship_id=42, owner_id=8, x=1000, y=2000)
     snapshot = ensure_fleet_baseline(628580, 1, turn_five)
