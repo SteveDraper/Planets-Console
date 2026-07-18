@@ -98,9 +98,7 @@ def is_stream_resolution_canceled(run_id: str) -> bool:
     """True when ``run_id`` is remembered as ``CANCELED`` (cancel fence)."""
     with _lock:
         resolution = _resolutions.get(run_id)
-        return (
-            resolution is not None and resolution.state is RowStreamResolutionState.CANCELED
-        )
+        return resolution is not None and resolution.state is RowStreamResolutionState.CANCELED
 
 
 def mark_stream_resolution_canceled(run_id: str) -> None:

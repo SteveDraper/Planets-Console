@@ -100,9 +100,7 @@ class InferenceStreamResolutionMixin:
             with self._lock:
                 resolution = get_stream_resolution(resolved.run_id)
                 state = (
-                    resolution.state
-                    if resolution is not None
-                    else RowStreamResolutionState.OPEN
+                    resolution.state if resolution is not None else RowStreamResolutionState.OPEN
                 )
             if state in {
                 RowStreamResolutionState.HARD_TERMINAL,
