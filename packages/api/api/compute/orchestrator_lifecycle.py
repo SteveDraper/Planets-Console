@@ -47,14 +47,24 @@ class OrchestratorLifecycleMixin:
             },
         )
 
+    def _reset_for_requeue(self: ComputeOrchestrator, node: ComputeNodeRun) -> int:
+        """Clear submit-generation seal so the node can re-enter the dispatch loop.
+
+        Shared by epoch-retry, persist-deferred recovery, and soft park -- the three
+        paths that leave an in-flight step and must reopen the node for later work.
+        Returns the step index at reset time for lifecycle notifications.
+        """
+        prior_step_index = node.step_index
+        node.generation_at_submit = None
+        node.execution_sealed = False
+        return prior_step_index
+
     def _retry_step_after_epoch_bump(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         self._metrics.epoch_discards += 1
-        prior_step_index = node.step_index
         prior_generation = node.generation_at_submit
         current_generation = self._current_invalidation_generation(node)
-        node.generation_at_submit = None
+        prior_step_index = self._reset_for_requeue(node)
         node.state = "ready"
-        node.execution_sealed = False
         self._enqueue_ready(node.scope)
         self._observers.notify_ready(node)
         self._observers.notify_lifecycle(
@@ -91,11 +101,9 @@ class OrchestratorLifecycleMixin:
         with self._condition:
             if node.state != "running":
                 return
-            prior_step_index = node.step_index
-            node.generation_at_submit = None
+            prior_step_index = self._reset_for_requeue(node)
             node.error = None
             node.state = "waiting_deps"
-            node.execution_sealed = False
             self._dequeue_ready(node.scope)
             self._metrics.epoch_discards += 1
             self._observers.notify_lifecycle(
@@ -256,30 +264,29 @@ class OrchestratorLifecycleMixin:
         *,
         state: Literal["complete", "failed", "parked"],
         error: BaseException | None = None,
-        release_waiters: bool = True,
-        notify_dependents: bool = True,
     ) -> None:
         """Transition ``node`` out of active dispatch and publish its outcome.
 
         Shared by complete, fail, and park -- the three states that stop a
         node's dispatch loop and report a :class:`ScopeLifecycleSnapshot`.
-        Park passes ``release_waiters=False`` (waiters keep waiting for a real
-        terminal outcome, not a soft pause) and ``notify_dependents=False``
+        Soft park (``state="parked"``) does not release waiters (they keep
+        waiting for a real terminal outcome) and does not notify dependents
         (dependents stay blocked rather than promoted); the caller emits its
         own lifecycle event and resets ``generation_at_submit`` around this
         call.
         """
+        soft_pause = state == "parked"
         node.state = state
         node.error = error
         if state in {"complete", "failed"}:
             node.park_auto_wake_issued = False
         self._dequeue_ready(node.scope)
-        if release_waiters:
+        if not soft_pause:
             for waiter in node.waiters:
                 waiter._waiter_error = error
             node.waiters.clear()
         self._observers.notify_scope_outcome(node)
-        if notify_dependents:
+        if not soft_pause:
             completed_scope = node.scope
             self._observers.schedule_post_lock(
                 lambda: self._handle_dependency_terminal(completed_scope),
@@ -308,15 +315,8 @@ class OrchestratorLifecycleMixin:
         if node.state != "running":
             return
 
-        prior_step_index = node.step_index
-        node.generation_at_submit = None
-        node.execution_sealed = False
-        self._settle_node(
-            node,
-            state="parked",
-            release_waiters=False,
-            notify_dependents=False,
-        )
+        prior_step_index = self._reset_for_requeue(node)
+        self._settle_node(node, state="parked")
         self._observers.notify_lifecycle(
             "step_parked",
             node.scope,
