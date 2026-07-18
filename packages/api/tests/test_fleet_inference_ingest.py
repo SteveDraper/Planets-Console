@@ -9,7 +9,11 @@ from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_s
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
-from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
+from api.analytics.fleet.serialization import (
+    fleet_ship_record_from_json,
+    fleet_ship_record_to_json,
+    fleet_turn_snapshot_to_compute_wire,
+)
 from api.analytics.fleet.types import (
     FleetBuildOptionSet,
     FleetEvidenceEvent,
@@ -647,6 +651,12 @@ def test_refine_drops_option_sets_for_hulls_other_than_observed(sample_turn):
     after = ledger_for_player(refined, player_id).records[0]
     assert after.fields.hull == FleetFieldKnown(value=87)
     assert after.build_option_sets == []
+    assert after.display_default_option_set_index is None
+    # Empty option sets must omit displayDefaultOptionSetIndex on the wire;
+    # index 0 would fail fleet_ship_record_from_json.
+    restored = fleet_ship_record_from_json(fleet_ship_record_to_json(after))
+    assert restored.build_option_sets == []
+    assert restored.display_default_option_set_index is None
 
 
 def test_streaming_refine_updates_freighter_option_sets(sample_turn):
