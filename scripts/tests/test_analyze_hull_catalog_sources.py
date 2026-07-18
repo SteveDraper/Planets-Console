@@ -123,6 +123,8 @@ def test_standard_settings_adjusted_swaps_sage_frigate_for_repair_ship() -> None
     )
     assert 1090 in adjusted
     assert 90 not in adjusted
+    assert 87 in adjusted
+    assert 1087 not in adjusted
 
 
 def test_standard_settings_adjusted_skips_repair_ship_when_race_lacks_sage_frigate() -> None:
