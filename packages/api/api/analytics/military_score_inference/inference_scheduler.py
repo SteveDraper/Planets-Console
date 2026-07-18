@@ -19,6 +19,10 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
 )
+from api.analytics.military_score_inference.inference_stream_resolution import (
+    InferenceStreamResolutionMixin,
+    TerminalSource,
+)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
@@ -33,10 +37,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.row_stream_resolution import (
-    InferenceStreamResolutionMixin,
-    RowStreamResolution,
-)
+from api.analytics.military_score_inference.row_stream_resolution import RowStreamResolution
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
@@ -516,7 +517,11 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         # Soft park: reattach empty/non-durable stream delivery without completing
         # the scores node (fleet ENSURE stays blocked until durable close).
         if snapshot.state == "parked":
-            self._deliver_soft_park_stream_terminal_if_needed(scope, snapshot)
+            self._deliver_row_terminal(
+                source=TerminalSource.PARKED,
+                scope=scope,
+                snapshot=snapshot,
+            )
             return
 
         wire_run_id = self._run_id_from_result_wire(snapshot.result_wire)
@@ -554,9 +559,11 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
                     if snapshot.error is not None
                     else "Inference tier solve failed"
                 )
-                self._deliver_stream_terminal(
-                    deliver_session,
-                    RowFailed(detail=detail),
+                self._deliver_row_terminal(
+                    source=TerminalSource.NODE_COMPLETE,
+                    scope=scope,
+                    session=deliver_session,
+                    event=RowFailed(detail=detail),
                 )
                 self._finalize_row_run(session)
                 continue
@@ -567,12 +574,21 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
                 if sibling_still_active:
                     continue
                 # Parity with orphan empty-complete: admission before RowFailed.
-                self._deliver_empty_complete_terminal(scope, deliver_session)
+                self._deliver_row_terminal(
+                    source=TerminalSource.NODE_COMPLETE,
+                    scope=scope,
+                    session=deliver_session,
+                )
                 self._finalize_row_run(session)
                 continue
             # Always attempt delivery: RowComplete may upgrade a prior empty/admission
             # terminal for the same stream session after force_fresh re-solve.
-            self._deliver_stream_terminal(deliver_session, row_complete)
+            self._deliver_row_terminal(
+                source=TerminalSource.NODE_COMPLETE,
+                scope=scope,
+                session=deliver_session,
+                event=row_complete,
+            )
             if sibling_still_active:
                 # Keep the process-wide RowRun registered until the last binding
                 # for this scope reaches a terminal state (background + stream share it).
@@ -585,7 +601,11 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         if snapshot.state in {"complete", "failed"} and not (
             self._scope_has_live_nonterminal_work(scope)
         ):
-            self._deliver_orphan_stream_terminal_if_needed(scope, snapshot)
+            self._deliver_row_terminal(
+                source=TerminalSource.ORPHAN,
+                scope=scope,
+                snapshot=snapshot,
+            )
 
     def _wake_parked_scores_after_row_run_adopt(
         self,

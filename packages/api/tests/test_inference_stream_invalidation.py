@@ -1107,7 +1107,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
     )
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.row_stream_resolution."
+        "api.analytics.military_score_inference.inference_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )

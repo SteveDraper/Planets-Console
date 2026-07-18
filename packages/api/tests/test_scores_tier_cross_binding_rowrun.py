@@ -155,7 +155,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
 
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.row_stream_resolution."
+        "api.analytics.military_score_inference.inference_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )
@@ -209,7 +209,7 @@ def test_peer_failure_does_not_unregister_while_sibling_running(sample_turn, mon
 
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.row_stream_resolution."
+        "api.analytics.military_score_inference.inference_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )
@@ -255,7 +255,7 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
 
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.row_stream_resolution."
+        "api.analytics.military_score_inference.inference_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )
