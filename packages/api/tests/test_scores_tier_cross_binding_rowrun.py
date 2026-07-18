@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import queue
-from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
@@ -29,9 +29,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.row_stream_resolution import (
-    RowStreamResolutionState,
-)
+from api.analytics.military_score_inference.row_stream_resolution import RowStreamResolutionState
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
@@ -42,6 +40,7 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun
+from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import ComputeScope
 
@@ -80,6 +79,22 @@ def _scope_for(session: InferenceRowStreamSession) -> ComputeScope:
         player_id=session.player_id,
     )
 
+def _outcome_snapshot(
+    scope: ComputeScope,
+    *,
+    state: Literal["parked", "complete", "failed"],
+    result_wire: object | None = None,
+    error: BaseException | None = None,
+    execution_generation: int = 0
+) -> ScopeLifecycleSnapshot:
+    return ScopeLifecycleSnapshot(
+        scope=scope,
+        state=state,
+        execution_generation=execution_generation,
+        result_wire=result_wire,
+        error=error,
+    )
+
 
 def _singleton_orchestrator():
     return get_compute_orchestrator()
@@ -91,7 +106,7 @@ def _set_scope_node(
     *,
     state: str,
     priority_band: str = "background",
-    **kwargs: object,
+    **kwargs: object
 ) -> ComputeNodeRun:
     node = ComputeNodeRun(
         scope=scope,
@@ -149,20 +164,26 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="exact",
     )
-    completed_node = SimpleNamespace(
-        state="complete",
-        result_wire={"runId": run.run_id, "rowComplete": row_complete},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+        ),
     )
-
-    scheduler._on_orchestrator_node_complete(scope, completed_node)
 
     assert get_row_run(run.run_id) is run
     assert run.run_id in scheduler._runs
     assert len(delivered) == 1
 
     orchestrator._nodes[scope].state = "complete"
-    scheduler._on_orchestrator_node_complete(scope, completed_node)
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+        ),
+    )
 
     assert get_row_run(run.run_id) is None
     assert run.run_id not in scheduler._runs
@@ -193,12 +214,14 @@ def test_peer_failure_does_not_unregister_while_sibling_running(sample_turn, mon
         lambda _session, event: delivered.append(event),
     )
 
-    failed_node = SimpleNamespace(
-        state="failed",
-        result_wire={"runId": run.run_id},
-        error=RuntimeError("peer boom"),
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="failed",
+            result_wire={"runId": run.run_id},
+            error=RuntimeError("peer boom"),
+        ),
     )
-    scheduler._on_orchestrator_node_complete(scope, failed_node)
 
     assert get_row_run(run.run_id) is run
     assert delivered == []
@@ -237,19 +260,22 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
         lambda _session, event: delivered.append(event),
     )
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     assert get_row_run(run.run_id) is run
     assert delivered == []
 
     orchestrator._nodes[scope].state = "complete"
     orchestrator._nodes[scope].result_wire = {"exportTree": {"ok": True}}
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"exportTree": {"ok": True}},
+        ),
+    )
 
     assert delivered, (
         "last peer empty-complete left DAG terminal without a stream terminal "
@@ -259,14 +285,14 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
 
 
 def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
-    sample_turn,
+    sample_turn
 ) -> None:
     """Regression: DAG terminal after idempotent empty complete must finish open stream.
 
     Cross-binding race: peer finalizes/unregisters the shared RowRun (and scheduler
     ``_runs`` entry) without a stream terminal, then the other binding's
     ``tier_solve`` returns idempotent ``complete`` with no ``rowComplete``. The
-    orchestrator node is terminal, but ``_on_orchestrator_node_complete`` finds no
+    orchestrator node is terminal, but ``_on_orchestrator_scope_outcome`` finds no
     matching run_id. Orphan fallback must still deliver a terminal so multiplex does
     not stay on ``progress``.
     """
@@ -317,12 +343,9 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
     # Missing RowRun parks until force_fresh wake can rebuild wire / reschedule.
     assert run_scores_tier_solve({"runId": run.run_id}).outcome == "park"
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     queued: list[object] = []
     while True:
@@ -340,7 +363,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
 
 
 def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
-    sample_turn,
+    sample_turn
 ) -> None:
     """After a successful peer delivery+finalize, a late empty peer must not RowFailed."""
     session = _session(sample_turn)
@@ -383,21 +406,19 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="exact",
     )
-    success_node = SimpleNamespace(
-        state="complete",
-        result_wire={"runId": run.run_id, "rowComplete": row_complete},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+        ),
     )
-    scheduler._on_orchestrator_node_complete(scope, success_node)
     assert get_row_run(run.run_id) is None
     assert scheduler._stream_resolutions[run.run_id].state is RowStreamResolutionState.HARD_TERMINAL
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     queued: list[object] = []
     while True:
@@ -410,7 +431,7 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
 
 
 def test_empty_complete_delivers_to_stream_session_not_ensure_session(
-    sample_turn,
+    sample_turn
 ) -> None:
     """Regression: DAG complete with no rowComplete must finish the multiplex session.
 
@@ -459,12 +480,9 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(
     )
     controller.attach()
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     ensure_queued: list[object] = []
     while True:
@@ -489,7 +507,7 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(
 
 
 def test_stale_scheduler_run_without_registry_still_finishes_stream(
-    sample_turn,
+    sample_turn
 ) -> None:
     """Stale ``_runs`` entry with no registry RowRun must not skip stream terminal."""
     session = _session(sample_turn)
@@ -528,12 +546,9 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(
     )
     controller.attach()
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     queued: list[object] = []
     while True:
@@ -548,7 +563,7 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(
 
 def test_matching_run_empty_complete_uses_admission_before_row_failed(
     sample_turn,
-    monkeypatch,
+    monkeypatch
 ) -> None:
     """Matching-run empty complete must try admission before RowFailed (orphan parity)."""
     from api.analytics.military_score_inference.inference_stream_rows import (
@@ -601,12 +616,9 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
         lambda _player_id, **_kwargs: immediate,
     )
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     queued: list[object] = []
     while True:
@@ -624,7 +636,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
 
 
 def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event(
-    sample_turn,
+    sample_turn
 ) -> None:
     """Cancel-silent finished_run_ids must not suppress the orphan stream terminal.
 
@@ -667,12 +679,9 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
     controller.finished_run_ids.add(session.run_id)
     controller.attach()
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     pending = controller.drain_pending_wire_events()
     assert any(event.get("type") in {"complete", "error"} for event in pending), (
@@ -682,7 +691,7 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
 
 def test_row_complete_upgrades_prior_empty_admission_terminal(
     sample_turn,
-    monkeypatch,
+    monkeypatch
 ) -> None:
     """Regression: force_fresh RowComplete must upgrade a soft empty/admission terminal.
 
@@ -751,12 +760,9 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
         lambda _player_id, **_kwargs: immediate,
     )
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     assert (
         scheduler._stream_resolutions[session.run_id].state
@@ -781,12 +787,13 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
         priority_band="stream_attached",
         result_wire={"runId": run.run_id, "rowComplete": row_complete},
     )
-    success_node = SimpleNamespace(
-        state="complete",
-        result_wire={"runId": run.run_id, "rowComplete": row_complete},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+        ),
     )
-    scheduler._on_orchestrator_node_complete(scope, success_node)
 
     pending = controller.drain_pending_wire_events()
     upgrades = [
@@ -805,7 +812,7 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
 
 
 def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
-    sample_turn,
+    sample_turn
 ) -> None:
     """Non-durable rowComplete park soft-delivers without DAG complete (fleet blocked)."""
     session = _session(sample_turn)
@@ -872,7 +879,7 @@ def test_soft_empty_park_delivers_stream_terminal_without_completing_node(
 
 
 def test_empty_park_schedule_row_stays_silent_for_wake(
-    sample_turn,
+    sample_turn
 ) -> None:
     """Empty park with schedule-only row stays silent; wake owns progress (no RowFailed)."""
     session = _session(sample_turn)
@@ -903,8 +910,9 @@ def test_empty_park_schedule_row_stays_silent_for_wake(
     )
     controller.attach()
 
-    parked_node = SimpleNamespace(state="parked", result_wire=None, error=None)
-    scheduler._on_orchestrator_node_complete(scope, parked_node)
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="parked"),
+    )
 
     queued: list[object] = []
     while True:
@@ -918,7 +926,7 @@ def test_empty_park_schedule_row_stays_silent_for_wake(
 
 
 def test_open_evidence_park_stays_silent_without_matching_row_run(
-    sample_turn,
+    sample_turn
 ) -> None:
     """Open-evidence wait park must not soft-admit; wake owns progress."""
     session = _session(sample_turn)
@@ -946,8 +954,9 @@ def test_open_evidence_park_stays_silent_without_matching_row_run(
     )
     controller.attach()
 
-    parked_node = SimpleNamespace(state="parked", result_wire=None, error=None)
-    scheduler._on_orchestrator_node_complete(scope, parked_node)
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="parked"),
+    )
 
     queued: list[object] = []
     while True:

@@ -1084,10 +1084,9 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
 
 def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monkeypatch):
     """Intentional cancel aborts must not RowFailed the open multiplex session."""
-    from types import SimpleNamespace
-
     from api.analytics.military_score_inference.inference_stream_domain_events import RowFailed
     from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
     from api.compute.scope import ComputeScope
 
     reset_inference_table_stream_registry_for_tests()
@@ -1115,12 +1114,15 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
     # Simulate post-cancel abort (run already removed from scheduler).
     with scheduler._lock:
         scheduler._runs.pop(session.run_id, None)
-    cancelled_node = SimpleNamespace(
-        state="failed",
-        result_wire=None,
-        error=ComputeScopeAbortedError("scores inference row run cancelled"),
+    scheduler._on_orchestrator_scope_outcome(
+        ScopeLifecycleSnapshot(
+            scope=scope,
+            state="failed",
+            execution_generation=0,
+            result_wire=None,
+            error=ComputeScopeAbortedError("scores inference row run cancelled"),
+        ),
     )
-    scheduler._on_orchestrator_node_complete(scope, cancelled_node)
     assert delivered == []
     assert not any(isinstance(e, RowFailed) for e in delivered)
     controller.end_stream(scheduler)

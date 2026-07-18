@@ -42,7 +42,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.orchestrator import ComputeNodeRun
+from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -562,13 +562,15 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
         turn=turn_number,
         player_id=player_id,
     )
-    node = ComputeNodeRun(
-        scope=compute_scope,
-        dependency_scopes=(),
-        state="complete",
-        result_wire={"runId": run_id, "rowComplete": row_complete},
+    scheduler._on_orchestrator_scope_outcome(
+        ScopeLifecycleSnapshot(
+            scope=compute_scope,
+            state="complete",
+            execution_generation=0,
+            result_wire={"runId": run_id, "rowComplete": row_complete},
+            error=None,
+        ),
     )
-    scheduler._on_orchestrator_node_complete(compute_scope, node)
 
     assert terminal_seen.wait(timeout=2.0), (
         f"open stream never received terminal event after persist+node-complete (events={events!r})"

@@ -1184,12 +1184,12 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
     orchestrator = ComputeOrchestrator(compute_registry=registry)
     scope = _compute_scope(SHARED_ID, export_scope)
 
-    def on_complete(_scope, node) -> None:
+    def on_outcome(snapshot) -> None:
         events.append("complete_listener")
-        assert node.state == "complete"
+        assert snapshot.state == "complete"
         assert durable_ready is True
 
-    orchestrator.register_node_complete_listener(on_complete)
+    orchestrator.register_scope_outcome_listener(on_outcome)
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
 
     assert handle.state == "complete"

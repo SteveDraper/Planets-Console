@@ -13,13 +13,14 @@ from typing import TYPE_CHECKING
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.compute.orchestrator import ComputeOrchestrator
+from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
     from api.analytics.military_score_inference.row_run import RowRun
 
-# Shared abort detail so node-complete listeners can ignore intentional cancels
+# Shared abort detail so scope-outcome listeners can ignore intentional cancels
 # (must not deliver RowFailed / orphan terminals to an open multiplex).
 SCORES_ROW_RUN_CANCELLED_MESSAGE = "scores inference row run cancelled"
 
@@ -207,12 +208,12 @@ class InferenceStreamTeardownMixin:
         ]
 
     @staticmethod
-    def _is_cancel_abort_failure(node: object) -> bool:
-        if getattr(node, "state", None) != "failed":
+    def _is_cancel_abort_failure(snapshot: ScopeLifecycleSnapshot) -> bool:
+        if snapshot.state != "failed":
             return False
         from api.compute.errors import ComputeScopeAbortedError
 
-        return isinstance(getattr(node, "error", None), ComputeScopeAbortedError)
+        return isinstance(snapshot.error, ComputeScopeAbortedError)
 
     @staticmethod
     def _adapter_row_run(run_id: str) -> RowRun | None:

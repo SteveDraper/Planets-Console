@@ -15,7 +15,6 @@ from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
 from api.compute.orchestrator_observers import (
     InlineStartListener,
     LifecycleListener,
-    NodeCompleteListener,
     NodeDispatchCommitHook,
     NodeDispatchGate,
     OrchestratorObservers,
@@ -202,13 +201,6 @@ class ComputeOrchestrator(
         Returns an unregister callable that removes only this hook.
         """
         return self._observers.register_dispatch_commit_hook(hook)
-
-    def register_node_complete_listener(
-        self,
-        listener: NodeCompleteListener,
-    ) -> Callable[[], None]:
-        """Register a node completion listener; return an unregister callable."""
-        return self._observers.register_node_complete_listener(listener)
 
     def register_scope_outcome_listener(
         self,
@@ -742,7 +734,6 @@ class ComputeOrchestrator(
             for waiter in node.waiters:
                 waiter._waiter_error = error
             node.waiters.clear()
-            self._observers.notify_node_complete(node)
         self._observers.notify_scope_outcome(node)
         if notify_dependents:
             completed_scope = node.scope

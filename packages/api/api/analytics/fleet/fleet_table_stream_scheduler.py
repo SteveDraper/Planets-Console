@@ -22,7 +22,8 @@ from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
-from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
+from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
+from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
@@ -216,8 +217,8 @@ class FleetTableStreamScheduler:
             return existing
         query_ctx = _query_context_for_services(fleet_services, host_turn=host_turn)
         orchestrator = get_compute_orchestrator()
-        unregister = orchestrator.register_node_complete_listener(
-            lambda scope, node: self._on_orchestrator_node_complete(scope, node)
+        unregister = orchestrator.register_scope_outcome_listener(
+            self._on_orchestrator_scope_outcome,
         )
         binding = _FleetStreamOrchestratorBinding(
             orchestrator=orchestrator,
@@ -227,11 +228,11 @@ class FleetTableStreamScheduler:
         self._stream_bindings[stream_token] = binding
         return binding
 
-    def _on_orchestrator_node_complete(
+    def _on_orchestrator_scope_outcome(
         self,
-        scope: ComputeScope,
-        node: ComputeNodeRun,
+        snapshot: ScopeLifecycleSnapshot,
     ) -> None:
+        scope = snapshot.scope
         if scope.analytic_id != ANALYTIC_ID:
             return
         if scope.turn == "*" or not isinstance(scope.turn, int):
@@ -252,19 +253,19 @@ class FleetTableStreamScheduler:
         for run in matching_runs:
             session = run.session
             cancelled = session.cancel_token.is_cancelled()
-            if node.state == "failed":
+            if snapshot.state == "failed":
                 detail = (
-                    str(node.error)
-                    if node.error is not None
+                    str(snapshot.error)
+                    if snapshot.error is not None
                     else "Fleet ledger materialization failed"
                 )
                 _emit_fleet_materialization_error(session, cancelled=cancelled, detail=detail)
                 continue
-            if node.state != "complete" or node.result_wire is None:
+            if snapshot.state != "complete" or snapshot.result_wire is None:
                 continue
-            persisted = _persisted_ledger_from_node_or_storage(
+            persisted = _persisted_ledger_from_result_wire_or_storage(
                 scope,
-                node,
+                snapshot.result_wire,
                 stream_bindings=self._stream_bindings,
             )
             if persisted is None:
@@ -316,19 +317,19 @@ def _emit_fleet_materialization_error(
         _wake_multiplex_for_session(session)
 
 
-def _persisted_ledger_from_node_or_storage(
+def _persisted_ledger_from_result_wire_or_storage(
     scope: ComputeScope,
-    node: ComputeNodeRun,
+    result_wire: object | None,
     *,
     stream_bindings: dict[str, _FleetStreamOrchestratorBinding],
 ) -> PersistedFleetLedger | None:
-    """Resolve a final ledger from the node wire or durable persistence.
+    """Resolve a final ledger from the outcome wire or durable persistence.
 
     Satisfaction short-circuit may complete with ``{}``; reload from storage so
     the stream still emits progress instead of a false materialization error.
     """
-    if isinstance(node.result_wire, dict):
-        persisted_wire = node.result_wire.get("persistedLedgerWire")
+    if isinstance(result_wire, dict):
+        persisted_wire = result_wire.get("persistedLedgerWire")
         if isinstance(persisted_wire, dict):
             return persisted_fleet_ledger_from_json(persisted_wire)
     if scope.player_id == "*" or not isinstance(scope.player_id, int):

@@ -17,8 +17,6 @@ from api.compute.scope import ComputeScope
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeNodeRun
 
-NodeCompleteListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
-
 
 @dataclass(frozen=True)
 class ScopeLifecycleSnapshot:
@@ -87,7 +85,6 @@ class OrchestratorObservers:
 
     def __init__(self, condition: threading.Condition) -> None:
         self._condition = condition
-        self._node_complete_listeners: list[NodeCompleteListener] = []
         self._scope_outcome_listeners: list[ScopeOutcomeListener] = []
         self._step_complete_listeners: list[StepCompleteListener] = []
         self._ready_listeners: list[ReadyListener] = []
@@ -139,22 +136,6 @@ class OrchestratorObservers:
             with self._condition:
                 try:
                     self._dispatch_commit_hooks.remove(hook)
-                except ValueError:
-                    return
-
-        return unregister
-
-    def register_node_complete_listener(
-        self,
-        listener: NodeCompleteListener,
-    ) -> Callable[[], None]:
-        with self._condition:
-            self._node_complete_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._node_complete_listeners.remove(listener)
                 except ValueError:
                     return
 
@@ -256,13 +237,6 @@ class OrchestratorObservers:
                     return
 
         return unregister
-
-    def notify_node_complete(self, node: ComputeNodeRun) -> None:
-        listeners = tuple(self._node_complete_listeners)
-        for listener in listeners:
-            self._post_lock_callbacks.append(
-                lambda listener=listener, node=node: listener(node.scope, node),
-            )
 
     def notify_scope_outcome(self, node: ComputeNodeRun) -> None:
         """Schedule an immutable terminal-or-parked outcome snapshot."""

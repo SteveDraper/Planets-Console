@@ -17,6 +17,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     deliver_inference_domain_event_to_open_stream,
 )
+from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
@@ -118,13 +119,13 @@ class InferenceStreamResolutionMixin:
     def _deliver_soft_park_stream_terminal_if_needed(
         self: InferenceRowScheduler,
         scope: ComputeScope,
-        node: object,
+        snapshot: ScopeLifecycleSnapshot,
     ) -> None:
         session = self._open_stream_session_for_scope(scope)
         if session is None:
             return
 
-        row_complete = self._row_complete_from_result_wire(getattr(node, "result_wire", None))
+        row_complete = self._row_complete_from_result_wire(snapshot.result_wire)
         if row_complete is not None:
             with self._lock:
                 delivery = self._transition_stream_resolution_locked(
@@ -280,7 +281,7 @@ class InferenceStreamResolutionMixin:
     def _deliver_orphan_stream_terminal_if_needed(
         self: InferenceRowScheduler,
         scope: ComputeScope,
-        node: object,
+        snapshot: ScopeLifecycleSnapshot,
     ) -> None:
         session = self._open_stream_session_for_scope(scope)
         if session is None:
@@ -288,7 +289,7 @@ class InferenceStreamResolutionMixin:
         if self._controller_for_compute_scope(scope) is None:
             return
 
-        row_complete = self._row_complete_from_result_wire(getattr(node, "result_wire", None))
+        row_complete = self._row_complete_from_result_wire(snapshot.result_wire)
         if row_complete is not None:
             self._deliver_stream_terminal(session, row_complete)
             self._finalize_row_run(session)
@@ -302,10 +303,10 @@ class InferenceStreamResolutionMixin:
         }:
             return
 
-        if getattr(node, "state", None) == "failed":
+        if snapshot.state == "failed":
             detail = (
-                str(node.error)
-                if getattr(node, "error", None) is not None
+                str(snapshot.error)
+                if snapshot.error is not None
                 else "Inference tier solve failed"
             )
             self._deliver_stream_terminal(session, RowFailed(detail=detail))

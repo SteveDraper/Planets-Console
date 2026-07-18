@@ -31,7 +31,7 @@ class _AdmitOnlyOrchestrator:
         node = ComputeNodeRun(scope=request.scope, dependency_scopes=())
         return ComputeHandle(scope=request.scope, _node=node)
 
-    def register_node_complete_listener(self, listener):
+    def register_scope_outcome_listener(self, listener):
         return lambda: None
 
 

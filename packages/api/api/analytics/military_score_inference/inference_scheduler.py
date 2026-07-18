@@ -79,8 +79,8 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         self._execution_generation_by_run_id: dict[str, int] = {}
         # RLock: adapter methods hold this lock across orchestrator calls. When resume_globally
         # calls _dispatch_ready_orchestrator_work_locked, dispatch_ready_work drains post-lock
-        # callbacks in the caller thread and the node-complete listener
-        # (_on_orchestrator_node_complete, _finalize_row_run) can re-acquire the lock on that
+        # callbacks in the caller thread and the scope-outcome listener
+        # (_on_orchestrator_scope_outcome, _finalize_row_run) can re-acquire the lock on that
         # thread. pause_globally shares the same lock while updating dispatch gates. Production
         # tier_solve uses the thread pool backend, so listener completion is usually async rather
         # than synchronous in the dispatch caller.
@@ -501,13 +501,7 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         self,
         snapshot: ScopeLifecycleSnapshot,
     ) -> None:
-        self._on_orchestrator_node_complete(snapshot.scope, snapshot)
-
-    def _on_orchestrator_node_complete(
-        self,
-        scope: ComputeScope,
-        node: object,
-    ) -> None:
+        scope = snapshot.scope
         if scope.analytic_id != SCORES_ANALYTIC_ID:
             return
         if scope.turn == "*" or not isinstance(scope.turn, int):
@@ -516,16 +510,16 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
             return
         # Intentional row-run cancel aborts in-flight DAG nodes. Do not fail (or
         # orphan-complete) the open multiplex -- reschedule will admit a replacement.
-        if self._is_cancel_abort_failure(node):
+        if self._is_cancel_abort_failure(snapshot):
             return
 
         # Soft park: reattach empty/non-durable stream delivery without completing
         # the scores node (fleet ENSURE stays blocked until durable close).
-        if getattr(node, "state", None) == "parked":
-            self._deliver_soft_park_stream_terminal_if_needed(scope, node)
+        if snapshot.state == "parked":
+            self._deliver_soft_park_stream_terminal_if_needed(scope, snapshot)
             return
 
-        wire_run_id = self._run_id_from_result_wire(getattr(node, "result_wire", None))
+        wire_run_id = self._run_id_from_result_wire(snapshot.result_wire)
         sibling_still_active = self._scope_has_live_nonterminal_work(scope)
 
         with self._lock:
@@ -550,13 +544,15 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
                 continue
             session = row_run.session
             deliver_session = self._open_stream_session_for_scope(scope) or session
-            if node.state == "failed":
+            if snapshot.state == "failed":
                 if sibling_still_active:
                     # Peer binding (e.g. stream_attached) still owns the shared RowRun.
                     # Do not fail the stream or unregister -- the peer may still succeed.
                     continue
                 detail = (
-                    str(node.error) if node.error is not None else "Inference tier solve failed"
+                    str(snapshot.error)
+                    if snapshot.error is not None
+                    else "Inference tier solve failed"
                 )
                 self._deliver_stream_terminal(
                     deliver_session,
@@ -564,9 +560,9 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
                 )
                 self._finalize_row_run(session)
                 continue
-            if node.state != "complete":
+            if snapshot.state != "complete":
                 continue
-            row_complete = self._row_complete_from_result_wire(node.result_wire)
+            row_complete = self._row_complete_from_result_wire(snapshot.result_wire)
             if row_complete is None:
                 if sibling_still_active:
                     continue
@@ -586,10 +582,10 @@ class InferenceRowScheduler(InferenceStreamTeardownMixin, InferenceStreamResolut
         # Always re-check after matching-run handling. Empty / idempotent tier_solve can
         # leave the DAG terminal while multiplex still waits (stale ``_runs``, cancelled
         # session skip, or peer unregister). Do not rely on matching_run_ids alone.
-        if getattr(node, "state", None) in {"complete", "failed"} and not (
+        if snapshot.state in {"complete", "failed"} and not (
             self._scope_has_live_nonterminal_work(scope)
         ):
-            self._deliver_orphan_stream_terminal_if_needed(scope, node)
+            self._deliver_orphan_stream_terminal_if_needed(scope, snapshot)
 
     def _wake_parked_scores_after_row_run_adopt(
         self,
