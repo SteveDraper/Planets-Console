@@ -6,7 +6,6 @@ import threading
 import time
 
 import pytest
-
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import (
     TierJobOutcome,
