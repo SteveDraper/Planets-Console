@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import (
     TierJobOutcome,
@@ -590,8 +592,10 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
 
         assert not session.cancel_token.is_cancelled()
         assert not is_row_run_cancelled(session.run_id)
+        # Unregister seeds OPEN (positive allow); detach must not set CANCELED.
         resolution = scheduler._stream_resolutions.get(session.run_id)
-        assert resolution is None or resolution.state is not RowStreamResolutionState.CANCELED
+        assert resolution is not None
+        assert resolution.state is RowStreamResolutionState.OPEN
         assert session.run_id not in scheduler._runs
     finally:
         reset_inference_row_scheduler_for_tests()
@@ -899,6 +903,9 @@ def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn
     """Disconnect detaches without a cancellation fence; finish may persist."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_stream_resolution import (
+        RowStreamResolutionState,
+    )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -941,6 +948,10 @@ def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn
         assert get_row_run(session.run_id) is None
         assert not is_row_run_cancelled(session.run_id)
         assert not session.cancel_token.is_cancelled()
+        # Unregister seeds OPEN as the positive finish-after-detach allow.
+        resolution = scheduler._stream_resolutions.get(session.run_id)
+        assert resolution is not None
+        assert resolution.state is RowStreamResolutionState.OPEN
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -970,6 +981,61 @@ def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn
     finally:
         reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
+
+
+def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn):
+    """Missing RowRun with no stream resolution must fail loudly, not write."""
+    from api.analytics.export_context import make_analytic_query_context
+    from api.analytics.military_score_inference.row_stream_resolution_registry import (
+        reset_stream_resolution_registry_for_tests,
+    )
+    from api.analytics.options import TurnAnalyticsOptions
+    from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.tier_row_run_registry import (
+        get_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+    from api.storage.memory_asset import MemoryAssetBackend
+
+    reset_tier_row_run_registry_for_tests()
+    reset_stream_resolution_registry_for_tests()
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    turn_number = sample_turn.settings.turn
+    player_id = sample_turn.scores[0].ownerid
+    unknown_run_id = "never-registered-run-id"
+    assert get_row_run(unknown_run_id) is None
+
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_services={
+            SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+        },
+    )
+    row_complete = row_complete_with_summary(
+        InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+        summary="unknown run must not persist",
+    )
+    try:
+        with pytest.raises(RuntimeError, match="unknown run_id"):
+            ScoresPersistencePolicy().persist(
+                ctx,
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                {"runId": unknown_run_id, "rowComplete": row_complete},
+            )
+        assert persistence.get_row(628580, 1, turn_number, player_id) is None
+    finally:
+        reset_tier_row_run_registry_for_tests()
+        reset_stream_resolution_registry_for_tests()
 
 
 def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monkeypatch):

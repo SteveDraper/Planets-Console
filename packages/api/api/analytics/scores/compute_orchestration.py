@@ -23,6 +23,9 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.row_stream_resolution_registry import (
+    get_stream_resolution,
+)
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.tier_row_run_registry import (
@@ -442,13 +445,20 @@ class ScoresPersistencePolicy:
         # Cancel vs detach: cancel intent (token + resolution CANCELED) sets a
         # durable fence in the shared bounded resolution registry before
         # unregister so a late persist after RowRun removal still skips. Detach
-        # only unregisters (no CANCELED) so finish-after-detach may persist from
-        # the payload.
+        # unregisters without CANCELED and seeds/keeps a non-cancel resolution so
+        # finish-after-detach has a positive allow (not merely "not cancelled").
+        # Unknown run_id with neither RowRun nor resolution must not write.
         if is_row_run_cancelled(run_id):
             return
         run = get_row_run(run_id)
-        if run is not None and run.session.cancel_token.is_cancelled():
-            return
+        if run is not None:
+            if run.session.cancel_token.is_cancelled():
+                return
+        elif get_stream_resolution(run_id) is None:
+            raise RuntimeError(
+                "scores persist refused: unknown run_id with no RowRun and no "
+                f"stream resolution (run_id={run_id!r})"
+            )
 
         services.persistence.persist_row_complete_for_scope(
             row_complete,

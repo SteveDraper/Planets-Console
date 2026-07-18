@@ -11,6 +11,7 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.row_stream_resolution_registry import (
+    ensure_stream_resolution,
     is_stream_resolution_canceled,
     mark_stream_resolution_canceled,
 )
@@ -110,6 +111,13 @@ def is_row_run_cancelled(run_id: str) -> bool:
 
 
 def unregister_row_run(run_id: str) -> None:
+    with _lock:
+        if run_id not in _runs_by_id:
+            return
+    # Seed/refresh while RowRun is still registered so persist never observes a
+    # gap with neither RowRun nor resolution for a known unregister. Cancel
+    # already wrote CANCELED before this call; ensure does not overwrite.
+    ensure_stream_resolution(run_id)
     with _lock:
         run = _runs_by_id.pop(run_id, None)
         if run is None:

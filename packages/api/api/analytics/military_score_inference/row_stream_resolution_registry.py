@@ -1,8 +1,10 @@
 """Process-wide bounded table of per-run stream resolutions.
 
-Single store for post-RowRun memory: soft/hard terminals and cancel
-(``CANCELED``). Shared by the inference scheduler (stream delivery) and scores
-persist (``is_row_run_cancelled``) so cancel fences are not a parallel encoding.
+Single store for post-RowRun memory: soft/hard terminals, cancel (``CANCELED``),
+and detach allow (``OPEN`` seeded on unregister when absent). Shared by the
+inference scheduler (stream delivery) and scores persist (``is_row_run_cancelled``
+plus positive finish-after-detach allow) so cancel fences are not a parallel
+encoding.
 
 FIFO-bounded by ``MAX_STREAM_RESOLUTIONS``. Capacity eviction is an accepted
 risk for very long-lived processes -- late-persist and late-peer races are
@@ -45,6 +47,19 @@ def _touch_locked(run_id: str, resolution: RowStreamResolution) -> None:
 def get_stream_resolution(run_id: str) -> RowStreamResolution | None:
     with _lock:
         return _resolutions.get(run_id)
+
+
+def ensure_stream_resolution(run_id: str) -> None:
+    """Remember ``run_id`` in the bounded table without changing an existing state.
+
+    Seeds ``OPEN`` when absent. Used when a known ``RowRun`` unregisters without
+    cancel so finish-after-detach has a positive allow signal for scores persist
+    (not merely "not cancelled"). Does not overwrite ``CANCELED`` or any other
+    state already recorded for ``run_id``. Refreshes FIFO eviction order.
+    """
+    with _lock:
+        existing = _resolutions.get(run_id)
+        _touch_locked(run_id, existing if existing is not None else RowStreamResolution())
 
 
 def transition_stream_resolution(

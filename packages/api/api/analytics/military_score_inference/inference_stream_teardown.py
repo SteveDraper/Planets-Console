@@ -139,11 +139,13 @@ class InferenceStreamTeardownMixin:
         the RowComplete payload, and complete the DAG node. ``cancel_run`` is the
         explicit cancel path (cancel intent then abort).
 
-        Stream resolutions are left untouched for a turn-scoped detach:
-        ``_remove_run_locked`` already keeps each detached run's resolution so a
-        late peer binding cannot supersede an already-resolved row, and other-turn
-        resolutions must survive a preempt. A full invalidate (``turn is None``,
-        e.g. shutdown) clears every resolution along with everything else.
+        Stream resolutions are left untouched for a turn-scoped detach except that
+        ``unregister_row_run`` seeds ``OPEN`` when none exists: that is the positive
+        allow for finish-after-detach persist. ``_remove_run_locked`` already keeps
+        each detached run's resolution so a late peer binding cannot supersede an
+        already-resolved row, and other-turn resolutions must survive a preempt.
+        A full invalidate (``turn is None``, e.g. shutdown) clears every resolution
+        along with everything else.
         """
         from api.analytics.military_score_inference.row_stream_resolution_registry import (
             clear_stream_resolutions,
@@ -212,7 +214,8 @@ class InferenceStreamTeardownMixin:
         self._execution_generation_by_run_id.pop(run_id, None)
         unregister_row_run(run_id)
         # Keep resolution state so a late peer binding cannot supersede an already
-        # resolved row after its RowRun registration has gone away.
+        # resolved row after its RowRun registration has gone away. Unregister also
+        # seeds OPEN when absent (finish-after-detach persist allow).
         if root_scope is None:
             return
         self._held_initial_submissions = [
