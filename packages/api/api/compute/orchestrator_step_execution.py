@@ -17,7 +17,7 @@ from api.compute.registry import AnalyticComputeRegistration
 from api.compute.wire import DependencyOutputs
 
 if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.orchestrator_state import ComputeNodeRun
     from api.compute.scope import ComputeScope
 
 

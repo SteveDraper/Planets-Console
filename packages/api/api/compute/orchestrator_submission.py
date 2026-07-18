@@ -7,16 +7,13 @@ from typing import TYPE_CHECKING
 from api.compute.dag import PlannedComputeNode, plan_compute_dag
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
-from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun
+from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun, ComputeRequest
 from api.compute.pools import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 
 if TYPE_CHECKING:
-    from api.compute.orchestrator import (
-        ComputeOrchestrator,
-        ComputeRequest,
-    )
+    from api.compute.orchestrator import ComputeOrchestrator
 
 
 class OrchestratorSubmissionMixin:

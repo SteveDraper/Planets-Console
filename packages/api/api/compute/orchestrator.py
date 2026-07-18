@@ -12,7 +12,12 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
 from api.compute.orchestrator_observers import OrchestratorObservers
-from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun, NodeState
+from api.compute.orchestrator_state import (
+    ComputeHandle,
+    ComputeNodeRun,
+    ComputeRequest,
+    NodeState,
+)
 from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
@@ -21,6 +26,8 @@ from api.compute.scope import ComputeScope
 from api.compute.turn_cache import OrchestratorTurnCache
 from api.models.game import TurnInfo
 
+# Re-exports for external callers; in-package compute code imports state types
+# from ``orchestrator_state`` (the owning module).
 __all__ = [
     "ComputeHandle",
     "ComputeNodeRun",
@@ -31,26 +38,6 @@ __all__ = [
     "OrchestratorMetrics",
     "OrchestratorNodeSnapshot",
 ]
-
-
-@dataclass(frozen=True)
-class ComputeRequest:
-    """One orchestrator submission for a compute scope."""
-
-    scope: ComputeScope
-    step_kind: str | None = None
-    priority_band: ComputePriorityBand = "background"
-    force_fresh: bool = False
-    bundle: OrchestrationBundle | None = None
-    ctx: AnalyticQueryContext | None = None
-
-    def resolved_bundle(self) -> OrchestrationBundle | None:
-        """Return the caller-supplied bundle, or build one from ``ctx`` for convenience."""
-        if self.bundle is not None:
-            return self.bundle
-        if self.ctx is not None:
-            return OrchestrationBundle.from_context(self.ctx)
-        return None
 
 
 @dataclass

@@ -14,8 +14,9 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.compute.diagnostics.bindings import BoundOrchestrator
 from api.compute.diagnostics.history import CompletionSurface, CompletionTerminalState
 from api.compute.diagnostics.profile_steps import profile_step_at, profile_step_is_inline
-from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import LifecycleEventKind
+from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope
 from api.config import get_config
 

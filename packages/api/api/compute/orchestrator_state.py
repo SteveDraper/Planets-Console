@@ -1,10 +1,11 @@
-"""Mutable compute-node state and caller-visible handles."""
+"""Compute request, mutable node state, and caller-visible handles."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Literal
 
+from api.analytics.export_context import AnalyticQueryContext
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.pools import ComputePriorityBand
 from api.compute.scope import ComputeScope
@@ -18,6 +19,26 @@ NodeState = Literal[
     "complete",
     "failed",
 ]
+
+
+@dataclass(frozen=True)
+class ComputeRequest:
+    """One orchestrator submission for a compute scope."""
+
+    scope: ComputeScope
+    step_kind: str | None = None
+    priority_band: ComputePriorityBand = "background"
+    force_fresh: bool = False
+    bundle: OrchestrationBundle | None = None
+    ctx: AnalyticQueryContext | None = None
+
+    def resolved_bundle(self) -> OrchestrationBundle | None:
+        """Return the caller-supplied bundle, or build one from ``ctx`` for convenience."""
+        if self.bundle is not None:
+            return self.bundle
+        if self.ctx is not None:
+            return OrchestrationBundle.from_context(self.ctx)
+        return None
 
 
 @dataclass

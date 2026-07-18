@@ -11,13 +11,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from api.compute.orchestrator_observers import LifecycleEventKind
+from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.scope import format_compute_scope_key
 from api.compute.wire import coerce_step_result
 
 if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
-    from api.compute.orchestrator_state import ComputeNodeRun
+    from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.registry import AnalyticComputeRegistration
 
 
@@ -128,8 +128,6 @@ class OrchestratorLifecycleMixin:
         step_kind = recovery.step_kind
 
         def _force_fresh_dependency() -> None:
-            from api.compute.orchestrator import ComputeRequest
-
             self.submit(
                 ComputeRequest(
                     scope=dependency_scope,

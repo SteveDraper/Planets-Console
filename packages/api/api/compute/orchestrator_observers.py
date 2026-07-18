@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.orchestrator_state import ComputeNodeRun
 
 
 @dataclass(frozen=True)

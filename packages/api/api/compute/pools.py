@@ -21,7 +21,8 @@ from api.compute.worker_turn_cache import init_worker_turn_cache, worker_deseria
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+    from api.compute.orchestrator import ComputeOrchestrator
+    from api.compute.orchestrator_state import ComputeNodeRun
 
 ComputePriorityBand = Literal["stream_attached", "interactive_ensure", "background"]
 
