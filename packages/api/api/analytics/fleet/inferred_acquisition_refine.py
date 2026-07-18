@@ -194,7 +194,9 @@ def _assign_option_sets_to_placeholders(
         if prior_sets == option_sets:
             continue
         record.build_option_sets = list(option_sets)
-        record.display_default_option_set_index = _default_option_set_index(option_sets)
+        record.display_default_option_set_index = (
+            _default_option_set_index(option_sets) if option_sets else 0
+        )
         _ensure_unknown_spec_fields(record)
         append_fleet_evidence_event(
             record,
@@ -211,20 +213,26 @@ def _option_sets_respecting_observation_locks(
     record: FleetShipRecord,
     option_sets: tuple[FleetBuildOptionSet, ...],
 ) -> tuple[FleetBuildOptionSet, ...]:
-    """Force observation-known component ids onto inferred option sets.
+    """Keep only inference option sets compatible with observation-known axes.
 
-    Used for partial sightings where hull (and any positively observed axes) must
-    survive refine while unknown axes remain open to inference.
+    Partial fog sightings lock hull (and any positively observed component ids).
+    Option sets for a different hull are dropped -- rewriting ``hull_id`` onto a
+    foreign fit left illegal slot fills (e.g. Falcon Class Escort stamped onto a
+    Deep Space Scout 4-beam build). Unknown weapon/engine axes on a matching-hull
+    set stay open for display from that set.
     """
     hull = record.fields.hull
     engine = record.fields.engine
     beams = record.fields.beams
     launchers = record.fields.launchers
+    known_hull_id = (
+        hull.value if isinstance(hull, FleetFieldKnown) and isinstance(hull.value, int) else None
+    )
     adjusted: list[FleetBuildOptionSet] = []
     for option_set in option_sets:
+        if known_hull_id is not None and option_set.hull_id != known_hull_id:
+            continue
         updates: dict[str, object] = {}
-        if isinstance(hull, FleetFieldKnown) and isinstance(hull.value, int):
-            updates["hull_id"] = hull.value
         if (
             isinstance(engine, FleetFieldKnown)
             and isinstance(engine.value, int)

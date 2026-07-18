@@ -481,7 +481,7 @@ def test_refine_preserves_partial_observation_hull_and_fills_unknown_axes(sample
                     ship_build_domain(
                         combo_id="combo-inferred",
                         label="Inferred fit",
-                        hull_id=99,
+                        hull_id=13,
                         engine_id=9,
                     ),
                 ),
@@ -538,6 +538,115 @@ def test_refine_preserves_partial_observation_hull_and_fills_unknown_axes(sample
     assert after.build_option_sets[0].combo_id == "combo-inferred"
     assert after.build_option_sets[0].engine_id == 9
     assert any(event.kind == "inference_update" for event in after.events)
+
+
+def test_refine_drops_option_sets_for_hulls_other_than_observed(sample_turn):
+    """Fog-known hull must not inherit foreign inference fits (Falcon←DSS fingerprint)."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = 8
+    perspective_id = 1
+    turn_number = sample_turn.settings.turn
+    fog_ship_turn = single_ship_turn(
+        turn_number=turn_number,
+        ship_id=47,
+        owner_id=player_id,
+        x=200,
+        y=200,
+        hull_id=87,
+    )
+    fog_ship = replace(
+        fog_ship_turn.ships[0],
+        beams=0,
+        beamid=0,
+        torps=0,
+        torpedoid=0,
+        bays=0,
+        engineid=0,
+    )
+    perspective_player = next(p for p in fog_ship_turn.players if p.id == perspective_id)
+    owner_player = fog_ship_turn.player
+    turn = replace(
+        fog_ship_turn,
+        player=perspective_player,
+        players=[
+            owner_player,
+            *[p for p in fog_ship_turn.players if p.id != perspective_id],
+        ],
+        ships=[fog_ship],
+        scores=[
+            replace(
+                score,
+                turn=turn_number,
+                ownerid=player_id,
+                capitalships=10,
+                freighters=5,
+                shipchange=1,
+                freighterchange=0,
+            )
+            for score in fog_ship_turn.scores
+            if score.ownerid == player_id
+        ],
+    )
+    schedule_row_with_ladder(
+        scheduler,
+        turn,
+        player_id,
+        merged_solutions=[
+            inference_solution(
+                objective_value=90,
+                ship_builds=(
+                    ship_build_domain(
+                        combo_id="combo_91_7_2_none_4_0",
+                        label="Build Deep Space Scout: 1x Quantam Drive 7, 4x X-Ray Laser",
+                        hull_id=91,
+                        engine_id=7,
+                    ),
+                ),
+            ),
+        ],
+    )
+    inference = FleetInferenceSupport(
+        scores_services=ScoresExportContext(
+            persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+            scheduler=scheduler,
+        ),
+    )
+    snapshot = ensure_fleet_baseline(628580, perspective_id, turn)
+    ledger_for_player(snapshot, player_id).records.append(
+        FleetShipRecord(
+            record_id="matched-placeholder",
+            fields=FleetShipRecordFields(
+                ship_id=FleetFieldBounded(operator="lte", value=50),
+                built_turn=FleetFieldKnown(turn_number),
+            ),
+            events=[
+                FleetEvidenceEvent(
+                    event_id="evt-acq",
+                    kind="scoreboard_delta",
+                    turn=turn_number,
+                    source="scoreboard",
+                    payload={
+                        "shipClass": "warship",
+                        "warshipDelta": 1,
+                        "freighterDelta": 0,
+                    },
+                )
+            ],
+        )
+    )
+    observed_snapshot = ingest_turn_ship_observations(snapshot, turn)
+    before = ledger_for_player(observed_snapshot, player_id).records[0]
+    assert before.fields.hull == FleetFieldKnown(value=87)
+
+    refined = ingest_turn_inferred_acquisitions(
+        observed_snapshot,
+        turn,
+        inference_materialization=_inference_materialization(inference, turn),
+    )
+    after = ledger_for_player(refined, player_id).records[0]
+    assert after.fields.hull == FleetFieldKnown(value=87)
+    assert after.build_option_sets == []
 
 
 def test_streaming_refine_updates_freighter_option_sets(sample_turn):
