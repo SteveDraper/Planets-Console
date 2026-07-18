@@ -142,8 +142,15 @@ class InferenceStreamResolutionMixin:
             return True
         if on_miss == "revert":
             # Empty soft park: drop the provisional claim so wake can rebuild.
+            # Compare-and-pop: a peer may have advanced to HARD_TERMINAL /
+            # CANCELED between claim and this miss; that marker must survive.
             with self._lock:
-                self._stream_resolutions.pop(session.run_id, None)
+                resolution = self._stream_resolutions.get(session.run_id)
+                if (
+                    resolution is not None
+                    and resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
+                ):
+                    del self._stream_resolutions[session.run_id]
             return False
         with self._lock:
             delivery = self._transition_stream_resolution_locked(

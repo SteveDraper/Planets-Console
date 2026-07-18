@@ -29,7 +29,11 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.row_stream_resolution import RowStreamResolutionState
+from api.analytics.military_score_inference.row_stream_resolution import (
+    RowStreamDelivery,
+    RowStreamResolutionState,
+    RowStreamResolutionTrigger,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
@@ -908,6 +912,58 @@ def test_empty_park_schedule_row_stays_silent_for_wake(sample_turn) -> None:
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals == []
     assert session.run_id not in scheduler._stream_resolutions
+
+
+def test_soft_park_revert_preserves_hard_terminal_claimed_during_admission(
+    sample_turn, monkeypatch
+) -> None:
+    """Revert miss must not pop HARD_TERMINAL that landed between claim and pop."""
+    session = _session(sample_turn)
+    run = RowRun(session)
+    register_row_run(run)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    scheduler._runs[run.run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    def _harden_then_miss(session_arg: InferenceRowStreamSession) -> bool:
+        with scheduler._lock:
+            delivery = scheduler._transition_stream_resolution_locked(
+                session_arg.run_id,
+                RowStreamResolutionTrigger.DURABLE_COMPLETE,
+            )
+        assert delivery is RowStreamDelivery.UPGRADE
+        return False
+
+    monkeypatch.setattr(controller, "push_admission_wire_terminal", _harden_then_miss)
+
+    admitted = scheduler._admit_after_soft_provisional(scope, session, on_miss="revert")
+
+    assert admitted is False
+    assert (
+        scheduler._stream_resolutions[session.run_id].state
+        is RowStreamResolutionState.HARD_TERMINAL
+    )
 
 
 def test_open_evidence_park_stays_silent_without_matching_row_run(sample_turn) -> None:
