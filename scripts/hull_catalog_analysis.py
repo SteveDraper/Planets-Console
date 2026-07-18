@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.inference_turn_lookup import (
     player_by_id,
     race_by_id_or_none,
 )
+from api.models.components import Hull
 from api.models.game import GameInfo, GameSettings, TurnInfo
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json

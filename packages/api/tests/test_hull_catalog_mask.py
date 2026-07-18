@@ -17,12 +17,9 @@ from api.storage.memory_asset import MemoryAssetBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 P5_TURN6_PATH = REPO_ROOT / ".data" / "games" / "628580" / "5" / "turns" / "6.json"
-FIXTURE_TURN3_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "inference_corpus" / "628580" / "1" / "turns" / "3.json"
-)
-FIXTURE_INFO_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "inference_corpus" / "628580" / "info.json"
-)
+_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "inference_corpus" / "628580"
+FIXTURE_TURN3_PATH = _FIXTURE_ROOT / "1" / "turns" / "3.json"
+FIXTURE_INFO_PATH = _FIXTURE_ROOT / "info.json"
 
 
 def _load_standard_fixture_turn():
