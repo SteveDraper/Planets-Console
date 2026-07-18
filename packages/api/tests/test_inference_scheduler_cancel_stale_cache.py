@@ -488,6 +488,115 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         reset_tier_row_run_registry_for_tests()
 
 
+def test_cancel_intent_sets_token_fence_and_resolution(sample_turn):
+    """cancel_run applies token + fence + resolution CANCELED as one intent.
+
+    Detach must not set any of these three; cancel must set all three before
+    unregister so late persist and stream delivery cannot race on a partial cancel.
+    """
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_stream_resolution import (
+        RowStreamResolutionState,
+    )
+    from api.analytics.scores.tier_row_run_registry import (
+        is_row_run_cancelled,
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler()
+    try:
+        turn_number = sample_turn.settings.turn
+        player_id = sample_turn.scores[0].ownerid
+        scheduler.begin_scope(
+            InferenceStreamScope(
+                game_id=628580,
+                perspective=1,
+                turn_number=turn_number,
+            )
+        )
+        session = _session_for_player(sample_turn, player_id=player_id)
+        register_row_run(RowRun(session))
+        with scheduler._lock:
+            scheduler._runs[session.run_id] = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            )
+
+        assert not session.cancel_token.is_cancelled()
+        assert not is_row_run_cancelled(session.run_id)
+        assert session.run_id not in scheduler._stream_resolutions
+
+        scheduler.cancel_run(session.run_id)
+
+        assert session.cancel_token.is_cancelled()
+        assert is_row_run_cancelled(session.run_id)
+        resolution = scheduler._stream_resolutions.get(session.run_id)
+        assert resolution is not None
+        assert resolution.state is RowStreamResolutionState.CANCELED
+        assert session.run_id not in scheduler._runs
+    finally:
+        reset_inference_row_scheduler_for_tests()
+        reset_tier_row_run_registry_for_tests()
+
+
+def test_detach_does_not_apply_cancel_intent(sample_turn):
+    """begin_scope detach drops ownership without token, fence, or CANCELED."""
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_stream_resolution import (
+        RowStreamResolutionState,
+    )
+    from api.analytics.scores.tier_row_run_registry import (
+        is_row_run_cancelled,
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
+    )
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.scope import ComputeScope
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler()
+    try:
+        turn_number = sample_turn.settings.turn
+        player_id = sample_turn.scores[0].ownerid
+        scope = InferenceStreamScope(
+            game_id=628580,
+            perspective=1,
+            turn_number=turn_number,
+        )
+        scheduler.begin_scope(scope)
+        session = _session_for_player(sample_turn, player_id=player_id)
+        register_row_run(RowRun(session))
+        with scheduler._lock:
+            scheduler._runs[session.run_id] = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            )
+
+        # Same-scope preempt detaches prior stream runs without cancel intent.
+        scheduler.begin_scope(scope)
+
+        assert not session.cancel_token.is_cancelled()
+        assert not is_row_run_cancelled(session.run_id)
+        resolution = scheduler._stream_resolutions.get(session.run_id)
+        assert resolution is None or resolution.state is not RowStreamResolutionState.CANCELED
+        assert session.run_id not in scheduler._runs
+    finally:
+        reset_inference_row_scheduler_for_tests()
+        reset_tier_row_run_registry_for_tests()
+
+
 def test_cancel_after_unregister_blocks_persist_via_fence(sample_turn):
     """cancel_run fence must survive RowRun removal so late persist skips.
 

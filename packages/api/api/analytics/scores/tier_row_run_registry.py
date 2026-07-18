@@ -107,11 +107,16 @@ def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
 def mark_row_run_cancelled(run_id: str) -> None:
     """Set an explicit cancellation fence that survives RowRun unregister.
 
-    ``cancel_run`` must call this before ``unregister_row_run``. Detach must
-    not -- detached workers may still persist from the RowComplete payload.
+    Production cancel goes through
+    ``InferenceStreamTeardownMixin._apply_cancel_intent_locked``, which sets
+    this fence together with the cancel token and stream-resolution CANCELED.
+    Call this directly only for fence-capacity tests. Detach must not set a
+    fence -- detached workers may still persist from the RowComplete payload.
 
-    Fences are FIFO-bounded by ``MAX_CANCEL_FENCE_RUN_IDS``; re-marking the
-    same ``run_id`` refreshes its eviction order.
+    Fences are FIFO-bounded by ``MAX_CANCEL_FENCE_RUN_IDS`` (accepted capacity;
+    late-persist races are short relative to it). Re-marking the same
+    ``run_id`` refreshes its eviction order. Always call before
+    ``unregister_row_run``.
     """
     with _lock:
         _cancel_fence_run_ids.pop(run_id, None)

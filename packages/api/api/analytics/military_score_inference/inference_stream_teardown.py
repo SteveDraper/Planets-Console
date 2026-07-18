@@ -56,7 +56,7 @@ class InferenceStreamTeardownMixin:
         cancel solve tokens, set cancellation fences, or abort orchestrator
         nodes -- in-flight tier workers may still finish, persist from the
         RowComplete payload, and complete the DAG node. ``cancel_run`` is the
-        explicit cancel intent (token + fence + abort).
+        explicit cancel path (cancel intent then abort).
         """
         with self._lock:
             prior = self._scope_guard.active_scope
@@ -79,35 +79,21 @@ class InferenceStreamTeardownMixin:
         """Cancel one row run and abort its orchestrator scope.
 
         Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
-        only drops stream ownership without cancelling solve work, cancel cancels
-        the RowRun token, sets a cancellation fence (survives unregister so
-        ``ScoresPersistencePolicy`` refuses late persist), and aborts in-flight
+        only drops stream ownership without cancelling solve work, cancel applies
+        cancel intent (token + fence + resolution CANCELED) then aborts in-flight
         orchestrator nodes so a later ``force_fresh`` submit cannot attach to a
         still-running node with a missing RowRun.
         """
-        from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
-
         abort_scope: ComputeScope | None = None
         abort_generation: int | None = None
         with self._lock:
-            row_run = self._adapter_row_run(run_id)
             root_scope = self._runs.get(run_id)
-            from api.analytics.military_score_inference.row_stream_resolution import (
-                RowStreamResolutionTrigger,
-            )
-
-            self._transition_stream_resolution_locked(
-                run_id,
-                RowStreamResolutionTrigger.CANCELED,
-            )
             # Use the generation cached at submit/wake -- never call into the
             # orchestrator while holding the scheduler lock (ABBA with orch drain
             # paths that take this lock, and with diagnostics snapshot on orch).
             abort_generation = self._execution_generation_by_run_id.get(run_id)
-            if row_run is not None:
-                row_run.session.cancel_token.cancel()
             # Fence before unregister: persist must not race on missing RowRun.
-            mark_row_run_cancelled(run_id)
+            self._apply_cancel_intent_locked(run_id)
             self._remove_run_locked(run_id)
             abort_scope = root_scope
         # Abort outside the scheduler lock: ``abort_scope`` drains node-complete
@@ -116,6 +102,27 @@ class InferenceStreamTeardownMixin:
         # self-deadlocks with ``reschedule_row`` (stream_lock -> cancel -> abort).
         if abort_scope is not None and abort_generation is not None:
             self._abort_orchestrator_scope(abort_scope, abort_generation)
+
+    def _apply_cancel_intent_locked(self: InferenceRowScheduler, run_id: str) -> None:
+        """Set token + fence + resolution CANCELED as one cancel intent.
+
+        Caller must hold ``self._lock``. Does not unregister the RowRun or abort
+        orchestrator scopes -- ``cancel_run`` owns those next steps. Detach must
+        never call this: detached workers may still finish and persist.
+        """
+        from api.analytics.military_score_inference.row_stream_resolution import (
+            RowStreamResolutionTrigger,
+        )
+        from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
+
+        self._transition_stream_resolution_locked(
+            run_id,
+            RowStreamResolutionTrigger.CANCELED,
+        )
+        row_run = self._adapter_row_run(run_id)
+        if row_run is not None:
+            row_run.session.cancel_token.cancel()
+        mark_row_run_cancelled(run_id)
 
     def _detach_stream_runs_locked(
         self: InferenceRowScheduler,
@@ -129,7 +136,7 @@ class InferenceStreamTeardownMixin:
         Does **not** cancel RowRun tokens, set cancellation fences, or call
         ``abort_scope`` -- in-flight tier workers may still finish, persist from
         the RowComplete payload, and complete the DAG node. ``cancel_run`` is the
-        explicit cancel intent (token + fence + abort).
+        explicit cancel path (cancel intent then abort).
 
         ``_stream_resolutions`` is left untouched for a turn-scoped detach:
         ``_remove_run_locked`` already keeps each detached run's resolution so a
