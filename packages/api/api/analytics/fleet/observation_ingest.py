@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import replace
 
 from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
+from api.analytics.fleet.observation_option_locks import (
+    observation_locks_from_option_set,
+    option_set_respecting_locks,
+)
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import (
@@ -186,53 +189,23 @@ def _apply_observed_option_set(
         record.build_option_sets = [observed_option_set]
         record.display_default_option_set_index = 0
         return
+    locks = observation_locks_from_option_set(observed_option_set)
     observed_hull_id = observed_option_set.hull_id
+    candidates = record.build_option_sets
     if observed_hull_id is not None:
-        matching = [
-            existing
-            for existing in record.build_option_sets
-            if existing.hull_id == observed_hull_id
-        ]
+        matching = [existing for existing in candidates if existing.hull_id == observed_hull_id]
         if not matching:
             record.build_option_sets = [observed_option_set]
             record.display_default_option_set_index = 0
             return
-        record.build_option_sets = [
-            _merge_option_set_observation_locks(existing, observed_option_set)
-            for existing in matching
-        ]
-        record.display_default_option_set_index = 0
-        return
-    record.build_option_sets = [
-        _merge_option_set_observation_locks(existing, observed_option_set)
-        for existing in record.build_option_sets
+        candidates = matching
+    merged_sets = [
+        merged
+        for existing in candidates
+        if (merged := option_set_respecting_locks(existing, locks)) is not None
     ]
-
-
-def _merge_option_set_observation_locks(
-    existing: FleetBuildOptionSet,
-    observed: FleetBuildOptionSet,
-) -> FleetBuildOptionSet:
-    """Merge positively observed component ids onto one already-compatible set.
-
-    Callers must only pass ``existing`` sets whose ``hull_id`` already matches
-    ``observed.hull_id`` when the observation locked a hull.
-    """
-    return replace(
-        existing,
-        hull_id=observed.hull_id if observed.hull_id is not None else existing.hull_id,
-        engine_id=observed.engine_id if observed.engine_id is not None else existing.engine_id,
-        beam_id=observed.beam_id if observed.beam_id is not None else existing.beam_id,
-        torp_id=observed.torp_id if observed.torp_id is not None else existing.torp_id,
-        beam_count=(
-            observed.beam_count if observed.beam_count is not None else existing.beam_count
-        ),
-        launcher_count=(
-            observed.launcher_count
-            if observed.launcher_count is not None
-            else existing.launcher_count
-        ),
-    )
+    record.build_option_sets = merged_sets if merged_sets else [observed_option_set]
+    record.display_default_option_set_index = 0
 
 
 def _find_active_record_for_ship(

@@ -19,7 +19,8 @@ class TerminalSource(StrEnum):
     """Who is asking to close (or soft-close) the stream row."""
 
     PARKED = "parked"
-    NODE_COMPLETE = "node_complete"
+    # Durable / failed terminals from ``notify_scope_outcome`` (not park).
+    SCOPE_OUTCOME = "scope_outcome"
     ORPHAN = "orphan"
 
 
@@ -32,7 +33,7 @@ class SoftStreamAction(StrEnum):
     DURABLE_EVENT = "durable_event"
     DURABLE_EVENT_FINALIZE = "durable_event_finalize"
     ORPHAN_EMPTY = "orphan_empty"
-    NODE_COMPLETE_EMPTY = "node_complete_empty"
+    SCOPE_OUTCOME_EMPTY = "scope_outcome_empty"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,11 +70,11 @@ _SOFT_STREAM_POLICY: dict[_SoftStreamPolicyKey, SoftStreamAction] = {
         TerminalSource.PARKED, None, True
     ): SoftStreamAction.SOFT_PROVISIONAL_EVENT,
     _SoftStreamPolicyKey(TerminalSource.PARKED, None, False): SoftStreamAction.SILENCE,
-    # NODE_COMPLETE -- park_reason unused
-    _SoftStreamPolicyKey(TerminalSource.NODE_COMPLETE, None, True): SoftStreamAction.DURABLE_EVENT,
+    # SCOPE_OUTCOME -- park_reason unused
+    _SoftStreamPolicyKey(TerminalSource.SCOPE_OUTCOME, None, True): SoftStreamAction.DURABLE_EVENT,
     _SoftStreamPolicyKey(
-        TerminalSource.NODE_COMPLETE, None, False
-    ): SoftStreamAction.NODE_COMPLETE_EMPTY,
+        TerminalSource.SCOPE_OUTCOME, None, False
+    ): SoftStreamAction.SCOPE_OUTCOME_EMPTY,
     # ORPHAN -- park_reason unused
     _SoftStreamPolicyKey(
         TerminalSource.ORPHAN, None, True
@@ -85,7 +86,7 @@ _SOFT_STREAM_POLICY: dict[_SoftStreamPolicyKey, SoftStreamAction] = {
 def resolve_soft_stream_action(
     *,
     source: TerminalSource,
-    park_reason: str | None,
+    park_reason: ScoresParkReason | str | None,
     has_event: bool,
 ) -> SoftStreamAction:
     """Look up soft-stream policy for one park / durable / orphan delivery."""
@@ -94,9 +95,11 @@ def resolve_soft_stream_action(
     return _SOFT_STREAM_POLICY.get(key, SoftStreamAction.SILENCE)
 
 
-def _coerce_park_reason(park_reason: str | None) -> ScoresParkReason | None:
+def _coerce_park_reason(park_reason: ScoresParkReason | str | None) -> ScoresParkReason | None:
     if park_reason is None:
         return None
+    if isinstance(park_reason, ScoresParkReason):
+        return park_reason
     try:
         return ScoresParkReason(park_reason)
     except ValueError:

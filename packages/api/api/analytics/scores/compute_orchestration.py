@@ -272,7 +272,13 @@ def wake_scores_scope(
     priority_band: str = "background",
     orchestrator: ComputeOrchestrator | None = None,
 ) -> bool:
-    """Submit an encoded scores wake publisher through one coordinator."""
+    """Submit an encoded scores wake publisher through one coordinator.
+
+    Wake *behavior* is total over ``ScoresWakeReason``:
+
+    - ``ROW_RUN_ADOPTED`` / ``EVIDENCE_CLOSED`` -- ``wake_if_parked`` only
+    - ``STREAM_RESCHEDULED`` -- ``force_fresh`` submit (reopens parked or running)
+    """
     from api.compute.orchestrator import ComputeRequest
     from api.compute.runtime import get_compute_orchestrator
 
@@ -284,13 +290,15 @@ def wake_scores_scope(
         ctx=ctx,
         priority_band=priority_band,
     )
+    if reason is ScoresWakeReason.STREAM_RESCHEDULED:
+        resolved_orchestrator.submit(request)
+        return True
     if reason in {
         ScoresWakeReason.ROW_RUN_ADOPTED,
         ScoresWakeReason.EVIDENCE_CLOSED,
     }:
         return resolved_orchestrator.wake_if_parked(request) is not None
-    resolved_orchestrator.submit(request)
-    return True
+    raise ValueError(f"unsupported scores wake reason: {reason!r}")
 
 
 def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> StepResult:
@@ -423,11 +431,11 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
-        # Cancel vs detach: cancel sets RowRun phase CANCELLED (shell retained);
-        # detach sets DETACHED. Unknown run_id with no retained shell must not write.
+        # Cancel vs detach: cancel records compact CANCELLED admission; detach
+        # retains a DETACHED shell. Unknown run_id with no admission must not write.
         # Live REGISTERED shells stay until stream finalize retires them so peer
-        # bindings can still resolve the same RowRun; DETACHED/CANCELLED late
-        # persist retires immediately after the decision.
+        # bindings can still resolve the same RowRun; DETACHED late persist retires
+        # immediately after the decision; CANCELLED deny retires admission memory.
         decision = decide_scores_row_persist(run_id)
         run = get_row_run(run_id)
         phase = None if run is None else run.phase

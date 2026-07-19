@@ -110,7 +110,7 @@ class InferenceStreamScopeOutcomesMixin:
                 str(snapshot.error) if snapshot.error is not None else "Inference tier solve failed"
             )
             self._deliver_row_terminal(
-                source=TerminalSource.NODE_COMPLETE,
+                source=TerminalSource.SCOPE_OUTCOME,
                 scope=scope,
                 session=deliver_session,
                 event=RowFailed(detail=detail),
@@ -127,7 +127,7 @@ class InferenceStreamScopeOutcomesMixin:
                 return
             # Parity with orphan empty-complete: admission before RowFailed.
             self._deliver_row_terminal(
-                source=TerminalSource.NODE_COMPLETE,
+                source=TerminalSource.SCOPE_OUTCOME,
                 scope=scope,
                 session=deliver_session,
             )
@@ -137,7 +137,7 @@ class InferenceStreamScopeOutcomesMixin:
         # Always attempt delivery: RowComplete may upgrade a prior empty/admission
         # terminal for the same stream session after force_fresh re-solve.
         self._deliver_row_terminal(
-            source=TerminalSource.NODE_COMPLETE,
+            source=TerminalSource.SCOPE_OUTCOME,
             scope=scope,
             session=deliver_session,
             event=row_complete,
@@ -185,8 +185,7 @@ class InferenceStreamScopeOutcomesMixin:
         """
         from api.compute.runtime import get_compute_orchestrator
 
-        node = get_compute_orchestrator().nodes.get(scope)
-        return node is not None and node.state not in {"complete", "failed"}
+        return get_compute_orchestrator().has_nonterminal_scope_work(scope)
 
 
 def _is_scores_player_turn_scope(scope: ComputeScope) -> bool:

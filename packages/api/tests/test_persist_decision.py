@@ -1,4 +1,4 @@
-"""Unit tests for scores PersistDecision gate."""
+"""Unit tests for scores PersistDecision gate (compact cancelled admission)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from api.analytics.scores.tier_row_run_registry import (
     detach_row_run,
     get_row_run,
     get_row_run_phase,
-    is_evicted_cancelled_run,
+    has_cancelled_admission,
     mark_row_run_cancelled,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
@@ -41,14 +41,16 @@ def test_persist_decision_table(sample_turn) -> None:
         assert get_row_run_phase(run.run_id) is RowRunPhase.REGISTERED
         assert decide_scores_row_persist(run.run_id) is PersistDecision.ALLOW
 
-        # Token alone is not a persist gate; cancel intent sets CANCELLED phase.
+        # Token alone is not a persist gate; cancel intent sets CANCELLED admission.
         run.session.cancel_token.cancel()
         assert decide_scores_row_persist(run.run_id) is PersistDecision.ALLOW
 
         cancelled = RowRun(_session(sample_turn))
         register_row_run(cancelled)
         mark_row_run_cancelled(cancelled.run_id)
+        assert get_row_run(cancelled.run_id) is None
         assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED
+        assert has_cancelled_admission(cancelled.run_id)
         assert decide_scores_row_persist(cancelled.run_id) is PersistDecision.DENY_CANCEL
 
         detached = RowRun(_session(sample_turn))
@@ -64,9 +66,9 @@ def test_persist_decision_table(sample_turn) -> None:
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancelled_shell_fifo_eviction_denies_persist(sample_turn, monkeypatch) -> None:
-    """Past CANCELLED shell bound: oldest shell drops; persist still DENY_CANCEL."""
-    monkeypatch.setattr(reg, "MAX_CANCELLED_ROW_RUNS", 3)
+def test_cancelled_admission_fifo_eviction_refuses_persist(sample_turn, monkeypatch) -> None:
+    """Past cancelled-admission bound: oldest id drops; persist REFUSE_UNKNOWN."""
+    monkeypatch.setattr(reg, "MAX_CANCELLED_ADMISSIONS", 3)
     reset_tier_row_run_registry_for_tests()
     try:
         cancelled_ids: list[str] = []
@@ -78,10 +80,11 @@ def test_cancelled_shell_fifo_eviction_denies_persist(sample_turn, monkeypatch) 
 
         oldest = cancelled_ids[0]
         assert get_row_run(oldest) is None
-        assert is_evicted_cancelled_run(oldest)
-        assert decide_scores_row_persist(oldest) is PersistDecision.DENY_CANCEL
+        assert not has_cancelled_admission(oldest)
+        assert decide_scores_row_persist(oldest) is PersistDecision.REFUSE_UNKNOWN
 
         for retained_id in cancelled_ids[1:]:
+            assert get_row_run(retained_id) is None
             assert get_row_run_phase(retained_id) is RowRunPhase.CANCELLED
             assert decide_scores_row_persist(retained_id) is PersistDecision.DENY_CANCEL
 
@@ -91,8 +94,8 @@ def test_cancelled_shell_fifo_eviction_denies_persist(sample_turn, monkeypatch) 
 
 
 def test_cancelled_fifo_does_not_evict_registered_or_detached(sample_turn, monkeypatch) -> None:
-    """REGISTERED / DETACHED shells are outside CANCELLED FIFO capacity."""
-    monkeypatch.setattr(reg, "MAX_CANCELLED_ROW_RUNS", 2)
+    """REGISTERED / DETACHED shells are outside cancelled-admission FIFO capacity."""
+    monkeypatch.setattr(reg, "MAX_CANCELLED_ADMISSIONS", 2)
     reset_tier_row_run_registry_for_tests()
     try:
         live = RowRun(_session(sample_turn))

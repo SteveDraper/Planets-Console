@@ -56,16 +56,16 @@ from api.analytics.scores_park_wake import ScoresParkReason
         (TerminalSource.PARKED, "unknown_park", False, SoftStreamAction.SILENCE),
         # Durable / orphan
         (
-            TerminalSource.NODE_COMPLETE,
+            TerminalSource.SCOPE_OUTCOME,
             ScoresParkReason.EMPTY_TIER_OUTCOME,
             True,
             SoftStreamAction.DURABLE_EVENT,
         ),
         (
-            TerminalSource.NODE_COMPLETE,
+            TerminalSource.SCOPE_OUTCOME,
             None,
             False,
-            SoftStreamAction.NODE_COMPLETE_EMPTY,
+            SoftStreamAction.SCOPE_OUTCOME_EMPTY,
         ),
         (
             TerminalSource.ORPHAN,

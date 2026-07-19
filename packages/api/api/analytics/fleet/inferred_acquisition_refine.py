@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import replace
 
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.inferred_acquisition_ingest import (
@@ -220,40 +219,21 @@ def _option_sets_respecting_observation_locks(
 ) -> tuple[FleetBuildOptionSet, ...]:
     """Keep only inference option sets compatible with observation-known axes.
 
-    Partial fog sightings lock hull (and any positively observed component ids).
-    Option sets for a different hull are dropped -- rewriting ``hull_id`` onto a
-    foreign fit left illegal slot fills (e.g. Falcon Class Escort stamped onto a
-    Deep Space Scout 4-beam build). Unknown weapon/engine axes on a matching-hull
-    set stay open for display from that set.
+    Partial fog sightings lock hull (and any positively observed component ids
+    and counts). Option sets that contradict those locks are dropped -- rewriting
+    a foreign hull or retaining a 4-beam fit after a 1-beam sighting left illegal
+    display rows. Unknown weapon/engine axes on a compatible set stay open for
+    display from that set, then receive the locked values via merge.
     """
-    hull = record.fields.hull
-    engine = record.fields.engine
-    beams = record.fields.beams
-    launchers = record.fields.launchers
-    known_hull_id = (
-        hull.value if isinstance(hull, FleetFieldKnown) and isinstance(hull.value, int) else None
+    from api.analytics.fleet.observation_option_locks import (
+        observation_locks_from_record,
+        option_sets_respecting_locks,
     )
-    adjusted: list[FleetBuildOptionSet] = []
-    for option_set in option_sets:
-        if known_hull_id is not None and option_set.hull_id != known_hull_id:
-            continue
-        updates: dict[str, object] = {}
-        if (
-            isinstance(engine, FleetFieldKnown)
-            and isinstance(engine.value, int)
-            and engine.value > 0
-        ):
-            updates["engine_id"] = engine.value
-        if isinstance(beams, FleetFieldKnown) and isinstance(beams.value, int) and beams.value > 0:
-            updates["beam_id"] = beams.value
-        if (
-            isinstance(launchers, FleetFieldKnown)
-            and isinstance(launchers.value, int)
-            and launchers.value > 0
-        ):
-            updates["torp_id"] = launchers.value
-        adjusted.append(replace(option_set, **updates) if updates else option_set)
-    return tuple(adjusted)
+
+    return option_sets_respecting_locks(
+        option_sets,
+        observation_locks_from_record(record),
+    )
 
 
 def _option_sets_for_slot(

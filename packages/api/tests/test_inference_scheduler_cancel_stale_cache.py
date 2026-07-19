@@ -504,7 +504,7 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
     Detach must not set these. CANCELLED phase is the durable persist refuse;
     stream ``CANCELED`` only silences delivery.
     """
-    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.military_score_inference.row_stream_resolution import (
         RowStreamResolutionState,
     )
@@ -512,7 +512,7 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
         get_stream_resolution,
     )
     from api.analytics.scores.tier_row_run_registry import (
-        is_row_run_cancelled,
+        get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -545,13 +545,13 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
             scheduler._execution_generation_by_run_id[session.run_id] = 7
 
         assert not session.cancel_token.is_cancelled()
-        assert not is_row_run_cancelled(session.run_id)
+        assert get_row_run_phase(session.run_id) is not RowRunPhase.CANCELLED
         assert get_stream_resolution(session.run_id) is None
 
         scheduler.cancel_run(session.run_id)
 
         assert session.cancel_token.is_cancelled()
-        assert is_row_run_cancelled(session.run_id)
+        assert get_row_run_phase(session.run_id) is RowRunPhase.CANCELLED
         resolution = get_stream_resolution(session.run_id)
         assert resolution is not None
         assert resolution.state is RowStreamResolutionState.CANCELED
@@ -566,7 +566,6 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
     from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run_phase,
-        is_row_run_cancelled,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -600,7 +599,7 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
         scheduler.begin_scope(scope)
 
         assert not session.cancel_token.is_cancelled()
-        assert not is_row_run_cancelled(session.run_id)
+        assert get_row_run_phase(session.run_id) is not RowRunPhase.CANCELLED
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
         assert session.run_id not in scheduler._runs
     finally:
@@ -612,7 +611,7 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
     """cancel_run CANCELLED phase must survive scheduler removal so late persist skips.
 
     Fingerprint: cancel cancelled the token and dropped scheduler maps before abort;
-    persist must still see the retained CANCELLED shell and refuse the write.
+    persist must still see compact CANCELLED admission and refuse the write.
     """
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
@@ -622,7 +621,6 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run,
         get_row_run_phase,
-        is_row_run_cancelled,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -657,9 +655,8 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
             )
 
         scheduler.cancel_run(session.run_id)
-        assert get_row_run(session.run_id) is row_run
+        assert get_row_run(session.run_id) is None
         assert get_row_run_phase(session.run_id) is RowRunPhase.CANCELLED
-        assert is_row_run_cancelled(session.run_id)
         assert session.cancel_token.is_cancelled()
 
         ctx = make_analytic_query_context(
@@ -694,7 +691,7 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
 def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
     """A CANCELLED phase must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.military_score_inference.row_stream_resolution_registry import (
         reset_stream_resolution_registry_for_tests,
     )
@@ -741,7 +738,7 @@ def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
             )
 
         scheduler.cancel_run(session.run_id)
-        assert reg.is_row_run_cancelled(session.run_id)
+        assert reg.get_row_run_phase(session.run_id) is RowRunPhase.CANCELLED
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -773,7 +770,7 @@ def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
 
 
 def test_row_run_phase_survives_scheduler_remove(sample_turn):
-    """CANCELLED / DETACHED phases stay on the registry owner after scheduler drop."""
+    """CANCELLED admission and DETACHED shells stay on the registry owner after scheduler drop."""
     from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.scores.tier_row_run_registry import (
         detach_row_run,
@@ -855,7 +852,6 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run,
         get_row_run_phase,
-        is_row_run_cancelled,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -891,7 +887,7 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
         assert get_row_run(session.run_id) is row_run
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
-        assert not is_row_run_cancelled(session.run_id)
+        assert get_row_run_phase(session.run_id) is not RowRunPhase.CANCELLED
         assert not session.cancel_token.is_cancelled()
 
         ctx = make_analytic_query_context(

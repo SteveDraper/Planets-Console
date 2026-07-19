@@ -103,7 +103,7 @@ class InferenceStreamResolutionMixin:
         if action is SoftStreamAction.CHEAP_ADMIT_REVERT:
             return self._admit_after_soft_provisional(scope, resolved, on_miss="revert")
 
-        if action is SoftStreamAction.NODE_COMPLETE_EMPTY:
+        if action is SoftStreamAction.SCOPE_OUTCOME_EMPTY:
             return self._admit_after_soft_provisional(scope, resolved, on_miss="fail")
 
         if action is SoftStreamAction.ORPHAN_EMPTY:

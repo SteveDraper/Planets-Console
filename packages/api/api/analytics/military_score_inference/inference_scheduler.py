@@ -120,11 +120,56 @@ class InferenceRowScheduler(
     ) -> bool:
         """Return whether scores@N should reschedule after one fleet ledger persist.
 
-        Runs invalidation and the skip decision under the scheduler lock.
+        Invalidation runs under the scheduler lock; orchestrator peeks run outside
+        that lock so adapters never read the live ``nodes`` map.
         """
         with self._lock:
             invalidate_row()
-            return not self._should_skip_reschedule_for_fleet_persist_locked(scope, event)
+            binding = self._stream_binding_for_scope_locked(scope)
+            if binding is None:
+                return True
+            scores_scope = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=scope.game_id,
+                perspective=scope.perspective,
+                turn=scope.turn_number,
+                player_id=event.player_id,
+            )
+            fleet_scope = self._fleet_scope_for_event(scope, event)
+            orchestrator = binding.orchestrator
+        return not self._should_skip_reschedule_for_fleet_persist(
+            orchestrator,
+            scores_scope,
+            fleet_scope,
+            event,
+        )
+
+    def _should_skip_reschedule_for_fleet_persist(
+        self,
+        orchestrator: ComputeOrchestrator,
+        scores_scope: ComputeScope,
+        fleet_scope: ComputeScope,
+        event: FleetLedgerPersistedEvent,
+    ) -> bool:
+        """Return whether to skip in-place reschedule for this fleet persist notification.
+
+        Own-DAG fleet persist notifications fire only after the fleet node is
+        ``complete`` (deferred until after ``_complete_node``). Skip when scores is
+        ``waiting_deps`` on that fleet scope and the completed fleet node's
+        materialization version matches the notification. A persist while fleet is
+        still non-terminal is treated as external and must reschedule.
+        """
+        scores_view = orchestrator.peek_scope_view(scores_scope)
+        if scores_view is None or scores_view.state != "waiting_deps":
+            return False
+        if fleet_scope not in scores_view.dependency_scopes:
+            return False
+
+        fleet_view = orchestrator.peek_scope_view(fleet_scope)
+        if fleet_view is None or fleet_view.state != "complete":
+            return False
+
+        return not self._fleet_versions_conflict(fleet_view.result_wire, event)
 
     def _stream_binding_for_scope_locked(
         self,
@@ -136,44 +181,6 @@ class InferenceRowScheduler(
         if stream_token is None:
             return None
         return self._stream_bindings.get(stream_token)
-
-    def _should_skip_reschedule_for_fleet_persist_locked(
-        self,
-        scope: InferenceStreamScope,
-        event: FleetLedgerPersistedEvent,
-    ) -> bool:
-        """Return whether to skip in-place reschedule for this fleet persist notification.
-
-        Own-DAG fleet persist notifications fire only after the fleet node is
-        ``complete`` (deferred until after ``_complete_node``). Skip when scores is
-        ``waiting_deps`` on that fleet scope and the completed fleet node's
-        materialization version matches the notification. A persist while fleet is
-        still non-terminal is treated as external and must reschedule.
-        """
-        binding = self._stream_binding_for_scope_locked(scope)
-        if binding is None:
-            return False
-
-        scores_scope = ComputeScope(
-            analytic_id=SCORES_ANALYTIC_ID,
-            game_id=scope.game_id,
-            perspective=scope.perspective,
-            turn=scope.turn_number,
-            player_id=event.player_id,
-        )
-        fleet_scope = self._fleet_scope_for_event(scope, event)
-        orchestrator = binding.orchestrator
-        scores_node = orchestrator.nodes.get(scores_scope)
-        if scores_node is None or scores_node.state != "waiting_deps":
-            return False
-        if fleet_scope not in scores_node.dependency_scopes:
-            return False
-
-        fleet_node = orchestrator.nodes.get(fleet_scope)
-        if fleet_node is None or fleet_node.state != "complete":
-            return False
-
-        return not self._fleet_versions_conflict(fleet_node, event)
 
     @staticmethod
     def _fleet_scope_for_event(
@@ -192,15 +199,14 @@ class InferenceRowScheduler(
 
     @staticmethod
     def _fleet_versions_conflict(
-        fleet_node: object,
+        fleet_result_wire: object | None,
         event: FleetLedgerPersistedEvent,
     ) -> bool:
         from api.analytics.fleet.serialization import (
             materialization_version_from_fleet_compute_result_wire,
         )
 
-        result_wire = getattr(fleet_node, "result_wire", None)
-        stream_version = materialization_version_from_fleet_compute_result_wire(result_wire)
+        stream_version = materialization_version_from_fleet_compute_result_wire(fleet_result_wire)
         if stream_version is None:
             return False
         return stream_version != event.materialization_version
@@ -229,16 +235,24 @@ class InferenceRowScheduler(
                     return None
             return None
 
-    def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
+    def global_pause_status(self, scope: InferenceStreamScope) -> dict[str, object]:
+        with self._lock:
+            inputs = self._global_pause_status_inputs_locked(scope)
+        return self._global_pause_status_from_inputs(scope, inputs)
+
+    def _global_pause_status_inputs_locked(
+        self,
+        scope: InferenceStreamScope,
+    ) -> dict[str, object]:
+        """Scheduler-owned pause fields. Caller holds ``self._lock``."""
         active_scope = self._scope_guard.active_scope
         scope_matches = active_scope == scope
-        held_jobs, held_continuations = self._held_work_counts_locked()
         return {
-            "gameId": scope.game_id,
-            "perspective": scope.perspective,
-            "turn": scope.turn_number,
-            "paused": self._globally_paused and scope_matches,
-            "activeScope": (
+            "scope_matches": scope_matches,
+            "globally_paused": self._globally_paused,
+            "held_base_jobs": len(self._held_initial_submissions),
+            "active_session_count": len(self._runs) if scope_matches else 0,
+            "active_scope_wire": (
                 {
                     "gameId": active_scope.game_id,
                     "perspective": active_scope.perspective,
@@ -247,14 +261,43 @@ class InferenceRowScheduler(
                 if active_scope is not None
                 else None
             ),
-            "heldJobCount": held_jobs if scope_matches else 0,
-            "heldContinuationCount": held_continuations if scope_matches else 0,
-            "activeSessionCount": len(self._runs) if scope_matches else 0,
+            "root_scopes": tuple(self._runs.values()),
+            "orchestrators": tuple(
+                binding.orchestrator for binding in self._stream_bindings.values()
+            ),
         }
 
-    def global_pause_status(self, scope: InferenceStreamScope) -> dict[str, object]:
-        with self._lock:
-            return self._global_pause_status_locked(scope)
+    def _global_pause_status_from_inputs(
+        self,
+        scope: InferenceStreamScope,
+        inputs: dict[str, object],
+    ) -> dict[str, object]:
+        """Build pause status wire; may peek orchestrators (no scheduler lock)."""
+        scope_matches = bool(inputs["scope_matches"])
+        globally_paused = bool(inputs["globally_paused"])
+        held_jobs = int(inputs["held_base_jobs"])
+        held_continuations = 0
+        if globally_paused and scope_matches:
+            root_scopes = inputs["root_scopes"]
+            orchestrators = inputs["orchestrators"]
+            if isinstance(root_scopes, tuple) and isinstance(orchestrators, tuple):
+                for orchestrator in orchestrators:
+                    ready_steps = orchestrator.peek_ready_step_indexes(root_scopes)
+                    for step_index in ready_steps.values():
+                        if step_index == 0:
+                            held_jobs += 1
+                        else:
+                            held_continuations += 1
+        return {
+            "gameId": scope.game_id,
+            "perspective": scope.perspective,
+            "turn": scope.turn_number,
+            "paused": globally_paused and scope_matches,
+            "activeScope": inputs["active_scope_wire"],
+            "heldJobCount": held_jobs if scope_matches else 0,
+            "heldContinuationCount": held_continuations if scope_matches else 0,
+            "activeSessionCount": inputs["active_session_count"],
+        }
 
     def _require_active_stream_for_scope_locked(self, scope: InferenceStreamScope) -> None:
         if not self._scope_guard.has_active_table_stream or self._scope_guard.active_scope != scope:
@@ -266,37 +309,39 @@ class InferenceRowScheduler(
         """Soft pause: hold tier_solve dispatch; in-flight tier work is not cancelled."""
         with self._lock:
             self._require_active_stream_for_scope_locked(scope)
-            if self._globally_paused:
-                return self._global_pause_status_locked(scope)
+            already_paused = self._globally_paused
             self._globally_paused = True
             bindings = tuple(self._stream_bindings.values())
-            self._broadcast_global_pause_locked(paused=True)
-            status = self._global_pause_status_locked(scope)
+            if not already_paused:
+                self._broadcast_global_pause_locked(paused=True)
+            inputs = self._global_pause_status_inputs_locked(scope)
         # Never register orchestrator gates while holding the scheduler lock:
         # job-wire builders / ensure paths take this lock under dispatch.
-        self._sync_pause_dispatch_gates(bindings, paused=True)
-        return status
+        if not already_paused:
+            self._sync_pause_dispatch_gates(bindings, paused=True)
+        return self._global_pause_status_from_inputs(scope, inputs)
 
     def resume_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
         with self._lock:
             self._require_active_stream_for_scope_locked(scope)
-            if not self._globally_paused:
-                return self._global_pause_status_locked(scope)
+            was_paused = self._globally_paused
             self._globally_paused = False
             bindings = tuple(self._stream_bindings.values())
-            held = tuple(self._held_initial_submissions)
-            self._held_initial_submissions.clear()
-            self._broadcast_global_pause_locked(paused=False)
-            status = self._global_pause_status_locked(scope)
+            held = tuple(self._held_initial_submissions) if was_paused else ()
+            if was_paused:
+                self._held_initial_submissions.clear()
+                self._broadcast_global_pause_locked(paused=False)
+            inputs = self._global_pause_status_inputs_locked(scope)
         # Submit held work outside the scheduler lock (same ABBA risk as enqueue).
         for held_item in held:
             binding = self._stream_bindings.get(held_item.stream_token)
             if binding is not None:
                 self._submit_tier_solve_locked(binding, held_item.root_scope)
-        self._sync_pause_dispatch_gates(bindings, paused=False)
-        for binding in bindings:
-            binding.orchestrator.dispatch_ready_work()
-        return status
+        if was_paused:
+            self._sync_pause_dispatch_gates(bindings, paused=False)
+            for binding in bindings:
+                binding.orchestrator.dispatch_ready_work()
+        return self._global_pause_status_from_inputs(scope, inputs)
 
     def unregister_session(self, run_id: str) -> None:
         with self._lock:
@@ -585,22 +630,6 @@ class InferenceRowScheduler(
         self._held_initial_submissions = [
             held for held in self._held_initial_submissions if held.stream_token != stream_token
         ]
-
-    def _held_work_counts_locked(self) -> tuple[int, int]:
-        held_jobs = len(self._held_initial_submissions)
-        held_continuations = 0
-        if not self._globally_paused:
-            return held_jobs, held_continuations
-        for binding in self._stream_bindings.values():
-            for root_scope in self._runs.values():
-                node = binding.orchestrator.nodes.get(root_scope)
-                if node is None or node.state != "ready":
-                    continue
-                if node.step_index == 0:
-                    held_jobs += 1
-                else:
-                    held_continuations += 1
-        return held_jobs, held_continuations
 
     def _apply_dispatch_gates_locked(self) -> None:
         """Apply pause gates for current bindings.

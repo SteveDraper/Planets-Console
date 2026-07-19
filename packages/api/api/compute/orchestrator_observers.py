@@ -27,7 +27,8 @@ class ScopeLifecycleSnapshot:
     execution_generation: int
     result_wire: object | None
     error: BaseException | None
-    # Analytic park site (e.g. ScoresParkReason); None when not parked.
+    # Analytic park site string (e.g. ScoresParkReason.value); None when not parked.
+    # Soft-stream policy coerces to ScoresParkReason at the scores adapter boundary.
     park_reason: str | None = None
 
 

@@ -301,6 +301,11 @@ def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
                         {"register_dispatch_gate": lambda _self, _gate: lambda: None},
                     )(),
                     "dispatch_ready_work": lambda: None,
+                    "peek_ready_step_indexes": lambda self, scopes: {
+                        scope: node.step_index
+                        for scope, node in self.nodes.items()
+                        if scope in scopes and node.state == "ready"
+                    },
                 },
             )(),
             "unregister_dispatch_gate": None,

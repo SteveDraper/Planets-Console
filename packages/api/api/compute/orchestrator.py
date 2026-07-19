@@ -37,6 +37,7 @@ __all__ = [
     "OrchestratorDiagnosticsSnapshot",
     "OrchestratorMetrics",
     "OrchestratorNodeSnapshot",
+    "ScopeNodeView",
 ]
 
 
@@ -60,6 +61,16 @@ class OrchestratorNodeSnapshot:
     profile_step_index: int
     step_index: int
     priority_band: ComputePriorityBand
+
+
+@dataclass(frozen=True)
+class ScopeNodeView:
+    """Lock-held adapter view of one node (state, deps, wire) without live map access."""
+
+    state: str
+    step_index: int
+    dependency_scopes: frozenset[ComputeScope]
+    result_wire: object | None
 
 
 @dataclass(frozen=True)
@@ -162,7 +173,46 @@ class ComputeOrchestrator(
 
     @property
     def nodes(self) -> Mapping[ComputeScope, ComputeNodeRun]:
+        """Live node map for tests and diagnostics. Adapters must use peek APIs."""
         return self._nodes
+
+    def peek_node_state(self, scope: ComputeScope) -> str | None:
+        """Return ``node.state`` under the orchestrator lock, or None if absent."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            return None if node is None else node.state
+
+    def has_nonterminal_scope_work(self, scope: ComputeScope) -> bool:
+        """True when a node exists and is not ``complete`` / ``failed``."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            return node is not None and node.state not in {"complete", "failed"}
+
+    def peek_scope_view(self, scope: ComputeScope) -> ScopeNodeView | None:
+        """Immutable lock-held snapshot of one node's adapter-visible fields."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            if node is None:
+                return None
+            return ScopeNodeView(
+                state=node.state,
+                step_index=node.step_index,
+                dependency_scopes=frozenset(node.dependency_scopes),
+                result_wire=node.result_wire,
+            )
+
+    def peek_ready_step_indexes(
+        self,
+        scopes: tuple[ComputeScope, ...],
+    ) -> dict[ComputeScope, int]:
+        """Map scopes currently ``ready`` to ``step_index`` (lock-held)."""
+        with self._condition:
+            out: dict[ComputeScope, int] = {}
+            for scope in scopes:
+                node = self._nodes.get(scope)
+                if node is not None and node.state == "ready":
+                    out[scope] = node.step_index
+            return out
 
     def ready_scopes(self) -> tuple[ComputeScope, ...]:
         """Return scopes currently in the ready queue."""

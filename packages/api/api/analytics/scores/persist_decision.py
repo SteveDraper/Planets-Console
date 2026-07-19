@@ -7,7 +7,7 @@ from enum import StrEnum
 from api.analytics.military_score_inference.row_run import RowRunPhase
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
-    is_evicted_cancelled_run,
+    get_row_run_phase,
 )
 
 
@@ -24,18 +24,19 @@ def decide_scores_row_persist(run_id: str) -> PersistDecision:
 
     Reads admission from the single RowRun owner (``tier_row_run_registry``):
 
-    - ``DENY_CANCEL`` -- ``CANCELLED`` phase or shell-evicted cancel denial
-    - ``ALLOW`` -- ``REGISTERED`` or ``DETACHED``
-    - ``REFUSE_UNKNOWN`` -- never-seen ``run_id`` (no shell, no cancel denial)
+    - ``DENY_CANCEL`` -- compact cancelled admission (or shell still marked cancelled)
+    - ``ALLOW`` -- ``REGISTERED`` or ``DETACHED`` shell
+    - ``REFUSE_UNKNOWN`` -- never-seen ``run_id`` (no shell, no cancelled admission)
 
-    Cancel intent must set ``CANCELLED`` via ``mark_row_run_cancelled``; the
-    live cancel token is not a persist gate.
+    Cancel intent must go through ``apply_scores_row_cancel`` / ``mark_row_run_cancelled``;
+    the live cancel token is not a persist gate.
     """
     run = get_row_run(run_id)
-    if run is None:
-        if is_evicted_cancelled_run(run_id):
+    if run is not None:
+        if run.phase is RowRunPhase.CANCELLED:
             return PersistDecision.DENY_CANCEL
-        return PersistDecision.REFUSE_UNKNOWN
-    if run.phase is RowRunPhase.CANCELLED:
+        return PersistDecision.ALLOW
+    phase = get_row_run_phase(run_id)
+    if phase is RowRunPhase.CANCELLED:
         return PersistDecision.DENY_CANCEL
-    return PersistDecision.ALLOW
+    return PersistDecision.REFUSE_UNKNOWN

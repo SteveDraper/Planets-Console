@@ -1,4 +1,11 @@
-"""Single owner for scores tier_solve RowRun state and persist-admission phase."""
+"""Single owner for scores tier_solve RowRun shells and persist-admission phase.
+
+``REGISTERED`` / ``DETACHED`` retain a full RowRun shell (late persist ALLOW).
+``CANCELLED`` is compact admission only: the shell is dropped immediately and
+the ``run_id`` is remembered in a bounded FIFO so ``PersistDecision`` still
+returns ``DENY_CANCEL``. Past that bound, a never-again-seen id is
+``REFUSE_UNKNOWN`` (still no write).
+"""
 
 from __future__ import annotations
 
@@ -14,21 +21,16 @@ from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.compute.scope import WILDCARD, ComputeScope
 
-# CANCELLED shells are FIFO-bounded so unique run UUIDs cannot retain RowRun
-# objects without limit. Same capacity class as ``MAX_STREAM_RESOLUTIONS`` and
-# the former ``MAX_CANCEL_FENCE_RUN_IDS`` (4096). Shell eviction remembers the
-# run_id in a compact denial set (also bounded) so late persist still
-# ``DENY_CANCEL`` rather than ``REFUSE_UNKNOWN``.
-MAX_CANCELLED_ROW_RUNS = 4096
+# Compact cancelled-admission FIFO. Same capacity class as ``MAX_STREAM_RESOLUTIONS``.
+MAX_CANCELLED_ADMISSIONS = 4096
 
 _lock = threading.Lock()
+# REGISTERED and DETACHED shells only -- never CANCELLED.
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
-# Insertion order among retained CANCELLED shells; eviction drops the shell.
-_cancelled_shell_fifo: OrderedDict[str, None] = OrderedDict()
-# Compact memory after shell eviction; persist still DENY_CANCEL.
-_evicted_cancelled_run_ids: OrderedDict[str, None] = OrderedDict()
+# Insertion-ordered cancelled run_ids (no RowRun shell).
+_cancelled_admissions: OrderedDict[str, None] = OrderedDict()
 
 
 def _scope_key(scope: ComputeScope) -> tuple[int, int, int, int]:
@@ -56,24 +58,20 @@ def _clear_scope_index_locked(run: RowRun) -> None:
         _run_id_by_scope_key.pop(scope_key, None)
 
 
-def _drop_shell_locked(run_id: str) -> None:
+def _drop_shell_locked(run_id: str) -> RowRun | None:
     """Remove retained shell and indexes. Caller holds ``_lock``."""
     run = _runs_by_id.pop(run_id, None)
     if run is None:
-        return
+        return None
     _clear_scope_index_locked(run)
     _tier_callbacks_by_run_id.pop(run_id, None)
+    return run
 
 
-def _trim_cancelled_locked() -> None:
-    """Bound CANCELLED shells then compact denial ids. Caller holds ``_lock``."""
-    while len(_cancelled_shell_fifo) > MAX_CANCELLED_ROW_RUNS:
-        old_id, _ = _cancelled_shell_fifo.popitem(last=False)
-        _drop_shell_locked(old_id)
-        _evicted_cancelled_run_ids.pop(old_id, None)
-        _evicted_cancelled_run_ids[old_id] = None
-    while len(_evicted_cancelled_run_ids) > MAX_CANCELLED_ROW_RUNS:
-        _evicted_cancelled_run_ids.popitem(last=False)
+def _trim_cancelled_admissions_locked() -> None:
+    """Bound compact cancelled ids. Caller holds ``_lock``."""
+    while len(_cancelled_admissions) > MAX_CANCELLED_ADMISSIONS:
+        _cancelled_admissions.popitem(last=False)
 
 
 def initialize_tier_ladder_state(
@@ -111,13 +109,13 @@ def register_row_run(
         initialize_tier_ladder_state(run, orchestration=orchestration)
     run.phase = RowRunPhase.REGISTERED
     with _lock:
-        _cancelled_shell_fifo.pop(run.run_id, None)
-        _evicted_cancelled_run_ids.pop(run.run_id, None)
+        _cancelled_admissions.pop(run.run_id, None)
         _runs_by_id[run.run_id] = run
         _run_id_by_scope_key[_session_scope_key(run.session)] = run.run_id
 
 
 def get_row_run(run_id: str) -> RowRun | None:
+    """Return a retained REGISTERED or DETACHED shell, if any."""
     with _lock:
         return _runs_by_id.get(run_id)
 
@@ -134,70 +132,60 @@ def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
 
 
 def get_row_run_phase(run_id: str) -> RowRunPhase | None:
+    """Admission phase: shell phase, or ``CANCELLED`` from compact denial memory."""
     with _lock:
         run = _runs_by_id.get(run_id)
-        return None if run is None else run.phase
+        if run is not None:
+            return run.phase
+        if run_id in _cancelled_admissions:
+            return RowRunPhase.CANCELLED
+        return None
 
 
-def is_row_run_cancelled(run_id: str) -> bool:
-    """True when ``run_id`` is retained in ``CANCELLED`` phase.
-
-    Prefer :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
-    for persist admission (also covers shell-evicted cancel denial memory).
-    """
-    return get_row_run_phase(run_id) is RowRunPhase.CANCELLED
-
-
-def is_evicted_cancelled_run(run_id: str) -> bool:
-    """True when a CANCELLED shell was FIFO-evicted but denial memory remains."""
+def has_cancelled_admission(run_id: str) -> bool:
+    """True when compact cancelled-admission memory still holds ``run_id``."""
     with _lock:
-        return run_id in _evicted_cancelled_run_ids
+        return run_id in _cancelled_admissions
 
 
 def detach_row_run(run_id: str) -> None:
     """Transition ``REGISTERED`` → ``DETACHED``; clear scope index; keep by id.
 
     Detach must not destroy admission state: late persist still finds the shell.
-    No-op when missing or already ``CANCELLED``. ``DETACHED`` stays ``DETACHED``.
+    No-op when missing or already cancelled (compact). ``DETACHED`` stays ``DETACHED``.
     """
     with _lock:
+        if run_id in _cancelled_admissions:
+            return
         run = _runs_by_id.get(run_id)
         if run is None:
-            return
-        if run.phase is RowRunPhase.CANCELLED:
             return
         run.phase = RowRunPhase.DETACHED
         _clear_scope_index_locked(run)
         _tier_callbacks_by_run_id.pop(run_id, None)
 
 
-def mark_row_run_cancelled(run_id: str) -> None:
-    """Transition to ``CANCELLED``; clear scope index; keep by id for late DENY.
+def mark_row_run_cancelled(run_id: str) -> RowRun | None:
+    """Record cancelled admission; drop any shell; return the dropped shell if any.
 
-    CANCELLED shells are FIFO-bounded by ``MAX_CANCELLED_ROW_RUNS``. Evicted
-    shells leave a compact run_id in denial memory so persist still
-    ``DENY_CANCEL``. Replaces generation-scoped cancel fences for persist
-    admission. Caller still cancels the session token and sets stream-resolution
-    ``CANCELED`` (delivery).
+    Compact cancelled memory is FIFO-bounded by ``MAX_CANCELLED_ADMISSIONS``.
+    Caller still cancels the session token and sets stream-resolution ``CANCELED``
+    (delivery) via :func:`api.analytics.scores.cancel_intent.apply_scores_row_cancel`.
     """
     with _lock:
-        run = _runs_by_id.get(run_id)
-        if run is None:
-            return
-        run.phase = RowRunPhase.CANCELLED
-        _clear_scope_index_locked(run)
-        _tier_callbacks_by_run_id.pop(run_id, None)
-        _evicted_cancelled_run_ids.pop(run_id, None)
-        _cancelled_shell_fifo.pop(run_id, None)
-        _cancelled_shell_fifo[run_id] = None
-        _trim_cancelled_locked()
+        dropped = _drop_shell_locked(run_id)
+        if dropped is not None:
+            dropped.phase = RowRunPhase.CANCELLED
+        _cancelled_admissions.pop(run_id, None)
+        _cancelled_admissions[run_id] = None
+        _trim_cancelled_admissions_locked()
+        return dropped
 
 
 def retire_row_run(run_id: str) -> None:
-    """Drop registry entries after persist decision or explicit retire."""
+    """Drop registry shell and cancelled-admission memory after persist or retire."""
     with _lock:
-        _cancelled_shell_fifo.pop(run_id, None)
-        _evicted_cancelled_run_ids.pop(run_id, None)
+        _cancelled_admissions.pop(run_id, None)
         _drop_shell_locked(run_id)
 
 
@@ -207,13 +195,12 @@ def unregister_row_run(run_id: str) -> None:
 
 
 def clear_row_runs() -> None:
-    """Drop every retained RowRun (full invalidate / shutdown)."""
+    """Drop every retained RowRun and cancelled admission (full invalidate / shutdown)."""
     with _lock:
         _runs_by_id.clear()
         _run_id_by_scope_key.clear()
         _tier_callbacks_by_run_id.clear()
-        _cancelled_shell_fifo.clear()
-        _evicted_cancelled_run_ids.clear()
+        _cancelled_admissions.clear()
 
 
 def register_tier_callbacks(run_id: str, callbacks: InferenceTierJobCallbacks) -> None:

@@ -127,6 +127,13 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn):
                 {"register_dispatch_gate": lambda _self, _gate: lambda: None},
             )()
 
+        def peek_ready_step_indexes(self, scopes: tuple) -> dict:
+            return {
+                scope: node.step_index
+                for scope, node in self.nodes.items()
+                if scope in scopes and node.state == "ready"
+            }
+
         def dispatch_ready_work(self) -> None:
             self.dispatch_calls += 1
 
@@ -209,6 +216,9 @@ def test_resume_dispatches_orchestrator_ready_work(sample_turn):
                 (),
                 {"register_dispatch_gate": lambda _self, _gate: lambda: None},
             )()
+
+        def peek_ready_step_indexes(self, scopes: tuple) -> dict:
+            return {}
 
         def dispatch_ready_work(self) -> None:
             self.dispatch_calls += 1

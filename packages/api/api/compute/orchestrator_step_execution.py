@@ -148,21 +148,6 @@ class OrchestratorStepExecutionMixin:
             )
         return steps[node.profile_step_index]
 
-    def _build_job_wire(
-        self,
-        node: ComputeNodeRun,
-        registration: AnalyticComputeRegistration,
-        step: ComputeStepSpec,
-    ) -> object:
-        """Build a job wire from live dependency nodes (caller must hold orch lock)."""
-        dependency_outputs = self._snapshot_dependency_outputs(node)
-        builder = registration.build_step_job_wire[step.step_kind]
-        return builder(
-            node.scope,
-            dependency_outputs=dependency_outputs,
-            ctx=self._ctx_for_node(node),
-        )
-
     def _begin_step_execution(self, node: ComputeNodeRun) -> None:
         registration = self._compute_registry[node.scope.analytic_id]
         node.state = "running"

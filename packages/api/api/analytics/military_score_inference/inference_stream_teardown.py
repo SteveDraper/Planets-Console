@@ -93,8 +93,8 @@ class InferenceStreamTeardownMixin:
             # orchestrator while holding the scheduler lock (ABBA with orch drain
             # paths that take this lock, and with diagnostics snapshot on orch).
             abort_generation = self._execution_generation_by_run_id.get(run_id)
-            # Phase CANCELLED before dropping scheduler maps: late persist still
-            # finds the retained shell and DENYs.
+            # Cancel intent (admission + delivery + token) before dropping
+            # scheduler maps so late persist still DENYs.
             self._apply_cancel_intent_locked(run_id)
             self._remove_run_locked(run_id, cancel=True)
             abort_scope = root_scope
@@ -106,26 +106,24 @@ class InferenceStreamTeardownMixin:
             self._abort_orchestrator_scope(abort_scope, abort_generation)
 
     def _apply_cancel_intent_locked(self: InferenceRowScheduler, run_id: str) -> None:
-        """Set token, RowRun ``CANCELLED`` phase, and stream CANCELED as one intent.
+        """Apply :func:`apply_scores_row_cancel` under the scheduler lock.
 
-        ``CANCELLED`` phase is the durable persist refuse signal that survives
-        stream detach from the scheduler. Stream-resolution ``CANCELED`` only
-        silences further stream delivery. Caller must hold ``self._lock``.
+        Compact ``CANCELLED`` admission is the durable persist refuse signal.
+        Stream-resolution ``CANCELED`` only silences further stream delivery.
         Detach must never call this: detached workers may still finish and persist.
         """
         from api.analytics.military_score_inference.row_stream_resolution import (
             RowStreamResolutionTrigger,
         )
-        from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
+        from api.analytics.scores.cancel_intent import apply_scores_row_cancel
 
-        mark_row_run_cancelled(run_id)
-        self._transition_stream_resolution_locked(
+        apply_scores_row_cancel(
             run_id,
-            RowStreamResolutionTrigger.CANCELED,
+            mark_stream_canceled=lambda rid: self._transition_stream_resolution_locked(
+                rid,
+                RowStreamResolutionTrigger.CANCELED,
+            ),
         )
-        row_run = self._adapter_row_run(run_id)
-        if row_run is not None:
-            row_run.session.cancel_token.cancel()
 
     def _detach_stream_runs_locked(
         self: InferenceRowScheduler,
