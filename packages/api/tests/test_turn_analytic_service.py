@@ -64,6 +64,7 @@ class TestTurnAnalytics:
         monkeypatch,
     ):
         from api.analytics import scores
+        from api.analytics.military_score_inference import inference_stream_rows
 
         forwarded: dict[str, object] = {}
         export_services = {"fleet": object(), "scores": object()}
@@ -72,8 +73,10 @@ class TestTurnAnalytics:
             forwarded.update(kwargs)
             yield {"type": "globalPause", "paused": False}
 
+        # Patch the owning module: scores.__init__ lazy-imports the events
+        # helper (no package re-export) to keep the military import cycle broken.
         monkeypatch.setattr(
-            scores,
+            inference_stream_rows,
             "iter_scores_table_inference_events",
             fake_iter_scores_table_inference_events,
         )
