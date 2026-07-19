@@ -96,9 +96,7 @@ def test_same_scope_register_supersedes_cancelled_admission(sample_turn) -> None
         first = RowRun(_session(sample_turn))
         register_row_run(first)
         mark_row_run_cancelled(first.run_id)
-        assert decide_scores_row_persist(first.run_id) == PersistDecision.refuse(
-            should_retire=True
-        )
+        assert decide_scores_row_persist(first.run_id) == PersistDecision.refuse(should_retire=True)
 
         replacement = RowRun(_session(sample_turn))
         register_row_run(replacement)
