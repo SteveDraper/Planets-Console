@@ -6,7 +6,8 @@ This module is the **scores** owner that applies the ownership-matrix sides
 (shell + admission + drain/token) for ``DETACH`` / ``CANCEL`` / ``RETIRE``.
 
 Scheduler abort_scope and stream-map pops stay on the scheduler plane -- they
-are not part of this command. Fleet does not use this module yet.
+are not part of this command. Fleet does not use this module (token-only
+cancel; ADR 0006).
 
 Cancel silence uses the sole cancel-seal operation
 :func:`stream_drain.seal_canceled`. This module is the scores-specific

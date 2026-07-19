@@ -38,7 +38,7 @@ from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scop
 from api.compute.wire import DependencyOutputs, StepResult
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
-from api.streaming.table_stream.row_run_admission import RowLifecycleOp, RowRunPhase
+from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -432,14 +432,12 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
-        # Cancel vs detach: cancel records compact cancel admission; detach
-        # retains a DETACHED shell. Unknown run_id with no admission must not write.
-        # Live REGISTERED shells stay until stream finalize retires them so peer
-        # bindings can still resolve the same RowRun; DETACHED late persist retires
-        # immediately after the decision; cancel deny retires admission memory.
+        # Cancel vs detach / late-persist retire: sole plan is PersistDecision.
+        # Unknown run_id with no admission must not write. Live REGISTERED shells
+        # stay until stream finalize retires them so peer bindings can still
+        # resolve the same RowRun; DETACHED late persist sets retire_after_write;
+        # cancel deny sets should_retire on refuse.
         decision = decide_scores_row_persist(run_id)
-        run = get_row_run(run_id)
-        phase = None if run is None else run.phase
         if not decision.allowed:
             # Silent no-write for both cancel deny and unknown/absent. Retire
             # only when the refuse carries should_retire (cancel admission).
@@ -454,7 +452,7 @@ class ScoresPersistencePolicy:
             host_turn=export_scope.turn,
             player_id=export_scope.player_id,
         )
-        if phase is RowRunPhase.DETACHED:
+        if decision.retire_after_write:
             apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run_id)
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:

@@ -68,8 +68,8 @@ def test_apply_scores_row_lifecycle_cancel(sample_turn) -> None:
         reset_stream_resolution_registry_for_tests()
 
 
-def test_apply_scores_row_cancel_reexport(sample_turn) -> None:
-    """``apply_scores_row_cancel`` remains the CANCEL convenience / re-export."""
+def test_apply_scores_row_cancel_convenience(sample_turn) -> None:
+    """``apply_scores_row_cancel`` is the CANCEL convenience on row_lifecycle."""
     reset_tier_row_run_registry_for_tests()
     reset_stream_resolution_registry_for_tests()
     try:
@@ -95,7 +95,9 @@ def test_apply_scores_row_lifecycle_detach(sample_turn) -> None:
         assert get_row_run(run.run_id) is run
         assert get_row_run_phase(run.run_id) is RowRunPhase.DETACHED
         assert get_persist_admission(run.run_id) is PersistAdmission.ALLOW
-        assert decide_scores_row_persist(run.run_id) == PersistDecision.allow()
+        assert decide_scores_row_persist(run.run_id) == PersistDecision.allow(
+            retire_after_write=True
+        )
         assert not run.session.cancel_token.is_cancelled()
         assert get_stream_resolution(run.run_id) is None
         assert not stream_drain.is_closed(run.run_id)

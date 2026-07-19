@@ -183,6 +183,12 @@ class FleetTableStreamScheduler:
         return session
 
     def cancel_player_run(self, run_id: str) -> None:
+        """Token-only cancel -- no scores-style shell admission or abort_scope.
+
+        Fleet does not retain row-run shells. Drain silence is the generic
+        multiplex token-observed ``stream_drain.seal_canceled`` path; reschedule
+        submits with ``force_fresh=True``. See ADR 0006 (fleet cancel asymmetry).
+        """
         with self._lock:
             run = self._runs.get(run_id)
             if run is not None:

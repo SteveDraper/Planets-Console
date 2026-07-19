@@ -7,6 +7,7 @@ GitHub epic: [#190](https://github.com/SteveDraper/Planets-Console/issues/190).
 Related:
 
 - [ADR 0005](adr/0005-compute-orchestrator.md) -- locked architectural decisions
+- [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md) -- anti-thrash table-stream lifecycle invariants (cancel / drain / persist / wake)
 - [Analytic exports](design-analytic-exports.md) -- export catalogs, JSONPath, probe/query envelopes (orchestrator consumes `ENSURE_DEPENDENCIES`)
 - [Analytics module structure](design-analytics-structure.md) -- layer roles and registration
 - [ADR 0004 addendum: table-stream session framework](adr/0004-addendum-table-stream-session-framework.md) -- stream multiplex/connect (orchestrator replaces per-analytic worker pools only)
@@ -408,7 +409,7 @@ All table-stream analytics follow the same adapter template ([#199](https://gith
 
 | Concern | Owner |
 |---------|--------|
-| Per-stream `ComputeOrchestrator` binding | Stream adapter (one orchestrator per stream token; released on disconnect) |
+| Per-stream observers / gates / query-context binding | Stream adapter (registers on the **process-wide** singleton orchestrator; released on disconnect -- not one orchestrator instance per stream) |
 | Durable terminal write | `PersistencePolicy.persist` on `persist` outcome |
 | NDJSON wire events | Adapter `register_scope_outcome_listener` (and mid-step callbacks for incremental events) |
 | Cache replay at admission | Probe persistence directly (`has_final_ledger`, inference row store, etc.) |
@@ -442,7 +443,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 - Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, controller base, registry attach/detach.
 - Shared `RowStreamResolution` FSM + `multiplex_closed` drain bit + `route_terminal` (queue / pending / silence). Soft is a shared capability; scores supplies soft triggers, fleet does not.
 - `multiplex_closed` is the sole drain-closed source of truth (stored on the resolution registry). Sole **public** writer/reader facade is `streaming.table_stream.stream_drain` (`close` / `reopen_if_soft` / `is_closed` / `seal_canceled`) -- adapters must not call registry drain helpers (`mark_multiplex_closed`, `seal_canceled_finish`, …) directly. UUID run ids are never reused.
-- Generic retained-shell / persist-admission vocabulary (`row_run_admission.py`: `RowRunPhase`, `PersistAdmission`, `RowLifecycleOp`). Per-analytic registries own shells; production persist gates use analytic `PersistDecision` / `decide_*`; scores applies lifecycle via `apply_scores_row_lifecycle` in `scores/row_lifecycle.py`.
+- Generic retained-shell / persist-admission vocabulary (`row_run_admission.py`: `RowRunPhase`, `PersistAdmission`, `RowLifecycleOp`). Per-analytic registries own shells; production persist gates use analytic `PersistDecision` / `decide_*` (write + retire plan); scores applies lifecycle via `apply_scores_row_lifecycle` in `scores/row_lifecycle.py`. Ownership invariants: [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md).
 
 **Thin adapters** (same template for fleet and scores):
 
@@ -454,7 +455,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 **Table-stream row-run shell / persist admission (generic).** Any table-stream analytic that retains per-row shells across stream detach (detach ≠ cancel) reuses `RowRunPhase` (`REGISTERED` / `DETACHED` only), registry-internal `PersistAdmission` (`ALLOW` | `CANCEL_DENY` | `ABSENT`), and `RowLifecycleOp` (`DETACH` | `CANCEL` | `RETIRE`) from `streaming/table_stream/row_run_admission.py`. Cancel never becomes a retained shell phase. Soft/hard stream resolutions stay FIFO-bounded (`MAX_STREAM_RESOLUTIONS`) and delivery-only -- they do not gate persist. Multi-step tier DAG scheduling stays in `compute/` -- do not conflate.
 
-**Scores instance.** `tier_row_run_registry` is the scores owner of shells + compact cancel admission. `PersistDecision` / `decide_scores_row_persist` is the only production persist gate (maps registry `PersistAdmission`); production writers must not branch on admission directly. Scores applies the three lifecycle ops through one command: `apply_scores_row_lifecycle` in `scores/row_lifecycle.py` (`RowLifecycleOp` from `row_run_admission.py`). Scheduler abort_scope and stream-map pops stay on the scheduler plane.
+**Scores instance.** `tier_row_run_registry` is the scores owner of shells + compact cancel admission. `PersistDecision` / `decide_scores_row_persist` is the only production persist gate (maps registry `PersistAdmission` and shell phase into write/refuse **and** retire plan); production writers must not branch on admission or shell phase beside that decision. Scores applies the three lifecycle ops through one command: `apply_scores_row_lifecycle` in `scores/row_lifecycle.py` (`RowLifecycleOp` from `row_run_admission.py`). Scheduler abort_scope and stream-map pops stay on the scheduler plane.
 
 | Op | RowRun shell | PersistAdmission | Stream resolution / drain | Compute token / abort |
 |----|--------------|------------------|---------------------------|------------------------|
@@ -462,7 +463,9 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 | cancel | drop immediately (no cancel phase) | `CANCEL_DENY` (scope-keyed compact memory) | `CANCELED` + drain closed via `stream_drain.seal_canceled` | cancel token, then `abort_scope` outside scheduler lock |
 | retire | drop | clear (`ABSENT`) | leave resolution (evict only on full invalidate) | -- |
 
-Cancel silence is one operation (`stream_drain.seal_canceled`) with two justified callers: multiplex (generic token-observed seal for any analytic) and scores `apply_scores_row_lifecycle(CANCEL)` (scores-specific immediate seal before multiplex notices). That CANCEL command is: compact cancel admission → immediate `stream_drain.seal_canceled` → session cancel token. Scheduler `cancel_run` then aborts the orchestrator scope outside the lock. Detach must never be routed as cancel -- detached workers may still finish and persist. Cancelled admission is at most one outstanding cancelled `run_id` per scores scope; a later `REGISTERED` for that scope supersedes it. Live `REGISTERED` persist leaves the shell for peer bindings (stream finalize retires); late `DETACHED` persist retires the shell after the decision; cancel deny retires compact admission when `PersistDecision` refuses with `should_retire=True`. Mapping: `ALLOW` → write; `CANCEL_DENY` → `REFUSE(should_retire=True)`; `ABSENT` → `REFUSE(should_retire=False)` -- both refuses are silent no-ops (never raise).
+Cancel silence is one operation (`stream_drain.seal_canceled`) with two justified callers: multiplex (generic token-observed seal for any analytic) and scores `apply_scores_row_lifecycle(CANCEL)` (scores-specific immediate seal before multiplex notices). That CANCEL command is: compact cancel admission → immediate `stream_drain.seal_canceled` → session cancel token. Scheduler `cancel_run` then aborts the orchestrator scope outside the lock. Detach must never be routed as cancel -- detached workers may still finish and persist. Cancelled admission is at most one outstanding cancelled `run_id` per scores scope; a later `REGISTERED` for that scope supersedes it. Live `REGISTERED` persist leaves the shell for peer bindings (stream finalize retires) -- `ALLOW(retire_after_write=False)`; late `DETACHED` persist is `ALLOW(retire_after_write=True)` and the policy retires after write from that flag alone; cancel deny is `REFUSE(should_retire=True)`. Mapping: `REGISTERED` → `ALLOW(retire_after_write=False)`; `DETACHED` → `ALLOW(retire_after_write=True)`; `CANCEL_DENY` → `REFUSE(should_retire=True)`; `ABSENT` → `REFUSE(should_retire=False)` -- both refuses are silent no-ops (never raise).
+
+**Fleet cancel (intentional asymmetry).** Fleet does **not** retain row-run shells or compact cancel admission. `FleetTableStreamScheduler.cancel_player_run` is **token-only**: cancel the session token and drop the scheduler map entry. Drain silence comes from the generic multiplex token-observed `stream_drain.seal_canceled` path; fleet does not call an immediate seal or `abort_scope`. Reschedule uses `force_fresh=True` on submit. Do not copy scores shell/admission machinery into fleet -- see [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md).
 
 **Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `stream_attached` `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
 

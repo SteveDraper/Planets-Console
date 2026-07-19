@@ -15,7 +15,8 @@ cancelled-admission memory is recorded separately.
 memory (shell present → ``ALLOW``; compact cancel → ``CANCEL_DENY``; else
 ``ABSENT``). Production persist writers must not branch on it directly -- use
 the analytic's ``PersistDecision`` / ``decide_*`` gate (scores:
-:func:`api.analytics.scores.persist_decision.decide_scores_row_persist`).
+:func:`api.analytics.scores.persist_decision.decide_scores_row_persist`), which
+also owns post-write / refuse retire flags. See ADR 0006.
 
 ``RowLifecycleOp`` names the three generic ops (``DETACH`` / ``CANCEL`` /
 ``RETIRE``). Scores applies them via

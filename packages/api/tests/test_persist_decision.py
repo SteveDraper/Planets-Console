@@ -72,7 +72,9 @@ def test_persist_decision_table(sample_turn) -> None:
         detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
         assert get_persist_admission(detached.run_id) is PersistAdmission.ALLOW
-        assert decide_scores_row_persist(detached.run_id) == PersistDecision.allow()
+        assert decide_scores_row_persist(detached.run_id) == PersistDecision.allow(
+            retire_after_write=True
+        )
 
         retire_row_run(detached.run_id)
         assert get_persist_admission(detached.run_id) is PersistAdmission.ABSENT
@@ -179,6 +181,8 @@ def test_cancel_churn_does_not_drop_registered_or_detached_shells(sample_turn) -
         assert get_row_run_phase(live.run_id) is RowRunPhase.REGISTERED
         assert decide_scores_row_persist(live.run_id) == PersistDecision.allow()
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
-        assert decide_scores_row_persist(detached.run_id) == PersistDecision.allow()
+        assert decide_scores_row_persist(detached.run_id) == PersistDecision.allow(
+            retire_after_write=True
+        )
     finally:
         reset_tier_row_run_registry_for_tests()
