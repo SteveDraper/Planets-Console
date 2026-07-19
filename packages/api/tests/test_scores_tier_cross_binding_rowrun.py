@@ -1096,9 +1096,7 @@ def test_missing_row_run_park_stays_silent_even_with_scheduler_run(
     assert session.run_id not in controller.finished_run_ids
 
 
-def test_empty_tier_park_cheap_admits_when_admission_available(
-    sample_turn, monkeypatch
-) -> None:
+def test_empty_tier_park_cheap_admits_when_admission_available(sample_turn, monkeypatch) -> None:
     """EMPTY_TIER_OUTCOME soft-admits via cheap admission when available."""
     from api.analytics.military_score_inference.inference_stream_rows import (
         ImmediateRowAdmission,

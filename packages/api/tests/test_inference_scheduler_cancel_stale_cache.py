@@ -721,7 +721,7 @@ def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
                 turn_number=turn_number,
             )
         )
-        for index in range(20):
+        for _index in range(20):
             other = _session_for_player(sample_turn, player_id=player_id)
             # Distinct run_ids via fresh sessions; mark cancelled then leave retained.
             other_run = RowRun(other)
@@ -785,7 +785,9 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
 
     reset_tier_row_run_registry_for_tests()
     try:
-        cancelled = RowRun(_session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid))
+        cancelled = RowRun(
+            _session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid)
+        )
         register_row_run(cancelled)
         mark_row_run_cancelled(cancelled.run_id)
         assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED

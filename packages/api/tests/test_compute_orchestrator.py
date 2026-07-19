@@ -621,9 +621,7 @@ def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sam
 
     assert shared_calls == 1
     assert orchestrator.nodes[shared_scope].state == "parked"
-    assert (
-        orchestrator.nodes[shared_scope].park_reason == "scores_empty_tier_outcome"
-    )
+    assert orchestrator.nodes[shared_scope].park_reason == "scores_empty_tier_outcome"
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
     assert handle.state == "waiting_deps"
 
