@@ -39,7 +39,6 @@ from api.analytics.military_score_inference.row_stream_resolution_registry impor
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
-from api.analytics.scores_park_wake import ScoresParkReason
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     register_row_run,
@@ -47,6 +46,7 @@ from api.analytics.scores.tier_row_run_registry import (
     unregister_row_run,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.analytics.scores_park_wake import ScoresParkReason
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
