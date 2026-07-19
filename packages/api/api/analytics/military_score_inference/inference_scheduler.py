@@ -37,7 +37,8 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     wake_inference_table_stream_multiplex,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
-from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+from api.analytics.military_score_inference.row_run import RowRun
+from api.streaming.table_stream.row_run_admission import RowRunPhase
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator

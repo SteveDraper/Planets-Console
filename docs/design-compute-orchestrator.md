@@ -442,6 +442,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 - Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, controller base, registry attach/detach.
 - Shared `RowStreamResolution` FSM + `multiplex_closed` drain bit + `route_terminal` (queue / pending / silence). Soft is a shared capability; scores supplies soft triggers, fleet does not.
 - `multiplex_closed` is the sole drain-closed source of truth; thin writer API is `streaming.table_stream.stream_drain` (`close` / `reopen_if_soft` / `is_closed`). UUID run ids are never reused.
+- Generic retained-shell / persist-admission vocabulary (`row_run_admission.py`: `RowRunPhase`, `PersistAdmission`). Per-analytic registries own shells; production persist gates use analytic `PersistDecision` / `decide_*`.
 
 **Thin adapters** (same template for fleet and scores):
 
@@ -451,7 +452,9 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 - **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
 - Stream teardown **detaches** observers only -- it does not cancel in-flight singleton DAG work (or abort a pending `persist`) solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240).
 
-**Scores detach / cancel / retire.** Shell phase (`RowRunPhase`: `REGISTERED` / `DETACHED` only; owner `tier_row_run_registry`) is independent of persist admission (`PersistAdmission`: `ALLOW` | `CANCEL_DENY` | `ABSENT`). Cancel never becomes a retained shell phase. Soft/hard stream resolutions stay FIFO-bounded (`MAX_STREAM_RESOLUTIONS`) and delivery-only -- they do not gate persist. `PersistDecision` is the only production persist gate, mapped from `PersistAdmission`.
+**Table-stream row-run shell / persist admission (generic).** Any table-stream analytic that retains per-row shells across stream detach (detach ≠ cancel) reuses `RowRunPhase` (`REGISTERED` / `DETACHED` only) and registry-internal `PersistAdmission` (`ALLOW` | `CANCEL_DENY` | `ABSENT`) from `streaming/table_stream/row_run_admission.py`. Cancel never becomes a retained shell phase. Soft/hard stream resolutions stay FIFO-bounded (`MAX_STREAM_RESOLUTIONS`) and delivery-only -- they do not gate persist. Multi-step tier DAG scheduling stays in `compute/` -- do not conflate.
+
+**Scores instance.** `tier_row_run_registry` is the scores owner of shells + compact cancel admission. `PersistDecision` / `decide_scores_row_persist` is the only production persist gate (maps registry `PersistAdmission`); production writers must not branch on admission directly.
 
 | Op | RowRun shell | PersistAdmission | Stream resolution / drain | Compute token / abort |
 |----|--------------|------------------|---------------------------|------------------------|

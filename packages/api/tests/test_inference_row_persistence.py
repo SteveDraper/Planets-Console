@@ -562,7 +562,8 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     from api.analytics.military_score_inference.row_complete_factory import (
         row_complete_with_summary,
     )
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import RowRunPhase
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy

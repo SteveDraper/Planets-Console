@@ -19,6 +19,7 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 | `connect.py` | `iter_table_stream_connect` / `iter_table_stream_connect_with_scope` with guaranteed `finally` scope teardown |
 | `row_stream_resolution.py` | Analytic-independent row terminal FSM (`OPEN` / `SOFT_PROVISIONAL` / `HARD_TERMINAL` / `CANCELED`) plus `multiplex_closed` drain bit |
 | `row_stream_resolution_registry.py` | Process-wide FIFO-bounded resolution table; sole owner of delivery state + drain-closed bit |
+| `row_run_admission.py` | Generic retained-shell phase (`RowRunPhase`) + registry-internal persist admission (`PersistAdmission`); detach≠cancel vocabulary for any table-stream analytic |
 | `terminal_route.py` | `route_terminal(delivery, run_id)` → queue / pending / silence (reads `multiplex_closed` only) |
 | `stream_drain.py` | Thin writer API over `multiplex_closed` (`close` / `reopen_if_soft` / `is_closed`); cancel finish also seals FSM `CANCELED` via `seal_canceled` |
 

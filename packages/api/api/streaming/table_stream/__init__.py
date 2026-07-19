@@ -10,6 +10,7 @@ from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events,
     iter_multiplexed_stream_events,
 )
+from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 from api.streaming.table_stream.row_stream_resolution import (
     RowStreamDelivery,
     RowStreamResolution,
@@ -28,6 +29,8 @@ from api.streaming.table_stream.terminal_route import TerminalRoute, route_termi
 
 __all__ = [
     "AdmissionDispatch",
+    "PersistAdmission",
+    "RowRunPhase",
     "RowStreamDelivery",
     "RowStreamResolution",
     "RowStreamResolutionState",

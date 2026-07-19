@@ -6,7 +6,8 @@ from api.analytics.military_score_inference.analytic import build_inference_obse
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.row_run import PersistAdmission, RowRun
+from api.analytics.military_score_inference.row_run import RowRun
+from api.streaming.table_stream.row_run_admission import PersistAdmission
 from api.analytics.scores.cancel_intent import apply_scores_row_cancel
 from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
 from api.analytics.scores.tier_row_run_registry import (

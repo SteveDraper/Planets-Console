@@ -236,7 +236,8 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
     stream resolutions for other-turn rows (background warm) or undo the
     keep-resolution-after-unregister invariant for the detached turn's own row.
     """
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import RowRunPhase
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run,
         get_row_run_phase,
@@ -397,11 +398,8 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
     RowComplete. Detach must leave DETACHED shell (ALLOW), not cancel admission.
     """
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import (
-        PersistAdmission,
-        RowRun,
-        RowRunPhase,
-    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -510,7 +508,8 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
     Detach must not set these. Compact cancel admission is the durable persist
     refuse; stream ``CANCELED`` only silences delivery.
     """
-    from api.analytics.military_score_inference.row_run import PersistAdmission, RowRun
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import PersistAdmission
     from api.analytics.scores.tier_row_run_registry import (
         get_persist_admission,
         get_row_run_phase,
@@ -571,11 +570,8 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
 
 def test_detach_does_not_apply_cancel_intent(sample_turn):
     """begin_scope detach drops ownership without token or cancel admission."""
-    from api.analytics.military_score_inference.row_run import (
-        PersistAdmission,
-        RowRun,
-        RowRunPhase,
-    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
     from api.analytics.scores.tier_row_run_registry import (
         get_persist_admission,
         get_row_run_phase,
@@ -627,7 +623,8 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
     persist must still see compact cancel admission and refuse the write.
     """
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import PersistAdmission, RowRun
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import PersistAdmission
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -706,7 +703,8 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
 def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
     """Cancel admission must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import PersistAdmission, RowRun
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import PersistAdmission
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores import tier_row_run_registry as reg
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
@@ -790,11 +788,8 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
 
     Same-scope re-register supersedes cancel; cross-scope detach must not.
     """
-    from api.analytics.military_score_inference.row_run import (
-        PersistAdmission,
-        RowRun,
-        RowRunPhase,
-    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
     from api.analytics.scores.tier_row_run_registry import (
         detach_row_run,
         get_persist_admission,
@@ -870,11 +865,8 @@ def test_stream_resolutions_are_fifo_bounded_across_states(monkeypatch):
 def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_turn):
     """Disconnect detaches without cancel admission; finish may persist."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import (
-        PersistAdmission,
-        RowRun,
-        RowRunPhase,
-    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext

@@ -1,4 +1,8 @@
-"""Single owner for scores tier_solve RowRun shells and compact persist admission.
+"""Scores instance of the generic table-stream row-run shell + admission pattern.
+
+Owns scores ``RowRun`` shells and compact persist admission. Types
+(``RowRunPhase``, ``PersistAdmission``) are generic stream-row vocabulary from
+:mod:`api.streaming.table_stream.row_run_admission` -- not scores-private.
 
 Retained shells use ``RowRunPhase`` (``REGISTERED`` / ``DETACHED`` only).
 Cancel intent drops the shell immediately and records compact cancelled
@@ -6,6 +10,9 @@ admission keyed by scores scope so ``PersistAdmission.CANCEL_DENY`` still
 denies late persist. A later ``REGISTERED`` for the same scope supersedes
 that cancelled admission (preempt / re-adopt). Memory is O(scopes with an
 outstanding cancel), not an unbounded UUID FIFO.
+
+Production persist writers use :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
+(``PersistDecision``) -- not :func:`get_persist_admission` directly.
 """
 
 from __future__ import annotations
@@ -17,13 +24,10 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
     InferenceStreamOrchestration,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
-from api.analytics.military_score_inference.row_run import (
-    PersistAdmission,
-    RowRun,
-    RowRunPhase,
-)
+from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.compute.scope import WILDCARD, ComputeScope
+from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 
 _lock = threading.Lock()
 # REGISTERED and DETACHED shells only -- cancel never retains a shell.
@@ -160,7 +164,12 @@ def get_row_run_phase(run_id: str) -> RowRunPhase | None:
 
 
 def get_persist_admission(run_id: str) -> PersistAdmission:
-    """Atomic persist-admission lookup (shell vs compact cancel vs absent)."""
+    """Registry-internal admission lookup (shell vs compact cancel vs absent).
+
+    Not a production persist gate. Public callers use
+    :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
+    (``PersistDecision``). This probe exists for that mapper and registry tests.
+    """
     with _lock:
         if run_id in _runs_by_id:
             return PersistAdmission.ALLOW
