@@ -70,9 +70,7 @@ _SOFT_STREAM_POLICY: dict[_SoftStreamPolicyKey, SoftStreamAction] = {
     ): SoftStreamAction.SOFT_PROVISIONAL_EVENT,
     _SoftStreamPolicyKey(TerminalSource.PARKED, None, False): SoftStreamAction.SILENCE,
     # NODE_COMPLETE -- park_reason unused
-    _SoftStreamPolicyKey(
-        TerminalSource.NODE_COMPLETE, None, True
-    ): SoftStreamAction.DURABLE_EVENT,
+    _SoftStreamPolicyKey(TerminalSource.NODE_COMPLETE, None, True): SoftStreamAction.DURABLE_EVENT,
     _SoftStreamPolicyKey(
         TerminalSource.NODE_COMPLETE, None, False
     ): SoftStreamAction.NODE_COMPLETE_EMPTY,

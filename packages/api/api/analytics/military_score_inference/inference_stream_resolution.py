@@ -134,9 +134,7 @@ class InferenceStreamResolutionMixin:
     ) -> bool:
         with self._lock:
             resolution = get_stream_resolution(session.run_id)
-            state = (
-                resolution.state if resolution is not None else RowStreamResolutionState.OPEN
-            )
+            state = resolution.state if resolution is not None else RowStreamResolutionState.OPEN
         if state in {
             RowStreamResolutionState.HARD_TERMINAL,
             RowStreamResolutionState.CANCELED,
@@ -144,9 +142,7 @@ class InferenceStreamResolutionMixin:
             return False
         if snapshot is not None and snapshot.state == "failed":
             detail = (
-                str(snapshot.error)
-                if snapshot.error is not None
-                else "Inference tier solve failed"
+                str(snapshot.error) if snapshot.error is not None else "Inference tier solve failed"
             )
             delivered = self._emit_domain_terminal(
                 session,
