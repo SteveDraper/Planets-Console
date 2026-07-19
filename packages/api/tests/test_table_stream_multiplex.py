@@ -8,8 +8,15 @@ import time
 
 from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.multiplex import iter_multiplexed_stream_events
+from api.streaming.table_stream.row_stream_resolution import (
+    RowStreamDelivery,
+    RowStreamResolutionState,
+    RowStreamResolutionTrigger,
+)
 from api.streaming.table_stream.row_stream_resolution_registry import (
+    get_stream_resolution,
     reset_stream_resolution_registry_for_tests,
+    transition_stream_resolution,
 )
 
 
@@ -130,6 +137,64 @@ def test_blocking_multiplex_marks_closed_on_terminal():
         assert {event.get("playerId") for event in seen} == {1, 2}
         assert stream_drain.is_closed("run-a")
         assert stream_drain.is_closed("run-b")
+        assert not thread.is_alive()
+    finally:
+        reset_stream_resolution_registry_for_tests()
+
+
+def test_multiplex_cancel_finish_seals_canceled_and_silences_late_terminals():
+    """Cancel-silent finish must CANCELED + close drain, not leave OPEN+closed."""
+    reset_stream_resolution_registry_for_tests()
+    try:
+        session = _Session("cancel-run")
+        session.cancel_token.cancel()
+        rows = (_Row(1, session),)
+        wake = threading.Event()
+        stream_active = True
+
+        def consume() -> None:
+            nonlocal stream_active
+            for _ in iter_multiplexed_stream_events(
+                rows,
+                tag_player_id=True,
+                is_stream_active=lambda: stream_active,
+                row_provider=lambda: rows,
+                wake_event=wake,
+                event_to_wire_events=lambda row, event: iter((event,)),
+                tag_event=lambda event, player_id: {**event, "playerId": player_id},
+                multiplex_wait_seconds=0.02,
+            ):
+                pass
+
+        thread = threading.Thread(target=consume, daemon=True)
+        thread.start()
+        wake.set()
+        # Allow multiplex to notice cancel and seal.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            resolution = get_stream_resolution("cancel-run")
+            if (
+                resolution is not None
+                and resolution.state is RowStreamResolutionState.CANCELED
+                and stream_drain.is_closed("cancel-run")
+            ):
+                break
+            time.sleep(0.01)
+        stream_active = False
+        wake.set()
+        thread.join(timeout=2.0)
+
+        resolution = get_stream_resolution("cancel-run")
+        assert resolution is not None
+        assert resolution.state is RowStreamResolutionState.CANCELED
+        assert stream_drain.is_closed("cancel-run")
+        assert (
+            transition_stream_resolution(
+                "cancel-run",
+                RowStreamResolutionTrigger.DURABLE_COMPLETE,
+            )
+            is RowStreamDelivery.SILENCE
+        )
         assert not thread.is_alive()
     finally:
         reset_stream_resolution_registry_for_tests()

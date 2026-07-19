@@ -20,7 +20,7 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 | `row_stream_resolution.py` | Analytic-independent row terminal FSM (`OPEN` / `SOFT_PROVISIONAL` / `HARD_TERMINAL` / `CANCELED`) plus `multiplex_closed` drain bit |
 | `row_stream_resolution_registry.py` | Process-wide FIFO-bounded resolution table; sole owner of delivery state + drain-closed bit |
 | `terminal_route.py` | `route_terminal(delivery, run_id)` → queue / pending / silence (reads `multiplex_closed` only) |
-| `stream_drain.py` | Thin writer API over `multiplex_closed` (`close` / `reopen_if_soft` / `is_closed`) |
+| `stream_drain.py` | Thin writer API over `multiplex_closed` (`close` / `reopen_if_soft` / `is_closed`); cancel finish also seals FSM `CANCELED` via `seal_canceled` |
 
 Per-analytic code keeps:
 
@@ -31,7 +31,7 @@ Per-analytic code keeps:
 - Thin `*ConnectPolicy` dataclass implementing `TableStreamConnectPolicy`
 - Soft-stream **triggers** and park-reason policy (scores only); fleet never fires soft provisional
 
-`multiplex_closed` on the process-wide resolution registry is the sole drain-closed source of truth. Multiplex skip/pending rebuild and `route_terminal` both read it (via `is_multiplex_closed` / `stream_drain.is_closed`). UUID run ids are never reused, so closed bits remain as routing history; soft reopen clears the bit only while still `SOFT_PROVISIONAL` (`stream_drain.reopen_if_soft`). Adapters must not keep a parallel finished set -- use `stream_drain.close` / `route_terminal`. Soft provisional is a shared FSM capability; only scores supplies soft triggers today.
+`multiplex_closed` on the process-wide resolution registry is the sole drain-closed source of truth. Multiplex skip/pending rebuild and `route_terminal` both read it (via `is_multiplex_closed` / `stream_drain.is_closed`). UUID run ids are never reused, so closed bits remain as routing history; soft reopen clears the bit only while still `SOFT_PROVISIONAL` (`stream_drain.reopen_if_soft`). Cancel-silent multiplex finish seals FSM `CANCELED` and drain closed together (`stream_drain.seal_canceled` / `seal_canceled_finish`) so late terminals stay silenced; idempotent with scores cancel intent. Adapters must not keep a parallel finished set -- use `stream_drain.close` / `route_terminal`. Soft provisional is a shared FSM capability; only scores supplies soft triggers today.
 
 ## Boundaries (explicitly not unified)
 

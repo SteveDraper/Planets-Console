@@ -93,7 +93,9 @@ def iter_multiplexed_stream_events(
     def finish_cancelled_run(row: ScheduledStreamRow[EventT]) -> None:
         if session_is_cancelled(row.session):
             pending_run_ids.discard(row.session.run_id)
-            stream_drain.close(row.session.run_id)
+            # Seal CANCELED + drain close (not drain-only): belt-and-suspenders with
+            # cancel intent so late terminals stay silenced.
+            stream_drain.seal_canceled(row.session.run_id)
 
     def refresh_pending_run_ids() -> set[str]:
         pending: set[str] = set()
@@ -101,7 +103,7 @@ def iter_multiplexed_stream_events(
             if stream_drain.is_closed(row.session.run_id):
                 continue
             if session_is_cancelled(row.session):
-                stream_drain.close(row.session.run_id)
+                stream_drain.seal_canceled(row.session.run_id)
                 continue
             pending.add(row.session.run_id)
         return pending

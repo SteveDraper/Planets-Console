@@ -24,6 +24,7 @@ from api.streaming.table_stream.row_stream_resolution_registry import (
     is_multiplex_closed,
     mark_multiplex_closed,
     reset_stream_resolution_registry_for_tests,
+    seal_canceled_finish,
     transition_stream_resolution,
 )
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
@@ -49,6 +50,7 @@ __all__ = [
     "mark_multiplex_closed",
     "reset_stream_resolution_registry_for_tests",
     "route_terminal",
+    "seal_canceled_finish",
     "stream_drain",
     "transition_stream_resolution",
 ]

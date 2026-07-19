@@ -44,9 +44,9 @@ class RowStreamResolution:
     Soft terminals are provisional: a later durable completion upgrades them through
     the pending wire. Hard terminals and cancellations silence all later events.
 
-    ``multiplex_closed`` is independent of FSM state: cancel-silent multiplex finish
-    can close drain while the row is still ``OPEN``, so a later durable/orphan
-    terminal can still route via pending wire.
+    ``multiplex_closed`` is independent of FSM state for non-cancel closes (e.g. a
+    hard terminal that closes drain after deliver). Cancel-silent multiplex finish
+    must seal ``CANCELED`` *and* close drain so late terminals stay silenced.
     """
 
     state: RowStreamResolutionState = RowStreamResolutionState.OPEN
