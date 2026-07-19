@@ -276,6 +276,8 @@ class OrchestratorLifecycleMixin:
         soft_pause = state == "parked"
         node.state = state
         node.error = error
+        if not soft_pause:
+            node.park_reason = None
         self._dequeue_ready(node.scope)
         if not soft_pause:
             for waiter in node.waiters:
@@ -312,6 +314,7 @@ class OrchestratorLifecycleMixin:
             return
 
         prior_step_index = self._reset_for_requeue(node)
+        node.park_reason = reason
         self._settle_node(node, state="parked")
         self._observers.notify_lifecycle(
             "step_parked",
@@ -328,6 +331,7 @@ class OrchestratorLifecycleMixin:
         """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""
         if node.state != "parked":
             return
+        node.park_reason = None
         node.generation_at_submit = None
         node.execution_sealed = False
         if self._deps_complete(node):

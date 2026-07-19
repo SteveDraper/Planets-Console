@@ -74,6 +74,15 @@ class InferenceStreamResolutionMixin:
         if resolved_event is None and snapshot is not None:
             resolved_event = self._row_complete_from_result_wire(snapshot.result_wire)
 
+        # Lazy: scores.compute_orchestration imports this package via scores.__init__.
+        from api.analytics.scores.compute_orchestration import ScoresParkReason
+
+        park_reason = None if snapshot is None else snapshot.park_reason
+        # Soft-stream policy follows ScoresParkReason (design park table):
+        # NON_DURABLE soft-yes; EMPTY cheap-admit; MISSING_ROW_RUN soft-no.
+        if source is TerminalSource.PARKED and park_reason == ScoresParkReason.MISSING_ROW_RUN:
+            return False
+
         if resolved_event is not None:
             trigger = (
                 RowStreamResolutionTrigger.SOFT_PROVISIONAL
@@ -92,9 +101,9 @@ class InferenceStreamResolutionMixin:
             return delivery is not RowStreamDelivery.SILENCE
 
         if source is TerminalSource.PARKED:
-            if not self._scope_has_matching_scheduler_run(scope):
-                return False
-            return self._admit_after_soft_provisional(scope, resolved, on_miss="revert")
+            if park_reason == ScoresParkReason.EMPTY_TIER_OUTCOME:
+                return self._admit_after_soft_provisional(scope, resolved, on_miss="revert")
+            return False
 
         if source is TerminalSource.ORPHAN:
             with self._lock:
@@ -168,19 +177,6 @@ class InferenceStreamResolutionMixin:
             delivery,
         )
         return True
-
-    def _scope_has_matching_scheduler_run(
-        self: InferenceRowScheduler,
-        scope: ComputeScope,
-    ) -> bool:
-        with self._lock:
-            return any(
-                root_scope.player_id == scope.player_id
-                and root_scope.game_id == scope.game_id
-                and root_scope.perspective == scope.perspective
-                and scope.turn == root_scope.turn
-                for root_scope in self._runs.values()
-            )
 
     def _emit_stream_terminal(
         self: InferenceRowScheduler,

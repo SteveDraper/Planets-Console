@@ -558,6 +558,7 @@ def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
 
     assert parked.state == "parked"
     assert parked.error is None
+    assert orchestrator.nodes[shared_scope].park_reason == "not_ready"
     assert shared_scope not in orchestrator.ready_scopes()
 
     woken = orchestrator.wake_if_parked(
@@ -567,6 +568,7 @@ def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
     assert call_count == 2
     assert woken.state == "complete"
     assert woken.result_wire == {"run": 2}
+    assert orchestrator.nodes[shared_scope].park_reason is None
     assert orchestrator.nodes[shared_scope] is parked._node
 
 
@@ -619,6 +621,9 @@ def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sam
 
     assert shared_calls == 1
     assert orchestrator.nodes[shared_scope].state == "parked"
+    assert (
+        orchestrator.nodes[shared_scope].park_reason == "scores_empty_tier_outcome"
+    )
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
     assert handle.state == "waiting_deps"
 

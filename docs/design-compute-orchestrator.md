@@ -172,6 +172,11 @@ enter `waiting_deps` -- that papered over un-wakeable parks and reintroduced thr
 | Empty `TierJobOutcome` | Cheap admission only (else silent) | `STREAM_RESCHEDULED` / `ROW_RUN_ADOPTED` |
 | Missing `RowRun` | No | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
 
+Park soft-stream policy is enforced at the scores stream boundary from
+`ScopeLifecycleSnapshot.park_reason` (`ScoresParkReason`), not from scheduler
+membership heuristics. The orchestrator stashes the step's `park_reason` on the
+node while `parked` and copies it into the scope-outcome snapshot.
+
 **Scores `tier_solve` wire invariant:** when ensure is satisfied and turn evidence is
 still open, wire build must attach a `runId` (tier registry or successful scheduler
 adopt) or emit the evidence-closed skip sentinel. A bare `{runId: null}` open-evidence

@@ -27,6 +27,8 @@ class ScopeLifecycleSnapshot:
     execution_generation: int
     result_wire: object | None
     error: BaseException | None
+    # Analytic park site (e.g. ScoresParkReason); None when not parked.
+    park_reason: str | None = None
 
 
 ScopeOutcomeListener = Callable[[ScopeLifecycleSnapshot], None]
@@ -248,6 +250,7 @@ class OrchestratorObservers:
             execution_generation=node.execution_generation,
             result_wire=node.result_wire,
             error=node.error,
+            park_reason=node.park_reason if node.state == "parked" else None,
         )
         for listener in tuple(self._scope_outcome_listeners):
             self._post_lock_callbacks.append(

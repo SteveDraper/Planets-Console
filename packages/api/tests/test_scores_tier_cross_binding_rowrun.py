@@ -38,7 +38,7 @@ from api.analytics.military_score_inference.row_stream_resolution_registry impor
     get_stream_resolution,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.analytics.scores.compute_orchestration import run_scores_tier_solve
+from api.analytics.scores.compute_orchestration import ScoresParkReason, run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     register_row_run,
@@ -94,6 +94,7 @@ def _outcome_snapshot(
     result_wire: object | None = None,
     error: BaseException | None = None,
     execution_generation: int = 0,
+    park_reason: str | None = None,
 ) -> ScopeLifecycleSnapshot:
     return ScopeLifecycleSnapshot(
         scope=scope,
@@ -101,6 +102,7 @@ def _outcome_snapshot(
         execution_generation=execution_generation,
         result_wire=result_wire,
         error=error,
+        park_reason=park_reason,
     )
 
 
@@ -831,6 +833,7 @@ def test_soft_empty_park_delivers_stream_terminal_without_completing_node(sample
         state="parked",
         priority_band="stream_attached",
         result_wire={"runId": run.run_id, "rowComplete": soft_complete},
+        park_reason=ScoresParkReason.NON_DURABLE_ROW_COMPLETE,
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
@@ -903,7 +906,11 @@ def test_empty_park_schedule_row_stays_silent_for_wake(sample_turn) -> None:
     controller.attach()
 
     scheduler._on_orchestrator_scope_outcome(
-        _outcome_snapshot(scope, state="parked"),
+        _outcome_snapshot(
+            scope,
+            state="parked",
+            park_reason=ScoresParkReason.EMPTY_TIER_OUTCOME,
+        ),
     )
 
     queued: list[object] = []
@@ -996,7 +1003,11 @@ def test_open_evidence_park_stays_silent_without_matching_row_run(sample_turn) -
     controller.attach()
 
     scheduler._on_orchestrator_scope_outcome(
-        _outcome_snapshot(scope, state="parked"),
+        _outcome_snapshot(
+            scope,
+            state="parked",
+            park_reason=ScoresParkReason.MISSING_ROW_RUN,
+        ),
     )
 
     queued: list[object] = []
@@ -1008,3 +1019,147 @@ def test_open_evidence_park_stays_silent_without_matching_row_run(sample_turn) -
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals == []
     assert get_stream_resolution(session.run_id) is None
+
+
+def test_missing_row_run_park_stays_silent_even_with_scheduler_run(
+    sample_turn, monkeypatch
+) -> None:
+    """MISSING_ROW_RUN must not soft-admit just because the scheduler still tracks the scope."""
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        ImmediateRowAdmission,
+    )
+
+    session = _session(sample_turn)
+    run = RowRun(session)
+    register_row_run(run)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    scheduler._runs[run.run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    immediate = ImmediateRowAdmission(
+        events=(
+            {
+                "type": "complete",
+                "status": "exact",
+                "summary": "should not admit",
+                "isComplete": True,
+                "playerId": session.player_id,
+                "solutionCount": 0,
+                "solutions": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        controller,
+        "resolve_row_admission",
+        lambda _player_id, **_kwargs: immediate,
+    )
+
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="parked",
+            park_reason=ScoresParkReason.MISSING_ROW_RUN,
+        ),
+    )
+
+    queued: list[object] = []
+    while True:
+        try:
+            queued.append(session.event_queue.get_nowait())
+        except queue.Empty:
+            break
+    domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
+    assert domain_terminals == []
+    assert get_stream_resolution(session.run_id) is None
+    assert session.run_id not in controller.finished_run_ids
+
+
+def test_empty_tier_park_cheap_admits_when_admission_available(
+    sample_turn, monkeypatch
+) -> None:
+    """EMPTY_TIER_OUTCOME soft-admits via cheap admission when available."""
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        ImmediateRowAdmission,
+    )
+
+    session = _session(sample_turn)
+    run = RowRun(session)
+    register_row_run(run)
+    scope = _scope_for(session)
+    stream_scope = InferenceStreamScope(
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn_number=session.turn_number,
+    )
+
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    scheduler._runs[run.run_id] = scope
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(session.player_id,),
+        scheduler=scheduler,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+    controller.register_scheduled_row(
+        session.player_id,
+        ScheduledInferenceRow(player_id=session.player_id, session=session),
+    )
+    controller.attach()
+
+    immediate = ImmediateRowAdmission(
+        events=(
+            {
+                "type": "complete",
+                "status": "exact",
+                "summary": "empty park admission",
+                "isComplete": True,
+                "playerId": session.player_id,
+                "solutionCount": 0,
+                "solutions": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        controller,
+        "resolve_row_admission",
+        lambda _player_id, **_kwargs: immediate,
+    )
+
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="parked",
+            park_reason=ScoresParkReason.EMPTY_TIER_OUTCOME,
+        ),
+    )
+
+    soft_resolution = get_stream_resolution(session.run_id)
+    assert soft_resolution is not None
+    assert soft_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
+    assert session.run_id in controller.finished_run_ids
