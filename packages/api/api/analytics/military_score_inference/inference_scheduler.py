@@ -37,7 +37,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     wake_inference_table_stream_multiplex,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
-from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
@@ -75,11 +75,8 @@ class InferenceRowScheduler(
         if worker_count == 0:
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
+        # Scope index only -- RowRun objects live in ``tier_row_run_registry``.
         self._runs: dict[str, ComputeScope] = {}
-        # Scheduler-side RowRun cache (dual ownership until issue-3 cleanup).
-        # Persist admission and adopt prefer the tier registry, which retains
-        # DETACHED / CANCELLED shells until retire.
-        self._row_runs_by_id: dict[str, RowRun] = {}
         # Execution identity for cancel abort, captured after submit/wake *outside*
         # the scheduler lock. ``cancel_run`` must never call into the orchestrator
         # while holding ``_lock`` (scheduler → orch nests ABBA with orch drain →
@@ -213,6 +210,11 @@ class InferenceRowScheduler(
         scope: InferenceStreamScope,
         player_id: int,
     ) -> RowRun | None:
+        """Return the live ``REGISTERED`` RowRun for this player, if any.
+
+        Uses the scheduler scope index plus the single registry owner. ``DETACHED``
+        / ``CANCELLED`` shells are not re-attached here.
+        """
         with self._lock:
             for run_id, root_scope in self._runs.items():
                 if (
@@ -221,10 +223,10 @@ class InferenceRowScheduler(
                     and root_scope.turn == scope.turn_number
                     and root_scope.player_id == player_id
                 ):
-                    owned = self._row_runs_by_id.get(run_id)
-                    if owned is not None:
-                        return owned
-                    return self._adapter_row_run(run_id)
+                    run = self._adapter_row_run(run_id)
+                    if run is not None and run.phase is RowRunPhase.REGISTERED:
+                        return run
+                    return None
             return None
 
     def _global_pause_status_locked(self, scope: InferenceStreamScope) -> dict[str, object]:
@@ -359,7 +361,6 @@ class InferenceRowScheduler(
             self._register_tier_callbacks_for_run(row_run)
             root_scope = self._root_scope_for_session(session)
             self._runs[session.run_id] = root_scope
-            self._row_runs_by_id[session.run_id] = row_run
             if self._defer_orchestrator_submit:
                 return
             if resolved_token is None:

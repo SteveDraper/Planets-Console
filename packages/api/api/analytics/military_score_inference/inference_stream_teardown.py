@@ -225,7 +225,6 @@ class InferenceStreamTeardownMixin:
         from api.analytics.scores.tier_row_run_registry import detach_row_run, retire_row_run
 
         root_scope = self._runs.pop(run_id, None)
-        self._row_runs_by_id.pop(run_id, None)
         self._execution_generation_by_run_id.pop(run_id, None)
         if cancel:
             pass
@@ -250,14 +249,7 @@ class InferenceStreamTeardownMixin:
         return isinstance(snapshot.error, ComputeScopeAbortedError)
 
     def _adapter_row_run(self: InferenceRowScheduler, run_id: str) -> RowRun | None:
-        """Resolve RowRun from the single registry owner (DETACHED/CANCELLED retained).
-
-        ``_row_runs_by_id`` remains a scheduler-side cache for adopt until dual
-        ownership is removed; prefer the registry when both disagree.
-        """
+        """Resolve RowRun from the single registry owner (any retained phase)."""
         from api.analytics.scores.tier_row_run_registry import get_row_run
 
-        registered = get_row_run(run_id)
-        if registered is not None:
-            return registered
-        return self._row_runs_by_id.get(run_id)
+        return get_row_run(run_id)

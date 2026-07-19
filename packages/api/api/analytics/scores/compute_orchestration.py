@@ -242,11 +242,12 @@ def _adopt_scheduler_row_run_for_tier_wire(
     ctx: AnalyticQueryContext,
     export_scope: ExportScope,
 ) -> RowRun | None:
-    """Attach an in-progress scheduler RowRun into the tier registry when missing.
+    """Re-index a live ``REGISTERED`` RowRun when scope lookup raced ensure.
 
-    Ensure may report satisfied because the inference scheduler already owns a live
-    row while the tier registry was cleared (detach / peer unregister). Adopt must
-    succeed in that case so wire build never parks without an armed wake publisher.
+    ``row_run_for_player`` reads the single registry owner (REGISTERED only).
+    ``DETACHED`` / ``CANCELLED`` shells are not adoptable. ``register_row_run``
+    refreshes the scope index if ensure scheduled the row before the first
+    ``get_row_run_for_scope`` check.
     """
     if export_scope.player_id is None:
         return None

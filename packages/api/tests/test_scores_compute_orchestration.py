@@ -286,16 +286,89 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
     assert skip_wire == {"runId": None, "evidenceClosed": True}
 
 
-def test_build_scores_tier_solve_job_wire_adopts_scheduler_row_when_tier_registry_empty(
+def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
     sample_turn,
     persistence,
 ) -> None:
-    """Ensure-satisfied + live scheduler RowRun must adopt, not park or raise.
+    """Live REGISTERED RowRun attaches from the single registry owner.
 
-    Tier registry may be empty while the scheduler still owns the RowRun; wire
-    build must attach that handle so dependents are not left waiting without a
-    wake publisher.
+    Wire build must not depend on a scheduler-side RowRun dual cache.
     """
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        schedule_inference_row,
+    )
+    from api.analytics.scores.export_snapshot import scores_inference_stream_scope
+    from api.analytics.scores.tier_row_run_registry import (
+        get_row_run_for_scope,
+        reset_tier_row_run_registry_for_tests,
+    )
+
+    from tests.scores_exports_helpers import (
+        GAME_ID,
+        first_player_id,
+        perspective,
+        scores_query_context,
+    )
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
+    player_id = first_player_id(sample_turn)
+    ctx = scores_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
+    export_scope = compute_scope_to_export_scope(scope)
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+    )
+    assert scheduled is not None
+    run = scheduler.row_run_for_player(
+        scores_inference_stream_scope(export_scope),
+        player_id,
+    )
+    assert run is not None
+    assert get_row_run_for_scope(scope) is run
+
+    with (
+        patch(
+            "api.analytics.scores.exports.ensure_scores_export",
+            return_value=True,
+        ),
+        patch.object(ScoresPersistencePolicy, "is_satisfied", return_value=False),
+    ):
+        wire = build_scores_tier_solve_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+    assert wire == {"runId": run.run_id}
+    assert get_row_run_for_scope(scope) is run
+
+
+def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
+    sample_turn,
+    persistence,
+) -> None:
+    """Retiring the registry shell drops adopt; no dual-cache recovery."""
     from api.analytics.military_score_inference.inference_scheduler import (
         InferenceRowScheduler,
         reset_inference_row_scheduler_for_tests,
@@ -349,7 +422,6 @@ def test_build_scores_tier_solve_job_wire_adopts_scheduler_row_when_tier_registr
         player_id,
     )
     assert run is not None
-    # Simulate tier-registry gap while scheduler still owns the live RowRun.
     unregister_row_run(run.run_id)
     assert get_row_run_for_scope(scope) is None
     assert (
@@ -357,7 +429,7 @@ def test_build_scores_tier_solve_job_wire_adopts_scheduler_row_when_tier_registr
             scores_inference_stream_scope(export_scope),
             player_id,
         )
-        is run
+        is None
     )
 
     with (
@@ -367,13 +439,12 @@ def test_build_scores_tier_solve_job_wire_adopts_scheduler_row_when_tier_registr
         ),
         patch.object(ScoresPersistencePolicy, "is_satisfied", return_value=False),
     ):
-        wire = build_scores_tier_solve_job_wire(
-            scope,
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-        )
-    assert wire == {"runId": run.run_id}
-    assert get_row_run_for_scope(scope) is run
+        with pytest.raises(RuntimeError, match="no attachable RowRun"):
+            build_scores_tier_solve_job_wire(
+                scope,
+                dependency_outputs=DependencyOutputs(),
+                ctx=ctx,
+            )
 
 
 def test_build_scores_tier_solve_job_wire_raises_when_ensure_satisfied_without_attachable_row(
