@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+import api.streaming.table_stream.stream_drain as stream_drain
 from api.streaming.table_stream.row_stream_resolution import RowStreamDelivery
-from api.streaming.table_stream.row_stream_resolution_registry import is_multiplex_closed
 
 
 class TerminalRoute(StrEnum):
@@ -24,6 +24,6 @@ def route_terminal(delivery: RowStreamDelivery, run_id: str) -> TerminalRoute:
     """
     if delivery is RowStreamDelivery.SILENCE:
         return TerminalRoute.SILENCE
-    if delivery is RowStreamDelivery.UPGRADE or is_multiplex_closed(run_id):
+    if delivery is RowStreamDelivery.UPGRADE or stream_drain.is_closed(run_id):
         return TerminalRoute.PENDING
     return TerminalRoute.QUEUE

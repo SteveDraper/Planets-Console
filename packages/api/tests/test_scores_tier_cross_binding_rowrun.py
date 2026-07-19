@@ -43,6 +43,7 @@ from api.compute.orchestrator import ComputeNodeRun
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import ComputeScope
+from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.row_stream_resolution import (
     RowStreamDelivery,
     RowStreamResolutionState,
@@ -50,7 +51,6 @@ from api.streaming.table_stream.row_stream_resolution import (
 )
 from api.streaming.table_stream.row_stream_resolution_registry import (
     get_stream_resolution,
-    is_multiplex_closed,
 )
 
 
@@ -349,7 +349,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
     assert get_row_run(run.run_id) is None
     assert scheduler._runs == {}
     assert session.player_id in controller.scheduled_rows
-    assert not is_multiplex_closed(session.run_id)
+    assert not stream_drain.is_closed(session.run_id)
 
     # Missing RowRun parks until force_fresh wake can rebuild wire / reschedule.
     assert run_scores_tier_solve({"runId": run.run_id}).outcome == "park"
@@ -637,7 +637,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
     assert any(event.get("type") == "complete" for event in pending), (
         f"expected admission complete on pending wire, got pending={pending!r} queued={queued!r}"
     )
-    assert is_multiplex_closed(session.run_id)
+    assert stream_drain.is_closed(session.run_id)
     assert get_row_run(run.run_id) is None
 
 
@@ -649,8 +649,6 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
     Multiplex can close drain when the cancel token trips without yielding a
     wire event. Orphan delivery must still reach pending wire via multiplex_closed.
     """
-    from api.streaming.table_stream import stream_drain
-
     session = _session(sample_turn)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -772,11 +770,11 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
     soft_resolution = get_stream_resolution(session.run_id)
     assert soft_resolution is not None
     assert soft_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
-    assert is_multiplex_closed(session.run_id)
+    assert stream_drain.is_closed(session.run_id)
 
     # Simulate force_fresh re-solve: reopen multiplex drain, then deliver RowComplete.
     scheduler._reopen_stream_row_for_force_fresh(scope)
-    assert not is_multiplex_closed(session.run_id)
+    assert not stream_drain.is_closed(session.run_id)
 
     row_complete = row_complete_with_summary(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
@@ -1097,7 +1095,7 @@ def test_missing_row_run_park_stays_silent_even_with_scheduler_run(
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals == []
     assert get_stream_resolution(session.run_id) is None
-    assert not is_multiplex_closed(session.run_id)
+    assert not stream_drain.is_closed(session.run_id)
 
 
 def test_empty_tier_park_cheap_admits_when_admission_available(sample_turn, monkeypatch) -> None:
@@ -1164,4 +1162,4 @@ def test_empty_tier_park_cheap_admits_when_admission_available(sample_turn, monk
     soft_resolution = get_stream_resolution(session.run_id)
     assert soft_resolution is not None
     assert soft_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
-    assert is_multiplex_closed(session.run_id)
+    assert stream_drain.is_closed(session.run_id)

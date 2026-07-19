@@ -17,14 +17,10 @@ from api.streaming.table_stream.row_stream_resolution import (
     RowStreamResolutionTrigger,
 )
 from api.streaming.table_stream.row_stream_resolution_registry import (
-    clear_multiplex_closed_if_soft,
     clear_stream_resolutions,
     discard_stream_resolution_if_state,
     get_stream_resolution,
-    is_multiplex_closed,
-    mark_multiplex_closed,
     reset_stream_resolution_registry_for_tests,
-    seal_canceled_finish,
     transition_stream_resolution,
 )
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
@@ -39,18 +35,14 @@ __all__ = [
     "TableStreamConnectPolicy",
     "TableStreamScopeGuard",
     "TerminalRoute",
-    "clear_multiplex_closed_if_soft",
     "clear_stream_resolutions",
     "discard_stream_resolution_if_state",
     "drain_available_multiplex_events",
     "get_stream_resolution",
-    "is_multiplex_closed",
     "iter_multiplexed_stream_events",
     "iter_table_stream_connect",
-    "mark_multiplex_closed",
     "reset_stream_resolution_registry_for_tests",
     "route_terminal",
-    "seal_canceled_finish",
     "stream_drain",
     "transition_stream_resolution",
 ]

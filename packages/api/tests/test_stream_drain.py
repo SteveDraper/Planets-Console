@@ -10,7 +10,6 @@ from api.streaming.table_stream.row_stream_resolution import (
 )
 from api.streaming.table_stream.row_stream_resolution_registry import (
     get_stream_resolution,
-    is_multiplex_closed,
     reset_stream_resolution_registry_for_tests,
     transition_stream_resolution,
 )
@@ -22,7 +21,6 @@ def test_close_sets_multiplex_closed() -> None:
     try:
         stream_drain.close("run-a")
         assert stream_drain.is_closed("run-a")
-        assert is_multiplex_closed("run-a")
     finally:
         reset_stream_resolution_registry_for_tests()
 
