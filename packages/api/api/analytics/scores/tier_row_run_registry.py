@@ -5,13 +5,16 @@ Owns scores ``RowRun`` shells and compact persist admission. Types
 :mod:`api.streaming.table_stream.row_run_admission` -- not scores-private.
 
 Retained shells use ``RowRunPhase`` (``REGISTERED`` / ``DETACHED`` only).
-Cancel intent drops the shell immediately and records compact cancelled
-admission keyed by scores scope so ``PersistAdmission.CANCEL_DENY`` still
-denies late persist. A later ``REGISTERED`` for the same scope supersedes
-that cancelled admission (preempt / re-adopt). Memory is O(scopes with an
-outstanding cancel), not an unbounded UUID FIFO.
+Cancel drops the shell immediately and records compact cancelled admission
+keyed by scores scope so ``PersistAdmission.CANCEL_DENY`` still denies late
+persist. A later ``REGISTERED`` for the same scope supersedes that cancelled
+admission (preempt / re-adopt). Memory is O(scopes with an outstanding
+cancel), not an unbounded UUID FIFO.
 
-Production persist writers use :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
+Lifecycle matrix sides (detach / cancel / retire) are applied by
+:func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`.
+Production persist writers use
+:func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
 (``PersistDecision``) -- not :func:`get_persist_admission` directly.
 """
 

@@ -441,8 +441,8 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 - Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, controller base, registry attach/detach.
 - Shared `RowStreamResolution` FSM + `multiplex_closed` drain bit + `route_terminal` (queue / pending / silence). Soft is a shared capability; scores supplies soft triggers, fleet does not.
-- `multiplex_closed` is the sole drain-closed source of truth; thin writer API is `streaming.table_stream.stream_drain` (`close` / `reopen_if_soft` / `is_closed`). UUID run ids are never reused.
-- Generic retained-shell / persist-admission vocabulary (`row_run_admission.py`: `RowRunPhase`, `PersistAdmission`, `RowLifecycleOp`). Per-analytic registries own shells; production persist gates use analytic `PersistDecision` / `decide_*`; scores applies lifecycle via `scores/row_lifecycle.py`.
+- `multiplex_closed` is the sole drain-closed source of truth (stored on the resolution registry). Sole **public** writer/reader facade is `streaming.table_stream.stream_drain` (`close` / `reopen_if_soft` / `is_closed` / `seal_canceled`) -- adapters must not call registry drain helpers (`mark_multiplex_closed`, `seal_canceled_finish`, …) directly. UUID run ids are never reused.
+- Generic retained-shell / persist-admission vocabulary (`row_run_admission.py`: `RowRunPhase`, `PersistAdmission`, `RowLifecycleOp`). Per-analytic registries own shells; production persist gates use analytic `PersistDecision` / `decide_*`; scores applies lifecycle via `apply_scores_row_lifecycle` in `scores/row_lifecycle.py`.
 
 **Thin adapters** (same template for fleet and scores):
 

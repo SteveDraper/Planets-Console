@@ -43,7 +43,7 @@ Turn-scoped analytics that run through the **compute orchestrator** (table strea
 | **Registration** | `scope_key_spec`, `compute_profile` (`ComputeStepSpec` per `step_kind`), `PersistencePolicy`, wire builders, `run_step` | Step kinds, backends, artifact shape |
 | **Submission** | `ComputeRequest(scope, step_kind?, priority_band)` | Entry step (`materialize` vs `tier_solve`, etc.) |
 | **Step outcome** | Result wire declares `continue`, `persist`, `complete`, or `park` | What `persist` writes; reader gates on terminal quality; `park` demotes to `parked` until `force_fresh` wake |
-| **Table stream adapter** | Process-wide observer/gate registration on the singleton orchestrator; node-complete listener for wire events; scope guard + per-row run state | Mid-step incremental events (e.g. inference `solution`) |
+| **Table stream adapter** | Process-wide observer/gate registration on the singleton orchestrator; node-complete listener for wire events; scope guard + per-row run state; shared `stream_drain` + `row_run_admission` vocabulary | Mid-step incremental events (e.g. inference `solution`); scores shell registry + `PersistDecision` + `apply_scores_row_lifecycle` |
 | **Durable persistence** | `PersistencePolicy.persist` on `persist` outcome only | Fleet `provenance.is_final`; scores durable turn-evidence statuses |
 | **Invalidation** | `invalidation_generation` + epoch discard; analytic `invalidate` hook | Cross-analytic triggers (fleet ledger persist invalidates scores row) |
 | **Dependencies** | `DependencyOutputs` on job wire; no blocking ensure in workers | `ENSURE_DEPENDENCIES` per export catalog |

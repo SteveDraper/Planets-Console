@@ -68,7 +68,11 @@ def transition_stream_resolution(
 
 
 def mark_multiplex_closed(run_id: str) -> None:
-    """Mark drain closed for ``run_id`` (creates OPEN resolution if missing)."""
+    """Internal: mark drain closed for ``run_id`` (creates OPEN if missing).
+
+    Public callers use :func:`api.streaming.table_stream.stream_drain.close`
+    only -- do not import this helper from adapters or analytics.
+    """
     with _lock:
         resolution = _ensure_locked(run_id)
         resolution.multiplex_closed = True
@@ -78,7 +82,8 @@ def mark_multiplex_closed(run_id: str) -> None:
 def seal_canceled_finish(run_id: str) -> RowStreamDelivery:
     """Internal cancel seal: FSM ``CANCELED`` + drain closed, under one lock.
 
-    Public callers use :func:`stream_drain.seal_canceled` only. Sealing both
+    Public callers use :func:`api.streaming.table_stream.stream_drain.seal_canceled`
+    only -- do not import this helper from adapters or analytics. Sealing both
     sides together avoids leaving resolution ``OPEN`` with drain closed alone.
     Idempotent with a prior ``CANCELED`` transition (returns ``SILENCE``) and
     with an already-closed drain bit.
@@ -92,14 +97,18 @@ def seal_canceled_finish(run_id: str) -> RowStreamDelivery:
 
 
 def is_multiplex_closed(run_id: str) -> bool:
-    """True when drain is closed for ``run_id``."""
+    """Internal read of drain-closed. Prefer :func:`stream_drain.is_closed`."""
     with _lock:
         resolution = _resolutions.get(run_id)
         return resolution is not None and resolution.multiplex_closed
 
 
 def clear_multiplex_closed_if_soft(run_id: str) -> bool:
-    """Clear drain-closed only while still ``SOFT_PROVISIONAL``. Returns True if cleared."""
+    """Internal soft reopen. Prefer :func:`stream_drain.reopen_if_soft`.
+
+    Clears drain-closed only while still ``SOFT_PROVISIONAL``. Returns True if
+    cleared.
+    """
     with _lock:
         resolution = _resolutions.get(run_id)
         if (

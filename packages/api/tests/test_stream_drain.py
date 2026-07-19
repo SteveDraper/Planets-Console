@@ -105,7 +105,7 @@ def test_drain_fsm_route_matrix() -> None:
 
 
 def test_seal_canceled_idempotent_with_prior_canceled_transition() -> None:
-    """Scores cancel intent then multiplex seal must not thrash (SILENCE + closed)."""
+    """Second seal_canceled after CANCELED is a no-op (SILENCE + closed)."""
     reset_stream_resolution_registry_for_tests()
     try:
         assert (

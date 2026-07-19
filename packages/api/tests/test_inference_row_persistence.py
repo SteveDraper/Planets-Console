@@ -563,7 +563,6 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
         row_complete_with_summary,
     )
     from api.analytics.military_score_inference.row_run import RowRun
-    from api.streaming.table_stream.row_run_admission import RowRunPhase
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
@@ -575,6 +574,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
         reset_tier_row_run_registry_for_tests,
     )
     from api.compute.scope import ComputeScope
+    from api.streaming.table_stream.row_run_admission import RowRunPhase
     from api.streaming.table_stream.row_stream_resolution_registry import (
         reset_stream_resolution_registry_for_tests,
     )

@@ -7,7 +7,6 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
 from api.analytics.scores.tier_row_run_registry import (
     detach_row_run,
@@ -20,6 +19,7 @@ from api.analytics.scores.tier_row_run_registry import (
     reset_tier_row_run_registry_for_tests,
     retire_row_run,
 )
+from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 
 
 def _session(sample_turn, *, player_id: int | None = None) -> InferenceRowStreamSession:
@@ -46,7 +46,7 @@ def test_persist_decision_table(sample_turn) -> None:
         assert get_persist_admission(run.run_id) is PersistAdmission.ALLOW
         assert decide_scores_row_persist(run.run_id) == PersistDecision.allow()
 
-        # Token alone is not a persist gate; cancel intent sets cancel admission.
+        # Token alone is not a persist gate; CANCEL sets cancel admission.
         run.session.cancel_token.cancel()
         assert decide_scores_row_persist(run.run_id) == PersistDecision.allow()
 

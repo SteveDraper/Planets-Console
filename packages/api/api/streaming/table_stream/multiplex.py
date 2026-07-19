@@ -94,8 +94,9 @@ def iter_multiplexed_stream_events(
         if session_is_cancelled(row.session):
             pending_run_ids.discard(row.session.run_id)
             # Token-observed cancel seal (generic path for any analytic). Sole
-            # operation is stream_drain.seal_canceled; scores cancel intent may
-            # already have sealed the same run (idempotent no-op here).
+            # operation is stream_drain.seal_canceled; scores
+            # apply_scores_row_lifecycle(CANCEL) may already have sealed the
+            # same run (idempotent no-op here).
             stream_drain.seal_canceled(row.session.run_id)
 
     def refresh_pending_run_ids() -> set[str]:

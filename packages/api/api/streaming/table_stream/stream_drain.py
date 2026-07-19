@@ -10,7 +10,7 @@ drain closed). Exactly two justified callers:
 
 - ``multiplex`` -- generic token-observed seal when any analytic's session
   cancel token is seen in the drain loop (covers fleet and analytics without
-  a cancel-intent path).
+  an immediate cancel-seal path of their own).
 - scores :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
   for ``RowLifecycleOp.CANCEL`` -- scores-specific immediate seal when cancel
   is applied, before multiplex necessarily notices the token.

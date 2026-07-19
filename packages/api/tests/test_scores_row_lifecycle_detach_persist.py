@@ -169,7 +169,7 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
                 player_id=player_id,
             )
 
-        # Same-scope preempt detaches prior stream runs without cancel intent.
+        # Same-scope preempt detaches prior stream runs without cancel.
         scheduler.begin_scope(scope)
 
         assert not session.cancel_token.is_cancelled()
