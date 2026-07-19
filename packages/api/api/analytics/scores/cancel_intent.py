@@ -2,6 +2,12 @@
 
 Cancel (not detach) must apply all three sides of cancel intent together so
 persist denial, stream silence, and in-flight solve abort cannot drift.
+
+Stream silence uses the sole cancel-seal operation
+:func:`stream_drain.seal_canceled`. This module is the scores-specific
+*immediate* caller (silence as soon as cancel is applied). Multiplex is the
+generic *token-observed* caller for any analytic; a later multiplex seal is a
+no-op.
 """
 
 from __future__ import annotations
@@ -21,8 +27,8 @@ def apply_scores_row_cancel(
 
     Order:
     1. Compact cancel admission (drops any RowRun shell; remembers run_id).
-    2. Seal stream cancel (``CANCELED`` + drain closed) via
-       :func:`stream_drain.seal_canceled` (idempotent with multiplex seal).
+    2. Immediate stream cancel seal via :func:`stream_drain.seal_canceled`
+       (scores-specific path; multiplex may later seal the same run as a no-op).
     3. Session cancel token (stop in-flight tier work), when provided.
 
     Detach must never call this: detached workers may still finish and persist.

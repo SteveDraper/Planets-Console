@@ -5,9 +5,16 @@ process-wide resolution registry. UUID run ids are never reused, so closed bits
 remain as routing history; soft reopen clears the bit only while still
 ``SOFT_PROVISIONAL``.
 
-Cancel-silent multiplex finish also seals FSM ``CANCELED`` via
-:func:`seal_canceled` so late terminals stay silenced (idempotent with scores
-cancel intent).
+Cancel silence is one operation -- :func:`seal_canceled` (FSM ``CANCELED`` +
+drain closed). Exactly two justified callers:
+
+- ``multiplex`` -- generic token-observed seal when any analytic's session
+  cancel token is seen in the drain loop (covers fleet and analytics without
+  a cancel-intent path).
+- ``apply_scores_row_cancel`` -- scores-specific immediate seal when cancel is
+  applied, before multiplex necessarily notices the token.
+
+A second call is a no-op (idempotent). No other module may seal cancel finish.
 """
 
 from __future__ import annotations
@@ -27,7 +34,10 @@ def close(run_id: str) -> None:
 
 
 def seal_canceled(run_id: str) -> RowStreamDelivery:
-    """Seal cancel finish: ``CANCELED`` + drain closed (idempotent)."""
+    """Sole cancel-silence operation: ``CANCELED`` + drain closed (idempotent).
+
+    Call only from multiplex (token-observed) or scores cancel intent (immediate).
+    """
     return seal_canceled_finish(run_id)
 
 

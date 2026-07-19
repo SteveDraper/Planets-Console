@@ -74,12 +74,12 @@ def mark_multiplex_closed(run_id: str) -> None:
 
 
 def seal_canceled_finish(run_id: str) -> RowStreamDelivery:
-    """Seal cancel finish: FSM ``CANCELED`` + drain closed, under one lock.
+    """Internal cancel seal: FSM ``CANCELED`` + drain closed, under one lock.
 
-    Multiplex cancel-silent finish must not leave resolution ``OPEN`` with only
-    ``multiplex_closed`` -- that invited a parallel cancel path that drifted from
-    the cancel-intent command. Idempotent with a prior ``CANCELED`` transition
-    (returns ``SILENCE``) and with an already-closed drain bit.
+    Public callers use :func:`stream_drain.seal_canceled` only. Sealing both
+    sides together avoids leaving resolution ``OPEN`` with drain closed alone.
+    Idempotent with a prior ``CANCELED`` transition (returns ``SILENCE``) and
+    with an already-closed drain bit.
     """
     with _lock:
         resolution = _ensure_locked(run_id)
