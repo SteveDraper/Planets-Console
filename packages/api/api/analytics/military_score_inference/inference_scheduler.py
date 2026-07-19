@@ -38,12 +38,12 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.row_run import RowRun
-from api.streaming.table_stream.row_run_admission import RowRunPhase
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
+from api.streaming.table_stream.row_run_admission import RowLifecycleOp, RowRunPhase
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
 
 __all__ = [
@@ -361,7 +361,7 @@ class InferenceRowScheduler(
         with self._lock:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
-                self._remove_run_locked(session.run_id, detach=True)
+                self._remove_run_locked(session.run_id, op=RowLifecycleOp.DETACH)
             self._drop_held_for_stream_locked(stream_token)
             binding = self._stream_bindings.pop(stream_token, None)
             if binding is not None:

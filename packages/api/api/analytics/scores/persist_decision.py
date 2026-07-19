@@ -49,7 +49,9 @@ def decide_scores_row_persist(run_id: str) -> PersistDecision:
     "no durable write" contract. The only behavioral difference is whether
     compact cancel admission should be retired.
 
-    Cancel intent must go through ``apply_scores_row_cancel`` / ``mark_row_run_cancelled``;
+    Cancel intent must go through
+    :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
+    (``RowLifecycleOp.CANCEL``) / registry ``mark_row_run_cancelled``;
     the live cancel token is not a persist gate. Shell ``RowRunPhase`` is not
     consulted here -- only :func:`get_persist_admission` (registry-internal).
     """

@@ -15,6 +15,7 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
+from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -57,7 +58,7 @@ class InferenceStreamTeardownMixin:
         set resolution ``CANCELED``, or abort orchestrator nodes -- in-flight
         tier workers may still finish, persist from the RowComplete payload, and
         complete the DAG node. ``cancel_run`` is the explicit cancel path
-        (cancel intent then abort).
+        (lifecycle CANCEL then abort).
         """
         with self._lock:
             prior = self._scope_guard.active_scope
@@ -81,9 +82,11 @@ class InferenceStreamTeardownMixin:
 
         Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
         only drops stream ownership without cancelling solve work, cancel applies
-        cancel intent (token + compact cancel admission + stream CANCELED)
-        then aborts in-flight orchestrator nodes so a later ``force_fresh`` submit
-        cannot attach to a still-running node with a missing RowRun.
+        :func:`~api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
+        for ``RowLifecycleOp.CANCEL`` (token + compact cancel admission + stream
+        CANCELED) then aborts in-flight orchestrator nodes so a later
+        ``force_fresh`` submit cannot attach to a still-running node with a
+        missing RowRun.
         """
         abort_scope: ComputeScope | None = None
         abort_generation: int | None = None
@@ -93,10 +96,9 @@ class InferenceStreamTeardownMixin:
             # orchestrator while holding the scheduler lock (ABBA with orch drain
             # paths that take this lock, and with diagnostics snapshot on orch).
             abort_generation = self._execution_generation_by_run_id.get(run_id)
-            # Cancel intent (admission + delivery + token) before dropping
+            # Lifecycle CANCEL (admission + seal + token) before dropping
             # scheduler maps so late persist still DENYs.
-            self._apply_cancel_intent_locked(run_id)
-            self._remove_run_locked(run_id, cancel=True)
+            self._remove_run_locked(run_id, op=RowLifecycleOp.CANCEL)
             abort_scope = root_scope
         # Abort outside the scheduler lock: ``abort_scope`` drains node-complete
         # listeners that may deliver stream events (controller ``stream_lock``) or
@@ -104,17 +106,6 @@ class InferenceStreamTeardownMixin:
         # self-deadlocks with ``reschedule_row`` (stream_lock -> cancel -> abort).
         if abort_scope is not None and abort_generation is not None:
             self._abort_orchestrator_scope(abort_scope, abort_generation)
-
-    def _apply_cancel_intent_locked(self: InferenceRowScheduler, run_id: str) -> None:
-        """Apply :func:`apply_scores_row_cancel` under the scheduler lock.
-
-        Compact cancel admission is the durable persist refuse signal.
-        Stream cancel seal (``CANCELED`` + drain closed) silences further delivery.
-        Detach must never call this: detached workers may still finish and persist.
-        """
-        from api.analytics.scores.cancel_intent import apply_scores_row_cancel
-
-        apply_scores_row_cancel(run_id)
 
     def _detach_stream_runs_locked(
         self: InferenceRowScheduler,
@@ -129,7 +120,7 @@ class InferenceStreamTeardownMixin:
         tokens, record cancel admission, or call ``abort_scope`` -- in-flight tier
         workers may still finish, persist from the RowComplete payload, and
         complete the DAG node. ``cancel_run`` is the explicit cancel path
-        (cancel intent then abort).
+        (lifecycle CANCEL then abort).
 
         Stream resolutions are left untouched for a turn-scoped detach.
         A full invalidate (``turn is None``, e.g. shutdown) clears every
@@ -151,7 +142,7 @@ class InferenceStreamTeardownMixin:
             root_scope = self._runs.get(run_id)
             if turn is not None and root_scope is not None and root_scope.turn != turn:
                 continue
-            self._remove_run_locked(run_id, detach=True)
+            self._remove_run_locked(run_id, op=RowLifecycleOp.DETACH)
         if turn is None:
             clear_stream_resolutions()
             clear_row_runs()
@@ -201,27 +192,28 @@ class InferenceStreamTeardownMixin:
         self: InferenceRowScheduler,
         run_id: str,
         *,
-        cancel: bool = False,
-        detach: bool = False,
+        op: RowLifecycleOp = RowLifecycleOp.RETIRE,
     ) -> None:
-        """Drop scheduler stream maps; update registry for persist admission.
+        """Drop scheduler stream maps; apply scores row lifecycle for ``op``.
 
-        ``cancel=True`` -- compact cancel admission already recorded; do not
-        detach or retire.
-        ``detach=True`` -- stream switch / disconnect: ``REGISTERED`` → ``DETACHED``.
-        Otherwise (terminal finalize): retire the shell (drop after admission done).
-        Full invalidate also retires via :func:`clear_row_runs`.
+        Lifecycle (shell + admission + drain/token) is owned by
+        :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`.
+        This method owns only the scheduler plane (maps / held submissions).
+
+        ``CANCEL`` applies lifecycle *before* map drop so late persist still
+        DENYs. ``DETACH`` / ``RETIRE`` apply after map drop. Full invalidate
+        also clears via :func:`clear_row_runs`.
         """
-        from api.analytics.scores.tier_row_run_registry import detach_row_run, retire_row_run
+        from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
+
+        if op is RowLifecycleOp.CANCEL:
+            # Admission + seal + token before dropping scheduler maps.
+            apply_scores_row_lifecycle(op, run_id)
 
         root_scope = self._runs.pop(run_id, None)
         self._execution_generation_by_run_id.pop(run_id, None)
-        if cancel:
-            pass
-        elif detach:
-            detach_row_run(run_id)
-        else:
-            retire_row_run(run_id)
+        if op is not RowLifecycleOp.CANCEL:
+            apply_scores_row_lifecycle(op, run_id)
         # Keep stream-resolution state so a late peer binding cannot supersede an
         # already-resolved row after its live scheduler entry has gone away.
         if root_scope is None:

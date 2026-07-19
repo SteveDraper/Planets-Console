@@ -16,6 +16,10 @@ memory (shell present → ``ALLOW``; compact cancel → ``CANCEL_DENY``; else
 ``ABSENT``). Production persist writers must not branch on it directly -- use
 the analytic's ``PersistDecision`` / ``decide_*`` gate (scores:
 :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`).
+
+``RowLifecycleOp`` names the three generic ops (``DETACH`` / ``CANCEL`` /
+``RETIRE``). Scores applies them via
+:func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`.
 """
 
 from __future__ import annotations
@@ -50,3 +54,23 @@ class PersistAdmission(StrEnum):
     ALLOW = "allow"
     CANCEL_DENY = "cancel_deny"
     ABSENT = "absent"
+
+
+class RowLifecycleOp(StrEnum):
+    """Generic table-stream row-run lifecycle ops (detach ≠ cancel ≠ retire).
+
+    Vocabulary only -- each analytic that retains shells across stream detach
+    applies these via its own lifecycle command (scores:
+    :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`).
+    Scheduler abort / stream-map pops stay on the scheduler plane.
+
+    ``DETACH`` -- ``REGISTERED`` → ``DETACHED``; admission stays ``ALLOW``;
+    no seal, no token cancel, no abort.
+    ``CANCEL`` -- drop shell; compact ``CANCEL_DENY``; seal cancel; cancel token
+    (abort is scheduler-owned, outside this op).
+    ``RETIRE`` -- drop shell and clear admission; leave stream resolution.
+    """
+
+    DETACH = "detach"
+    CANCEL = "cancel"
+    RETIRE = "retire"

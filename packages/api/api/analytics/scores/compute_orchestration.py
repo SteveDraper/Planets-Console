@@ -22,16 +22,15 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.streaming.table_stream.row_run_admission import RowRunPhase
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.persist_decision import decide_scores_row_persist
+from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_row_run_for_scope,
     get_tier_callbacks,
     register_row_run,
-    retire_row_run,
 )
 from api.analytics.scores_park_wake import ScoresParkReason, ScoresWakeReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
@@ -39,6 +38,7 @@ from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scop
 from api.compute.wire import DependencyOutputs, StepResult
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
+from api.streaming.table_stream.row_run_admission import RowLifecycleOp, RowRunPhase
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -444,7 +444,7 @@ class ScoresPersistencePolicy:
             # Silent no-write for both cancel deny and unknown/absent. Retire
             # only when the refuse carries should_retire (cancel admission).
             if decision.should_retire:
-                retire_row_run(run_id)
+                apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run_id)
             return
 
         services.persistence.persist_row_complete_for_scope(
@@ -455,7 +455,7 @@ class ScoresPersistencePolicy:
             player_id=export_scope.player_id,
         )
         if phase is RowRunPhase.DETACHED:
-            retire_row_run(run_id)
+            apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run_id)
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
         export_scope = _export_scope_for_compute(scope)

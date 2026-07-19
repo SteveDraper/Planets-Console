@@ -1,41 +1,12 @@
-"""One cancel command for scores row runs: admission + delivery + token.
+"""Thin re-export: scores cancel is ``RowLifecycleOp.CANCEL``.
 
-Cancel (not detach) must apply all three sides of cancel intent together so
-persist denial, stream silence, and in-flight solve abort cannot drift.
-
-Stream silence uses the sole cancel-seal operation
-:func:`stream_drain.seal_canceled`. This module is the scores-specific
-*immediate* caller (silence as soon as cancel is applied). Multiplex is the
-generic *token-observed* caller for any analytic; a later multiplex seal is a
-no-op.
+Prefer :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
+(or :func:`~api.analytics.scores.row_lifecycle.apply_scores_row_cancel`) as the
+scores owner path for detach / cancel / retire.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from api.analytics.scores.row_lifecycle import apply_scores_row_cancel
 
-from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
-from api.streaming.table_stream import stream_drain
-
-
-def apply_scores_row_cancel(
-    run_id: str,
-    *,
-    cancel_token: Callable[[], None] | None = None,
-) -> None:
-    """Apply durable cancel admission, seal stream cancel, then cancel the token.
-
-    Order:
-    1. Compact cancel admission (drops any RowRun shell; remembers run_id).
-    2. Immediate stream cancel seal via :func:`stream_drain.seal_canceled`
-       (scores-specific path; multiplex may later seal the same run as a no-op).
-    3. Session cancel token (stop in-flight tier work), when provided.
-
-    Detach must never call this: detached workers may still finish and persist.
-    """
-    dropped = mark_row_run_cancelled(run_id)
-    stream_drain.seal_canceled(run_id)
-    if cancel_token is not None:
-        cancel_token()
-    elif dropped is not None:
-        dropped.session.cancel_token.cancel()
+__all__ = ["apply_scores_row_cancel"]

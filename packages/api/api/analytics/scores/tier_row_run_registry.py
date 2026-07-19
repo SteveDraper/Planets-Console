@@ -206,9 +206,10 @@ def mark_row_run_cancelled(run_id: str) -> RowRun | None:
 
     Compact cancelled memory is scope-keyed (one outstanding cancel per scores
     scope). The dropped shell is not painted with a cancel phase -- cancel is
-    admission memory only. Caller still cancels the session token and seals
-    stream cancel (``CANCELED`` + drain closed) via
-    :func:`api.analytics.scores.cancel_intent.apply_scores_row_cancel`.
+    admission memory only. Production callers apply cancel via
+    :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
+    (``RowLifecycleOp.CANCEL``), which also seals stream cancel and cancels
+    the session token.
     """
     with _lock:
         dropped = _drop_shell_locked(run_id)
