@@ -394,14 +394,19 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
 
     Fingerprint: cancel-on-detach raced with ScoresPersistencePolicy, which skips
     cancelled runs -- durable evidence dropped even though the worker finished a
-    RowComplete. Detach must leave DETACHED phase (ALLOW), not CANCELLED.
+    RowComplete. Detach must leave DETACHED shell (ALLOW), not cancel admission.
     """
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.military_score_inference.row_run import (
+        PersistAdmission,
+        RowRun,
+        RowRunPhase,
+    )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        get_persist_admission,
         get_row_run,
         get_row_run_phase,
         register_row_run,
@@ -444,6 +449,7 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         assert session.run_id not in scheduler._runs
         assert get_row_run(session.run_id) is row_run
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
+        assert get_persist_admission(session.run_id) is PersistAdmission.ALLOW
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -473,13 +479,14 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         assert stored.summary == "detach must not block persist"
         assert get_row_run_phase(session.run_id) is None
 
-        # After ALLOW retire, a CANCELLED retained shell still DENYs late persist.
+        # After ALLOW retire, compact cancel admission still DENYs late persist.
         persistence.delete_row(628580, 1, turn_number, player_id)
         cancelled = RowRun(session)
         register_row_run(cancelled)
         from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
 
         mark_row_run_cancelled(cancelled.run_id)
+        assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
         ScoresPersistencePolicy().persist(
             ctx,
             ComputeScope(
@@ -498,13 +505,14 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
 
 
 def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
-    """cancel_run applies token + CANCELLED phase + stream CANCELED as one intent.
+    """cancel_run applies token + cancel admission + stream CANCELED as one intent.
 
-    Detach must not set these. CANCELLED phase is the durable persist refuse;
-    stream ``CANCELED`` only silences delivery.
+    Detach must not set these. Compact cancel admission is the durable persist
+    refuse; stream ``CANCELED`` only silences delivery.
     """
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.military_score_inference.row_run import PersistAdmission, RowRun
     from api.analytics.scores.tier_row_run_registry import (
+        get_persist_admission,
         get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
@@ -544,13 +552,14 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
             scheduler._execution_generation_by_run_id[session.run_id] = 7
 
         assert not session.cancel_token.is_cancelled()
-        assert get_row_run_phase(session.run_id) is not RowRunPhase.CANCELLED
+        assert get_persist_admission(session.run_id) is PersistAdmission.ALLOW
         assert get_stream_resolution(session.run_id) is None
 
         scheduler.cancel_run(session.run_id)
 
         assert session.cancel_token.is_cancelled()
-        assert get_row_run_phase(session.run_id) is RowRunPhase.CANCELLED
+        assert get_row_run_phase(session.run_id) is None
+        assert get_persist_admission(session.run_id) is PersistAdmission.CANCEL_DENY
         resolution = get_stream_resolution(session.run_id)
         assert resolution is not None
         assert resolution.state is RowStreamResolutionState.CANCELED
@@ -561,9 +570,14 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
 
 
 def test_detach_does_not_apply_cancel_intent(sample_turn):
-    """begin_scope detach drops ownership without token or CANCELLED phase."""
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    """begin_scope detach drops ownership without token or cancel admission."""
+    from api.analytics.military_score_inference.row_run import (
+        PersistAdmission,
+        RowRun,
+        RowRunPhase,
+    )
     from api.analytics.scores.tier_row_run_registry import (
+        get_persist_admission,
         get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
@@ -598,7 +612,7 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
         scheduler.begin_scope(scope)
 
         assert not session.cancel_token.is_cancelled()
-        assert get_row_run_phase(session.run_id) is not RowRunPhase.CANCELLED
+        assert get_persist_admission(session.run_id) is PersistAdmission.ALLOW
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
         assert session.run_id not in scheduler._runs
     finally:
@@ -607,17 +621,18 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
 
 
 def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
-    """cancel_run CANCELLED phase must survive scheduler removal so late persist skips.
+    """cancel_run cancel admission must survive scheduler removal so late persist skips.
 
     Fingerprint: cancel cancelled the token and dropped scheduler maps before abort;
-    persist must still see compact CANCELLED admission and refuse the write.
+    persist must still see compact cancel admission and refuse the write.
     """
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.military_score_inference.row_run import PersistAdmission, RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        get_persist_admission,
         get_row_run,
         get_row_run_phase,
         register_row_run,
@@ -655,7 +670,8 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
 
         scheduler.cancel_run(session.run_id)
         assert get_row_run(session.run_id) is None
-        assert get_row_run_phase(session.run_id) is RowRunPhase.CANCELLED
+        assert get_row_run_phase(session.run_id) is None
+        assert get_persist_admission(session.run_id) is PersistAdmission.CANCEL_DENY
         assert session.cancel_token.is_cancelled()
 
         ctx = make_analytic_query_context(
@@ -681,16 +697,16 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
             {"runId": session.run_id, "rowComplete": row_complete},
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
-        assert get_row_run_phase(session.run_id) is None
+        assert get_persist_admission(session.run_id) is PersistAdmission.ABSENT
     finally:
         reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 
 def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
-    """A CANCELLED phase must still block late persist when other runs also churn."""
+    """Cancel admission must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.military_score_inference.row_run import PersistAdmission, RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores import tier_row_run_registry as reg
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
@@ -737,7 +753,8 @@ def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
             )
 
         scheduler.cancel_run(session.run_id)
-        assert reg.get_row_run_phase(session.run_id) is RowRunPhase.CANCELLED
+        assert reg.get_row_run_phase(session.run_id) is None
+        assert reg.get_persist_admission(session.run_id) is PersistAdmission.CANCEL_DENY
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -769,13 +786,18 @@ def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
 
 
 def test_row_run_phase_survives_scheduler_remove(sample_turn):
-    """CANCELLED admission and DETACHED shells stay on the registry owner after scheduler drop.
+    """Cancel admission and DETACHED shells stay on the registry owner after scheduler drop.
 
     Same-scope re-register supersedes cancel; cross-scope detach must not.
     """
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.military_score_inference.row_run import (
+        PersistAdmission,
+        RowRun,
+        RowRunPhase,
+    )
     from api.analytics.scores.tier_row_run_registry import (
         detach_row_run,
+        get_persist_admission,
         get_row_run_phase,
         mark_row_run_cancelled,
         register_row_run,
@@ -789,14 +811,15 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
         cancelled = RowRun(_session_for_player(sample_turn, player_id=players[0]))
         register_row_run(cancelled)
         mark_row_run_cancelled(cancelled.run_id)
-        assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED
+        assert get_row_run_phase(cancelled.run_id) is None
+        assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
 
         detached = RowRun(_session_for_player(sample_turn, player_id=players[1]))
         register_row_run(detached)
         detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
         # Cross-scope detach must not clear another scope's cancelled admission.
-        assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED
+        assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
     finally:
         reset_tier_row_run_registry_for_tests()
 
@@ -845,13 +868,18 @@ def test_stream_resolutions_are_fifo_bounded_across_states(monkeypatch):
 
 
 def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_turn):
-    """Disconnect detaches without CANCELLED; finish may persist."""
+    """Disconnect detaches without cancel admission; finish may persist."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.military_score_inference.row_run import (
+        PersistAdmission,
+        RowRun,
+        RowRunPhase,
+    )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        get_persist_admission,
         get_row_run,
         get_row_run_phase,
         register_row_run,
@@ -889,7 +917,7 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
         assert get_row_run(session.run_id) is row_run
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
-        assert get_row_run_phase(session.run_id) is not RowRunPhase.CANCELLED
+        assert get_persist_admission(session.run_id) is PersistAdmission.ALLOW
         assert not session.cancel_token.is_cancelled()
 
         ctx = make_analytic_query_context(

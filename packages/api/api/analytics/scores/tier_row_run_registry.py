@@ -1,9 +1,9 @@
-"""Single owner for scores tier_solve RowRun shells and persist-admission phase.
+"""Single owner for scores tier_solve RowRun shells and compact persist admission.
 
-``REGISTERED`` / ``DETACHED`` retain a full RowRun shell (late persist ALLOW).
-``CANCELLED`` is compact admission only: the shell is dropped immediately and
-the ``run_id`` is remembered keyed by scores scope so ``PersistDecision`` still
-returns ``DENY_CANCEL``. A later ``REGISTERED`` for the same scope supersedes
+Retained shells use ``RowRunPhase`` (``REGISTERED`` / ``DETACHED`` only).
+Cancel intent drops the shell immediately and records compact cancelled
+admission keyed by scores scope so ``PersistAdmission.CANCEL_DENY`` still
+denies late persist. A later ``REGISTERED`` for the same scope supersedes
 that cancelled admission (preempt / re-adopt). Memory is O(scopes with an
 outstanding cancel), not an unbounded UUID FIFO.
 """
@@ -17,12 +17,16 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
     InferenceStreamOrchestration,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
-from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+from api.analytics.military_score_inference.row_run import (
+    PersistAdmission,
+    RowRun,
+    RowRunPhase,
+)
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.compute.scope import WILDCARD, ComputeScope
 
 _lock = threading.Lock()
-# REGISTERED and DETACHED shells only -- never CANCELLED.
+# REGISTERED and DETACHED shells only -- cancel never retains a shell.
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
@@ -81,7 +85,7 @@ def _supersede_cancelled_for_scope_locked(scope_key: tuple[int, int, int, int]) 
 
 
 def _record_cancelled_locked(run_id: str, scope_key: tuple[int, int, int, int]) -> None:
-    """Remember ``run_id`` as CANCELLED for ``scope_key`` (one slot). Caller holds ``_lock``."""
+    """Remember cancelled admission for ``run_id`` under ``scope_key``. Caller holds ``_lock``."""
     _forget_cancelled_locked(run_id)
     _supersede_cancelled_for_scope_locked(scope_key)
     _cancelled_admissions[run_id] = scope_key
@@ -149,14 +153,20 @@ def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
 
 
 def get_row_run_phase(run_id: str) -> RowRunPhase | None:
-    """Admission phase: shell phase, or ``CANCELLED`` from compact denial memory."""
+    """Retained shell phase only (``REGISTERED`` / ``DETACHED``); never admission."""
     with _lock:
         run = _runs_by_id.get(run_id)
-        if run is not None:
-            return run.phase
+        return None if run is None else run.phase
+
+
+def get_persist_admission(run_id: str) -> PersistAdmission:
+    """Atomic persist-admission lookup (shell vs compact cancel vs absent)."""
+    with _lock:
+        if run_id in _runs_by_id:
+            return PersistAdmission.ALLOW
         if run_id in _cancelled_admissions:
-            return RowRunPhase.CANCELLED
-        return None
+            return PersistAdmission.CANCEL_DENY
+        return PersistAdmission.ABSENT
 
 
 def has_cancelled_admission(run_id: str) -> bool:
@@ -186,14 +196,14 @@ def mark_row_run_cancelled(run_id: str) -> RowRun | None:
     """Record cancelled admission; drop any shell; return the dropped shell if any.
 
     Compact cancelled memory is scope-keyed (one outstanding cancel per scores
-    scope). Caller still cancels the session token and sets stream-resolution
-    ``CANCELED`` (delivery) via
+    scope). The dropped shell is not painted with a cancel phase -- cancel is
+    admission memory only. Caller still cancels the session token and sets
+    stream-resolution ``CANCELED`` (delivery) via
     :func:`api.analytics.scores.cancel_intent.apply_scores_row_cancel`.
     """
     with _lock:
         dropped = _drop_shell_locked(run_id)
         if dropped is not None:
-            dropped.phase = RowRunPhase.CANCELLED
             _record_cancelled_locked(run_id, _session_scope_key(dropped.session))
             return dropped
         # Already compact-cancelled (or never registered): leave admission as-is.

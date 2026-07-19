@@ -6,10 +6,15 @@ from api.analytics.military_score_inference.analytic import build_inference_obse
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+from api.analytics.military_score_inference.row_run import (
+    PersistAdmission,
+    RowRun,
+    RowRunPhase,
+)
 from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
 from api.analytics.scores.tier_row_run_registry import (
     detach_row_run,
+    get_persist_admission,
     get_row_run,
     get_row_run_phase,
     has_cancelled_admission,
@@ -41,9 +46,10 @@ def test_persist_decision_table(sample_turn) -> None:
         run = RowRun(_session(sample_turn))
         register_row_run(run)
         assert get_row_run_phase(run.run_id) is RowRunPhase.REGISTERED
+        assert get_persist_admission(run.run_id) is PersistAdmission.ALLOW
         assert decide_scores_row_persist(run.run_id) is PersistDecision.ALLOW
 
-        # Token alone is not a persist gate; cancel intent sets CANCELLED admission.
+        # Token alone is not a persist gate; cancel intent sets cancel admission.
         run.session.cancel_token.cancel()
         assert decide_scores_row_persist(run.run_id) is PersistDecision.ALLOW
 
@@ -51,7 +57,8 @@ def test_persist_decision_table(sample_turn) -> None:
         register_row_run(cancelled)
         mark_row_run_cancelled(cancelled.run_id)
         assert get_row_run(cancelled.run_id) is None
-        assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED
+        assert get_row_run_phase(cancelled.run_id) is None
+        assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
         assert has_cancelled_admission(cancelled.run_id)
         assert decide_scores_row_persist(cancelled.run_id) is PersistDecision.DENY_CANCEL
 
@@ -59,12 +66,15 @@ def test_persist_decision_table(sample_turn) -> None:
         register_row_run(detached)
         # Same-scope register supersedes the prior cancelled admission.
         assert not has_cancelled_admission(cancelled.run_id)
+        assert get_persist_admission(cancelled.run_id) is PersistAdmission.ABSENT
         assert decide_scores_row_persist(cancelled.run_id) is PersistDecision.REFUSE_UNKNOWN
         detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
+        assert get_persist_admission(detached.run_id) is PersistAdmission.ALLOW
         assert decide_scores_row_persist(detached.run_id) is PersistDecision.ALLOW
 
         retire_row_run(detached.run_id)
+        assert get_persist_admission(detached.run_id) is PersistAdmission.ABSENT
         assert decide_scores_row_persist(detached.run_id) is PersistDecision.REFUSE_UNKNOWN
         assert decide_scores_row_persist("never-seen") is PersistDecision.REFUSE_UNKNOWN
     finally:

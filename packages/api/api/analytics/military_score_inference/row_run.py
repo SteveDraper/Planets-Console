@@ -15,17 +15,29 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 
 
 class RowRunPhase(StrEnum):
-    """Lifecycle phase for persist admission on the single RowRun owner.
+    """Lifecycle of a *retained* RowRun shell (not persist-admission memory).
 
-    ``REGISTERED`` -- live shell; persist ALLOW.
-    ``DETACHED`` -- stream dropped; shell retained; persist ALLOW.
-    ``CANCELLED`` -- cancel intent; compact admission only (no shell); persist DENY.
-    After persist decision or explicit retire, the registry drops the entry.
+    ``REGISTERED`` -- live shell indexed by scope.
+    ``DETACHED`` -- stream dropped; shell retained by ``run_id`` for late persist.
+    Cancel intent does not become a shell phase: the shell is dropped and compact
+    cancelled-admission memory is recorded separately (see ``PersistAdmission``).
     """
 
     REGISTERED = "registered"
     DETACHED = "detached"
-    CANCELLED = "cancelled"
+
+
+class PersistAdmission(StrEnum):
+    """Persist-write admission for a scores ``run_id`` (independent of shell phase).
+
+    ``ALLOW`` -- retained ``REGISTERED`` or ``DETACHED`` shell.
+    ``CANCEL_DENY`` -- compact cancelled-admission memory (no shell).
+    ``ABSENT`` -- never-seen / retired / superseded cancel.
+    """
+
+    ALLOW = "allow"
+    CANCEL_DENY = "cancel_deny"
+    ABSENT = "absent"
 
 
 class RowRun:

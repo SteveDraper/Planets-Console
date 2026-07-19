@@ -81,7 +81,7 @@ class InferenceStreamTeardownMixin:
 
         Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
         only drops stream ownership without cancelling solve work, cancel applies
-        cancel intent (token + RowRun ``CANCELLED`` phase + stream CANCELED)
+        cancel intent (token + compact cancel admission + stream CANCELED)
         then aborts in-flight orchestrator nodes so a later ``force_fresh`` submit
         cannot attach to a still-running node with a missing RowRun.
         """
@@ -108,7 +108,7 @@ class InferenceStreamTeardownMixin:
     def _apply_cancel_intent_locked(self: InferenceRowScheduler, run_id: str) -> None:
         """Apply :func:`apply_scores_row_cancel` under the scheduler lock.
 
-        Compact ``CANCELLED`` admission is the durable persist refuse signal.
+        Compact cancel admission is the durable persist refuse signal.
         Stream-resolution ``CANCELED`` only silences further stream delivery.
         Detach must never call this: detached workers may still finish and persist.
         """
@@ -135,7 +135,7 @@ class InferenceStreamTeardownMixin:
         Used by ``begin_scope`` when switching table streams. Detaches RowRuns
         (``DETACHED`` phase, shell retained) and drops stream bindings for
         ``turn`` only; other turns are untouched. Does **not** cancel RowRun
-        tokens, set ``CANCELLED``, or call ``abort_scope`` -- in-flight tier
+        tokens, record cancel admission, or call ``abort_scope`` -- in-flight tier
         workers may still finish, persist from the RowComplete payload, and
         complete the DAG node. ``cancel_run`` is the explicit cancel path
         (cancel intent then abort).
@@ -213,9 +213,10 @@ class InferenceStreamTeardownMixin:
         cancel: bool = False,
         detach: bool = False,
     ) -> None:
-        """Drop scheduler stream maps; update registry phase for persist admission.
+        """Drop scheduler stream maps; update registry for persist admission.
 
-        ``cancel=True`` -- phase already ``CANCELLED``; do not detach or retire.
+        ``cancel=True`` -- compact cancel admission already recorded; do not
+        detach or retire.
         ``detach=True`` -- stream switch / disconnect: ``REGISTERED`` → ``DETACHED``.
         Otherwise (terminal finalize): retire the shell (drop after admission done).
         Full invalidate also retires via :func:`clear_row_runs`.

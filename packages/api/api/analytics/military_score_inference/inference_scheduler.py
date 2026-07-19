@@ -219,7 +219,7 @@ class InferenceRowScheduler(
         """Return the live ``REGISTERED`` RowRun for this player, if any.
 
         Uses the scheduler scope index plus the single registry owner. ``DETACHED``
-        / ``CANCELLED`` shells are not re-attached here.
+        shells (and cancelled admissions with no shell) are not re-attached here.
         """
         with self._lock:
             for run_id, root_scope in self._runs.items():

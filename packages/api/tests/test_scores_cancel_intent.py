@@ -6,10 +6,11 @@ from api.analytics.military_score_inference.analytic import build_inference_obse
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+from api.analytics.military_score_inference.row_run import PersistAdmission, RowRun
 from api.analytics.scores.cancel_intent import apply_scores_row_cancel
 from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
 from api.analytics.scores.tier_row_run_registry import (
+    get_persist_admission,
     get_row_run,
     get_row_run_phase,
     register_row_run,
@@ -55,7 +56,8 @@ def test_apply_scores_row_cancel_is_one_command(sample_turn) -> None:
         )
 
         assert get_row_run(run.run_id) is None
-        assert get_row_run_phase(run.run_id) is RowRunPhase.CANCELLED
+        assert get_row_run_phase(run.run_id) is None
+        assert get_persist_admission(run.run_id) is PersistAdmission.CANCEL_DENY
         assert decide_scores_row_persist(run.run_id) is PersistDecision.DENY_CANCEL
         assert run.session.cancel_token.is_cancelled()
         resolution = get_stream_resolution(run.run_id)

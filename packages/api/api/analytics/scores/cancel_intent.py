@@ -20,7 +20,7 @@ def apply_scores_row_cancel(
     """Apply durable cancel admission, stream ``CANCELED``, then cancel the token.
 
     Order:
-    1. Compact ``CANCELLED`` admission (drops any RowRun shell; remembers run_id).
+    1. Compact cancel admission (drops any RowRun shell; remembers run_id).
     2. Delivery FSM ``CANCELED`` (silence further stream terminals).
     3. Session cancel token (stop in-flight tier work), when provided.
 

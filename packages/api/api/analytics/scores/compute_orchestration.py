@@ -228,9 +228,9 @@ def _adopt_scheduler_row_run_for_tier_wire(
     """Re-index a live ``REGISTERED`` RowRun when scope lookup raced ensure.
 
     ``row_run_for_player`` reads the single registry owner (REGISTERED only).
-    ``DETACHED`` / ``CANCELLED`` shells are not adoptable. ``register_row_run``
-    refreshes the scope index if ensure scheduled the row before the first
-    ``get_row_run_for_scope`` check.
+    ``DETACHED`` shells and cancelled admissions are not adoptable.
+    ``register_row_run`` refreshes the scope index if ensure scheduled the row
+    before the first ``get_row_run_for_scope`` check.
     """
     if export_scope.player_id is None:
         return None
@@ -431,11 +431,11 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
-        # Cancel vs detach: cancel records compact CANCELLED admission; detach
+        # Cancel vs detach: cancel records compact cancel admission; detach
         # retains a DETACHED shell. Unknown run_id with no admission must not write.
         # Live REGISTERED shells stay until stream finalize retires them so peer
         # bindings can still resolve the same RowRun; DETACHED late persist retires
-        # immediately after the decision; CANCELLED deny retires admission memory.
+        # immediately after the decision; cancel deny retires admission memory.
         decision = decide_scores_row_persist(run_id)
         run = get_row_run(run_id)
         phase = None if run is None else run.phase
