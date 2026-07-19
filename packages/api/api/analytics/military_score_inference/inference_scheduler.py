@@ -516,10 +516,8 @@ class InferenceRowScheduler(
         session: InferenceRowStreamSession,
     ) -> None:
         """Wake a soft-parked scores node after background RowRun register."""
-        from api.analytics.scores.compute_orchestration import (
-            ScoresWakeReason,
-            wake_scores_scope,
-        )
+        from api.analytics.scores.compute_orchestration import wake_scores_scope
+        from api.analytics.scores_park_wake import ScoresWakeReason
 
         wake_scores_scope(
             root_scope,
@@ -544,10 +542,8 @@ class InferenceRowScheduler(
         """Submit/wake tier_solve for ``root_scope``. Caller must not hold ``_lock``."""
         if self._defer_orchestrator_submit:
             return
-        from api.analytics.scores.compute_orchestration import (
-            ScoresWakeReason,
-            wake_scores_scope,
-        )
+        from api.analytics.scores.compute_orchestration import wake_scores_scope
+        from api.analytics.scores_park_wake import ScoresWakeReason
 
         # force_fresh may replace a prior empty/admission terminal. Reopen the multiplex
         # row so progress drains and a later RowComplete can upgrade the soft terminal.

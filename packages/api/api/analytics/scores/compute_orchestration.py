@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -33,6 +32,7 @@ from api.analytics.scores.tier_row_run_registry import (
     register_row_run,
     retire_row_run,
 )
+from api.analytics.scores_park_wake import ScoresParkReason, ScoresWakeReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
@@ -47,23 +47,6 @@ SCORES_TIER_SOLVE = "tier_solve"
 SCORES_TIER_SOLVE_PROFILE_INDEX = 1
 
 SCORES_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
-
-
-class ScoresParkReason(StrEnum):
-    """Reasons scores tier solving intentionally waits for a later wake."""
-
-    NON_DURABLE_ROW_COMPLETE = "scores_non_durable_row_complete"
-    EMPTY_TIER_OUTCOME = "scores_empty_tier_outcome"
-    MISSING_ROW_RUN = "scores_missing_row_run"
-
-
-class ScoresWakeReason(StrEnum):
-    """Publishers allowed to resume scores tier solving after a soft park."""
-
-    ROW_RUN_ADOPTED = "scores_row_run_adopted"
-    EVIDENCE_CLOSED = "scores_evidence_closed"
-    STREAM_RESCHEDULED = "scores_stream_rescheduled"
-
 
 SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
     steps=(

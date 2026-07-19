@@ -1227,7 +1227,8 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
     from api.analytics.military_score_inference.inference_scheduler import (
         reset_inference_row_scheduler_for_tests,
     )
-    from api.analytics.scores.compute_orchestration import ScoresWakeReason, wake_scores_scope
+    from api.analytics.scores.compute_orchestration import wake_scores_scope
+    from api.analytics.scores_park_wake import ScoresWakeReason
     from api.compute import runtime as compute_runtime
     from api.compute.orchestrator import ComputeNodeRun
     from api.compute.runtime import reset_orchestrators_for_tests

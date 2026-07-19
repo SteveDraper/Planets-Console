@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -26,6 +25,11 @@ from api.analytics.military_score_inference.row_stream_resolution_registry impor
     get_stream_resolution,
     transition_stream_resolution,
 )
+from api.analytics.military_score_inference.soft_stream_policy import (
+    SoftStreamAction,
+    TerminalSource,
+    resolve_soft_stream_action,
+)
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 
@@ -36,14 +40,6 @@ if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_table_stream_controller import (
         InferenceTableStreamController,
     )
-
-
-class TerminalSource(StrEnum):
-    """Who is asking to close (or soft-close) the stream row."""
-
-    PARKED = "parked"
-    NODE_COMPLETE = "node_complete"
-    ORPHAN = "orphan"
 
 
 class InferenceStreamResolutionMixin:
@@ -74,69 +70,95 @@ class InferenceStreamResolutionMixin:
         if resolved_event is None and snapshot is not None:
             resolved_event = self._row_complete_from_result_wire(snapshot.result_wire)
 
-        # Lazy: scores.compute_orchestration imports this package via scores.__init__.
-        from api.analytics.scores.compute_orchestration import ScoresParkReason
-
         park_reason = None if snapshot is None else snapshot.park_reason
-        # Soft-stream policy follows ScoresParkReason (design park table):
-        # NON_DURABLE soft-yes; EMPTY cheap-admit; MISSING_ROW_RUN soft-no.
-        if source is TerminalSource.PARKED and park_reason == ScoresParkReason.MISSING_ROW_RUN:
+        action = resolve_soft_stream_action(
+            source=source,
+            park_reason=park_reason,
+            has_event=resolved_event is not None,
+        )
+
+        if action is SoftStreamAction.SILENCE:
             return False
 
-        if resolved_event is not None:
-            trigger = (
-                RowStreamResolutionTrigger.SOFT_PROVISIONAL
-                if source is TerminalSource.PARKED
-                else (
-                    RowStreamResolutionTrigger.DURABLE_COMPLETE
-                    if isinstance(resolved_event, RowComplete)
-                    else RowStreamResolutionTrigger.DURABLE_FAILURE
-                )
-            )
-            with self._lock:
-                delivery = self._transition_stream_resolution_locked(resolved.run_id, trigger)
-            self._emit_stream_terminal(resolved, resolved_event, delivery)
-            if source is TerminalSource.ORPHAN:
-                self._finalize_row_run(resolved)
-            return delivery is not RowStreamDelivery.SILENCE
-
-        if source is TerminalSource.PARKED:
-            if park_reason == ScoresParkReason.EMPTY_TIER_OUTCOME:
-                return self._admit_after_soft_provisional(scope, resolved, on_miss="revert")
-            return False
-
-        if source is TerminalSource.ORPHAN:
-            with self._lock:
-                resolution = get_stream_resolution(resolved.run_id)
-                state = (
-                    resolution.state if resolution is not None else RowStreamResolutionState.OPEN
-                )
-            if state in {
-                RowStreamResolutionState.HARD_TERMINAL,
-                RowStreamResolutionState.CANCELED,
-            }:
+        if action in {
+            SoftStreamAction.SOFT_PROVISIONAL_EVENT,
+            SoftStreamAction.DURABLE_EVENT,
+            SoftStreamAction.DURABLE_EVENT_FINALIZE,
+        }:
+            if resolved_event is None:
                 return False
-            if snapshot is not None and snapshot.state == "failed":
-                detail = (
-                    str(snapshot.error)
-                    if snapshot.error is not None
-                    else "Inference tier solve failed"
-                )
-                with self._lock:
-                    delivery = self._transition_stream_resolution_locked(
-                        resolved.run_id,
-                        RowStreamResolutionTrigger.DURABLE_FAILURE,
-                    )
-                self._emit_stream_terminal(resolved, RowFailed(detail=detail), delivery)
-                self._finalize_row_run(resolved)
-                return True
-            if self._admit_after_soft_provisional(scope, resolved, on_miss="fail"):
-                self._finalize_row_run(resolved)
-                return True
-            return False
+            if action is SoftStreamAction.SOFT_PROVISIONAL_EVENT:
+                trigger = RowStreamResolutionTrigger.SOFT_PROVISIONAL
+            elif isinstance(resolved_event, RowComplete):
+                trigger = RowStreamResolutionTrigger.DURABLE_COMPLETE
+            else:
+                trigger = RowStreamResolutionTrigger.DURABLE_FAILURE
+            return self._emit_domain_terminal(
+                resolved,
+                resolved_event,
+                trigger,
+                finalize=action is SoftStreamAction.DURABLE_EVENT_FINALIZE,
+            )
 
-        # NODE_COMPLETE empty: admission before RowFailed (orphan parity).
-        return self._admit_after_soft_provisional(scope, resolved, on_miss="fail")
+        if action is SoftStreamAction.CHEAP_ADMIT_REVERT:
+            return self._admit_after_soft_provisional(scope, resolved, on_miss="revert")
+
+        if action is SoftStreamAction.NODE_COMPLETE_EMPTY:
+            return self._admit_after_soft_provisional(scope, resolved, on_miss="fail")
+
+        if action is SoftStreamAction.ORPHAN_EMPTY:
+            return self._deliver_orphan_empty(scope, resolved, snapshot)
+
+        return False
+
+    def _emit_domain_terminal(
+        self: InferenceRowScheduler,
+        session: InferenceRowStreamSession,
+        event: RowComplete | RowFailed,
+        trigger: RowStreamResolutionTrigger,
+        *,
+        finalize: bool,
+    ) -> bool:
+        with self._lock:
+            delivery = self._transition_stream_resolution_locked(session.run_id, trigger)
+        self._emit_stream_terminal(session, event, delivery)
+        if finalize:
+            self._finalize_row_run(session)
+        return delivery is not RowStreamDelivery.SILENCE
+
+    def _deliver_orphan_empty(
+        self: InferenceRowScheduler,
+        scope: ComputeScope,
+        session: InferenceRowStreamSession,
+        snapshot: ScopeLifecycleSnapshot | None,
+    ) -> bool:
+        with self._lock:
+            resolution = get_stream_resolution(session.run_id)
+            state = (
+                resolution.state if resolution is not None else RowStreamResolutionState.OPEN
+            )
+        if state in {
+            RowStreamResolutionState.HARD_TERMINAL,
+            RowStreamResolutionState.CANCELED,
+        }:
+            return False
+        if snapshot is not None and snapshot.state == "failed":
+            detail = (
+                str(snapshot.error)
+                if snapshot.error is not None
+                else "Inference tier solve failed"
+            )
+            delivered = self._emit_domain_terminal(
+                session,
+                RowFailed(detail=detail),
+                RowStreamResolutionTrigger.DURABLE_FAILURE,
+                finalize=True,
+            )
+            return delivered
+        if self._admit_after_soft_provisional(scope, session, on_miss="fail"):
+            self._finalize_row_run(session)
+            return True
+        return False
 
     def _admit_after_soft_provisional(
         self: InferenceRowScheduler,

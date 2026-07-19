@@ -13,12 +13,10 @@ from typing import TYPE_CHECKING
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     RowFailed,
 )
-from api.analytics.military_score_inference.inference_stream_resolution import (
-    TerminalSource,
-)
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.soft_stream_policy import TerminalSource
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope

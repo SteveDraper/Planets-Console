@@ -177,6 +177,13 @@ Park soft-stream policy is enforced at the scores stream boundary from
 membership heuristics. The orchestrator stashes the step's `park_reason` on the
 node while `parked` and copies it into the scope-outcome snapshot.
 
+Soft-stream *delivery* is a table dispatch
+(`military_score_inference.soft_stream_policy`: `(TerminalSource, park_reason,
+has_event) → SoftStreamAction`) rather than an if-ladder in
+`_deliver_row_terminal`. Park / wake reason enums live in the leaf module
+`scores_park_wake` (sibling of `scores_assets`) so stream resolution can import
+them without the scores package ↔ scheduler cycle.
+
 **Scores `tier_solve` wire invariant:** when ensure is satisfied and turn evidence is
 still open, wire build must attach a `runId` (tier registry or successful scheduler
 adopt) or emit the evidence-closed skip sentinel. A bare `{runId: null}` open-evidence

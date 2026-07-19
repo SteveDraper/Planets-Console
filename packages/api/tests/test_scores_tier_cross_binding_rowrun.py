@@ -38,7 +38,8 @@ from api.analytics.military_score_inference.row_stream_resolution_registry impor
     get_stream_resolution,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.analytics.scores.compute_orchestration import ScoresParkReason, run_scores_tier_solve
+from api.analytics.scores.compute_orchestration import run_scores_tier_solve
+from api.analytics.scores_park_wake import ScoresParkReason
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     register_row_run,
