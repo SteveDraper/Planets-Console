@@ -237,7 +237,7 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
     stream resolutions for other-turn rows (background warm) or undo the
     keep-resolution-after-unregister invariant for the detached turn's own row.
     """
-    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.military_score_inference.row_stream_resolution import (
         RowStreamResolutionState,
         RowStreamResolutionTrigger,
@@ -247,6 +247,8 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
         transition_stream_resolution,
     )
     from api.analytics.scores.tier_row_run_registry import (
+        get_row_run,
+        get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -312,11 +314,12 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
 
         assert not prior_session.cancel_token.is_cancelled()
         assert prior_session.run_id not in scheduler._runs
-        assert get_row_run(prior_session.run_id) is None
+        assert get_row_run_phase(prior_session.run_id) is RowRunPhase.DETACHED
 
         assert not other_session.cancel_token.is_cancelled()
         assert other_session.run_id in scheduler._runs
         assert get_row_run(other_session.run_id) is not None
+        assert get_row_run_phase(other_session.run_id) is RowRunPhase.REGISTERED
 
         # Other-turn resolution must survive untouched (background warm row).
         other_resolution = get_stream_resolution(other_session.run_id)
@@ -388,18 +391,20 @@ def test_begin_scope_prior_turn_preempt_keeps_other_turn_held_submissions(sample
 def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
     sample_turn,
 ):
-    """Detach must not cancel; a still-registered RowRun must still persist.
+    """Detach must not cancel; DETACHED shell must still admit persist.
 
     Fingerprint: cancel-on-detach raced with ScoresPersistencePolicy, which skips
     cancelled runs -- durable evidence dropped even though the worker finished a
-    RowComplete. Detach must leave no cancellation fence.
+    RowComplete. Detach must leave DETACHED phase (ALLOW), not CANCELLED.
     """
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        get_row_run,
+        get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -438,12 +443,8 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         assert not scheduler.owns_table_stream(first_token)
         assert not session.cancel_token.is_cancelled()
         assert session.run_id not in scheduler._runs
-        assert get_row_run(session.run_id) is None
-
-        # Race window: RowRun still visible to persist, token not cancelled.
-        register_row_run(row_run)
         assert get_row_run(session.run_id) is row_run
-        assert not session.cancel_token.is_cancelled()
+        assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -471,10 +472,15 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         stored = persistence.get_row(628580, 1, turn_number, player_id)
         assert stored is not None
         assert stored.summary == "detach must not block persist"
+        assert get_row_run_phase(session.run_id) is None
 
-        # Explicit cancel still blocks persist while the run is registered.
+        # After ALLOW retire, a CANCELLED retained shell still DENYs late persist.
         persistence.delete_row(628580, 1, turn_number, player_id)
-        session.cancel_token.cancel()
+        cancelled = RowRun(session)
+        register_row_run(cancelled)
+        from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
+
+        mark_row_run_cancelled(cancelled.run_id)
         ScoresPersistencePolicy().persist(
             ctx,
             ComputeScope(
@@ -484,7 +490,7 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": session.run_id, "rowComplete": row_complete},
+            {"runId": cancelled.run_id, "rowComplete": row_complete},
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:
@@ -492,10 +498,10 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancel_intent_sets_token_fence_and_resolution(sample_turn):
-    """cancel_run applies token + generation fence + stream CANCELED as one intent.
+def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
+    """cancel_run applies token + CANCELLED phase + stream CANCELED as one intent.
 
-    Detach must not set these. The generation fence is the durable persist refuse;
+    Detach must not set these. CANCELLED phase is the durable persist refuse;
     stream ``CANCELED`` only silences delivery.
     """
     from api.analytics.military_score_inference.row_run import RowRun
@@ -556,10 +562,10 @@ def test_cancel_intent_sets_token_fence_and_resolution(sample_turn):
 
 
 def test_detach_does_not_apply_cancel_intent(sample_turn):
-    """begin_scope detach drops ownership without token or cancel fence."""
-    from api.analytics.military_score_inference.row_run import RowRun
-    from api.analytics.scores.known_run_allow_store import is_known_run_allowed
+    """begin_scope detach drops ownership without token or CANCELLED phase."""
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.scores.tier_row_run_registry import (
+        get_row_run_phase,
         is_row_run_cancelled,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
@@ -595,26 +601,27 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
 
         assert not session.cancel_token.is_cancelled()
         assert not is_row_run_cancelled(session.run_id)
-        assert is_known_run_allowed(session.run_id)
+        assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
         assert session.run_id not in scheduler._runs
     finally:
         reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancel_after_unregister_blocks_persist_via_fence(sample_turn):
-    """cancel_run CANCELED fence must survive RowRun removal so late persist skips.
+def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
+    """cancel_run CANCELLED phase must survive scheduler removal so late persist skips.
 
-    Fingerprint: cancel cancelled the token and unregistered before abort; persist
-    saw ``get_row_run is None`` and wrote durable evidence for cancelled work.
+    Fingerprint: cancel cancelled the token and dropped scheduler maps before abort;
+    persist must still see the retained CANCELLED shell and refuse the write.
     """
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run,
+        get_row_run_phase,
         is_row_run_cancelled,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
@@ -650,7 +657,8 @@ def test_cancel_after_unregister_blocks_persist_via_fence(sample_turn):
             )
 
         scheduler.cancel_run(session.run_id)
-        assert get_row_run(session.run_id) is None
+        assert get_row_run(session.run_id) is row_run
+        assert get_row_run_phase(session.run_id) is RowRunPhase.CANCELLED
         assert is_row_run_cancelled(session.run_id)
         assert session.cancel_token.is_cancelled()
 
@@ -677,13 +685,14 @@ def test_cancel_after_unregister_blocks_persist_via_fence(sample_turn):
             {"runId": session.run_id, "rowComplete": row_complete},
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
+        assert get_row_run_phase(session.run_id) is None
     finally:
         reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancel_fence_blocks_late_persist_under_churn(sample_turn):
-    """A cancel fence must still block late persist when other runs also churn."""
+def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
+    """A CANCELLED phase must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.military_score_inference.row_stream_resolution_registry import (
@@ -712,20 +721,12 @@ def test_cancel_fence_blocks_late_persist_under_churn(sample_turn):
                 turn_number=turn_number,
             )
         )
-        from api.analytics.scores.cancel_fence_store import mark_cancel_fence
-
         for index in range(20):
-            mark_cancel_fence(
-                ComputeScope(
-                    analytic_id=SCORES_ANALYTIC_ID,
-                    game_id=628580,
-                    perspective=1,
-                    turn=turn_number + 1 + index,
-                    player_id=player_id,
-                ),
-                execution_generation=index + 1,
-                run_id=f"unrelated-run-{index}",
-            )
+            other = _session_for_player(sample_turn, player_id=player_id)
+            # Distinct run_ids via fresh sessions; mark cancelled then leave retained.
+            other_run = RowRun(other)
+            reg.register_row_run(other_run)
+            reg.mark_row_run_cancelled(other_run.run_id)
 
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = RowRun(session)
@@ -771,38 +772,36 @@ def test_cancel_fence_blocks_late_persist_under_churn(sample_turn):
         reset_stream_resolution_registry_for_tests()
 
 
-def test_cancel_fences_are_generation_scoped(sample_turn):
-    """Cancel fences key by scope + execution_generation, not FIFO UUID eviction."""
-    from api.analytics.scores.cancel_fence_store import (
-        is_run_cancel_fenced,
-        mark_cancel_fence,
-        reset_cancel_fence_store_for_tests,
+def test_row_run_phase_survives_scheduler_remove(sample_turn):
+    """CANCELLED / DETACHED phases stay on the registry owner after scheduler drop."""
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
+    from api.analytics.scores.tier_row_run_registry import (
+        detach_row_run,
+        get_row_run_phase,
+        mark_row_run_cancelled,
+        register_row_run,
+        reset_tier_row_run_registry_for_tests,
     )
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.compute.scope import ComputeScope
 
-    reset_cancel_fence_store_for_tests()
+    reset_tier_row_run_registry_for_tests()
     try:
-        scope = ComputeScope(
-            analytic_id=SCORES_ANALYTIC_ID,
-            game_id=628580,
-            perspective=1,
-            turn=sample_turn.settings.turn,
-            player_id=sample_turn.scores[0].ownerid,
-        )
-        mark_cancel_fence(scope, 1, run_id="run-gen-1")
-        mark_cancel_fence(scope, 2, run_id="run-gen-2")
-        assert is_run_cancel_fenced("run-gen-1")
-        assert is_run_cancel_fenced("run-gen-2")
-        mark_cancel_fence(scope, 3, run_id="run-gen-3")
-        assert is_run_cancel_fenced("run-gen-1")
-        assert is_run_cancel_fenced("run-gen-3")
+        cancelled = RowRun(_session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid))
+        register_row_run(cancelled)
+        mark_row_run_cancelled(cancelled.run_id)
+        assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED
+
+        detached = RowRun(_session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid))
+        register_row_run(detached)
+        detach_row_run(detached.run_id)
+        assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
+        # Cancel must not be overwritten by a later detach of a different run.
+        assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED
     finally:
-        reset_cancel_fence_store_for_tests()
+        reset_tier_row_run_registry_for_tests()
 
 
 def test_stream_resolutions_are_fifo_bounded_across_states(monkeypatch):
-    """Soft/hard stream resolutions stay FIFO-bounded (cancel fences are separate)."""
+    """Soft/hard stream resolutions stay FIFO-bounded (persist phase is separate)."""
     from api.analytics.military_score_inference import row_stream_resolution_registry as resolutions
     from api.analytics.military_score_inference.row_stream_resolution import (
         RowStreamResolutionState,
@@ -844,16 +843,16 @@ def test_stream_resolutions_are_fifo_bounded_across_states(monkeypatch):
         resolutions.reset_stream_resolution_registry_for_tests()
 
 
-def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn):
-    """Disconnect detaches without a cancellation fence; finish may persist."""
+def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_turn):
+    """Disconnect detaches without CANCELLED; finish may persist."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
-    from api.analytics.scores.known_run_allow_store import is_known_run_allowed
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run,
+        get_row_run_phase,
         is_row_run_cancelled,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
@@ -888,10 +887,10 @@ def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn
             )
 
         scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
-        assert get_row_run(session.run_id) is None
+        assert get_row_run(session.run_id) is row_run
+        assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
         assert not is_row_run_cancelled(session.run_id)
         assert not session.cancel_token.is_cancelled()
-        assert is_known_run_allowed(session.run_id)
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -924,7 +923,7 @@ def test_stream_disconnect_detaches_without_fence_and_allows_persist(sample_turn
 
 
 def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn):
-    """Missing RowRun with no known-run allow must fail loudly, not write."""
+    """Missing retained RowRun must fail loudly, not write."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_stream_resolution_registry import (
         reset_stream_resolution_registry_for_tests,
@@ -960,7 +959,7 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
         summary="unknown run must not persist",
     )
     try:
-        with pytest.raises(RuntimeError, match="known-run allow"):
+        with pytest.raises(RuntimeError, match="no retained RowRun"):
             ScoresPersistencePolicy().persist(
                 ctx,
                 ComputeScope(

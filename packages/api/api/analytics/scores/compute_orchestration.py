@@ -22,7 +22,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolution_from_fleet_records,
     resolve_prior_turn_fleet_torp_overlay,
 )
-from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
@@ -31,6 +31,7 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run_for_scope,
     get_tier_callbacks,
     register_row_run,
+    retire_row_run,
 )
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
@@ -438,16 +439,21 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
-        # Cancel vs detach: cancel intent records a generation-scoped fence before
-        # unregister so late persist still skips. Detach records a known-run allow
-        # (not FSM OPEN). Unknown run_id with neither RowRun nor allow must not write.
+        # Cancel vs detach: cancel sets RowRun phase CANCELLED (shell retained);
+        # detach sets DETACHED. Unknown run_id with no retained shell must not write.
+        # Live REGISTERED shells stay until stream finalize retires them so peer
+        # bindings can still resolve the same RowRun; DETACHED/CANCELLED late
+        # persist retires immediately after the decision.
         decision = decide_scores_row_persist(run_id)
+        run = get_row_run(run_id)
+        phase = None if run is None else run.phase
         if decision is PersistDecision.DENY_CANCEL:
+            retire_row_run(run_id)
             return
         if decision is PersistDecision.REFUSE_UNKNOWN:
             raise RuntimeError(
-                "scores persist refused: unknown run_id with no RowRun and no "
-                f"known-run allow (run_id={run_id!r})"
+                "scores persist refused: unknown run_id with no retained RowRun "
+                f"(run_id={run_id!r})"
             )
 
         services.persistence.persist_row_complete_for_scope(
@@ -457,6 +463,8 @@ class ScoresPersistencePolicy:
             host_turn=export_scope.turn,
             player_id=export_scope.player_id,
         )
+        if phase is RowRunPhase.DETACHED:
+            retire_row_run(run_id)
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
         export_scope = _export_scope_for_compute(scope)

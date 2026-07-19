@@ -76,8 +76,9 @@ class InferenceRowScheduler(
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
         self._runs: dict[str, ComputeScope] = {}
-        # Live RowRun objects owned by this scheduler. Tier registry may be cleared
-        # on detach while a background adopt still needs the RowRun handle.
+        # Scheduler-side RowRun cache (dual ownership until issue-3 cleanup).
+        # Persist admission and adopt prefer the tier registry, which retains
+        # DETACHED / CANCELLED shells until retire.
         self._row_runs_by_id: dict[str, RowRun] = {}
         # Execution identity for cancel abort, captured after submit/wake *outside*
         # the scheduler lock. ``cancel_run`` must never call into the orchestrator
@@ -312,7 +313,7 @@ class InferenceRowScheduler(
         with self._lock:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
-                self._remove_run_locked(session.run_id)
+                self._remove_run_locked(session.run_id, detach=True)
             self._drop_held_for_stream_locked(stream_token)
             binding = self._stream_bindings.pop(stream_token, None)
             if binding is not None:
@@ -741,8 +742,6 @@ def reset_inference_row_scheduler_for_tests() -> None:
     from api.analytics.military_score_inference.row_stream_resolution_registry import (
         reset_stream_resolution_registry_for_tests,
     )
-    from api.analytics.scores.cancel_fence_store import reset_cancel_fence_store_for_tests
-    from api.analytics.scores.known_run_allow_store import reset_known_run_allow_store_for_tests
     from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
@@ -753,8 +752,6 @@ def reset_inference_row_scheduler_for_tests() -> None:
     reset_orchestrators_for_tests()
     reset_tier_row_run_registry_for_tests()
     reset_stream_resolution_registry_for_tests()
-    reset_cancel_fence_store_for_tests()
-    reset_known_run_allow_store_for_tests()
     from api.compute.pools import shutdown_compute_worker_pool_for_tests
 
     shutdown_compute_worker_pool_for_tests()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from enum import StrEnum
 
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
@@ -11,6 +12,20 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+
+
+class RowRunPhase(StrEnum):
+    """Lifecycle phase for persist admission on the single RowRun owner.
+
+    ``REGISTERED`` -- live; persist ALLOW (unless cancel token fired).
+    ``DETACHED`` -- stream dropped; shell retained; persist ALLOW.
+    ``CANCELLED`` -- cancel intent applied; persist DENY.
+    After persist decision or explicit retire, the registry drops the entry.
+    """
+
+    REGISTERED = "registered"
+    DETACHED = "detached"
+    CANCELLED = "cancelled"
 
 
 class RowRun:
@@ -26,6 +41,7 @@ class RowRun:
         self.ladder_state: PolicyLadderState | None = None
         self.orchestration: InferenceStreamOrchestration | None = None
         self.tier_lock = threading.RLock()
+        self.phase: RowRunPhase = RowRunPhase.REGISTERED
 
     @property
     def run_id(self) -> str:

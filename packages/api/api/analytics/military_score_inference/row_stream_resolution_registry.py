@@ -1,9 +1,8 @@
 """Process-wide bounded table of per-run soft/hard stream resolutions.
 
 Owns deliver / upgrade / silence memory for table-stream terminal events only.
-Cancel durability lives in :mod:`api.analytics.scores.cancel_fence_store`
-(generation-scoped). Finish-after-detach persist allow lives in
-:mod:`api.analytics.scores.known_run_allow_store`.
+Persist admission lives on RowRun phase in
+:mod:`api.analytics.scores.tier_row_run_registry` -- not here.
 
 FIFO-bounded by ``MAX_STREAM_RESOLUTIONS``. Soft/hard terminals are short-lived
 relative to this capacity. Run IDs are unique UUIDs.

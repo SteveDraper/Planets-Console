@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from api.analytics.scores.cancel_fence_store import is_run_cancel_fenced
-from api.analytics.scores.known_run_allow_store import is_known_run_allowed
+from api.analytics.military_score_inference.row_run import RowRunPhase
 from api.analytics.scores.tier_row_run_registry import get_row_run
 
 
@@ -20,17 +19,17 @@ class PersistDecision(StrEnum):
 def decide_scores_row_persist(run_id: str) -> PersistDecision:
     """Decide whether a scores ``rowComplete`` persist may write.
 
-    - ``DENY_CANCEL`` -- cancel fence or live cancel token
-    - ``ALLOW`` -- live RowRun (not cancelled) or known detach allow
-    - ``REFUSE_UNKNOWN`` -- no RowRun and no known allow (loud refuse)
+    Reads admission phase from the single RowRun owner:
+
+    - ``DENY_CANCEL`` -- ``CANCELLED`` phase or live cancel token
+    - ``ALLOW`` -- ``REGISTERED`` or ``DETACHED``
+    - ``REFUSE_UNKNOWN`` -- no retained RowRun for ``run_id``
     """
-    if is_run_cancel_fenced(run_id):
-        return PersistDecision.DENY_CANCEL
     run = get_row_run(run_id)
-    if run is not None:
-        if run.session.cancel_token.is_cancelled():
-            return PersistDecision.DENY_CANCEL
-        return PersistDecision.ALLOW
-    if is_known_run_allowed(run_id):
-        return PersistDecision.ALLOW
-    return PersistDecision.REFUSE_UNKNOWN
+    if run is None:
+        return PersistDecision.REFUSE_UNKNOWN
+    if run.phase is RowRunPhase.CANCELLED:
+        return PersistDecision.DENY_CANCEL
+    if run.session.cancel_token.is_cancelled():
+        return PersistDecision.DENY_CANCEL
+    return PersistDecision.ALLOW

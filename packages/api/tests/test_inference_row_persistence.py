@@ -548,11 +548,11 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
     assert stored.status == STATUS_STOPPED
 
 
-def test_scores_persistence_policy_persists_when_rowrun_missing_for_persistable(
+def test_scores_persistence_policy_persists_when_rowrun_detached(
     sample_turn,
     memory_backend,
 ):
-    """Unregister seeds a stream resolution so finish-after-detach can still persist."""
+    """Detach retains DETACHED phase so finish-after-detach can still persist."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.analytic import build_inference_observation
     from api.analytics.military_score_inference.inference_stream_session import (
@@ -562,7 +562,7 @@ def test_scores_persistence_policy_persists_when_rowrun_missing_for_persistable(
     from api.analytics.military_score_inference.row_complete_factory import (
         row_complete_with_summary,
     )
-    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.military_score_inference.row_stream_resolution_registry import (
         reset_stream_resolution_registry_for_tests,
     )
@@ -570,11 +570,11 @@ def test_scores_persistence_policy_persists_when_rowrun_missing_for_persistable(
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
-    from api.analytics.scores.known_run_allow_store import is_known_run_allowed
     from api.analytics.scores.tier_row_run_registry import (
+        detach_row_run,
+        get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
-        unregister_row_run,
     )
     from api.compute.scope import ComputeScope
 
@@ -592,8 +592,8 @@ def test_scores_persistence_policy_persists_when_rowrun_missing_for_persistable(
     run = RowRun(session)
     register_row_run(run)
     run_id = run.run_id
-    unregister_row_run(run_id)
-    assert is_known_run_allowed(run_id)
+    detach_row_run(run_id)
+    assert get_row_run_phase(run_id) is RowRunPhase.DETACHED
 
     persistence = InferenceRowPersistenceService(memory_backend)
     ctx = make_analytic_query_context(
@@ -621,6 +621,7 @@ def test_scores_persistence_policy_persists_when_rowrun_missing_for_persistable(
         assert stored is not None
         assert stored.status == STATUS_EXACT
         assert stored.summary == "orphan persist"
+        assert get_row_run_phase(run_id) is None
     finally:
         reset_tier_row_run_registry_for_tests()
         reset_stream_resolution_registry_for_tests()

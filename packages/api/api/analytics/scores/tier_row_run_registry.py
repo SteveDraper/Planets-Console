@@ -1,4 +1,4 @@
-"""Registry for scores tier_solve RowRun state between orchestrator continuations."""
+"""Single owner for scores tier_solve RowRun state and persist-admission phase."""
 
 from __future__ import annotations
 
@@ -9,10 +9,8 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
     InferenceStreamOrchestration,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
-from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.analytics.scores.cancel_fence_store import is_run_cancel_fenced
-from api.analytics.scores.known_run_allow_store import record_known_run_allow
 from api.compute.scope import WILDCARD, ComputeScope
 
 _lock = threading.Lock()
@@ -38,6 +36,12 @@ def _session_scope_key(session) -> tuple[int, int, int, int]:
         session.turn_number,
         session.player_id,
     )
+
+
+def _clear_scope_index_locked(run: RowRun) -> None:
+    scope_key = _session_scope_key(run.session)
+    if _run_id_by_scope_key.get(scope_key) == run.run_id:
+        _run_id_by_scope_key.pop(scope_key, None)
 
 
 def initialize_tier_ladder_state(
@@ -73,6 +77,7 @@ def register_row_run(
     """Register one RowRun for orchestrator tier_solve wire build and execution."""
     if initialize_ladder and run.ladder_state is None:
         initialize_tier_ladder_state(run, orchestration=orchestration)
+    run.phase = RowRunPhase.REGISTERED
     with _lock:
         _runs_by_id[run.run_id] = run
         _run_id_by_scope_key[_session_scope_key(run.session)] = run.run_id
@@ -88,34 +93,80 @@ def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
         run_id = _run_id_by_scope_key.get(_scope_key(scope))
         if run_id is None:
             return None
-        return _runs_by_id.get(run_id)
+        run = _runs_by_id.get(run_id)
+        if run is None or run.phase is not RowRunPhase.REGISTERED:
+            return None
+        return run
+
+
+def get_row_run_phase(run_id: str) -> RowRunPhase | None:
+    with _lock:
+        run = _runs_by_id.get(run_id)
+        return None if run is None else run.phase
 
 
 def is_row_run_cancelled(run_id: str) -> bool:
-    """True when ``run_id`` has a generation-scoped cancel fence.
+    """True when ``run_id`` is retained in ``CANCELLED`` phase.
 
     Prefer :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
-    for persist admission. Kept for cancel/detach tests that assert the fence.
+    for persist admission.
     """
-    return is_run_cancel_fenced(run_id)
+    return get_row_run_phase(run_id) is RowRunPhase.CANCELLED
 
 
-def unregister_row_run(run_id: str) -> None:
-    """Drop registry entries and record a known-run allow when not cancel-fenced.
+def detach_row_run(run_id: str) -> None:
+    """Transition ``REGISTERED`` → ``DETACHED``; clear scope index; keep by id.
 
-    Cancel already wrote a generation fence before this call. Detach does not;
-    the known-run allow is the positive finish-after-detach persist signal.
+    Detach must not destroy admission state: late persist still finds the shell.
+    No-op when missing or already ``CANCELLED``. ``DETACHED`` stays ``DETACHED``.
     """
+    with _lock:
+        run = _runs_by_id.get(run_id)
+        if run is None:
+            return
+        if run.phase is RowRunPhase.CANCELLED:
+            return
+        run.phase = RowRunPhase.DETACHED
+        _clear_scope_index_locked(run)
+        _tier_callbacks_by_run_id.pop(run_id, None)
+
+
+def mark_row_run_cancelled(run_id: str) -> None:
+    """Transition to ``CANCELLED``; clear scope index; keep by id for late DENY.
+
+    Replaces generation-scoped cancel fences for persist admission. Caller still
+    cancels the session token and sets stream-resolution ``CANCELED`` (delivery).
+    """
+    with _lock:
+        run = _runs_by_id.get(run_id)
+        if run is None:
+            return
+        run.phase = RowRunPhase.CANCELLED
+        _clear_scope_index_locked(run)
+        _tier_callbacks_by_run_id.pop(run_id, None)
+
+
+def retire_row_run(run_id: str) -> None:
+    """Drop registry entries after persist decision or explicit retire."""
     with _lock:
         run = _runs_by_id.pop(run_id, None)
         if run is None:
             return
-        scope_key = _session_scope_key(run.session)
-        if _run_id_by_scope_key.get(scope_key) == run_id:
-            _run_id_by_scope_key.pop(scope_key, None)
+        _clear_scope_index_locked(run)
         _tier_callbacks_by_run_id.pop(run_id, None)
-    if not is_run_cancel_fenced(run_id):
-        record_known_run_allow(run_id)
+
+
+def unregister_row_run(run_id: str) -> None:
+    """Drop registry entries (retire). Prefer :func:`detach_row_run` for stream detach."""
+    retire_row_run(run_id)
+
+
+def clear_row_runs() -> None:
+    """Drop every retained RowRun (full invalidate / shutdown)."""
+    with _lock:
+        _runs_by_id.clear()
+        _run_id_by_scope_key.clear()
+        _tier_callbacks_by_run_id.clear()
 
 
 def register_tier_callbacks(run_id: str, callbacks: InferenceTierJobCallbacks) -> None:
@@ -129,7 +180,4 @@ def get_tier_callbacks(run_id: str) -> InferenceTierJobCallbacks | None:
 
 
 def reset_tier_row_run_registry_for_tests() -> None:
-    with _lock:
-        _runs_by_id.clear()
-        _run_id_by_scope_key.clear()
-        _tier_callbacks_by_run_id.clear()
+    clear_row_runs()
