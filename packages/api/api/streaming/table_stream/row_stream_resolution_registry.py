@@ -1,8 +1,9 @@
 """Process-wide bounded table of per-run stream resolutions.
 
 Owns deliver / upgrade / silence memory and the ``multiplex_closed`` drain bit
-for table-stream terminal events. Persist admission (scores) lives on RowRun
-phase in :mod:`api.analytics.scores.tier_row_run_registry` -- not here.
+for table-stream terminal events. Persist admission (scores) lives on
+:class:`~api.analytics.military_score_inference.row_run.PersistAdmission` in
+:mod:`api.analytics.scores.tier_row_run_registry` -- not here.
 
 FIFO-bounded by ``MAX_STREAM_RESOLUTIONS``. Run IDs are unique UUIDs.
 """
