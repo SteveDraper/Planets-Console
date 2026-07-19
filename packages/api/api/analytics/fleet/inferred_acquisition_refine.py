@@ -190,6 +190,11 @@ def _assign_option_sets_to_placeholders(
             continue
         if record_has_direct_observation(record):
             option_sets = _option_sets_respecting_observation_locks(record, option_sets)
+            # Foreign-hull (or otherwise incompatible) inference candidates were
+            # all dropped. Keep observation's prior sets (often a hull-only seed)
+            # rather than wiping to [].
+            if not option_sets:
+                continue
         prior_sets = tuple(record.build_option_sets)
         if prior_sets == option_sets:
             continue

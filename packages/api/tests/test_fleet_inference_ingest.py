@@ -642,6 +642,18 @@ def test_refine_drops_option_sets_for_hulls_other_than_observed(sample_turn):
     observed_snapshot = ingest_turn_ship_observations(snapshot, turn)
     before = ledger_for_player(observed_snapshot, player_id).records[0]
     assert before.fields.hull == FleetFieldKnown(value=87)
+    hull_only_prior = [
+        FleetBuildOptionSet(
+            hull_id=87,
+            engine_id=None,
+            beam_id=None,
+            torp_id=None,
+            beam_count=None,
+            launcher_count=None,
+        )
+    ]
+    assert before.build_option_sets == hull_only_prior
+    assert before.display_default_option_set_index == 0
 
     refined = ingest_turn_inferred_acquisitions(
         observed_snapshot,
@@ -650,13 +662,15 @@ def test_refine_drops_option_sets_for_hulls_other_than_observed(sample_turn):
     )
     after = ledger_for_player(refined, player_id).records[0]
     assert after.fields.hull == FleetFieldKnown(value=87)
-    assert after.build_option_sets == []
-    assert after.display_default_option_set_index is None
-    # Empty option sets must omit displayDefaultOptionSetIndex on the wire;
-    # index 0 would fail fleet_ship_record_from_json.
+    # Foreign DSS candidates were lock-filtered out; keep observation hull-only
+    # seed instead of assigning [] (and never stamp Falcon onto DSS slot fills).
+    assert after.build_option_sets == hull_only_prior
+    assert after.display_default_option_set_index == 0
+    assert all(option.hull_id == 87 for option in after.build_option_sets)
+    assert all(option.engine_id is None for option in after.build_option_sets)
     restored = fleet_ship_record_from_json(fleet_ship_record_to_json(after))
-    assert restored.build_option_sets == []
-    assert restored.display_default_option_set_index is None
+    assert restored.build_option_sets == hull_only_prior
+    assert restored.display_default_option_set_index == 0
 
 
 def test_streaming_refine_updates_freighter_option_sets(sample_turn):
