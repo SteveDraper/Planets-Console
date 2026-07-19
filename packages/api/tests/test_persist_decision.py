@@ -41,10 +41,10 @@ def test_persist_decision_table(sample_turn) -> None:
         assert get_row_run_phase(run.run_id) is RowRunPhase.REGISTERED
         assert decide_scores_row_persist(run.run_id) is PersistDecision.ALLOW
 
+        # Token alone is not a persist gate; cancel intent sets CANCELLED phase.
         run.session.cancel_token.cancel()
-        assert decide_scores_row_persist(run.run_id) is PersistDecision.DENY_CANCEL
+        assert decide_scores_row_persist(run.run_id) is PersistDecision.ALLOW
 
-        # Fresh run for phase CANCELLED (token alone is already DENY above).
         cancelled = RowRun(_session(sample_turn))
         register_row_run(cancelled)
         mark_row_run_cancelled(cancelled.run_id)

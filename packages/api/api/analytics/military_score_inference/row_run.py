@@ -17,7 +17,7 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 class RowRunPhase(StrEnum):
     """Lifecycle phase for persist admission on the single RowRun owner.
 
-    ``REGISTERED`` -- live; persist ALLOW (unless cancel token fired).
+    ``REGISTERED`` -- live; persist ALLOW.
     ``DETACHED`` -- stream dropped; shell retained; persist ALLOW.
     ``CANCELLED`` -- cancel intent applied; persist DENY.
     After persist decision or explicit retire, the registry drops the entry.

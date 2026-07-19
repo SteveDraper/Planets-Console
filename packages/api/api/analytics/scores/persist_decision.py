@@ -24,10 +24,12 @@ def decide_scores_row_persist(run_id: str) -> PersistDecision:
 
     Reads admission from the single RowRun owner (``tier_row_run_registry``):
 
-    - ``DENY_CANCEL`` -- ``CANCELLED`` phase, shell-evicted cancel denial, or
-      live cancel token
+    - ``DENY_CANCEL`` -- ``CANCELLED`` phase or shell-evicted cancel denial
     - ``ALLOW`` -- ``REGISTERED`` or ``DETACHED``
     - ``REFUSE_UNKNOWN`` -- never-seen ``run_id`` (no shell, no cancel denial)
+
+    Cancel intent must set ``CANCELLED`` via ``mark_row_run_cancelled``; the
+    live cancel token is not a persist gate.
     """
     run = get_row_run(run_id)
     if run is None:
@@ -35,7 +37,5 @@ def decide_scores_row_persist(run_id: str) -> PersistDecision:
             return PersistDecision.DENY_CANCEL
         return PersistDecision.REFUSE_UNKNOWN
     if run.phase is RowRunPhase.CANCELLED:
-        return PersistDecision.DENY_CANCEL
-    if run.session.cancel_token.is_cancelled():
         return PersistDecision.DENY_CANCEL
     return PersistDecision.ALLOW
