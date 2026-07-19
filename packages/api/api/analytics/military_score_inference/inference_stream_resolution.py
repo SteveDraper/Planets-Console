@@ -15,16 +15,6 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     deliver_inference_domain_event_to_open_stream,
 )
-from api.analytics.military_score_inference.row_stream_resolution import (
-    RowStreamDelivery,
-    RowStreamResolutionState,
-    RowStreamResolutionTrigger,
-)
-from api.analytics.military_score_inference.row_stream_resolution_registry import (
-    discard_stream_resolution_if_state,
-    get_stream_resolution,
-    transition_stream_resolution,
-)
 from api.analytics.military_score_inference.soft_stream_policy import (
     SoftStreamAction,
     TerminalSource,
@@ -32,6 +22,18 @@ from api.analytics.military_score_inference.soft_stream_policy import (
 )
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
+from api.streaming.table_stream import stream_drain
+from api.streaming.table_stream.row_stream_resolution import (
+    RowStreamDelivery,
+    RowStreamResolutionState,
+    RowStreamResolutionTrigger,
+)
+from api.streaming.table_stream.row_stream_resolution_registry import (
+    discard_stream_resolution_if_state,
+    get_stream_resolution,
+    transition_stream_resolution,
+)
+from api.streaming.table_stream.terminal_route import TerminalRoute, route_terminal
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_scheduler import (
@@ -202,15 +204,14 @@ class InferenceStreamResolutionMixin:
         event: RowComplete | RowFailed,
         delivery: RowStreamDelivery,
     ) -> None:
-        if delivery is RowStreamDelivery.SILENCE:
+        route = route_terminal(delivery, session.run_id)
+        if route is TerminalRoute.SILENCE:
             return
-        controller = self._controller_for_stream_session(session)
-        if delivery is RowStreamDelivery.UPGRADE or (
-            controller is not None and session.run_id in controller.finished_run_ids
-        ):
+        if route is TerminalRoute.PENDING:
+            controller = self._controller_for_stream_session(session)
             if controller is not None:
                 controller.push_domain_event_pending_wire(session, event)
-                return
+            return
         deliver_inference_domain_event_to_open_stream(session, event)
 
     def _transition_stream_resolution_locked(
@@ -276,16 +277,9 @@ class InferenceStreamResolutionMixin:
         session = self._open_stream_session_for_scope(scope)
         if session is None:
             return
-        with self._lock:
-            resolution = get_stream_resolution(session.run_id)
-            if (
-                resolution is None
-                or resolution.state is not RowStreamResolutionState.SOFT_PROVISIONAL
-            ):
-                return
         controller = self._controller_for_compute_scope(scope)
         if controller is None:
             return
-        with controller.stream_lock:
-            controller.finished_run_ids.discard(session.run_id)
+        if not stream_drain.reopen_if_soft(controller, session.run_id):
+            return
         controller.wake_multiplex.set()

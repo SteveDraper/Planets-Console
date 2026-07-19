@@ -17,6 +17,10 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 | `registry.py` | Generic scope-keyed controller registry (attach/detach, in-place reschedule lookup) |
 | `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, `finished_run_ids`, scheduled-row map) |
 | `connect.py` | `iter_table_stream_connect` / `iter_table_stream_connect_with_scope` with guaranteed `finally` scope teardown |
+| `row_stream_resolution.py` | Analytic-independent row terminal FSM (`OPEN` / `SOFT_PROVISIONAL` / `HARD_TERMINAL` / `CANCELED`) plus `multiplex_closed` drain bit |
+| `row_stream_resolution_registry.py` | Process-wide FIFO-bounded resolution table; sole owner of delivery state + drain-closed bit |
+| `terminal_route.py` | `route_terminal(delivery, run_id)` → queue / pending / silence (does not read `finished_run_ids`) |
+| `stream_drain.py` | Sole writer of `finished_run_ids` + `multiplex_closed` (`close` / `reopen_if_soft` / `discard` / `clear`) |
 
 Per-analytic code keeps:
 
@@ -25,6 +29,9 @@ Per-analytic code keeps:
 - Admission resolution (`ImmediateRowAdmission`, cached-complete, schedule)
 - Invalidation policy wiring
 - Thin `*ConnectPolicy` dataclass implementing `TableStreamConnectPolicy`
+- Soft-stream **triggers** and park-reason policy (scores only); fleet never fires soft provisional
+
+`finished_run_ids` remains the multiplex drain set on the controller. The sole writer is `stream_drain` (`close` / `reopen_if_soft` / `discard` / `clear`), which keeps `multiplex_closed` in lockstep. Adapters must not mutate `finished_run_ids` directly or OR it into delivery routing -- use `route_terminal` / `multiplex_closed`. Soft provisional is a shared FSM capability; only scores supplies soft triggers today.
 
 ## Boundaries (explicitly not unified)
 

@@ -1,4 +1,8 @@
-"""Pure FSM for resolving one inference row on a table stream."""
+"""Pure FSM for resolving one row on a multiplexed table stream.
+
+Analytic-independent: soft provisional is a shared capability that scores uses
+and fleet simply never triggers.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +20,7 @@ class RowStreamResolutionState(StrEnum):
 
 
 class RowStreamResolutionTrigger(StrEnum):
-    """A scheduler event that can resolve a stream row."""
+    """An adapter event that can resolve a stream row."""
 
     SOFT_PROVISIONAL = "soft_provisional"
     DURABLE_COMPLETE = "durable_complete"
@@ -39,9 +43,14 @@ class RowStreamResolution:
 
     Soft terminals are provisional: a later durable completion upgrades them through
     the pending wire. Hard terminals and cancellations silence all later events.
+
+    ``multiplex_closed`` is independent of FSM state: cancel-silent multiplex finish
+    can close drain while the row is still ``OPEN``, so a later durable/orphan
+    terminal can still route via pending wire.
     """
 
     state: RowStreamResolutionState = RowStreamResolutionState.OPEN
+    multiplex_closed: bool = False
 
     def transition(self, trigger: RowStreamResolutionTrigger) -> RowStreamDelivery:
         """Apply one trigger and return whether its event reaches the stream."""

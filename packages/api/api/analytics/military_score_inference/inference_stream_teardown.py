@@ -112,10 +112,10 @@ class InferenceStreamTeardownMixin:
         Stream-resolution ``CANCELED`` only silences further stream delivery.
         Detach must never call this: detached workers may still finish and persist.
         """
-        from api.analytics.military_score_inference.row_stream_resolution import (
+        from api.analytics.scores.cancel_intent import apply_scores_row_cancel
+        from api.streaming.table_stream.row_stream_resolution import (
             RowStreamResolutionTrigger,
         )
-        from api.analytics.scores.cancel_intent import apply_scores_row_cancel
 
         apply_scores_row_cancel(
             run_id,
@@ -144,10 +144,10 @@ class InferenceStreamTeardownMixin:
         A full invalidate (``turn is None``, e.g. shutdown) clears every
         resolution and retires all retained RowRun shells.
         """
-        from api.analytics.military_score_inference.row_stream_resolution_registry import (
+        from api.analytics.scores.tier_row_run_registry import clear_row_runs
+        from api.streaming.table_stream.row_stream_resolution_registry import (
             clear_stream_resolutions,
         )
-        from api.analytics.scores.tier_row_run_registry import clear_row_runs
 
         self._globally_paused = False
         if turn is None:

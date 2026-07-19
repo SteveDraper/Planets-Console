@@ -21,6 +21,7 @@ from api.analytics.fleet.fleet_table_stream_scheduler import FleetTableStreamSch
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
+from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
 from api.transport.fleet_table_stream import fleet_error_event
@@ -30,6 +31,12 @@ from api.transport.fleet_table_stream import fleet_error_event
 class FleetTableStreamController(
     TableStreamControllerBase[ScheduledFleetPlayer, PlayerStreamAdmission]
 ):
+    """Fleet table-stream controller.
+
+    Fleet uses hard terminals only -- never soft-provisional stream resolution
+    triggers or ``stream_drain.reopen_if_soft``.
+    """
+
     scope: FleetTableStreamScope
     turn: TurnInfo
     scheduler: FleetTableStreamScheduler
@@ -83,13 +90,13 @@ class FleetTableStreamController(
             old_row = self.scheduled_rows.get(player_id)
             if old_row is not None:
                 cancel_run_ids.append(old_row.session.run_id)
-                self.finished_run_ids.discard(old_row.session.run_id)
+                stream_drain.discard_unlocked(self.finished_run_ids, old_row.session.run_id)
                 self.scheduled_rows.pop(player_id, None)
             else:
                 active = self.scheduler.row_run_for_player(self.scope, player_id)
                 if active is not None:
                     cancel_run_ids.append(active.session.run_id)
-                    self.finished_run_ids.discard(active.session.run_id)
+                    stream_drain.discard_unlocked(self.finished_run_ids, active.session.run_id)
         for run_id in cancel_run_ids:
             self.scheduler.cancel_player_run(run_id)
         with self.stream_lock:
@@ -115,7 +122,7 @@ class FleetTableStreamController(
                 old_row = self.scheduled_rows.get(player_id)
                 if old_row is not None:
                     cancel_run_ids.append(old_row.session.run_id)
-            self.finished_run_ids.clear()
+            stream_drain.clear_unlocked(self.finished_run_ids)
             self.scheduled_rows.clear()
         for run_id in cancel_run_ids:
             self.scheduler.cancel_player_run(run_id)

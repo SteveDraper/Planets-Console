@@ -7,15 +7,6 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
-from api.analytics.military_score_inference.row_stream_resolution import (
-    RowStreamResolutionState,
-    RowStreamResolutionTrigger,
-)
-from api.analytics.military_score_inference.row_stream_resolution_registry import (
-    get_stream_resolution,
-    reset_stream_resolution_registry_for_tests,
-    transition_stream_resolution,
-)
 from api.analytics.scores.cancel_intent import apply_scores_row_cancel
 from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
 from api.analytics.scores.tier_row_run_registry import (
@@ -23,6 +14,15 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run_phase,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
+)
+from api.streaming.table_stream.row_stream_resolution import (
+    RowStreamResolutionState,
+    RowStreamResolutionTrigger,
+)
+from api.streaming.table_stream.row_stream_resolution_registry import (
+    get_stream_resolution,
+    reset_stream_resolution_registry_for_tests,
+    transition_stream_resolution,
 )
 
 

@@ -443,10 +443,10 @@ class ScoresPersistencePolicy:
             retire_row_run(run_id)
             return
         if decision is PersistDecision.REFUSE_UNKNOWN:
-            raise RuntimeError(
-                "scores persist refused: unknown run_id with no retained RowRun "
-                f"(run_id={run_id!r})"
-            )
+            # No write: never-seen / retired ids share the deny contract with
+            # cancel (including any historically evicted cancel memory). Do not
+            # raise -- late workers must not fail the scores node for this.
+            return
 
         services.persistence.persist_row_complete_for_scope(
             row_complete,

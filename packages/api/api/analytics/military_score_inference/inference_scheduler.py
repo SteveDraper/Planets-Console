@@ -765,11 +765,11 @@ def get_inference_row_scheduler(
 def reset_inference_row_scheduler_for_tests() -> None:
     """Drop the process-wide scheduler (tests only)."""
     global _scheduler
-    from api.analytics.military_score_inference.row_stream_resolution_registry import (
-        reset_stream_resolution_registry_for_tests,
-    )
     from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
+    from api.streaming.table_stream.row_stream_resolution_registry import (
+        reset_stream_resolution_registry_for_tests,
+    )
 
     with _scheduler_lock:
         if _scheduler is not None:

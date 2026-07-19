@@ -1,11 +1,10 @@
-"""Process-wide bounded table of per-run soft/hard stream resolutions.
+"""Process-wide bounded table of per-run stream resolutions.
 
-Owns deliver / upgrade / silence memory for table-stream terminal events only.
-Persist admission lives on RowRun phase in
-:mod:`api.analytics.scores.tier_row_run_registry` -- not here.
+Owns deliver / upgrade / silence memory and the ``multiplex_closed`` drain bit
+for table-stream terminal events. Persist admission (scores) lives on RowRun
+phase in :mod:`api.analytics.scores.tier_row_run_registry` -- not here.
 
-FIFO-bounded by ``MAX_STREAM_RESOLUTIONS``. Soft/hard terminals are short-lived
-relative to this capacity. Run IDs are unique UUIDs.
+FIFO-bounded by ``MAX_STREAM_RESOLUTIONS``. Run IDs are unique UUIDs.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 
-from api.analytics.military_score_inference.row_stream_resolution import (
+from api.streaming.table_stream.row_stream_resolution import (
     RowStreamDelivery,
     RowStreamResolution,
     RowStreamResolutionState,
@@ -40,6 +39,14 @@ def _touch_locked(run_id: str, resolution: RowStreamResolution) -> None:
     _trim_locked()
 
 
+def _ensure_locked(run_id: str) -> RowStreamResolution:
+    """Return existing or new OPEN resolution. Caller holds ``_lock``."""
+    resolution = _resolutions.get(run_id)
+    if resolution is None:
+        resolution = RowStreamResolution()
+    return resolution
+
+
 def get_stream_resolution(run_id: str) -> RowStreamResolution | None:
     with _lock:
         return _resolutions.get(run_id)
@@ -51,12 +58,40 @@ def transition_stream_resolution(
 ) -> RowStreamDelivery:
     """Apply one trigger, refresh eviction order, and trim to capacity."""
     with _lock:
-        resolution = _resolutions.get(run_id)
-        if resolution is None:
-            resolution = RowStreamResolution()
+        resolution = _ensure_locked(run_id)
         delivery = resolution.transition(trigger)
         _touch_locked(run_id, resolution)
         return delivery
+
+
+def mark_multiplex_closed(run_id: str) -> None:
+    """Mark drain closed for ``run_id`` (creates OPEN resolution if missing)."""
+    with _lock:
+        resolution = _ensure_locked(run_id)
+        resolution.multiplex_closed = True
+        _touch_locked(run_id, resolution)
+
+
+def is_multiplex_closed(run_id: str) -> bool:
+    """True when drain is closed for ``run_id``."""
+    with _lock:
+        resolution = _resolutions.get(run_id)
+        return resolution is not None and resolution.multiplex_closed
+
+
+def clear_multiplex_closed_if_soft(run_id: str) -> bool:
+    """Clear drain-closed only while still ``SOFT_PROVISIONAL``. Returns True if cleared."""
+    with _lock:
+        resolution = _resolutions.get(run_id)
+        if (
+            resolution is None
+            or resolution.state is not RowStreamResolutionState.SOFT_PROVISIONAL
+            or not resolution.multiplex_closed
+        ):
+            return False
+        resolution.multiplex_closed = False
+        _touch_locked(run_id, resolution)
+        return True
 
 
 def discard_stream_resolution_if_state(

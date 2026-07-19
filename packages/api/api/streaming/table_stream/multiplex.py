@@ -8,6 +8,8 @@ import time
 from collections.abc import Callable, Iterator
 from typing import Protocol, TypeVar
 
+from api.streaming.table_stream import stream_drain
+
 _DEFAULT_MULTIPLEX_WAIT_SECONDS = 0.05
 
 
@@ -50,7 +52,7 @@ def drain_available_multiplex_events(
                 if tag_player_id and tag_event is not None:
                     event = tag_event(event, row.player_id)
                 if event.get("type") in terminal_types:
-                    finished_run_ids.add(row.session.run_id)
+                    stream_drain.close_unlocked(finished_run_ids, row.session.run_id)
                 yield event
 
 
@@ -94,7 +96,7 @@ def iter_multiplexed_stream_events(
     def finish_cancelled_run(row: ScheduledStreamRow[EventT]) -> None:
         if session_is_cancelled(row.session):
             pending_run_ids.discard(row.session.run_id)
-            finished.add(row.session.run_id)
+            stream_drain.close_unlocked(finished, row.session.run_id)
 
     def refresh_pending_run_ids() -> set[str]:
         pending: set[str] = set()
@@ -102,7 +104,7 @@ def iter_multiplexed_stream_events(
             if row.session.run_id in finished:
                 continue
             if session_is_cancelled(row.session):
-                finished.add(row.session.run_id)
+                stream_drain.close_unlocked(finished, row.session.run_id)
                 continue
             pending.add(row.session.run_id)
         return pending
@@ -167,7 +169,7 @@ def iter_multiplexed_stream_events(
                 # finished_run_ids; omitting finished.add leaves rows pending forever
                 # (serverStreams linger, idle CPU -- manual hang fingerprint).
                 pending_run_ids.discard(row.session.run_id)
-                finished.add(row.session.run_id)
+                stream_drain.close_unlocked(finished, row.session.run_id)
             if tag_player_id and tag_event is not None:
                 yield tag_event(event, row.player_id)
             else:

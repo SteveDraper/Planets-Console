@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
+from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.connect import AdmissionDispatch
 
 ScheduledT = TypeVar("ScheduledT")
@@ -63,7 +64,7 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
                     cancel_run_id(new_run_id)
                     return False
             self.scheduled_rows[player_id] = row
-            self.finished_run_ids.discard(new_run_id)
+            stream_drain.discard_unlocked(self.finished_run_ids, new_run_id)
             return True
 
     def dispatch_admission(
@@ -82,7 +83,10 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
         if dispatch.scheduled is not None:
             scheduled = dispatch.scheduled
             self.scheduled_rows[player_id] = scheduled
-            self.finished_run_ids.discard(self._run_id_for_scheduled_row(scheduled))
+            stream_drain.discard_unlocked(
+                self.finished_run_ids,
+                self._run_id_for_scheduled_row(scheduled),
+            )
         return True
 
     def _run_id_for_scheduled_row(self, row: ScheduledT) -> str:

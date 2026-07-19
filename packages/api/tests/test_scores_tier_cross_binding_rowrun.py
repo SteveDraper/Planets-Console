@@ -29,14 +29,6 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.row_stream_resolution import (
-    RowStreamDelivery,
-    RowStreamResolutionState,
-    RowStreamResolutionTrigger,
-)
-from api.analytics.military_score_inference.row_stream_resolution_registry import (
-    get_stream_resolution,
-)
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
@@ -51,6 +43,14 @@ from api.compute.orchestrator import ComputeNodeRun
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import ComputeScope
+from api.streaming.table_stream.row_stream_resolution import (
+    RowStreamDelivery,
+    RowStreamResolutionState,
+    RowStreamResolutionTrigger,
+)
+from api.streaming.table_stream.row_stream_resolution_registry import (
+    get_stream_resolution,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -643,12 +643,14 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
 def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event(
     sample_turn,
 ) -> None:
-    """Cancel-silent finished_run_ids must not suppress the orphan stream terminal.
+    """Cancel-silent drain close must not suppress the orphan stream terminal.
 
-    Multiplex can mark a run finished when the cancel token trips without yielding a
-    wire event. Orphan delivery used to bail on finished_run_ids and leave the
-    scoreboard in-progress while the DAG was already complete.
+    Multiplex can close drain when the cancel token trips without yielding a
+    wire event. Orphan delivery must still reach pending wire via multiplex_closed
+    (not by reading finished_run_ids in the emit path).
     """
+    from api.streaming.table_stream import stream_drain
+
     session = _session(sample_turn)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -681,7 +683,11 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
         session.player_id,
         ScheduledInferenceRow(player_id=session.player_id, session=session),
     )
-    controller.finished_run_ids.add(session.run_id)
+    # Simulate cancel-silent multiplex finish, then empty finished to prove emit
+    # routes from multiplex_closed alone.
+    stream_drain.close(controller, session.run_id)
+    with controller.stream_lock:
+        controller.finished_run_ids.clear()
     controller.attach()
 
     scheduler._on_orchestrator_scope_outcome(
@@ -690,7 +696,7 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
 
     pending = controller.drain_pending_wire_events()
     assert any(event.get("type") in {"complete", "error"} for event in pending), (
-        f"expected pending-wire terminal after finished_run_ids suppress, got {pending!r}"
+        f"expected pending-wire terminal after drain close, got {pending!r}"
     )
 
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 import time
 
-import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import (
     TierJobOutcome,
@@ -238,14 +237,6 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
     keep-resolution-after-unregister invariant for the detached turn's own row.
     """
     from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
-    from api.analytics.military_score_inference.row_stream_resolution import (
-        RowStreamResolutionState,
-        RowStreamResolutionTrigger,
-    )
-    from api.analytics.military_score_inference.row_stream_resolution_registry import (
-        get_stream_resolution,
-        transition_stream_resolution,
-    )
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run,
         get_row_run_phase,
@@ -254,6 +245,14 @@ def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
     )
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
+    from api.streaming.table_stream.row_stream_resolution import (
+        RowStreamResolutionState,
+        RowStreamResolutionTrigger,
+    )
+    from api.streaming.table_stream.row_stream_resolution_registry import (
+        get_stream_resolution,
+        transition_stream_resolution,
+    )
 
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
@@ -505,12 +504,6 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
     stream ``CANCELED`` only silences delivery.
     """
     from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
-    from api.analytics.military_score_inference.row_stream_resolution import (
-        RowStreamResolutionState,
-    )
-    from api.analytics.military_score_inference.row_stream_resolution_registry import (
-        get_stream_resolution,
-    )
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run_phase,
         register_row_run,
@@ -518,6 +511,12 @@ def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
     )
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
+    from api.streaming.table_stream.row_stream_resolution import (
+        RowStreamResolutionState,
+    )
+    from api.streaming.table_stream.row_stream_resolution_registry import (
+        get_stream_resolution,
+    )
 
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
@@ -692,9 +691,6 @@ def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
     """A CANCELLED phase must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
-    from api.analytics.military_score_inference.row_stream_resolution_registry import (
-        reset_stream_resolution_registry_for_tests,
-    )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores import tier_row_run_registry as reg
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
@@ -702,6 +698,9 @@ def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
     from api.storage.memory_asset import MemoryAssetBackend
+    from api.streaming.table_stream.row_stream_resolution_registry import (
+        reset_stream_resolution_registry_for_tests,
+    )
 
     reset_inference_row_scheduler_for_tests()
     reg.reset_tier_row_run_registry_for_tests()
@@ -770,7 +769,10 @@ def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
 
 
 def test_row_run_phase_survives_scheduler_remove(sample_turn):
-    """CANCELLED admission and DETACHED shells stay on the registry owner after scheduler drop."""
+    """CANCELLED admission and DETACHED shells stay on the registry owner after scheduler drop.
+
+    Same-scope re-register supersedes cancel; cross-scope detach must not.
+    """
     from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
     from api.analytics.scores.tier_row_run_registry import (
         detach_row_run,
@@ -780,20 +782,20 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
         reset_tier_row_run_registry_for_tests,
     )
 
+    players = [s.ownerid for s in sample_turn.scores[:2]]
+    assert len(players) == 2
     reset_tier_row_run_registry_for_tests()
     try:
-        cancelled = RowRun(
-            _session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid)
-        )
+        cancelled = RowRun(_session_for_player(sample_turn, player_id=players[0]))
         register_row_run(cancelled)
         mark_row_run_cancelled(cancelled.run_id)
         assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED
 
-        detached = RowRun(_session_for_player(sample_turn, player_id=sample_turn.scores[0].ownerid))
+        detached = RowRun(_session_for_player(sample_turn, player_id=players[1]))
         register_row_run(detached)
         detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
-        # Cancel must not be overwritten by a later detach of a different run.
+        # Cross-scope detach must not clear another scope's cancelled admission.
         assert get_row_run_phase(cancelled.run_id) is RowRunPhase.CANCELLED
     finally:
         reset_tier_row_run_registry_for_tests()
@@ -801,8 +803,8 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
 
 def test_stream_resolutions_are_fifo_bounded_across_states(monkeypatch):
     """Soft/hard stream resolutions stay FIFO-bounded (persist phase is separate)."""
-    from api.analytics.military_score_inference import row_stream_resolution_registry as resolutions
-    from api.analytics.military_score_inference.row_stream_resolution import (
+    from api.streaming.table_stream import row_stream_resolution_registry as resolutions
+    from api.streaming.table_stream.row_stream_resolution import (
         RowStreamResolutionState,
         RowStreamResolutionTrigger,
     )
@@ -921,11 +923,8 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
 
 
 def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn):
-    """Missing retained RowRun must fail loudly, not write."""
+    """Missing retained RowRun must not write (silent refuse, not raise)."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_stream_resolution_registry import (
-        reset_stream_resolution_registry_for_tests,
-    )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -936,6 +935,9 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
     from api.storage.memory_asset import MemoryAssetBackend
+    from api.streaming.table_stream.row_stream_resolution_registry import (
+        reset_stream_resolution_registry_for_tests,
+    )
 
     reset_tier_row_run_registry_for_tests()
     reset_stream_resolution_registry_for_tests()
@@ -957,18 +959,17 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
         summary="unknown run must not persist",
     )
     try:
-        with pytest.raises(RuntimeError, match="no retained RowRun"):
-            ScoresPersistencePolicy().persist(
-                ctx,
-                ComputeScope(
-                    analytic_id=SCORES_ANALYTIC_ID,
-                    game_id=628580,
-                    perspective=1,
-                    turn=turn_number,
-                    player_id=player_id,
-                ),
-                {"runId": unknown_run_id, "rowComplete": row_complete},
-            )
+        ScoresPersistencePolicy().persist(
+            ctx,
+            ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=628580,
+                perspective=1,
+                turn=turn_number,
+                player_id=player_id,
+            ),
+            {"runId": unknown_run_id, "rowComplete": row_complete},
+        )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:
         reset_tier_row_run_registry_for_tests()

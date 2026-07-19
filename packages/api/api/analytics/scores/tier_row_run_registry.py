@@ -2,15 +2,15 @@
 
 ``REGISTERED`` / ``DETACHED`` retain a full RowRun shell (late persist ALLOW).
 ``CANCELLED`` is compact admission only: the shell is dropped immediately and
-the ``run_id`` is remembered in a bounded FIFO so ``PersistDecision`` still
-returns ``DENY_CANCEL``. Past that bound, a never-again-seen id is
-``REFUSE_UNKNOWN`` (still no write).
+the ``run_id`` is remembered keyed by scores scope so ``PersistDecision`` still
+returns ``DENY_CANCEL``. A later ``REGISTERED`` for the same scope supersedes
+that cancelled admission (preempt / re-adopt). Memory is O(scopes with an
+outstanding cancel), not an unbounded UUID FIFO.
 """
 
 from __future__ import annotations
 
 import threading
-from collections import OrderedDict
 
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_orchestration import (
@@ -21,16 +21,14 @@ from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.compute.scope import WILDCARD, ComputeScope
 
-# Compact cancelled-admission FIFO. Same capacity class as ``MAX_STREAM_RESOLUTIONS``.
-MAX_CANCELLED_ADMISSIONS = 4096
-
 _lock = threading.Lock()
 # REGISTERED and DETACHED shells only -- never CANCELLED.
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
-# Insertion-ordered cancelled run_ids (no RowRun shell).
-_cancelled_admissions: OrderedDict[str, None] = OrderedDict()
+# Compact cancelled admission: at most one run_id per scores scope.
+_cancelled_admissions: dict[str, tuple[int, int, int, int]] = {}
+_cancelled_run_by_scope: dict[tuple[int, int, int, int], str] = {}
 
 
 def _scope_key(scope: ComputeScope) -> tuple[int, int, int, int]:
@@ -68,10 +66,26 @@ def _drop_shell_locked(run_id: str) -> RowRun | None:
     return run
 
 
-def _trim_cancelled_admissions_locked() -> None:
-    """Bound compact cancelled ids. Caller holds ``_lock``."""
-    while len(_cancelled_admissions) > MAX_CANCELLED_ADMISSIONS:
-        _cancelled_admissions.popitem(last=False)
+def _forget_cancelled_locked(run_id: str) -> None:
+    """Drop compact cancelled admission for ``run_id``. Caller holds ``_lock``."""
+    scope_key = _cancelled_admissions.pop(run_id, None)
+    if scope_key is not None and _cancelled_run_by_scope.get(scope_key) == run_id:
+        _cancelled_run_by_scope.pop(scope_key, None)
+
+
+def _supersede_cancelled_for_scope_locked(scope_key: tuple[int, int, int, int]) -> None:
+    """Clear any cancelled admission for ``scope_key``. Caller holds ``_lock``."""
+    prior = _cancelled_run_by_scope.pop(scope_key, None)
+    if prior is not None:
+        _cancelled_admissions.pop(prior, None)
+
+
+def _record_cancelled_locked(run_id: str, scope_key: tuple[int, int, int, int]) -> None:
+    """Remember ``run_id`` as CANCELLED for ``scope_key`` (one slot). Caller holds ``_lock``."""
+    _forget_cancelled_locked(run_id)
+    _supersede_cancelled_for_scope_locked(scope_key)
+    _cancelled_admissions[run_id] = scope_key
+    _cancelled_run_by_scope[scope_key] = run_id
 
 
 def initialize_tier_ladder_state(
@@ -108,10 +122,13 @@ def register_row_run(
     if initialize_ladder and run.ladder_state is None:
         initialize_tier_ladder_state(run, orchestration=orchestration)
     run.phase = RowRunPhase.REGISTERED
+    scope_key = _session_scope_key(run.session)
     with _lock:
-        _cancelled_admissions.pop(run.run_id, None)
+        # Same-scope re-register supersedes prior cancelled admission (preempt path).
+        _supersede_cancelled_for_scope_locked(scope_key)
+        _forget_cancelled_locked(run.run_id)
         _runs_by_id[run.run_id] = run
-        _run_id_by_scope_key[_session_scope_key(run.session)] = run.run_id
+        _run_id_by_scope_key[scope_key] = run.run_id
 
 
 def get_row_run(run_id: str) -> RowRun | None:
@@ -168,24 +185,25 @@ def detach_row_run(run_id: str) -> None:
 def mark_row_run_cancelled(run_id: str) -> RowRun | None:
     """Record cancelled admission; drop any shell; return the dropped shell if any.
 
-    Compact cancelled memory is FIFO-bounded by ``MAX_CANCELLED_ADMISSIONS``.
-    Caller still cancels the session token and sets stream-resolution ``CANCELED``
-    (delivery) via :func:`api.analytics.scores.cancel_intent.apply_scores_row_cancel`.
+    Compact cancelled memory is scope-keyed (one outstanding cancel per scores
+    scope). Caller still cancels the session token and sets stream-resolution
+    ``CANCELED`` (delivery) via
+    :func:`api.analytics.scores.cancel_intent.apply_scores_row_cancel`.
     """
     with _lock:
         dropped = _drop_shell_locked(run_id)
         if dropped is not None:
             dropped.phase = RowRunPhase.CANCELLED
-        _cancelled_admissions.pop(run_id, None)
-        _cancelled_admissions[run_id] = None
-        _trim_cancelled_admissions_locked()
-        return dropped
+            _record_cancelled_locked(run_id, _session_scope_key(dropped.session))
+            return dropped
+        # Already compact-cancelled (or never registered): leave admission as-is.
+        return None
 
 
 def retire_row_run(run_id: str) -> None:
     """Drop registry shell and cancelled-admission memory after persist or retire."""
     with _lock:
-        _cancelled_admissions.pop(run_id, None)
+        _forget_cancelled_locked(run_id)
         _drop_shell_locked(run_id)
 
 
@@ -201,6 +219,7 @@ def clear_row_runs() -> None:
         _run_id_by_scope_key.clear()
         _tier_callbacks_by_run_id.clear()
         _cancelled_admissions.clear()
+        _cancelled_run_by_scope.clear()
 
 
 def register_tier_callbacks(run_id: str, callbacks: InferenceTierJobCallbacks) -> None:

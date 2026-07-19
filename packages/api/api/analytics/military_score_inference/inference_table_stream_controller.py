@@ -34,6 +34,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 )
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
 from api.transport.inference_stream_wire import domain_event_to_wire_events
@@ -160,13 +161,13 @@ class InferenceTableStreamController(
             old_row = self.scheduled_rows.get(player_id)
             if old_row is not None:
                 cancel_run_ids.append(old_row.session.run_id)
-                self.finished_run_ids.discard(old_row.session.run_id)
+                stream_drain.discard_unlocked(self.finished_run_ids, old_row.session.run_id)
                 self.scheduled_rows.pop(player_id, None)
             else:
                 active = self.scheduler.row_run_for_player(self.scope, player_id)
                 if active is not None:
                     cancel_run_ids.append(active.session.run_id)
-                    self.finished_run_ids.discard(active.session.run_id)
+                    stream_drain.discard_unlocked(self.finished_run_ids, active.session.run_id)
         # Cancel outside stream_lock: cancel aborts orchestrator scopes and drains
         # node-complete listeners that call ``deliver_domain_event`` (needs this lock).
         for run_id in cancel_run_ids:
@@ -208,7 +209,7 @@ class InferenceTableStreamController(
             return False
         with self.stream_lock:
             self.pending_wire_events.extend(wires)
-            self.finished_run_ids.add(session.run_id)
+            stream_drain.close_unlocked(self.finished_run_ids, session.run_id)
         self.wake_multiplex.set()
         return True
 
@@ -217,7 +218,7 @@ class InferenceTableStreamController(
         session: InferenceRowStreamSession,
         event: InferenceStreamDomainEvent,
     ) -> None:
-        """Append tagged domain-event wire to pending (finished_run_ids suppress path)."""
+        """Append tagged domain-event wire to pending (drain-closed / upgrade path)."""
         with self.stream_lock:
             for wire in domain_event_to_wire_events(
                 event,
@@ -261,9 +262,12 @@ class InferenceTableStreamController(
                         # run for this player. Unbound terminals used to mark only the
                         # delivering run_id; multiplex kept waiting on the adopted
                         # session forever while the UI stayed in-progress.
-                        self.finished_run_ids.add(session.run_id)
+                        stream_drain.close_unlocked(self.finished_run_ids, session.run_id)
                         if scheduled is not None:
-                            self.finished_run_ids.add(scheduled.session.run_id)
+                            stream_drain.close_unlocked(
+                                self.finished_run_ids,
+                                scheduled.session.run_id,
+                            )
         self.wake_multiplex.set()
 
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
@@ -274,7 +278,7 @@ class InferenceTableStreamController(
                 old_row = self.scheduled_rows.get(player_id)
                 if old_row is not None:
                     cancel_run_ids.append(old_row.session.run_id)
-            self.finished_run_ids.clear()
+            stream_drain.clear_unlocked(self.finished_run_ids)
             self.scheduled_rows.clear()
         for run_id in cancel_run_ids:
             self.scheduler.cancel_row_run(run_id)
