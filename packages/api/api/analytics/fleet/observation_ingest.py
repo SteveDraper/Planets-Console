@@ -190,20 +190,12 @@ def _apply_observed_option_set(
         record.display_default_option_set_index = 0
         return
     locks = observation_locks_from_option_set(observed_option_set)
-    observed_hull_id = observed_option_set.hull_id
-    candidates = record.build_option_sets
-    if observed_hull_id is not None:
-        matching = [existing for existing in candidates if existing.hull_id == observed_hull_id]
-        if not matching:
-            record.build_option_sets = [observed_option_set]
-            record.display_default_option_set_index = 0
-            return
-        candidates = matching
     merged_sets = [
         merged
-        for existing in candidates
+        for existing in record.build_option_sets
         if (merged := option_set_respecting_locks(existing, locks)) is not None
     ]
+    # Empty after lock filter: seed hull-only (or observed) set rather than wipe.
     record.build_option_sets = merged_sets if merged_sets else [observed_option_set]
     record.display_default_option_set_index = 0
 

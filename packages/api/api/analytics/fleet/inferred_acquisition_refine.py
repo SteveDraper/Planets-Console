@@ -198,9 +198,7 @@ def _assign_option_sets_to_placeholders(
         if prior_sets == option_sets:
             continue
         record.build_option_sets = list(option_sets)
-        record.display_default_option_set_index = (
-            _default_option_set_index(option_sets) if option_sets else None
-        )
+        record.display_default_option_set_index = _default_option_set_index(option_sets)
         _ensure_unknown_spec_fields(record)
         append_fleet_evidence_event(
             record,
