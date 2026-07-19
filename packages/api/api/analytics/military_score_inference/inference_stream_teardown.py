@@ -171,7 +171,7 @@ class InferenceStreamTeardownMixin:
         """Fail in-flight orchestrator work for ``root_scope`` after a row-run cancel.
 
         Without this, a later ``force_fresh`` submit attaches to the still-running node
-        and ``tier_solve`` fails with a missing RowRun after unregister.
+        and ``tier_solve`` fails with a missing RowRun after retire.
 
         Uses :class:`~api.compute.errors.ComputeScopeAbortedError` so dependents on the
         singleton DAG (e.g. fleet) stay ``waiting_deps`` instead of cascading the cancel

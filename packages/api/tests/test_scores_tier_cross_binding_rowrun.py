@@ -35,7 +35,7 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
-    unregister_row_run,
+    retire_row_run,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_park_wake import ScoresParkReason
@@ -131,12 +131,12 @@ def _set_scope_node(
     return node
 
 
-def test_run_scores_tier_solve_continues_when_rowrun_unregistered(sample_turn) -> None:
+def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> None:
     """Missing RowRun must park (rebuild wire on wake), not empty-complete and unlock fleet."""
     session = _session(sample_turn)
     run = RowRun(session)
     register_row_run(run)
-    unregister_row_run(run.run_id)
+    retire_row_run(run.run_id)
 
     result = run_scores_tier_solve({"runId": run.run_id})
 
@@ -203,7 +203,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
     assert len(delivered) == 1
 
 
-def test_peer_failure_does_not_unregister_while_sibling_running(sample_turn, monkeypatch) -> None:
+def test_peer_failure_does_not_retire_while_sibling_running(sample_turn, monkeypatch) -> None:
     session = _session(sample_turn)
     run = RowRun(session)
     register_row_run(run)
@@ -300,7 +300,7 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
 def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn) -> None:
     """Regression: DAG terminal after idempotent empty complete must finish open stream.
 
-    Cross-binding race: peer finalizes/unregisters the shared RowRun (and scheduler
+    Cross-binding race: peer finalizes/retires the shared RowRun (and scheduler
     ``_runs`` entry) without a stream terminal, then the other binding's
     ``tier_solve`` returns idempotent ``complete`` with no ``rowComplete``. The
     orchestrator node is terminal, but ``_on_orchestrator_scope_outcome`` finds no
@@ -343,9 +343,9 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
     )
     controller.attach()
 
-    # Premature unregister: RowRun gone and scheduler no longer tracks the run,
+    # Premature retire: RowRun gone and scheduler no longer tracks the run,
     # but the open stream session still exists (UI in-progress / last event progress).
-    unregister_row_run(run.run_id)
+    retire_row_run(run.run_id)
     assert get_row_run(run.run_id) is None
     assert scheduler._runs == {}
     assert session.player_id in controller.scheduled_rows

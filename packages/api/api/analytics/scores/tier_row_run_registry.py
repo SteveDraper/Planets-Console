@@ -226,11 +226,6 @@ def retire_row_run(run_id: str) -> None:
         _drop_shell_locked(run_id)
 
 
-def unregister_row_run(run_id: str) -> None:
-    """Drop registry entries (retire). Prefer :func:`detach_row_run` for stream detach."""
-    retire_row_run(run_id)
-
-
 def clear_row_runs() -> None:
     """Drop every retained RowRun and cancelled admission (full invalidate / shutdown)."""
     with _lock:

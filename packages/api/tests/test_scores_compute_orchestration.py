@@ -47,7 +47,7 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run_for_scope,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
-    unregister_row_run,
+    retire_row_run,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import (
@@ -110,13 +110,13 @@ def test_scores_registration_includes_tier_solve_step() -> None:
     assert build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
 
 
-def test_unregister_stale_run_preserves_replacement_scope_mapping(sample_turn) -> None:
+def test_retire_stale_run_preserves_replacement_scope_mapping(sample_turn) -> None:
     player_id = sample_turn.scores[0].ownerid
     old_run = _register_run(sample_turn, player_id=player_id)
     replacement_run = _register_run(sample_turn, player_id=player_id)
     scope = _scores_scope(sample_turn, player_id)
 
-    unregister_row_run(old_run.run_id)
+    retire_row_run(old_run.run_id)
 
     assert get_row_run_for_scope(scope) is replacement_run
 
@@ -380,7 +380,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run_for_scope,
         reset_tier_row_run_registry_for_tests,
-        unregister_row_run,
+        retire_row_run,
     )
 
     from tests.scores_exports_helpers import (
@@ -422,7 +422,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
         player_id,
     )
     assert run is not None
-    unregister_row_run(run.run_id)
+    retire_row_run(run.run_id)
     assert get_row_run_for_scope(scope) is None
     assert (
         scheduler.row_run_for_player(

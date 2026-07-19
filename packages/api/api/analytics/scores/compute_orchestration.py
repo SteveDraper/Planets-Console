@@ -365,7 +365,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
-        # Cross-binding race: peer may have finalized/unregistered the shared RowRun.
+        # Cross-binding race: peer may have finalized/retired the shared RowRun.
         # Do not empty-complete here -- that unlocked fleet with open scores evidence
         # and left the scoreboard in-progress. Park until wire-build can re-check
         # ``is_satisfied`` / re-ensures a RowRun.

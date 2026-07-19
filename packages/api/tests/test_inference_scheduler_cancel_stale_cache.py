@@ -502,10 +502,10 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancel_intent_sets_token_phase_and_resolution(sample_turn):
-    """cancel_run applies token + cancel admission + stream CANCELED as one intent.
+def test_cancel_intent_sets_token_cancel_deny_and_resolution(sample_turn):
+    """cancel_run applies token + CANCEL_DENY admission + stream CANCELED as one intent.
 
-    Detach must not set these. Compact cancel admission is the durable persist
+    Detach must not set these. Compact CANCEL_DENY admission is the durable persist
     refuse; stream ``CANCELED`` only silences delivery.
     """
     from api.analytics.military_score_inference.row_run import RowRun
@@ -616,11 +616,11 @@ def test_detach_does_not_apply_cancel_intent(sample_turn):
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
-    """cancel_run cancel admission must survive scheduler removal so late persist skips.
+def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
+    """cancel_run CANCEL_DENY admission must survive scheduler removal so late persist skips.
 
     Fingerprint: cancel cancelled the token and dropped scheduler maps before abort;
-    persist must still see compact cancel admission and refuse the write.
+    persist must still see compact CANCEL_DENY admission and refuse the write.
     """
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
@@ -680,7 +680,7 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
         )
         row_complete = row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
-            summary="cancel-after-unregister must not persist",
+            summary="cancel-after-retire must not persist",
         )
         ScoresPersistencePolicy().persist(
             ctx,
@@ -700,8 +700,8 @@ def test_cancel_after_detach_blocks_persist_via_cancelled_phase(sample_turn):
         reset_tier_row_run_registry_for_tests()
 
 
-def test_cancelled_phase_blocks_late_persist_under_churn(sample_turn):
-    """Cancel admission must still block late persist when other runs also churn."""
+def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
+    """CANCEL_DENY admission must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
     from api.streaming.table_stream.row_run_admission import PersistAdmission
