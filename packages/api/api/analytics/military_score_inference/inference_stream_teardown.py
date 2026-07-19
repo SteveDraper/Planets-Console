@@ -109,21 +109,12 @@ class InferenceStreamTeardownMixin:
         """Apply :func:`apply_scores_row_cancel` under the scheduler lock.
 
         Compact cancel admission is the durable persist refuse signal.
-        Stream-resolution ``CANCELED`` only silences further stream delivery.
+        Stream cancel seal (``CANCELED`` + drain closed) silences further delivery.
         Detach must never call this: detached workers may still finish and persist.
         """
         from api.analytics.scores.cancel_intent import apply_scores_row_cancel
-        from api.streaming.table_stream.row_stream_resolution import (
-            RowStreamResolutionTrigger,
-        )
 
-        apply_scores_row_cancel(
-            run_id,
-            mark_stream_canceled=lambda rid: self._transition_stream_resolution_locked(
-                rid,
-                RowStreamResolutionTrigger.CANCELED,
-            ),
-        )
+        apply_scores_row_cancel(run_id)
 
     def _detach_stream_runs_locked(
         self: InferenceRowScheduler,

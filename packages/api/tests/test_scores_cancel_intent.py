@@ -16,14 +16,11 @@ from api.analytics.scores.tier_row_run_registry import (
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
-from api.streaming.table_stream.row_stream_resolution import (
-    RowStreamResolutionState,
-    RowStreamResolutionTrigger,
-)
+from api.streaming.table_stream.row_stream_resolution import RowStreamResolutionState
 from api.streaming.table_stream.row_stream_resolution_registry import (
     get_stream_resolution,
+    is_multiplex_closed,
     reset_stream_resolution_registry_for_tests,
-    transition_stream_resolution,
 )
 
 
@@ -47,13 +44,7 @@ def test_apply_scores_row_cancel_is_one_command(sample_turn) -> None:
         register_row_run(run)
         assert not run.session.cancel_token.is_cancelled()
 
-        apply_scores_row_cancel(
-            run.run_id,
-            mark_stream_canceled=lambda rid: transition_stream_resolution(
-                rid,
-                RowStreamResolutionTrigger.CANCELED,
-            ),
-        )
+        apply_scores_row_cancel(run.run_id)
 
         assert get_row_run(run.run_id) is None
         assert get_row_run_phase(run.run_id) is None
@@ -63,6 +54,7 @@ def test_apply_scores_row_cancel_is_one_command(sample_turn) -> None:
         resolution = get_stream_resolution(run.run_id)
         assert resolution is not None
         assert resolution.state is RowStreamResolutionState.CANCELED
+        assert is_multiplex_closed(run.run_id)
     finally:
         reset_tier_row_run_registry_for_tests()
         reset_stream_resolution_registry_for_tests()
