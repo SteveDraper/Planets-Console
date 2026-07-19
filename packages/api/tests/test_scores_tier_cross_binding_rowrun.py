@@ -50,6 +50,7 @@ from api.streaming.table_stream.row_stream_resolution import (
 )
 from api.streaming.table_stream.row_stream_resolution_registry import (
     get_stream_resolution,
+    is_multiplex_closed,
 )
 
 
@@ -348,7 +349,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
     assert get_row_run(run.run_id) is None
     assert scheduler._runs == {}
     assert session.player_id in controller.scheduled_rows
-    assert session.run_id not in controller.finished_run_ids
+    assert not is_multiplex_closed(session.run_id)
 
     # Missing RowRun parks until force_fresh wake can rebuild wire / reschedule.
     assert run_scores_tier_solve({"runId": run.run_id}).outcome == "park"
@@ -636,7 +637,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
     assert any(event.get("type") == "complete" for event in pending), (
         f"expected admission complete on pending wire, got pending={pending!r} queued={queued!r}"
     )
-    assert session.run_id in controller.finished_run_ids
+    assert is_multiplex_closed(session.run_id)
     assert get_row_run(run.run_id) is None
 
 
@@ -646,8 +647,7 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
     """Cancel-silent drain close must not suppress the orphan stream terminal.
 
     Multiplex can close drain when the cancel token trips without yielding a
-    wire event. Orphan delivery must still reach pending wire via multiplex_closed
-    (not by reading finished_run_ids in the emit path).
+    wire event. Orphan delivery must still reach pending wire via multiplex_closed.
     """
     from api.streaming.table_stream import stream_drain
 
@@ -683,11 +683,8 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
         session.player_id,
         ScheduledInferenceRow(player_id=session.player_id, session=session),
     )
-    # Simulate cancel-silent multiplex finish, then empty finished to prove emit
-    # routes from multiplex_closed alone.
-    stream_drain.close(controller, session.run_id)
-    with controller.stream_lock:
-        controller.finished_run_ids.clear()
+    # Cancel-silent multiplex finish closes drain; emit routes from multiplex_closed.
+    stream_drain.close(session.run_id)
     controller.attach()
 
     scheduler._on_orchestrator_scope_outcome(
@@ -704,7 +701,7 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
     """Regression: force_fresh RowComplete must upgrade a soft empty/admission terminal.
 
     Fingerprint (game 628580 t8 Fury): evidenceClosed skip empty-completes and pushes
-    admission wire (multiplex finished_run_ids), then force_fresh re-solves. Without
+    admission wire (multiplex_closed drain), then force_fresh re-solves. Without
     upgrade the real RowComplete is dropped, progress resets the UI, and the scoreboard
     stays in-progress with idle CPU.
     """
@@ -775,11 +772,11 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
     soft_resolution = get_stream_resolution(session.run_id)
     assert soft_resolution is not None
     assert soft_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
-    assert session.run_id in controller.finished_run_ids
+    assert is_multiplex_closed(session.run_id)
 
     # Simulate force_fresh re-solve: reopen multiplex drain, then deliver RowComplete.
     scheduler._reopen_stream_row_for_force_fresh(scope)
-    assert session.run_id not in controller.finished_run_ids
+    assert not is_multiplex_closed(session.run_id)
 
     row_complete = row_complete_with_summary(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
@@ -1100,7 +1097,7 @@ def test_missing_row_run_park_stays_silent_even_with_scheduler_run(
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals == []
     assert get_stream_resolution(session.run_id) is None
-    assert session.run_id not in controller.finished_run_ids
+    assert not is_multiplex_closed(session.run_id)
 
 
 def test_empty_tier_park_cheap_admits_when_admission_available(sample_turn, monkeypatch) -> None:
@@ -1167,4 +1164,4 @@ def test_empty_tier_park_cheap_admits_when_admission_available(sample_turn, monk
     soft_resolution = get_stream_resolution(session.run_id)
     assert soft_resolution is not None
     assert soft_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
-    assert session.run_id in controller.finished_run_ids
+    assert is_multiplex_closed(session.run_id)

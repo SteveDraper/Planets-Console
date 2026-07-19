@@ -74,9 +74,6 @@ class FleetTableStreamConnectPolicy:
     ) -> bool:
         return self.controller.adopt_admission_scheduled_row(player_id, scheduled)
 
-    def finished_run_ids(self) -> set[str]:
-        return self.controller.finished_run_ids
-
     def drain_pending_wire_events(self) -> list[dict[str, object]]:
         return self.controller.drain_pending_wire_events()
 

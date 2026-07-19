@@ -115,7 +115,6 @@ def _attach_active_table_stream(
 ) -> tuple[
     InferenceTableStreamController,
     dict[int, ScheduledInferenceRow],
-    set[str],
     threading.Event,
 ]:
     scope = _stream_scope(sample_turn)
@@ -143,7 +142,6 @@ def _attach_active_table_stream(
     return (
         controller,
         controller.scheduled_rows,
-        controller.finished_run_ids,
         controller.wake_multiplex,
     )
 
@@ -280,7 +278,7 @@ def test_mask_change_reschedules_completed_row_while_table_stream_active_case_4(
     scheduler = _install_workerless_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
 
-    _active_stream, scheduled_rows, finished_run_ids, _wake = _attach_active_table_stream(
+    _active_stream, scheduled_rows, _wake = _attach_active_table_stream(
         sample_turn,
         scheduler,
         player_ids,
@@ -290,7 +288,9 @@ def test_mask_change_reschedules_completed_row_while_table_stream_active_case_4(
 
     target_player_id, other_player_id = player_ids
     completed_row = scheduled_rows[target_player_id]
-    finished_run_ids.add(completed_row.session.run_id)
+    from api.streaming.table_stream import stream_drain
+
+    stream_drain.close(completed_row.session.run_id)
 
     before_other_run_id = scheduled_rows[other_player_id].session.run_id
     before_target_run_id = completed_row.session.run_id
@@ -304,7 +304,9 @@ def test_mask_change_reschedules_completed_row_while_table_stream_active_case_4(
 
     assert scheduled_rows[other_player_id].session.run_id == before_other_run_id
     assert scheduled_rows[target_player_id].session.run_id != before_target_run_id
-    assert before_target_run_id not in finished_run_ids
+    # UUID run ids are never reused; old closed bit remains as routing history.
+    assert stream_drain.is_closed(before_target_run_id)
+    assert not stream_drain.is_closed(scheduled_rows[target_player_id].session.run_id)
     assert persistence.get_row(628580, 1, sample_turn.settings.turn, target_player_id) is None
 
 
@@ -1070,7 +1072,9 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
     assert after is not None
     assert after.session.run_id != before_run_id
     # Cancel abort must not mark the replacement run finished / fail the stream.
-    assert after.session.run_id not in controller.finished_run_ids
+    from api.streaming.table_stream import stream_drain
+
+    assert not stream_drain.is_closed(after.session.run_id)
     from api.analytics.military_score_inference.inference_stream_domain_events import RowFailed
 
     queued: list[object] = []
@@ -1092,7 +1096,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_workerless_scheduler(monkeypatch)
     player_ids = (sample_turn.scores[0].ownerid,)
-    controller, scheduled_rows, _finished, _wake = _attach_active_table_stream(
+    controller, scheduled_rows, _wake = _attach_active_table_stream(
         sample_turn,
         scheduler,
         player_ids,

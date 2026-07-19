@@ -17,7 +17,7 @@ class TerminalRoute(StrEnum):
 
 
 def route_terminal(delivery: RowStreamDelivery, run_id: str) -> TerminalRoute:
-    """Decide queue vs pending vs silence without reading ``finished_run_ids``.
+    """Decide queue vs pending vs silence from delivery + ``multiplex_closed``.
 
     ``UPGRADE`` and drain-closed rows use pending wire (client already saw a
     provisional terminal, or multiplex already closed the queue slot).

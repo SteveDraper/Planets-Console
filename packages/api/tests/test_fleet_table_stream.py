@@ -657,12 +657,10 @@ def test_drain_available_multiplex_events_returns_queued_events_without_blocking
     )
     session.event_queue.put(fleet_complete_event(is_final=True, summary="ok"))
     row = ScheduledFleetPlayer(player_id=8, session=session)
-    finished: set[str] = set()
     events = list(
         drain_available_multiplex_events(
             (row,),
             tag_player_id=True,
-            finished_run_ids=finished,
         )
     )
     assert len(events) == 1

@@ -208,12 +208,10 @@ def test_drain_available_multiplex_events_returns_queued_events_without_blocking
         )
         rows.append(ScheduledInferenceRow(player_id=player_id, session=session))
 
-    finished: set[str] = set()
     events = list(
         drain_available_multiplex_events(
             (rows[0],),
             tag_player_id=True,
-            finished_run_ids=finished,
         )
     )
     assert len(events) == 1

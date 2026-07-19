@@ -15,12 +15,12 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 | `multiplex.py` | Generic round-robin drain over per-row `event_queue`, `is_stream_active`, `wake_event`, terminal-type predicate |
 | `scope_guard.py` | `TableStreamScopeGuard` composed into both schedulers (`begin_scope`, `owns_table_stream`, `end_table_stream`) |
 | `registry.py` | Generic scope-keyed controller registry (attach/detach, in-place reschedule lookup) |
-| `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, `finished_run_ids`, scheduled-row map) |
+| `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, scheduled-row map) |
 | `connect.py` | `iter_table_stream_connect` / `iter_table_stream_connect_with_scope` with guaranteed `finally` scope teardown |
 | `row_stream_resolution.py` | Analytic-independent row terminal FSM (`OPEN` / `SOFT_PROVISIONAL` / `HARD_TERMINAL` / `CANCELED`) plus `multiplex_closed` drain bit |
 | `row_stream_resolution_registry.py` | Process-wide FIFO-bounded resolution table; sole owner of delivery state + drain-closed bit |
-| `terminal_route.py` | `route_terminal(delivery, run_id)` → queue / pending / silence (does not read `finished_run_ids`) |
-| `stream_drain.py` | Sole writer of `finished_run_ids` + `multiplex_closed` (`close` / `reopen_if_soft` / `discard` / `clear`) |
+| `terminal_route.py` | `route_terminal(delivery, run_id)` → queue / pending / silence (reads `multiplex_closed` only) |
+| `stream_drain.py` | Thin writer API over `multiplex_closed` (`close` / `reopen_if_soft` / `is_closed`) |
 
 Per-analytic code keeps:
 
@@ -31,7 +31,7 @@ Per-analytic code keeps:
 - Thin `*ConnectPolicy` dataclass implementing `TableStreamConnectPolicy`
 - Soft-stream **triggers** and park-reason policy (scores only); fleet never fires soft provisional
 
-`finished_run_ids` remains the multiplex drain set on the controller. The sole writer is `stream_drain` (`close` / `reopen_if_soft` / `discard` / `clear`), which keeps `multiplex_closed` in lockstep. Adapters must not mutate `finished_run_ids` directly or OR it into delivery routing -- use `route_terminal` / `multiplex_closed`. Soft provisional is a shared FSM capability; only scores supplies soft triggers today.
+`multiplex_closed` on the process-wide resolution registry is the sole drain-closed source of truth. Multiplex skip/pending rebuild and `route_terminal` both read it (via `is_multiplex_closed` / `stream_drain.is_closed`). UUID run ids are never reused, so closed bits remain as routing history; soft reopen clears the bit only while still `SOFT_PROVISIONAL` (`stream_drain.reopen_if_soft`). Adapters must not keep a parallel finished set -- use `stream_drain.close` / `route_terminal`. Soft provisional is a shared FSM capability; only scores supplies soft triggers today.
 
 ## Boundaries (explicitly not unified)
 

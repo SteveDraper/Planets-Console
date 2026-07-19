@@ -441,7 +441,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 - Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, controller base, registry attach/detach.
 - Shared `RowStreamResolution` FSM + `multiplex_closed` drain bit + `route_terminal` (queue / pending / silence). Soft is a shared capability; scores supplies soft triggers, fleet does not.
-- Controller `finished_run_ids` remains the multiplex drain set; sole writer is `streaming.table_stream.stream_drain` (keeps `multiplex_closed` in lockstep).
+- `multiplex_closed` is the sole drain-closed source of truth; thin writer API is `streaming.table_stream.stream_drain` (`close` / `reopen_if_soft` / `is_closed`). UUID run ids are never reused.
 
 **Thin adapters** (same template for fleet and scores):
 

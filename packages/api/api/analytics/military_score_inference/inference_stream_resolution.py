@@ -280,6 +280,6 @@ class InferenceStreamResolutionMixin:
         controller = self._controller_for_compute_scope(scope)
         if controller is None:
             return
-        if not stream_drain.reopen_if_soft(controller, session.run_id):
+        if not stream_drain.reopen_if_soft(session.run_id):
             return
         controller.wake_multiplex.set()
