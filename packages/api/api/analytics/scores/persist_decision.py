@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
+from dataclasses import dataclass
 
 from api.analytics.military_score_inference.row_run import PersistAdmission
 from api.analytics.scores.tier_row_run_registry import get_persist_admission
 
 
-class PersistDecision(StrEnum):
-    """Outcome of :func:`decide_scores_row_persist`."""
+@dataclass(frozen=True, slots=True)
+class PersistDecision:
+    """Outcome of :func:`decide_scores_row_persist`.
 
-    DENY_CANCEL = "deny_cancel"
-    ALLOW = "allow"
-    REFUSE_UNKNOWN = "refuse_unknown"
+    ``allowed`` -- write may proceed (retained shell admission).
+    ``should_retire`` -- only meaningful on refuse: retire compact cancel
+    admission memory after the silent no-write. Unknown / absent refuse does
+    not retire.
+    """
+
+    allowed: bool
+    should_retire: bool = False
+
+    @classmethod
+    def allow(cls) -> PersistDecision:
+        return cls(allowed=True, should_retire=False)
+
+    @classmethod
+    def refuse(cls, *, should_retire: bool) -> PersistDecision:
+        return cls(allowed=False, should_retire=should_retire)
 
 
 def decide_scores_row_persist(run_id: str) -> PersistDecision:
@@ -22,13 +36,14 @@ def decide_scores_row_persist(run_id: str) -> PersistDecision:
     Reads :class:`PersistAdmission` from the single RowRun owner
     (``tier_row_run_registry``):
 
-    - ``DENY_CANCEL`` -- ``PersistAdmission.CANCEL_DENY`` (compact cancel memory)
     - ``ALLOW`` -- ``PersistAdmission.ALLOW`` (``REGISTERED`` or ``DETACHED`` shell)
-    - ``REFUSE_UNKNOWN`` -- ``PersistAdmission.ABSENT`` (never-seen / retired)
+    - ``REFUSE(should_retire=True)`` -- ``PersistAdmission.CANCEL_DENY``
+    - ``REFUSE(should_retire=False)`` -- ``PersistAdmission.ABSENT``
 
-    Both ``DENY_CANCEL`` and ``REFUSE_UNKNOWN`` must not write. Persist policy
-    treats them as silent no-ops (never raise): cancelled late workers and
-    unknown ids share the same "no durable write" contract.
+    Both refuse outcomes must not write. Persist policy treats them as silent
+    no-ops (never raise): cancelled late workers and unknown ids share the same
+    "no durable write" contract. The only behavioral difference is whether
+    compact cancel admission should be retired.
 
     Cancel intent must go through ``apply_scores_row_cancel`` / ``mark_row_run_cancelled``;
     the live cancel token is not a persist gate. Shell ``RowRunPhase`` is not
@@ -36,7 +51,7 @@ def decide_scores_row_persist(run_id: str) -> PersistDecision:
     """
     admission = get_persist_admission(run_id)
     if admission is PersistAdmission.ALLOW:
-        return PersistDecision.ALLOW
+        return PersistDecision.allow()
     if admission is PersistAdmission.CANCEL_DENY:
-        return PersistDecision.DENY_CANCEL
-    return PersistDecision.REFUSE_UNKNOWN
+        return PersistDecision.refuse(should_retire=True)
+    return PersistDecision.refuse(should_retire=False)

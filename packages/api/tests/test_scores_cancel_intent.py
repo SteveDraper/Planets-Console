@@ -58,7 +58,9 @@ def test_apply_scores_row_cancel_is_one_command(sample_turn) -> None:
         assert get_row_run(run.run_id) is None
         assert get_row_run_phase(run.run_id) is None
         assert get_persist_admission(run.run_id) is PersistAdmission.CANCEL_DENY
-        assert decide_scores_row_persist(run.run_id) is PersistDecision.DENY_CANCEL
+        assert decide_scores_row_persist(run.run_id) == PersistDecision.refuse(
+            should_retire=True
+        )
         assert run.session.cancel_token.is_cancelled()
         resolution = get_stream_resolution(run.run_id)
         assert resolution is not None

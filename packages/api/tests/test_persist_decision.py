@@ -47,11 +47,11 @@ def test_persist_decision_table(sample_turn) -> None:
         register_row_run(run)
         assert get_row_run_phase(run.run_id) is RowRunPhase.REGISTERED
         assert get_persist_admission(run.run_id) is PersistAdmission.ALLOW
-        assert decide_scores_row_persist(run.run_id) is PersistDecision.ALLOW
+        assert decide_scores_row_persist(run.run_id) == PersistDecision.allow()
 
         # Token alone is not a persist gate; cancel intent sets cancel admission.
         run.session.cancel_token.cancel()
-        assert decide_scores_row_persist(run.run_id) is PersistDecision.ALLOW
+        assert decide_scores_row_persist(run.run_id) == PersistDecision.allow()
 
         cancelled = RowRun(_session(sample_turn))
         register_row_run(cancelled)
@@ -60,23 +60,31 @@ def test_persist_decision_table(sample_turn) -> None:
         assert get_row_run_phase(cancelled.run_id) is None
         assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
         assert has_cancelled_admission(cancelled.run_id)
-        assert decide_scores_row_persist(cancelled.run_id) is PersistDecision.DENY_CANCEL
+        assert decide_scores_row_persist(cancelled.run_id) == PersistDecision.refuse(
+            should_retire=True
+        )
 
         detached = RowRun(_session(sample_turn))
         register_row_run(detached)
         # Same-scope register supersedes the prior cancelled admission.
         assert not has_cancelled_admission(cancelled.run_id)
         assert get_persist_admission(cancelled.run_id) is PersistAdmission.ABSENT
-        assert decide_scores_row_persist(cancelled.run_id) is PersistDecision.REFUSE_UNKNOWN
+        assert decide_scores_row_persist(cancelled.run_id) == PersistDecision.refuse(
+            should_retire=False
+        )
         detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
         assert get_persist_admission(detached.run_id) is PersistAdmission.ALLOW
-        assert decide_scores_row_persist(detached.run_id) is PersistDecision.ALLOW
+        assert decide_scores_row_persist(detached.run_id) == PersistDecision.allow()
 
         retire_row_run(detached.run_id)
         assert get_persist_admission(detached.run_id) is PersistAdmission.ABSENT
-        assert decide_scores_row_persist(detached.run_id) is PersistDecision.REFUSE_UNKNOWN
-        assert decide_scores_row_persist("never-seen") is PersistDecision.REFUSE_UNKNOWN
+        assert decide_scores_row_persist(detached.run_id) == PersistDecision.refuse(
+            should_retire=False
+        )
+        assert decide_scores_row_persist("never-seen") == PersistDecision.refuse(
+            should_retire=False
+        )
     finally:
         reset_tier_row_run_registry_for_tests()
 
@@ -88,13 +96,17 @@ def test_same_scope_register_supersedes_cancelled_admission(sample_turn) -> None
         first = RowRun(_session(sample_turn))
         register_row_run(first)
         mark_row_run_cancelled(first.run_id)
-        assert decide_scores_row_persist(first.run_id) is PersistDecision.DENY_CANCEL
+        assert decide_scores_row_persist(first.run_id) == PersistDecision.refuse(
+            should_retire=True
+        )
 
         replacement = RowRun(_session(sample_turn))
         register_row_run(replacement)
         assert not has_cancelled_admission(first.run_id)
-        assert decide_scores_row_persist(first.run_id) is PersistDecision.REFUSE_UNKNOWN
-        assert decide_scores_row_persist(replacement.run_id) is PersistDecision.ALLOW
+        assert decide_scores_row_persist(first.run_id) == PersistDecision.refuse(
+            should_retire=False
+        )
+        assert decide_scores_row_persist(replacement.run_id) == PersistDecision.allow()
     finally:
         reset_tier_row_run_registry_for_tests()
 
@@ -113,8 +125,12 @@ def test_cancelled_admission_is_one_slot_per_scope(sample_turn) -> None:
 
         assert not has_cancelled_admission(first.run_id)
         assert has_cancelled_admission(second.run_id)
-        assert decide_scores_row_persist(first.run_id) is PersistDecision.REFUSE_UNKNOWN
-        assert decide_scores_row_persist(second.run_id) is PersistDecision.DENY_CANCEL
+        assert decide_scores_row_persist(first.run_id) == PersistDecision.refuse(
+            should_retire=False
+        )
+        assert decide_scores_row_persist(second.run_id) == PersistDecision.refuse(
+            should_retire=True
+        )
     finally:
         reset_tier_row_run_registry_for_tests()
 
@@ -139,7 +155,7 @@ def test_cancelled_admission_does_not_cross_scopes(sample_turn) -> None:
         register_row_run(replacement)
         assert not has_cancelled_admission(left.run_id)
         assert has_cancelled_admission(right.run_id)
-        assert decide_scores_row_persist(replacement.run_id) is PersistDecision.ALLOW
+        assert decide_scores_row_persist(replacement.run_id) == PersistDecision.allow()
     finally:
         reset_tier_row_run_registry_for_tests()
 
@@ -166,8 +182,8 @@ def test_cancel_churn_does_not_drop_registered_or_detached_shells(sample_turn) -
         # remains until explicit retire (same as pre-scope-keyed behavior).
         assert get_row_run(live.run_id) is live
         assert get_row_run_phase(live.run_id) is RowRunPhase.REGISTERED
-        assert decide_scores_row_persist(live.run_id) is PersistDecision.ALLOW
+        assert decide_scores_row_persist(live.run_id) == PersistDecision.allow()
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
-        assert decide_scores_row_persist(detached.run_id) is PersistDecision.ALLOW
+        assert decide_scores_row_persist(detached.run_id) == PersistDecision.allow()
     finally:
         reset_tier_row_run_registry_for_tests()

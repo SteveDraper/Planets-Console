@@ -24,7 +24,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.military_score_inference.row_run import RowRun, RowRunPhase
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
-from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
+from api.analytics.scores.persist_decision import decide_scores_row_persist
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_row_run_for_scope,
@@ -439,13 +439,11 @@ class ScoresPersistencePolicy:
         decision = decide_scores_row_persist(run_id)
         run = get_row_run(run_id)
         phase = None if run is None else run.phase
-        if decision is PersistDecision.DENY_CANCEL:
-            retire_row_run(run_id)
-            return
-        if decision is PersistDecision.REFUSE_UNKNOWN:
-            # No write: never-seen / retired ids share the deny contract with
-            # cancel (including any historically evicted cancel memory). Do not
-            # raise -- late workers must not fail the scores node for this.
+        if not decision.allowed:
+            # Silent no-write for both cancel deny and unknown/absent. Retire
+            # only when the refuse carries should_retire (cancel admission).
+            if decision.should_retire:
+                retire_row_run(run_id)
             return
 
         services.persistence.persist_row_complete_for_scope(
