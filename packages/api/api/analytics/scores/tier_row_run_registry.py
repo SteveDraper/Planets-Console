@@ -14,8 +14,9 @@ cancel), not an unbounded UUID FIFO.
 Lifecycle matrix sides (detach / cancel / retire) are applied by
 :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`.
 Production persist writers use
-:func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
-(``PersistDecision``) -- not :func:`get_persist_admission` directly.
+:func:`api.analytics.scores.persist_decision.decide_scores_row_persist`,
+which calls :func:`snapshot_persist_decision` (admission + phase under one
+lock) -- not :func:`get_persist_admission` directly.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.persist_decision import PersistDecision
 from api.compute.scope import WILDCARD, ComputeScope
 from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 
@@ -171,20 +173,43 @@ def get_persist_admission(run_id: str) -> PersistAdmission:
 
     Not a production persist gate. Public callers use
     :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
-    (``PersistDecision``). This probe exists for that mapper and registry tests.
+    (``PersistDecision`` via :func:`snapshot_persist_decision`). This probe
+    exists for registry tests that assert admission memory directly.
     """
     with _lock:
-        if run_id in _runs_by_id:
-            return PersistAdmission.ALLOW
-        if run_id in _cancelled_admissions:
-            return PersistAdmission.CANCEL_DENY
-        return PersistAdmission.ABSENT
+        return _persist_admission_locked(run_id)
 
 
-def has_cancelled_admission(run_id: str) -> bool:
-    """True when compact cancelled-admission memory still holds ``run_id``."""
+def snapshot_persist_decision(run_id: str) -> PersistDecision:
+    """Atomically map shell + compact admission into one ``PersistDecision``.
+
+    Holds ``_lock`` for the whole map so callers never compose
+    :func:`get_persist_admission` and :func:`get_row_run_phase` across two
+    lock acquisitions. Once returned, a later cancel does not revoke the
+    decision for that persist attempt.
+    """
     with _lock:
-        return run_id in _cancelled_admissions
+        admission = _persist_admission_locked(run_id)
+        if admission is PersistAdmission.ALLOW:
+            run = _runs_by_id.get(run_id)
+            # Shell must exist for ALLOW; treat missing as absent refuse.
+            if run is None:
+                return PersistDecision.refuse(should_retire=False)
+            return PersistDecision.allow(
+                retire_after_write=run.phase is RowRunPhase.DETACHED,
+            )
+        if admission is PersistAdmission.CANCEL_DENY:
+            return PersistDecision.refuse(should_retire=True)
+        return PersistDecision.refuse(should_retire=False)
+
+
+def _persist_admission_locked(run_id: str) -> PersistAdmission:
+    """Admission probe. Caller holds ``_lock``."""
+    if run_id in _runs_by_id:
+        return PersistAdmission.ALLOW
+    if run_id in _cancelled_admissions:
+        return PersistAdmission.CANCEL_DENY
+    return PersistAdmission.ABSENT
 
 
 def detach_row_run(run_id: str) -> None:

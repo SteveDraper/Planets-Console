@@ -16,9 +16,9 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     deliver_inference_domain_event_to_open_stream,
 )
 from api.analytics.military_score_inference.soft_stream_policy import (
-    SoftStreamAction,
+    SoftStreamDispatch,
     TerminalSource,
-    resolve_soft_stream_action,
+    resolve_soft_stream_dispatch,
 )
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
@@ -73,44 +73,40 @@ class InferenceStreamResolutionMixin:
             resolved_event = self._row_complete_from_result_wire(snapshot.result_wire)
 
         park_reason = None if snapshot is None else snapshot.park_reason
-        action = resolve_soft_stream_action(
+        dispatch = resolve_soft_stream_dispatch(
             source=source,
             park_reason=park_reason,
             has_event=resolved_event is not None,
         )
 
-        if action is SoftStreamAction.SILENCE:
-            return False
-
-        if action in {
-            SoftStreamAction.SOFT_PROVISIONAL_EVENT,
-            SoftStreamAction.DURABLE_EVENT,
-            SoftStreamAction.DURABLE_EVENT_FINALIZE,
-        }:
-            if resolved_event is None:
+        match dispatch:
+            case SoftStreamDispatch.SILENCE:
                 return False
-            if action is SoftStreamAction.SOFT_PROVISIONAL_EVENT:
-                trigger = RowStreamResolutionTrigger.SOFT_PROVISIONAL
-            elif isinstance(resolved_event, RowComplete):
-                trigger = RowStreamResolutionTrigger.DURABLE_COMPLETE
-            else:
-                trigger = RowStreamResolutionTrigger.DURABLE_FAILURE
-            return self._emit_domain_terminal(
-                resolved,
-                resolved_event,
-                trigger,
-                finalize=action is SoftStreamAction.DURABLE_EVENT_FINALIZE,
-            )
-
-        if action is SoftStreamAction.CHEAP_ADMIT_REVERT:
-            return self._admit_after_soft_provisional(scope, resolved, on_miss="revert")
-
-        if action is SoftStreamAction.SCOPE_OUTCOME_EMPTY:
-            return self._admit_after_soft_provisional(scope, resolved, on_miss="fail")
-
-        if action is SoftStreamAction.ORPHAN_EMPTY:
-            return self._deliver_orphan_empty(scope, resolved, snapshot)
-
+            case (
+                SoftStreamDispatch.EMIT_SOFT_PROVISIONAL
+                | SoftStreamDispatch.EMIT_DURABLE
+                | SoftStreamDispatch.EMIT_DURABLE_FINALIZE
+            ):
+                if resolved_event is None:
+                    return False
+                if dispatch is SoftStreamDispatch.EMIT_SOFT_PROVISIONAL:
+                    trigger = RowStreamResolutionTrigger.SOFT_PROVISIONAL
+                elif isinstance(resolved_event, RowComplete):
+                    trigger = RowStreamResolutionTrigger.DURABLE_COMPLETE
+                else:
+                    trigger = RowStreamResolutionTrigger.DURABLE_FAILURE
+                return self._emit_domain_terminal(
+                    resolved,
+                    resolved_event,
+                    trigger,
+                    finalize=dispatch is SoftStreamDispatch.EMIT_DURABLE_FINALIZE,
+                )
+            case SoftStreamDispatch.ADMIT_REVERT:
+                return self._admit_after_soft_provisional(scope, resolved, on_miss="revert")
+            case SoftStreamDispatch.ADMIT_FAIL:
+                return self._admit_after_soft_provisional(scope, resolved, on_miss="fail")
+            case SoftStreamDispatch.ORPHAN_EMPTY:
+                return self._deliver_orphan_empty(scope, resolved, snapshot)
         return False
 
     def _emit_domain_terminal(

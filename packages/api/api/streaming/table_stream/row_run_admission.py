@@ -16,7 +16,9 @@ memory (shell present → ``ALLOW``; compact cancel → ``CANCEL_DENY``; else
 ``ABSENT``). Production persist writers must not branch on it directly -- use
 the analytic's ``PersistDecision`` / ``decide_*`` gate (scores:
 :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`), which
-also owns post-write / refuse retire flags. See ADR 0006.
+snapshots admission + shell phase under one registry lock and also owns
+post-write / refuse retire flags. Once that decision is taken, a later cancel
+does not revoke it for that persist attempt. See ADR 0006.
 
 ``RowLifecycleOp`` names the three generic ops (``DETACH`` / ``CANCEL`` /
 ``RETIRE``). Scores applies them via
@@ -45,7 +47,8 @@ class PersistAdmission(StrEnum):
     """Registry-internal persist-write admission for a ``run_id``.
 
     Independent of shell phase. Production callers use ``PersistDecision``
-    (mapped from this enum under lock); do not treat this as a second public gate.
+    (snapshotted from this enum + shell phase under one registry lock); do not
+    treat this as a second public gate.
 
     ``ALLOW`` -- retained ``REGISTERED`` or ``DETACHED`` shell.
     ``CANCEL_DENY`` -- compact cancelled-admission memory (no shell).

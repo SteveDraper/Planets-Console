@@ -124,7 +124,7 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
         reset_inference_row_scheduler_for_tests()
 
 
-def test_cancel_intent_sets_token_cancel_deny_and_resolution(sample_turn):
+def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
     """cancel_run applies token + CANCEL_DENY admission + stream CANCELED as one intent.
 
     Detach must not set these. Compact CANCEL_DENY admission is the durable persist

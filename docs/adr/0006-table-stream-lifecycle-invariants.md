@@ -39,13 +39,19 @@ Drain-closed is only `RowStreamResolution.multiplex_closed`, written/read throug
 
 ### 3. Persist write / refuse / retire plan (scores)
 
-The full persist plan is only `PersistDecision` from `decide_scores_row_persist`:
+The full persist plan is only `PersistDecision` from `decide_scores_row_persist`
+(backed by `tier_row_run_registry.snapshot_persist_decision` under one lock):
 
 - `allowed` -- may write
 - `should_retire` -- on refuse, retire compact cancel admission after silent no-write
 - `retire_after_write` -- on allow, retire the retained shell after a successful write (`DETACHED` late persist)
 
-Production persist policy must not re-read `PersistAdmission` or `RowRunPhase` beside that decision. Stream-resolution FSM state does not gate persist.
+Admission and shell phase are snapshotted atomically into that decision. Once
+the decision is taken, a later cancel does not revoke it for that persist
+attempt -- the policy writes or refuses from the decision alone and must not
+re-probe admission. Production persist policy must not re-read
+`PersistAdmission` or `RowRunPhase` beside that decision. Stream-resolution FSM
+state does not gate persist.
 
 ### 4. Lifecycle mutation (scores)
 

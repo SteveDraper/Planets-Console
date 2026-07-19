@@ -133,7 +133,7 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         reset_tier_row_run_registry_for_tests()
 
 
-def test_detach_does_not_apply_cancel_intent(sample_turn):
+def test_detach_does_not_apply_lifecycle_cancel(sample_turn):
     """begin_scope detach drops ownership without token or cancel admission."""
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.scores.tier_row_run_registry import (

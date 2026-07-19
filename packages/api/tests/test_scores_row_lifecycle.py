@@ -8,10 +8,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
-from api.analytics.scores.row_lifecycle import (
-    apply_scores_row_cancel,
-    apply_scores_row_lifecycle,
-)
+from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     get_persist_admission,
     get_row_run,
@@ -63,21 +60,6 @@ def test_apply_scores_row_lifecycle_cancel(sample_turn) -> None:
         assert resolution is not None
         assert resolution.state is RowStreamResolutionState.CANCELED
         assert stream_drain.is_closed(run.run_id)
-    finally:
-        reset_tier_row_run_registry_for_tests()
-        reset_stream_resolution_registry_for_tests()
-
-
-def test_apply_scores_row_cancel_convenience(sample_turn) -> None:
-    """``apply_scores_row_cancel`` is the CANCEL convenience on row_lifecycle."""
-    reset_tier_row_run_registry_for_tests()
-    reset_stream_resolution_registry_for_tests()
-    try:
-        run = RowRun(_session(sample_turn))
-        register_row_run(run)
-        apply_scores_row_cancel(run.run_id)
-        assert get_persist_admission(run.run_id) is PersistAdmission.CANCEL_DENY
-        assert run.session.cancel_token.is_cancelled()
     finally:
         reset_tier_row_run_registry_for_tests()
         reset_stream_resolution_registry_for_tests()

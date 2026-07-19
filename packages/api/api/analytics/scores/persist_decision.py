@@ -4,21 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from api.analytics.scores.tier_row_run_registry import (
-    get_persist_admission,
-    get_row_run_phase,
-)
-from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
-
 
 @dataclass(frozen=True, slots=True)
 class PersistDecision:
     """Outcome of :func:`decide_scores_row_persist`.
 
     The only production persist gate for scores row writes. Registry
-    :class:`~api.streaming.table_stream.row_run_admission.PersistAdmission` is
-    mapped here under lock -- callers must not branch on admission or shell
+    :class:`~api.streaming.table_stream.row_run_admission.PersistAdmission`
+    and retained-shell phase are snapshotted atomically into this decision
+    (one registry lock hold) -- callers must not branch on admission or shell
     phase directly.
+
+    Once this decision is taken, a later cancel does not revoke it: the persist
+    policy may write (or refuse) according to these flags without re-probing
+    admission. Cancel that lands before the snapshot is already reflected here.
 
     ``allowed`` -- write may proceed (retained shell admission).
     ``should_retire`` -- only meaningful on refuse: retire compact cancel
@@ -53,9 +52,9 @@ class PersistDecision:
 def decide_scores_row_persist(run_id: str) -> PersistDecision:
     """Decide whether a scores ``rowComplete`` persist may write, and retire plan.
 
-    Sole production persist gate. Maps registry-internal
-    :class:`~api.streaming.table_stream.row_run_admission.PersistAdmission`
-    and retained-shell phase into one decision:
+    Sole production persist gate. Delegates to
+    :func:`~api.analytics.scores.tier_row_run_registry.snapshot_persist_decision`
+    so admission and shell phase are read under one registry lock:
 
     - ``ALLOW(retire_after_write=False)`` -- ``REGISTERED`` shell
     - ``ALLOW(retire_after_write=True)`` -- ``DETACHED`` shell (late persist)
@@ -72,14 +71,9 @@ def decide_scores_row_persist(run_id: str) -> PersistDecision:
     (``RowLifecycleOp.CANCEL``) / registry ``mark_row_run_cancelled``;
     the live cancel token is not a persist gate. Callers must not re-read
     shell phase beside this decision -- ``retire_after_write`` owns post-write
-    retire.
+    retire. After this returns, a subsequent cancel race does not matter; the
+    decision stands for that persist attempt.
     """
-    admission = get_persist_admission(run_id)
-    if admission is PersistAdmission.ALLOW:
-        phase = get_row_run_phase(run_id)
-        return PersistDecision.allow(
-            retire_after_write=phase is RowRunPhase.DETACHED,
-        )
-    if admission is PersistAdmission.CANCEL_DENY:
-        return PersistDecision.refuse(should_retire=True)
-    return PersistDecision.refuse(should_retire=False)
+    from api.analytics.scores.tier_row_run_registry import snapshot_persist_decision
+
+    return snapshot_persist_decision(run_id)

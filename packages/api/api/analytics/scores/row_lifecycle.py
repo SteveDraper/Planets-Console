@@ -58,16 +58,3 @@ def apply_scores_row_lifecycle(
                 cancel_token()
             elif dropped is not None:
                 dropped.session.cancel_token.cancel()
-
-
-def apply_scores_row_cancel(
-    run_id: str,
-    *,
-    cancel_token: Callable[[], None] | None = None,
-) -> None:
-    """Convenience: :func:`apply_scores_row_lifecycle` for ``RowLifecycleOp.CANCEL``."""
-    apply_scores_row_lifecycle(
-        RowLifecycleOp.CANCEL,
-        run_id,
-        cancel_token=cancel_token,
-    )

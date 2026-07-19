@@ -432,11 +432,12 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
-        # Cancel vs detach / late-persist retire: sole plan is PersistDecision.
-        # Unknown run_id with no admission must not write. Live REGISTERED shells
-        # stay until stream finalize retires them so peer bindings can still
-        # resolve the same RowRun; DETACHED late persist sets retire_after_write;
-        # cancel deny sets should_retire on refuse.
+        # Cancel vs detach / late-persist retire: sole plan is PersistDecision
+        # (atomic registry snapshot). Once taken, a later cancel does not
+        # revoke this attempt. Unknown run_id with no admission must not write.
+        # Live REGISTERED shells stay until stream finalize retires them so
+        # peer bindings can still resolve the same RowRun; DETACHED late
+        # persist sets retire_after_write; cancel deny sets should_retire.
         decision = decide_scores_row_persist(run_id)
         if not decision.allowed:
             # Silent no-write for both cancel deny and unknown/absent. Retire

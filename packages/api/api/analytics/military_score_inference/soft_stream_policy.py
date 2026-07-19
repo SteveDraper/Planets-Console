@@ -1,8 +1,9 @@
 """Declarative soft-stream delivery policy for scores DAG terminals.
 
 Maps ``(TerminalSource, park_reason | event presence)`` to a
-:class:`SoftStreamAction`. ``_deliver_row_terminal`` dispatches the action;
-handlers stay in the stream-resolution mixin.
+:class:`SoftStreamAction`, then to a :class:`SoftStreamDispatch` for the
+stream-resolution mixin. One table owns policy; one table owns dispatch -- no
+second if-ladder encoding of the same decisions.
 
 Park rows mirror the design park table in ``design-compute-orchestrator.md``.
 """
@@ -34,6 +35,23 @@ class SoftStreamAction(StrEnum):
     DURABLE_EVENT_FINALIZE = "durable_event_finalize"
     ORPHAN_EMPTY = "orphan_empty"
     SCOPE_OUTCOME_EMPTY = "scope_outcome_empty"
+
+
+class SoftStreamDispatch(StrEnum):
+    """How ``_deliver_row_terminal`` executes one :class:`SoftStreamAction`.
+
+    Durable emit kinds derive the FSM trigger from the event type
+    (``RowComplete`` vs ``RowFailed``); soft provisional always uses
+    ``SOFT_PROVISIONAL``.
+    """
+
+    SILENCE = "silence"
+    EMIT_SOFT_PROVISIONAL = "emit_soft_provisional"
+    EMIT_DURABLE = "emit_durable"
+    EMIT_DURABLE_FINALIZE = "emit_durable_finalize"
+    ADMIT_REVERT = "admit_revert"
+    ADMIT_FAIL = "admit_fail"
+    ORPHAN_EMPTY = "orphan_empty"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +100,16 @@ _SOFT_STREAM_POLICY: dict[_SoftStreamPolicyKey, SoftStreamAction] = {
     _SoftStreamPolicyKey(TerminalSource.ORPHAN, None, False): SoftStreamAction.ORPHAN_EMPTY,
 }
 
+_SOFT_STREAM_DISPATCH: dict[SoftStreamAction, SoftStreamDispatch] = {
+    SoftStreamAction.SILENCE: SoftStreamDispatch.SILENCE,
+    SoftStreamAction.SOFT_PROVISIONAL_EVENT: SoftStreamDispatch.EMIT_SOFT_PROVISIONAL,
+    SoftStreamAction.DURABLE_EVENT: SoftStreamDispatch.EMIT_DURABLE,
+    SoftStreamAction.DURABLE_EVENT_FINALIZE: SoftStreamDispatch.EMIT_DURABLE_FINALIZE,
+    SoftStreamAction.CHEAP_ADMIT_REVERT: SoftStreamDispatch.ADMIT_REVERT,
+    SoftStreamAction.SCOPE_OUTCOME_EMPTY: SoftStreamDispatch.ADMIT_FAIL,
+    SoftStreamAction.ORPHAN_EMPTY: SoftStreamDispatch.ORPHAN_EMPTY,
+}
+
 
 def resolve_soft_stream_action(
     *,
@@ -93,6 +121,21 @@ def resolve_soft_stream_action(
     reason = _coerce_park_reason(park_reason) if source is TerminalSource.PARKED else None
     key = _SoftStreamPolicyKey(source, reason, has_event)
     return _SOFT_STREAM_POLICY.get(key, SoftStreamAction.SILENCE)
+
+
+def resolve_soft_stream_dispatch(
+    *,
+    source: TerminalSource,
+    park_reason: ScoresParkReason | str | None,
+    has_event: bool,
+) -> SoftStreamDispatch:
+    """Policy action plus how ``_deliver_row_terminal`` should execute it."""
+    action = resolve_soft_stream_action(
+        source=source,
+        park_reason=park_reason,
+        has_event=has_event,
+    )
+    return _SOFT_STREAM_DISPATCH[action]
 
 
 def _coerce_park_reason(park_reason: ScoresParkReason | str | None) -> ScoresParkReason | None:
