@@ -162,14 +162,20 @@ Analytics own **what** `persist` writes and **how readers** gate on terminal qua
 - **Scores inference** -- `persist` for durable turn-evidence row statuses (`exact`, `no_exact_solution`, stopped / `time_limited`, and fallback terminals per `is_durable_turn_evidence_row_status`). Soft / empty non-durable outcomes use `park` until a later `force_fresh` wake -- not hot `continue`. Evidence-closed skip may still `complete` without persist. Ladder state between tiers stays in the stream adapter (`RowRun`), not on the wire.
 
 **Scores `park` wake ownership** is encoded by `ScoresParkReason` and
-`ScoresWakeReason`; `wake_scores_scope` is the only scores wake coordinator:
+`ScoresWakeReason`; `wake_scores_scope` is the only scores wake coordinator.
+The orchestrator does **not** demand-wake parked ENSURE ancestors when dependents
+enter `waiting_deps` -- that papered over un-wakeable parks and reintroduced thrash.
 
 | Park site | Soft stream on park? | Mandatory wake owner |
 |-----------|----------------------|----------------------|
 | Non-durable `rowComplete` | Yes (upgradable) | `STREAM_RESCHEDULED` / `EVIDENCE_CLOSED` |
 | Empty `TierJobOutcome` | Cheap admission only (else silent) | `STREAM_RESCHEDULED` / `ROW_RUN_ADOPTED` |
-| Open-evidence wait (`runId: null`) | No (wait for work) | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
 | Missing `RowRun` | No | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
+
+**Scores `tier_solve` wire invariant:** when ensure is satisfied and turn evidence is
+still open, wire build must attach a `runId` (tier registry or successful scheduler
+adopt) or emit the evidence-closed skip sentinel. A bare `{runId: null}` open-evidence
+wait wire is forbidden -- that state has no armed wake publisher and hung dependents.
 
 Park never marks the node `complete`, so same-turn fleet ENSURE stays blocked until durable persist or evidence-closed skip. Soft stream delivery rides on process-wide park notify, not on `complete`.
 
@@ -246,7 +252,7 @@ Same-scope dedupe is **only** in-orchestrator singleflight on the singleton DAG.
 
 When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `stream_attached` joining `background` warm) and the node is not yet past the point where adopt is allowed (not mid expensive inline/pool execution -- same rule as the former lease “seal”), upgrade `node.priority_band` and adjust ready-queue ordering as needed. No mid-run preempt once expensive work has started.
 
-**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; a missing `RowRun` or open-evidence wait wire while evidence is still open must `park` until a later `force_fresh` wake (rebuild wire / re-ensure), not empty-complete -- that falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
+**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; when evidence is still open, wire build must attach a `RowRun` (or fail loud if ensure claimed satisfaction without an attachable row) -- not empty-complete and not a bare open-evidence wait wire. Empty-complete falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
 
 ### Terminal reuse and `force_fresh`
 
@@ -426,7 +432,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 - Register process-wide `scope_outcome` / related listeners (and pause **dispatch gates**) with analytic/scope filters; unregister on disconnect. Adapters do **not** own an orchestrator instance.
 - Retain stream-only state (scope guard, per-row run registry, global pause gate).
 - **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
-- Stream teardown **detaches** observers only -- it does not cancel in-flight singleton DAG work (or abort a pending `persist`) solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240). Scores **cancel** (not detach) applies one cancel intent under the scheduler lock: cancel token + stream-resolution `CANCELED` (the durable cancel fence in the shared bounded resolution registry), then aborts the orchestrator scope outside that lock. Resolutions are FIFO-bounded (`MAX_STREAM_RESOLUTIONS`); capacity eviction is an accepted risk for very long-lived processes.
+- Stream teardown **detaches** observers only -- it does not cancel in-flight singleton DAG work (or abort a pending `persist`) solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240). Scores **cancel** (not detach) applies one cancel intent under the scheduler lock: cancel token + generation-scoped cancel fence (`scope key` + `execution_generation`) + stream-resolution `CANCELED` (delivery silence only), then aborts the orchestrator scope outside that lock. Soft/hard stream resolutions remain FIFO-bounded (`MAX_STREAM_RESOLUTIONS`); cancel durability does not share that capacity. Detach records a known-run allow for finish-after-detach persist -- not FSM `OPEN` as a persist signal. `PersistDecision` is the single persist admission gate (`DENY_CANCEL` / `ALLOW` / `REFUSE_UNKNOWN`).
 
 **Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `stream_attached` `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
 

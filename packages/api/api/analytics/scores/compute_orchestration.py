@@ -23,16 +23,13 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.row_stream_resolution_registry import (
-    get_stream_resolution,
-)
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
+from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
 from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_row_run_for_scope,
     get_tier_callbacks,
-    is_row_run_cancelled,
     register_row_run,
 )
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
@@ -56,7 +53,6 @@ class ScoresParkReason(StrEnum):
 
     NON_DURABLE_ROW_COMPLETE = "scores_non_durable_row_complete"
     EMPTY_TIER_OUTCOME = "scores_empty_tier_outcome"
-    OPEN_EVIDENCE_WAIT = "scores_open_evidence_wait"
     MISSING_ROW_RUN = "scores_missing_row_run"
 
 
@@ -195,15 +191,12 @@ def build_scores_tier_solve_job_wire(
 
     Skip sentinel (``runId: None``, ``evidenceClosed: True``) is allowed only when
     turn evidence is already closed (persisted / durable terminal under the same
-    materialization probe fleet uses). A missing ``RowRun`` while evidence is still
-    open must not empty-complete the scores node -- that falsely unlocks fleet with
-    ``turnEvidenceAtN=False`` and leaves the scores stream without a rowComplete.
+    materialization probe fleet uses).
 
-    When ensure has admitted (cheap ephemeral, scheduler attach race, etc.) but no
-    registry ``RowRun`` is ready yet, return ``{runId: None}`` so
-    ``run_scores_tier_solve`` continues and rebuilds after admit -- not a hard
-    ``RuntimeError``. Raise only when ensure still needs work after the admit attempt
-    (invariant: schedule/admit should have produced a RowRun).
+    Invariant: when ensure is satisfied and evidence is still open, this dispatch
+    must attach a ``runId`` (tier registry or successful scheduler adopt). Parking
+    on ``{runId: None}`` with open evidence is forbidden -- that state has no armed
+    wake publisher and hung dependents (Birds hang). Raise instead.
     """
     if ctx is None:
         raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
@@ -226,13 +219,10 @@ def build_scores_tier_solve_job_wire(
     if run is None:
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
             return {"runId": None, "evidenceClosed": True}
-        if ensure_satisfied:
-            # Ensure admitted without a registry RowRun (e.g. cheap ephemeral) or a
-            # peer is still registering: wait via continue rebuild.
-            return {"runId": None}
         raise RuntimeError(
-            "scores tier_solve requires a registered RowRun when turn evidence "
-            f"is not closed and ensure still needs work "
+            "scores tier_solve invariant broken: ensure "
+            f"{'satisfied' if ensure_satisfied else 'unsatisfied'} but no attachable "
+            f"RowRun while turn evidence is still open "
             f"(game_id={scope.game_id}, perspective={scope.perspective}, "
             f"turn={scope.turn}, player_id={scope.player_id})"
         )
@@ -251,7 +241,12 @@ def _adopt_scheduler_row_run_for_tier_wire(
     ctx: AnalyticQueryContext,
     export_scope: ExportScope,
 ) -> RowRun | None:
-    """Attach an in-progress scheduler RowRun into the tier registry when missing."""
+    """Attach an in-progress scheduler RowRun into the tier registry when missing.
+
+    Ensure may report satisfied because the inference scheduler already owns a live
+    row while the tier registry was cleared (detach / peer unregister). Adopt must
+    succeed in that case so wire build never parks without an armed wake publisher.
+    """
     if export_scope.player_id is None:
         return None
     from api.analytics.scores.export_snapshot import scores_inference_stream_scope
@@ -352,14 +347,13 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one scores inference tier step and return an explicit orchestrator outcome.
 
-    Empty complete is allowed only for the evidence-closed skip sentinel. Open-evidence
-    wait wires (``runId: None`` without ``evidenceClosed``) and missing ``RowRun``
-    lookups park so the orchestrator does not hot-redispatch ``tier_solve``.
+    Empty complete is allowed only for the evidence-closed skip sentinel. A bare
+    ``runId: None`` wire is an invariant break (wire build must attach or
+    skip-complete). Missing ``RowRun`` lookups park until a replacement is
+    registered (``ROW_RUN_ADOPTED``) or evidence closes.
 
     Park sites and wake owners (no soft stream terminal -- wait for work):
 
-    - Open-evidence wait → park; wake when ensure admits / adopts a ``RowRun`` or
-      closes evidence (``wake_scores_scope``)
     - Missing ``RowRun`` → park; wake when a replacement ``RowRun`` is registered
       (``enqueue_tier_ladder``) or evidence closes
     """
@@ -369,8 +363,10 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
             # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn
             # evidence is already closed -- no CP-SAT.
             return StepResult(outcome="complete")
-        # Open-evidence wait / stale skip without closed marker: park until wake.
-        return StepResult(outcome="park", park_reason=ScoresParkReason.OPEN_EVIDENCE_WAIT)
+        raise RuntimeError(
+            "scores tier_solve received open-evidence wait wire without runId; "
+            "wire build must attach a RowRun or emit evidenceClosed skip"
+        )
     if not isinstance(run_id, str):
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
@@ -442,22 +438,16 @@ class ScoresPersistencePolicy:
         if services.persistence is None:
             return
 
-        # Cancel vs detach: cancel intent (token + resolution CANCELED) sets a
-        # durable fence in the shared bounded resolution registry before
-        # unregister so a late persist after RowRun removal still skips. Detach
-        # unregisters without CANCELED and seeds/keeps a non-cancel resolution so
-        # finish-after-detach has a positive allow (not merely "not cancelled").
-        # Unknown run_id with neither RowRun nor resolution must not write.
-        if is_row_run_cancelled(run_id):
+        # Cancel vs detach: cancel intent records a generation-scoped fence before
+        # unregister so late persist still skips. Detach records a known-run allow
+        # (not FSM OPEN). Unknown run_id with neither RowRun nor allow must not write.
+        decision = decide_scores_row_persist(run_id)
+        if decision is PersistDecision.DENY_CANCEL:
             return
-        run = get_row_run(run_id)
-        if run is not None:
-            if run.session.cancel_token.is_cancelled():
-                return
-        elif get_stream_resolution(run_id) is None:
+        if decision is PersistDecision.REFUSE_UNKNOWN:
             raise RuntimeError(
                 "scores persist refused: unknown run_id with no RowRun and no "
-                f"stream resolution (run_id={run_id!r})"
+                f"known-run allow (run_id={run_id!r})"
             )
 
         services.persistence.persist_row_complete_for_scope(

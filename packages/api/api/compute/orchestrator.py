@@ -402,49 +402,6 @@ class ComputeOrchestrator(
         else:
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
-            self._request_auto_wake_parked_dependencies(node)
-
-    def _request_auto_wake_parked_dependencies(self, waiting_node: ComputeNodeRun) -> None:
-        """Wake parked ENSURE deps once so dependents are not idle forever."""
-        for dependency_scope in waiting_node.dependency_scopes:
-            dependency = self._nodes.get(dependency_scope)
-            if dependency is None or dependency.state != "parked":
-                continue
-            self._schedule_parked_auto_wake(dependency)
-
-    def _scope_has_waiting_dependent(self, scope: ComputeScope) -> bool:
-        for node in self._nodes.values():
-            if node.state != "waiting_deps":
-                continue
-            if scope in node.dependency_scopes:
-                return True
-        return False
-
-    def _schedule_parked_auto_wake(self, parked_node: ComputeNodeRun) -> None:
-        """Schedule one ``wake_if_parked`` for a soft-parked node with waiters.
-
-        Caller holds the orchestrator lock. Wake runs after lock release so pool
-        submit / inline dispatch are never nested under the condition.
-        """
-        if parked_node.state != "parked" or parked_node.park_auto_wake_issued:
-            return
-        parked_node.park_auto_wake_issued = True
-        scope = parked_node.scope
-        priority_band = parked_node.priority_band
-        bundle = parked_node.bundle
-
-        def _wake_parked() -> None:
-            self.wake_if_parked(
-                ComputeRequest(
-                    scope=scope,
-                    force_fresh=True,
-                    priority_band=priority_band,
-                    bundle=bundle,
-                    ctx=None if bundle is None else bundle.query_context,
-                )
-            )
-
-        self._observers.schedule_post_lock(_wake_parked)
 
     def _failed_dependency_error(self, node: ComputeNodeRun) -> BaseException | None:
         for dependency_scope in node.dependency_scopes:

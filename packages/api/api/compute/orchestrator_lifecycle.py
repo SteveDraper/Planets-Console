@@ -276,8 +276,6 @@ class OrchestratorLifecycleMixin:
         soft_pause = state == "parked"
         node.state = state
         node.error = error
-        if state in {"complete", "failed"}:
-            node.park_auto_wake_issued = False
         self._dequeue_ready(node.scope)
         if not soft_pause:
             for waiter in node.waiters:
@@ -325,18 +323,11 @@ class OrchestratorLifecycleMixin:
                 "priorProfileStepIndex": node.profile_step_index,
             },
         )
-        # Soft-park does not complete, so ENSURE dependents stay waiting_deps with
-        # no dependency-terminal refresh. If any dependent is already waiting,
-        # issue one auto-wake so the DAG cannot go idle (Birds hang fingerprint).
-        if self._scope_has_waiting_dependent(node.scope):
-            self._schedule_parked_auto_wake(node)
 
     def _maybe_wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""
         if node.state != "parked":
             return
-        # Leaving parked starts a new soft-park episode; allow one auto-wake again.
-        node.park_auto_wake_issued = False
         node.generation_at_submit = None
         node.execution_sealed = False
         if self._deps_complete(node):

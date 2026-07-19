@@ -141,7 +141,8 @@ def test_run_scores_tier_solve_continues_when_rowrun_unregistered(sample_turn) -
 
 def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -> None:
     assert run_scores_tier_solve({"runId": None, "evidenceClosed": True}).outcome == "complete"
-    assert run_scores_tier_solve({"runId": None}).outcome == "park"
+    with pytest.raises(RuntimeError, match="open-evidence wait wire"):
+        run_scores_tier_solve({"runId": None})
 
 
 def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, monkeypatch) -> None:

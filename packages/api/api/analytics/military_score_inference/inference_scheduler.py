@@ -76,6 +76,9 @@ class InferenceRowScheduler(
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
         self._runs: dict[str, ComputeScope] = {}
+        # Live RowRun objects owned by this scheduler. Tier registry may be cleared
+        # on detach while a background adopt still needs the RowRun handle.
+        self._row_runs_by_id: dict[str, RowRun] = {}
         # Execution identity for cancel abort, captured after submit/wake *outside*
         # the scheduler lock. ``cancel_run`` must never call into the orchestrator
         # while holding ``_lock`` (scheduler → orch nests ABBA with orch drain →
@@ -217,6 +220,9 @@ class InferenceRowScheduler(
                     and root_scope.turn == scope.turn_number
                     and root_scope.player_id == player_id
                 ):
+                    owned = self._row_runs_by_id.get(run_id)
+                    if owned is not None:
+                        return owned
                     return self._adapter_row_run(run_id)
             return None
 
@@ -352,6 +358,7 @@ class InferenceRowScheduler(
             self._register_tier_callbacks_for_run(row_run)
             root_scope = self._root_scope_for_session(session)
             self._runs[session.run_id] = root_scope
+            self._row_runs_by_id[session.run_id] = row_run
             if self._defer_orchestrator_submit:
                 return
             if resolved_token is None:
@@ -734,6 +741,8 @@ def reset_inference_row_scheduler_for_tests() -> None:
     from api.analytics.military_score_inference.row_stream_resolution_registry import (
         reset_stream_resolution_registry_for_tests,
     )
+    from api.analytics.scores.cancel_fence_store import reset_cancel_fence_store_for_tests
+    from api.analytics.scores.known_run_allow_store import reset_known_run_allow_store_for_tests
     from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
@@ -744,6 +753,8 @@ def reset_inference_row_scheduler_for_tests() -> None:
     reset_orchestrators_for_tests()
     reset_tier_row_run_registry_for_tests()
     reset_stream_resolution_registry_for_tests()
+    reset_cancel_fence_store_for_tests()
+    reset_known_run_allow_store_for_tests()
     from api.compute.pools import shutdown_compute_worker_pool_for_tests
 
     shutdown_compute_worker_pool_for_tests()

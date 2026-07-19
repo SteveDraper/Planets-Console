@@ -10,12 +10,9 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.row_stream_resolution_registry import (
-    ensure_stream_resolution,
-    is_stream_resolution_canceled,
-    mark_stream_resolution_canceled,
-)
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.cancel_fence_store import is_run_cancel_fenced
+from api.analytics.scores.known_run_allow_store import record_known_run_allow
 from api.compute.scope import WILDCARD, ComputeScope
 
 _lock = threading.Lock()
@@ -94,30 +91,21 @@ def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
         return _runs_by_id.get(run_id)
 
 
-def mark_row_run_cancelled(run_id: str) -> None:
-    """Set stream-resolution ``CANCELED`` that survives RowRun unregister.
-
-    Thin facade over the shared bounded resolution registry. Production cancel
-    goes through ``InferenceStreamTeardownMixin._apply_cancel_intent_locked``,
-    which transitions to ``CANCELED`` before unregister. Call this directly only
-    for fence-capacity tests. Detach must not set ``CANCELED``.
-    """
-    mark_stream_resolution_canceled(run_id)
-
-
 def is_row_run_cancelled(run_id: str) -> bool:
-    """True when stream resolution for ``run_id`` is ``CANCELED``."""
-    return is_stream_resolution_canceled(run_id)
+    """True when ``run_id`` has a generation-scoped cancel fence.
+
+    Prefer :func:`api.analytics.scores.persist_decision.decide_scores_row_persist`
+    for persist admission. Kept for cancel/detach tests that assert the fence.
+    """
+    return is_run_cancel_fenced(run_id)
 
 
 def unregister_row_run(run_id: str) -> None:
-    with _lock:
-        if run_id not in _runs_by_id:
-            return
-    # Seed/refresh while RowRun is still registered so persist never observes a
-    # gap with neither RowRun nor resolution for a known unregister. Cancel
-    # already wrote CANCELED before this call; ensure does not overwrite.
-    ensure_stream_resolution(run_id)
+    """Drop registry entries and record a known-run allow when not cancel-fenced.
+
+    Cancel already wrote a generation fence before this call. Detach does not;
+    the known-run allow is the positive finish-after-detach persist signal.
+    """
     with _lock:
         run = _runs_by_id.pop(run_id, None)
         if run is None:
@@ -126,6 +114,8 @@ def unregister_row_run(run_id: str) -> None:
         if _run_id_by_scope_key.get(scope_key) == run_id:
             _run_id_by_scope_key.pop(scope_key, None)
         _tier_callbacks_by_run_id.pop(run_id, None)
+    if not is_run_cancel_fenced(run_id):
+        record_known_run_allow(run_id)
 
 
 def register_tier_callbacks(run_id: str, callbacks: InferenceTierJobCallbacks) -> None:

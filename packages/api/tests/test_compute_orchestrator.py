@@ -570,12 +570,13 @@ def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
     assert orchestrator.nodes[shared_scope] is parked._node
 
 
-def test_parked_ensure_dependency_auto_wakes_when_dependent_is_waiting(sample_turn):
-    """Parked ENSURE deps must not leave dependents idle forever (Birds hang).
+def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sample_turn):
+    """Parked ENSURE deps do not auto-wake; dependents wait for a real publisher.
 
     Soft-park is intentionally non-complete, so fleet-style dependents stay
-    ``waiting_deps``. If nothing wakes the parked dependency, ready/in-flight go
-    empty and the scoreboard/fleet streams hang with no CPU.
+    ``waiting_deps``. Progress requires an explicit ``force_fresh`` wake (analytic
+    ``wake_scores_scope``, evidence close, RowRun adopt, or PersistDeferred) --
+    not an orchestrator demand redispath.
     """
     ctx = make_fixture_query_context(
         sample_turn,
@@ -588,7 +589,7 @@ def test_parked_ensure_dependency_auto_wakes_when_dependent_is_waiting(sample_tu
         nonlocal shared_calls
         shared_calls += 1
         if shared_calls == 1:
-            return StepResult(outcome="park", park_reason="scores_open_evidence_wait")
+            return StepResult(outcome="park", park_reason="scores_empty_tier_outcome")
         return {"result": SHARED_ID}
 
     registry = build_compute_registry(
@@ -616,23 +617,23 @@ def test_parked_ensure_dependency_auto_wakes_when_dependent_is_waiting(sample_tu
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
 
-    assert shared_calls >= 2, (
-        f"expected parked ENSURE dependency to auto-wake; shared_calls={shared_calls} "
-        f"shared_state={orchestrator.nodes[shared_scope].state} "
-        f"branch_state={orchestrator.nodes[branch_b_scope].state}"
+    assert shared_calls == 1
+    assert orchestrator.nodes[shared_scope].state == "parked"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert handle.state == "waiting_deps"
+
+    woken = orchestrator.wake_if_parked(
+        ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True)
     )
+    assert woken is not None
+    assert shared_calls == 2
     assert orchestrator.nodes[shared_scope].state == "complete"
     assert handle.state == "complete"
     assert orchestrator.nodes[branch_b_scope].state == "complete"
 
 
-def test_parked_ensure_dependency_auto_wakes_across_two_park_episodes(sample_turn):
-    """``park_auto_wake_issued`` must reset on wake so a second park can re-wake.
-
-    Without clearing the flag in ``_maybe_wake_parked_node``, park → wake → park
-    leaves the flag stuck True and the next auto-wake is skipped forever, so the
-    dependent stays ``waiting_deps`` with an empty ready/in-flight set.
-    """
+def test_parked_ensure_dependency_second_park_also_needs_explicit_wake(sample_turn):
+    """A second park episode stays idle until another explicit ``force_fresh`` wake."""
     ctx = make_fixture_query_context(
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
@@ -644,7 +645,7 @@ def test_parked_ensure_dependency_auto_wakes_across_two_park_episodes(sample_tur
         nonlocal shared_calls
         shared_calls += 1
         if shared_calls <= 2:
-            return StepResult(outcome="park", park_reason="scores_open_evidence_wait")
+            return StepResult(outcome="park", park_reason="scores_empty_tier_outcome")
         return {"result": SHARED_ID}
 
     registry = build_compute_registry(
@@ -671,15 +672,17 @@ def test_parked_ensure_dependency_auto_wakes_across_two_park_episodes(sample_tur
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
+    assert shared_calls == 1
+    assert orchestrator.nodes[shared_scope].state == "parked"
 
-    assert shared_calls >= 3, (
-        f"expected second park episode to auto-wake; shared_calls={shared_calls} "
-        f"shared_state={orchestrator.nodes[shared_scope].state} "
-        f"branch_state={orchestrator.nodes[branch_b_scope].state} "
-        f"park_auto_wake_issued={orchestrator.nodes[shared_scope].park_auto_wake_issued}"
-    )
+    orchestrator.wake_if_parked(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
+    assert shared_calls == 2
+    assert orchestrator.nodes[shared_scope].state == "parked"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+
+    orchestrator.wake_if_parked(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
+    assert shared_calls == 3
     assert orchestrator.nodes[shared_scope].state == "complete"
-    assert orchestrator.nodes[shared_scope].park_auto_wake_issued is False
     assert handle.state == "complete"
     assert orchestrator.nodes[branch_b_scope].state == "complete"
 

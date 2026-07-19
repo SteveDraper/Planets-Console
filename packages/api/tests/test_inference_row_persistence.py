@@ -564,13 +564,13 @@ def test_scores_persistence_policy_persists_when_rowrun_missing_for_persistable(
     )
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.military_score_inference.row_stream_resolution_registry import (
-        get_stream_resolution,
         reset_stream_resolution_registry_for_tests,
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.known_run_allow_store import is_known_run_allowed
     from api.analytics.scores.tier_row_run_registry import (
         register_row_run,
         reset_tier_row_run_registry_for_tests,
@@ -593,7 +593,7 @@ def test_scores_persistence_policy_persists_when_rowrun_missing_for_persistable(
     register_row_run(run)
     run_id = run.run_id
     unregister_row_run(run_id)
-    assert get_stream_resolution(run_id) is not None
+    assert is_known_run_allowed(run_id)
 
     persistence = InferenceRowPersistenceService(memory_backend)
     ctx = make_analytic_query_context(

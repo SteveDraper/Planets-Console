@@ -1,14 +1,12 @@
-"""Process-wide bounded table of per-run stream resolutions.
+"""Process-wide bounded table of per-run soft/hard stream resolutions.
 
-Single store for post-RowRun memory: soft/hard terminals, cancel (``CANCELED``),
-and detach allow (``OPEN`` seeded on unregister when absent). Shared by the
-inference scheduler (stream delivery) and scores persist (``is_row_run_cancelled``
-plus positive finish-after-detach allow) so cancel fences are not a parallel
-encoding.
+Owns deliver / upgrade / silence memory for table-stream terminal events only.
+Cancel durability lives in :mod:`api.analytics.scores.cancel_fence_store`
+(generation-scoped). Finish-after-detach persist allow lives in
+:mod:`api.analytics.scores.known_run_allow_store`.
 
-FIFO-bounded by ``MAX_STREAM_RESOLUTIONS``. Capacity eviction is an accepted
-risk for very long-lived processes -- late-persist and late-peer races are
-short relative to this capacity. Run IDs are unique UUIDs.
+FIFO-bounded by ``MAX_STREAM_RESOLUTIONS``. Soft/hard terminals are short-lived
+relative to this capacity. Run IDs are unique UUIDs.
 """
 
 from __future__ import annotations
@@ -23,7 +21,6 @@ from api.analytics.military_score_inference.row_stream_resolution import (
     RowStreamResolutionTrigger,
 )
 
-# Same capacity rationale as the former cancel-fence bound.
 MAX_STREAM_RESOLUTIONS = 4096
 
 _lock = threading.Lock()
@@ -47,19 +44,6 @@ def _touch_locked(run_id: str, resolution: RowStreamResolution) -> None:
 def get_stream_resolution(run_id: str) -> RowStreamResolution | None:
     with _lock:
         return _resolutions.get(run_id)
-
-
-def ensure_stream_resolution(run_id: str) -> None:
-    """Remember ``run_id`` in the bounded table without changing an existing state.
-
-    Seeds ``OPEN`` when absent. Used when a known ``RowRun`` unregisters without
-    cancel so finish-after-detach has a positive allow signal for scores persist
-    (not merely "not cancelled"). Does not overwrite ``CANCELED`` or any other
-    state already recorded for ``run_id``. Refreshes FIFO eviction order.
-    """
-    with _lock:
-        existing = _resolutions.get(run_id)
-        _touch_locked(run_id, existing if existing is not None else RowStreamResolution())
 
 
 def transition_stream_resolution(
@@ -92,26 +76,6 @@ def discard_stream_resolution_if_state(
 def clear_stream_resolutions() -> None:
     with _lock:
         _resolutions.clear()
-
-
-def is_stream_resolution_canceled(run_id: str) -> bool:
-    """True when ``run_id`` is remembered as ``CANCELED`` (cancel fence)."""
-    with _lock:
-        resolution = _resolutions.get(run_id)
-        return resolution is not None and resolution.state is RowStreamResolutionState.CANCELED
-
-
-def mark_stream_resolution_canceled(run_id: str) -> None:
-    """Set ``CANCELED`` that survives RowRun unregister (cancel fence).
-
-    Production cancel goes through
-    ``InferenceStreamTeardownMixin._apply_cancel_intent_locked``, which
-    transitions to ``CANCELED`` before unregister. Call this directly only for
-    fence-capacity tests. Detach must not set ``CANCELED``.
-
-    Re-marking the same ``run_id`` refreshes its eviction order.
-    """
-    transition_stream_resolution(run_id, RowStreamResolutionTrigger.CANCELED)
 
 
 def reset_stream_resolution_registry_for_tests() -> None:

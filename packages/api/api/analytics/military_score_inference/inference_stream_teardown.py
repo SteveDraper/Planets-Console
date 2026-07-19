@@ -80,9 +80,9 @@ class InferenceStreamTeardownMixin:
 
         Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
         only drops stream ownership without cancelling solve work, cancel applies
-        cancel intent (token + resolution CANCELED fence) then aborts in-flight
-        orchestrator nodes so a later ``force_fresh`` submit cannot attach to a
-        still-running node with a missing RowRun.
+        cancel intent (token + generation-scoped cancel fence + stream CANCELED)
+        then aborts in-flight orchestrator nodes so a later ``force_fresh`` submit
+        cannot attach to a still-running node with a missing RowRun.
         """
         abort_scope: ComputeScope | None = None
         abort_generation: int | None = None
@@ -104,19 +104,26 @@ class InferenceStreamTeardownMixin:
             self._abort_orchestrator_scope(abort_scope, abort_generation)
 
     def _apply_cancel_intent_locked(self: InferenceRowScheduler, run_id: str) -> None:
-        """Set token + resolution CANCELED as one cancel intent.
+        """Set token, generation cancel fence, and stream CANCELED as one intent.
 
-        ``CANCELED`` in the shared bounded resolution registry is the cancel
-        fence: it survives RowRun unregister so late persist skips. Caller must
-        hold ``self._lock``. Does not unregister the RowRun or abort orchestrator
-        scopes -- ``cancel_run`` owns those next steps. Detach must never call
-        this: detached workers may still finish and persist.
+        The generation-scoped cancel fence is the durable persist refuse signal
+        that survives RowRun unregister. Stream-resolution ``CANCELED`` only
+        silences further stream delivery. Caller must hold ``self._lock``.
+        Detach must never call this: detached workers may still finish and persist.
         """
         from api.analytics.military_score_inference.row_stream_resolution import (
             RowStreamResolutionTrigger,
         )
+        from api.analytics.scores.cancel_fence_store import mark_cancel_fence
 
-        # Fence before unregister: resolution CANCELED outlives the RowRun.
+        root_scope = self._runs.get(run_id)
+        execution_generation = self._execution_generation_by_run_id.get(run_id, 0)
+        if root_scope is not None:
+            mark_cancel_fence(
+                root_scope,
+                execution_generation,
+                run_id=run_id,
+            )
         self._transition_stream_resolution_locked(
             run_id,
             RowStreamResolutionTrigger.CANCELED,
@@ -134,22 +141,22 @@ class InferenceStreamTeardownMixin:
 
         Used by ``begin_scope`` when switching table streams. Unregisters RowRuns
         and drops stream bindings for ``turn`` only; other turns are untouched.
-        Does **not** cancel RowRun tokens, set resolution ``CANCELED``, or call
+        Does **not** cancel RowRun tokens, set a cancel fence, or call
         ``abort_scope`` -- in-flight tier workers may still finish, persist from
         the RowComplete payload, and complete the DAG node. ``cancel_run`` is the
         explicit cancel path (cancel intent then abort).
 
-        Stream resolutions are left untouched for a turn-scoped detach except that
-        ``unregister_row_run`` seeds ``OPEN`` when none exists: that is the positive
-        allow for finish-after-detach persist. ``_remove_run_locked`` already keeps
-        each detached run's resolution so a late peer binding cannot supersede an
-        already-resolved row, and other-turn resolutions must survive a preempt.
-        A full invalidate (``turn is None``, e.g. shutdown) clears every resolution
-        along with everything else.
+        Stream resolutions are left untouched for a turn-scoped detach.
+        ``unregister_row_run`` records a known-run allow (not FSM ``OPEN``) so
+        finish-after-detach persist has a positive allow. A full invalidate
+        (``turn is None``, e.g. shutdown) clears every resolution along with
+        cancel fences and known-run allows.
         """
         from api.analytics.military_score_inference.row_stream_resolution_registry import (
             clear_stream_resolutions,
         )
+        from api.analytics.scores.cancel_fence_store import clear_cancel_fences
+        from api.analytics.scores.known_run_allow_store import clear_known_run_allows
 
         self._globally_paused = False
         if turn is None:
@@ -165,6 +172,8 @@ class InferenceStreamTeardownMixin:
             self._remove_run_locked(run_id)
         if turn is None:
             clear_stream_resolutions()
+            clear_cancel_fences()
+            clear_known_run_allows()
         for stream_token in list(self._stream_bindings):
             binding = self._stream_bindings.pop(stream_token)
             self._release_stream_binding_locked(binding)
@@ -211,11 +220,11 @@ class InferenceStreamTeardownMixin:
         from api.analytics.scores.tier_row_run_registry import unregister_row_run
 
         root_scope = self._runs.pop(run_id, None)
+        self._row_runs_by_id.pop(run_id, None)
         self._execution_generation_by_run_id.pop(run_id, None)
         unregister_row_run(run_id)
-        # Keep resolution state so a late peer binding cannot supersede an already
-        # resolved row after its RowRun registration has gone away. Unregister also
-        # seeds OPEN when absent (finish-after-detach persist allow).
+        # Keep stream-resolution state so a late peer binding cannot supersede an
+        # already-resolved row after its RowRun registration has gone away.
         if root_scope is None:
             return
         self._held_initial_submissions = [
@@ -230,8 +239,10 @@ class InferenceStreamTeardownMixin:
 
         return isinstance(snapshot.error, ComputeScopeAbortedError)
 
-    @staticmethod
-    def _adapter_row_run(run_id: str) -> RowRun | None:
+    def _adapter_row_run(self: InferenceRowScheduler, run_id: str) -> RowRun | None:
         from api.analytics.scores.tier_row_run_registry import get_row_run
 
+        owned = self._row_runs_by_id.get(run_id)
+        if owned is not None:
+            return owned
         return get_row_run(run_id)

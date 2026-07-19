@@ -256,9 +256,9 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
     )
 
     # Open evidence + ensure still needs work (schedule patched away): hard fail --
-    # not empty-complete, and not a soft continue that would spin forever.
+    # not empty-complete, and not a soft park without an armed wake publisher.
     with patch("api.analytics.scores.exports.schedule_inference_row"):
-        with pytest.raises(RuntimeError, match="requires a registered RowRun"):
+        with pytest.raises(RuntimeError, match="invariant broken"):
             build_scores_tier_solve_job_wire(
                 scope,
                 dependency_outputs=DependencyOutputs(),
@@ -286,18 +286,101 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
     assert skip_wire == {"runId": None, "evidenceClosed": True}
 
 
-def test_build_scores_tier_solve_job_wire_continues_when_ensure_admitted_without_rowrun(
+def test_build_scores_tier_solve_job_wire_adopts_scheduler_row_when_tier_registry_empty(
     sample_turn,
     persistence,
 ) -> None:
-    """Transient ensure-satisfied / no-RowRun race parks via tier_solve, not hard-fail.
+    """Ensure-satisfied + live scheduler RowRun must adopt, not park or raise.
 
-    Permanent cheap ImmediateRowAdmission is durable on ensure and skip-completes
-    (see ``test_cheap_immediate_admission_closes_materialization_evidence_and_skip_completes``).
-    This covers the remaining open-evidence path: ensure reports satisfied while no
-    registry/scheduler RowRun is visible yet and materialization evidence is still
-    open -- park until ``force_fresh`` wake; do not ``RuntimeError`` or empty-complete.
+    Tier registry may be empty while the scheduler still owns the RowRun; wire
+    build must attach that handle so dependents are not left waiting without a
+    wake publisher.
     """
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        schedule_inference_row,
+    )
+    from api.analytics.scores.export_snapshot import scores_inference_stream_scope
+    from api.analytics.scores.tier_row_run_registry import (
+        get_row_run_for_scope,
+        reset_tier_row_run_registry_for_tests,
+        unregister_row_run,
+    )
+
+    from tests.scores_exports_helpers import (
+        GAME_ID,
+        first_player_id,
+        perspective,
+        scores_query_context,
+    )
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
+    player_id = first_player_id(sample_turn)
+    ctx = scores_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
+    export_scope = compute_scope_to_export_scope(scope)
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+    )
+    assert scheduled is not None
+    run = scheduler.row_run_for_player(
+        scores_inference_stream_scope(export_scope),
+        player_id,
+    )
+    assert run is not None
+    # Simulate tier-registry gap while scheduler still owns the live RowRun.
+    unregister_row_run(run.run_id)
+    assert get_row_run_for_scope(scope) is None
+    assert (
+        scheduler.row_run_for_player(
+            scores_inference_stream_scope(export_scope),
+            player_id,
+        )
+        is run
+    )
+
+    with (
+        patch(
+            "api.analytics.scores.exports.ensure_scores_export",
+            return_value=True,
+        ),
+        patch.object(ScoresPersistencePolicy, "is_satisfied", return_value=False),
+    ):
+        wire = build_scores_tier_solve_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+    assert wire == {"runId": run.run_id}
+    assert get_row_run_for_scope(scope) is run
+
+
+def test_build_scores_tier_solve_job_wire_raises_when_ensure_satisfied_without_attachable_row(
+    sample_turn,
+    persistence,
+) -> None:
+    """Ensure-satisfied with open evidence and no RowRun is an invariant break."""
     from api.analytics.military_score_inference.inference_scheduler import (
         InferenceRowScheduler,
         reset_inference_row_scheduler_for_tests,
@@ -335,14 +418,12 @@ def test_build_scores_tier_solve_job_wire_continues_when_ensure_admitted_without
         ),
         patch.object(ScoresPersistencePolicy, "is_satisfied", return_value=False),
     ):
-        wait_wire = build_scores_tier_solve_job_wire(
-            scope,
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-        )
-    assert wait_wire == {"runId": None}
-    assert get_row_run_for_scope(scope) is None
-    assert run_scores_tier_solve(wait_wire).outcome == "park"
+        with pytest.raises(RuntimeError, match="invariant broken"):
+            build_scores_tier_solve_job_wire(
+                scope,
+                dependency_outputs=DependencyOutputs(),
+                ctx=ctx,
+            )
 
 
 def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_completes(
