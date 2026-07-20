@@ -115,3 +115,52 @@ def test_wire_round_trip_shape():
     assert patch["height"] == 31
     assert isinstance(patch["coverageRle"], list)
     assert patch["coverageRle"][0].keys() >= {"length", "covered"}
+
+
+def _patch_aabb(patch) -> tuple[int, int, int, int]:
+    return (
+        patch.origin_x,
+        patch.origin_y,
+        patch.origin_x + patch.width - 1,
+        patch.origin_y + patch.height - 1,
+    )
+
+
+def _aabbs_overlap(
+    a: tuple[int, int, int, int],
+    b: tuple[int, int, int, int],
+) -> bool:
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
+def test_overlapping_nebulas_merge_into_one_non_overlapping_patch():
+    origin = CoverageOrigin(x=0, y=0, base_range=200)
+    n1 = Nebula(id=1, x=50, y=0, name="A", radius=40, intensity=40)
+    n2 = Nebula(id=2, x=70, y=0, name="B", radius=40, intensity=40)
+    coverage = build_hybrid_coverage([origin], [n1, n2])
+
+    assert len(coverage.disks) == 1
+    assert len(coverage.patches) == 1
+    patch = coverage.patches[0]
+    # Union of [10,-40]..[90,40] and [30,-40]..[110,40]
+    assert patch.origin_x == 10
+    assert patch.origin_y == -40
+    assert patch.width == 101
+    assert patch.height == 81
+    # Overlap cell is owned by exactly one patch (the merged AABB).
+    assert patch_cell_covered(patch, 60, 0) is not None
+
+
+def test_disjoint_nebulas_emit_non_overlapping_patches():
+    origin = CoverageOrigin(x=0, y=0, base_range=500)
+    n1 = Nebula(id=1, x=100, y=0, name="West", radius=20, intensity=40)
+    n2 = Nebula(id=2, x=400, y=0, name="East", radius=20, intensity=40)
+    coverage = build_hybrid_coverage([origin], [n1, n2])
+
+    assert len(coverage.patches) == 2
+    a, b = coverage.patches
+    assert not _aabbs_overlap(_patch_aabb(a), _patch_aabb(b))
+    assert patch_cell_covered(a, 100, 0) is not None
+    assert patch_cell_covered(b, 100, 0) is None
+    assert patch_cell_covered(b, 400, 0) is not None
+    assert patch_cell_covered(a, 400, 0) is None

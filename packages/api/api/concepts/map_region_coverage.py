@@ -1,8 +1,8 @@
 """Hybrid map-region coverage: ideal disks plus nebula-local patches.
 
 Core owns coverage truth. The SPA blits disks and patches; it does not
-reimplement V(P) modulation. Patch AABBs are exclusive authority for blit
-(clip disks against them, then paint the patch raster).
+reimplement V(P) modulation. Patch AABBs are a non-overlapping partition and
+exclusive blit authority (clip disks against them, then paint each patch once).
 """
 
 from __future__ import annotations
@@ -20,6 +20,9 @@ from api.concepts.stellar_cartography.nebula_visibility import (
 # Optional hook: (base_range, density) -> effective range at a modulated cell.
 # Default applies min(base_range, V(P)). Nebula Scanner and similar land later.
 EffectiveRangeFn = Callable[[float, float], float]
+
+# Inclusive map-cell AABB: (min_x, min_y, max_x, max_y).
+CellAabb = tuple[int, int, int, int]
 
 
 @dataclass(frozen=True)
@@ -114,7 +117,7 @@ def _disk_intersects_nebula(origin: CoverageOrigin, nebula: NebulaCenter) -> boo
     )
 
 
-def _nebula_aabb(nebula: NebulaCenter) -> tuple[int, int, int, int]:
+def _nebula_aabb(nebula: NebulaCenter) -> CellAabb:
     """Inclusive AABB of the nebula disk as integer map cells."""
     r = nebula.radius
     return (
@@ -123,6 +126,56 @@ def _nebula_aabb(nebula: NebulaCenter) -> tuple[int, int, int, int]:
         nebula.x + r,
         nebula.y + r,
     )
+
+
+def _aabbs_overlap(a: CellAabb, b: CellAabb) -> bool:
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
+def _aabb_union(a: CellAabb, b: CellAabb) -> CellAabb:
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
+def _merged_patch_aabbs(
+    origins: Sequence[CoverageOrigin],
+    nebulas: Sequence[NebulaCenter],
+) -> list[CellAabb]:
+    """Union intersecting nebula AABBs that touch at least one coverage disk.
+
+    Returns a non-overlapping partition (connected components of AABB overlap).
+    """
+    boxes: list[CellAabb] = []
+    for nebula in nebulas:
+        if not any(_disk_intersects_nebula(o, nebula) for o in origins):
+            continue
+        boxes.append(_nebula_aabb(nebula))
+    if not boxes:
+        return []
+
+    parent = list(range(len(boxes)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        root_i, root_j = find(i), find(j)
+        if root_i != root_j:
+            parent[root_j] = root_i
+
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            if _aabbs_overlap(boxes[i], boxes[j]):
+                union(i, j)
+
+    merged: dict[int, CellAabb] = {}
+    for i, box in enumerate(boxes):
+        root = find(i)
+        existing = merged.get(root)
+        merged[root] = box if existing is None else _aabb_union(existing, box)
+    return list(merged.values())
 
 
 def _cell_covered(
@@ -143,14 +196,14 @@ def _cell_covered(
     return False
 
 
-def _build_patch_for_nebula(
-    nebula: NebulaCenter,
+def _build_patch_for_aabb(
+    aabb: CellAabb,
     origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter],
     *,
     effective_range: EffectiveRangeFn,
 ) -> MapRegionOverlayPatch | None:
-    min_x, min_y, max_x, max_y = _nebula_aabb(nebula)
+    min_x, min_y, max_x, max_y = aabb
     width = max_x - min_x + 1
     height = max_y - min_y + 1
     if width <= 0 or height <= 0:
@@ -187,10 +240,10 @@ def build_hybrid_coverage(
 ) -> HybridCoverage:
     """Build ideal disks plus nebula-local patches for the given origins.
 
-    Disks are one per origin at ``base_range``. Patches are emitted only for
-    nebula footprints that intersect at least one disk. Inside a patch AABB,
-    coverage truth includes ideal reach outside density and V(P)-modulated
-    reach where density > 0 (so the AABB is exclusive blit authority).
+    Disks are one per origin at ``base_range``. Patches cover merged AABBs of
+    disk-intersecting nebulas (connected components of AABB overlap) so patch
+    regions never overlap. Inside a patch AABB, coverage truth includes ideal
+    reach outside density and V(P)-modulated reach where density > 0.
     """
     active_origins = [o for o in origins if o.base_range > 0]
     disks = tuple(MapRegionOverlayDisk(x=o.x, y=o.y, radius=o.base_range) for o in active_origins)
@@ -199,11 +252,9 @@ def build_hybrid_coverage(
 
     modulation = effective_range or default_effective_range
     patches: list[MapRegionOverlayPatch] = []
-    for nebula in nebulas:
-        if not any(_disk_intersects_nebula(o, nebula) for o in active_origins):
-            continue
-        patch = _build_patch_for_nebula(
-            nebula,
+    for aabb in _merged_patch_aabbs(active_origins, nebulas):
+        patch = _build_patch_for_aabb(
+            aabb,
             active_origins,
             nebulas,
             effective_range=modulation,

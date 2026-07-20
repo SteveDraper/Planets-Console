@@ -69,7 +69,10 @@ function expandCoverageRle(
   return cells
 }
 
-function parseCssColorToRgb(fillColor: string): { r: number; g: number; b: number } {
+/** Hex `#rgb` / `#rrggbb` only; null if the wire color is not a supported hex. */
+export function parseCssColorToRgb(
+  fillColor: string
+): { r: number; g: number; b: number } | null {
   const hex = fillColor.trim()
   if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
     return {
@@ -85,12 +88,13 @@ function parseCssColorToRgb(fillColor: string): { r: number; g: number; b: numbe
       b: parseInt(hex[3]! + hex[3]!, 16),
     }
   }
-  return { r: 34, g: 197, b: 94 }
+  return null
 }
 
 /**
  * Rasterize one nebula-local patch at 1 px/ly (map space).
  * RLE row 0 is map-south; canvas row 0 is image-top (map-north).
+ * Returns empty string when fillColor is not a supported hex (fail closed).
  */
 export function patchRasterDataUrl(
   fillColor: string,
@@ -100,6 +104,8 @@ export function patchRasterDataUrl(
   if (cached != null && cached.fillColor === fillColor) return cached.imageDataUrl
 
   if (typeof document === 'undefined') return ''
+  const rgb = parseCssColorToRgb(fillColor)
+  if (rgb == null) return ''
   const cells = expandCoverageRle(patch.width, patch.height, patch.coverageRle)
   const canvas = document.createElement('canvas')
   canvas.width = patch.width
@@ -107,7 +113,7 @@ export function patchRasterDataUrl(
   const ctx = canvas.getContext('2d')
   if (ctx == null) return ''
   const image = ctx.createImageData(patch.width, patch.height)
-  const { r, g, b } = parseCssColorToRgb(fillColor)
+  const { r, g, b } = rgb
   for (let row = 0; row < patch.height; row++) {
     const sourceRow = patch.height - 1 - row
     for (let col = 0; col < patch.width; col++) {
@@ -176,6 +182,9 @@ export function buildMapRegionOverlayPaneShapes(
 
     for (let i = 0; i < overlay.patches.length; i++) {
       const patch = overlay.patches[i]!
+      const imageDataUrl = patchRasterDataUrl(overlay.fillColor, patch)
+      // Fail closed: non-hex fillColor skips punch + raster (no invented color, no holes).
+      if (imageDataUrl === '') continue
       const rect = patchPaneRect(patch, viewport)
       patchMaskRects.push({
         x: rect.left,
@@ -183,8 +192,6 @@ export function buildMapRegionOverlayPaneShapes(
         width: rect.width,
         height: rect.height,
       })
-      const imageDataUrl = patchRasterDataUrl(overlay.fillColor, patch)
-      if (imageDataUrl === '') continue
       patches.push({
         key: `${overlay.id}-patch-${i}`,
         left: rect.left,

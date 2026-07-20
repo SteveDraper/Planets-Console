@@ -1,4 +1,4 @@
-"""Temporary map-only demo analytic for hybrid map region overlays (#248).
+"""Temporary map-only demo analytic for hybrid map region overlays.
 
 Produces shaded coverage via the shared Core hybrid coverage helper so the SPA
 can merge and blit without the Visibility analytic. Remove this registration

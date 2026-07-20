@@ -9,8 +9,9 @@ import { useOverlayPaneSize } from './useOverlayPaneSize'
  * Blit hybrid map region overlays.
  *
  * Disks: opaque SVG circles under one group opacity (union, no stacked alpha).
- * Patches: cached map-space PNGs, reprojected only. Patch AABBs are punched from
- * the disk mask so disks and patches never double-paint.
+ * Patches: cached map-space PNGs, reprojected only. Patch AABBs are a
+ * non-overlapping partition punched from the disk mask so disks and patches
+ * never double-paint.
  */
 export function MapRegionOverlayPane({
   regionOverlays,
