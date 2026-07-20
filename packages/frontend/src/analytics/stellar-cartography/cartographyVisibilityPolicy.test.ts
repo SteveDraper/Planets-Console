@@ -147,6 +147,7 @@ describe('cartographyVisibilityPolicy', () => {
         edges: [wormholeEdge],
         routeWaypoints: [],
         overlayCircles: [],
+        regionOverlays: [],
         wormholeUnknownEntrances: [{ x: 50, y: 60 }],
       }
       const policy = cartographyVisibilityPolicy({
@@ -168,6 +169,7 @@ describe('cartographyVisibilityPolicy', () => {
         edges: [wormholeEdge],
         routeWaypoints: [],
         overlayCircles: [],
+        regionOverlays: [],
         wormholeUnknownEntrances: [{ x: 50, y: 60 }],
       }
       const parts = cartographyVisibilityPolicy(baseConfig).mapFrameParts(data)

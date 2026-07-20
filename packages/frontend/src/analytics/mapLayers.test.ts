@@ -189,6 +189,35 @@ describe('combineMapData', () => {
     expect(combined.overlayCircles).toHaveLength(2)
   })
 
+  it('merges region overlays from the map-region-demo analytic', () => {
+    const demo: MapDataResponse = {
+      analyticId: 'map-region-demo',
+      nodes: [],
+      edges: [],
+      regionOverlays: [
+        {
+          kind: 'demo',
+          id: 'demo-coverage',
+          fillColor: '#22c55e',
+          fillOpacity: 0.25,
+          disks: [{ x: 10, y: 20, radius: 150 }],
+          patches: [],
+        },
+      ],
+    }
+
+    const combined = combineMapData(['map-region-demo'], [demo], {
+      liveConnectionsParams: null,
+    })
+
+    expect(combined.regionOverlays).toHaveLength(1)
+    expect(combined.regionOverlays[0]).toMatchObject({
+      kind: 'demo',
+      fillColor: '#22c55e',
+      disks: [{ x: 10, y: 20, radius: 150 }],
+    })
+  })
+
   it('records unknown-target wormhole entrances when no edge is emitted', () => {
     const sc: MapDataResponse = {
       analyticId: 'stellar-cartography',

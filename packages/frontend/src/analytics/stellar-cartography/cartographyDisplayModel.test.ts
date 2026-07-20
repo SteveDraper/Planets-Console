@@ -58,6 +58,7 @@ const sampleData = {
       warp: 5,
     },
   ],
+  regionOverlays: [],
   wormholeUnknownEntrances: [{ x: 50, y: 60 }],
 } satisfies CombinedMapData
 

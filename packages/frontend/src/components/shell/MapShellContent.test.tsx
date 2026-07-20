@@ -22,6 +22,7 @@ const displayMapData = {
   edges: [],
   routeWaypoints: [],
   overlayCircles: [],
+  regionOverlays: [],
   wormholeUnknownEntrances: [],
 }
 

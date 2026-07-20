@@ -83,6 +83,7 @@ const emptyCombined = {
   edges: [],
   routeWaypoints: [],
   overlayCircles: [],
+  regionOverlays: [],
   wormholeUnknownEntrances: [],
 }
 

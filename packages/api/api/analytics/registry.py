@@ -10,6 +10,7 @@ from api.analytics.catalog import (
 from api.analytics.compute_context import make_analytic_compute_context
 from api.analytics.connections import REGISTRATION as CONNECTIONS_REGISTRATION
 from api.analytics.fleet.registration import REGISTRATION as FLEET_REGISTRATION
+from api.analytics.map_region_demo import REGISTRATION as MAP_REGION_DEMO_REGISTRATION
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import (
     TurnAnalyticHandler,
@@ -27,6 +28,7 @@ _IMPORTED_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
     CONNECTIONS_REGISTRATION,
     STELLAR_CARTOGRAPHY_REGISTRATION,
     FLEET_REGISTRATION,
+    MAP_REGION_DEMO_REGISTRATION,
 )
 
 validate_turn_analytic_registrations(_IMPORTED_REGISTRATIONS)

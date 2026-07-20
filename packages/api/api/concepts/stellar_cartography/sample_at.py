@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 
 from api.analytics.stellar_cartography import ion_storm_class
@@ -18,6 +17,13 @@ from api.concepts.stellar_cartography.layers import (
     LAYER_STAR_CLUSTERS,
     PAINT_ORDER,
 )
+from api.concepts.stellar_cartography.nebula_visibility import (
+    NEBULA_VISIBILITY_MAX_LY,
+    NEBULA_VISIBILITY_NUMERATOR,
+    distance_ly,
+    nebula_density_at,
+    nebula_visibility_ly,
+)
 from api.concepts.stellar_cartography.star_clusters import (
     format_neutrino_movement_bonus,
     format_neutrino_warp_9_max_range,
@@ -29,6 +35,13 @@ from api.concepts.stellar_cartography.star_clusters import (
 from api.models.game import TurnInfo
 from api.models.space import IonStorm, Nebula
 
+# Re-export for callers that historically imported constants from this module.
+__all__ = (
+    "NEBULA_VISIBILITY_MAX_LY",
+    "NEBULA_VISIBILITY_NUMERATOR",
+    "sample_at",
+)
+
 ION_CLASS_NAMES: dict[int, str] = {
     1: "Harmless",
     2: "Moderate",
@@ -37,13 +50,9 @@ ION_CLASS_NAMES: dict[int, str] = {
     5: "Very dangerous",
 }
 
-# Host-aligned tooltip math (Planets.nu client / Meteor's Library).
-NEBULA_VISIBILITY_NUMERATOR = 4000
-NEBULA_VISIBILITY_MAX_LY = 250
-
 
 def _distance_ly(x: int, y: int, fx: int, fy: int) -> float:
-    return math.hypot(x - fx, y - fy)
+    return distance_ly(x, y, fx, fy)
 
 
 def _ion_storm_groups(ionstorms: list[IonStorm]) -> list[list[IonStorm]]:
@@ -146,26 +155,6 @@ def _black_hole_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
     return entries
 
 
-def _nebula_density_at(centers: list[Nebula], x: int, y: int) -> float:
-    total = 0.0
-    for center in centers:
-        if center.radius <= 0 or center.id < 0:
-            continue
-        dist = _distance_ly(x, y, center.x, center.y)
-        if dist <= center.radius:
-            total += math.ceil(center.intensity * (1.0 - dist / center.radius))
-    return total
-
-
-def _nebula_visibility_ly(density: float) -> int | None:
-    if density <= 0:
-        return None
-    return min(
-        NEBULA_VISIBILITY_MAX_LY,
-        int(round(NEBULA_VISIBILITY_NUMERATOR / (density + 1))),
-    )
-
-
 def _nebula_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
     by_name: dict[str, list[Nebula]] = defaultdict(list)
     for nebula in turn.nebulas:
@@ -173,8 +162,8 @@ def _nebula_entries(turn: TurnInfo, x: int, y: int) -> list[dict]:
 
     entries: list[dict] = []
     for name, centers in by_name.items():
-        density = _nebula_density_at(centers, x, y)
-        visibility = _nebula_visibility_ly(density)
+        density = nebula_density_at(centers, x, y)
+        visibility = nebula_visibility_ly(density)
         if visibility is None:
             continue
         entries.append(

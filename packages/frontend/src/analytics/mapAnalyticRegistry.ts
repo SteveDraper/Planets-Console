@@ -11,10 +11,12 @@ import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
   FLEET_ANALYTIC_ID,
+  MAP_REGION_DEMO_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
 } from './mapAnalyticIds'
 import { stellarCartographyMapAnalytic } from './stellar-cartography/mapAnalytic'
 import { fleetMapAnalytic } from './fleet/mapAnalytic'
+import { mapRegionDemoMapAnalytic } from './map-region-demo/mapAnalytic'
 import type { CombineMapDataOptionsBase } from './mapLayers'
 
 export type MapAnalyticQueryContext = {
@@ -34,6 +36,7 @@ export type MapLayerMergeContext = {
   nodes: CombinedMapData['nodes']
   edges: MapEdge[]
   overlayCircles: CombinedMapData['overlayCircles']
+  regionOverlays: CombinedMapData['regionOverlays']
   wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances']
   waypointsByKey: Map<string, { x: number; y: number }>
   nuIonStorms: boolean | undefined
@@ -105,6 +108,7 @@ const mapAnalyticRegistry: Record<string, MapAnalyticRegistration> = {
   [CONNECTIONS_ANALYTIC_ID]: connectionsMapAnalytic,
   [STELLAR_CARTOGRAPHY_ANALYTIC_ID]: stellarCartographyMapAnalytic,
   [FLEET_ANALYTIC_ID]: fleetMapAnalytic,
+  [MAP_REGION_DEMO_ANALYTIC_ID]: mapRegionDemoMapAnalytic,
 }
 
 /** Canonical map analytic ids with explicit registry entries. */
@@ -113,6 +117,7 @@ export const REGISTERED_MAP_ANALYTIC_IDS = [
   CONNECTIONS_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
   FLEET_ANALYTIC_ID,
+  MAP_REGION_DEMO_ANALYTIC_ID,
 ] as const satisfies readonly string[]
 
 export type RegisteredMapAnalyticId = (typeof REGISTERED_MAP_ANALYTIC_IDS)[number]

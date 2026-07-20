@@ -13,6 +13,7 @@ import type {
   StellarCartographyOverlayCircle,
 } from "./bffCartographyTypes"
 import { normalizeOverlayCircle } from "./normalizeMapOverlayCircle"
+import { normalizeMapRegionOverlays } from "./normalizeMapRegionOverlay"
 import {
   parseFiniteNumberPair,
   parseJsonFiniteNumber,
@@ -203,6 +204,10 @@ export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
     out.overlayCircles = overlayCircles
       .map(normalizeOverlayCircle)
       .filter((c): c is StellarCartographyOverlayCircle => c != null)
+  }
+  const regionOverlaysRaw = o.regionOverlays ?? o.region_overlays
+  if (Array.isArray(regionOverlaysRaw)) {
+    out.regionOverlays = normalizeMapRegionOverlays(regionOverlaysRaw)
   }
   const metaRaw = o.meta
   const meta = normalizeMapMeta(metaRaw)

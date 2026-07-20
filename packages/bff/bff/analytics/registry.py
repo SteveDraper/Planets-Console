@@ -7,7 +7,7 @@ from bff.analytics.descriptor import AnalyticDescriptor
 from bff.analytics.models import ConnectionsMapQuery, CoreAnalyticsLoader, TurnScope
 from bff.errors import BFFValidationError
 
-from . import base_map, connections, fleet, scores, stellar_cartography
+from . import base_map, connections, fleet, map_region_demo, scores, stellar_cartography
 
 _BFF_DESCRIPTORS_BY_ID: dict[str, AnalyticDescriptor] = {
     base_map.DESCRIPTOR.id: base_map.DESCRIPTOR,
@@ -15,6 +15,7 @@ _BFF_DESCRIPTORS_BY_ID: dict[str, AnalyticDescriptor] = {
     connections.DESCRIPTOR.id: connections.DESCRIPTOR,
     stellar_cartography.DESCRIPTOR.id: stellar_cartography.DESCRIPTOR,
     fleet.DESCRIPTOR.id: fleet.DESCRIPTOR,
+    map_region_demo.DESCRIPTOR.id: map_region_demo.DESCRIPTOR,
 }
 
 

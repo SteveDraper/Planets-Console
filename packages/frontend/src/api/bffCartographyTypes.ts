@@ -4,6 +4,9 @@
  */
 
 import type { components } from './schema-games'
+import type { MapRegionOverlay } from './mapRegionOverlayTypes'
+
+export type { MapRegionOverlay } from './mapRegionOverlayTypes'
 
 /** Game map cell coordinates from OpenAPI `MapCellModel`. */
 export type MapCell = components['schemas']['MapCellModel']
@@ -175,6 +178,8 @@ export type MapDataResponse = {
   edges: MapEdge[]
   routes?: PlanetPairRoute[]
   overlayCircles?: StellarCartographyOverlayCircle[]
+  /** Hybrid shaded regions (disks + nebula-local patches); not cartography circles. */
+  regionOverlays?: MapRegionOverlay[]
   meta?: {
     nebulae?: number
     ionStorms?: number
@@ -204,6 +209,8 @@ export type CombinedMapData = {
   routeWaypoints: RouteMapWaypoint[]
   /** Unfiltered merged Stellar Cartography disc overlays; visibility applied at render time. */
   overlayCircles: StellarCartographyOverlayCircle[]
+  /** Merged hybrid map region overlays (disks + nebula-local patches). */
+  regionOverlays: MapRegionOverlay[]
   /** Wormhole entrances with unknown targets (6px sky dots). */
   wormholeUnknownEntrances: WormholeUnknownEntrance[]
   /** Stellar Cartography ion storm mode from turn settings (`nuionstorms`). */

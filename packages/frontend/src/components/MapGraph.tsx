@@ -28,6 +28,7 @@ import { clientToFlowPosition } from './map-graph/geometry'
 import { nodeTypes, toFlowNodes } from './map-graph/nodes'
 import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
+import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
 import {
   WormholeInteractionProvider,
   useWormholeInteractionState,
@@ -209,6 +210,7 @@ function MapGraphFlow({
           nuIonStorms={data.nuIonStorms}
         />
       ) : null}
+      <MapRegionOverlayPane regionOverlays={data.regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <FixedSizeDotsOverlay
         planetGrid={planetGrid}

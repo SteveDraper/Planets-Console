@@ -5,6 +5,7 @@ export const sampleMap: CombinedMapData = {
   edges: [],
   routeWaypoints: [],
   overlayCircles: [],
+  regionOverlays: [],
   wormholeUnknownEntrances: [],
 }
 
