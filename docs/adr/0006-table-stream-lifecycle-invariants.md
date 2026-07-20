@@ -63,10 +63,11 @@ Shell + admission + cancel seal + session token cancel go only through `apply_sc
 
 ### 5. Soft park wake
 
-Soft park wake is **scores-owned** (`wake_if_parked` / `ScoresWakeReason` coordination in scores compute orchestration).
+Soft park wake is **scores-owned** (`wake_if_parked` / `ScoresWakeReason` coordination in scores compute orchestration via `wake_scores_scope`).
 
 - The orchestrator does **not** demand-wake or ENSURE-ancestor auto-wake parked nodes.
 - Soft provisional / pending-wire upgrade is stream policy, not DAG state.
+- **Justified non-`wake_scores_scope` reopen:** when fleet persist refuses for open turn evidence, it raises `PersistDependencyRecovery(force_fresh=True)` on the scores scope. Orchestrator persist-deferred recovery then `submit`s that scope with `force_fresh=True`, which wakes parked (and absent / terminal) nodes. Fleet must **not** also call `wake_scores_scope` for the same reopen -- that would be a second encoding of one policy. Details: [design-compute-orchestrator.md](../design-compute-orchestrator.md) (park / PersistDeferred section).
 
 ### 6. Overlay / observation locks stay out of lifecycle PRs
 
