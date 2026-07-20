@@ -27,11 +27,10 @@ import {
   streamingLoadAllActivity,
   type LoadAllActivity,
 } from './loadAllActivity'
+import { reportCredentialSensitiveFailure } from './reportCredentialSensitiveFailure'
 
 export type UseShellGameSelectionOptions = {
   reportShellError: (message: string) => void
-  /** When true, load-all/refresh onError skips the shell error bar (modal handles it). */
-  reportCredentialSensitiveFailure?: (err: unknown) => boolean
 }
 
 export type LoadAllTurnsVars = {
@@ -54,7 +53,6 @@ function reportLoadAllFailure(
 /** Game refresh, load-all (header or on commit), and a single activity model for the shell. */
 export function useShellGameSelection({
   reportShellError,
-  reportCredentialSensitiveFailure,
 }: UseShellGameSelectionOptions) {
   const queryClient = useQueryClient()
   const loginName = useSessionStore((s) => s.name)
@@ -88,7 +86,7 @@ export function useShellGameSelection({
       invalidateShellGameQueries(queryClient, vars.gameId)
     },
     onError: (err) => {
-      if (reportCredentialSensitiveFailure?.(err)) {
+      if (reportCredentialSensitiveFailure(err)) {
         return
       }
       const message =
@@ -155,7 +153,7 @@ export function useShellGameSelection({
       invalidateShellGameQueries(queryClient, vars.gameId)
     },
     onError: (err) => {
-      if (reportCredentialSensitiveFailure?.(err)) {
+      if (reportCredentialSensitiveFailure(err)) {
         return
       }
       const message =

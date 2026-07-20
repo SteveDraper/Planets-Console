@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { isCredentialRequiredError } from '../api/bffHttpError'
-import { useSessionStore } from '../stores/session'
+import { useCallback, useEffect, useRef } from 'react'
+import {
+  reportCredentialSensitiveFailure,
+  useCredentialRequiredLoginStore,
+} from './reportCredentialSensitiveFailure'
 import {
   useSilentLoginRestore,
   type SilentLoginRestoreStatus,
@@ -32,8 +34,6 @@ export function useIdentityLifecycle({
   forceLoginModalOpen: boolean
   clearForceLoginModalOpen: () => void
   handleIdentityEstablished: () => void
-  /** Clear session + open login modal when err is credential-required; else false. */
-  reportCredentialSensitiveFailure: (err: unknown) => boolean
 } {
   const {
     status: silentLoginStatus,
@@ -41,22 +41,11 @@ export function useIdentityLifecycle({
     clearShouldOpenLoginModal,
   } = useSilentLoginRestore(shellStoreHydrated)
 
-  const [authFailureLoginModal, setAuthFailureLoginModal] = useState(false)
-
-  const openLoginModalForCredentialFailure = useCallback(() => {
-    useSessionStore.getState().clearSession()
-    setAuthFailureLoginModal(true)
-  }, [])
-
-  const reportCredentialSensitiveFailure = useCallback(
-    (err: unknown): boolean => {
-      if (!isCredentialRequiredError(err)) {
-        return false
-      }
-      openLoginModalForCredentialFailure()
-      return true
-    },
-    [openLoginModalForCredentialFailure]
+  const credentialRequiredForceLogin = useCredentialRequiredLoginStore(
+    (s) => s.forceLoginModal
+  )
+  const clearCredentialRequiredForceLogin = useCredentialRequiredLoginStore(
+    (s) => s.clearForceLoginModal
   )
 
   const didSilentUnfinishedRefreshRef = useRef(false)
@@ -76,7 +65,7 @@ export function useIdentityLifecycle({
   useEffect(() => {
     if (!turnEnsureIsError || turnEnsureError == null) return
     reportCredentialSensitiveFailure(turnEnsureError)
-  }, [turnEnsureIsError, turnEnsureError, reportCredentialSensitiveFailure])
+  }, [turnEnsureIsError, turnEnsureError])
 
   const handleIdentityEstablished = useCallback(() => {
     refreshUnfinishedSelectedGame()
@@ -84,14 +73,13 @@ export function useIdentityLifecycle({
 
   const clearForceLoginModalOpen = useCallback(() => {
     clearShouldOpenLoginModal()
-    setAuthFailureLoginModal(false)
-  }, [clearShouldOpenLoginModal])
+    clearCredentialRequiredForceLogin()
+  }, [clearShouldOpenLoginModal, clearCredentialRequiredForceLogin])
 
   return {
     silentLoginStatus,
-    forceLoginModalOpen: shouldOpenLoginModal || authFailureLoginModal,
+    forceLoginModalOpen: shouldOpenLoginModal || credentialRequiredForceLogin,
     clearForceLoginModalOpen,
     handleIdentityEstablished,
-    reportCredentialSensitiveFailure,
   }
 }

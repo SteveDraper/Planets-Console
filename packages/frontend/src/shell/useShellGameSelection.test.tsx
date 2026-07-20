@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { BffHttpError } from '../api/bffHttpError'
 import { useShellGameSelection } from './useShellGameSelection'
+import { useCredentialRequiredLoginStore } from './reportCredentialSensitiveFailure'
 import { useShellStore } from '../stores/shell'
 import { useSessionStore } from '../stores/session'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
@@ -47,6 +49,7 @@ describe('useShellGameSelection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useSessionStore.setState({ name: 'Alice', password: 'secret', credentialsRevision: 1 })
+    useCredentialRequiredLoginStore.getState().clearForceLoginModal()
     useShellStore.setState({
       selectedGameId: '99',
       gameInfoContext: {
@@ -177,6 +180,27 @@ describe('useShellGameSelection', () => {
         expect.any(Function)
       )
     })
+  })
+
+  it('on load-all 401 clears session, requests login modal, and skips shell error', async () => {
+    vi.mocked(loadAllTurnsWithProgress).mockRejectedValue(
+      new BffHttpError(401, 'Login credentials are required.', 'POST /load-all')
+    )
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useShellGameSelection({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await act(async () => {
+      result.current.handleLoadAllTurns()
+    })
+
+    await waitFor(() => {
+      expect(useSessionStore.getState().name).toBeNull()
+      expect(useCredentialRequiredLoginStore.getState().forceLoginModal).toBe(true)
+    })
+    expect(reportShellError).not.toHaveBeenCalled()
   })
 
   it('reports shell error when final turn load fails for some perspectives', async () => {

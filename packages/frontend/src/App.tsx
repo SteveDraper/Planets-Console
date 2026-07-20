@@ -90,10 +90,6 @@ function ConsoleShell() {
     stepTurn,
   } = useShellContext({ reportShellError: addShellError })
 
-  const reportCredentialSensitiveFailureRef = useRef<(err: unknown) => boolean>(
-    () => false
-  )
-
   const {
     loadAllProgress,
     handleCommitGameSelection,
@@ -104,8 +100,6 @@ function ConsoleShell() {
     refreshUnfinishedSelectedGame,
   } = useShellGameSelection({
     reportShellError: addShellError,
-    reportCredentialSensitiveFailure: (err) =>
-      reportCredentialSensitiveFailureRef.current(err),
   })
 
   const shellStoreHydrated = usePersistStoreHydrated(useShellStore)
@@ -113,7 +107,6 @@ function ConsoleShell() {
     forceLoginModalOpen,
     clearForceLoginModalOpen,
     handleIdentityEstablished,
-    reportCredentialSensitiveFailure,
   } = useIdentityLifecycle({
     shellStoreHydrated,
     selectedGameId,
@@ -122,7 +115,6 @@ function ConsoleShell() {
     turnEnsureIsError,
     turnEnsureError,
   })
-  reportCredentialSensitiveFailureRef.current = reportCredentialSensitiveFailure
 
   const prevLoginNameRef = useRef<string | null | undefined>(undefined)
   useEffect(() => {

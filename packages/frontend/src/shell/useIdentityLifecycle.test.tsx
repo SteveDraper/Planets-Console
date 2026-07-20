@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { renderHook, waitFor, act } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import { BffHttpError } from '../api/bffHttpError'
 import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../lib/rememberedLoginUsername'
 import { useSessionStore } from '../stores/session'
+import { useCredentialRequiredLoginStore } from './reportCredentialSensitiveFailure'
 import { useIdentityLifecycle } from './useIdentityLifecycle'
 import { probeCredentials } from '../api/credentialsClient'
 
@@ -15,6 +16,7 @@ describe('useIdentityLifecycle', () => {
 
   beforeEach(() => {
     useSessionStore.getState().clearSession()
+    useCredentialRequiredLoginStore.getState().clearForceLoginModal()
     localStorage.clear()
     refreshUnfinishedSelectedGame.mockReset()
     vi.mocked(probeCredentials).mockReset()
@@ -46,52 +48,29 @@ describe('useIdentityLifecycle', () => {
     expect(useSessionStore.getState().name).toBeNull()
   })
 
-  it('reportCredentialSensitiveFailure handles load-all 401', async () => {
+  it('ignores non-401 turn-ensure errors', async () => {
     useSessionStore.getState().adoptLoginName('Alice')
-    const { result } = renderHook(() =>
-      useIdentityLifecycle({
-        shellStoreHydrated: true,
-        selectedGameId: null,
-        isGameFinished: null,
-        refreshUnfinishedSelectedGame,
-        turnEnsureIsError: false,
-        turnEnsureError: null,
-      })
+    const { result, rerender } = renderHook(
+      (props: { turnEnsureIsError: boolean; turnEnsureError: unknown }) =>
+        useIdentityLifecycle({
+          shellStoreHydrated: true,
+          selectedGameId: null,
+          isGameFinished: null,
+          refreshUnfinishedSelectedGame,
+          turnEnsureIsError: props.turnEnsureIsError,
+          turnEnsureError: props.turnEnsureError,
+        }),
+      { initialProps: { turnEnsureIsError: false, turnEnsureError: null as unknown } }
     )
 
     await waitFor(() => expect(result.current.silentLoginStatus).toBe('skipped'))
 
-    let handled = false
-    act(() => {
-      handled = result.current.reportCredentialSensitiveFailure(
-        new BffHttpError(401, 'Login credentials are required.', 'POST /load-all')
-      )
+    rerender({
+      turnEnsureIsError: true,
+      turnEnsureError: new Error('Load failed'),
     })
-    expect(handled).toBe(true)
-    expect(result.current.forceLoginModalOpen).toBe(true)
-    expect(useSessionStore.getState().name).toBeNull()
-  })
-
-  it('ignores non-401 errors', async () => {
-    useSessionStore.getState().adoptLoginName('Alice')
-    const { result } = renderHook(() =>
-      useIdentityLifecycle({
-        shellStoreHydrated: true,
-        selectedGameId: null,
-        isGameFinished: null,
-        refreshUnfinishedSelectedGame,
-        turnEnsureIsError: false,
-        turnEnsureError: null,
-      })
-    )
 
     await waitFor(() => expect(result.current.silentLoginStatus).toBe('skipped'))
-
-    let handled = true
-    act(() => {
-      handled = result.current.reportCredentialSensitiveFailure(new Error('Load failed'))
-    })
-    expect(handled).toBe(false)
     expect(result.current.forceLoginModalOpen).toBe(false)
     expect(useSessionStore.getState().name).toBe('Alice')
   })
