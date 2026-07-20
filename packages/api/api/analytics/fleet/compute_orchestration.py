@@ -263,26 +263,31 @@ class FleetPersistencePolicy:
 
         if not persisted.provenance.turn_evidence_at_n:
             # Same-turn scores evidence is still open. Persisting and completing the
-            # fleet node would unlock dependents and park a non-final ledger with no
+            # fleet node would unlock dependents and leave a non-final ledger with no
             # automatic rematerialization (empty scores complete hang fingerprint).
-            # Recovery is owned here: orchestrator only sees PersistDeferredError.
+            # PersistDependencyRecovery.force_fresh is the sole reopen mechanism here:
+            # the orchestrator's persist-deferred recovery submits the scores scope
+            # with force_fresh=True, which wakes parked, absent, and terminal nodes
+            # alike. Do not also call wake_scores_scope for this path -- that would
+            # be a second encoding of the same reopen policy.
             from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
             from api.compute.persistence import PersistDependencyRecovery
             from api.errors import FleetScoresEvidenceOpenError
 
+            scores_scope = ComputeScope(
+                analytic_id=SCORES_ANALYTIC_ID,
+                game_id=scope.game_id,
+                perspective=scope.perspective,
+                turn=scope.turn,
+                player_id=scope.player_id,
+                parameters=scope.parameters,
+            )
             raise FleetScoresEvidenceOpenError(
                 f"fleet persist refused for game {scope.game_id} perspective "
                 f"{scope.perspective} player {scope.player_id} turn {scope.turn}: "
                 "scores turn evidence is not closed",
                 recovery=PersistDependencyRecovery(
-                    dependency_scope=ComputeScope(
-                        analytic_id=SCORES_ANALYTIC_ID,
-                        game_id=scope.game_id,
-                        perspective=scope.perspective,
-                        turn=scope.turn,
-                        player_id=scope.player_id,
-                        parameters=scope.parameters,
-                    ),
+                    dependency_scope=scores_scope,
                     force_fresh=True,
                     step_kind="tier_solve",
                 ),
@@ -327,7 +332,7 @@ class FleetPersistencePolicy:
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return 0
         services = resolve_fleet_services(ctx)
-        return services.persistence.invalidation_generation(
+        return services.persistence.player_invalidation_generation(
             scope.game_id,
             scope.perspective,
             scope.player_id,

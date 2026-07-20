@@ -14,7 +14,6 @@ from api.compute.diagnostics.history import (
 )
 from api.compute.diagnostics.in_flight import InFlightPoolExecution
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.timeline import (
     ComputeConcurrencyTimeline,
     OccupancyGauges,
@@ -23,9 +22,9 @@ from api.compute.diagnostics.timeline import (
     format_execution_key,
     make_concurrency_event,
 )
-from api.compute.orchestrator import ComputeNodeRun
+from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.pools import ComputePriorityBand
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, format_compute_scope_key
 
 
 class ConcurrencyTimelineRecorder:
@@ -48,7 +47,6 @@ class ConcurrencyTimelineRecorder:
         timeline_capacity: Callable[[], int],
         bound_orchestrators: Callable[[], tuple[BoundOrchestrator, ...]],
         in_flight_records: Callable[[], Sequence[InFlightPoolExecution]],
-        global_queue_depth: Callable[[], int],
         configured_workers: Callable[[], int],
         ancestor_turns: Callable[[ShellContextKey], frozenset[int]],
         history_for_shell: Callable[[ShellContextKey], ComputeCompletionHistory],
@@ -57,7 +55,6 @@ class ConcurrencyTimelineRecorder:
         self._timeline_capacity = timeline_capacity
         self._bound_orchestrators = bound_orchestrators
         self._in_flight_records = in_flight_records
-        self._global_queue_depth = global_queue_depth
         self._configured_workers = configured_workers
         self._ancestor_turns = ancestor_turns
         self._history_for_shell = history_for_shell
@@ -67,12 +64,19 @@ class ConcurrencyTimelineRecorder:
         # Per-shell ready depth as sum of per-orchestrator contributions from
         # ready-queue-changed snapshots (complete lifecycle, no ±1 drift).
         self._ready_depth_parts: dict[ShellContextKey, dict[int, int]] = {}
+        # Last depth from enqueue/start (explicit). Listener paths fall back to
+        # this value and must never sample the pool live: workers hold the pool
+        # condition while taking the controller lock in the dequeue predicate /
+        # on_dequeued hooks (ABBA). Live sampling belongs only in snapshot
+        # assembly outside that lock order.
+        self._last_known_global_queue_depth = 0
         self._lock = threading.Lock()
 
     def clear(self) -> None:
         with self._lock:
             self._timelines.clear()
             self._ready_depth_parts.clear()
+            self._last_known_global_queue_depth = 0
         self._open_executions.clear()
 
     def clear_orchestrator_ready_depth(self, orchestrator_id: int) -> None:
@@ -212,19 +216,24 @@ class ConcurrencyTimelineRecorder:
         scope: ComputeScope,
         node: ComputeNodeRun,
         step_kind: str,
+        step_index: int,
         surface: CompletionSurface,
         terminal_state: CompletionTerminalState,
         orchestrator_id: int | None,
         backend: str | None,
         global_queue_depth: int | None = None,
     ) -> None:
-        """One finish sink: timeline complete/inline_complete + completion history."""
+        """One finish sink: timeline complete/inline_complete + completion history.
+
+        ``step_index`` must be the index of the step that finished (captured before
+        any continue that advances ``node.step_index``).
+        """
         scope_key = format_compute_scope_key(scope)
         execution_key = format_execution_key(
             orchestrator_id=orchestrator_id,
             scope_key=scope_key,
             step_kind=step_kind,
-            step_index=node.step_index,
+            step_index=step_index,
         )
         duration_ms, opened_backend = self._open_executions.close(execution_key)
         resolved_backend = backend if backend is not None else opened_backend
@@ -245,7 +254,7 @@ class ConcurrencyTimelineRecorder:
             execution_key=execution_key,
             gauges=gauges,
             step_kind=step_kind,
-            step_index=node.step_index,
+            step_index=step_index,
             priority_band=node.priority_band,
             backend=resolved_backend,
             terminal_state=terminal_state,
@@ -256,10 +265,46 @@ class ConcurrencyTimelineRecorder:
             surface=surface,
             terminal_state=terminal_state,
             step_kind=step_kind,
-            step_index=node.step_index,
+            step_index=step_index,
             priority_band=node.priority_band,
             backend=resolved_backend,
             duration_ms=duration_ms,
+        )
+
+    def record_lifecycle(
+        self,
+        shell: ShellContextKey,
+        *,
+        kind: TimelineEventKind,
+        scope: ComputeScope,
+        orchestrator_id: int | None,
+        step_kind: str | None,
+        step_index: int | None,
+        priority_band: ComputePriorityBand | None = None,
+        detail: dict[str, object] | None = None,
+    ) -> None:
+        """Append a causal lifecycle event (force_fresh / abort / stale pool finish)."""
+        scope_key = format_compute_scope_key(scope)
+        execution_key = format_execution_key(
+            orchestrator_id=orchestrator_id,
+            scope_key=scope_key,
+            step_kind=step_kind or "",
+            step_index=step_index if step_index is not None else -1,
+        )
+        gauges = self._occupancy_gauges(
+            shell,
+            sample_ready_from_orchestrators=False,
+        )
+        self._append(
+            shell,
+            kind=kind,
+            scope_key=scope_key,
+            execution_key=execution_key,
+            gauges=gauges,
+            step_kind=step_kind,
+            step_index=step_index,
+            priority_band=priority_band,
+            detail=detail,
         )
 
     def _timeline_for_shell(self, shell: ShellContextKey) -> ComputeConcurrencyTimeline:
@@ -293,6 +338,13 @@ class ConcurrencyTimelineRecorder:
         ``sample_ready_from_orchestrators`` is true (snapshot assembly only, never
         from drain_post_lock listeners), live orchestrator ready queues are used
         and the cache is refreshed to match.
+
+        Global queue depth must be passed explicitly from enqueue/start (already
+        under or after a pool snapshot) or falls back to the last known value.
+        Listener callbacks must never call into the pool for a live queue depth:
+        workers hold the pool condition while taking the diagnostics controller
+        lock (predicate / on_dequeued), so pool sampling here is controller→pool
+        under drain and ABBA-deadlocks the dequeue path.
         """
         ancestor_turns = self._ancestor_turns(shell)
         if sample_ready_from_orchestrators:
@@ -336,7 +388,9 @@ class ConcurrencyTimelineRecorder:
         )
         global_in_flight = len(in_flight)
         if global_queue_depth is None:
-            global_queue_depth = self._global_queue_depth()
+            global_queue_depth = self._last_known_global_queue_depth
+        else:
+            self._last_known_global_queue_depth = global_queue_depth
         return OccupancyGauges(
             scoped_ready_depth=ready_depth,
             scoped_in_flight_count=scoped_in_flight,
@@ -359,6 +413,7 @@ class ConcurrencyTimelineRecorder:
         backend: str | None = None,
         terminal_state: str | None = None,
         duration_ms: float | None = None,
+        detail: dict[str, object] | None = None,
     ) -> None:
         self._timeline_for_shell(shell).append(
             make_concurrency_event(
@@ -372,5 +427,6 @@ class ConcurrencyTimelineRecorder:
                 backend=backend,
                 terminal_state=terminal_state,
                 duration_ms=duration_ms,
+                detail=detail,
             )
         )

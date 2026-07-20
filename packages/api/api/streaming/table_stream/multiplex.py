@@ -8,6 +8,8 @@ import time
 from collections.abc import Callable, Iterator
 from typing import Protocol, TypeVar
 
+from api.streaming.table_stream import stream_drain
+
 _DEFAULT_MULTIPLEX_WAIT_SECONDS = 0.05
 
 
@@ -29,7 +31,6 @@ def drain_available_multiplex_events(
     rows: tuple[ScheduledStreamRow[EventT], ...],
     *,
     tag_player_id: bool,
-    finished_run_ids: set[str],
     event_to_wire_events: Callable[
         [ScheduledStreamRow[EventT], EventT],
         Iterator[dict[str, object]],
@@ -39,7 +40,7 @@ def drain_available_multiplex_events(
 ) -> Iterator[dict[str, object]]:
     """Yield any events already queued without blocking."""
     for row in rows:
-        if row.session.run_id in finished_run_ids:
+        if stream_drain.is_closed(row.session.run_id):
             continue
         while True:
             try:
@@ -50,7 +51,7 @@ def drain_available_multiplex_events(
                 if tag_player_id and tag_event is not None:
                     event = tag_event(event, row.player_id)
                 if event.get("type") in terminal_types:
-                    finished_run_ids.add(row.session.run_id)
+                    stream_drain.close(row.session.run_id)
                 yield event
 
 
@@ -58,7 +59,6 @@ def iter_multiplexed_stream_events(
     rows: tuple[ScheduledStreamRow[EventT], ...],
     *,
     tag_player_id: bool,
-    finished_run_ids: set[str] | None = None,
     is_stream_active: Callable[[], bool] | None = None,
     row_provider: Callable[[], tuple[ScheduledStreamRow[EventT], ...]] | None = None,
     pending_events_provider: Callable[[], list[dict[str, object]]] | None = None,
@@ -77,7 +77,6 @@ def iter_multiplexed_stream_events(
     while the table stream remains active so in-place row reschedule can enqueue work
     after every row has already reached a terminal event.
     """
-    finished = finished_run_ids if finished_run_ids is not None else set()
 
     def active_rows() -> tuple[ScheduledStreamRow[EventT], ...]:
         if row_provider is not None:
@@ -94,15 +93,20 @@ def iter_multiplexed_stream_events(
     def finish_cancelled_run(row: ScheduledStreamRow[EventT]) -> None:
         if session_is_cancelled(row.session):
             pending_run_ids.discard(row.session.run_id)
-            finished.add(row.session.run_id)
+            # Token-observed cancel seal (generic path for any analytic). Sole
+            # operation is stream_drain.seal_canceled; scores
+            # apply_scores_row_lifecycle(CANCEL) may already have sealed the
+            # same run (idempotent no-op here).
+            stream_drain.seal_canceled(row.session.run_id)
 
     def refresh_pending_run_ids() -> set[str]:
         pending: set[str] = set()
         for row in active_rows():
-            if row.session.run_id in finished:
+            if stream_drain.is_closed(row.session.run_id):
                 continue
             if session_is_cancelled(row.session):
-                finished.add(row.session.run_id)
+                # Same token-observed seal as finish_cancelled_run.
+                stream_drain.seal_canceled(row.session.run_id)
                 continue
             pending.add(row.session.run_id)
         return pending
@@ -164,10 +168,10 @@ def iter_multiplexed_stream_events(
             if event.get("type") in terminal_types:
                 # Must mirror drain_available_multiplex_events: discard alone is not
                 # enough. With is_stream_active, refresh_pending_run_ids rebuilds from
-                # finished_run_ids; omitting finished.add leaves rows pending forever
+                # multiplex_closed; omitting close leaves rows pending forever
                 # (serverStreams linger, idle CPU -- manual hang fingerprint).
                 pending_run_ids.discard(row.session.run_id)
-                finished.add(row.session.run_id)
+                stream_drain.close(row.session.run_id)
             if tag_player_id and tag_event is not None:
                 yield tag_event(event, row.player_id)
             else:

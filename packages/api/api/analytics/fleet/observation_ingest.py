@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import replace
 
 from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
+from api.analytics.fleet.observation_option_locks import (
+    LockFilterEmptyPolicy,
+    observation_locks_from_option_set,
+    resolve_option_sets_respecting_locks,
+)
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import (
@@ -174,7 +178,9 @@ def _apply_observed_option_set(
 
     Full-information sightings replace any prior sets with the single confirmed fit.
     Partial sightings only lock positively observed axes onto existing inferred
-    alternates (or seed a hull-centric set when none exist yet).
+    alternates that already match the observed hull (or seed a hull-centric set
+    when none exist / none match). Never rewrite a foreign hull id onto a
+    Deep-Space-Scout-style fit -- that produced Falcon rows with 4 X-Rays.
     """
     if full_information:
         record.build_option_sets = [observed_option_set]
@@ -184,31 +190,15 @@ def _apply_observed_option_set(
         record.build_option_sets = [observed_option_set]
         record.display_default_option_set_index = 0
         return
-    record.build_option_sets = [
-        _merge_option_set_observation_locks(existing, observed_option_set)
-        for existing in record.build_option_sets
-    ]
-
-
-def _merge_option_set_observation_locks(
-    existing: FleetBuildOptionSet,
-    observed: FleetBuildOptionSet,
-) -> FleetBuildOptionSet:
-    return replace(
-        existing,
-        hull_id=observed.hull_id if observed.hull_id is not None else existing.hull_id,
-        engine_id=observed.engine_id if observed.engine_id is not None else existing.engine_id,
-        beam_id=observed.beam_id if observed.beam_id is not None else existing.beam_id,
-        torp_id=observed.torp_id if observed.torp_id is not None else existing.torp_id,
-        beam_count=(
-            observed.beam_count if observed.beam_count is not None else existing.beam_count
-        ),
-        launcher_count=(
-            observed.launcher_count
-            if observed.launcher_count is not None
-            else existing.launcher_count
-        ),
+    locks = observation_locks_from_option_set(observed_option_set)
+    resolved = resolve_option_sets_respecting_locks(
+        record.build_option_sets,
+        locks,
+        on_empty=LockFilterEmptyPolicy.SEED,
+        seed=observed_option_set,
     )
+    record.build_option_sets = list(resolved)
+    record.display_default_option_set_index = 0
 
 
 def _find_active_record_for_ship(

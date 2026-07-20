@@ -18,6 +18,7 @@ from api.compute.scope import (
     ScopeKeySpec,
     compute_scope_to_export_scope,
     fingerprint_parameters,
+    format_compute_scope_key,
     normalize_export_scope_to_compute_scope,
 )
 from api.compute.wire import (
@@ -128,6 +129,7 @@ __all__ = [
     "configured_worker_count",
     "dequeue_next_work_item",
     "fingerprint_parameters",
+    "format_compute_scope_key",
     "get_compute_worker_pool",
     "normalize_export_scope_to_compute_scope",
     "plan_compute_dag",

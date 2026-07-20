@@ -657,12 +657,10 @@ def test_drain_available_multiplex_events_returns_queued_events_without_blocking
     )
     session.event_queue.put(fleet_complete_event(is_final=True, summary="ok"))
     row = ScheduledFleetPlayer(player_id=8, session=session)
-    finished: set[str] = set()
     events = list(
         drain_available_multiplex_events(
             (row,),
             tag_player_id=True,
-            finished_run_ids=finished,
         )
     )
     assert len(events) == 1
@@ -687,7 +685,7 @@ def test_orchestrator_node_complete_emits_complete_after_progress_when_session_c
     )
     from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
     from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
-    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
     from api.compute.scope import ComputeScope
 
     turn_110 = load_turn(110)
@@ -741,15 +739,15 @@ def test_orchestrator_node_complete_emits_complete_after_progress_when_session_c
         progress_tracker=progress_tracker,
         root_scope=scope,
     )
-    scheduler._on_orchestrator_node_complete(
-        scope,
-        ComputeNodeRun(
+    scheduler._on_orchestrator_scope_outcome(
+        ScopeLifecycleSnapshot(
             scope=scope,
-            dependency_scopes=(),
             state="complete",
+            execution_generation=0,
             result_wire={
                 "persistedLedgerWire": persisted_fleet_ledger_to_json(final_persisted),
             },
+            error=None,
         ),
     )
 
@@ -781,7 +779,7 @@ def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
     )
     from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
     from api.analytics.options import TurnAnalyticsOptions
-    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
     from api.compute.scope import ComputeScope
 
     turn = load_turn(112)
@@ -844,13 +842,13 @@ def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
         progress_tracker=progress_tracker,
         root_scope=scope,
     )
-    scheduler._on_orchestrator_node_complete(
-        scope,
-        ComputeNodeRun(
+    scheduler._on_orchestrator_scope_outcome(
+        ScopeLifecycleSnapshot(
             scope=scope,
-            dependency_scopes=(),
             state="complete",
+            execution_generation=0,
             result_wire={},
+            error=None,
         ),
     )
 

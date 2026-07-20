@@ -135,7 +135,7 @@ def test_schedule_inference_row_ignores_stale_stream_token_after_scope_end(sampl
     )
     assert active_row is not None
 
-    scheduler.end_inference_stream(scope, (active_row.session,), stream_token=first_token)
+    scheduler.detach_inference_stream(scope, (active_row.session,), stream_token=first_token)
     scheduler.begin_scope(scope)
 
     stale_row = schedule_inference_row(
@@ -148,7 +148,7 @@ def test_schedule_inference_row_ignores_stale_stream_token_after_scope_end(sampl
         stream_token=first_token,
     )
     assert stale_row is None
-    assert active_row.session.cancel_token.is_cancelled()
+    assert not active_row.session.cancel_token.is_cancelled()
 
 
 def test_table_stream_reconnect_preempts_in_flight_rows_for_same_scope(sample_turn):
@@ -178,7 +178,9 @@ def test_table_stream_reconnect_preempts_in_flight_rows_for_same_scope(sample_tu
 
     assert not scheduler.owns_table_stream(stream_token)
     for session in sessions:
-        assert session.cancel_token.is_cancelled()
+        # Reconnect detach must not cancel solve tokens (persist may still write).
+        assert not session.cancel_token.is_cancelled()
+        assert session.run_id not in scheduler._runs
 
 
 def test_tag_inference_stream_event_adds_player_id_except_global_pause():
@@ -206,12 +208,10 @@ def test_drain_available_multiplex_events_returns_queued_events_without_blocking
         )
         rows.append(ScheduledInferenceRow(player_id=player_id, session=session))
 
-    finished: set[str] = set()
     events = list(
         drain_available_multiplex_events(
             (rows[0],),
             tag_player_id=True,
-            finished_run_ids=finished,
         )
     )
     assert len(events) == 1
@@ -293,8 +293,17 @@ def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
                             profile_step_index=1,
                         ),
                     },
-                    "register_dispatch_gate": lambda _gate: lambda: None,
+                    "observers": type(
+                        "FakeObservers",
+                        (),
+                        {"register_dispatch_gate": lambda _self, _gate: lambda: None},
+                    )(),
                     "dispatch_ready_work": lambda: None,
+                    "peek_ready_step_indexes": lambda self, scopes: {
+                        scope: node.step_index
+                        for scope, node in self.nodes.items()
+                        if scope in scopes and node.state == "ready"
+                    },
                 },
             )(),
             "unregister_dispatch_gate": None,

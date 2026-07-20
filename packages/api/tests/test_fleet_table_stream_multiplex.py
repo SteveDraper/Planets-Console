@@ -24,15 +24,20 @@ from api.transport.fleet_table_stream import (
 )
 
 
+class _AdmitOnlyObservers:
+    def register_scope_outcome_listener(self, listener):
+        return lambda: None
+
+
 class _AdmitOnlyOrchestrator:
     """Orchestrator stand-in: enqueue registers sessions; submit starts no work."""
+
+    def __init__(self) -> None:
+        self.observers = _AdmitOnlyObservers()
 
     def submit(self, request: ComputeRequest) -> ComputeHandle:
         node = ComputeNodeRun(scope=request.scope, dependency_scopes=())
         return ComputeHandle(scope=request.scope, _node=node)
-
-    def register_node_complete_listener(self, listener):
-        return lambda: None
 
 
 def _install_admit_only_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:

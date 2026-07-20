@@ -288,6 +288,7 @@ def _ensure_admit_inference_row(
         # ScoresPersistencePolicy.is_satisfied) agrees with ensure -- ephemeral
         # alone cannot close turnEvidenceAtN.
         _persist_immediate_row_admission(services, scope, admission)
+        _wake_parked_scores_after_evidence_close(ctx, scope)
         return True
 
     inputs = _scores_row_ensure_inputs(services, scope, turn)
@@ -321,6 +322,30 @@ def _ensure_admit_inference_row(
         stream_token=inputs.stream_token,
     )
     return True
+
+
+def _wake_parked_scores_after_evidence_close(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> None:
+    """force_fresh wake soft-parked scores after cheap admit closes turn evidence."""
+    if scope.player_id is None:
+        return
+    from api.analytics.scores.compute_orchestration import wake_scores_scope
+    from api.analytics.scores_park_wake import ScoresWakeReason
+    from api.compute.scope import ComputeScope
+
+    wake_scores_scope(
+        ComputeScope(
+            analytic_id=ANALYTIC_ID,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=scope.turn,
+            player_id=scope.player_id,
+        ),
+        ctx=ctx,
+        reason=ScoresWakeReason.EVIDENCE_CLOSED,
+    )
 
 
 def _persist_immediate_row_admission(

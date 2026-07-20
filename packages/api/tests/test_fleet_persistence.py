@@ -318,10 +318,10 @@ def test_invalidate_for_turn_write_drops_snapshots_at_and_after_turn(persistence
                 players=[FleetAcquisitionLedger(player_id=8)],
             ),
         )
-    assert persistence.invalidation_generation(628580, 1, 8) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 0
     cleared = persistence.invalidate_for_turn_write(628580, 1, 111)
     assert cleared == {111, 112}
-    assert persistence.invalidation_generation(628580, 1, 8) == 1
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 1
     assert persistence.get_snapshot(628580, 1, 110) is not None
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.get_snapshot(628580, 1, 112) is None
@@ -345,12 +345,12 @@ def test_invalidate_player_ledgers_from_turn_drops_only_target_player(persistenc
             3,
             PersistedFleetLedger(ledger=player_3),
         )
-    assert persistence.invalidation_generation(628580, 1, 8) == 0
-    assert persistence.invalidation_generation(628580, 1, 3) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 3) == 0
     cleared = persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8)
     assert cleared == {111, 112}
-    assert persistence.invalidation_generation(628580, 1, 8) == 1
-    assert persistence.invalidation_generation(628580, 1, 3) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 1
+    assert persistence.player_invalidation_generation(628580, 1, 3) == 0
     assert persistence.get_ledger(628580, 1, 110, 8) is not None
     assert persistence.get_ledger(628580, 1, 110, 3) is not None
     assert persistence.get_ledger(628580, 1, 111, 8) is None
@@ -379,11 +379,40 @@ def test_invalidation_bumps_epoch_for_target_player_only(persistence):
             PersistedFleetLedger(ledger=player_3),
         )
 
-    assert persistence.invalidation_generation(628580, 1, 8) == 0
-    assert persistence.invalidation_generation(628580, 1, 3) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 3) == 0
     persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8)
-    assert persistence.invalidation_generation(628580, 1, 8) == 1
-    assert persistence.invalidation_generation(628580, 1, 3) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 1
+    assert persistence.player_invalidation_generation(628580, 1, 3) == 0
+
+
+def test_player_scoped_and_turn_scoped_invalidation_generations_are_independent(persistence):
+    """Player-wide and turn-scoped fleet epochs bump on distinct keys via the combined API."""
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 0
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == 0
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 0
+
+    persistence.bump_player_and_turn_invalidations(628580, 1, 8, turns=())
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 1
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == 0
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 0
+
+    persistence.bump_player_and_turn_invalidations(628580, 1, 8, turns=(4,))
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 2
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == 1
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 0
+
+    persistence.put_ledger(
+        628580,
+        1,
+        5,
+        8,
+        PersistedFleetLedger(ledger=FleetAcquisitionLedger(player_id=8)),
+    )
+    persistence.invalidate_player_ledgers_from_turn(628580, 1, 5, 8)
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 3
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == 1
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 1
 
 
 def test_turn_document_replace_bumps_all_player_epochs(persistence):
@@ -406,12 +435,12 @@ def test_turn_document_replace_bumps_all_player_epochs(persistence):
             PersistedFleetLedger(ledger=player_3),
         )
 
-    assert persistence.invalidation_generation(628580, 1, 8) == 0
-    assert persistence.invalidation_generation(628580, 1, 3) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 0
+    assert persistence.player_invalidation_generation(628580, 1, 3) == 0
     cleared = persistence.invalidate_for_turn_write(628580, 1, 111)
     assert cleared == {111, 112}
-    assert persistence.invalidation_generation(628580, 1, 8) == 1
-    assert persistence.invalidation_generation(628580, 1, 3) == 1
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 1
+    assert persistence.player_invalidation_generation(628580, 1, 3) == 1
     assert persistence.get_ledger(628580, 1, 110, 8) is not None
     assert persistence.get_ledger(628580, 1, 110, 3) is not None
 
@@ -704,7 +733,7 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
         original_put_ledger(*args, **kwargs)
         player_id = args[3]
         put_records.append(
-            (player_id, persistence.invalidation_generation(628580, 1, player_id)),
+            (player_id, persistence.player_invalidation_generation(628580, 1, player_id)),
         )
         if len(put_records) == 1:
             sync.wait()
@@ -888,7 +917,7 @@ def test_gap_fill_aborts_on_mid_chain_invalidation_without_spin(persistence, loa
 
     assert persistence.get_snapshot(628580, 1, 111) is None
     # One coherent attempt bumps generation once via the hooked put -- not N spins.
-    assert persistence.invalidation_generation(628580, 1, first_player_id) == 1
+    assert persistence.player_invalidation_generation(628580, 1, first_player_id) == 1
 
 
 def test_gap_fill_succeeds_on_retry_after_invalidation_stops(persistence, load_turn):
@@ -1166,12 +1195,12 @@ def test_stale_materialization_version_is_deleted_on_read(persistence, load_turn
         stale_payload,
     )
     first_player_id = snapshot.players[0].player_id
-    generation_before = persistence.invalidation_generation(628580, 1, first_player_id)
+    generation_before = persistence.player_invalidation_generation(628580, 1, first_player_id)
 
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.has_snapshot(628580, 1, 111) is False
     for player_ledger in snapshot.players:
-        assert persistence.invalidation_generation(628580, 1, player_ledger.player_id) == (
+        assert persistence.player_invalidation_generation(628580, 1, player_ledger.player_id) == (
             generation_before + 1
         )
 

@@ -15,8 +15,13 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 | `multiplex.py` | Generic round-robin drain over per-row `event_queue`, `is_stream_active`, `wake_event`, terminal-type predicate |
 | `scope_guard.py` | `TableStreamScopeGuard` composed into both schedulers (`begin_scope`, `owns_table_stream`, `end_table_stream`) |
 | `registry.py` | Generic scope-keyed controller registry (attach/detach, in-place reschedule lookup) |
-| `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, `finished_run_ids`, scheduled-row map) |
+| `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, scheduled-row map) |
 | `connect.py` | `iter_table_stream_connect` / `iter_table_stream_connect_with_scope` with guaranteed `finally` scope teardown |
+| `row_stream_resolution.py` | Analytic-independent row terminal FSM (`OPEN` / `SOFT_PROVISIONAL` / `HARD_TERMINAL` / `CANCELED`) plus `multiplex_closed` drain bit |
+| `row_stream_resolution_registry.py` | Process-wide FIFO-bounded resolution table; stores delivery state + `multiplex_closed` (not a public drain write API) |
+| `row_run_admission.py` | Generic stream-row vocabulary: retained-shell phase (`RowRunPhase`), registry-internal persist admission (`PersistAdmission`), lifecycle ops (`RowLifecycleOp`); detach≠cancel for any table-stream analytic -- not scores-private; multi-step tier DAG stays in `compute/` |
+| `terminal_route.py` | `route_terminal(delivery, run_id)` → queue / pending / silence (reads drain-closed via `stream_drain.is_closed`) |
+| `stream_drain.py` | Sole public writer/reader facade over `multiplex_closed` (`close` / `reopen_if_soft` / `is_closed` / `seal_canceled`); cancel silence is `seal_canceled` (FSM `CANCELED` + drain closed) |
 
 Per-analytic code keeps:
 
@@ -25,6 +30,10 @@ Per-analytic code keeps:
 - Admission resolution (`ImmediateRowAdmission`, cached-complete, schedule)
 - Invalidation policy wiring
 - Thin `*ConnectPolicy` dataclass implementing `TableStreamConnectPolicy`
+- Soft-stream **triggers** and park-reason policy (scores only); fleet never fires soft provisional
+- Scores shell registry + production persist gate + lifecycle applicator (`tier_row_run_registry.decide_scores_row_persist`, `PersistDecision`, `apply_scores_row_lifecycle`) -- instances of the generic stream-row pattern, not parallel ownership stories. Ownership invariants (cancel memory, sole drain ledger, persist plan, wake, fleet cancel asymmetry): [ADR 0006](0006-table-stream-lifecycle-invariants.md).
+
+`multiplex_closed` on the process-wide resolution registry is the sole drain-closed source of truth. Sole **public** drain API is `stream_drain` -- adapters and analytics must not call registry-private `_mark_multiplex_closed` / `_seal_canceled_finish` helpers. Multiplex skip/pending rebuild and `route_terminal` read via `stream_drain.is_closed`. UUID run ids are never reused, so closed bits remain as routing history; soft reopen clears the bit only while still `SOFT_PROVISIONAL` (`stream_drain.reopen_if_soft`). Cancel silence is one operation (`stream_drain.seal_canceled`: FSM `CANCELED` + drain closed) with two justified callers -- multiplex (generic token-observed seal for any analytic) and scores `apply_scores_row_lifecycle(CANCEL)` (immediate seal when cancel is applied). A second seal is a no-op. Adapters must not keep a parallel finished set -- use `stream_drain.close` / `route_terminal`. Soft provisional is a shared FSM capability; only scores supplies soft triggers today. Cancel is never a retained shell phase (`RowRunPhase` is `REGISTERED` / `DETACHED` only; cancel uses `PersistAdmission.CANCEL_DENY`). Fleet cancel remains token-only (ADR 0006).
 
 ## Boundaries (explicitly not unified)
 

@@ -8,10 +8,6 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.solver import (
-    STATUS_EXACT,
-    STATUS_NO_EXACT_SOLUTION,
-)
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.errors import NotFoundError, ValidationError
 from api.serialization.inference_row_persistence import (
@@ -26,7 +22,6 @@ from api.storage.base import StorageBackend
 from api.transport.inference_stream_wire import row_complete_to_complete_wire_event
 
 _INFERENCE_ROWS_KEY = "inference_rows"
-_PERSISTABLE_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 
 OnRowPersistedCallback = Callable[[int, int, int, int], None]
 
@@ -159,24 +154,37 @@ class InferenceRowPersistenceService:
             cleared.add(host_turn)
         return cleared
 
+    def persist_row_complete_for_scope(
+        self,
+        event: RowComplete,
+        *,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
+    ) -> None:
+        """Write durable turn evidence from a RowComplete payload alone."""
+        status = event.wire_payload.status
+        # Lazy: avoid scores package import cycle at module load.
+        from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
+
+        if not is_durable_turn_evidence_row_status(status):
+            return
+        wire_event = row_complete_to_complete_wire_event(event)
+        row = persisted_inference_row_from_wire_complete(wire_event)
+        self.put_row(game_id, perspective, host_turn, player_id, row)
+
     def persist_row_complete(
         self,
         session: InferenceRowStreamSession,
         event: RowComplete,
     ) -> None:
-        status = event.wire_payload.status
-        if status not in _PERSISTABLE_STATUSES:
+        if session.cancel_token.is_cancelled():
             return
-        wire_event = row_complete_to_complete_wire_event(
+        self.persist_row_complete_for_scope(
             event,
-            observation=session.observation,
-            turn=session.turn,
-        )
-        row = persisted_inference_row_from_wire_complete(wire_event)
-        self.put_row(
-            session.game_id,
-            session.perspective,
-            session.turn_number,
-            session.player_id,
-            row,
+            game_id=session.game_id,
+            perspective=session.perspective,
+            host_turn=session.turn_number,
+            player_id=session.player_id,
         )

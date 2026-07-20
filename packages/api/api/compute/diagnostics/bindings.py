@@ -28,6 +28,7 @@ class BoundOrchestrator:
     unregister_ready_listener: Callable[[], None]
     unregister_ready_queue_listener: Callable[[], None]
     unregister_inline_start_listener: Callable[[], None]
+    unregister_lifecycle_listener: Callable[[], None]
 
 
 def bound_matches_shell(bound: BoundOrchestrator, shell: ShellContextKey) -> bool:

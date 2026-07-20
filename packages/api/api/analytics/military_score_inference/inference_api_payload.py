@@ -164,7 +164,10 @@ def inference_api_payload(
         "status": status,
         "summary": summary,
         "solutionCount": len(solutions),
-        "isComplete": status != STATUS_TIME_LIMITED,
+        # Zero-solution timeouts are terminal failures (visible error in the SPA).
+        # Timeouts that already hold solutions stay incomplete so partial top-K can
+        # keep streaming until a durable stop/persist path closes the row.
+        "isComplete": status != STATUS_TIME_LIMITED or len(solutions) == 0,
         "solutions": (
             [
                 _serialize_solution_with_arithmetic(observation, catalog, solution)

@@ -14,12 +14,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PersistDependencyRecovery:
-    """Park the persisting node on ``waiting_deps`` and optionally re-submit a dependency.
+    """Demote the persisting node to ``waiting_deps`` and optionally re-submit a dependency.
 
     Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
     carrying this when a durable write cannot complete until another scope is
     re-run (typically ``force_fresh``). The orchestrator handles the signal
     generically -- no analytic ids or feature exceptions in the shared path.
+    This is a real dependency wait, not soft ``parked`` / outcome ``park``.
     """
 
     dependency_scope: ComputeScope
@@ -30,9 +31,10 @@ class PersistDependencyRecovery:
 class PersistDeferredError(Exception):
     """Raised from ``PersistencePolicy.persist`` when the write must wait on a dependency.
 
-    The orchestrator parks the node on ``waiting_deps`` (not ``failed``) and, when
-    ``recovery.force_fresh`` is true, submits ``recovery.dependency_scope`` so a
-    durable dependency close can wake rematerialization.
+    The orchestrator demotes the node to ``waiting_deps`` (not ``failed``, not
+    soft ``parked``) and, when ``recovery.force_fresh`` is true, submits
+    ``recovery.dependency_scope`` so a durable dependency close can wake
+    rematerialization.
     """
 
     def __init__(self, message: str, *, recovery: PersistDependencyRecovery) -> None:
@@ -77,8 +79,8 @@ class PersistencePolicy(Protocol):
         is released again.
 
         May raise :class:`PersistDeferredError` when the durable write cannot
-        complete until a dependency is force-freshed; the orchestrator parks the
-        node on ``waiting_deps`` and applies ``recovery`` generically.
+        complete until a dependency is force-freshed; the orchestrator demotes
+        the node to ``waiting_deps`` and applies ``recovery`` generically.
         """
         ...
 

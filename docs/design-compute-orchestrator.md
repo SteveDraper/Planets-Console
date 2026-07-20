@@ -7,6 +7,7 @@ GitHub epic: [#190](https://github.com/SteveDraper/Planets-Console/issues/190).
 Related:
 
 - [ADR 0005](adr/0005-compute-orchestrator.md) -- locked architectural decisions
+- [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md) -- anti-thrash table-stream lifecycle invariants (cancel / drain / persist / wake)
 - [Analytic exports](design-analytic-exports.md) -- export catalogs, JSONPath, probe/query envelopes (orchestrator consumes `ENSURE_DEPENDENCIES`)
 - [Analytics module structure](design-analytics-structure.md) -- layer roles and registration
 - [ADR 0004 addendum: table-stream session framework](adr/0004-addendum-table-stream-session-framework.md) -- stream multiplex/connect (orchestrator replaces per-analytic worker pools only)
@@ -154,11 +155,51 @@ Every `run_step` result wire carries an explicit **step outcome** the orchestrat
 | **`continue`** | Increment `step_index`; re-queue the same `step_kind` for the same node |
 | **`persist`** | After epoch re-check, call analytic `PersistencePolicy.persist`, then mark node `complete` |
 | **`complete`** | Mark node `complete` **without** calling `persist` |
+| **`park`** | Demote node to `parked` until an explicit `force_fresh` wake. May store an optional `result_wire` payload; does **not** call `persist`. Not hot `continue`; not `complete`. |
 
 Analytics own **what** `persist` writes and **how readers** gate on terminal quality. Examples:
 
 - **Fleet** -- `persist` on every materialization leg; `provenance.is_final` distinguishes gap-fill intermediates from ensure-satisfied finals. Readers use `has_final_ledger` / `is_fleet_export_ensure_satisfied`, not raw `has_ledger`, where terminal quality matters.
-- **Scores inference** -- `persist` only for terminal `exact` / `no_exact_solution`; `stopped` uses `complete` without persist. Ladder state between tiers stays in the stream adapter (`RowRun`), not on the wire.
+- **Scores inference** -- `persist` for durable turn-evidence row statuses (`exact`, `no_exact_solution`, stopped / `time_limited`, and fallback terminals per `is_durable_turn_evidence_row_status`). Soft / empty non-durable outcomes use `park` until a later `force_fresh` wake -- not hot `continue`. Evidence-closed skip may still `complete` without persist. Ladder state between tiers stays in the stream adapter (`RowRun`), not on the wire.
+
+**Scores `park` wake ownership** is encoded by `ScoresParkReason` and
+`ScoresWakeReason`; `wake_scores_scope` is the only scores wake coordinator.
+The orchestrator does **not** demand-wake parked ENSURE ancestors when dependents
+enter `waiting_deps` -- that papered over un-wakeable parks and reintroduced thrash.
+
+| Park site | Soft stream on park? | Mandatory wake owner |
+|-----------|----------------------|----------------------|
+| Non-durable `rowComplete` | Yes (upgradable) | `STREAM_RESCHEDULED` / `EVIDENCE_CLOSED` |
+| Empty `TierJobOutcome` | Cheap admission only (else silent) | `STREAM_RESCHEDULED` / `ROW_RUN_ADOPTED` |
+| Missing `RowRun` | No | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
+
+Park soft-stream policy is enforced at the scores stream boundary from
+`ScopeLifecycleSnapshot.park_reason` (`ScoresParkReason`), not from scheduler
+membership heuristics. The orchestrator stashes the step's `park_reason` on the
+node while `parked` and copies it into the scope-outcome snapshot.
+
+Soft-stream *delivery* is a table dispatch
+(`military_score_inference.soft_stream_policy`: `(TerminalSource, park_reason,
+has_event) → SoftStreamDispatch`) rather than an if-ladder in
+`_deliver_row_terminal`. `TerminalSource.SCOPE_OUTCOME` covers durable complete /
+failed notifications from `notify_scope_outcome`. Park / wake reason enums live in
+the leaf module `scores_park_wake` (sibling of `scores_assets`) so stream resolution
+can import them without the scores package ↔ scheduler cycle.
+
+**Scores `tier_solve` wire invariant:** when ensure is satisfied and turn evidence is
+still open, wire build must attach a `runId` (tier registry or successful scheduler
+adopt) or emit the evidence-closed skip sentinel. A bare `{runId: null}` open-evidence
+wait wire is forbidden -- that state has no armed wake publisher and hung dependents.
+
+Park never marks the node `complete`, so same-turn fleet ENSURE stays blocked until durable persist or evidence-closed skip. Soft stream delivery rides on process-wide park notify, not on `complete`.
+
+A parked scores node can also be reopened by fleet: when fleet persist refuses
+for open turn evidence, it raises `PersistDependencyRecovery(force_fresh=True)`
+on the scores scope. The orchestrator's persist-deferred recovery then
+`submit`s the scores scope with `force_fresh=True`, which wakes parked,
+absent, and terminal nodes alike -- the sole reopen mechanism for this case.
+Fleet does not additionally call `wake_scores_scope`; that would be a second
+encoding of the same reopen policy.
 
 Fleet and scores share the orchestrator contract; persistence semantics differ by domain.
 
@@ -205,11 +246,13 @@ Fleet ledger persist notifications must **not** use `id(AnalyticQueryContext)` a
 ```text
 waiting_deps → ready → running → complete | failed
                     ↘ attach_inflight (waiter; no pool worker)
+running → parked   (soft park; wake only on force_fresh → ready | waiting_deps)
 ```
 
 | State | Meaning |
 |-------|---------|
 | **waiting_deps** | Ancestor nodes incomplete; not in ready queue |
+| **parked** | Soft-parked after a `park` step outcome; idle until explicit `force_fresh` wake (not dispatchable; distinct from dependency wait) |
 | **ready** | Dependencies satisfied; eligible for pool |
 | **running** | Leader step executing on a worker (or inline) |
 | **attach_inflight** | Duplicate request joins leader; **no second pool worker** |
@@ -217,13 +260,13 @@ waiting_deps → ready → running → complete | failed
 
 **Hard invariant:** pool workers never call `ensure_export` or block on another node's completion.
 
-Same-scope dedupe is **only** in-orchestrator singleflight on the singleton DAG. The former process-wide scope lease / `parked` state ([#222](https://github.com/SteveDraper/Planets-Console/issues/222)) is **retired** by [#209](https://github.com/SteveDraper/Planets-Console/issues/209) -- it compensated for multiple per-context orchestrator DAGs.
+Same-scope dedupe is **only** in-orchestrator singleflight on the singleton DAG. The former process-wide scope lease ([#222](https://github.com/SteveDraper/Planets-Console/issues/222)) is **retired** by [#209](https://github.com/SteveDraper/Planets-Console/issues/209) -- it compensated for multiple per-context orchestrator DAGs. Soft-park uses the first-class node state `parked` above (see [Compute step outcome](#compute-step-outcome)), not that retired lease.
 
 ### Priority adopt on attach
 
 When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `stream_attached` joining `background` warm) and the node is not yet past the point where adopt is allowed (not mid expensive inline/pool execution -- same rule as the former lease “seal”), upgrade `node.priority_band` and adjust ready-queue ordering as needed. No mid-run preempt once expensive work has started.
 
-**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; a missing `RowRun` while evidence is still open must `continue` (rebuild wire / re-ensure), not empty-complete -- that falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
+**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; when evidence is still open, wire build must attach a `RowRun` (or fail loud if ensure claimed satisfaction without an attachable row) -- not empty-complete and not a bare open-evidence wait wire. Empty-complete falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
 
 ### Terminal reuse and `force_fresh`
 
@@ -233,8 +276,10 @@ When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `str
 |---------------|---------------------|----------|
 | `False` (default) | `complete` or `failed` | Attach to the terminal node; return its cached `result_wire` or error. No new pool work. |
 | `False` (default) | `waiting_deps`, `ready`, `running` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. May **priority-adopt** (see above). |
+| `False` (default) | `parked` | Attach / singleflight; node stays `parked` (no wake without `force_fresh`). |
 | `True` | `complete` or `failed` | **Supersede** the terminal node: remove it from the orchestrator map, clear any waiters, re-plan the DAG from the request's entry `step_kind`, and dispatch fresh work. |
-| `True` | non-terminal | Same as default -- singleflight preserved; in-flight work is never superseded. |
+| `True` | `parked` | **Wake** the soft-parked node: re-ready if deps complete, else `waiting_deps`; then attach / dispatch. |
+| `True` | other non-terminal | Same as default -- singleflight preserved; in-flight work is never superseded. |
 
 Default behavior treats terminal nodes as a **cache hit**: repeat callers for the same normalized `ComputeScope` get the prior outcome without re-execution. Opt-in `force_fresh=True` is the generic lifecycle primitive for callers that need a new run after terminal completion or failure (for example scores inference stream reschedule paths that must re-enter `tier_solve` on an already-failed or completed scope).
 
@@ -261,7 +306,7 @@ Interpreter/process steps:
 
 - Receive **serializable `JobWire`** (orchestrator may prefetch `turn_wire`, `prior_ledger_wire`, dependency slices).
 - May read storage via worker-local `StorageBackend(storage_root)` when wire omits large payloads (ancestor already **complete**).
-- Return **`ResultWire`** with an explicit **step outcome** (`continue`, `persist`, or `complete`); see [Compute step outcome](#compute-step-outcome).
+- Return **`ResultWire`** with an explicit **step outcome** (`continue`, `persist`, `complete`, or `park`); see [Compute step outcome](#compute-step-outcome).
 - **Never** hold `AnalyticQueryContext`, schedulers, or gap-fill coordinators.
 
 Thread steps (scores tiers) resolve per-row adapter state (`RowRun`) by `run_id` on the job wire; ladder progress stays adapter-owned between continuations. They must not block on cross-node ensure or call `ensure_fleet_export` in the worker.
@@ -345,7 +390,7 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 | **Complete** | If `generation != generation_at_submit`, discard result and re-queue node |
 | **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist` |
 
-Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` aligns with per-player fleet epoch so in-flight `tier_solve` work is discarded when `fleet@(host_turn - 1)` lands; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
+Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` reads the **turn-scoped** fleet epoch for `fleet@(host_turn - 1)` so in-flight `tier_solve` work is discarded when that prior fleet changes -- not when same-player scores/fleet activity on unrelated turns advances the player-scoped counter used by fleet compute / gap-fill; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
 
 ---
 
@@ -353,7 +398,7 @@ Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/St
 
 | Owner | Responsibility |
 |-------|----------------|
-| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome; handle analytic-agnostic `PersistDeferredError` (park `waiting_deps` + optional dependency `force_fresh`) |
+| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome; handle analytic-agnostic `PersistDeferredError` (demote to `waiting_deps` + optional dependency `force_fresh`; not soft `parked`) |
 | **Analytic** (`PersistencePolicy` on registration) | Record shape; write gates; merge (e.g. homeworld user-asserted); invalidation rules; terminal-quality metadata on stored artifacts; map write-gate refuses to `PersistDeferredError` + `PersistDependencyRecovery` when rematerialization must wait on a dependency |
 
 Storage paths remain per [ADR 0002](adr/0002-analytic-persistence.md). Orchestrator is cache **coordinator**, not cache **schema** owner.
@@ -364,9 +409,9 @@ All table-stream analytics follow the same adapter template ([#199](https://gith
 
 | Concern | Owner |
 |---------|--------|
-| Per-stream `ComputeOrchestrator` binding | Stream adapter (one orchestrator per stream token; released on disconnect) |
+| Per-stream observers / gates / query-context binding | Stream adapter (registers on the **process-wide** singleton orchestrator; released on disconnect -- not one orchestrator instance per stream) |
 | Durable terminal write | `PersistencePolicy.persist` on `persist` outcome |
-| NDJSON wire events | Adapter `register_node_complete_listener` (and mid-step callbacks for incremental events) |
+| NDJSON wire events | Adapter `register_scope_outcome_listener` (and mid-step callbacks for incremental events) |
 | Cache replay at admission | Probe persistence directly (`has_final_ledger`, inference row store, etc.) |
 
 Do not use adapter `on_row_complete` callbacks for durable persistence once migrated.
@@ -391,17 +436,36 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 ## Relationship to table streams ([#175](https://github.com/SteveDraper/Planets-Console/issues/175))
 
+**Two planes.** The compute orchestrator owns DAG scheduling (`continue` / `persist` / `complete` / `park`). The table-stream framework owns NDJSON multiplex drain and row-terminal delivery. Soft provisional / pending-wire upgrade is **stream** policy, not orchestrator DAG state -- adapters translate park/complete snapshots into shared stream-resolution triggers.
+
 **Keep** under `packages/api/api/streaming/table_stream/`:
 
 - Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, controller base, registry attach/detach.
+- Shared `RowStreamResolution` FSM + `multiplex_closed` drain bit + `route_terminal` (queue / pending / silence). Soft is a shared capability; scores supplies soft triggers, fleet does not.
+- `multiplex_closed` is the sole drain-closed source of truth (stored on the resolution registry). Sole **public** writer/reader facade is `streaming.table_stream.stream_drain` (`close` / `reopen_if_soft` / `is_closed` / `seal_canceled`) -- adapters must not call registry-private `_mark_multiplex_closed` / `_seal_canceled_finish` helpers. UUID run ids are never reused.
+- Generic retained-shell / persist-admission vocabulary (`row_run_admission.py`: `RowRunPhase`, `PersistAdmission`, `RowLifecycleOp`). Per-analytic registries own shells; production persist gates use analytic `PersistDecision` / registry `decide_*` (write + retire plan; scores: `tier_row_run_registry.decide_scores_row_persist`); scores applies lifecycle via `apply_scores_row_lifecycle` in `scores/row_lifecycle.py`. Ownership invariants: [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md).
 
 **Thin adapters** (same template for fleet and scores):
 
 - Submit `ComputeRequest` scopes to the **process-wide** orchestrator (`stream_attached` band for interactive work; `background` for warm-up deps).
-- Register process-wide `node_complete` / related listeners (and pause **dispatch gates**) with analytic/scope filters; unregister on disconnect. Adapters do **not** own an orchestrator instance.
+- Register process-wide `scope_outcome` / related listeners (and pause **dispatch gates**) with analytic/scope filters; unregister on disconnect. Adapters do **not** own an orchestrator instance.
 - Retain stream-only state (scope guard, per-row run registry, global pause gate).
 - **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
-- Stream teardown does not cancel in-flight singleton DAG work solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240).
+- Stream teardown **detaches** observers only -- it does not cancel in-flight singleton DAG work (or abort a pending `persist`) solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240).
+
+**Table-stream row-run shell / persist admission (generic).** Any table-stream analytic that retains per-row shells across stream detach (detach ≠ cancel) reuses `RowRunPhase` (`REGISTERED` / `DETACHED` only), registry-internal `PersistAdmission` (`ALLOW` | `CANCEL_DENY` | `ABSENT`), and `RowLifecycleOp` (`DETACH` | `CANCEL` | `RETIRE`) from `streaming/table_stream/row_run_admission.py`. Cancel never becomes a retained shell phase. Soft/hard stream resolutions stay FIFO-bounded (`MAX_STREAM_RESOLUTIONS`) and delivery-only -- they do not gate persist. Multi-step tier DAG scheduling stays in `compute/` -- do not conflate.
+
+**Scores instance.** `tier_row_run_registry` is the scores owner of shells + compact cancel admission. `decide_scores_row_persist` on that registry is the only production persist gate (atomic under one lock: maps `PersistAdmission` and shell phase into `PersistDecision` write/refuse **and** retire plan via `persist_decision_from_admission`). Once that decision is taken, a later cancel does not revoke it for that persist attempt; production writers must not branch on admission or shell phase beside that decision. Scores applies the three lifecycle ops through one command: `apply_scores_row_lifecycle` in `scores/row_lifecycle.py` (`RowLifecycleOp` from `row_run_admission.py`). Scheduler abort_scope and stream-map pops stay on the scheduler plane.
+
+| Op | RowRun shell | PersistAdmission | Stream resolution / drain | Compute token / abort |
+|----|--------------|------------------|---------------------------|------------------------|
+| detach | `REGISTERED` → `DETACHED` (retained) | `ALLOW` | unchanged | no token cancel; no `abort_scope` |
+| cancel | drop immediately (no cancel phase) | `CANCEL_DENY` (scope-keyed compact memory) | `CANCELED` + drain closed via `stream_drain.seal_canceled` | cancel token, then `abort_scope` outside scheduler lock |
+| retire | drop | clear (`ABSENT`) | leave resolution (evict only on full invalidate) | -- |
+
+Cancel silence is one operation (`stream_drain.seal_canceled`) with two justified callers: multiplex (generic token-observed seal for any analytic) and scores `apply_scores_row_lifecycle(CANCEL)` (scores-specific immediate seal before multiplex notices). That CANCEL command is: compact cancel admission → immediate `stream_drain.seal_canceled` → session cancel token. Scheduler `cancel_run` then aborts the orchestrator scope outside the lock. Detach must never be routed as cancel -- detached workers may still finish and persist. Cancelled admission is at most one outstanding cancelled `run_id` per scores scope; a later `REGISTERED` for that scope supersedes it. Live `REGISTERED` persist leaves the shell for peer bindings (stream finalize retires) -- `ALLOW(retire_after_write=False)`; late `DETACHED` persist is `ALLOW(retire_after_write=True)` and the policy retires after write from that flag alone; cancel deny is `REFUSE(should_retire=True)`. Mapping: `REGISTERED` → `ALLOW(retire_after_write=False)`; `DETACHED` → `ALLOW(retire_after_write=True)`; `CANCEL_DENY` → `REFUSE(should_retire=True)`; `ABSENT` → `REFUSE(should_retire=False)` -- both refuses are silent no-ops (never raise).
+
+**Fleet cancel (intentional asymmetry).** Fleet does **not** retain row-run shells or compact cancel admission. `FleetTableStreamScheduler.cancel_player_run` is **token-only**: cancel the session token and drop the scheduler map entry. Drain silence comes from the generic multiplex token-observed `stream_drain.seal_canceled` path; fleet does not call an immediate seal or `abort_scope`. Reschedule uses `force_fresh=True` on submit. Do not copy scores shell/admission machinery into fleet -- see [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md).
 
 **Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `stream_attached` `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
 
@@ -430,7 +494,7 @@ Until phase 2, table/map REST responses may still call `compute()` handlers dire
 packages/api/api/compute/
   scope.py           # ComputeScope, ScopeKeySpec, normalization
   orchestration_bundle.py  # Leader-retained export_services + ensure-memo (#209)
-  scope_terminal_fanout.py  # Process-wide terminal notify for stream adapters
+  orchestrator_observers.py  # Immutable outcome snapshots and lifecycle observers
   profile.py         # AnalyticComputeProfile, ComputeStepSpec
   orchestrator.py    # DAG, singleflight, submit, complete (process-wide singleton)
   turn_cache.py      # Process-wide LRU keyed by (game_id, perspective, turn)

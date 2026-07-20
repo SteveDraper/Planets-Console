@@ -6,10 +6,9 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import ComputeBackend, ComputePriorityBand, PoolWorkItem
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, format_compute_scope_key
 
 # (orchestrator_id, scope, step_kind, step_index) -- matches a running DAG node.
 InFlightExecutionKey = tuple[int, ComputeScope, str, int]

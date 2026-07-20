@@ -30,10 +30,10 @@ from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
     scope_in_diagnostic_scope,
 )
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.pools import ComputePriorityBand, PoolWorkItem
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
+from api.compute.scope import format_compute_scope_key
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
@@ -465,11 +465,11 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
-    orchestrator.register_step_complete_listener(
-        lambda _scope, _node, step_kind, surface, terminal_state: step_completions.append(
-            f"{surface}:{step_kind}:{terminal_state}"
-        )
-    )
+
+    def _on_step_complete(_scope, _node, step_kind, _step_index, surface, terminal_state):
+        step_completions.append(f"{surface}:{step_kind}:{terminal_state}")
+
+    orchestrator.observers.register_step_complete_listener(_on_step_complete)
     controller = get_compute_diagnostics_controller()
     controller.bind_orchestrator(orchestrator, ctx)
     shell = ShellContextKey(
@@ -1012,7 +1012,7 @@ def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
     controller = get_compute_diagnostics_controller()
     controller.bind_orchestrator(orchestrator, ctx)
     # Reject every node -- models scores pause blocking the selected profile step.
-    orchestrator.register_dispatch_gate(lambda _node: False)
+    orchestrator.observers.register_dispatch_gate(lambda _node: False)
     shell = ShellContextKey(
         game_id=ctx.game_id,
         perspective=ctx.perspective,
@@ -1400,6 +1400,12 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
             "counts": {"pending": 0, "running": 0, "done": 0, "cancelled": 0},
             "futures": [],
         },
+        "dispatch": {
+            "configuredWorkers": 1,
+            "aliveWorkers": 1,
+            "workerExceptionCount": 0,
+            "lastDequeueMonotonic": None,
+        },
     }
     assert wire["nextSingleStep"] == {
         "target": None,
@@ -1445,6 +1451,7 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
         item.scope,
         completed_node,
         item.step_kind,
+        item.step_index,
         "pool",
         "success",
         orchestrator_id=item.orchestrator_id,
@@ -1500,6 +1507,7 @@ def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
         item.scope,
         aborted_node,
         item.step_kind,
+        item.step_index,
         "pool",
         "failed",
         orchestrator_id=item.orchestrator_id,
@@ -1567,6 +1575,7 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
         item.scope,
         failed_node,
         item.step_kind,
+        item.step_index,
         "pool",
         "failed",
         orchestrator_id=item.orchestrator_id,
@@ -1755,7 +1764,6 @@ def test_completion_history_via_orchestrator_step_complete(sample_turn):
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import merge_export_registry
     from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
-    from api.compute.diagnostics.scope_key import format_compute_scope_key
 
     scores_stub_export = AnalyticExportCatalog(
         analytic_id="scores",
@@ -1827,7 +1835,6 @@ def test_concurrency_timeline_records_inline_lifecycle_and_shares_finish_sink(sa
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import merge_export_registry
     from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
-    from api.compute.diagnostics.scope_key import format_compute_scope_key
 
     scores_stub_export = AnalyticExportCatalog(
         analytic_id="scores",
@@ -2257,6 +2264,7 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         ancestor_scope,
         completed_node,
         "materialization_leg",
+        completed_node.step_index,
         "pool",
         "success",
     )

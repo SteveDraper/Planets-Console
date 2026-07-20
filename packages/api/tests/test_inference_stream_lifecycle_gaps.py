@@ -42,7 +42,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.orchestrator import ComputeNodeRun
+from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -276,7 +276,9 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     replacement.close()
 
     assert persistence.get_row(628580, 1, turn_number, completed_player_id) is not None
-    assert in_flight_session.cancel_token.is_cancelled()
+    # Reconnect detach drops stream ownership without cancelling solve tokens.
+    assert not in_flight_session.cancel_token.is_cancelled()
+    assert in_flight_session.run_id not in scheduler._runs
     assert not scheduler.owns_table_stream(first_token)
 
 
@@ -312,12 +314,12 @@ def test_progress_without_terminal_complete_when_scope_deactivates_mid_row(sampl
     assert list(stream) == []
 
 
-def test_stream_disconnect_leaves_in_flight_row_without_persisted_terminal_state(
+def test_stream_disconnect_ends_before_worker_completes(
     sample_turn,
     monkeypatch,
     memory_backend,
 ):
-    """Disconnect before terminal: in-flight row is cancelled without persistence."""
+    """Disconnect may end delivery before a worker has produced a terminal."""
     persistence = InferenceRowPersistenceService(memory_backend)
     scheduler = _install_workerless_scheduler(
         monkeypatch,
@@ -452,7 +454,7 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
         ),
         persistence=persistence,
     )
-    scheduler.end_inference_stream(scope, (scheduled.session,), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, (scheduled.session,), stream_token=stream_token)
 
     replay = iter_scores_table_inference_events(
         sample_turn,
@@ -560,13 +562,15 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
         turn=turn_number,
         player_id=player_id,
     )
-    node = ComputeNodeRun(
-        scope=compute_scope,
-        dependency_scopes=(),
-        state="complete",
-        result_wire={"runId": run_id, "rowComplete": row_complete},
+    scheduler._on_orchestrator_scope_outcome(
+        ScopeLifecycleSnapshot(
+            scope=compute_scope,
+            state="complete",
+            execution_generation=0,
+            result_wire={"runId": run_id, "rowComplete": row_complete},
+            error=None,
+        ),
     )
-    scheduler._on_orchestrator_node_complete(compute_scope, node)
 
     assert terminal_seen.wait(timeout=2.0), (
         f"open stream never received terminal event after persist+node-complete (events={events!r})"

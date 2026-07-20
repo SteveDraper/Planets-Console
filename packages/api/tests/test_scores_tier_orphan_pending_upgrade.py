@@ -1,15 +1,12 @@
-"""Regression: shared RowRun must survive first peer binding completion."""
+"""Orphan / pending / upgrade regressions for scores tier stream terminals."""
 
 from __future__ import annotations
 
 import queue
-from types import SimpleNamespace
 
 import pytest
-from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
-    reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     RowComplete,
@@ -17,14 +14,8 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 )
 from api.analytics.military_score_inference.inference_stream_rows import ScheduledInferenceRow
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.inference_stream_session import (
-    InferenceRowStreamSession,
-)
 from api.analytics.military_score_inference.inference_table_stream_controller import (
     InferenceTableStreamController,
-)
-from api.analytics.military_score_inference.inference_table_stream_registry import (
-    reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
@@ -32,173 +23,32 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
+    _retire_row_run,
     get_row_run,
     register_row_run,
-    reset_tier_row_run_registry_for_tests,
-    unregister_row_run,
 )
-from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.orchestrator import ComputeNodeRun
-from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
-from api.compute.scope import ComputeScope
+from api.streaming.table_stream import stream_drain
+from api.streaming.table_stream.row_stream_resolution import (
+    RowStreamResolutionState,
+)
+from api.streaming.table_stream.row_stream_resolution_registry import (
+    get_stream_resolution,
+)
+
+from tests.scores_tier_cross_binding_test_helpers import (
+    _outcome_snapshot,
+    _scope_for,
+    _session,
+    _set_scope_node,
+    _singleton_orchestrator,
+    reset_cross_binding_registries,
+)
 
 
 @pytest.fixture(autouse=True)
 def _reset_registries():
-    reset_tier_row_run_registry_for_tests()
-    reset_orchestrators_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    reset_inference_table_stream_registry_for_tests()
-    yield
-    reset_tier_row_run_registry_for_tests()
-    reset_orchestrators_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    reset_inference_table_stream_registry_for_tests()
-
-
-def _session(sample_turn) -> InferenceRowStreamSession:
-    score = sample_turn.scores[0]
-    return InferenceRowStreamSession(
-        player_id=score.ownerid,
-        observation=build_inference_observation(score, sample_turn),
-        turn=sample_turn,
-        game_id=sample_turn.game.id,
-        perspective=sample_turn.player.id,
-        turn_number=sample_turn.settings.turn,
-    )
-
-
-def _scope_for(session: InferenceRowStreamSession) -> ComputeScope:
-    return ComputeScope(
-        analytic_id=SCORES_ANALYTIC_ID,
-        game_id=session.game_id,
-        perspective=session.perspective,
-        turn=session.turn_number,
-        player_id=session.player_id,
-    )
-
-
-def _singleton_orchestrator():
-    return get_compute_orchestrator()
-
-
-def _set_scope_node(
-    orchestrator,
-    scope: ComputeScope,
-    *,
-    state: str,
-    priority_band: str = "background",
-    **kwargs: object,
-) -> ComputeNodeRun:
-    node = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state=state,
-        priority_band=priority_band,
-        **kwargs,
-    )
-    orchestrator._nodes[scope] = node
-    return node
-
-
-def test_run_scores_tier_solve_continues_when_rowrun_unregistered(sample_turn) -> None:
-    """Missing RowRun must continue (rebuild wire), not empty-complete and unlock fleet."""
-    session = _session(sample_turn)
-    run = RowRun(session)
-    register_row_run(run)
-    unregister_row_run(run.run_id)
-
-    result = run_scores_tier_solve({"runId": run.run_id})
-
-    assert result.outcome == "continue"
-
-
-def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -> None:
-    assert run_scores_tier_solve({"runId": None, "evidenceClosed": True}).outcome == "complete"
-    assert run_scores_tier_solve({"runId": None}).outcome == "continue"
-
-
-def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, monkeypatch) -> None:
-    session = _session(sample_turn)
-    run = RowRun(session)
-    register_row_run(run)
-    scope = _scope_for(session)
-
-    orchestrator = _singleton_orchestrator()
-    _set_scope_node(
-        orchestrator,
-        scope,
-        state="running",
-        priority_band="stream_attached",
-    )
-
-    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
-    scheduler._runs[run.run_id] = scope
-
-    delivered: list[object] = []
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler."
-        "deliver_inference_domain_event_to_open_stream",
-        lambda _session, event: delivered.append(event),
-    )
-
-    row_complete = row_complete_with_summary(
-        InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
-        summary="exact",
-    )
-    completed_node = SimpleNamespace(
-        state="complete",
-        result_wire={"runId": run.run_id, "rowComplete": row_complete},
-        error=None,
-    )
-
-    scheduler._on_orchestrator_node_complete(scope, completed_node)
-
-    assert get_row_run(run.run_id) is run
-    assert run.run_id in scheduler._runs
-    assert len(delivered) == 1
-
-    orchestrator._nodes[scope].state = "complete"
-    scheduler._on_orchestrator_node_complete(scope, completed_node)
-
-    assert get_row_run(run.run_id) is None
-    assert run.run_id not in scheduler._runs
-    assert len(delivered) == 1
-
-
-def test_peer_failure_does_not_unregister_while_sibling_running(sample_turn, monkeypatch) -> None:
-    session = _session(sample_turn)
-    run = RowRun(session)
-    register_row_run(run)
-    scope = _scope_for(session)
-
-    orchestrator = _singleton_orchestrator()
-    _set_scope_node(
-        orchestrator,
-        scope,
-        state="running",
-        priority_band="stream_attached",
-    )
-
-    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
-    scheduler._runs[run.run_id] = scope
-
-    delivered: list[object] = []
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler."
-        "deliver_inference_domain_event_to_open_stream",
-        lambda _session, event: delivered.append(event),
-    )
-
-    failed_node = SimpleNamespace(
-        state="failed",
-        result_wire={"runId": run.run_id},
-        error=RuntimeError("peer boom"),
-    )
-    scheduler._on_orchestrator_node_complete(scope, failed_node)
-
-    assert get_row_run(run.run_id) is run
-    assert delivered == []
+    with reset_cross_binding_registries():
+        yield
 
 
 def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
@@ -229,24 +79,27 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
 
     delivered: list[object] = []
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.inference_scheduler."
+        "api.analytics.military_score_inference.inference_stream_resolution."
         "deliver_inference_domain_event_to_open_stream",
         lambda _session, event: delivered.append(event),
     )
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     assert get_row_run(run.run_id) is run
     assert delivered == []
 
     orchestrator._nodes[scope].state = "complete"
     orchestrator._nodes[scope].result_wire = {"exportTree": {"ok": True}}
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"exportTree": {"ok": True}},
+        ),
+    )
 
     assert delivered, (
         "last peer empty-complete left DAG terminal without a stream terminal "
@@ -255,15 +108,13 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
     assert get_row_run(run.run_id) is None
 
 
-def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
-    sample_turn,
-) -> None:
+def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn) -> None:
     """Regression: DAG terminal after idempotent empty complete must finish open stream.
 
-    Cross-binding race: peer finalizes/unregisters the shared RowRun (and scheduler
+    Cross-binding race: peer finalizes/retires the shared RowRun (and scheduler
     ``_runs`` entry) without a stream terminal, then the other binding's
     ``tier_solve`` returns idempotent ``complete`` with no ``rowComplete``. The
-    orchestrator node is terminal, but ``_on_orchestrator_node_complete`` finds no
+    orchestrator node is terminal, but ``_on_orchestrator_scope_outcome`` finds no
     matching run_id. Orphan fallback must still deliver a terminal so multiplex does
     not stay on ``progress``.
     """
@@ -303,23 +154,20 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
     )
     controller.attach()
 
-    # Premature unregister: RowRun gone and scheduler no longer tracks the run,
+    # Premature retire: RowRun gone and scheduler no longer tracks the run,
     # but the open stream session still exists (UI in-progress / last event progress).
-    unregister_row_run(run.run_id)
+    _retire_row_run(run.run_id)
     assert get_row_run(run.run_id) is None
     assert scheduler._runs == {}
     assert session.player_id in controller.scheduled_rows
-    assert session.run_id not in controller.finished_run_ids
+    assert not stream_drain.is_closed(session.run_id)
 
-    # Missing RowRun continues so wire-build can re-check evidence / reschedule.
-    assert run_scores_tier_solve({"runId": run.run_id}).outcome == "continue"
+    # Missing RowRun parks until force_fresh wake can rebuild wire / reschedule.
+    assert run_scores_tier_solve({"runId": run.run_id}).outcome == "park"
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     queued: list[object] = []
     while True:
@@ -336,9 +184,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(
     assert isinstance(domain_terminals[0], RowFailed)
 
 
-def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
-    sample_turn,
-) -> None:
+def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(sample_turn) -> None:
     """After a successful peer delivery+finalize, a late empty peer must not RowFailed."""
     session = _session(sample_turn)
     run = RowRun(session)
@@ -380,21 +226,21 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="exact",
     )
-    success_node = SimpleNamespace(
-        state="complete",
-        result_wire={"runId": run.run_id, "rowComplete": row_complete},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+        ),
     )
-    scheduler._on_orchestrator_node_complete(scope, success_node)
     assert get_row_run(run.run_id) is None
-    assert run.run_id in scheduler._terminal_stream_events_delivered
+    resolution = get_stream_resolution(run.run_id)
+    assert resolution is not None
+    assert resolution.state is RowStreamResolutionState.HARD_TERMINAL
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     queued: list[object] = []
     while True:
@@ -406,9 +252,7 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(
     assert [e for e in queued if isinstance(e, RowFailed)] == []
 
 
-def test_empty_complete_delivers_to_stream_session_not_ensure_session(
-    sample_turn,
-) -> None:
+def test_empty_complete_delivers_to_stream_session_not_ensure_session(sample_turn) -> None:
     """Regression: DAG complete with no rowComplete must finish the multiplex session.
 
     Background/ensure can register a different ``RowRun`` session than the table stream
@@ -456,12 +300,9 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(
     )
     controller.attach()
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     ensure_queued: list[object] = []
     while True:
@@ -485,9 +326,7 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(
     assert isinstance(stream_terminals[0], RowFailed)
 
 
-def test_stale_scheduler_run_without_registry_still_finishes_stream(
-    sample_turn,
-) -> None:
+def test_stale_scheduler_run_without_registry_still_finishes_stream(sample_turn) -> None:
     """Stale ``_runs`` entry with no registry RowRun must not skip stream terminal."""
     session = _session(sample_turn)
     scope = _scope_for(session)
@@ -525,12 +364,9 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(
     )
     controller.attach()
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     queued: list[object] = []
     while True:
@@ -544,8 +380,7 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(
 
 
 def test_matching_run_empty_complete_uses_admission_before_row_failed(
-    sample_turn,
-    monkeypatch,
+    sample_turn, monkeypatch
 ) -> None:
     """Matching-run empty complete must try admission before RowFailed (orphan parity)."""
     from api.analytics.military_score_inference.inference_stream_rows import (
@@ -598,12 +433,9 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
         lambda _player_id, **_kwargs: immediate,
     )
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     queued: list[object] = []
     while True:
@@ -616,18 +448,17 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
     assert any(event.get("type") == "complete" for event in pending), (
         f"expected admission complete on pending wire, got pending={pending!r} queued={queued!r}"
     )
-    assert session.run_id in controller.finished_run_ids
+    assert stream_drain.is_closed(session.run_id)
     assert get_row_run(run.run_id) is None
 
 
 def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event(
     sample_turn,
 ) -> None:
-    """Cancel-silent finished_run_ids must not suppress the orphan stream terminal.
+    """Cancel-silent drain close must not suppress the orphan stream terminal.
 
-    Multiplex can mark a run finished when the cancel token trips without yielding a
-    wire event. Orphan delivery used to bail on finished_run_ids and leave the
-    scoreboard in-progress while the DAG was already complete.
+    Multiplex can close drain when the cancel token trips without yielding a
+    wire event. Orphan delivery must still reach pending wire via multiplex_closed.
     """
     session = _session(sample_turn)
     scope = _scope_for(session)
@@ -661,30 +492,25 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
         session.player_id,
         ScheduledInferenceRow(player_id=session.player_id, session=session),
     )
-    controller.finished_run_ids.add(session.run_id)
+    # Cancel-silent multiplex finish closes drain; emit routes from multiplex_closed.
+    stream_drain.close(session.run_id)
     controller.attach()
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
     pending = controller.drain_pending_wire_events()
     assert any(event.get("type") in {"complete", "error"} for event in pending), (
-        f"expected pending-wire terminal after finished_run_ids suppress, got {pending!r}"
+        f"expected pending-wire terminal after drain close, got {pending!r}"
     )
 
 
-def test_row_complete_upgrades_prior_empty_admission_terminal(
-    sample_turn,
-    monkeypatch,
-) -> None:
+def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monkeypatch) -> None:
     """Regression: force_fresh RowComplete must upgrade a soft empty/admission terminal.
 
     Fingerprint (game 628580 t8 Fury): evidenceClosed skip empty-completes and pushes
-    admission wire (multiplex finished_run_ids), then force_fresh re-solves. Without
+    admission wire (multiplex_closed drain), then force_fresh re-solves. Without
     upgrade the real RowComplete is dropped, progress resets the UI, and the scoreboard
     stays in-progress with idle CPU.
     """
@@ -748,20 +574,18 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
         lambda _player_id, **_kwargs: immediate,
     )
 
-    empty_complete = SimpleNamespace(
-        state="complete",
-        result_wire={"exportTree": {"ok": True}},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),
     )
-    scheduler._on_orchestrator_node_complete(scope, empty_complete)
 
-    assert session.run_id in scheduler._terminal_stream_events_delivered
-    assert session.run_id in scheduler._upgradable_empty_terminals
-    assert session.run_id in controller.finished_run_ids
+    soft_resolution = get_stream_resolution(session.run_id)
+    assert soft_resolution is not None
+    assert soft_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
+    assert stream_drain.is_closed(session.run_id)
 
     # Simulate force_fresh re-solve: reopen multiplex drain, then deliver RowComplete.
     scheduler._reopen_stream_row_for_force_fresh(scope)
-    assert session.run_id not in controller.finished_run_ids
+    assert not stream_drain.is_closed(session.run_id)
 
     row_complete = row_complete_with_summary(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
@@ -776,12 +600,13 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
         priority_band="stream_attached",
         result_wire={"runId": run.run_id, "rowComplete": row_complete},
     )
-    success_node = SimpleNamespace(
-        state="complete",
-        result_wire={"runId": run.run_id, "rowComplete": row_complete},
-        error=None,
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+        ),
     )
-    scheduler._on_orchestrator_node_complete(scope, success_node)
 
     pending = controller.drain_pending_wire_events()
     upgrades = [
@@ -793,4 +618,6 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(
         "expected RowComplete upgrade on pending wire after soft empty admission "
         f"(pending={pending!r})"
     )
-    assert session.run_id not in scheduler._upgradable_empty_terminals
+    hard_resolution = get_stream_resolution(session.run_id)
+    assert hard_resolution is not None
+    assert hard_resolution.state is RowStreamResolutionState.HARD_TERMINAL

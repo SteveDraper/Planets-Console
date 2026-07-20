@@ -397,37 +397,37 @@ Inference is fetched **per scoreboard row** at the solver layer. Three wire path
 
 **Table stream (Phase 1H, #71, SPA primary):** `GET .../scores/inference/table-stream?playerIds=...` returns one NDJSON connection for all requested rows. Events: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. Row-scoped events include `playerId`. Follow the load-all progress pattern (`readNdjsonStream`, Zod-owned event shapes). Each `solution` event carries the **full held top-K** for that row (ranked explanations plus **inference solution rank weight**); the consumer replaces local held state from the payload (server owns merge and K-best eviction). Terminal `complete` events include the same `solutions` array shape when the row finishes; the consumer replaces local held state from the terminal payload (authoritative final top-K). Terminal `complete` diagnostics may include **`fleetTorpInputStatus`** when fleet overlay wiring is active (section 8.8.5). On stream connect, orchestrator **`background`-band** submissions for `fleet@(host_turn - 1)` per player may run in parallel with row scheduling ([#200](https://github.com/SteveDraper/Planets-Console/issues/200)). The dashed-zero badge transitions to a solid count when the first `solution` arrives with `solutions.length >= 1`; the badge and modal track `solutions.length` while search continues.
 
-**Stream disconnect:** when the table stream ends (client `AbortSignal`, refresh, network loss, disable build inference, or natural completion after all rows finish), the server cancels all row runs for that connection and clears **inference global pause**. Reopening the table stream on the same scope **recalculates from scratch** (no server-side ladder or pause state preserved across disconnect).
+**Stream disconnect:** when the table stream ends (client `AbortSignal`, refresh, network loss, or natural completion after all rows finish), teardown is **detach-only** ([ADR 0006](adr/0006-table-stream-lifecycle-invariants.md)): clear **inference global pause**, retain row shells as `DETACHED` for late persist, leave in-flight solve tokens alone, and unregister stream observers. Reopening the table stream on the same scope **replays** durable **scores inference row persistence**; rows without a valid persisted terminal still schedule fresh work. **Disable build inference** is cancel, not disconnect -- it drops shells, records `CANCEL_DENY`, seals drain, cancels tokens, and aborts orchestrator scopes.
 
 **Global pause:** `POST/DELETE .../scores/inference/global-pause` freezes or resumes all scheduler work for the current scope **while the table stream is connected**. Open streams receive `globalPause` events; held top-K remains visible with paused chrome. The frontend syncs pause-control state from stream `globalPause` events.
 
-**SPA time budget:** none. A row runs until the ladder completes, **inference global pause** freezes it (on an open stream), or the stream is cancelled (game / turn / **perspective** change, disable build inference, client disconnect). Implicit cancel may emit `complete` with `status: stopped`, `isComplete: true`, and the last held top-K on the wire when applicable; reconnect still recalculates.
+**SPA time budget:** none. A row runs until the ladder completes, **inference global pause** freezes it (on an open stream), or the stream is **cancelled** (game / turn / **perspective** change, disable build inference, explicit cancel/recompute -- **not** client disconnect). Implicit cancel may emit `complete` with `status: stopped`, `isComplete: true`, and the last held top-K on the wire when applicable. Disconnect does not imply that terminal; reconnect may still show persisted terminals without recalculating.
 
 **#77 batch path (before #71 stream UI):** same merge semantics (section 8.5.4) without wire events; `solutionCount` in the batch payload reflects final held top-K size.
 
 ### 7.5 Inference row scheduler (#71)
 
-Process-wide backend facility (glossary: `CONTEXT.md` **Inference row scheduler**). Fair-schedules **inference search tier** work for rows on the active inference table stream.
+Thin stream adapter over the process-wide **compute orchestrator** (glossary: `CONTEXT.md` **Inference row scheduler**; [design-compute-orchestrator.md](design-compute-orchestrator.md)). Retains scope guard, per-row **inference row run** registry, **inference global pause** dispatch gate, and stream event emission via orchestrator **scope-outcome listeners**; submits `tier_solve` **compute step**s instead of draining a private worker queue. The legacy private `threading.Thread` worker pool and FIFO `_work_queue` dequeue path are removed.
 
-1. When the table stream schedules a row, construct a tier-1 **inference tier job** (deltas, player id, ladder entry state).
-2. Enqueue tier-1 on a shared **FIFO** queue.
-3. Drain with a worker pool (default **4** workers, configurable). Distinct from corpus `--workers` (batch case parallelism).
-4. When a tier job completes, enqueue that row's tier-(n+1) job (seeds, held solutions, signatures). Per-row tier chains are strictly sequential.
-5. Emit `solution` events (full held top-K) from merge-admit hooks inside the tier job.
+1. When the table stream schedules a row, construct a tier-1 **inference tier job** (deltas, player id, ladder entry state) and submit `tier_solve` on the scores scope (`stream_attached` band).
+2. When a tier step completes with `continue`, submit that row's tier-(n+1) continuation (seeds, held solutions, signatures). Per-row tier chains are strictly sequential on one analytic compute node.
+3. Cross-row fairness (tier-1-before-continuations) lives in the global orchestrator pool, not an adapter-owned queue.
+4. Emit `solution` events (full held top-K) from merge-admit hooks inside the tier step.
+5. Soft non-durable terminals **park** the DAG node (scores-owned wake); they do not hot-continue. Durable terminals go through `ScoresPersistencePolicy.persist` gated by `PersistDecision`.
 
-One schedulable job = one full **inference search tier** step (catalog build, exact/band passes, within-tier top-K, merge, seed output).
+One schedulable step = one full **inference search tier** for one scoreboard row (catalog build, exact/band passes, within-tier top-K, merge, seed output).
 
 **Table stream multiplexing:** per-row event queues are round-robin drained into one NDJSON generator; `playerId` tags identify the row on the wire.
 
-**Global pause (soft):** pause drains the worker queue into a held buffer, stops starting new tier jobs, and broadcasts `globalPause`; in-flight tier jobs are not cancelled and may finish the current tier step and emit `solution` events until that step completes. Resume requeues held tier jobs and continuations. Applies only while the table stream stays connected. **Stream disconnect** cancels all row runs and clears server-side global pause; reconnect recalculates from scratch.
+**Global pause (soft):** pause broadcasts `globalPause` and blocks new `stream_attached` `tier_solve` dispatches via an orchestrator **dispatch gate**; deferred tier-1 and continuation steps stay in the adapter held buffer. In-flight pool work already running continues until the current tier step completes and may still emit `solution` events. Resume requeues held work through the orchestrator on the same connection. Applies only while the table stream stays connected. **Stream disconnect** clears server-side global pause and **detaches** row shells (does not cancel in-flight tokens); reconnect replays durable row persistence where present.
 
 **Accelerated-start rows:** same scheduler path as normal rows in v1; internal accel segments stay inside the row path (no per-segment SPA time split).
 
-**Cancellation:** each row run has a cancel token. Scope change, disable build inference, and client disconnect call `cancel_run`, which purges queued tier jobs for that `run_id` and cooperatively stops in-flight work. There is no per-row halt API in the SPA.
+**Cancellation vs disconnect:** each row run has a cancel token. Scope change, disable build inference, and explicit cancel/recompute call `cancel_run` (lifecycle `CANCEL` + `abort_scope`), which cooperatively stops in-flight work and refuses late persist. **Client disconnect is not cancel** -- detach retains shells for late persist. There is no per-row halt API in the SPA. See [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md).
 
 **Accelerated-start lifecycle:** segment chaining and terminal row-complete assembly live in `InferenceStreamOrchestration`; the scheduler delegates after each segment's ladder finishes. Batch JSON uses `run_accelerated_split_inference` with per-segment time budgets (see module docstring in `inference_accelerated.py`).
 
-**Inference solve interrupt boundary (v1):** cooperative cancel at sub-step boundaries inside a tier job (top-K iterations, seed attempts, exact vs band passes) plus `StopSearch()` when cancel fires mid-`Solve()`. OR-Tools CP-SAT cannot resume internal search state across `Solve()` calls. **Known gap:** a long first-feasible `Solve()` on a huge catalog may block cancel until that call returns. **Follow-on:** retry `UNKNOWN` sub-steps until feasible or cancelled (see `CONTEXT.md` **Inference solve interrupt boundary**).
+**Inference solve interrupt boundary (v1):** cooperative cancel at sub-step boundaries inside a tier job (top-K iterations, seed attempts, exact vs band passes) plus `StopSearch()` when cancel fires mid-`Solve()`. Disconnect is **not** this boundary. OR-Tools CP-SAT cannot resume internal search state across `Solve()` calls. **Known gap:** a long first-feasible `Solve()` on a huge catalog may block cancel until that call returns. **Follow-on:** retry `UNKNOWN` sub-steps until feasible or cancelled (see `CONTEXT.md` **Inference solve interrupt boundary**).
 
 ---
 
@@ -1043,7 +1043,7 @@ GitHub: **#71**. Depends on **#77** ladder merge semantics (section 8.5.4): cros
 
 Files:
 
-- `packages/api/api/analytics/military_score_inference/inference_scheduler.py` (or equivalent: FIFO tier jobs, worker pool, per-row cancel),
+- `packages/api/api/analytics/military_score_inference/inference_scheduler.py` (orchestrator stream adapter: scope guard, row-run registry, pause gate, `tier_solve` submit; no private worker pool),
 - `packages/api/api/analytics/military_score_inference/policy_ladder.py` (emit hook on merge admit),
 - `packages/api/api/analytics/military_score_inference/solver.py` (callback per within-tier solution; sub-step cancel checks),
 - Core + BFF inference routes (NDJSON stream alongside existing batch JSON),
@@ -1054,13 +1054,13 @@ Files:
 Steps:
 
 1. Define NDJSON event types: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. `complete.status` includes `exact`, `no_exact_solution`, `stopped`, etc. Table-stream row events include `playerId`.
-2. Implement **inference row scheduler** (section 7.5): tier-1 enqueued per row at schedule time; tier-(n+1) chained per row; shared FIFO; default 4 workers (configurable). Add **inference global pause** (held jobs, broadcast).
+2. Implement **inference row scheduler** (section 7.5) as a thin orchestrator adapter: register process-wide listeners/gates; submit `tier_solve` per row; chain continuations on `continue`; soft non-durable terminals `park`. Add **inference global pause** (dispatch gate + held buffer + broadcast).
 3. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K. Payload is the **full held top-K** for that row (ranked explanation rows plus **inference solution rank weight**). Do not emit on suppressed re-discoveries. Consumer replaces local held state; no client-side merge.
 4. Refactor the within-tier top-K loop to flush each feasible solution to the emit hook before the next no-good cut.
 5. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.
-6. **SPA:** no row time budget. **Inference global pause** in column header (while table stream connected); implicit cancel on game / turn / **perspective** change, disable build inference, disconnect (`AbortSignal`). Disconnect clears server-side global pause and recalculates on reconnect. No per-row halt API.
+6. **SPA:** no row time budget. **Inference global pause** in column header (while table stream connected); implicit **cancel** on game / turn / **perspective** change or disable build inference. **Disconnect** detaches shells and clears pause without cancelling in-flight tokens; reconnect replays durable row persistence. No per-row halt API.
 7. **Batch JSON:** retain for corpus harness with per-case `time_limit_seconds`. Do not remove batch time limits when SPA drops them.
-8. Cooperative cancel at **inference solve interrupt boundaries** (section 7.5); `cancel_run` purges queued tier jobs. Document follow-on: sub-step retry on `UNKNOWN` if cancel responsiveness is insufficient.
+8. Cooperative cancel at **inference solve interrupt boundaries** (section 7.5); `cancel_run` applies lifecycle CANCEL + `abort_scope`. Document follow-on: sub-step retry on `UNKNOWN` if cancel responsiveness is insufficient.
 9. Revisit combo-count `max_solutions=1` batch fallback after streaming + global pause proven.
 
 **Corpus probe follow-ons** (companion PR or epic follow-on acceptable):
@@ -1334,7 +1334,7 @@ Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Solution detail modal U
 | False confidence | return multiple explanations and expose ambiguity |
 | Scoreboard regression | keep inference disabled by default and test the existing table contract |
 | Row-level solving blocks the table | per-row NDJSON streams (#71); inference row scheduler for cross-row fairness; dashed-zero badge transitions to solid count on first admitted solution |
-| Open-ended SPA search consumes CPU | global pause; scope cancel; worker pool cap; batch/corpus stay time-bounded |
+| Open-ended SPA search consumes CPU | global pause; scope cancel; orchestrator pool concurrency caps; batch/corpus stay time-bounded |
 | Cancel blocked by long CP-SAT call | sub-step interrupt boundaries; follow-on UNKNOWN retry if needed |
 | Dependency/platform issue | keep solver isolated behind an adapter so a fallback can be added |
 | Hard-to-debug CP-SAT models | emit diagnostics with tier, combo counts, bounds, constraint targets, solver status |
@@ -1359,6 +1359,6 @@ The user-facing scoreboard integration should be considered complete when:
 - the Scores tile includes an `Include build inference` checkbox,
 - enabling inference adds an inference column with row-level status,
 - rows with **N > 0** open the solution detail modal per [design-military-score-inference-solution-modal.md](design-military-score-inference-solution-modal.md) (#48),
-- global pause freezes in-flight inference without losing partial held top-K while the table stream stays open; stream disconnect clears pause and recalculates; implicit cancel may emit `status: stopped` with the last held top-K on the wire,
+- global pause freezes in-flight inference without losing partial held top-K while the table stream stays open; stream disconnect clears pause and **detaches** (late persist allowed; durable terminals may replay on reconnect); implicit **cancel** (not disconnect) may emit `status: stopped` with the last held top-K on the wire,
 - BFF and frontend code never import OR-Tools or encode solver rules directly,
 - `make lint` and the relevant API, BFF, and frontend tests pass.

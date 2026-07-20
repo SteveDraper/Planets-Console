@@ -415,6 +415,31 @@ def test_compute_scope_aborted_does_not_cascade_fail_dependents(sample_turn):
     assert orchestrator.nodes[root_scope].error is None
 
 
+def test_abort_scope_does_not_abort_replacement_execution(sample_turn):
+    from api.compute.orchestrator import ComputeNodeRun
+
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    scope = _compute_scope(SHARED_ID, _export_scope(sample_turn))
+    replacement = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="running",
+        execution_generation=2,
+    )
+    orchestrator._nodes[scope] = replacement
+
+    assert (
+        orchestrator.abort_scope(
+            scope,
+            RuntimeError("cancelled stale execution"),
+            expected_execution_generation=1,
+        )
+        is False
+    )
+    assert orchestrator.nodes[scope] is replacement
+    assert replacement.state == "running"
+
+
 def test_attach_inflight_does_not_double_pool_workers(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,
@@ -481,13 +506,188 @@ def test_submit_reuses_terminal_node_unless_fresh_requested(sample_turn):
 
     first = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     duplicate = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    not_woken = orchestrator.wake_if_parked(
+        ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True)
+    )
     fresh = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
 
     assert run_payloads == [1, 2]
     assert first.result_wire == {"run": 1}
     assert duplicate.result_wire == {"run": 1}
+    assert not_woken is None
     assert fresh.result_wire == {"run": 2}
     assert orchestrator.nodes[shared_scope] is fresh._node
+
+
+def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
+    """A soft-parked node reruns its current step and completes after wake."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    call_count = 0
+
+    def run_step(_job):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return StepResult(outcome="park", park_reason="not_ready")
+        return {"run": call_count}
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", run_step),),
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((registration,)),
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    parked = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+
+    assert parked.state == "parked"
+    assert parked.error is None
+    assert orchestrator.nodes[shared_scope].park_reason == "not_ready"
+    assert shared_scope not in orchestrator.ready_scopes()
+
+    woken = orchestrator.wake_if_parked(
+        ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True)
+    )
+
+    assert call_count == 2
+    assert woken.state == "complete"
+    assert woken.result_wire == {"run": 2}
+    assert orchestrator.nodes[shared_scope].park_reason is None
+    assert orchestrator.nodes[shared_scope] is parked._node
+
+
+def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sample_turn):
+    """Parked ENSURE deps do not auto-wake; dependents wait for a real publisher.
+
+    Soft-park is intentionally non-complete, so fleet-style dependents stay
+    ``waiting_deps``. Progress requires an explicit ``force_fresh`` wake (analytic
+    ``wake_scores_scope``, evidence close, RowRun adopt, or PersistDeferred) --
+    not an orchestrator demand redispath.
+    """
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_calls = 0
+
+    def run_shared(_job):
+        nonlocal shared_calls
+        shared_calls += 1
+        if shared_calls == 1:
+            return StepResult(outcome="park", park_reason="scores_empty_tier_outcome")
+        return {"result": SHARED_ID}
+
+    registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=_StubPersistencePolicy(),
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", run_shared),),
+            ),
+            _inline_compute_registration(BRANCH_B_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(compute_registry=registry)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
+
+    assert shared_calls == 1
+    assert orchestrator.nodes[shared_scope].state == "parked"
+    assert orchestrator.nodes[shared_scope].park_reason == "scores_empty_tier_outcome"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert handle.state == "waiting_deps"
+
+    woken = orchestrator.wake_if_parked(
+        ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True)
+    )
+    assert woken is not None
+    assert shared_calls == 2
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert handle.state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
+
+
+def test_parked_ensure_dependency_second_park_also_needs_explicit_wake(sample_turn):
+    """A second park episode stays idle until another explicit ``force_fresh`` wake."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_calls = 0
+
+    def run_shared(_job):
+        nonlocal shared_calls
+        shared_calls += 1
+        if shared_calls <= 2:
+            return StepResult(outcome="park", park_reason="scores_empty_tier_outcome")
+        return {"result": SHARED_ID}
+
+    registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=_StubPersistencePolicy(),
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", run_shared),),
+            ),
+            _inline_compute_registration(BRANCH_B_ID),
+        )
+    )
+    orchestrator = ComputeOrchestrator(compute_registry=registry)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
+    assert shared_calls == 1
+    assert orchestrator.nodes[shared_scope].state == "parked"
+
+    orchestrator.wake_if_parked(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
+    assert shared_calls == 2
+    assert orchestrator.nodes[shared_scope].state == "parked"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+
+    orchestrator.wake_if_parked(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
+    assert shared_calls == 3
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert handle.state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
 
 
 def test_fresh_submit_replaces_failed_terminal_node(sample_turn):
@@ -1048,16 +1248,47 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
     orchestrator = ComputeOrchestrator(compute_registry=registry)
     scope = _compute_scope(SHARED_ID, export_scope)
 
-    def on_complete(_scope, node) -> None:
+    def on_outcome(snapshot) -> None:
         events.append("complete_listener")
-        assert node.state == "complete"
+        assert snapshot.state == "complete"
         assert durable_ready is True
 
-    orchestrator.register_node_complete_listener(on_complete)
+    orchestrator.observers.register_scope_outcome_listener(on_outcome)
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
 
     assert handle.state == "complete"
     assert events == ["persist", "complete_listener", "notify"]
+
+
+def test_scope_outcome_listener_receives_park_snapshot_after_node_wakes(sample_turn):
+    """A post-lock outcome callback keeps the park state it observed under lock."""
+    export_scope = _export_scope(sample_turn)
+    scope = _compute_scope(SHARED_ID, export_scope)
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    observed = []
+    orchestrator.observers.register_scope_outcome_listener(observed.append)
+
+    from api.compute.orchestrator import ComputeNodeRun
+
+    node = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="parked",
+        execution_generation=17,
+        result_wire={"outcome": "soft"},
+    )
+    with orchestrator._condition:
+        orchestrator._observers.notify_scope_outcome(node)
+        node.state = "ready"
+        node.execution_generation = 18
+        node.result_wire = {"outcome": "fresh"}
+    orchestrator._observers.drain_post_lock_callbacks()
+
+    assert len(observed) == 1
+    assert observed[0].scope == scope
+    assert observed[0].state == "parked"
+    assert observed[0].execution_generation == 17
+    assert observed[0].result_wire == {"outcome": "soft"}
 
 
 def test_step_outcome_complete_skips_persistence_policy(sample_turn):
@@ -1210,7 +1441,7 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
-    orchestrator.register_dispatch_gate(
+    orchestrator.observers.register_dispatch_gate(
         lambda node: node.scope.analytic_id != gated_analytic_id,
     )
 
@@ -1412,10 +1643,10 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
 
     step_completions: list[str] = []
 
-    def on_step_complete(_scope, _node, step_kind, surface, terminal_state) -> None:
+    def on_step_complete(_scope, _node, step_kind, _step_index, surface, terminal_state) -> None:
         step_completions.append(f"{surface}:{step_kind}:{terminal_state}")
 
-    orchestrator.register_step_complete_listener(on_step_complete)
+    orchestrator.observers.register_step_complete_listener(on_step_complete)
 
     orchestrator.complete_pool_step(
         scope,
@@ -1429,12 +1660,13 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
     assert orchestrator.nodes[scope].error is persist_error
 
 
-def test_persist_deferred_parks_waiting_deps_and_force_freshes_dependency(sample_turn):
-    """PersistDeferredError parks the node and force_freshes the declared dependency.
+def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(sample_turn):
+    """PersistDeferredError demotes to waiting_deps and force_freshes the dependency.
 
     Mirrors fleet open-evidence recovery without fleet/scores imports in the
-    orchestrator: refuse persist → waiting_deps (not failed) → dependency
-    force_fresh submitted → after dependency completes again, dependent is ready.
+    orchestrator: refuse persist → waiting_deps (not failed, not soft parked) →
+    dependency force_fresh submitted → after dependency completes again,
+    dependent is ready.
     """
     from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 
@@ -1558,7 +1790,7 @@ def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_tur
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
-    orchestrator.register_dispatch_gate(
+    orchestrator.observers.register_dispatch_gate(
         lambda node: node.scope.analytic_id != BRANCH_B_ID,
     )
 
@@ -1601,7 +1833,7 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
-    unregister_pause = orchestrator.register_dispatch_gate(lambda _node: not is_paused)
+    unregister_pause = orchestrator.observers.register_dispatch_gate(lambda _node: not is_paused)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -1699,8 +1931,8 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
-    unregister_pause = orchestrator.register_dispatch_gate(lambda _node: not pause_blocks)
-    unregister_freeze = orchestrator.register_dispatch_gate(
+    unregister_pause = orchestrator.observers.register_dispatch_gate(lambda _node: not pause_blocks)
+    unregister_freeze = orchestrator.observers.register_dispatch_gate(
         lambda node: not (freeze_blocks_branch_b and node.scope.analytic_id == BRANCH_B_ID),
     )
 

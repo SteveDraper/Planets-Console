@@ -4,120 +4,41 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Literal
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.compute.dag import PlannedComputeNode, plan_compute_dag
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
-from api.compute.orchestrator_observers import (
-    InlineStartListener,
-    NodeCompleteListener,
-    NodeDispatchCommitHook,
-    NodeDispatchGate,
-    OrchestratorObservers,
-    ReadyListener,
-    ReadyQueueChangedListener,
-    StepCompleteListener,
+from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
+from api.compute.orchestrator_observers import OrchestratorObservers
+from api.compute.orchestrator_state import (
+    ComputeHandle,
+    ComputeNodeRun,
+    ComputeRequest,
+    NodeState,
 )
-from api.compute.orchestrator_step_execution import (
-    OrchestratorStepExecutionMixin,
-    _PendingInlineExecution,
-    _PendingPoolSubmission,
-)
-from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
-from api.compute.pools import (
-    PRIORITY_BAND_RANK,
-    ComputePriorityBand,
-    ComputeWorkerPool,
-    PoolSubmitter,
-)
+from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
+from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
+from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.registry import AnalyticComputeRegistration
-from api.compute.scope import ComputeScope, compute_scope_to_export_scope
-from api.compute.scope_terminal_fanout import notify_process_scope_terminal
+from api.compute.scope import ComputeScope
 from api.compute.turn_cache import OrchestratorTurnCache
-from api.compute.wire import coerce_step_result
 from api.models.game import TurnInfo
 
-NodeState = Literal[
-    "waiting_deps",
-    "ready",
-    "running",
-    "attach_inflight",
-    "complete",
-    "failed",
+# Re-exports for external callers; in-package compute code imports state types
+# from ``orchestrator_state`` (the owning module).
+__all__ = [
+    "ComputeHandle",
+    "ComputeNodeRun",
+    "ComputeOrchestrator",
+    "ComputeRequest",
+    "NodeState",
+    "OrchestratorDiagnosticsSnapshot",
+    "OrchestratorMetrics",
+    "OrchestratorNodeSnapshot",
+    "ScopeNodeView",
 ]
-
-
-@dataclass(frozen=True)
-class ComputeRequest:
-    """One orchestrator submission for a compute scope."""
-
-    scope: ComputeScope
-    step_kind: str | None = None
-    priority_band: ComputePriorityBand = "background"
-    force_fresh: bool = False
-    bundle: OrchestrationBundle | None = None
-    ctx: AnalyticQueryContext | None = None
-
-    def resolved_bundle(self) -> OrchestrationBundle | None:
-        """Return the caller-supplied bundle, or build one from ``ctx`` for convenience."""
-        if self.bundle is not None:
-            return self.bundle
-        if self.ctx is not None:
-            return OrchestrationBundle.from_context(self.ctx)
-        return None
-
-
-@dataclass
-class ComputeHandle:
-    """Caller-visible orchestrator handle for one submission."""
-
-    scope: ComputeScope
-    _node: ComputeNodeRun
-    is_waiter: bool = False
-    _waiter_error: BaseException | None = field(default=None, compare=False)
-
-    @property
-    def error(self) -> BaseException | None:
-        if self.is_waiter:
-            return self._waiter_error
-        if self._node.state == "failed":
-            return self._node.error
-        return None
-
-    @property
-    def state(self) -> NodeState:
-        if self.is_waiter and self._node.state not in {"complete", "failed"}:
-            return "attach_inflight"
-        return self._node.state
-
-    @property
-    def result_wire(self) -> object | None:
-        return self._node.result_wire
-
-
-@dataclass
-class ComputeNodeRun:
-    """Mutable orchestrator state for one compute scope."""
-
-    scope: ComputeScope
-    dependency_scopes: tuple[ComputeScope, ...]
-    state: NodeState = "waiting_deps"
-    profile_step_index: int = 0
-    step_index: int = 0
-    priority_band: ComputePriorityBand = "background"
-    generation_at_submit: int | None = None
-    result_wire: object | None = None
-    error: BaseException | None = None
-    waiters: list[ComputeHandle] = field(default_factory=list)
-    # Leader-retained query context / export services (see OrchestrationBundle).
-    bundle: OrchestrationBundle | None = None
-    # True once expensive inline/pool work has started (job wire built or handed
-    # to the pool); closes the priority-adopt window for later attaches.
-    execution_sealed: bool = False
 
 
 @dataclass
@@ -143,6 +64,16 @@ class OrchestratorNodeSnapshot:
 
 
 @dataclass(frozen=True)
+class ScopeNodeView:
+    """Lock-held adapter view of one node (state, deps, wire) without live map access."""
+
+    state: str
+    step_index: int
+    dependency_scopes: frozenset[ComputeScope]
+    result_wire: object | None
+
+
+@dataclass(frozen=True)
 class OrchestratorDiagnosticsSnapshot:
     """Immutable node and ready-queue view captured under the orchestrator lock."""
 
@@ -150,7 +81,11 @@ class OrchestratorDiagnosticsSnapshot:
     ready_scopes: tuple[ComputeScope, ...]
 
 
-class ComputeOrchestrator(OrchestratorStepExecutionMixin):
+class ComputeOrchestrator(
+    OrchestratorStepExecutionMixin,
+    OrchestratorLifecycleMixin,
+    OrchestratorSubmissionMixin,
+):
     """Process-wide DAG scheduler with singleflight per normalized compute scope.
 
     One instance schedules every analytic's compute work. Concurrent
@@ -172,6 +107,9 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
     satisfaction short-circuit (``PersistencePolicy.is_satisfied``) is enough
     to avoid duplicate work for one orchestrator instance, and only one
     instance exists per process.
+
+    Observer registration (dispatch gates, lifecycle listeners, etc.) lives on
+    :attr:`observers` -- call ``orchestrator.observers.register_*`` directly.
     """
 
     def __init__(
@@ -192,6 +130,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         self._nodes: dict[ComputeScope, ComputeNodeRun] = {}
         self._ready_queue: deque[ComputeScope] = deque()
         self._metrics = OrchestratorMetrics()
+        self._next_execution_generation = 1
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._observers = OrchestratorObservers(self._condition)
@@ -227,91 +166,58 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
     def turn_cache(self) -> OrchestratorTurnCache:
         return self._turn_cache
 
-    def register_dispatch_gate(
-        self,
-        gate: NodeDispatchGate,
-    ) -> Callable[[], None]:
-        """Register a node-level gate; dispatch only if all registered gates pass.
-
-        Gates must be side-effect free. Slot or grant consumption belongs in a
-        :meth:`register_dispatch_commit_hook` so a later gate failure cannot burn
-        a single-step slot.
-
-        Returns an unregister callable that removes only this gate.
-        """
-        return self._observers.register_dispatch_gate(gate)
-
-    def register_dispatch_commit_hook(
-        self,
-        hook: NodeDispatchCommitHook,
-    ) -> Callable[[], None]:
-        """Register a post-gate commit hook; called only when every gate passed.
-
-        Returns an unregister callable that removes only this hook.
-        """
-        return self._observers.register_dispatch_commit_hook(hook)
-
-    def register_node_complete_listener(
-        self,
-        listener: NodeCompleteListener,
-    ) -> Callable[[], None]:
-        """Register a node completion listener; return an unregister callable."""
-        return self._observers.register_node_complete_listener(listener)
-
-    def register_step_complete_listener(
-        self,
-        listener: StepCompleteListener,
-    ) -> Callable[[], None]:
-        """Register a step completion listener; return an unregister callable."""
-        return self._observers.register_step_complete_listener(listener)
-
-    def register_ready_listener(
-        self,
-        listener: ReadyListener,
-    ) -> Callable[[], None]:
-        """Register a ready-queue listener; return an unregister callable.
-
-        Listeners run after the orchestrator lock is released (via post-lock
-        callbacks) so observers may take other locks without nesting under the
-        orchestrator condition.
-        """
-        return self._observers.register_ready_listener(listener)
-
-    def register_ready_queue_listener(
-        self,
-        listener: ReadyQueueChangedListener,
-    ) -> Callable[[], None]:
-        """Register a ready-queue depth listener; return an unregister callable.
-
-        Listeners run under the orchestrator lock with the current ready-scopes
-        snapshot whenever membership may have changed (enqueue, dequeue, dispatch
-        pop including ready→waiting_deps). They must not re-enter this
-        orchestrator's condition. Taking the diagnostics controller lock is OK
-        (same order as dispatch gates: orch → controller).
-        """
-        return self._observers.register_ready_queue_listener(listener)
-
-    def register_inline_start_listener(
-        self,
-        listener: InlineStartListener,
-    ) -> Callable[[], None]:
-        """Register an inline-step start listener; return an unregister callable.
-
-        Listeners run outside the orchestrator lock at the start of inline
-        execution (before job-wire build / ``run_step``).
-        """
-        return self._observers.register_inline_start_listener(listener)
+    @property
+    def observers(self) -> OrchestratorObservers:
+        """Listener registration, notify fan-out, and post-lock callback drain."""
+        return self._observers
 
     @property
     def nodes(self) -> Mapping[ComputeScope, ComputeNodeRun]:
+        """Live node map for tests and diagnostics. Adapters must use peek APIs."""
         return self._nodes
+
+    def peek_node_state(self, scope: ComputeScope) -> str | None:
+        """Return ``node.state`` under the orchestrator lock, or None if absent."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            return None if node is None else node.state
+
+    def has_nonterminal_scope_work(self, scope: ComputeScope) -> bool:
+        """True when a node exists and is not ``complete`` / ``failed``."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            return node is not None and node.state not in {"complete", "failed"}
+
+    def peek_scope_view(self, scope: ComputeScope) -> ScopeNodeView | None:
+        """Immutable lock-held snapshot of one node's adapter-visible fields."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            if node is None:
+                return None
+            return ScopeNodeView(
+                state=node.state,
+                step_index=node.step_index,
+                dependency_scopes=frozenset(node.dependency_scopes),
+                result_wire=node.result_wire,
+            )
+
+    def peek_ready_step_indexes(
+        self,
+        scopes: tuple[ComputeScope, ...],
+    ) -> dict[ComputeScope, int]:
+        """Map scopes currently ``ready`` to ``step_index`` (lock-held)."""
+        with self._condition:
+            out: dict[ComputeScope, int] = {}
+            for scope in scopes:
+                node = self._nodes.get(scope)
+                if node is not None and node.state == "ready":
+                    out[scope] = node.step_index
+            return out
 
     def ready_scopes(self) -> tuple[ComputeScope, ...]:
         """Return scopes currently in the ready queue."""
         with self._condition:
-            return tuple(
-                scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
-            )
+            return self._ready_scopes_snapshot()
 
     def diagnostics_snapshot(self) -> OrchestratorDiagnosticsSnapshot:
         """Return immutable node and ready-queue data in one critical section."""
@@ -326,45 +232,10 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
                 )
                 for node in self._nodes.values()
             )
-            ready_scopes = tuple(
-                scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
+            return OrchestratorDiagnosticsSnapshot(
+                nodes=nodes,
+                ready_scopes=self._ready_scopes_snapshot(),
             )
-            return OrchestratorDiagnosticsSnapshot(nodes=nodes, ready_scopes=ready_scopes)
-
-    def submit(self, request: ComputeRequest) -> ComputeHandle:
-        """Submit or attach to in-flight work for one compute scope."""
-        with self._condition:
-            scope = request.scope
-            existing = self._nodes.get(scope)
-            pending_inline: tuple[_PendingInlineExecution, ...] = ()
-            pending_pool: tuple[_PendingPoolSubmission, ...] = ()
-            if existing is not None:
-                if not (request.force_fresh and existing.state in {"complete", "failed"}):
-                    handle = self._attach_to_existing(existing, request)
-                    pending_inline, pending_pool = self._dispatch()
-                    should_plan = False
-                else:
-                    self._replace_terminal_node(existing)
-                    should_plan = True
-            else:
-                should_plan = True
-
-            if should_plan:
-                bundle = self._require_bundle(request)
-                self._plan_and_register(
-                    scope,
-                    bundle=bundle,
-                    priority_band=request.priority_band,
-                    entry_step_kind=request.step_kind,
-                )
-                for node in self._nodes.values():
-                    self._refresh_node_readiness(node)
-                handle = ComputeHandle(scope=scope, _node=self._nodes[scope])
-                pending_inline, pending_pool = self._dispatch()
-        self._execute_pending_inlines(pending_inline)
-        self._flush_pending_pool_submissions(pending_pool)
-        self._observers.drain_post_lock_callbacks()
-        return handle
 
     def execute_pool_step(self, scope: ComputeScope) -> object:
         """Run the current pool step for one scope on the calling thread."""
@@ -408,47 +279,84 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         *,
         result_wire: object | None = None,
         error: BaseException | None = None,
+        step_kind: str | None = None,
+        step_index: int | None = None,
     ) -> None:
-        """Mark a pool-submitted step complete (used by worker pool integration)."""
+        """Mark a pool-submitted step complete (used by worker pool integration).
+
+        Optional ``step_kind`` / ``step_index`` come from the pool work item and are
+        used when the node is no longer ``running`` (stale finish after abort/replace).
+        """
         with self._condition:
             node = self._nodes.get(scope)
             if node is None:
-                return
-            if node.state != "running":
-                # Already aborted/cancelled while the pool worker was still finishing.
-                return
-            if error is not None:
-                step_kind = self._current_step_spec(
-                    node,
-                    self._compute_registry[node.scope.analytic_id],
-                ).step_kind
-                self._observers.notify_step_complete(
-                    node,
-                    step_kind,
-                    surface="pool",
-                    terminal_state="failed",
+                self._observers.notify_lifecycle(
+                    "pool_finish_ignored",
+                    scope,
+                    step_kind=step_kind,
+                    step_index=step_index,
+                    detail={
+                        "reason": "missing_node",
+                        "hadError": error is not None,
+                    },
                 )
-                self._fail_node(node, error)
+            elif node.state != "running":
+                # Already aborted/cancelled/replaced while the pool worker was finishing.
+                # step_kind / step_index identify the finishing pool work item, which
+                # may differ from the node's current (already-moved-on) step.
+                self._observers.notify_lifecycle(
+                    "pool_finish_ignored",
+                    scope,
+                    node=node,
+                    step_kind=step_kind,
+                    step_index=step_index,
+                    detail={
+                        "reason": "node_not_running",
+                        "priorState": node.state,
+                        "priorStepIndex": node.step_index,
+                        "priorProfileStepIndex": node.profile_step_index,
+                        "hadError": error is not None,
+                    },
+                )
             else:
-                step_kind = self._current_step_spec(
+                finished_step_kind = self._current_step_spec(
                     node,
                     self._compute_registry[node.scope.analytic_id],
                 ).step_kind
-                self._observers.notify_step_complete(
-                    node,
-                    step_kind,
-                    surface="pool",
-                    terminal_state="success",
-                )
-                self._after_step_success(node, result_wire)
+                finished_step_index = node.step_index
+                if error is not None:
+                    self._observers.notify_step_complete(
+                        node,
+                        finished_step_kind,
+                        step_index=finished_step_index,
+                        surface="pool",
+                        terminal_state="failed",
+                    )
+                    self._fail_node(node, error)
+                else:
+                    self._observers.notify_step_complete(
+                        node,
+                        finished_step_kind,
+                        step_index=finished_step_index,
+                        surface="pool",
+                        terminal_state="success",
+                    )
+                    self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
 
-    def abort_scope(self, scope: ComputeScope, error: BaseException) -> bool:
+    def abort_scope(
+        self,
+        scope: ComputeScope,
+        error: BaseException,
+        *,
+        expected_execution_generation: int | None = None,
+    ) -> bool:
         """Abort a non-terminal node so a later ``force_fresh`` submit can replace it.
 
         Returns whether a node was aborted. No-op when the scope is absent or already
-        terminal. Used when a stream row run is cancelled while orchestrator work for
-        that scope is still in flight.
+        terminal, or when it is no longer the expected execution generation. Used when
+        a stream row run is cancelled while orchestrator work for that scope is still
+        in flight.
 
         Prefer :class:`ComputeScopeAbortedError` for intentional cancels: the node
         becomes ``failed`` for force_fresh replacement, but dependents do **not**
@@ -456,18 +364,42 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         """
         with self._condition:
             node = self._nodes.get(scope)
-            if node is None or node.state in {"complete", "failed"}:
+            if node is None or node.is_terminal:
                 return False
-            if node.state == "running":
+            if (
+                expected_execution_generation is not None
+                and node.execution_generation != expected_execution_generation
+            ):
+                return False
+            prior_state = node.state
+            was_running = prior_state == "running"
+            finished_step_kind: str | None = None
+            finished_step_index = node.step_index
+            if was_running:
                 registration = self._compute_registry.get(node.scope.analytic_id)
                 if registration is not None:
-                    step_kind = self._current_step_spec(node, registration).step_kind
+                    finished_step_kind = self._current_step_spec(node, registration).step_kind
                     self._observers.notify_step_complete(
                         node,
-                        step_kind,
+                        finished_step_kind,
+                        step_index=finished_step_index,
                         surface="pool",
                         terminal_state="failed",
                     )
+            self._observers.notify_lifecycle(
+                "abort",
+                scope,
+                node=node,
+                step_kind=finished_step_kind,
+                step_index=finished_step_index,
+                detail={
+                    "reason": "abort_scope",
+                    "priorState": prior_state,
+                    "priorProfileStepIndex": node.profile_step_index,
+                    "wasRunning": was_running,
+                    "errorType": type(error).__name__,
+                },
+            )
             self._fail_node(node, error)
         self._observers.drain_post_lock_callbacks()
         return True
@@ -493,138 +425,20 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
             raise RuntimeError(f"compute node {node.scope!r} has no orchestration bundle")
         return self._ctx_for_bundle(node.bundle)
 
-    def _require_bundle(self, request: ComputeRequest) -> OrchestrationBundle:
-        bundle = request.resolved_bundle()
-        if bundle is None:
-            raise ValueError("ComputeRequest requires bundle= or ctx= for new work")
-        return bundle
-
-    def _attach_to_existing(
-        self,
-        node: ComputeNodeRun,
-        request: ComputeRequest,
-    ) -> ComputeHandle:
-        if node.state in {"complete", "failed"}:
-            return ComputeHandle(scope=node.scope, _node=node)
-        handle = ComputeHandle(scope=node.scope, _node=node, is_waiter=True)
-        node.waiters.append(handle)
-        self._maybe_adopt_priority(node, request.priority_band)
-        return handle
-
-    def _maybe_adopt_priority(
-        self,
-        node: ComputeNodeRun,
-        priority_band: ComputePriorityBand,
-    ) -> None:
-        """Upgrade a non-terminal node's priority band to match a higher-priority attach.
-
-        Closed once the node has sealed for execution: adopting after job-wire
-        build has started (or after the step is handed to the pool) could race
-        the in-flight work, so later attaches simply wait for that leader.
-        """
-        if node.execution_sealed:
-            return
-        if node.state not in {"waiting_deps", "ready", "running"}:
-            return
-        if PRIORITY_BAND_RANK[priority_band] >= PRIORITY_BAND_RANK[node.priority_band]:
-            return
-        node.priority_band = priority_band
-
-    def _replace_terminal_node(self, node: ComputeNodeRun) -> None:
-        if node.state not in {"complete", "failed"}:
-            raise RuntimeError(f"cannot replace non-terminal node in state {node.state!r}")
-        self._dequeue_ready(node.scope)
-        node.waiters.clear()
-        self._nodes.pop(node.scope, None)
-
-    def _plan_and_register(
-        self,
-        root_scope: ComputeScope,
-        *,
-        bundle: OrchestrationBundle,
-        priority_band: ComputePriorityBand,
-        entry_step_kind: str | None = None,
-    ) -> None:
-        export_scope = compute_scope_to_export_scope(root_scope)
-        ctx = self._ctx_for_bundle(bundle)
-        planned_nodes = plan_compute_dag(
-            ctx,
-            root_scope.analytic_id,
-            export_scope,
-            compute_registry=self._compute_registry,
-            force_root=entry_step_kind is not None,
-        )
-        self._turn_cache.prefetch_planned_nodes(
-            planned_nodes,
-            load_turn=bundle.query_context.load_turn,
-            game_id=bundle.game_id,
-            perspective=bundle.perspective,
-        )
-        for planned in planned_nodes:
-            self._register_planned_node(
-                planned,
-                bundle=bundle,
-                priority_band=priority_band,
-                entry_step_kind=entry_step_kind if planned.scope == root_scope else None,
-            )
-        if root_scope not in self._nodes:
-            self._nodes[root_scope] = ComputeNodeRun(
-                scope=root_scope,
-                dependency_scopes=(),
-                state="complete",
-                priority_band=priority_band,
-                bundle=bundle,
-            )
-
-    def _register_planned_node(
-        self,
-        planned: PlannedComputeNode,
-        *,
-        bundle: OrchestrationBundle,
-        priority_band: ComputePriorityBand,
-        entry_step_kind: str | None = None,
-    ) -> None:
-        if planned.scope in self._nodes:
-            # Existing node keeps the bundle of whichever submission first
-            # registered it -- the leader is sticky.
-            return
-        registration = self._compute_registry[planned.scope.analytic_id]
-        profile_step_index = self._resolve_profile_step_index(
-            registration,
-            entry_step_kind,
-        )
-        node = ComputeNodeRun(
-            scope=planned.scope,
-            dependency_scopes=planned.dependency_scopes,
-            priority_band=priority_band,
-            profile_step_index=profile_step_index,
-            bundle=bundle,
-        )
-        self._nodes[planned.scope] = node
-
-    def _resolve_profile_step_index(
-        self,
-        registration: AnalyticComputeRegistration,
-        entry_step_kind: str | None,
-    ) -> int:
-        steps = registration.compute_profile.steps
-        if entry_step_kind is None:
-            return 0
-        for index, step in enumerate(steps):
-            if step.step_kind == entry_step_kind:
-                return index
-        raise ValueError(
-            f"unknown entry step_kind {entry_step_kind!r} for analytic {registration.analytic_id!r}"
-        )
+    def execution_generation_for_scope(self, scope: ComputeScope) -> int | None:
+        """Return the current execution identity for ``scope``."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            return None if node is None else node.execution_generation
 
     def _refresh_all_readiness(self) -> None:
         for node in self._nodes.values():
-            if node.state in {"complete", "failed", "running"}:
+            if node.blocks_readiness_refresh:
                 continue
             self._refresh_node_readiness(node)
 
     def _refresh_node_readiness(self, node: ComputeNodeRun) -> None:
-        if node.state in {"complete", "failed", "running"}:
+        if node.blocks_readiness_refresh:
             return
         failed_dependency_error = self._failed_dependency_error(node)
         if failed_dependency_error is not None:
@@ -680,205 +494,16 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
             return False
         return self._current_invalidation_generation(node) != node.generation_at_submit
 
-    def _retry_step_after_epoch_bump(self, node: ComputeNodeRun) -> None:
-        self._metrics.epoch_discards += 1
-        node.generation_at_submit = None
-        node.state = "ready"
-        node.execution_sealed = False
-        self._enqueue_ready(node.scope)
-        self._observers.notify_ready(node)
-        # Never call pool.submit under the orchestrator lock (deadlocks with workers).
-        self._observers.schedule_post_lock(self.dispatch_ready_work)
-
-    def _recover_after_persist_deferred(
-        self,
-        node: ComputeNodeRun,
-        recovery: PersistDependencyRecovery,
-    ) -> None:
-        """Park the node on ``waiting_deps`` and optionally force_fresh a dependency.
-
-        Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
-        when a durable write cannot complete until a dependency re-closes.
-        Failing the node left dependents waiting with no wake for background DAG
-        nodes (no table-stream controller). Force-freshing the declared dependency
-        reopens the ENSURE edge; when it completes, readiness promotes this node.
-        """
-        priority_band = node.priority_band
-        bundle = node.bundle
-        with self._condition:
-            if node.state != "running":
-                return
-            node.generation_at_submit = None
-            node.error = None
-            node.state = "waiting_deps"
-            node.execution_sealed = False
-            self._dequeue_ready(node.scope)
-            self._metrics.epoch_discards += 1
-
-        if not recovery.force_fresh:
-            return
-
-        dependency_scope = recovery.dependency_scope
-        step_kind = recovery.step_kind
-
-        def _force_fresh_dependency() -> None:
-            self.submit(
-                ComputeRequest(
-                    scope=dependency_scope,
-                    priority_band=priority_band,
-                    force_fresh=True,
-                    step_kind=step_kind,
-                    bundle=bundle,
-                )
-            )
-
-        self._observers.schedule_post_lock(_force_fresh_dependency)
-
-    def _after_step_success(self, node: ComputeNodeRun, result_wire: object | None) -> None:
-        if self._is_epoch_stale(node):
-            self._retry_step_after_epoch_bump(node)
-            return
-
-        step_result = coerce_step_result(result_wire)
-        registration = self._compute_registry[node.scope.analytic_id]
-        node.generation_at_submit = None
-
-        if step_result.outcome == "continue":
-            if step_result.payload is not None:
-                node.result_wire = step_result.payload
-            self._continue_node_step(node, registration)
-            return
-
-        if step_result.outcome == "persist":
-            node.result_wire = step_result.payload
-            self._metrics.persist_calls += 1
-            # Persist must not run under the orchestrator lock: fleet refine/scores
-            # probes take the inference scheduler lock, and scheduler paths call back
-            # into register_dispatch_gate / dispatch_ready_work (ABBA deadlock).
-            #
-            # Ordering invariant (even outside the lock): persist must finish before
-            # ``_complete_node``. Completing first would wake dependents / allow
-            # ``has_final_ledger`` readers to observe a terminal node whose durable
-            # artifact is not written yet (missed overlay, false unsatisfied probes,
-            # or skipped scores reschedule decisions). Notifications returned from
-            # ``persist`` run only after complete so skip-reschedule sees ``complete``.
-            payload = step_result.payload
-
-            def _persist_then_complete(
-                completed_node: ComputeNodeRun = node,
-                completed_payload: object = payload,
-                completed_registration: AnalyticComputeRegistration = registration,
-            ) -> None:
-                ctx = self._ctx_for_node(completed_node)
-                try:
-                    post_lock_callback = completed_registration.persistence_policy.persist(
-                        ctx,
-                        completed_node.scope,
-                        completed_payload,
-                    )
-                except BaseException as exc:
-                    # Persist runs after step-complete success; a raise must not leave a
-                    # ghost ``running`` node (empty queues, freeze ``nothing_steppable``).
-                    # Do not re-raise: pool workers call complete_pool_step on this thread
-                    # and an escaping exception would kill the worker loop.
-                    if isinstance(exc, PersistDeferredError):
-                        # Analytic-owned recovery: park waiting_deps and optionally
-                        # force_fresh the declared dependency (e.g. open scores evidence).
-                        self._recover_after_persist_deferred(
-                            completed_node,
-                            exc.recovery,
-                        )
-                        return
-                    with self._condition:
-                        if completed_node.state == "running":
-                            self._fail_node(completed_node, exc)
-                    return
-                with self._condition:
-                    if completed_node.state != "running":
-                        return
-                    self._complete_node(completed_node)
-                    if post_lock_callback is not None:
-                        self._observers.schedule_post_lock(post_lock_callback)
-
-            self._observers.schedule_post_lock(_persist_then_complete)
-            return
-
-        if step_result.outcome == "complete":
-            # Keep a provisional continue payload when the terminal step has none
-            # (e.g. scores materialize export tree then tier_solve skip).
-            if step_result.payload is not None:
-                node.result_wire = step_result.payload
-            self._complete_node(node)
-            return
-
-        raise RuntimeError(f"unsupported step outcome {step_result.outcome!r}")
-
-    def _continue_node_step(
-        self,
-        node: ComputeNodeRun,
-        registration: AnalyticComputeRegistration,
-    ) -> None:
-        node.step_index += 1
-        steps = registration.compute_profile.steps
-        current_step = steps[node.profile_step_index]
-        next_profile_index = node.profile_step_index + 1
-        if next_profile_index < len(steps):
-            next_step = steps[next_profile_index]
-            if next_step.step_kind != current_step.step_kind:
-                # Advance profile; retain prior step claims until node terminal so
-                # peers cannot rematerialize while this node is still non-terminal.
-                node.profile_step_index = next_profile_index
-        node.state = "ready"
-        node.execution_sealed = False
-        self._enqueue_ready(node.scope)
-        self._observers.notify_ready(node)
-        # Defer dispatch so pool submit is never nested under this lock.
-        self._observers.schedule_post_lock(self.dispatch_ready_work)
-
-    def _complete_node(self, node: ComputeNodeRun) -> None:
-        node.state = "complete"
-        self._dequeue_ready(node.scope)
-        for waiter in node.waiters:
-            waiter._waiter_error = None
-        node.waiters.clear()
-        self._observers.notify_node_complete(node)
-        completed_scope = node.scope
-        completed_node = node
-        self._observers.schedule_post_lock(
-            lambda: self._handle_dependency_terminal(completed_scope),
-        )
-        self._observers.schedule_post_lock(
-            lambda: notify_process_scope_terminal(completed_scope, completed_node),
-        )
-
-    def _fail_node(self, node: ComputeNodeRun, error: BaseException) -> None:
-        if node.state == "failed":
-            return
-        node.state = "failed"
-        node.error = error
-        self._dequeue_ready(node.scope)
-        for waiter in node.waiters:
-            waiter._waiter_error = error
-        node.waiters.clear()
-        self._observers.notify_node_complete(node)
-        completed_scope = node.scope
-        completed_node = node
-        self._observers.schedule_post_lock(
-            lambda: self._handle_dependency_terminal(completed_scope),
-        )
-        self._observers.schedule_post_lock(
-            lambda: notify_process_scope_terminal(completed_scope, completed_node),
-        )
-
     def _ready_depth(self) -> int:
         return sum(1 for scope in self._ready_queue if self._nodes[scope].state == "ready")
 
+    def _ready_scopes_snapshot(self) -> tuple[ComputeScope, ...]:
+        """Return ready-queue scopes still in ``ready`` state (caller holds lock)."""
+        return tuple(scope for scope in self._ready_queue if self._nodes[scope].state == "ready")
+
     def _notify_ready_queue_changed(self) -> None:
         """Push the current ready-scopes snapshot to depth listeners (caller holds lock)."""
-        ready_scopes = tuple(
-            scope for scope in self._ready_queue if self._nodes[scope].state == "ready"
-        )
-        self._observers.notify_ready_queue_changed(ready_scopes)
+        self._observers.notify_ready_queue_changed(self._ready_scopes_snapshot())
 
     def _handle_dependency_terminal(self, completed_scope: ComputeScope) -> None:
         with self._condition:
@@ -888,7 +513,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         for node in self._nodes.values():
             if completed_scope not in node.dependency_scopes:
                 continue
-            if node.state in {"complete", "failed", "running"}:
+            if node.blocks_readiness_refresh:
                 continue
             self._refresh_node_readiness(node)
         # Defer dispatch: this runs under the orchestrator lock via
@@ -896,6 +521,7 @@ class ComputeOrchestrator(OrchestratorStepExecutionMixin):
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
     def _has_pending_work(self) -> bool:
+        # ``parked`` is idle until an explicit ``force_fresh`` wake -- not dispatchable.
         return any(
             node.state in {"waiting_deps", "ready", "running"} for node in self._nodes.values()
         )

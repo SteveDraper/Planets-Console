@@ -9,42 +9,16 @@ lifecycle.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.wire import DependencyOutputs
 
 if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeNodeRun
+    from api.compute.orchestrator_state import ComputeNodeRun
     from api.compute.scope import ComputeScope
-
-
-@dataclass(frozen=True)
-class _PendingInlineExecution:
-    """Inline work accepted under the orchestrator lock; executed after release.
-
-    Job-wire builders (e.g. scores ``ensure_scores_export``) may take other locks
-    such as the inference scheduler lock. Building or running them while holding
-    the orchestrator lock deadlocks with scheduler paths that call back into
-    ``register_dispatch_gate`` / ``dispatch_ready_work``.
-    """
-
-    node: ComputeNodeRun
-    registration: AnalyticComputeRegistration
-    step: ComputeStepSpec
-    dependency_outputs: DependencyOutputs
-
-
-@dataclass(frozen=True)
-class _PendingPoolSubmission:
-    """Pool work accepted under the orchestrator lock; built and submitted after release."""
-
-    node: ComputeNodeRun
-    registration: AnalyticComputeRegistration
-    step: ComputeStepSpec
-    dependency_outputs: DependencyOutputs
 
 
 class OrchestratorStepExecutionMixin:
@@ -59,7 +33,7 @@ class OrchestratorStepExecutionMixin:
 
     def _dispatch(
         self,
-    ) -> tuple[tuple[_PendingInlineExecution, ...], tuple[_PendingPoolSubmission, ...]]:
+    ) -> tuple[tuple[PendingInlineExecution, ...], tuple[PendingPoolSubmission, ...]]:
         """Select and begin ready work under the orchestrator lock.
 
         Inline and pool steps are prepared here (state → running, dependency wires
@@ -69,8 +43,8 @@ class OrchestratorStepExecutionMixin:
         Before execution, durable satisfaction short-circuits the node so a node
         whose durable artifact already satisfies this step never re-runs it.
         """
-        pending_inline: list[_PendingInlineExecution] = []
-        pending_pool: list[_PendingPoolSubmission] = []
+        pending_inline: list[PendingInlineExecution] = []
+        pending_pool: list[PendingPoolSubmission] = []
         initial_ready_depth = self._ready_depth()
         while self._ready_queue:
             scope, node = self._dequeue_dispatchable_ready_node()
@@ -85,7 +59,7 @@ class OrchestratorStepExecutionMixin:
             if step.backend == "inline":
                 self._begin_step_execution(node)
                 pending_inline.append(
-                    _PendingInlineExecution(
+                    PendingInlineExecution(
                         node=node,
                         registration=registration,
                         step=step,
@@ -101,7 +75,7 @@ class OrchestratorStepExecutionMixin:
                 break
             self._begin_step_execution(node)
             pending_pool.append(
-                _PendingPoolSubmission(
+                PendingPoolSubmission(
                     node=node,
                     registration=registration,
                     step=step,
@@ -129,7 +103,7 @@ class OrchestratorStepExecutionMixin:
 
     def _execute_pending_inlines(
         self,
-        pending: tuple[_PendingInlineExecution, ...],
+        pending: tuple[PendingInlineExecution, ...],
     ) -> None:
         """Build and run accepted inline steps without holding the orchestrator lock."""
         for item in pending:
@@ -174,21 +148,6 @@ class OrchestratorStepExecutionMixin:
             )
         return steps[node.profile_step_index]
 
-    def _build_job_wire(
-        self,
-        node: ComputeNodeRun,
-        registration: AnalyticComputeRegistration,
-        step: ComputeStepSpec,
-    ) -> object:
-        """Build a job wire from live dependency nodes (caller must hold orch lock)."""
-        dependency_outputs = self._snapshot_dependency_outputs(node)
-        builder = registration.build_step_job_wire[step.step_kind]
-        return builder(
-            node.scope,
-            dependency_outputs=dependency_outputs,
-            ctx=self._ctx_for_node(node),
-        )
-
     def _begin_step_execution(self, node: ComputeNodeRun) -> None:
         registration = self._compute_registry[node.scope.analytic_id]
         node.state = "running"
@@ -225,7 +184,7 @@ class OrchestratorStepExecutionMixin:
         self._complete_node(node)
         return True
 
-    def _run_inline_outside_lock(self, pending: _PendingInlineExecution) -> None:
+    def _run_inline_outside_lock(self, pending: PendingInlineExecution) -> None:
         """Build wire, seal for execution, then run an inline step without the orch lock."""
         node = pending.node
         ctx = self._ctx_for_node(node)
@@ -242,6 +201,7 @@ class OrchestratorStepExecutionMixin:
                 self._observers.notify_step_complete(
                     node,
                     pending.step.step_kind,
+                    step_index=node.step_index,
                     surface="inline",
                     terminal_state="failed",
                 )
@@ -262,6 +222,7 @@ class OrchestratorStepExecutionMixin:
                 self._observers.notify_step_complete(
                     node,
                     pending.step.step_kind,
+                    step_index=node.step_index,
                     surface="inline",
                     terminal_state="failed",
                 )
@@ -272,6 +233,7 @@ class OrchestratorStepExecutionMixin:
             self._observers.notify_step_complete(
                 node,
                 pending.step.step_kind,
+                step_index=node.step_index,
                 surface="inline",
                 terminal_state="success",
             )
@@ -279,7 +241,7 @@ class OrchestratorStepExecutionMixin:
 
     def _flush_pending_pool_submissions(
         self,
-        pending: tuple[_PendingPoolSubmission, ...],
+        pending: tuple[PendingPoolSubmission, ...],
     ) -> None:
         """Build job wires, seal, and submit pool work without the orchestrator lock."""
         if not pending:
@@ -322,6 +284,7 @@ class OrchestratorStepExecutionMixin:
                         self._observers.notify_step_complete(
                             node,
                             step.step_kind,
+                            step_index=node.step_index,
                             surface="pool",
                             terminal_state="failed",
                         )

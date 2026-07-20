@@ -11,10 +11,9 @@ from api.compute.diagnostics.bindings import BoundOrchestrator, bound_matches_sh
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.profile_steps import profile_step_at
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import PRIORITY_BAND_RANK, PoolWorkItem, dequeue_next_work_item
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, format_compute_scope_key
 
 SingleStepSource = Literal["held", "would_dispatch"]
 SingleStepDisabledReason = Literal[

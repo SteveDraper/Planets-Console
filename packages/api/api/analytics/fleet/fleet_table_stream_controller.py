@@ -30,6 +30,12 @@ from api.transport.fleet_table_stream import fleet_error_event
 class FleetTableStreamController(
     TableStreamControllerBase[ScheduledFleetPlayer, PlayerStreamAdmission]
 ):
+    """Fleet table-stream controller.
+
+    Fleet uses hard terminals only -- never soft-provisional stream resolution
+    triggers or ``stream_drain.reopen_if_soft``.
+    """
+
     scope: FleetTableStreamScope
     turn: TurnInfo
     scheduler: FleetTableStreamScheduler
@@ -83,13 +89,11 @@ class FleetTableStreamController(
             old_row = self.scheduled_rows.get(player_id)
             if old_row is not None:
                 cancel_run_ids.append(old_row.session.run_id)
-                self.finished_run_ids.discard(old_row.session.run_id)
                 self.scheduled_rows.pop(player_id, None)
             else:
                 active = self.scheduler.row_run_for_player(self.scope, player_id)
                 if active is not None:
                     cancel_run_ids.append(active.session.run_id)
-                    self.finished_run_ids.discard(active.session.run_id)
         for run_id in cancel_run_ids:
             self.scheduler.cancel_player_run(run_id)
         with self.stream_lock:
@@ -115,7 +119,6 @@ class FleetTableStreamController(
                 old_row = self.scheduled_rows.get(player_id)
                 if old_row is not None:
                     cancel_run_ids.append(old_row.session.run_id)
-            self.finished_run_ids.clear()
             self.scheduled_rows.clear()
         for run_id in cancel_run_ids:
             self.scheduler.cancel_player_run(run_id)

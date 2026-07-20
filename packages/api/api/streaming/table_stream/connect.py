@@ -47,8 +47,6 @@ class TableStreamConnectPolicy(Protocol[ScheduledT, AdmissionT, EventT]):
 
     def adopt_admission_scheduled_row(self, player_id: int, scheduled: ScheduledT) -> bool: ...
 
-    def finished_run_ids(self) -> set[str]: ...
-
     def drain_pending_wire_events(self) -> list[dict[str, object]]: ...
 
     def wake_multiplex(self) -> threading.Event: ...
@@ -122,7 +120,6 @@ def iter_table_stream_connect(
                 yield from drain_available_multiplex_events(
                     policy.current_scheduled_rows(),
                     tag_player_id=True,
-                    finished_run_ids=policy.finished_run_ids(),
                     event_to_wire_events=policy.multiplex_event_to_wire_events,
                     tag_event=policy.tag_event,
                     terminal_types=policy.terminal_types(),
@@ -132,7 +129,6 @@ def iter_table_stream_connect(
             yield from iter_multiplexed_stream_events(
                 policy.current_scheduled_rows(),
                 tag_player_id=True,
-                finished_run_ids=policy.finished_run_ids(),
                 is_stream_active=policy.owns_table_stream,
                 row_provider=policy.current_scheduled_rows,
                 pending_events_provider=policy.drain_pending_wire_events,

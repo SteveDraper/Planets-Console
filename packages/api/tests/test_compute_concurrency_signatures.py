@@ -31,12 +31,12 @@ from api.compute.diagnostics import (
     snapshot_to_wire,
 )
 from api.compute.diagnostics.rollup import build_concurrency_timeline_rollup, rollup_to_wire
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.timeline import (
     OccupancyGauges,
     make_concurrency_event,
 )
 from api.compute.runtime import reset_orchestrators_for_tests
+from api.compute.scope import format_compute_scope_key
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
@@ -482,7 +482,7 @@ def test_ready_to_waiting_deps_notifies_ready_queue_depth(sample_turn):
         pool_submitter=lambda _node, _step: None,
     )
     snapshots: list[tuple] = []
-    orchestrator.register_ready_queue_listener(lambda scopes: snapshots.append(scopes))
+    orchestrator.observers.register_ready_queue_listener(lambda scopes: snapshots.append(scopes))
 
     player_id = sample_turn.scores[0].ownerid
     scope = normalize_export_scope_to_compute_scope(

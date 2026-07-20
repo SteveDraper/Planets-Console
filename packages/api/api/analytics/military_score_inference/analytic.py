@@ -536,7 +536,7 @@ def _try_accelerated_backfill_inference(
             "status": segment_status,
             "summary": _summary_from_segment_payload(segment_payload),
             "solutionCount": solution_count,
-            "isComplete": segment_status != STATUS_TIME_LIMITED,
+            "isComplete": segment_status != STATUS_TIME_LIMITED or solution_count == 0,
             "solutions": solutions_raw if isinstance(solutions_raw, list) else [],
             "hostTurnTargets": [
                 host_turn_functional_target_to_wire_dict(

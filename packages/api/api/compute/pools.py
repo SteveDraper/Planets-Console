@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
+import time
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecutor
@@ -16,8 +18,11 @@ from api.compute.scope import ComputeScope
 from api.compute.wire import RunStepFn
 from api.compute.worker_turn_cache import init_worker_turn_cache, worker_deserialize_calls
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+    from api.compute.orchestrator import ComputeOrchestrator
+    from api.compute.orchestrator_state import ComputeNodeRun
 
 ComputePriorityBand = Literal["stream_attached", "interactive_ensure", "background"]
 
@@ -161,6 +166,8 @@ class ComputeWorkerPool:
         # controller→pool).
         self._remote_futures_lock = threading.Lock()
         self._remote_futures: list[RemotePoolFutureRecord] = []
+        self._worker_exception_count = 0
+        self._last_dequeue_monotonic: float | None = None
         for _ in range(self._worker_count):
             thread = threading.Thread(target=self._worker_loop, daemon=True)
             thread.start()
@@ -197,9 +204,12 @@ class ComputeWorkerPool:
         self,
         callback: Callable[[PoolWorkItem, int], None] | None,
     ) -> None:
-        """Set a hook invoked under the pool lock after an item is enqueued.
+        """Set a hook invoked after an item is enqueued (outside the pool lock).
 
-        The second argument is the work-queue depth after the append.
+        The second argument is the work-queue depth after the append. Invoked
+        outside the pool condition so the callback may take the diagnostics
+        controller lock without nesting under the pool lock (workers hold pool
+        then controller in predicate / on_dequeued).
         """
         with self._condition:
             self._on_item_enqueued = callback
@@ -236,6 +246,19 @@ class ComputeWorkerPool:
             "processMaxWorkers": worker_count if process is not None else None,
             "interpreterQueueDepth": _executor_queue_depth(interpreter),
             "processQueueDepth": _executor_queue_depth(process),
+        }
+
+    def worker_health(self) -> dict[str, object]:
+        """Return alive-thread / exception counters for compute diagnostics."""
+        with self._condition:
+            alive = sum(1 for thread in self._workers if thread.is_alive())
+            exceptions = self._worker_exception_count
+            last_dequeue = self._last_dequeue_monotonic
+        return {
+            "configuredWorkers": self._worker_count,
+            "aliveWorkers": alive,
+            "workerExceptionCount": exceptions,
+            "lastDequeueMonotonic": last_dequeue,
         }
 
     def wake_workers(self) -> bool:
@@ -296,23 +319,26 @@ class ComputeWorkerPool:
         run_step: RunStepFn | None = None,
     ) -> None:
         """Enqueue one ready orchestrator step for pool execution."""
+        item = PoolWorkItem(
+            orchestrator_id=orchestrator_id,
+            scope=node.scope,
+            step_kind=step.step_kind,
+            backend=step.backend,
+            priority_band=priority_band,
+            step_index=node.step_index,
+            job_wire=job_wire,
+            run_step=run_step,
+        )
         with self._condition:
-            item = PoolWorkItem(
-                orchestrator_id=orchestrator_id,
-                scope=node.scope,
-                step_kind=step.step_kind,
-                backend=step.backend,
-                priority_band=priority_band,
-                step_index=node.step_index,
-                job_wire=job_wire,
-                run_step=run_step,
-            )
             self._work_queue.append(item)
             on_enqueued = self._on_item_enqueued
             queue_depth = len(self._work_queue)
-            if on_enqueued is not None:
-                on_enqueued(item, queue_depth)
             self._condition.notify()
+        # Outside the pool lock: enqueue hooks take the diagnostics controller lock
+        # (must not nest under the pool condition -- workers hold pool then
+        # controller in predicate / on_dequeued).
+        if on_enqueued is not None:
+            on_enqueued(item, queue_depth)
 
     def shutdown(self, *, wait_for_interpreters: bool = False) -> None:
         with self._condition:
@@ -351,10 +377,25 @@ class ComputeWorkerPool:
 
     def _worker_loop(self) -> None:
         while True:
-            item = self._take_next_item()
+            try:
+                item = self._take_next_item()
+            except BaseException:
+                with self._condition:
+                    self._worker_exception_count += 1
+                logger.exception("compute pool worker failed while dequeuing; continuing")
+                continue
             if item is None:
                 return
-            self._execute_item(item)
+            try:
+                self._execute_item(item)
+            except BaseException:
+                with self._condition:
+                    self._worker_exception_count += 1
+                logger.exception(
+                    "compute pool worker failed while executing %s %s; continuing",
+                    item.step_kind,
+                    item.scope,
+                )
 
     def _take_next_item(self) -> PoolWorkItem | None:
         with self._condition:
@@ -364,6 +405,7 @@ class ComputeWorkerPool:
                 item = dequeue_next_work_item(self._work_queue, predicate=predicate)
                 if item is not None:
                     self._metrics.dequeues += 1
+                    self._last_dequeue_monotonic = time.monotonic()
                     # Same critical section as pop -- grant burn must be atomic with selection.
                     # Callback may take the diagnostics controller lock (pool -> controller).
                     if on_dequeued is not None:
@@ -404,6 +446,8 @@ class ComputeWorkerPool:
                     item.orchestrator_id,
                     item.scope,
                     orchestrator.execute_pool_step,
+                    step_kind=item.step_kind,
+                    step_index=item.step_index,
                 )
             finally:
                 self._notify_item_finished(item)
@@ -460,7 +504,13 @@ class ComputeWorkerPool:
 
     def _on_remote_future_done(self, item: PoolWorkItem, future: Future[object]) -> None:
         try:
-            self._complete_from_future(item.orchestrator_id, item.scope, future)
+            self._complete_from_future(
+                item.orchestrator_id,
+                item.scope,
+                future,
+                step_kind=item.step_kind,
+                step_index=item.step_index,
+            )
         finally:
             # Unregister after complete/persist so a mid-callback snapshot can still
             # observe futureState=done while the DAG node remains running.
@@ -508,16 +558,27 @@ class ComputeWorkerPool:
         orchestrator_id: int,
         scope: ComputeScope,
         run_step: Callable[[ComputeScope], object],
+        *,
+        step_kind: str | None = None,
+        step_index: int | None = None,
     ) -> None:
         try:
             result_wire = run_step(scope)
         except BaseException as exc:
-            self._complete_pool_step_if_registered(orchestrator_id, scope, error=exc)
+            self._complete_pool_step_if_registered(
+                orchestrator_id,
+                scope,
+                error=exc,
+                step_kind=step_kind,
+                step_index=step_index,
+            )
             return
         self._complete_pool_step_if_registered(
             orchestrator_id,
             scope,
             result_wire=result_wire,
+            step_kind=step_kind,
+            step_index=step_index,
         )
 
     def _complete_from_future(
@@ -525,16 +586,27 @@ class ComputeWorkerPool:
         orchestrator_id: int,
         scope: ComputeScope,
         future: Future[object],
+        *,
+        step_kind: str | None = None,
+        step_index: int | None = None,
     ) -> None:
         try:
             result_wire = future.result()
         except BaseException as exc:
-            self._complete_pool_step_if_registered(orchestrator_id, scope, error=exc)
+            self._complete_pool_step_if_registered(
+                orchestrator_id,
+                scope,
+                error=exc,
+                step_kind=step_kind,
+                step_index=step_index,
+            )
             return
         self._complete_pool_step_if_registered(
             orchestrator_id,
             scope,
             result_wire=result_wire,
+            step_kind=step_kind,
+            step_index=step_index,
         )
 
     def _complete_pool_step_if_registered(
@@ -544,11 +616,19 @@ class ComputeWorkerPool:
         *,
         result_wire: object | None = None,
         error: BaseException | None = None,
+        step_kind: str | None = None,
+        step_index: int | None = None,
     ) -> None:
         orchestrator = self._lookup_orchestrator(orchestrator_id)
         if orchestrator is None:
             return
-        orchestrator.complete_pool_step(scope, result_wire=result_wire, error=error)
+        orchestrator.complete_pool_step(
+            scope,
+            result_wire=result_wire,
+            error=error,
+            step_kind=step_kind,
+            step_index=step_index,
+        )
 
 
 _global_worker_pool: ComputeWorkerPool | None = None

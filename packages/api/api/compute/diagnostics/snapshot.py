@@ -20,7 +20,6 @@ from api.compute.diagnostics.rollup import (
     rollup_to_wire,
 )
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
-from api.compute.diagnostics.scope_key import format_compute_scope_key
 from api.compute.diagnostics.single_step_preview import (
     SingleStepDisabledReason,
     SingleStepPreview,
@@ -34,13 +33,13 @@ from api.compute.remote_futures import (
     classify_future_state,
     future_exception_type,
 )
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.streaming.table_stream.registry_catalog import active_table_stream_bindings
 
 
 def event_to_wire(event: ComputeConcurrencyEvent) -> dict[str, Any]:
     """CamelCase wire shape for one concurrency timeline event."""
-    return {
+    wire: dict[str, Any] = {
         "kind": event.kind,
         "timestamp": event.timestamp,
         "scopeKey": event.scope_key,
@@ -59,6 +58,9 @@ def event_to_wire(event: ComputeConcurrencyEvent) -> dict[str, Any]:
             "configuredWorkers": event.gauges.configured_workers,
         },
     }
+    if event.detail is not None:
+        wire["detail"] = event.detail
+    return wire
 
 
 def live_occupancy_to_wire(
@@ -165,6 +167,7 @@ def build_compute_diagnostics_snapshot(
     configured_workers: int = 0,
     remote_futures: tuple[RemotePoolFutureRecord, ...] = (),
     remote_executor_probe: dict[str, object] | None = None,
+    dispatch_workers: dict[str, object] | None = None,
 ) -> ComputeDiagnosticsSnapshot:
     dag_nodes: list[dict[str, Any]] = []
     ready_queue: list[dict[str, Any]] = []
@@ -249,6 +252,7 @@ def build_compute_diagnostics_snapshot(
         process_max_workers=_optional_int(probe.get("processMaxWorkers")),
         interpreter_queue_depth=_optional_int(probe.get("interpreterQueueDepth")),
         process_queue_depth=_optional_int(probe.get("processQueueDepth")),
+        dispatch_workers=dispatch_workers,
     )
 
     backend_mix: dict[str, int] = {}

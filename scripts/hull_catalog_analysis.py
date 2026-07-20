@@ -10,6 +10,10 @@ from typing import Any
 from api.analytics.military_score_inference.component_eligibility import (
     buildable_hull_ids_for_player,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import (
+    BIRD_ENLIGHTEN_HULL_ID,
+    standard_settings_adjusted_basehulls,
+)
 from api.analytics.military_score_inference.inference_turn_lookup import (
     parse_component_id_csv,
     player_by_id,
@@ -33,22 +37,6 @@ HEURISTIC_LABELS: dict[str, str] = {
     "proposed_cross_player": "Proposed: perspective-aware synthesis",
     "catalog_all": "Full turn.hulls catalog",
 }
-
-REPLACEMENT_SETTING_FIELDS: tuple[str, ...] = (
-    "repairshipreplacessagefrigate",
-    "migtransportreplacesmigscout",
-    "saurianlightfrigatereplacessaurian",
-    "scorpiuscarrierreplacesscorpiuslight",
-    "sscruiseriireplacessscruiser",
-    "sscarrierplusreplacessscarrier",
-    "skyfireplusreplacesskyfire",
-    "d7creplacesd7a",
-    "quietusplusreplacesquietus",
-    "cybernautlightreplacescybernaut",
-    "ironslavescoutreplacesironslave",
-)
-
-BIRD_ENLIGHTEN_HULL_ID = 106
 
 
 @dataclass(frozen=True)
@@ -132,75 +120,6 @@ def fleet_hull_ids_for_player(turn: TurnInfo, player_id: int) -> frozenset[int]:
     )
 
 
-def _apply_parent_child_swap(
-    result: set[int],
-    *,
-    parent_id: int,
-    child_id: int,
-    race_hull_ids: frozenset[int],
-) -> None:
-    if child_id not in race_hull_ids or parent_id not in result:
-        return
-    result.discard(parent_id)
-    result.add(child_id)
-
-
-def swaps_for_enabled_settings(
-    *,
-    settings: GameSettings,
-    hulls_by_id: dict[int, Hull],
-    race_hull_ids: frozenset[int],
-    base_hull_ids: frozenset[int],
-) -> list[tuple[int, int]]:
-    swaps: list[tuple[int, int]] = []
-    if settings.repairshipreplacessagefrigate and 90 in base_hull_ids:
-        swaps.append((90, 1090))
-    for field in REPLACEMENT_SETTING_FIELDS:
-        if field == "repairshipreplacessagefrigate":
-            continue
-        if not getattr(settings, field, False):
-            continue
-        for child_id in sorted(race_hull_ids):
-            child = hulls_by_id.get(child_id)
-            if child is None or child.parentid == 0:
-                continue
-            if child.parentid in base_hull_ids:
-                swaps.append((child.parentid, child_id))
-    return swaps
-
-
-def standard_settings_adjusted_basehulls(
-    *,
-    race_id: int,
-    race_basehulls_csv: str,
-    race_hulls_csv: str,
-    catalog_ids: frozenset[int],
-    hulls_by_id: dict[int, Hull],
-    settings: GameSettings,
-) -> frozenset[int]:
-    result = set(parse_component_id_csv(race_basehulls_csv) & catalog_ids)
-    race_hull_ids = frozenset(parse_component_id_csv(race_hulls_csv) & catalog_ids)
-    base_hull_ids = frozenset(result)
-
-    for parent_id, child_id in swaps_for_enabled_settings(
-        settings=settings,
-        hulls_by_id=hulls_by_id,
-        race_hull_ids=race_hull_ids,
-        base_hull_ids=base_hull_ids,
-    ):
-        _apply_parent_child_swap(
-            result,
-            parent_id=parent_id,
-            child_id=child_id,
-            race_hull_ids=race_hull_ids,
-        )
-
-    if settings.birdshaveenlighten and race_id == 3 and BIRD_ENLIGHTEN_HULL_ID in race_hull_ids:
-        result.add(BIRD_ENLIGHTEN_HULL_ID)
-
-    return frozenset(result)
-
-
 def proposed_cross_player_hull_ids(
     turn: TurnInfo,
     player_id: int,
@@ -219,13 +138,11 @@ def proposed_cross_player_hull_ids(
     if settings.campaignmode:
         return frozenset(parse_component_id_csv(race.hulls) & catalog_ids)
 
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
     return standard_settings_adjusted_basehulls(
         race_id=player.raceid,
         race_basehulls_csv=race.basehulls,
         race_hulls_csv=race.hulls,
         catalog_ids=catalog_ids,
-        hulls_by_id=hulls_by_id,
         settings=settings,
     )
 
@@ -289,7 +206,6 @@ def build_heuristic_sets(
         )
         race_union &= catalog_ids
 
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
     standard_adjusted = frozenset()
     if race is not None:
         standard_adjusted = standard_settings_adjusted_basehulls(
@@ -297,7 +213,6 @@ def build_heuristic_sets(
             race_basehulls_csv=race.basehulls,
             race_hulls_csv=race.hulls,
             catalog_ids=catalog_ids,
-            hulls_by_id=hulls_by_id,
             settings=settings,
         )
 

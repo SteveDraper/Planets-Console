@@ -48,7 +48,7 @@ def _patch_scores_dag_without_fleet_deps(monkeypatch: pytest.MonkeyPatch) -> Non
             ),
         )
 
-    monkeypatch.setattr("api.compute.orchestrator.plan_compute_dag", scores_only_dag)
+    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
 
 
 def _session_for_player(

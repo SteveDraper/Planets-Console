@@ -36,6 +36,28 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "asset
 API_ROOT = Path(__file__).resolve().parent.parent / "api"
 
 
+def _fake_orchestrator_with_nodes(nodes: dict) -> object:
+    """Minimal orchestrator stub that implements adapter peek APIs over ``nodes``."""
+    from api.compute.orchestrator import ScopeNodeView
+
+    class FakeOrchestrator:
+        def __init__(self) -> None:
+            self.nodes = nodes
+
+        def peek_scope_view(self, scope: ComputeScope) -> ScopeNodeView | None:
+            node = self.nodes.get(scope)
+            if node is None:
+                return None
+            return ScopeNodeView(
+                state=node.state,
+                step_index=node.step_index,
+                dependency_scopes=frozenset(node.dependency_scopes),
+                result_wire=node.result_wire,
+            )
+
+    return FakeOrchestrator()
+
+
 @pytest.fixture(autouse=True)
 def _reset_fleet_gap_fill_coordinators():
     reset_coordinators()
@@ -338,27 +360,23 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
         "FakeBinding",
         (),
         {
-            "orchestrator": type(
-                "FakeOrchestrator",
-                (),
+            "orchestrator": _fake_orchestrator_with_nodes(
                 {
-                    "nodes": {
-                        scores_scope: ComputeNodeRun(
-                            scope=scores_scope,
-                            dependency_scopes=(fleet_scope,),
-                            state="waiting_deps",
-                        ),
-                        fleet_scope: ComputeNodeRun(
-                            scope=fleet_scope,
-                            dependency_scopes=(),
-                            state="complete",
-                            result_wire={
-                                "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
-                            },
-                        ),
-                    },
-                },
-            )(),
+                    scores_scope: ComputeNodeRun(
+                        scope=scores_scope,
+                        dependency_scopes=(fleet_scope,),
+                        state="waiting_deps",
+                    ),
+                    fleet_scope: ComputeNodeRun(
+                        scope=fleet_scope,
+                        dependency_scopes=(),
+                        state="complete",
+                        result_wire={
+                            "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
+                        },
+                    ),
+                }
+            ),
             "query_context": query_context,
         },
     )()
@@ -426,19 +444,15 @@ def test_fleet_ledger_persist_reschedules_for_external_persist_while_waiting_on_
         "FakeBinding",
         (),
         {
-            "orchestrator": type(
-                "FakeOrchestrator",
-                (),
+            "orchestrator": _fake_orchestrator_with_nodes(
                 {
-                    "nodes": {
-                        scores_scope: ComputeNodeRun(
-                            scope=scores_scope,
-                            dependency_scopes=(fleet_scope,),
-                            state="waiting_deps",
-                        ),
-                    },
-                },
-            )(),
+                    scores_scope: ComputeNodeRun(
+                        scope=scores_scope,
+                        dependency_scopes=(fleet_scope,),
+                        state="waiting_deps",
+                    ),
+                }
+            ),
             "query_context": object(),
         },
     )()
@@ -502,29 +516,23 @@ def test_fleet_ledger_persist_reschedules_when_stream_fleet_version_differs(
         "FakeBinding",
         (),
         {
-            "orchestrator": type(
-                "FakeOrchestrator",
-                (),
+            "orchestrator": _fake_orchestrator_with_nodes(
                 {
-                    "nodes": {
-                        scores_scope: ComputeNodeRun(
-                            scope=scores_scope,
-                            dependency_scopes=(fleet_scope,),
-                            state="waiting_deps",
-                        ),
-                        fleet_scope: ComputeNodeRun(
-                            scope=fleet_scope,
-                            dependency_scopes=(),
-                            state="complete",
-                            result_wire={
-                                "persistedLedgerWire": persisted_fleet_ledger_to_json(
-                                    stale_persisted
-                                ),
-                            },
-                        ),
-                    },
-                },
-            )(),
+                    scores_scope: ComputeNodeRun(
+                        scope=scores_scope,
+                        dependency_scopes=(fleet_scope,),
+                        state="waiting_deps",
+                    ),
+                    fleet_scope: ComputeNodeRun(
+                        scope=fleet_scope,
+                        dependency_scopes=(),
+                        state="complete",
+                        result_wire={
+                            "persistedLedgerWire": persisted_fleet_ledger_to_json(stale_persisted),
+                        },
+                    ),
+                }
+            ),
             "query_context": query_context,
         },
     )()
@@ -591,25 +599,21 @@ def test_fleet_ledger_persist_skips_when_stream_wire_lacks_version_stamp(
         "FakeBinding",
         (),
         {
-            "orchestrator": type(
-                "FakeOrchestrator",
-                (),
+            "orchestrator": _fake_orchestrator_with_nodes(
                 {
-                    "nodes": {
-                        scores_scope: ComputeNodeRun(
-                            scope=scores_scope,
-                            dependency_scopes=(fleet_scope,),
-                            state="waiting_deps",
-                        ),
-                        fleet_scope: ComputeNodeRun(
-                            scope=fleet_scope,
-                            dependency_scopes=(),
-                            state="complete",
-                            result_wire={"persistedLedgerWire": wire},
-                        ),
-                    },
-                },
-            )(),
+                    scores_scope: ComputeNodeRun(
+                        scope=scores_scope,
+                        dependency_scopes=(fleet_scope,),
+                        state="waiting_deps",
+                    ),
+                    fleet_scope: ComputeNodeRun(
+                        scope=fleet_scope,
+                        dependency_scopes=(),
+                        state="complete",
+                        result_wire={"persistedLedgerWire": wire},
+                    ),
+                }
+            ),
             "query_context": query_context,
         },
     )()
@@ -663,24 +667,20 @@ def test_fleet_ledger_persist_reschedules_for_external_persist_while_stream_flee
         "FakeBinding",
         (),
         {
-            "orchestrator": type(
-                "FakeOrchestrator",
-                (),
+            "orchestrator": _fake_orchestrator_with_nodes(
                 {
-                    "nodes": {
-                        scores_scope: ComputeNodeRun(
-                            scope=scores_scope,
-                            dependency_scopes=(fleet_scope,),
-                            state="waiting_deps",
-                        ),
-                        fleet_scope: ComputeNodeRun(
-                            scope=fleet_scope,
-                            dependency_scopes=(),
-                            state="running",
-                        ),
-                    },
-                },
-            )(),
+                    scores_scope: ComputeNodeRun(
+                        scope=scores_scope,
+                        dependency_scopes=(fleet_scope,),
+                        state="waiting_deps",
+                    ),
+                    fleet_scope: ComputeNodeRun(
+                        scope=fleet_scope,
+                        dependency_scopes=(),
+                        state="running",
+                    ),
+                }
+            ),
             "query_context": object(),
         },
     )()
@@ -791,13 +791,16 @@ def test_scores_evidence_update_wakes_fleet_even_without_ledger_to_clear(
         inference_persistence,
         fleet_persistence=persistence,
     )
-    gen_before = persistence.invalidation_generation(628580, 1, 8)
+    gen_before = persistence.player_invalidation_generation(628580, 1, 8)
+    turn_gen_before = persistence.turn_invalidation_generation(628580, 1, 8, 4)
 
     woken = invalidation.on_inference_evidence_updated(628580, 1, 4, 8)
 
     assert woken == {4}
     assert rescheduled == [(4, 8)]
-    assert persistence.invalidation_generation(628580, 1, 8) == gen_before + 1
+    assert persistence.player_invalidation_generation(628580, 1, 8) == gen_before + 1
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == turn_gen_before + 1
+    assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 0
 
 
 def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_turn):

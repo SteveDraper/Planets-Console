@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.exports.registry import EXPORT_REGISTRY
 from api.compute.diagnostics.bindings import BoundOrchestrator
 from api.compute.diagnostics.concurrency_recorder import ConcurrencyTimelineRecorder
@@ -15,8 +14,6 @@ from api.compute.diagnostics.freeze import (
 )
 from api.compute.diagnostics.history import (
     DEFAULT_COMPLETION_HISTORY_CAP,
-    CompletionSurface,
-    CompletionTerminalState,
     ComputeCompletionHistory,
 )
 from api.compute.diagnostics.in_flight import (
@@ -29,11 +26,8 @@ from api.compute.diagnostics.in_flight import (
     remove_in_flight_by_object_ids,
     running_in_flight_keys_for_nodes,
 )
-from api.compute.diagnostics.profile_steps import (
-    profile_step_at,
-    profile_step_is_inline,
-    registration_step_kind,
-)
+from api.compute.diagnostics.orchestrator_bind import DiagnosticsOrchestratorBindMixin
+from api.compute.diagnostics.profile_steps import registration_step_kind
 from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
     player_id_from_scope,
@@ -49,7 +43,7 @@ from api.compute.diagnostics.single_step_preview import (
     resolve_single_step_preview,
     single_step_pin_matches,
 )
-from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OrchestratorNodeSnapshot
+from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import (
     ComputeWorkerPool,
     PoolWorkItem,
@@ -82,7 +76,7 @@ def compute_diagnostics_timeline_capacity() -> int:
     return max(1, get_config().compute_diagnostics_timeline_capacity)
 
 
-class ComputeDiagnosticsController:
+class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
     """Analytic-agnostic observer and freeze controller for compute orchestration."""
 
     def __init__(self) -> None:
@@ -100,7 +94,6 @@ class ComputeDiagnosticsController:
             timeline_capacity=compute_diagnostics_timeline_capacity,
             bound_orchestrators=self._bound_orchestrators_snapshot,
             in_flight_records=self._in_flight_snapshot,
-            global_queue_depth=self._global_queue_depth,
             configured_workers=self._configured_workers,
             ancestor_turns=self._ancestor_turns_for_shell,
             history_for_shell=self._history_for_shell,
@@ -129,142 +122,6 @@ class ComputeDiagnosticsController:
                 return
             self._pool = pool
             self._wired = True
-
-    def bind_orchestrator(
-        self,
-        orchestrator: ComputeOrchestrator,
-        ctx: AnalyticQueryContext | None = None,
-    ) -> None:
-        """Register the diagnostics observer on ``orchestrator``.
-
-        ``ctx`` is unavailable for a singleton bind at process startup (the
-        orchestrator serves many callers, each with its own leader context); use
-        placeholder shell fields in that case. Start-frozen arming needs a real
-        game id and is skipped until a caller context establishes one via
-        :meth:`on_shell_context`.
-        """
-        if not self.is_enabled():
-            return
-        self.ensure_wired()
-        # Process-wide singleton has no single shell; ``None`` matches every shell
-        # in snapshot / concurrency / single-step filters.
-        game_id = ctx.game_id if ctx is not None else None
-        perspective = ctx.perspective if ctx is not None else None
-        ambient_turn = ctx.ambient_turn if ctx is not None else 0
-        # Arm before registering the dispatch gate so early submits see freeze.
-        if ctx is not None and compute_diagnostics_start_frozen():
-            self._freeze_state.arm_start_frozen_if_needed(ctx.game_id)
-        with self._lock:
-            for bound in self._bound_orchestrators:
-                if bound.orchestrator is orchestrator:
-                    return
-        # Register outside ``_lock`` so we never take orchestrator condition under
-        # the controller lock (dispatch/step-complete take the opposite order).
-        # Gate and commit both capture pool_registration_id so an armed single-step
-        # pin rejects wrong-orchestrator nodes before commit (avoids ready-queue thrash).
-        registration_id = orchestrator.pool_registration_id
-        unregister_dispatch_gate = orchestrator.register_dispatch_gate(
-            lambda node, _orch_id=registration_id: self._dispatch_gate(
-                node,
-                orchestrator_id=_orch_id,
-            )
-        )
-        unregister_dispatch_commit = orchestrator.register_dispatch_commit_hook(
-            lambda node, _orch_id=registration_id: self._commit_single_step_dispatch(
-                node,
-                orchestrator_id=_orch_id,
-            )
-        )
-        unregister_step_complete = orchestrator.register_step_complete_listener(
-            lambda scope, node, step_kind, surface, terminal_state, _orch_id=registration_id: (
-                self._on_step_complete(
-                    scope,
-                    node,
-                    step_kind,
-                    surface,
-                    terminal_state,
-                    orchestrator_id=_orch_id,
-                )
-            )
-        )
-        unregister_ready = orchestrator.register_ready_listener(
-            lambda scope, node, _orch_id=registration_id: self._on_node_ready(
-                scope,
-                node,
-                orchestrator_id=_orch_id,
-            )
-        )
-        unregister_ready_queue = orchestrator.register_ready_queue_listener(
-            self._timeline.bind_ready_queue_listener(
-                orchestrator_id=registration_id,
-                game_id=game_id,
-                perspective=perspective,
-                fallback_id=id(orchestrator),
-            )
-        )
-        unregister_inline_start = orchestrator.register_inline_start_listener(
-            lambda scope, node, step_kind, _orch_id=registration_id: self._on_inline_start(
-                scope,
-                node,
-                step_kind,
-                orchestrator_id=_orch_id,
-            )
-        )
-        with self._lock:
-            for bound in self._bound_orchestrators:
-                if bound.orchestrator is orchestrator:
-                    unregister_dispatch_gate()
-                    unregister_dispatch_commit()
-                    unregister_step_complete()
-                    unregister_ready()
-                    unregister_ready_queue()
-                    unregister_inline_start()
-                    return
-            self._bound_orchestrators.append(
-                BoundOrchestrator(
-                    orchestrator=orchestrator,
-                    game_id=game_id,
-                    perspective=perspective,
-                    ambient_turn=ambient_turn,
-                    unregister_dispatch_gate=unregister_dispatch_gate,
-                    unregister_dispatch_commit_hook=unregister_dispatch_commit,
-                    unregister_step_complete_listener=unregister_step_complete,
-                    unregister_ready_listener=unregister_ready,
-                    unregister_ready_queue_listener=unregister_ready_queue,
-                    unregister_inline_start_listener=unregister_inline_start,
-                )
-            )
-
-    def unbind_orchestrator(self, orchestrator: ComputeOrchestrator) -> None:
-        """Drop diagnostics binding for a released orchestrator.
-
-        Safe no-op when diagnostics never bound this orchestrator (including when
-        diagnostics are disabled). Clears in-flight pool records for the
-        orchestrator's registration id (abandon path when workers cannot complete).
-        """
-        bound: BoundOrchestrator | None = None
-        registration_id = orchestrator.pool_registration_id
-        with self._lock:
-            for index, candidate in enumerate(self._bound_orchestrators):
-                if candidate.orchestrator is orchestrator:
-                    bound = self._bound_orchestrators.pop(index)
-                    break
-            if registration_id is not None:
-                self._in_flight = [
-                    record
-                    for record in self._in_flight
-                    if record.orchestrator_id != registration_id
-                ]
-        if bound is None:
-            return
-        bound.unregister_dispatch_gate()
-        bound.unregister_dispatch_commit_hook()
-        bound.unregister_step_complete_listener()
-        bound.unregister_ready_listener()
-        bound.unregister_ready_queue_listener()
-        bound.unregister_inline_start_listener()
-        orch_key = registration_id if registration_id is not None else id(orchestrator)
-        self._timeline.clear_orchestrator_ready_depth(orch_key)
 
     def on_shell_context(self, shell: ShellContextKey) -> None:
         if not self.is_enabled():
@@ -306,6 +163,7 @@ class ComputeDiagnosticsController:
         remote_executor_probe = (
             self._pool.remote_executor_probe() if self._pool is not None else None
         )
+        dispatch_workers = self._pool.worker_health() if self._pool is not None else None
         return build_compute_diagnostics_snapshot(
             shell=shell,
             ancestor_turns=ancestor_turns,
@@ -323,6 +181,7 @@ class ComputeDiagnosticsController:
             configured_workers=self._configured_workers(),
             remote_futures=remote_futures,
             remote_executor_probe=remote_executor_probe,
+            dispatch_workers=dispatch_workers,
         )
 
     def preview_single_step(
@@ -450,6 +309,7 @@ class ComputeDiagnosticsController:
             entry.unregister_ready_listener()
             entry.unregister_ready_queue_listener()
             entry.unregister_inline_start_listener()
+            entry.unregister_lifecycle_listener()
         self._freeze_state.reset_for_tests()
         if self._pool is not None:
             self._pool.set_dequeue_predicate(None)
@@ -470,11 +330,6 @@ class ComputeDiagnosticsController:
     def timeline_recent(self, shell: ShellContextKey) -> tuple:
         """Return recent concurrency timeline events for ``shell`` (tests / snapshot)."""
         return self._timeline.recent(shell)
-
-    def _global_queue_depth(self) -> int:
-        if self._pool is not None:
-            return len(self._pool.snapshot_work_queue())
-        return 0
 
     def _configured_workers(self) -> int:
         return self._pool.worker_count if self._pool is not None else 0
@@ -718,84 +573,6 @@ class ComputeDiagnosticsController:
             return False
         return self._scope_in_focus(scope, shell)
 
-    def _dispatch_gate(
-        self,
-        node: ComputeNodeRun,
-        *,
-        orchestrator_id: int | None = None,
-    ) -> bool:
-        """Side-effect free: whether freeze allows ``node`` to be selected."""
-        with self._lock:
-            operator_shell = self._last_shell_context
-        if operator_shell is None:
-            # Freeze armed (e.g. start-frozen on bind) before any operator shell:
-            # hold all work for that game until shell sync / single-step.
-            if not self._freeze_state.freeze_armed_for_game(node.scope.game_id):
-                return True
-            with self._lock:
-                return self._single_step_dispatch_allowed_locked(
-                    node,
-                    orchestrator_id=orchestrator_id,
-                )
-        shell = self._scope_matches_active_shell(node.scope)
-        if shell is None:
-            # Operator shell set, but scope outside diagnostic scope: allow.
-            # Freeze only gates players in compute diagnostic scope.
-            return True
-        if not self._is_scope_frozen(node.scope, shell):
-            return True
-        with self._lock:
-            return self._single_step_dispatch_allowed_locked(
-                node,
-                orchestrator_id=orchestrator_id,
-            )
-
-    def _single_step_dispatch_allowed_locked(
-        self,
-        node: ComputeNodeRun,
-        *,
-        orchestrator_id: int | None,
-    ) -> bool:
-        """Return whether an armed single-step may select ``node`` (no consume)."""
-        if self._single_step.dispatch_slots_remaining <= 0:
-            return False
-        return self._single_step_may_release(
-            node.scope,
-            priority_band=node.priority_band,
-            orchestrator_id=orchestrator_id,
-        )
-
-    def _commit_single_step_dispatch(
-        self,
-        node: ComputeNodeRun,
-        *,
-        orchestrator_id: int | None,
-    ) -> bool:
-        """Consume one single-step dispatch slot for ``node`` after all gates passed.
-
-        When no dispatch slot is armed, returns True so normal (unfrozen) dispatch is
-        unaffected. Inline steps also clear the paired pool grant so single-step cannot
-        leave an orphan for a later dequeue. Returns False when a slot is armed for a
-        different target (caller requeues the node).
-        """
-        with self._lock:
-            if self._single_step.dispatch_slots_remaining <= 0:
-                return True
-            if not self._single_step_may_release(
-                node.scope,
-                priority_band=node.priority_band,
-                orchestrator_id=orchestrator_id,
-            ):
-                return False
-            self._single_step.dispatch_slots_remaining -= 1
-            if self._node_current_step_is_inline(node):
-                self._single_step.clear()
-            return True
-
-    def _node_current_step_is_inline(self, node: ComputeNodeRun) -> bool:
-        """Return whether ``node``'s current profile step uses the inline backend."""
-        return profile_step_is_inline(node.scope.analytic_id, node.profile_step_index)
-
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
         """Return whether ``item`` may dequeue; never consumes single-step grants."""
         with self._lock:
@@ -896,99 +673,6 @@ class ComputeDiagnosticsController:
                 step_index=step_index,
                 orchestrator_id=orchestrator_id,
             )
-
-    def _on_node_ready(
-        self,
-        scope: ComputeScope,
-        node: ComputeNodeRun,
-        *,
-        orchestrator_id: int | None = None,
-    ) -> None:
-        shell = self._scope_matches_active_shell(scope)
-        if shell is None:
-            return
-        step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
-        # Cache-only gauges: ready listeners drain under paths that may hold the scores
-        # scheduler lock (enqueue -> submit -> drain). Live orch sampling deadlocks.
-        self._timeline.record(
-            shell,
-            kind="ready",
-            scope=scope,
-            orchestrator_id=orchestrator_id,
-            step_kind=step_spec.step_kind if step_spec is not None else None,
-            step_index=node.step_index,
-            priority_band=node.priority_band,
-            backend=step_spec.backend if step_spec is not None else None,
-            sample_ready_from_orchestrators=False,
-        )
-
-    def _on_inline_start(
-        self,
-        scope: ComputeScope,
-        node: ComputeNodeRun,
-        step_kind: str,
-        *,
-        orchestrator_id: int | None = None,
-    ) -> None:
-        shell = self._scope_matches_active_shell(scope)
-        if shell is None:
-            return
-        # Cache-only gauges: inline_start runs before heavy ensure work and must not
-        # nest into other orchestrators' locks (same ABBA risk as ready/finish).
-        self._timeline.record(
-            shell,
-            kind="inline_start",
-            scope=scope,
-            orchestrator_id=orchestrator_id,
-            step_kind=step_kind,
-            step_index=node.step_index,
-            priority_band=node.priority_band,
-            backend="inline",
-            open_execution=True,
-            sample_ready_from_orchestrators=False,
-        )
-
-    def _on_step_complete(
-        self,
-        scope: ComputeScope,
-        node: ComputeNodeRun,
-        step_kind: str,
-        surface: CompletionSurface,
-        terminal_state: CompletionTerminalState,
-        *,
-        orchestrator_id: int | None = None,
-    ) -> None:
-        # Clear in-flight on pool failure immediately, then reconcile other orphans.
-        # On success, leave the row until pool item finished so persist-before-complete
-        # stays visible (node remains ``running`` through durable write).
-        if surface == "pool" and terminal_state == "failed":
-            self._clear_in_flight_for_step(
-                scope,
-                step_kind=step_kind,
-                step_index=node.step_index,
-                orchestrator_id=orchestrator_id,
-            )
-            self._reconcile_orphan_in_flight()
-        shell = self._scope_matches_active_shell(scope)
-        if shell is None:
-            return
-        step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
-        if step_spec is not None and step_spec.step_kind != step_kind:
-            return
-        if step_spec is None:
-            backend = "inline" if surface == "inline" else None
-        else:
-            backend = "inline" if surface == "inline" else step_spec.backend
-        self._timeline.record_finish(
-            shell,
-            scope=scope,
-            node=node,
-            step_kind=step_kind,
-            surface=surface,
-            terminal_state=terminal_state,
-            orchestrator_id=orchestrator_id,
-            backend=backend,
-        )
 
 
 def get_compute_diagnostics_controller() -> ComputeDiagnosticsController:

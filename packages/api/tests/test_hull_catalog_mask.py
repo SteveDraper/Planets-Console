@@ -8,12 +8,58 @@ from api.analytics.military_score_inference.hull_catalog_mask import (
     default_enabled_hull_ids_for_player,
     master_hull_ids_for_race,
     resolve_hull_catalog_mask,
+    standard_settings_adjusted_basehulls,
+    swaps_for_enabled_settings,
 )
+from api.serialization.turn import turn_info_from_json
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 P5_TURN6_PATH = REPO_ROOT / ".data" / "games" / "628580" / "5" / "turns" / "6.json"
+_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "inference_corpus" / "628580"
+FIXTURE_TURN3_PATH = _FIXTURE_ROOT / "1" / "turns" / "3.json"
+FIXTURE_INFO_PATH = _FIXTURE_ROOT / "info.json"
+
+
+def _load_standard_fixture_turn():
+    settings_defaults = json.loads(FIXTURE_INFO_PATH.read_text())["settings"]
+    return turn_info_from_json(
+        json.loads(FIXTURE_TURN3_PATH.read_text()),
+        settings_defaults=settings_defaults,
+    )
+
+
+def test_swaps_for_enabled_settings_are_fixed_pairs_not_parentid_walk():
+    turn = _load_standard_fixture_turn()
+    race = next(entry for entry in turn.races if entry.id == 10)
+    from api.analytics.military_score_inference.inference_turn_lookup import parse_component_id_csv
+
+    base_hull_ids = parse_component_id_csv(race.basehulls)
+    swaps = swaps_for_enabled_settings(
+        settings=turn.settings,
+        base_hull_ids=base_hull_ids,
+    )
+    assert swaps == [(90, 1090)]
+
+
+def test_standard_settings_rebel_keeps_falcon_and_swaps_only_sage():
+    turn = _load_standard_fixture_turn()
+    race = next(entry for entry in turn.races if entry.id == 10)
+    catalog_ids = frozenset(hull.id for hull in turn.hulls)
+    adjusted = standard_settings_adjusted_basehulls(
+        race_id=10,
+        race_basehulls_csv=race.basehulls,
+        race_hulls_csv=race.hulls,
+        catalog_ids=catalog_ids,
+        settings=turn.settings,
+    )
+    assert 87 in adjusted
+    assert 1087 not in adjusted
+    assert 1090 in adjusted
+    assert 90 not in adjusted
+    assert 88 in adjusted
+    assert 1088 not in adjusted
 
 
 def test_master_hull_ids_intersects_turn_catalog(sample_turn):

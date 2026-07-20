@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
+from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.pools import ComputePriorityBand
 
 DEFAULT_TIMELINE_CAPACITY = 5000
 
-TimelineEventKind = Literal[
+# Occupancy / scheduling events recorded by the concurrency timeline.
+OccupancyTimelineEventKind = Literal[
     "ready",
     "enqueue",
     "start",
@@ -20,6 +22,8 @@ TimelineEventKind = Literal[
     "inline_start",
     "inline_complete",
 ]
+# Occupancy plus causal lifecycle kinds owned by orchestrator observers.
+TimelineEventKind = OccupancyTimelineEventKind | LifecycleEventKind
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,8 @@ class ComputeConcurrencyEvent:
     terminal_state: str | None
     duration_ms: float | None
     gauges: OccupancyGauges
+    # Optional causal payload for restart / abort / stale-finish events.
+    detail: dict[str, object] | None = None
 
 
 def format_execution_key(
@@ -140,6 +146,7 @@ def make_concurrency_event(
     backend: str | None = None,
     terminal_state: str | None = None,
     duration_ms: float | None = None,
+    detail: dict[str, object] | None = None,
     timestamp: datetime | None = None,
 ) -> ComputeConcurrencyEvent:
     """Build one timeline event with a UTC ISO timestamp."""
@@ -156,4 +163,5 @@ def make_concurrency_event(
         terminal_state=terminal_state,
         duration_ms=duration_ms,
         gauges=gauges,
+        detail=detail,
     )

@@ -700,3 +700,86 @@ def test_pool_dispatches_fleet_materialization_leg_interpreter(sample_turn):
     assert "persistedLedgerWire" in handle.result_wire
     assert handle.result_wire["materializeTurn"] == scope.turn
     assert pool.metrics.interpreter_executions == 1
+
+
+def test_on_item_enqueued_runs_outside_pool_lock(sample_turn):
+    """Enqueue hooks must not nest under the pool condition (ABBA with dequeue).
+
+    Workers hold the pool condition then take the diagnostics controller lock in
+    predicate / on_dequeued. If on_enqueued runs under the pool lock and also takes
+    the controller lock, those paths deadlock.
+    """
+    from api.compute.orchestrator import ComputeNodeRun
+
+    pool = ComputeWorkerPool(worker_count=0)
+    seen: dict[str, bool] = {}
+
+    def on_enqueued(_item, depth: int) -> None:
+        # Must be able to take the pool lock from the hook (hook is outside it).
+        acquired = pool._lock.acquire(blocking=False)
+        seen["acquired_pool_from_hook"] = acquired
+        seen["depth"] = depth
+        if acquired:
+            pool._lock.release()
+
+    try:
+        pool.set_on_item_enqueued(on_enqueued)
+        scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
+        node = ComputeNodeRun(scope=scope, dependency_scopes=(), step_index=0)
+        step = ComputeStepSpec(step_kind="materialize", backend="thread")
+        pool.submit(0, node, step, priority_band="background")
+
+        assert seen.get("acquired_pool_from_hook") is True
+        assert seen.get("depth") == 1
+        assert len(pool.snapshot_work_queue()) == 1
+    finally:
+        pool.shutdown()
+
+
+def test_worker_health_reports_alive_workers() -> None:
+    pool = ComputeWorkerPool(worker_count=2)
+    try:
+        health = pool.worker_health()
+        assert health["configuredWorkers"] == 2
+        assert health["aliveWorkers"] == 2
+        assert health["workerExceptionCount"] == 0
+    finally:
+        pool.shutdown()
+
+
+def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
+    """A raised on_dequeued hook must not kill the worker thread permanently."""
+    pool = ComputeWorkerPool(worker_count=1)
+    dequeues = {"n": 0}
+    second_finished = threading.Event()
+
+    def on_dequeued(_item, _depth: int) -> None:
+        dequeues["n"] += 1
+        if dequeues["n"] == 1:
+            raise RuntimeError("on_dequeued boom")
+
+    def on_finished(item: PoolWorkItem) -> None:
+        if item.step_index == 1:
+            second_finished.set()
+
+    class OkOrch:
+        def execute_pool_step(self, scope):
+            return {"ok": True}
+
+        def complete_pool_step(self, *args, **kwargs):
+            return None
+
+    try:
+        pool.set_on_item_dequeued(on_dequeued)
+        pool.set_on_item_finished(on_finished)
+        orch_id = pool.register(OkOrch())  # type: ignore[arg-type]
+        scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
+        pool.enqueue_for_tests(_work_item(scope=scope, orchestrator_id=orch_id, step_index=0))
+        pool.enqueue_for_tests(_work_item(scope=scope, orchestrator_id=orch_id, step_index=1))
+
+        assert second_finished.wait(timeout=3.0), "worker did not recover after on_dequeued boom"
+        health = pool.worker_health()
+        assert health["aliveWorkers"] == 1
+        assert health["workerExceptionCount"] >= 1
+    finally:
+        pool.shutdown()

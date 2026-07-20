@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.actions import ActionCatalog
@@ -42,7 +41,9 @@ class PolicyLadderState:
     next_step_index: int = 0
     ladder_complete: bool = False
     cancelled: bool = False
-    started_at: float = field(default_factory=time.monotonic)
+    # Wall-clock anchor for batch whole-ladder budgets. Deferred until the first
+    # dispatched tier so waiting_deps / queue delay does not burn SPA tier budgets.
+    started_at: float | None = None
     resolved_mask: ResolvedHullCatalogMask | None = None
     fleet_torp_overlay: FleetTorpOverlay | None = None
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None

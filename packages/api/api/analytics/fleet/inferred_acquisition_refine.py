@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import replace
 
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.inferred_acquisition_ingest import (
@@ -16,6 +15,11 @@ from api.analytics.fleet.inferred_acquisition_ingest import (
 from api.analytics.fleet.observation_ingest import (
     observation_established_full_fit,
     record_has_direct_observation,
+)
+from api.analytics.fleet.observation_option_locks import (
+    LockFilterEmptyPolicy,
+    observation_locks_from_record,
+    resolve_option_sets_respecting_locks,
 )
 from api.analytics.fleet.serialization import (
     append_fleet_evidence_event,
@@ -189,7 +193,17 @@ def _assign_option_sets_to_placeholders(
         if not option_sets:
             continue
         if record_has_direct_observation(record):
-            option_sets = _option_sets_respecting_observation_locks(record, option_sets)
+            resolved = resolve_option_sets_respecting_locks(
+                option_sets,
+                observation_locks_from_record(record),
+                on_empty=LockFilterEmptyPolicy.KEEP_PRIOR,
+            )
+            # Foreign-hull (or otherwise incompatible) inference candidates were
+            # all dropped. KEEP_PRIOR leaves observation's prior sets (often a
+            # hull-only seed) rather than wiping to [].
+            if resolved is None:
+                continue
+            option_sets = resolved
         prior_sets = tuple(record.build_option_sets)
         if prior_sets == option_sets:
             continue
@@ -205,42 +219,6 @@ def _assign_option_sets_to_placeholders(
                 built_turn=built_turn,
             ),
         )
-
-
-def _option_sets_respecting_observation_locks(
-    record: FleetShipRecord,
-    option_sets: tuple[FleetBuildOptionSet, ...],
-) -> tuple[FleetBuildOptionSet, ...]:
-    """Force observation-known component ids onto inferred option sets.
-
-    Used for partial sightings where hull (and any positively observed axes) must
-    survive refine while unknown axes remain open to inference.
-    """
-    hull = record.fields.hull
-    engine = record.fields.engine
-    beams = record.fields.beams
-    launchers = record.fields.launchers
-    adjusted: list[FleetBuildOptionSet] = []
-    for option_set in option_sets:
-        updates: dict[str, object] = {}
-        if isinstance(hull, FleetFieldKnown) and isinstance(hull.value, int):
-            updates["hull_id"] = hull.value
-        if (
-            isinstance(engine, FleetFieldKnown)
-            and isinstance(engine.value, int)
-            and engine.value > 0
-        ):
-            updates["engine_id"] = engine.value
-        if isinstance(beams, FleetFieldKnown) and isinstance(beams.value, int) and beams.value > 0:
-            updates["beam_id"] = beams.value
-        if (
-            isinstance(launchers, FleetFieldKnown)
-            and isinstance(launchers.value, int)
-            and launchers.value > 0
-        ):
-            updates["torp_id"] = launchers.value
-        adjusted.append(replace(option_set, **updates) if updates else option_set)
-    return tuple(adjusted)
 
 
 def _option_sets_for_slot(

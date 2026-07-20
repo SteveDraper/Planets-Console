@@ -1,4 +1,21 @@
-"""Registry for scores tier_solve RowRun state between orchestrator continuations."""
+"""Scores instance of the generic table-stream row-run shell + admission pattern.
+
+Owns scores ``RowRun`` shells and compact persist admission. Types
+(``RowRunPhase``, ``PersistAdmission``) are generic stream-row vocabulary from
+:mod:`api.streaming.table_stream.row_run_admission` -- not scores-private.
+
+Retained shells use ``RowRunPhase`` (``REGISTERED`` / ``DETACHED`` only).
+Cancel drops the shell immediately and records compact cancelled admission
+keyed by scores scope so ``PersistAdmission.CANCEL_DENY`` still denies late
+persist. A later ``REGISTERED`` for the same scope supersedes that cancelled
+admission (preempt / re-adopt). Memory is O(scopes with an outstanding
+cancel), not an unbounded UUID FIFO.
+
+Lifecycle matrix sides (detach / cancel / retire) are applied by
+:func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`.
+Production persist writers use :func:`decide_scores_row_persist` (admission +
+phase under one lock) -- not :func:`get_persist_admission` directly.
+"""
 
 from __future__ import annotations
 
@@ -11,12 +28,21 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.persist_decision import (
+    PersistDecision,
+    persist_decision_from_admission,
+)
 from api.compute.scope import WILDCARD, ComputeScope
+from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 
 _lock = threading.Lock()
+# REGISTERED and DETACHED shells only -- cancel never retains a shell.
 _runs_by_id: dict[str, RowRun] = {}
 _run_id_by_scope_key: dict[tuple[int, int, int, int], str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
+# Compact cancelled admission: at most one run_id per scores scope.
+_cancelled_admissions: dict[str, tuple[int, int, int, int]] = {}
+_cancelled_run_by_scope: dict[tuple[int, int, int, int], str] = {}
 
 
 def _scope_key(scope: ComputeScope) -> tuple[int, int, int, int]:
@@ -36,6 +62,44 @@ def _session_scope_key(session) -> tuple[int, int, int, int]:
         session.turn_number,
         session.player_id,
     )
+
+
+def _clear_scope_index_locked(run: RowRun) -> None:
+    scope_key = _session_scope_key(run.session)
+    if _run_id_by_scope_key.get(scope_key) == run.run_id:
+        _run_id_by_scope_key.pop(scope_key, None)
+
+
+def _drop_shell_locked(run_id: str) -> RowRun | None:
+    """Remove retained shell and indexes. Caller holds ``_lock``."""
+    run = _runs_by_id.pop(run_id, None)
+    if run is None:
+        return None
+    _clear_scope_index_locked(run)
+    _tier_callbacks_by_run_id.pop(run_id, None)
+    return run
+
+
+def _forget_cancelled_locked(run_id: str) -> None:
+    """Drop compact cancelled admission for ``run_id``. Caller holds ``_lock``."""
+    scope_key = _cancelled_admissions.pop(run_id, None)
+    if scope_key is not None and _cancelled_run_by_scope.get(scope_key) == run_id:
+        _cancelled_run_by_scope.pop(scope_key, None)
+
+
+def _supersede_cancelled_for_scope_locked(scope_key: tuple[int, int, int, int]) -> None:
+    """Clear any cancelled admission for ``scope_key``. Caller holds ``_lock``."""
+    prior = _cancelled_run_by_scope.pop(scope_key, None)
+    if prior is not None:
+        _cancelled_admissions.pop(prior, None)
+
+
+def _record_cancelled_locked(run_id: str, scope_key: tuple[int, int, int, int]) -> None:
+    """Remember cancelled admission for ``run_id`` under ``scope_key``. Caller holds ``_lock``."""
+    _forget_cancelled_locked(run_id)
+    _supersede_cancelled_for_scope_locked(scope_key)
+    _cancelled_admissions[run_id] = scope_key
+    _cancelled_run_by_scope[scope_key] = run_id
 
 
 def initialize_tier_ladder_state(
@@ -71,12 +135,18 @@ def register_row_run(
     """Register one RowRun for orchestrator tier_solve wire build and execution."""
     if initialize_ladder and run.ladder_state is None:
         initialize_tier_ladder_state(run, orchestration=orchestration)
+    run.phase = RowRunPhase.REGISTERED
+    scope_key = _session_scope_key(run.session)
     with _lock:
+        # Same-scope re-register supersedes prior cancelled admission (preempt path).
+        _supersede_cancelled_for_scope_locked(scope_key)
+        _forget_cancelled_locked(run.run_id)
         _runs_by_id[run.run_id] = run
-        _run_id_by_scope_key[_session_scope_key(run.session)] = run.run_id
+        _run_id_by_scope_key[scope_key] = run.run_id
 
 
 def get_row_run(run_id: str) -> RowRun | None:
+    """Return a retained REGISTERED or DETACHED shell, if any."""
     with _lock:
         return _runs_by_id.get(run_id)
 
@@ -86,18 +156,119 @@ def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
         run_id = _run_id_by_scope_key.get(_scope_key(scope))
         if run_id is None:
             return None
-        return _runs_by_id.get(run_id)
+        run = _runs_by_id.get(run_id)
+        if run is None or run.phase is not RowRunPhase.REGISTERED:
+            return None
+        return run
 
 
-def unregister_row_run(run_id: str) -> None:
+def get_row_run_phase(run_id: str) -> RowRunPhase | None:
+    """Retained shell phase only (``REGISTERED`` / ``DETACHED``); never admission."""
     with _lock:
-        run = _runs_by_id.pop(run_id, None)
+        run = _runs_by_id.get(run_id)
+        return None if run is None else run.phase
+
+
+def get_persist_admission(run_id: str) -> PersistAdmission:
+    """Registry-internal admission lookup (shell vs compact cancel vs absent).
+
+    Not a production persist gate. Public callers use
+    :func:`decide_scores_row_persist`. This probe exists for admission-memory
+    unit tests only.
+    """
+    with _lock:
+        return _persist_admission_locked(run_id)
+
+
+def decide_scores_row_persist(run_id: str) -> PersistDecision:
+    """Sole production persist gate: atomic admission + phase → ``PersistDecision``.
+
+    Holds ``_lock`` for the whole map so callers never compose
+    :func:`get_persist_admission` and :func:`get_row_run_phase` across two
+    lock acquisitions. Once returned, a later cancel does not revoke the
+    decision for that persist attempt.
+
+    Mapping (via :func:`persist_decision_from_admission`):
+
+    - ``ALLOW`` + ``REGISTERED`` → ``allow(retire_after_write=False)``
+    - ``ALLOW`` + ``DETACHED`` → ``allow(retire_after_write=True)``
+    - ``CANCEL_DENY`` → ``refuse(should_retire=True)``
+    - ``ABSENT`` → ``refuse(should_retire=False)``
+
+    Both refuse outcomes must not write. Persist policy treats them as silent
+    no-ops. Cancel intent must go through
+    :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
+    (``RowLifecycleOp.CANCEL``); the live cancel token is not a persist gate.
+    """
+    with _lock:
+        admission = _persist_admission_locked(run_id)
+        phase = None
+        if admission is PersistAdmission.ALLOW:
+            run = _runs_by_id.get(run_id)
+            phase = None if run is None else run.phase
+        return persist_decision_from_admission(admission, phase=phase)
+
+
+def _persist_admission_locked(run_id: str) -> PersistAdmission:
+    """Admission probe. Caller holds ``_lock``."""
+    if run_id in _runs_by_id:
+        return PersistAdmission.ALLOW
+    if run_id in _cancelled_admissions:
+        return PersistAdmission.CANCEL_DENY
+    return PersistAdmission.ABSENT
+
+
+def _detach_row_run(run_id: str) -> None:
+    """Registry-private DETACH side. Public API: ``apply_scores_row_lifecycle``.
+
+    Transition ``REGISTERED`` → ``DETACHED``; clear scope index; keep by id.
+    Detach must not destroy admission state: late persist still finds the shell.
+    No-op when missing or already cancelled (compact). ``DETACHED`` stays ``DETACHED``.
+    """
+    with _lock:
+        if run_id in _cancelled_admissions:
+            return
+        run = _runs_by_id.get(run_id)
         if run is None:
             return
-        scope_key = _session_scope_key(run.session)
-        if _run_id_by_scope_key.get(scope_key) == run_id:
-            _run_id_by_scope_key.pop(scope_key, None)
+        run.phase = RowRunPhase.DETACHED
+        _clear_scope_index_locked(run)
         _tier_callbacks_by_run_id.pop(run_id, None)
+
+
+def _mark_row_run_cancelled(run_id: str) -> RowRun | None:
+    """Registry-private CANCEL admission side. Public API: ``apply_scores_row_lifecycle``.
+
+    Record cancelled admission; drop any shell; return the dropped shell if any.
+    Compact cancelled memory is scope-keyed (one outstanding cancel per scores
+    scope). The dropped shell is not painted with a cancel phase -- cancel is
+    admission memory only. Lifecycle also seals stream cancel and cancels the
+    session token.
+    """
+    with _lock:
+        dropped = _drop_shell_locked(run_id)
+        if dropped is not None:
+            _record_cancelled_locked(run_id, _session_scope_key(dropped.session))
+            return dropped
+        # Already compact-cancelled (or never registered): leave admission as-is.
+        return None
+
+
+def _retire_row_run(run_id: str) -> None:
+    """Registry-private RETIRE side. Public API: ``apply_scores_row_lifecycle``."""
+    with _lock:
+        _forget_cancelled_locked(run_id)
+        _drop_shell_locked(run_id)
+
+
+def clear_row_runs() -> None:
+    """Drop every retained RowRun and cancelled admission (full invalidate / shutdown)."""
+    with _lock:
+        _runs_by_id.clear()
+        _run_id_by_scope_key.clear()
+        _tier_callbacks_by_run_id.clear()
+        _cancelled_admissions.clear()
+        _cancelled_run_by_scope.clear()
 
 
 def register_tier_callbacks(run_id: str, callbacks: InferenceTierJobCallbacks) -> None:
@@ -111,7 +282,4 @@ def get_tier_callbacks(run_id: str) -> InferenceTierJobCallbacks | None:
 
 
 def reset_tier_row_run_registry_for_tests() -> None:
-    with _lock:
-        _runs_by_id.clear()
-        _run_id_by_scope_key.clear()
-        _tier_callbacks_by_run_id.clear()
+    clear_row_runs()

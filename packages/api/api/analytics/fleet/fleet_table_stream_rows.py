@@ -121,13 +121,11 @@ def drain_available_multiplex_events(
     players: tuple[ScheduledFleetPlayer, ...],
     *,
     tag_player_id: bool,
-    finished_run_ids: set[str],
 ) -> Iterator[dict[str, object]]:
     """Yield any events already queued without blocking."""
     return _drain_available_multiplex_events(
         players,
         tag_player_id=tag_player_id,
-        finished_run_ids=finished_run_ids,
         event_to_wire_events=_fleet_multiplex_event_to_wire_events,
         tag_event=lambda event, player_id: tag_fleet_table_stream_event(
             event,
@@ -141,7 +139,6 @@ def iter_multiplexed_fleet_table_events(
     players: tuple[ScheduledFleetPlayer, ...],
     *,
     tag_player_id: bool,
-    finished_run_ids: set[str] | None = None,
     is_stream_active: Callable[[], bool] | None = None,
     player_provider: Callable[[], tuple[ScheduledFleetPlayer, ...]] | None = None,
     pending_events_provider: Callable[[], list[dict[str, object]]] | None = None,
@@ -151,7 +148,6 @@ def iter_multiplexed_fleet_table_events(
     return iter_multiplexed_stream_events(
         players,
         tag_player_id=tag_player_id,
-        finished_run_ids=finished_run_ids,
         is_stream_active=is_stream_active,
         row_provider=player_provider,
         pending_events_provider=pending_events_provider,

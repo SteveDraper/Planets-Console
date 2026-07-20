@@ -1,17 +1,12 @@
 """Core scoreboard analytic."""
 
+from __future__ import annotations
+
 from collections.abc import Callable, Iterator, Mapping
+from typing import TYPE_CHECKING
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
-from api.analytics.military_score_inference.inference_stream_rows import (
-    iter_scores_table_inference_events,
-)
-from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
-    PriorTurnFleetTorpResolution,
-)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores.compute_orchestration import (
@@ -30,6 +25,17 @@ from api.analytics.scores_assets import ANALYTIC_ID
 from api.analytics.turn_roster import players_by_id as turn_players_by_id
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+
+if TYPE_CHECKING:
+    from api.analytics.military_score_inference.hull_catalog_mask import (
+        ResolvedHullCatalogMask,
+    )
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+    )
+    from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+        PriorTurnFleetTorpResolution,
+    )
 
 
 def _score_row(
@@ -101,6 +107,10 @@ def iter_scores_table_inference_stream(
     scheduler: InferenceRowScheduler | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield NDJSON wire events for all scoreboard rows on one stream."""
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        iter_scores_table_inference_events,
+    )
+
     yield from iter_scores_table_inference_events(
         turn,
         player_ids,

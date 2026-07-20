@@ -19,7 +19,6 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
     player_ids: tuple[int, ...]
     scheduled_rows: dict[int, ScheduledT] = field(default_factory=dict)
     pending_wire_events: list[dict[str, object]] = field(default_factory=list)
-    finished_run_ids: set[str] = field(default_factory=set)
     stream_lock: threading.Lock = field(default_factory=threading.Lock)
     wake_multiplex: threading.Event = field(default_factory=threading.Event)
 
@@ -63,7 +62,6 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
                     cancel_run_id(new_run_id)
                     return False
             self.scheduled_rows[player_id] = row
-            self.finished_run_ids.discard(new_run_id)
             return True
 
     def dispatch_admission(
@@ -80,9 +78,7 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
         if dispatch.wire_events:
             self.pending_wire_events.extend(dispatch.wire_events)
         if dispatch.scheduled is not None:
-            scheduled = dispatch.scheduled
-            self.scheduled_rows[player_id] = scheduled
-            self.finished_run_ids.discard(self._run_id_for_scheduled_row(scheduled))
+            self.scheduled_rows[player_id] = dispatch.scheduled
         return True
 
     def _run_id_for_scheduled_row(self, row: ScheduledT) -> str:

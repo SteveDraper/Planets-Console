@@ -9,23 +9,25 @@ from api.analytics.military_score_inference.inference_turn_lookup import (
     player_by_id,
     race_by_id_or_none,
 )
-from api.models.components import Hull
 from api.models.game import GameSettings, TurnInfo
 
 BIRD_ENLIGHTEN_HULL_ID = 106
 
-REPLACEMENT_SETTING_FIELDS: tuple[str, ...] = (
-    "repairshipreplacessagefrigate",
-    "migtransportreplacesmigscout",
-    "saurianlightfrigatereplacessaurian",
-    "scorpiuscarrierreplacesscorpiuslight",
-    "sscruiseriireplacessscruiser",
-    "sscarrierplusreplacessscarrier",
-    "skyfireplusreplacesskyfire",
-    "d7creplacesd7a",
-    "quietusplusreplacesquietus",
-    "cybernautlightreplacescybernaut",
-    "ironslavescoutreplacesironslave",
+# Fixed standard-settings replacements. Each flag maps to exactly one
+# (parent_out, child_in) pair -- not every campaign child of a base hull.
+# Several children are not direct parentid descendants of the stock hull.
+STANDARD_HULL_REPLACEMENT_SWAPS: tuple[tuple[str, int, int], ...] = (
+    ("repairshipreplacessagefrigate", 90, 1090),  # Sage Frigate -> Sage Repair
+    ("migtransportreplacesmigscout", 73, 1073),  # Mig Scout -> Mig Transport
+    ("saurianlightfrigatereplacessaurian", 25, 3025),  # Saurian LC -> Light Frigate
+    ("scorpiuscarrierreplacesscorpiuslight", 102, 1102),  # Scorpius Light -> Carrier
+    ("sscruiseriireplacessscruiser", 74, 1074),  # Super Star Cruiser -> II
+    ("sscarrierplusreplacessscarrier", 76, 2076),  # Super Star Carrier -> Carrier+
+    ("skyfireplusreplacesskyfire", 48, 2048),  # Skyfire -> Skyfire+
+    ("d7creplacesd7a", 34, 2034),  # D7a Painmaker -> D7c
+    ("quietusplusreplacesquietus", 58, 1058),  # Quietus -> Quietus+
+    ("cybernautlightreplacescybernaut", 83, 2083),  # Cybernaut -> Light Baseship
+    ("ironslavescoutreplacesironslave", 85, 2085),  # Iron Slave -> Scout
 )
 
 
@@ -75,24 +77,19 @@ def _apply_parent_child_swap(
 def swaps_for_enabled_settings(
     *,
     settings: GameSettings,
-    hulls_by_id: dict[int, Hull],
-    race_hull_ids: frozenset[int],
     base_hull_ids: frozenset[int],
 ) -> list[tuple[int, int]]:
+    """Return enabled standard (parent, child) swaps for hulls in ``base_hull_ids``.
+
+    Child presence in the race hull list is enforced by ``_apply_parent_child_swap``.
+    """
     swaps: list[tuple[int, int]] = []
-    if settings.repairshipreplacessagefrigate and 90 in base_hull_ids:
-        swaps.append((90, 1090))
-    for field in REPLACEMENT_SETTING_FIELDS:
-        if field == "repairshipreplacessagefrigate":
-            continue
+    for field, parent_id, child_id in STANDARD_HULL_REPLACEMENT_SWAPS:
         if not getattr(settings, field, False):
             continue
-        for child_id in sorted(race_hull_ids):
-            child = hulls_by_id.get(child_id)
-            if child is None or child.parentid == 0:
-                continue
-            if child.parentid in base_hull_ids:
-                swaps.append((child.parentid, child_id))
+        if parent_id not in base_hull_ids:
+            continue
+        swaps.append((parent_id, child_id))
     return swaps
 
 
@@ -102,7 +99,6 @@ def standard_settings_adjusted_basehulls(
     race_basehulls_csv: str,
     race_hulls_csv: str,
     catalog_ids: frozenset[int],
-    hulls_by_id: dict[int, Hull],
     settings: GameSettings,
 ) -> frozenset[int]:
     result = set(parse_component_id_csv(race_basehulls_csv) & catalog_ids)
@@ -111,8 +107,6 @@ def standard_settings_adjusted_basehulls(
 
     for parent_id, child_id in swaps_for_enabled_settings(
         settings=settings,
-        hulls_by_id=hulls_by_id,
-        race_hull_ids=race_hull_ids,
         base_hull_ids=base_hull_ids,
     ):
         _apply_parent_child_swap(
@@ -143,13 +137,11 @@ def default_enabled_hull_ids_for_player(turn: TurnInfo, player_id: int) -> froze
     if turn.settings.campaignmode:
         return frozenset(parse_component_id_csv(race.hulls) & catalog_ids) & master
 
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
     enabled = standard_settings_adjusted_basehulls(
         race_id=player.raceid,
         race_basehulls_csv=race.basehulls,
         race_hulls_csv=race.hulls,
         catalog_ids=catalog_ids,
-        hulls_by_id=hulls_by_id,
         settings=turn.settings,
     )
     return enabled & master

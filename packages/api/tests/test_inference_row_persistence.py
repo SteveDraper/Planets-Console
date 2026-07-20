@@ -472,10 +472,11 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
     assert stored.summary == "orchestrator exact"
 
 
-def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
+def test_scores_persistence_policy_persists_stopped_terminal_row(
     sample_turn,
     memory_backend,
 ):
+    """Stopped closes turnEvidenceAtN when durable -- must persist, not soft-complete."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.analytic import build_inference_observation
     from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
@@ -521,7 +522,7 @@ def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
             ),
         ),
     )
-    assert step_result.outcome == "complete"
+    assert step_result.outcome == "persist"
 
     persistence = InferenceRowPersistenceService(memory_backend)
     ctx = make_analytic_query_context(
@@ -542,14 +543,16 @@ def test_scores_persistence_policy_does_not_persist_stopped_terminal_row(
         step_result.payload,
     )
 
-    assert persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid) is None
+    stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
+    assert stored is not None
+    assert stored.status == STATUS_STOPPED
 
 
-def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(
+def test_scores_persistence_policy_persists_when_rowrun_detached(
     sample_turn,
     memory_backend,
 ):
-    """Persistable tier outcome without a live RowRun must not quiet-complete."""
+    """Detach retains DETACHED phase so finish-after-detach can still persist."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.analytic import build_inference_observation
     from api.analytics.military_score_inference.inference_stream_session import (
@@ -565,13 +568,19 @@ def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        _detach_row_run,
+        get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
-        unregister_row_run,
     )
     from api.compute.scope import ComputeScope
+    from api.streaming.table_stream.row_run_admission import RowRunPhase
+    from api.streaming.table_stream.row_stream_resolution_registry import (
+        reset_stream_resolution_registry_for_tests,
+    )
 
     reset_tier_row_run_registry_for_tests()
+    reset_stream_resolution_registry_for_tests()
     score = sample_turn.scores[0]
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -584,7 +593,8 @@ def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(
     run = RowRun(session)
     register_row_run(run)
     run_id = run.run_id
-    unregister_row_run(run_id)
+    _detach_row_run(run_id)
+    assert get_row_run_phase(run_id) is RowRunPhase.DETACHED
 
     persistence = InferenceRowPersistenceService(memory_backend)
     ctx = make_analytic_query_context(
@@ -596,7 +606,7 @@ def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="orphan persist",
     )
-    with pytest.raises(RuntimeError, match="missing RowRun"):
+    try:
         ScoresPersistencePolicy().persist(
             ctx,
             ComputeScope(
@@ -608,4 +618,11 @@ def test_scores_persistence_policy_raises_when_rowrun_missing_for_persistable(
             ),
             {"runId": run_id, "rowComplete": row_complete},
         )
-    assert persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid) is None
+        stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
+        assert stored is not None
+        assert stored.status == STATUS_EXACT
+        assert stored.summary == "orphan persist"
+        assert get_row_run_phase(run_id) is None
+    finally:
+        reset_tier_row_run_registry_for_tests()
+        reset_stream_resolution_registry_for_tests()

@@ -112,29 +112,29 @@ def test_analyze_game_628580_standard_settings_adjusted_full_coverage() -> None:
 def test_standard_settings_adjusted_swaps_sage_frigate_for_repair_ship() -> None:
     turn, _ = _load_fixture_turn()
     race = next(race for race in turn.races if race.id == 10)
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
+    catalog_ids = frozenset(hull.id for hull in turn.hulls)
     adjusted = standard_settings_adjusted_basehulls(
         race_id=10,
         race_basehulls_csv=race.basehulls,
         race_hulls_csv=race.hulls,
-        catalog_ids=frozenset(hulls_by_id),
-        hulls_by_id=hulls_by_id,
+        catalog_ids=catalog_ids,
         settings=turn.settings,
     )
     assert 1090 in adjusted
     assert 90 not in adjusted
+    assert 87 in adjusted
+    assert 1087 not in adjusted
 
 
 def test_standard_settings_adjusted_skips_repair_ship_when_race_lacks_sage_frigate() -> None:
     turn, _ = _load_fixture_turn()
     race = next(race for race in turn.races if race.id == 9)
-    hulls_by_id = {hull.id: hull for hull in turn.hulls}
+    catalog_ids = frozenset(hull.id for hull in turn.hulls)
     adjusted = standard_settings_adjusted_basehulls(
         race_id=9,
         race_basehulls_csv=race.basehulls,
         race_hulls_csv=race.hulls,
-        catalog_ids=frozenset(hulls_by_id),
-        hulls_by_id=hulls_by_id,
+        catalog_ids=catalog_ids,
         settings=turn.settings,
     )
     assert 1090 not in adjusted
