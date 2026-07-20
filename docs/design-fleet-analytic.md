@@ -112,13 +112,18 @@ When scoreboard shows `+2 warship` and inference is `in_progress` with 0 solutio
 
 ### 4.3 Observation-inference merge
 
-When a sighting arrives:
+When a sighting of ship id `S` arrives (owner = ledger player), process sightings in `turn.ships` order (greedy: a claimed row leaves the pool for later sightings on the same turn). Tracker: [#120](https://github.com/SteveDraper/Planets-Console/issues/120).
 
-1. Match spec to a **fleet build option set** on an unmatched inferred row (exact component match on visible fields)
-2. Tie-break: earliest inferred row without linked id that lists the matching set (FIFO by `builtTurn`)
-3. On match: append event, collapse **observation-reliable** fields to **known**, link `shipId` if visible
-4. No match: new **fleet observed ship** row
-5. Never delete prior events -- support future **fleet reconciliation correction**
+1. **Exact known id** -- if an active row has `shipId` **known** equal to `S`, update that row only (sighting / position update + field and option-set merge). Do not run option-set arbitration.
+2. **Else candidate pool** -- active rows where all of the following hold:
+   - id constraint **allows** `S` (e.g. `lte maxId`; not a different known id)
+   - no prior direct observation (`sighting` / `position_update`) -- unlinked acquisitions only
+   - at least one **lock-compatible** **fleet build option set** (positively observed axes must agree; fog-of-war zeros are not locks). Empty `buildOptionSets` are not eligible.
+3. **Select** among the pool: maximize the matching set's **inference solution rank weight** (`solutionRankWeight`). Per row, use the max weight among its lock-compatible sets (that set is the matched index). Ties: earliest known `builtTurn`, then stable ledger order. FIFO is a tie-break only -- not the primary rule.
+4. **On match:** append `option_set_match` (record `shipId`, `optionSetIndex`, `solutionRankWeight`, tie-break reason, candidate-set size) then ordinary `sighting` / `position_update`; set `shipId` to **known** `S`; collapse **observation-reliable** fields and apply observation locks to option sets as today. Never delete prior events; do not change disposition -- support future **fleet reconciliation correction**.
+5. **No match:** new **fleet observed ship** row. A sole id-bound candidate with incompatible option sets must not be force-merged.
+
+Global max-weight assignment across same-turn sightings is out of scope for v1.
 
 **Refine must not overwrite observation-known elements.** After a sighting has linked a scoreboard placeholder:
 
@@ -128,6 +133,8 @@ When a sighting arrives:
 ### 4.4 Id bounds
 
 Sequential host ship id allocation: if turn `N-1` had `X` ships globally and turn `N` had `Y` builds, `maxId <= X + Y` (refine when sighting fixes id).
+
+**Ordering invariant:** when a max ship-id bound is computable for the shell turn (scoreboard totals present), apply id bounds to scoreboard and homeworld inferred acquisitions **before** observation matching on that turn. Unconstrained `shipId` on those rows while a bound was computable is invalid -- not a legitimate observation-merge path. (Implementation today may still tighten after sightings; [#120](https://github.com/SteveDraper/Planets-Console/issues/120) moves bounds ahead of match.)
 
 On the first reliable accelerated row (`turn == acceleratedturns`), apply **built-turn-aware** bounds when tightening inferred rows on that shell turn:
 
@@ -364,7 +371,7 @@ F0.2 registration uses a single `api/analytics/fleet.py` module (same pattern as
 | Snapshot chain | T-1 -> T; turn-1 baseline; invalidation on turn replace |
 | Observation ingest | Sighting creates/updates row; id bounds |
 | Inference ingest | Placeholder rows from delta; option sets from top-K |
-| Reconciliation | Option-set match + FIFO; event append immutability |
+| Reconciliation | Exact known id vs id-bound + lock-compatible option sets; max rank weight then builtTurn; event append immutability; bounds before observation |
 | Discrepancy | Player flag without disposition change; alibi excludes possibly-lost |
 | Exports | Ensure deps; materialize shape; scores edge registration |
 | BFF | Table/map wire golden fixtures |
