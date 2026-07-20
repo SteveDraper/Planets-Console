@@ -31,25 +31,23 @@ logger = logging.getLogger(__name__)
 
 _USERNAME_SAFE = re.compile(r"^[a-zA-Z0-9_.-]+$")
 
-# Planets.nu auth-failure phrases seen on rejected account API keys / sessions.
-_AUTH_FAILURE_MARKERS = (
-    "apikey",
-    "api key",
-    "api-key",
+# Precise Planets.nu rejection phrases (case-insensitive substring).
+# Keep this list narrow: bare tokens like "apikey" / "authentication" false-positive
+# and wipe a still-valid stored key.
+_AUTH_FAILURE_PHRASES = (
+    "invalid apikey",
+    "invalid api key",
+    "invalid api-key",
     "not logged in",
     "not logged-in",
-    "unauthorized",
-    "authentication",
     "login required",
-    "invalid key",
-    "invalid api",
 )
 
 
 def looks_like_account_api_key_auth_failure(detail: str) -> bool:
-    """True when an upstream error message likely means the stored key was rejected."""
+    """True when an upstream error message matches a known key/session rejection phrase."""
     lowered = detail.lower()
-    return any(marker in lowered for marker in _AUTH_FAILURE_MARKERS)
+    return any(phrase in lowered for phrase in _AUTH_FAILURE_PHRASES)
 
 
 class CredentialService:

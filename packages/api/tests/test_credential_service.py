@@ -163,8 +163,20 @@ def test_invalidate_if_auth_failure():
     "detail,expected",
     [
         ("Invalid apikey", True),
+        ("invalid API key", True),
+        ("Invalid api-key supplied", True),
         ("Not logged in", True),
+        ("User is not logged-in", True),
+        ("Login required", True),
         ("turn missing", False),
+        ("turn not found", False),
+        # Bare tokens that used to over-match must not invalidate.
+        ("Missing apikey parameter", False),
+        ("Failed to parse apikey from response", False),
+        ("authentication timeout", False),
+        ("Unauthorized to view this player's turns", False),
+        ("invalid api response shape", False),
+        ("invalid key for turn export", False),
     ],
 )
 def test_looks_like_auth_failure(detail: str, expected: bool):
