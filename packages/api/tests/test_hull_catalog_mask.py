@@ -100,7 +100,7 @@ def test_user_override_intersects_master(sample_turn):
 @pytest.mark.skipif(not P5_TURN6_PATH.is_file(), reason="local store only")
 def test_hull_catalog_service_put_and_reset_round_trip():
     backend = MemoryAssetBackend(initial={})
-    _, turns, _, _, analytics = build_service_stack(backend)
+    _, turns, _, _, analytics, _ = build_service_stack(backend)
     service = analytics._hull_catalog_masks
 
     game_id = 628580

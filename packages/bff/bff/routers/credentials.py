@@ -2,27 +2,18 @@
 
 from typing import Annotated
 
+from api.transport.credentials import (
+    CredentialExchangeRequest,
+    CredentialExchangeResponse,
+    CredentialProbeResponse,
+)
 from fastapi import APIRouter, Depends, Query, Response
-from pydantic import BaseModel, Field
 
 from bff.core_client import CoreClient, get_core_client
 
 router = APIRouter()
 
 CoreClientDep = Annotated[CoreClient, Depends(get_core_client)]
-
-
-class CredentialExchangeRequest(BaseModel):
-    username: str = Field(min_length=1)
-    password: str = Field(min_length=1)
-
-
-class CredentialProbeResponse(BaseModel):
-    present: bool
-
-
-class CredentialExchangeResponse(BaseModel):
-    ok: bool = True
 
 
 @router.get("/probe", response_model=CredentialProbeResponse)

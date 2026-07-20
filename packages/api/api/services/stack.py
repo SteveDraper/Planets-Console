@@ -1,5 +1,7 @@
 """Construct the default Core service dependency graph for a storage backend."""
 
+from typing import NamedTuple
+
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
@@ -15,15 +17,18 @@ from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
 
 
-def build_service_stack(
-    storage: StorageBackend,
-) -> tuple[
-    GameService,
-    TurnLoadService,
-    LoadAllTurnsService,
-    TurnConceptService,
-    TurnAnalyticService,
-]:
+class ServiceStack(NamedTuple):
+    """Process service graph for one storage backend."""
+
+    games: GameService
+    turns: TurnLoadService
+    load_all: LoadAllTurnsService
+    concepts: TurnConceptService
+    analytics: TurnAnalyticService
+    credentials: CredentialService
+
+
+def build_service_stack(storage: StorageBackend) -> ServiceStack:
     credentials = CredentialService(storage)
     games = GameService(storage, credentials)
     fleet_persistence = FleetSnapshotPersistenceService(storage)
@@ -69,16 +74,17 @@ def build_service_stack(
         inference_scheduler=inference_scheduler,
         fleet_persistence=fleet_persistence,
     )
-    return games, turns, load_all, concepts, analytics
+    return ServiceStack(
+        games=games,
+        turns=turns,
+        load_all=load_all,
+        concepts=concepts,
+        analytics=analytics,
+        credentials=credentials,
+    )
 
 
-def build_default_service_stack() -> tuple[
-    GameService,
-    TurnLoadService,
-    LoadAllTurnsService,
-    TurnConceptService,
-    TurnAnalyticService,
-]:
+def build_default_service_stack() -> ServiceStack:
     """Service graph for the active process storage backend (BFF in-process adapter, tests)."""
     from api.storage import get_storage
 

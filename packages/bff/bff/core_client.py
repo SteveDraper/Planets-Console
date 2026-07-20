@@ -23,7 +23,6 @@ from api.services.stack import build_default_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
-from api.storage import get_storage
 from api.transport.concept_stellar_cartography import (
     StellarCartographySampleResponse,
     StellarCartographyTurnSummaryResponse,
@@ -60,7 +59,7 @@ class CoreClient:
         load_all_turns_service: LoadAllTurnsService,
         turn_concept_service: TurnConceptService,
         turn_analytic_service: TurnAnalyticService,
-        credential_service: CredentialService | None = None,
+        credential_service: CredentialService,
         planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
     ) -> None:
         self._games = game_service
@@ -68,7 +67,7 @@ class CoreClient:
         self._load_all = load_all_turns_service
         self._concepts = turn_concept_service
         self._analytics = turn_analytic_service
-        self._credentials = credential_service or CredentialService(get_storage())
+        self._credentials = credential_service
         self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
 
     def _invoke(self, fn: Callable[[], T]) -> T:
@@ -404,13 +403,14 @@ def clear_core_client_cache() -> None:
 
 
 def _build_core_client() -> CoreClient:
-    games, turns, load_all, concepts, analytics = build_default_service_stack()
+    stack = build_default_service_stack()
     return CoreClient(
-        game_service=games,
-        turn_load_service=turns,
-        load_all_turns_service=load_all,
-        turn_concept_service=concepts,
-        turn_analytic_service=analytics,
+        game_service=stack.games,
+        turn_load_service=stack.turns,
+        load_all_turns_service=stack.load_all,
+        turn_concept_service=stack.concepts,
+        turn_analytic_service=stack.analytics,
+        credential_service=stack.credentials,
     )
 
 

@@ -18,7 +18,7 @@ def analytics_service():
         backend.put("games/628580/info", json.load(f))
     with open(ASSETS_DIR / "turn_sample.json") as f:
         backend.put("games/628580/1/turns/111", json.load(f))
-    _, _, _, _, analytics = build_service_stack(backend)
+    _, _, _, _, analytics, _ = build_service_stack(backend)
     return analytics
 
 
