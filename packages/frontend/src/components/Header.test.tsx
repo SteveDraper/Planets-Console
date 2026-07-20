@@ -385,7 +385,7 @@ describe('Header', () => {
 
   it('change-login button is always present and opens modal when logged in', async () => {
     const user = userEvent.setup()
-    useSessionStore.getState().setCredentials('Someone', 'pass')
+    useSessionStore.getState().adoptLoginName('Someone')
     renderHeader()
     expect(screen.getByText('Someone')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /change login/i }))

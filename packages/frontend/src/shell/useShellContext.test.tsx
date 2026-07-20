@@ -91,7 +91,7 @@ describe('useShellContext', () => {
   })
 
   it('sends username only to ensureTurnData (no password)', async () => {
-    useSessionStore.getState().setCredentials('Alice', '  secret  ')
+    useSessionStore.getState().adoptLoginName('Alice')
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     useShellStore.setState({
       selectedGameId: '628580',
@@ -213,7 +213,7 @@ describe('useShellContext', () => {
     })
     expect(ensureTurnData).toHaveBeenCalledTimes(1)
 
-    useSessionStore.getState().setCredentials('Alice', 'correct')
+    useSessionStore.getState().adoptLoginName('Alice')
 
     await waitFor(() => {
       expect(result.current.turnDataReady).toBe(true)

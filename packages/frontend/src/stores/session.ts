@@ -8,12 +8,12 @@ import { create } from 'zustand'
  */
 type SessionState = {
   name: string | null
+  /** Always null in SPA flows; retained for historical session shape. */
   password: string | null
   /** Bumps on credential changes so turn-ensure queries refetch without password in the key. */
   credentialsRevision: number
   /** Adopt a login name with no password (silent restore / name-only switch / post-exchange). */
   adoptLoginName: (name: string) => void
-  setCredentials: (name: string, password: string) => void
   clearSession: () => void
 }
 
@@ -26,14 +26,6 @@ export const useSessionStore = create<SessionState>((set) => ({
     set((state) => ({
       name: trimmed === '' ? null : trimmed,
       password: null,
-      credentialsRevision: state.credentialsRevision + 1,
-    }))
-  },
-  setCredentials: (name, password) => {
-    const trimmedPassword = password.trim()
-    set((state) => ({
-      name,
-      password: trimmedPassword === '' ? null : trimmedPassword,
       credentialsRevision: state.credentialsRevision + 1,
     }))
   },
