@@ -135,7 +135,7 @@ class CredentialService:
         if is_obfuscated_envelope(raw):
             try:
                 plaintext = self._unwrap(raw)  # type: ignore[arg-type]
-            except MachineIdError, ValueError:
+            except (MachineIdError, ValueError):
                 return None
             return plaintext.strip() or None
 
