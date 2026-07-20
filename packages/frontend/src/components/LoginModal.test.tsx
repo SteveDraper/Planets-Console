@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { LoginModal } from './LoginModal'
 import {
   LAST_LOGIN_USERNAME_STORAGE_KEY,
-  LoginModal,
   clearRememberedLoginUsername,
-} from './LoginModal'
+} from '../lib/rememberedLoginUsername'
 import { useSessionStore } from '../stores/session'
 import {
   dropCredentials,

@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Header } from './Header'
-import { LAST_LOGIN_USERNAME_STORAGE_KEY } from './LoginModal'
+import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../lib/rememberedLoginUsername'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
 

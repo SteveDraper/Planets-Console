@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { probeCredentials } from '../api/credentialsClient'
-import {
-  readRememberedLoginUsername,
-} from '../components/LoginModal'
+import { readRememberedLoginUsername } from '../lib/rememberedLoginUsername'
 import { useSessionStore } from '../stores/session'
 
 export type SilentLoginRestoreStatus = 'pending' | 'restored' | 'failed' | 'skipped'

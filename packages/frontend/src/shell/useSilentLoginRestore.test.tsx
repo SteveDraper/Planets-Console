@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../components/LoginModal'
+import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../lib/rememberedLoginUsername'
 import { useSilentLoginRestore } from './useSilentLoginRestore'
 import { useSessionStore } from '../stores/session'
 import { probeCredentials } from '../api/credentialsClient'

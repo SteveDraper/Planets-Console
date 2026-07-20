@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { BffHttpError } from '../api/bffHttpError'
-import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../components/LoginModal'
+import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../lib/rememberedLoginUsername'
 import { useSessionStore } from '../stores/session'
 import { useIdentityLifecycle } from './useIdentityLifecycle'
 import { probeCredentials } from '../api/credentialsClient'
