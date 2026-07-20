@@ -21,6 +21,7 @@ import {
   fetchShellGameBootstrap,
 } from './shell/shellGameBootstrap'
 import { useShellContext, useShellGameSelection } from './shell'
+import { useIdentityLifecycle } from './shell/useIdentityLifecycle'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
@@ -96,7 +97,24 @@ function ConsoleShell() {
     isLoadAllTurnsDisabled,
     isLoadAllTurnsPending,
     handleLoadAllTurns,
-  } = useShellGameSelection({ reportShellError: addShellError })
+    refreshUnfinishedSelectedGame,
+  } = useShellGameSelection({
+    reportShellError: addShellError,
+  })
+
+  const shellStoreHydrated = usePersistStoreHydrated(useShellStore)
+  const {
+    forceLoginModalOpen,
+    clearForceLoginModalOpen,
+    handleIdentityEstablished,
+  } = useIdentityLifecycle({
+    shellStoreHydrated,
+    selectedGameId,
+    isGameFinished: gameInfoContext?.isGameFinished ?? null,
+    refreshUnfinishedSelectedGame,
+    turnEnsureIsError,
+    turnEnsureError,
+  })
 
   const prevLoginNameRef = useRef<string | null | undefined>(undefined)
   useEffect(() => {
@@ -142,7 +160,6 @@ function ConsoleShell() {
 
   useComputeFreezeStatusSync(analyticScope)
 
-  const shellStoreHydrated = usePersistStoreHydrated(useShellStore)
   const scoresPreferencesHydrated = usePersistStoreHydrated(useScoresTablePreferencesStore)
 
   const trimmedLoginName = loginName?.trim() ?? ''
@@ -318,6 +335,9 @@ function ConsoleShell() {
         onShellViewpointChange={handleShellViewpointChange}
         analyticScope={analyticScope}
         computeDiagnosticsEnabled={Boolean(shellBootstrap?.computeDiagnosticsEnabled)}
+        forceLoginModalOpen={forceLoginModalOpen}
+        onForceLoginModalOpenConsumed={clearForceLoginModalOpen}
+        onIdentityEstablished={handleIdentityEstablished}
       />
       <ShellErrorBar errors={shellErrors} onDismiss={dismissShellError} />
       {loadAllProgress ? <ShellLoadAllProgressBar progress={loadAllProgress} /> : null}

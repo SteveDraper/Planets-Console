@@ -273,6 +273,11 @@ export interface components {
             type: "error";
             /** Detail */
             detail: string;
+            /**
+             * Http Error
+             * @description HTTP status that would apply for an equivalent non-stream failure.
+             */
+            http_error: number;
         };
         /**
          * LoadAllStreamProgressEvent

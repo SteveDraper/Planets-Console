@@ -486,7 +486,7 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
 
 
 def test_turn_store_invalidates_fleet_snapshots(memory_backend):
-    _, turns, _, _, _ = build_service_stack(memory_backend)
+    _, turns, _, _, _, _ = build_service_stack(memory_backend)
     persistence = FleetSnapshotPersistenceService(memory_backend)
     persistence.put_snapshot(
         628580,
@@ -528,7 +528,7 @@ def test_turn_analytic_service_materializes_persisted_fleet(memory_backend, load
         110,
         ensure_fleet_baseline(628580, 1, turn_110),
     )
-    _, _, _, _, analytics = build_service_stack(memory_backend)
+    _, _, _, _, analytics, _ = build_service_stack(memory_backend)
     data = analytics.get_turn_analytics(628580, 1, 111, "fleet")
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4

@@ -4,9 +4,15 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Header } from './Header'
-import { LAST_LOGIN_USERNAME_STORAGE_KEY } from './LoginModal'
+import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../lib/rememberedLoginUsername'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
+
+vi.mock('../api/credentialsClient', () => ({
+  exchangeCredentials: vi.fn().mockResolvedValue(undefined),
+  probeCredentials: vi.fn().mockResolvedValue(true),
+  dropCredentials: vi.fn().mockResolvedValue(undefined),
+}))
 
 const headerQueryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -359,8 +365,11 @@ describe('Header', () => {
     await user.type(screen.getByLabelText(/name/i), 'TestPlayer')
     await user.type(screen.getByLabelText(/password/i), 'secret')
     await user.click(screen.getByRole('button', { name: /log in/i }))
-    expect(screen.getByText('TestPlayer')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('TestPlayer')).toBeInTheDocument()
+    })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(useSessionStore.getState().password).toBeNull()
   })
 
   it('restores focus to change-login button when modal closes (Cancel)', async () => {
@@ -376,7 +385,7 @@ describe('Header', () => {
 
   it('change-login button is always present and opens modal when logged in', async () => {
     const user = userEvent.setup()
-    useSessionStore.getState().setCredentials('Someone', 'pass')
+    useSessionStore.getState().adoptLoginName('Someone')
     renderHeader()
     expect(screen.getByText('Someone')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /change login/i }))
@@ -390,7 +399,9 @@ describe('Header', () => {
     await user.type(screen.getByLabelText(/^name$/i), 'User')
     await user.type(screen.getByLabelText(/^password$/i), 'sensitive-password')
     await user.click(screen.getByRole('button', { name: /log in/i }))
-    expect(localStorage.getItem(LAST_LOGIN_USERNAME_STORAGE_KEY)).toBe('User')
+    await waitFor(() => {
+      expect(localStorage.getItem(LAST_LOGIN_USERNAME_STORAGE_KEY)).toBe('User')
+    })
     expect(sessionStorage.length).toBe(0)
     const sessionKeys = Object.keys(sessionStorage)
     const sessionStr = sessionKeys.length

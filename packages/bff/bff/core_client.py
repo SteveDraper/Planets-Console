@@ -16,6 +16,7 @@ from api.handlers.stellar_cartography import (
 from api.handlers.warp_well import coordinate_in_well, warp_well_cells
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
+from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import build_default_service_stack
@@ -58,6 +59,7 @@ class CoreClient:
         load_all_turns_service: LoadAllTurnsService,
         turn_concept_service: TurnConceptService,
         turn_analytic_service: TurnAnalyticService,
+        credential_service: CredentialService,
         planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
     ) -> None:
         self._games = game_service
@@ -65,6 +67,7 @@ class CoreClient:
         self._load_all = load_all_turns_service
         self._concepts = turn_concept_service
         self._analytics = turn_analytic_service
+        self._credentials = credential_service
         self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
 
     def _invoke(self, fn: Callable[[], T]) -> T:
@@ -75,6 +78,20 @@ class CoreClient:
                 status_code=getattr(exc, "http_error", 500),
                 detail=str(exc),
             ) from exc
+
+    def probe_credentials(self, username: str) -> bool:
+        return self._invoke(lambda: self._credentials.probe(username))
+
+    def exchange_credentials(self, username: str, password: str) -> None:
+        planets = self._planets_client_factory()
+
+        def work() -> None:
+            self._credentials.exchange(username, password, planets)
+
+        self._invoke(work)
+
+    def drop_credentials(self, username: str) -> None:
+        self._invoke(lambda: self._credentials.drop(username))
 
     def list_stored_games(self) -> dict[str, list[dict[str, str]]]:
         return self._invoke(self._games.list_stored_games)
@@ -386,13 +403,14 @@ def clear_core_client_cache() -> None:
 
 
 def _build_core_client() -> CoreClient:
-    games, turns, load_all, concepts, analytics = build_default_service_stack()
+    stack = build_default_service_stack()
     return CoreClient(
-        game_service=games,
-        turn_load_service=turns,
-        load_all_turns_service=load_all,
-        turn_concept_service=concepts,
-        turn_analytic_service=analytics,
+        game_service=stack.games,
+        turn_load_service=stack.turns,
+        load_all_turns_service=stack.load_all,
+        turn_concept_service=stack.concepts,
+        turn_analytic_service=stack.analytics,
+        credential_service=stack.credentials,
     )
 
 

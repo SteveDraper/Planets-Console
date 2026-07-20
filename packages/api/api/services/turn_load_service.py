@@ -252,6 +252,7 @@ class TurnLoadService:
         upstream_turn: int | None,
         api_key: str,
         planets: PlanetsNuClient,
+        username: str,
     ) -> tuple[dict, TurnInfo]:
         """Fetch one turn from Planets.nu and deserialize it."""
         remote = planets.load_turn(
@@ -262,7 +263,12 @@ class TurnLoadService:
         )
         if not remote.get("success"):
             detail = remote.get("error") or remote.get("message") or "Load turn was not successful."
-            raise UpstreamPlanetsError(str(detail))
+            detail_text = str(detail)
+            if self._credentials.invalidate_if_auth_failure(username, detail_text):
+                raise LoginCredentialsRequiredError(
+                    "Stored account API key was rejected; login credentials are required."
+                )
+            raise UpstreamPlanetsError(detail_text)
         rst = remote.get("rst")
         if not isinstance(rst, dict):
             raise UpstreamPlanetsError(
@@ -326,6 +332,7 @@ class TurnLoadService:
             upstream_turn=upstream_turn,
             api_key=api_key,
             planets=planets,
+            username=params.username,
         )
         if self._should_retry_spectator_turnless_with_explicit_turn(
             upstream_turn, game_id, turn_number, turn
@@ -336,6 +343,7 @@ class TurnLoadService:
                 upstream_turn=turn_number,
                 api_key=api_key,
                 planets=planets,
+                username=params.username,
             )
 
         self._validate_turn_loaded_matches_request(game_id, turn_number, turn)

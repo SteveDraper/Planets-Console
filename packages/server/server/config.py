@@ -206,6 +206,19 @@ def load_config(
         raise ValueError(
             f"api.compute_diagnostics_timeline_capacity must be >= 1, got {raw_timeline_capacity}"
         )
+    raw_cred_secret = api_dict.get(
+        "credentials_obfuscation_secret",
+        ApiConfig().credentials_obfuscation_secret,
+    )
+    if raw_cred_secret is not None and not isinstance(raw_cred_secret, str):
+        raise TypeError(
+            f"api.credentials_obfuscation_secret must be a string or null, got "
+            f"{type(raw_cred_secret).__name__}: {raw_cred_secret!r}"
+        )
+    if isinstance(raw_cred_secret, str) and raw_cred_secret == "":
+        cred_secret: str | None = None
+    else:
+        cred_secret = raw_cred_secret
     api_config = ApiConfig(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
         storage_root=_parse_api_storage_root(api_dict.get("storage_root")),
@@ -217,6 +230,7 @@ def load_config(
         compute_diagnostics=raw_compute_diag,
         compute_diagnostics_start_frozen=raw_start_frozen,
         compute_diagnostics_timeline_capacity=raw_timeline_capacity,
+        credentials_obfuscation_secret=cred_secret,
     )
     cors = bff_dict.get("cors_origins")
     if isinstance(cors, list):

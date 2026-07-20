@@ -20,6 +20,7 @@ def _core_client(**overrides: object) -> CoreClient:
         "load_all_turns_service": MagicMock(),
         "turn_concept_service": MagicMock(),
         "turn_analytic_service": MagicMock(),
+        "credential_service": MagicMock(),
     }
     defaults.update(overrides)
     return CoreClient(**defaults)  # type: ignore[arg-type]

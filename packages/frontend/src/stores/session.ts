@@ -3,13 +3,17 @@ import { create } from 'zustand'
 /**
  * Session credentials for planets.nu. In-memory only; never persisted.
  * Password must not be stored in localStorage, sessionStorage, cookies, or URL.
+ * After login exchange the password is cleared; silent restore / name-only switch
+ * set the name only.
  */
 type SessionState = {
   name: string | null
+  /** Always null in SPA flows; retained for historical session shape. */
   password: string | null
-  /** Bumps on setCredentials/clearSession so turn-ensure queries refetch without password in the key. */
+  /** Bumps on credential changes so turn-ensure queries refetch without password in the key. */
   credentialsRevision: number
-  setCredentials: (name: string, password: string) => void
+  /** Adopt a login name with no password (silent restore / name-only switch / post-exchange). */
+  adoptLoginName: (name: string) => void
   clearSession: () => void
 }
 
@@ -17,11 +21,11 @@ export const useSessionStore = create<SessionState>((set) => ({
   name: null,
   password: null,
   credentialsRevision: 0,
-  setCredentials: (name, password) => {
-    const trimmedPassword = password.trim()
+  adoptLoginName: (name) => {
+    const trimmed = name.trim()
     set((state) => ({
-      name,
-      password: trimmedPassword === '' ? null : trimmedPassword,
+      name: trimmed === '' ? null : trimmed,
+      password: null,
       credentialsRevision: state.credentialsRevision + 1,
     }))
   },

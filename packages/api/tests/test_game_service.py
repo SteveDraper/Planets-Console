@@ -35,7 +35,7 @@ def seeded_backend():
 
 @pytest.fixture
 def service(seeded_backend):
-    games, _, _, _, _ = build_service_stack(seeded_backend)
+    games, _, _, _, _, _ = build_service_stack(seeded_backend)
     return games
 
 
@@ -49,7 +49,7 @@ def _clear_sector_title_cache():
 class TestListStoredGames:
     def test_returns_empty_when_games_path_missing(self):
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         assert games.list_stored_games() == {"games": []}
 
     def test_includes_sector_name_from_stored_info(self, service):
@@ -63,7 +63,7 @@ class TestListStoredGames:
             payload = json.load(f)
         backend.put("games/111/info", payload)
         backend.put("games/222/info", payload)
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
 
         info_reads: list[str] = []
         original_get = backend.get
@@ -80,7 +80,7 @@ class TestListStoredGames:
 
     def test_refresh_updates_sector_title_cache(self, game_info_sample_data):
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(game_info_sample_data, login_returns="key")
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -138,7 +138,7 @@ class TestMalformedGameInfoStoreData:
     def test_game_info_non_dict_raises_validation(self):
         backend = MemoryAssetBackend(initial={})
         backend.put("games/1/info", ["not", "a", "dict"])
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(ValidationError, match="Expected JSON object"):
             games.get_game_info(1)
 
@@ -147,7 +147,7 @@ class TestMalformedGameInfoStoreData:
         bad = copy.deepcopy(game_info_sample_data)
         del bad["settings"]["id"]
         backend.put("games/628580/info", bad)
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(ValidationError, match="settings\\.id"):
             games.get_game_info(628580)
 
@@ -176,7 +176,7 @@ class TestRefreshGameInfo:
 
     def test_requires_password_when_no_stored_api_key(self, sample_info):
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(sample_info)
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -189,7 +189,7 @@ class TestRefreshGameInfo:
 
     def test_login_and_store_when_password_given(self, sample_info):
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(sample_info, login_returns="stored-key")
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -198,14 +198,19 @@ class TestRefreshGameInfo:
         gi = games.update_game_info(628580, body, planets)
         assert planets.login_calls == [("player1", "secret")]
         assert planets.load_calls == [628580]
-        assert backend.get("credentials/accounts/player1/api_key") == "stored-key"
+        stored = backend.get("credentials/accounts/player1/api_key")
+        from api.credentials.obfuscation import is_obfuscated_envelope
+        from api.services.credential_service import CredentialService
+
+        assert is_obfuscated_envelope(stored)
+        assert CredentialService(backend).get_stored_api_key("player1") == "stored-key"
         assert isinstance(gi, GameInfo)
         assert gi.game.id == 628580
 
     def test_skips_login_when_api_key_cached(self, sample_info):
         backend = MemoryAssetBackend(initial={})
         backend.put("credentials/accounts/player1/api_key", "cached-key")
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(sample_info)
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -219,7 +224,7 @@ class TestRefreshGameInfo:
         bad = copy.deepcopy(sample_info)
         bad["game"]["id"] = 1
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(bad)
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,
@@ -232,7 +237,7 @@ class TestRefreshGameInfo:
         bad = copy.deepcopy(sample_info)
         bad["settings"]["turn"] = 1
         backend = MemoryAssetBackend(initial={})
-        games, _, _, _, _ = build_service_stack(backend)
+        games, _, _, _, _, _ = build_service_stack(backend)
         planets = FakePlanetsNu(bad)
         body = GameInfoUpdateRequest(
             operation=GameInfoUpdateOperation.REFRESH,

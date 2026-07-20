@@ -14,7 +14,7 @@ Stores are **in-memory** unless a store explicitly adds persistence middleware. 
 
 | Store | Path | Responsibility |
 |--------|------|----------------|
-| **Session** | `packages/frontend/src/stores/session.ts` | Login **name** and **password** for planets.nu-backed operations. Used by game refresh and related flows. |
+| **Session** | `packages/frontend/src/stores/session.ts` | Login **name** and optional **password** for planets.nu-backed operations. Password is cleared after **login exchange**; name may be restored via **silent login restore**. See [ADR 0007](adr/0007-account-api-key-and-silent-login.md). |
 | **Shell** | `packages/frontend/src/stores/shell.ts` | **Selected game id**, snapshot from the last successful game-info refresh (**max turn**, **perspectives** / player order, **Stellar Cartography settings gates**), **selected turn**, **viewpoint override**, and **`applyGameInfoRefresh`** (turn and override rules when game info updates). |
 | **Enabled analytics** | `packages/frontend/src/stores/enabledAnalytics.ts` | Persisted sidebar master enable toggles (`planets-console-enabled-analytics`; default none enabled). |
 | **Stellar Cartography layers** | `packages/frontend/src/stores/stellarCartographyLayers.ts` | Persisted per-layer map visibility toggles for the Stellar Cartography analytic (`planets-console-stellar-cartography-layers`; default all on). |

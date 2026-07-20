@@ -27,6 +27,7 @@ import {
   streamingLoadAllActivity,
   type LoadAllActivity,
 } from './loadAllActivity'
+import { reportCredentialSensitiveFailure } from './reportCredentialSensitiveFailure'
 
 export type UseShellGameSelectionOptions = {
   reportShellError: (message: string) => void
@@ -35,7 +36,6 @@ export type UseShellGameSelectionOptions = {
 export type LoadAllTurnsVars = {
   gameId: string
   username: string
-  password?: string
 }
 
 function reportLoadAllFailure(
@@ -51,7 +51,9 @@ function reportLoadAllFailure(
 }
 
 /** Game refresh, load-all (header or on commit), and a single activity model for the shell. */
-export function useShellGameSelection({ reportShellError }: UseShellGameSelectionOptions) {
+export function useShellGameSelection({
+  reportShellError,
+}: UseShellGameSelectionOptions) {
   const queryClient = useQueryClient()
   const loginName = useSessionStore((s) => s.name)
   const selectedGameId = useShellStore((s) => s.selectedGameId)
@@ -67,7 +69,7 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
       try {
         const result = await loadAllTurnsWithProgress(
           vars.gameId,
-          { username: vars.username, password: vars.password },
+          { username: vars.username },
           (progress: LoadAllProgressUpdate) => {
             setLoadAllActivity({ phase: 'streaming', progress })
           }
@@ -84,6 +86,9 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
       invalidateShellGameQueries(queryClient, vars.gameId)
     },
     onError: (err) => {
+      if (reportCredentialSensitiveFailure(err)) {
+        return
+      }
       const message =
         err instanceof Error
           ? err.message
@@ -103,7 +108,6 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
     mutationFn: async (vars: {
       gameId: string
       username: string
-      password?: string
       loadAllTurns?: boolean
     }): Promise<
       | { source: 'refresh'; gameInfo: GameInfoResponse }
@@ -113,13 +117,11 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
       if (username) {
         const gameInfo = await refreshGameInfo(vars.gameId, {
           username,
-          password: vars.password,
         })
         if (vars.loadAllTurns) {
           await executeLoadAllTurns({
             gameId: vars.gameId,
             username,
-            password: vars.password,
           })
         }
         return { source: 'refresh', gameInfo }
@@ -151,6 +153,9 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
       invalidateShellGameQueries(queryClient, vars.gameId)
     },
     onError: (err) => {
+      if (reportCredentialSensitiveFailure(err)) {
+        return
+      }
       const message =
         err instanceof Error ? err.message : typeof err === 'string' ? err : 'Game refresh failed'
       reportShellError(message)
@@ -171,14 +176,13 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
 
   const handleCommitGameSelection = useCallback(
     (gameId: string, options?: GameSelectionOptions) => {
-      const { name, password } = useSessionStore.getState()
+      const { name } = useSessionStore.getState()
       if (options?.loadAllTurns) {
         setLoadAllActivity({ phase: 'awaiting-refresh' })
       }
       refreshGameMutation.mutate({
         gameId,
         username: name?.trim() ?? '',
-        password: password || undefined,
         loadAllTurns: options?.loadAllTurns,
       })
     },
@@ -187,7 +191,7 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
 
   const handleLoadAllTurns = useCallback(() => {
     if (!selectedGameId) return
-    const { name, password } = useSessionStore.getState()
+    const { name } = useSessionStore.getState()
     const username = name?.trim() ?? ''
     if (!username) {
       reportShellError(LOGIN_REQUIRED_FOR_GAME_SELECTION)
@@ -196,9 +200,18 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
     loadAllTurnsMutation.mutate({
       gameId: selectedGameId,
       username,
-      password: password || undefined,
     })
   }, [selectedGameId, loadAllTurnsMutation, reportShellError])
+
+  /** After silent restore or login exchange: refresh unfinished selected game (no turn auto-advance). */
+  const refreshUnfinishedSelectedGame = useCallback(() => {
+    const { name } = useSessionStore.getState()
+    const username = name?.trim() ?? ''
+    if (!username) return
+    const { selectedGameId: gameId, gameInfoContext: ctx } = useShellStore.getState()
+    if (!gameId || ctx == null || ctx.isGameFinished) return
+    refreshGameMutation.mutate({ gameId, username })
+  }, [refreshGameMutation])
 
   const isLoadAllTurnsDisabled =
     !loginName?.trim() ||
@@ -213,6 +226,7 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
     loadAllTurnsStatus,
     handleCommitGameSelection,
     handleLoadAllTurns,
+    refreshUnfinishedSelectedGame,
     isGameRefreshPending: refreshGameMutation.isPending,
     isLoadAllTurnsDisabled,
     isLoadAllTurnsPending,

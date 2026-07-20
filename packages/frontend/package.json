@@ -12,9 +12,9 @@
     "test:watch": "vitest",
     "generate:api:dump": "cd ../bff && uv run python -c \"from bff.app import app; import json; print(json.dumps(app.openapi()))\" > ../frontend/.bff-openapi.json",
     "generate:api:filter": "cd ../.. && uv run python scripts/filter_bff_openapi.py packages/frontend/.bff-openapi.json packages/frontend/.bff-openapi-slices",
-    "generate:api:slices": "sh -c 'set -e; for slice in games analytics shell diagnostics; do openapi-typescript .bff-openapi-slices/$slice.json -o src/api/schema-$slice.ts; done'",
+    "generate:api:slices": "sh -c 'set -e; for slice in games analytics shell diagnostics credentials; do openapi-typescript .bff-openapi-slices/$slice.json -o src/api/schema-$slice.ts; done'",
     "check:api:slices": "npm run generate:api:dump && npm run generate:api:filter && npm run check:api:slices:typescript",
-    "check:api:slices:typescript": "sh -c 'set -e; for slice in games analytics shell diagnostics; do openapi-typescript .bff-openapi-slices/$slice.json -o src/api/schema-$slice.ts --check; done'",
+    "check:api:slices:typescript": "sh -c 'set -e; for slice in games analytics shell diagnostics credentials; do openapi-typescript .bff-openapi-slices/$slice.json -o src/api/schema-$slice.ts --check; done'",
     "generate:api": "npm run generate:api:dump && npm run generate:api:filter && npm run generate:api:slices",
     "generate:api:live": "curl -sf http://localhost:8000/bff/openapi.json -o .bff-openapi.json && npm run generate:api:filter && npm run generate:api:slices"
   },

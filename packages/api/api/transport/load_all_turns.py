@@ -71,10 +71,15 @@ def iter_load_all_ndjson_lines(iterator: Iterator[LoadAllStreamItem]) -> Iterato
         yield json.dumps(load_all_stream_event_to_dict(item)) + "\n"
 
 
-def _load_all_stream_error_detail(exc: BaseException) -> str:
+def _load_all_stream_error_payload(exc: BaseException) -> dict[str, Any]:
     if isinstance(exc, PlanetsConsoleError):
-        return str(exc) or _LOAD_ALL_STREAM_UNEXPECTED_ERROR_DETAIL
-    return _LOAD_ALL_STREAM_UNEXPECTED_ERROR_DETAIL
+        detail = str(exc) or _LOAD_ALL_STREAM_UNEXPECTED_ERROR_DETAIL
+        return {"type": "error", "detail": detail, "http_error": exc.http_error}
+    return {
+        "type": "error",
+        "detail": _LOAD_ALL_STREAM_UNEXPECTED_ERROR_DETAIL,
+        "http_error": 500,
+    }
 
 
 def stream_load_all_turns(
@@ -83,13 +88,13 @@ def stream_load_all_turns(
     """Run bulk load and yield NDJSON lines, including one error line on failure.
 
     Failures while iterating are not propagated to FastAPI; callers always get HTTP 200
-    with a final ``{"type": "error", "detail": ...}`` line (after any progress lines).
-    ``PlanetsConsoleError`` uses the exception message; other exceptions are logged and
-    surfaced with a generic detail string.
+    with a final ``{"type": "error", "detail": ..., "http_error": ...}`` line (after any
+    progress lines). ``PlanetsConsoleError`` uses the exception message and ``http_error``;
+    other exceptions are logged and surfaced with a generic detail and status 500.
     """
     try:
         yield from iter_load_all_ndjson_lines(load_iterator())
     except Exception as exc:
         if not isinstance(exc, PlanetsConsoleError):
             logger.exception("Load-all NDJSON stream failed")
-        yield json.dumps({"type": "error", "detail": _load_all_stream_error_detail(exc)}) + "\n"
+        yield json.dumps(_load_all_stream_error_payload(exc)) + "\n"

@@ -33,8 +33,20 @@ import type { FleetTorpInputStatus } from './inferenceStreamEventSchema'
 import { fetchAnalyticTableNdjsonStream } from './fetchAnalyticTableNdjsonStream'
 import { readNdjsonStream } from './readNdjsonStream'
 import type { components } from './schema-games'
+import {
+  throwBffHttpError,
+  throwBffHttpErrorFromResponse,
+  withEndpointIfGeneric,
+} from './bffHttpError'
 
 const BFF_BASE = '' // proxy in dev: /bff -> backend
+
+export {
+  BffHttpError,
+  isCredentialRequiredError,
+  isGenericServerErrorMessage,
+  withEndpointIfGeneric,
+} from './bffHttpError'
 
 export type {
   ConnectionsFlareDepth,
@@ -146,43 +158,6 @@ export async function bffRequest(
   } catch (e) {
     throw toFetchRejectionError(e, endpointLabel, requestPath)
   }
-}
-
-/** Human-readable endpoint for error rows (method + path, no host). */
-export function withEndpointIfGeneric(message: string, endpointLabel: string): string {
-  const detail = message.trim()
-  if (!isGenericServerErrorMessage(detail)) {
-    return detail || 'Request failed'
-  }
-  if (detail.includes(endpointLabel)) {
-    return detail || 'Request failed'
-  }
-  const base = detail || 'Request failed'
-  return `${base} (${endpointLabel})`
-}
-
-export function isGenericServerErrorMessage(message: string): boolean {
-  const t = message.trim().toLowerCase()
-  if (t === '') {
-    return true
-  }
-  if (t === 'internal server error') {
-    return true
-  }
-  if (t === 'bad gateway') {
-    return true
-  }
-  if (t === 'service unavailable') {
-    return true
-  }
-  if (t === 'gateway timeout') {
-    return true
-  }
-  // Response body or fallback was only an HTTP status code for a server error
-  if (/^5\d\d$/.test(t)) {
-    return true
-  }
-  return false
 }
 
 /** True when a BFF fetch failed because the requested store path does not exist (HTTP 404). */
@@ -437,16 +412,7 @@ export async function loadAllTurnsWithProgress(
     endpointLabel
   )
   if (!r.ok) {
-    let detail = r.statusText
-    try {
-      const j: { detail?: string | unknown } = await r.json()
-      if (j?.detail != null) {
-        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
-      }
-    } catch {
-      /* use statusText */
-    }
-    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
   if (!r.body) {
     throw new Error(withEndpointIfGeneric('No response body', endpointLabel))
@@ -461,7 +427,7 @@ export async function loadAllTurnsWithProgress(
     } else if (event.type === 'complete') {
       result = event.result
     } else if (event.type === 'error') {
-      throw new Error(withEndpointIfGeneric(event.detail, endpointLabel))
+      throwBffHttpError(event.http_error, event.detail, endpointLabel)
     }
   }
 
@@ -540,16 +506,7 @@ export async function ensureTurnData(
     endpointLabel
   )
   if (!r.ok) {
-    let detail = r.statusText
-    try {
-      const j: { detail?: string | unknown } = await r.json()
-      if (j?.detail != null) {
-        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
-      }
-    } catch {
-      /* use statusText */
-    }
-    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
   const payload: unknown = await r.json().catch(() => undefined)
   return {
@@ -588,16 +545,7 @@ export async function refreshGameInfo(
     endpointLabel
   )
   if (!r.ok) {
-    let detail = r.statusText
-    try {
-      const j: { detail?: string | unknown } = await r.json()
-      if (j?.detail != null) {
-        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
-      }
-    } catch {
-      /* use statusText */
-    }
-    throw new Error(withEndpointIfGeneric(detail, endpointLabel))
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
   return r.json()
 }

@@ -87,12 +87,11 @@ describe('useShellContext', () => {
       turn: 5,
       perspective: 1,
       username: 'Alice',
-      password: undefined,
     })
   })
 
-  it('sends trimmed password to ensureTurnData', async () => {
-    useSessionStore.getState().setCredentials('Alice', '  secret  ')
+  it('sends username only to ensureTurnData (no password)', async () => {
+    useSessionStore.getState().adoptLoginName('Alice')
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     useShellStore.setState({
       selectedGameId: '628580',
@@ -115,7 +114,6 @@ describe('useShellContext', () => {
         turn: 5,
         perspective: 1,
         username: 'Alice',
-        password: 'secret',
       })
     })
   })
@@ -215,7 +213,7 @@ describe('useShellContext', () => {
     })
     expect(ensureTurnData).toHaveBeenCalledTimes(1)
 
-    useSessionStore.getState().setCredentials('Alice', 'correct')
+    useSessionStore.getState().adoptLoginName('Alice')
 
     await waitFor(() => {
       expect(result.current.turnDataReady).toBe(true)
@@ -225,7 +223,6 @@ describe('useShellContext', () => {
       turn: 5,
       perspective: 1,
       username: 'Alice',
-      password: 'correct',
     })
   })
 

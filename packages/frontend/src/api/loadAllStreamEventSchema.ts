@@ -39,6 +39,8 @@ export const loadAllStreamCompleteEventSchema = z.object({
 export const loadAllStreamErrorEventSchema = z.object({
   type: z.literal('error'),
   detail: z.string(),
+  /** HTTP status that would apply if this were a non-stream failure (e.g. 401). */
+  http_error: z.number().int(),
 })
 
 export const loadAllStreamEventSchema = z.discriminatedUnion('type', [
@@ -96,7 +98,7 @@ export function formatLoadAllStreamValidationError(error: z.ZodError): string {
     return 'Load-all stream progress event has an invalid shape.'
   }
 
-  if (issue.path.includes('detail')) {
+  if (issue.path.includes('detail') || issue.path.includes('http_error')) {
     return 'Load-all stream error event has an invalid shape.'
   }
 

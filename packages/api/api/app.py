@@ -13,7 +13,7 @@ from api.errors import (
     ValidationError,
     make_http_exception_handler,
 )
-from api.routers import concepts, game_concepts, games, store
+from api.routers import concepts, credentials, game_concepts, games, store
 from api.services.seed import run_startup_seed_if_configured
 
 
@@ -41,6 +41,7 @@ for _exc_cls in (
     app.add_exception_handler(_exc_cls, make_http_exception_handler(CoreAPIError))
 app.include_router(store.router)
 app.include_router(concepts.router)
+app.include_router(credentials.router)
 app.include_router(games.router)
 app.include_router(game_concepts.router)
 

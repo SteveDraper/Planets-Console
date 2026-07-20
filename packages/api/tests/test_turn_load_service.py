@@ -42,7 +42,7 @@ def seeded_backend():
 
 @pytest.fixture
 def turn_load_service(seeded_backend):
-    _, turns, _, _, _ = build_service_stack(seeded_backend)
+    _, turns, _, _, _, _ = build_service_stack(seeded_backend)
     return turns
 
 
@@ -102,7 +102,7 @@ class TestGetTurnInfo:
         del historical["settings"]["allplanetsvisible"]
         del historical["settings"]["spectatormode"]
         backend.put("games/628580/1/turns/50", historical)
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         ti = turns.get_turn_info(628580, 1, 50)
         assert ti.settings.allplanetsvisible is False
         assert ti.settings.spectatormode is False
@@ -195,7 +195,7 @@ class TestStoreArchiveTurnIfMissing:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         archive_turn = ArchiveTurnFile(player_slot=1, turn_number=50, rst=copy.deepcopy(turn_rst))
         archive_turn.rst["settings"]["turn"] = 50
         archive_turn.rst["game"]["id"] = 628580
@@ -204,7 +204,7 @@ class TestStoreArchiveTurnIfMissing:
         backend.get("games/628580/1/turns/50")
 
     def test_skips_when_already_stored(self, seeded_backend, turn_rst) -> None:
-        _, turns, _, _, _ = build_service_stack(seeded_backend)
+        _, turns, _, _, _, _ = build_service_stack(seeded_backend)
         archive_turn = ArchiveTurnFile(player_slot=1, turn_number=111, rst=turn_rst)
         assert turns.store_archive_turn_if_missing(628580, archive_turn) is False
 
@@ -212,7 +212,7 @@ class TestStoreArchiveTurnIfMissing:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         rst = copy.deepcopy(turn_rst)
         rst["settings"]["turn"] = 42
         archive_turn = ArchiveTurnFile(player_slot=1, turn_number=50, rst=rst)
@@ -226,7 +226,7 @@ class TestStoreArchiveTurnIfMissing:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         rst = copy.deepcopy(turn_rst)
         rst["settings"]["turn"] = 50
         rst["game"]["id"] = 999999
@@ -241,7 +241,7 @@ class TestStoreArchiveTurnIfMissing:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         rst = copy.deepcopy(turn_rst)
         rst["settings"]["turn"] = 50
         rst["game"]["id"] = 628580
@@ -258,7 +258,7 @@ class TestMalformedTurnStoreData:
     def test_turn_info_non_dict_raises_validation(self):
         backend = MemoryAssetBackend(initial={})
         backend.put("games/1/1/turns/1", "just a string")
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(ValidationError, match="Expected JSON object"):
             turns.get_turn_info(1, 1, 1)
 
@@ -267,7 +267,7 @@ class TestMalformedTurnStoreData:
         historical = copy.deepcopy(turn_rst)
         del historical["settings"]["allplanetsvisible"]
         backend.put("games/1/1/turns/1", historical)
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(ValidationError, match="settings\\.allplanetsvisible"):
             turns.get_turn_info(1, 1, 1)
 
@@ -325,7 +325,7 @@ class FakePlanetsNuWithTurnByUpstreamTurn(FakePlanetsNu):
 
 class TestEnsureTurnLoaded:
     def test_returns_stored_turn_without_calling_planets(self, seeded_backend, turn_rst):
-        _, turns, _, _, _ = build_service_stack(seeded_backend)
+        _, turns, _, _, _, _ = build_service_stack(seeded_backend)
         planets = FakePlanetsNuWithTurn({}, turn_rst)
         params = RefreshGameInfoParams(username="player1", password="x")
         ti = turns.ensure_turn_loaded(628580, 1, 111, params, planets)
@@ -334,7 +334,7 @@ class TestEnsureTurnLoaded:
         assert planets.load_turn_calls == []
 
     def test_allows_empty_username_when_turn_already_stored(self, seeded_backend, turn_rst):
-        _, turns, _, _, _ = build_service_stack(seeded_backend)
+        _, turns, _, _, _, _ = build_service_stack(seeded_backend)
         planets = FakePlanetsNuWithTurn({}, turn_rst)
         params = RefreshGameInfoParams(username="")
         ti = turns.ensure_turn_loaded(628580, 1, 111, params, planets)
@@ -345,7 +345,7 @@ class TestEnsureTurnLoaded:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             info = json.load(f)
         planets = FakePlanetsNuWithTurn(info, turn_rst)
@@ -360,7 +360,7 @@ class TestEnsureTurnLoaded:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             info = json.load(f)
         planets = FakePlanetsNuWithTurn(info, turn_rst)
@@ -375,7 +375,7 @@ class TestEnsureTurnLoaded:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             info = json.load(f)
         historical = copy.deepcopy(turn_rst)
@@ -401,7 +401,7 @@ class TestEnsureTurnLoaded:
         planets = FakePlanetsNuWithTurnByUpstreamTurn(info, {None: bad, 111: bad})
         backend.put("credentials/accounts/host/api_key", "k")
         params = RefreshGameInfoParams(username="host")
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(UpstreamPlanetsError, match="settings.turn"):
             turns.ensure_turn_loaded(628580, 0, 111, params, planets)
         assert planets.load_turn_calls == [(628580, None, 0), (628580, 111, 0)]
@@ -422,7 +422,7 @@ class TestEnsureTurnLoaded:
         planets = FakePlanetsNuWithTurnByUpstreamTurn(info, {None: newer, 111: turn_rst})
         backend.put("credentials/accounts/host/api_key", "k")
         params = RefreshGameInfoParams(username="host")
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         ti = turns.ensure_turn_loaded(628580, 0, 111, params, planets)
         assert ti.settings.turn == 111
         assert planets.load_turn_calls == [(628580, None, 0), (628580, 111, 0)]
@@ -439,7 +439,7 @@ class TestEnsureTurnLoaded:
         planets = FakePlanetsNuWithTurn(info, bad)
         backend.put("credentials/accounts/player1/api_key", "k")
         params = RefreshGameInfoParams(username="player1")
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(UpstreamPlanetsError, match="settings.turn"):
             turns.ensure_turn_loaded(628580, 1, 111, params, planets)
         with pytest.raises(NotFoundError):
@@ -456,7 +456,7 @@ class TestEnsureTurnLoaded:
         planets = FakePlanetsNuWithTurn(info, bad)
         backend.put("credentials/accounts/player1/api_key", "k")
         params = RefreshGameInfoParams(username="player1")
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(UpstreamPlanetsError, match="game.id"):
             turns.ensure_turn_loaded(628580, 1, 111, params, planets)
         with pytest.raises(NotFoundError):
@@ -473,7 +473,7 @@ class TestEnsureTurnLoaded:
         planets = FakePlanetsNuWithTurn(info, bad)
         backend.put("credentials/accounts/player1/api_key", "k")
         params = RefreshGameInfoParams(username="player1")
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with pytest.raises(UpstreamPlanetsError, match="game.turn"):
             turns.ensure_turn_loaded(628580, 1, 111, params, planets)
         with pytest.raises(NotFoundError):
@@ -483,7 +483,7 @@ class TestEnsureTurnLoaded:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             info = json.load(f)
         planets = FakePlanetsNuWithTurn(info, turn_rst)
@@ -496,7 +496,7 @@ class TestEnsureTurnLoaded:
         backend = MemoryAssetBackend(initial={})
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             backend.put("games/628580/info", json.load(f))
-        _, turns, _, _, _ = build_service_stack(backend)
+        _, turns, _, _, _, _ = build_service_stack(backend)
         with open(ASSETS_DIR / "game_info_sample.json") as f:
             info = json.load(f)
         planets = FakePlanetsNuWithTurn(info, turn_rst)
@@ -504,5 +504,38 @@ class TestEnsureTurnLoaded:
         with pytest.raises(LoginCredentialsRequiredError, match="not already in storage"):
             turns.ensure_turn_loaded(628580, 1, 111, params, planets)
         assert planets.load_turn_calls == []
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/1/turns/111")
+
+    def test_invalidates_key_and_raises_when_loadturn_rejects_apikey(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        _, turns, _, _, _, credentials = build_service_stack(backend)
+        credentials.store_api_key("player1", "stale-key")
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+
+        class FakePlanetsNuRejectedKey(FakePlanetsNu):
+            def load_turn(
+                self,
+                *,
+                game_id: int,
+                turn: int | None,
+                player_id: int,
+                api_key: str | None = None,
+            ):
+                self.load_turn_calls.append((game_id, turn, player_id))
+                return {"success": False, "error": "Invalid apikey"}
+
+        planets = FakePlanetsNuRejectedKey(info)
+        params = RefreshGameInfoParams(username="player1")
+        with pytest.raises(
+            LoginCredentialsRequiredError,
+            match="Stored account API key was rejected",
+        ):
+            turns.ensure_turn_loaded(628580, 1, 111, params, planets)
+        assert planets.load_turn_calls == [(628580, 111, 1)]
+        assert credentials.probe("player1") is False
         with pytest.raises(NotFoundError):
             backend.get("games/628580/1/turns/111")

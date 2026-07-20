@@ -2,6 +2,8 @@
 
 **Source:** [GitHub Issue #12 - [Feature] Add login identity](https://github.com/SteveDraper/Planets-Console/issues/12)
 
+> **Supersession note:** Client-only modal submit and “no log out” are superseded by [design-account-api-key-and-silent-login.md](design-account-api-key-and-silent-login.md) and [ADR 0007](adr/0007-account-api-key-and-silent-login.md) (**login exchange**, **silent login restore**, **log out**). The rule that **passwords must never be persisted** remains in force.
+
 This document describes the design for adding login identity to the console: a consistent header control (refresh icon + "Login:" label), a modal to collect name and password, and in-session state only (no persistence of credentials). **Implementation is out of scope** for this doc; it is a design and acceptance reference only.
 
 ---
