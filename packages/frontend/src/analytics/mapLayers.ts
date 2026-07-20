@@ -25,12 +25,14 @@ export function combineMapData(
   const nodes: CombinedMapData['nodes'] = []
   const edges: MapEdge[] = []
   const overlayCircles: CombinedMapData['overlayCircles'] = []
+  const regionOverlays: CombinedMapData['regionOverlays'] = []
   const wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances'] = []
   const context: MapLayerMergeContext = {
     baseMapAnalyticId,
     nodes,
     edges,
     overlayCircles,
+    regionOverlays,
     wormholeUnknownEntrances,
     waypointsByKey: new Map<string, { x: number; y: number }>(),
     nuIonStorms: undefined,
@@ -45,6 +47,7 @@ export function combineMapData(
     edges,
     routeWaypoints: routeWaypointsFromMap(context.waypointsByKey),
     overlayCircles: context.overlayCircles,
+    regionOverlays: context.regionOverlays,
     wormholeUnknownEntrances,
     nuIonStorms: context.nuIonStorms,
   }

@@ -288,6 +288,18 @@ _Avoid_: keepPreviousData (implementation detail; not the product concept), stal
 One analytic's contribution to the combined map graph -- nodes and/or edges merged with **base map** and other enabled map analytics via id-prefixing.
 _Avoid_: overlay (acceptable informally; prefer map layer in docs)
 
+**Map region overlay**:
+A shaded designated area on the map used to highlight a region rather than a single planet or ship. v1 wire field is **`regionOverlays`**: a **hybrid coverage** payload of disk unions (centers + radii) where coverage is ideal, plus **nebula-local coverage patches** (1 ly RLE rasters) where \(V(P)\) / **Nebula Scanner** distort the footprint -- so payloads stay small on empty-nebula maps while Core still owns coverage truth. Style metadata (fill color, kind id) travels with the geometry. Shared rendering and merge concern across map analytics; the SPA blits disks and patches. Distinct from cartography hazard circles (`overlayCircles`) and from **homeworld region overlay** arcs.
+_Avoid_: overlay circle (cartography-specific), cartography layer (Stellar Cartography only), homeworld region overlay (that analytic's candidate envelope), client-side reimplementation of coverage policy, full-map 1 ly boolean grids as the default wire
+
+**Visibility analytic**:
+A map-only **turn analytic** (`analytic_id` `visibility`) that draws **map region overlay**s for sensor coverage from the **viewpoint** (plus **Share Intel** partners as scan origins). Per-**visibility region kind** toggles and **base colors** are **client preferences** persisted globally in localStorage (sticky across sessions and games, same pattern as **Cartography layer** toggles): checkbox + color control; client may override wire defaults. Fresh install defaults: all three kinds on with distinct default base colors; overlapping kinds use independent semi-transparent fills (fixed z-order). Distinct from **Fleet player visibility**.
+_Avoid_: fleet player visibility, sensor picture (homeworld evidence sense), scan radius alone (one of several region kinds), per-game preference scope for these toggles
+
+**Visibility region kind**:
+One toggleable shaded coverage family inside the **Visibility analytic**. v1 kinds: **ship scan coverage** (where non-special-case ships are detectable within ship-scan range of **planet and ship** origins -- starbases are not separate origins; they share planet coordinates); **active Sensor Sweep coverage** (union of sensor-mission range disks around ships whose mission is **Sensor Sweep** or **Bioscan** this turn); **potential Sensor Sweep coverage** (same range around non-bioscan ships that could set Sensor Sweep, plus bioscan hulls that use Bioscan instead). Geometry is boolean coverage footprint -- industry and defense-post gates describe what reports are possible inside those regions, not the disk shape. Probability banding is out of scope for v1. Sensor-mission range defaults to 200 ly (Host "Sensor mission range"); bind a `GameSettings` field if one is present. Advanced Bioscan nebula-planet exceptions are a documented follow-on if they differ from the shared \(V(P)\) model. Scan origins for all kinds include the viewpoint player's units and **Share Intel** partners' units (product approximation). Partner detection uses turn **Relation** edges once their integer codes are mapped to diplomacy tiers (spike required -- codes are not yet documented in Console or vault help). Full Alliance adds no extra region-origin rules beyond Share Intel for this analytic. Nebula handling is the same for ship and planet visibility: at point \(P\), effective range is \(\min(\mathrm{baseRange},\, V(P))\) when \(P\) is in a nebula (else `baseRange`), using Core cartography \(V(P)\) from density. **Nebula Scanner**–equipped origins apply to all three **visibility region kinds**: inside a nebula, effective reach is \(\max(\min(\mathrm{baseRange},\, V(P)),\, 100)\) (the 100 ly floor only matters where density would otherwise cut deeper than 100; if `baseRange < 100`, cap by `baseRange`). Coverage is emitted as hybrid **map region overlay** geometry (ideal disks + nebula-local patches). Cloak, Stealth Armor range reduction, Hide in Warp Well, and other special detection abilities remain v1 exclusions (documented, not drawn).
+_Avoid_: cartography layer, fleet player visibility, detection probability field, treating Sensor Sweep nebula rules as a boolean punch-out distinct from ship \(V(P)\)
+
 **Stellar Cartography**:
 NuHost optional map geography (star clusters, nebulae, wormholes, black holes, debris disks, and related ion-storm behavior). Exposed in the console as one map-only **turn analytic** with per-element layer toggles.
 _Avoid_: SC (in user-facing copy), space hazards (too broad)
@@ -931,6 +943,15 @@ Use **homeworld planet** in Console prose and UI for map inference. Do not say "
 
 Use **perspective** in storage paths and API path segments; use **viewpoint** in UI copy; use **Player** when referring to model fields or upstream payload entities. Do not say "player 3" when you mean perspective slot 3 unless the prose explicitly ties slot to the `Player` record.
 
+**Visibility analytic vs Fleet player visibility**:
+- **Visibility analytic** -- map **map region overlay**s for sensor / ship-detection coverage from the **viewpoint**.
+- **Fleet player visibility** -- which **Player**s' fleet rows and map markers are enabled in the fleet analytic UI.
+
+Do not shorten either to "visibility" alone in tickets or UI copy when both could apply.
+
+**Nebula visibility vs some help text**:
+For Console **Visibility analytic** geometry, nebula modulation for planet visibility matches ship visibility (\(V(P)\) at the target), plus **Nebula Scanner** 100 ly islands. Some Planets.nu help text describes ordinary sensor/bioscan as failing on nebular planets; that wording must not drive a separate boolean punch-out for Sensor Sweep coverage in this product.
+
 ## Example dialogue
 
 **Dev:** I'm wiring a new map analytic. What scope does it need?  
@@ -965,4 +986,7 @@ Use **perspective** in storage paths and API path segments; use **viewpoint** in
 
 **Dev:** Where is my Planets.nu API key stored?  
 **Expert:** In the **`credentials/accounts/{name}`** account **document**, under **machine-bound obfuscation**. **Log out** clears the remembered name; optional **account API key drop** deletes the stored key on this server. Auth failure triggers **account API key invalidation** (same key deletion) and opens the modal.
+
+**Dev:** I need shaded sensor coverage on the map for the viewpoint. Is that Stellar Cartography?  
+**Expert:** No. That's the **Visibility analytic** -- it emits **map region overlay**s (hybrid disks plus nebula patches) for each **visibility region kind**. Cartography is hazards and geography; **Fleet player visibility** only toggles which players' fleets show.
 

@@ -38,17 +38,17 @@ def test_nebula_name_at_center(stellar_cartography_turn):
 
 
 def test_nebula_visibility_can_exceed_hundred_ly():
-    from api.concepts.stellar_cartography.sample_at import _nebula_visibility_ly
+    from api.concepts.stellar_cartography.nebula_visibility import nebula_visibility_ly
 
-    assert _nebula_visibility_ly(38) == 103
-    assert _nebula_visibility_ly(39) == 100
+    assert nebula_visibility_ly(38) == 103
+    assert nebula_visibility_ly(39) == 100
 
 
 def test_nebula_visibility_capped_at_two_fifty_ly():
-    from api.concepts.stellar_cartography.sample_at import _nebula_visibility_ly
+    from api.concepts.stellar_cartography.nebula_visibility import nebula_visibility_ly
 
-    assert _nebula_visibility_ly(1) == 250
-    assert _nebula_visibility_ly(15) == 250
+    assert nebula_visibility_ly(1) == 250
+    assert nebula_visibility_ly(15) == 250
 
 
 def test_nebula_groups_overlapping_centers_by_name(stellar_cartography_turn):

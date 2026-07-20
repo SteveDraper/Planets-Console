@@ -267,6 +267,37 @@ def test_list_analytics_includes_stellar_cartography_map_analytic():
     assert stellar["type"] == "selectable"
 
 
+def test_list_analytics_includes_map_region_demo_map_analytic():
+    response = client.get("/analytics")
+    assert response.status_code == 200
+    analytics = response.json()["analytics"]
+    demo = next(a for a in analytics if a["id"] == "map-region-demo")
+    assert demo == {
+        "id": "map-region-demo",
+        "name": "Map region demo",
+        "supportsTable": False,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
+def test_map_region_demo_map_returns_region_overlays():
+    storage = get_storage()
+    with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:
+        storage.put(f"games/{GAME_ID}/{PERSPECTIVE}/turns/{HOST_TURN}", json.load(f))
+    response = client.get(f"/analytics/map-region-demo/map?{SCOPE_QS}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "map-region-demo"
+    assert isinstance(data["regionOverlays"], list)
+    assert len(data["regionOverlays"]) == 1
+    overlay = data["regionOverlays"][0]
+    assert overlay["kind"] == "demo"
+    assert "disks" in overlay
+    assert "patches" in overlay
+    assert "fillColor" in overlay
+
+
 def test_list_analytics_includes_fleet_table_and_map_analytic():
     response = client.get("/analytics")
     assert response.status_code == 200
