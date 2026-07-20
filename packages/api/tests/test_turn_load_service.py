@@ -506,3 +506,36 @@ class TestEnsureTurnLoaded:
         assert planets.load_turn_calls == []
         with pytest.raises(NotFoundError):
             backend.get("games/628580/1/turns/111")
+
+    def test_invalidates_key_and_raises_when_loadturn_rejects_apikey(self, turn_rst):
+        backend = MemoryAssetBackend(initial={})
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            backend.put("games/628580/info", json.load(f))
+        _, turns, _, _, _, credentials = build_service_stack(backend)
+        credentials.store_api_key("player1", "stale-key")
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            info = json.load(f)
+
+        class FakePlanetsNuRejectedKey(FakePlanetsNu):
+            def load_turn(
+                self,
+                *,
+                game_id: int,
+                turn: int | None,
+                player_id: int,
+                api_key: str | None = None,
+            ):
+                self.load_turn_calls.append((game_id, turn, player_id))
+                return {"success": False, "error": "Invalid apikey"}
+
+        planets = FakePlanetsNuRejectedKey(info)
+        params = RefreshGameInfoParams(username="player1")
+        with pytest.raises(
+            LoginCredentialsRequiredError,
+            match="Stored account API key was rejected",
+        ):
+            turns.ensure_turn_loaded(628580, 1, 111, params, planets)
+        assert planets.load_turn_calls == [(628580, 111, 1)]
+        assert credentials.probe("player1") is False
+        with pytest.raises(NotFoundError):
+            backend.get("games/628580/1/turns/111")

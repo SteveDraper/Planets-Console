@@ -1,7 +1,21 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import { perspectiveRow } from '../lib/perspectiveRowTestFixtures'
-import { SHELL_STORAGE_KEY, useShellStore } from '../stores/shell'
+import {
+  SHELL_STORAGE_KEY,
+  useShellStore,
+  type GameInfoShellContext,
+} from '../stores/shell'
+
+function unfinishedCtx(turn: number): GameInfoShellContext {
+  return {
+    turn,
+    perspectives: [perspectiveRow(1, 'Alice')],
+    isGameFinished: false,
+    sectorDisplayName: null,
+    stellarCartographyGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+  }
+}
 
 describe('useShellStore', () => {
   beforeEach(() => {
@@ -58,5 +72,40 @@ describe('useShellStore', () => {
     expect(raw).toBeTruthy()
     expect(raw).not.toContain('Test Sector')
     expect(raw).not.toContain('Federation')
+  })
+
+  describe('applyGameInfoRefresh', () => {
+    it('does not auto-advance selected turn on same-game refresh when still in range', () => {
+      useShellStore.setState({
+        selectedGameId: '99',
+        lastShellGameId: '99',
+        selectedTurn: 5,
+        gameInfoContext: unfinishedCtx(5),
+      })
+
+      useShellStore.getState().applyGameInfoRefresh('99', unfinishedCtx(8), {
+        selectableTurnMax: 8,
+      })
+
+      const state = useShellStore.getState()
+      expect(state.selectedTurn).toBe(5)
+      expect(state.gameInfoContext?.turn).toBe(8)
+    })
+
+    it('jumps selected turn to turn cap when switching games', () => {
+      useShellStore.setState({
+        selectedGameId: '10',
+        lastShellGameId: '10',
+        selectedTurn: 3,
+        gameInfoContext: unfinishedCtx(5),
+      })
+
+      useShellStore.getState().applyGameInfoRefresh('99', unfinishedCtx(8), {
+        selectableTurnMax: 8,
+      })
+
+      expect(useShellStore.getState().selectedTurn).toBe(8)
+      expect(useShellStore.getState().selectedGameId).toBe('99')
+    })
   })
 })
