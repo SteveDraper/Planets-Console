@@ -67,26 +67,20 @@ def transition_stream_resolution(
         return delivery
 
 
-def mark_multiplex_closed(run_id: str) -> None:
-    """Internal: mark drain closed for ``run_id`` (creates OPEN if missing).
-
-    Public callers use :func:`api.streaming.table_stream.stream_drain.close`
-    only -- do not import this helper from adapters or analytics.
-    """
+def _mark_multiplex_closed(run_id: str) -> None:
+    """Module-private drain close. Public API: :mod:`stream_drain`.close."""
     with _lock:
         resolution = _ensure_locked(run_id)
         resolution.multiplex_closed = True
         _touch_locked(run_id, resolution)
 
 
-def seal_canceled_finish(run_id: str) -> RowStreamDelivery:
-    """Internal cancel seal: FSM ``CANCELED`` + drain closed, under one lock.
+def _seal_canceled_finish(run_id: str) -> RowStreamDelivery:
+    """Module-private cancel seal. Public API: :mod:`stream_drain`.seal_canceled.
 
-    Public callers use :func:`api.streaming.table_stream.stream_drain.seal_canceled`
-    only -- do not import this helper from adapters or analytics. Sealing both
-    sides together avoids leaving resolution ``OPEN`` with drain closed alone.
-    Idempotent with a prior ``CANCELED`` transition (returns ``SILENCE``) and
-    with an already-closed drain bit.
+    FSM ``CANCELED`` + drain closed under one lock. Idempotent with a prior
+    ``CANCELED`` transition (returns ``SILENCE``) and with an already-closed
+    drain bit.
     """
     with _lock:
         resolution = _ensure_locked(run_id)
@@ -96,15 +90,15 @@ def seal_canceled_finish(run_id: str) -> RowStreamDelivery:
         return delivery
 
 
-def is_multiplex_closed(run_id: str) -> bool:
-    """Internal read of drain-closed. Prefer :func:`stream_drain.is_closed`."""
+def _is_multiplex_closed(run_id: str) -> bool:
+    """Module-private drain read. Public API: :mod:`stream_drain`.is_closed."""
     with _lock:
         resolution = _resolutions.get(run_id)
         return resolution is not None and resolution.multiplex_closed
 
 
-def clear_multiplex_closed_if_soft(run_id: str) -> bool:
-    """Internal soft reopen. Prefer :func:`stream_drain.reopen_if_soft`.
+def _clear_multiplex_closed_if_soft(run_id: str) -> bool:
+    """Module-private soft reopen. Public API: :mod:`stream_drain`.reopen_if_soft.
 
     Clears drain-closed only while still ``SOFT_PROVISIONAL``. Returns True if
     cleared.

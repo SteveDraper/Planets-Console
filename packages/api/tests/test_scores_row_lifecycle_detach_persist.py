@@ -112,9 +112,9 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         persistence.delete_row(628580, 1, turn_number, player_id)
         cancelled = RowRun(session)
         register_row_run(cancelled)
-        from api.analytics.scores.tier_row_run_registry import mark_row_run_cancelled
+        from api.analytics.scores.tier_row_run_registry import _mark_row_run_cancelled
 
-        mark_row_run_cancelled(cancelled.run_id)
+        _mark_row_run_cancelled(cancelled.run_id)
         assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
         ScoresPersistencePolicy().persist(
             ctx,
@@ -188,10 +188,10 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
     """
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.scores.tier_row_run_registry import (
-        detach_row_run,
+        _detach_row_run,
+        _mark_row_run_cancelled,
         get_persist_admission,
         get_row_run_phase,
-        mark_row_run_cancelled,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -203,13 +203,13 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
     try:
         cancelled = RowRun(_session_for_player(sample_turn, player_id=players[0]))
         register_row_run(cancelled)
-        mark_row_run_cancelled(cancelled.run_id)
+        _mark_row_run_cancelled(cancelled.run_id)
         assert get_row_run_phase(cancelled.run_id) is None
         assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
 
         detached = RowRun(_session_for_player(sample_turn, player_id=players[1]))
         register_row_run(detached)
-        detach_row_run(detached.run_id)
+        _detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
         # Cross-scope detach must not clear another scope's cancelled admission.
         assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY

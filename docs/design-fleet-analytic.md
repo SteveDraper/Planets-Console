@@ -123,7 +123,7 @@ When a sighting arrives:
 **Refine must not overwrite observation-known elements.** After a sighting has linked a scoreboard placeholder:
 
 - **Full-information** (`ledger.player_id == perspective`): confirmed option set and known component fields are locked; later scores refine is a no-op for that row's fit.
-- **Partial** (foreign ship): preserve observation-known axes (typically hull; other axes only when positively observed). Refine may still attach inferred option sets for unknown axes, forcing known hull/component ids onto those sets. Fog zeros are not observation locks.
+- **Partial** (foreign ship): preserve observation-known axes (typically hull; other axes only when positively observed). Refine and ingest keep only option sets **compatible** with those locks (drop foreign-hull / contradictory fits -- never stamp an observed hull onto an incompatible Deep-Space-Scout-style set). Compatible sets receive locked ids/counts via merge; unknown weapon/engine axes stay open. When a lock filter would empty the sets, **keep prior** sets (often a hull-only observation seed) rather than wiping to `[]`. Fog zeros are not observation locks.
 
 ### 4.4 Id bounds
 

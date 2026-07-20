@@ -21,9 +21,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from api.analytics.scores.tier_row_run_registry import (
-    detach_row_run,
-    mark_row_run_cancelled,
-    retire_row_run,
+    _detach_row_run,
+    _mark_row_run_cancelled,
+    _retire_row_run,
 )
 from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
@@ -37,6 +37,10 @@ def apply_scores_row_lifecycle(
 ) -> None:
     """Apply one scores row-run lifecycle op per the ownership matrix.
 
+    Sole production mutation entry for shell + admission + cancel seal + token.
+    Do not call registry ``_detach_row_run`` / ``_mark_row_run_cancelled`` /
+    ``_retire_row_run`` from adapters -- go through this command.
+
     ``DETACH`` -- ``REGISTERED`` → ``DETACHED``; keep ``ALLOW``; no seal / token.
     ``CANCEL`` -- drop shell + ``CANCEL_DENY`` + :func:`stream_drain.seal_canceled`
     + session cancel token (``cancel_token`` override or shell's token).
@@ -48,11 +52,11 @@ def apply_scores_row_lifecycle(
     """
     match op:
         case RowLifecycleOp.DETACH:
-            detach_row_run(run_id)
+            _detach_row_run(run_id)
         case RowLifecycleOp.RETIRE:
-            retire_row_run(run_id)
+            _retire_row_run(run_id)
         case RowLifecycleOp.CANCEL:
-            dropped = mark_row_run_cancelled(run_id)
+            dropped = _mark_row_run_cancelled(run_id)
             stream_drain.seal_canceled(run_id)
             if cancel_token is not None:
                 cancel_token()

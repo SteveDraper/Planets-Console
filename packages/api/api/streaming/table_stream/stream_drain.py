@@ -22,16 +22,16 @@ from __future__ import annotations
 
 from api.streaming.table_stream.row_stream_resolution import RowStreamDelivery
 from api.streaming.table_stream.row_stream_resolution_registry import (
-    clear_multiplex_closed_if_soft,
-    is_multiplex_closed,
-    mark_multiplex_closed,
-    seal_canceled_finish,
+    _clear_multiplex_closed_if_soft,
+    _is_multiplex_closed,
+    _mark_multiplex_closed,
+    _seal_canceled_finish,
 )
 
 
 def close(run_id: str) -> None:
     """Mark ``run_id`` drain-closed for multiplex and terminal routing."""
-    mark_multiplex_closed(run_id)
+    _mark_multiplex_closed(run_id)
 
 
 def seal_canceled(run_id: str) -> RowStreamDelivery:
@@ -40,7 +40,7 @@ def seal_canceled(run_id: str) -> RowStreamDelivery:
     Call only from multiplex (token-observed) or scores row lifecycle CANCEL
     (immediate).
     """
-    return seal_canceled_finish(run_id)
+    return _seal_canceled_finish(run_id)
 
 
 def reopen_if_soft(run_id: str) -> bool:
@@ -48,9 +48,9 @@ def reopen_if_soft(run_id: str) -> bool:
 
     Returns True when drain was reopened (caller should wake multiplex).
     """
-    return clear_multiplex_closed_if_soft(run_id)
+    return _clear_multiplex_closed_if_soft(run_id)
 
 
 def is_closed(run_id: str) -> bool:
     """True when drain is closed for ``run_id``."""
-    return is_multiplex_closed(run_id)
+    return _is_multiplex_closed(run_id)

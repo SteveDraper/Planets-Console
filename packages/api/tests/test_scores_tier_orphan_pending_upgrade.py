@@ -23,9 +23,9 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
+    _retire_row_run,
     get_row_run,
     register_row_run,
-    retire_row_run,
 )
 from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.row_stream_resolution import (
@@ -156,7 +156,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
 
     # Premature retire: RowRun gone and scheduler no longer tracks the run,
     # but the open stream session still exists (UI in-progress / last event progress).
-    retire_row_run(run.run_id)
+    _retire_row_run(run.run_id)
     assert get_row_run(run.run_id) is None
     assert scheduler._runs == {}
     assert session.player_id in controller.scheduled_rows

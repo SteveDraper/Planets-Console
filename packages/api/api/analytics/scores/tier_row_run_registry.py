@@ -212,9 +212,10 @@ def _persist_admission_locked(run_id: str) -> PersistAdmission:
     return PersistAdmission.ABSENT
 
 
-def detach_row_run(run_id: str) -> None:
-    """Transition ``REGISTERED`` → ``DETACHED``; clear scope index; keep by id.
+def _detach_row_run(run_id: str) -> None:
+    """Registry-private DETACH side. Public API: ``apply_scores_row_lifecycle``.
 
+    Transition ``REGISTERED`` → ``DETACHED``; clear scope index; keep by id.
     Detach must not destroy admission state: late persist still finds the shell.
     No-op when missing or already cancelled (compact). ``DETACHED`` stays ``DETACHED``.
     """
@@ -229,15 +230,14 @@ def detach_row_run(run_id: str) -> None:
         _tier_callbacks_by_run_id.pop(run_id, None)
 
 
-def mark_row_run_cancelled(run_id: str) -> RowRun | None:
-    """Record cancelled admission; drop any shell; return the dropped shell if any.
+def _mark_row_run_cancelled(run_id: str) -> RowRun | None:
+    """Registry-private CANCEL admission side. Public API: ``apply_scores_row_lifecycle``.
 
+    Record cancelled admission; drop any shell; return the dropped shell if any.
     Compact cancelled memory is scope-keyed (one outstanding cancel per scores
     scope). The dropped shell is not painted with a cancel phase -- cancel is
-    admission memory only. Production callers apply cancel via
-    :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
-    (``RowLifecycleOp.CANCEL``), which also seals stream cancel and cancels
-    the session token.
+    admission memory only. Lifecycle also seals stream cancel and cancels the
+    session token.
     """
     with _lock:
         dropped = _drop_shell_locked(run_id)
@@ -248,8 +248,8 @@ def mark_row_run_cancelled(run_id: str) -> RowRun | None:
         return None
 
 
-def retire_row_run(run_id: str) -> None:
-    """Drop registry shell and cancelled-admission memory after persist or retire."""
+def _retire_row_run(run_id: str) -> None:
+    """Registry-private RETIRE side. Public API: ``apply_scores_row_lifecycle``."""
     with _lock:
         _forget_cancelled_locked(run_id)
         _drop_shell_locked(run_id)

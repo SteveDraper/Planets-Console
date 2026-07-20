@@ -68,11 +68,11 @@ def decide_scores_row_persist(run_id: str) -> PersistDecision:
 
     Cancel intent must go through
     :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
-    (``RowLifecycleOp.CANCEL``) / registry ``mark_row_run_cancelled``;
-    the live cancel token is not a persist gate. Callers must not re-read
-    shell phase beside this decision -- ``retire_after_write`` owns post-write
-    retire. After this returns, a subsequent cancel race does not matter; the
-    decision stands for that persist attempt.
+    (``RowLifecycleOp.CANCEL``); the live cancel token is not a persist gate.
+    Callers must not re-read shell phase beside this decision --
+    ``retire_after_write`` owns post-write retire. After this returns, a
+    subsequent cancel race does not matter; the decision stands for that
+    persist attempt.
     """
     from api.analytics.scores.tier_row_run_registry import snapshot_persist_decision
 

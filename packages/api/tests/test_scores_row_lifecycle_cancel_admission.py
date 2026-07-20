@@ -310,7 +310,7 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
             # Distinct run_ids via fresh sessions; mark cancelled then leave retained.
             other_run = RowRun(other)
             reg.register_row_run(other_run)
-            reg.mark_row_run_cancelled(other_run.run_id)
+            reg._mark_row_run_cancelled(other_run.run_id)
 
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = RowRun(session)

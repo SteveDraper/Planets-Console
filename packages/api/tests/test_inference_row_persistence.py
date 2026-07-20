@@ -568,7 +568,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
-        detach_row_run,
+        _detach_row_run,
         get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
@@ -593,7 +593,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     run = RowRun(session)
     register_row_run(run)
     run_id = run.run_id
-    detach_row_run(run_id)
+    _detach_row_run(run_id)
     assert get_row_run_phase(run_id) is RowRunPhase.DETACHED
 
     persistence = InferenceRowPersistenceService(memory_backend)

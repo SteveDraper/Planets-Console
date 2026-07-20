@@ -44,10 +44,10 @@ from api.analytics.scores.compute_orchestration import (
 )
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
+    _retire_row_run,
     get_row_run_for_scope,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
-    retire_row_run,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import (
@@ -116,7 +116,7 @@ def test_retire_stale_run_preserves_replacement_scope_mapping(sample_turn) -> No
     replacement_run = _register_run(sample_turn, player_id=player_id)
     scope = _scores_scope(sample_turn, player_id)
 
-    retire_row_run(old_run.run_id)
+    _retire_row_run(old_run.run_id)
 
     assert get_row_run_for_scope(scope) is replacement_run
 
@@ -378,9 +378,9 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
     )
     from api.analytics.scores.export_snapshot import scores_inference_stream_scope
     from api.analytics.scores.tier_row_run_registry import (
+        _retire_row_run,
         get_row_run_for_scope,
         reset_tier_row_run_registry_for_tests,
-        retire_row_run,
     )
 
     from tests.scores_exports_helpers import (
@@ -422,7 +422,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
         player_id,
     )
     assert run is not None
-    retire_row_run(run.run_id)
+    _retire_row_run(run.run_id)
     assert get_row_run_for_scope(scope) is None
     assert (
         scheduler.row_run_for_player(

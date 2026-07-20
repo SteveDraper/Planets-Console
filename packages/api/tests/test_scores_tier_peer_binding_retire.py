@@ -12,9 +12,9 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
+    _retire_row_run,
     get_row_run,
     register_row_run,
-    retire_row_run,
 )
 
 from tests.scores_tier_cross_binding_test_helpers import (
@@ -38,7 +38,7 @@ def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> Non
     session = _session(sample_turn)
     run = RowRun(session)
     register_row_run(run)
-    retire_row_run(run.run_id)
+    _retire_row_run(run.run_id)
 
     result = run_scores_tier_solve({"runId": run.run_id})
 
