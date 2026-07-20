@@ -48,7 +48,11 @@ def test_stream_load_all_turns_yields_error_line_on_planets_console_error() -> N
 
     assert len(lines) == 1
     error = json.loads(lines[0])
-    assert error == {"type": "error", "detail": "Login credentials are required."}
+    assert error == {
+        "type": "error",
+        "detail": "Login credentials are required.",
+        "http_error": 401,
+    }
 
 
 def test_stream_load_all_turns_yields_error_line_after_progress_on_unexpected_error() -> None:
@@ -69,4 +73,4 @@ def test_stream_load_all_turns_yields_error_line_after_progress_on_unexpected_er
     progress = json.loads(lines[0])
     assert progress["type"] == "progress"
     error = json.loads(lines[1])
-    assert error == {"type": "error", "detail": "Internal server error"}
+    assert error == {"type": "error", "detail": "Internal server error", "http_error": 500}

@@ -8,15 +8,11 @@ import { LAST_LOGIN_USERNAME_STORAGE_KEY } from './LoginModal'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
 
-vi.mock('../api/bff', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api/bff')>()
-  return {
-    ...actual,
-    exchangeCredentials: vi.fn().mockResolvedValue(undefined),
-    probeCredentials: vi.fn().mockResolvedValue(true),
-    dropCredentials: vi.fn().mockResolvedValue(undefined),
-  }
-})
+vi.mock('../api/credentialsClient', () => ({
+  exchangeCredentials: vi.fn().mockResolvedValue(undefined),
+  probeCredentials: vi.fn().mockResolvedValue(true),
+  dropCredentials: vi.fn().mockResolvedValue(undefined),
+}))
 
 const headerQueryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { probeCredentials } from '../api/bff'
+import { probeCredentials } from '../api/credentialsClient'
 import {
   readRememberedLoginUsername,
 } from '../components/LoginModal'

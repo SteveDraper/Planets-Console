@@ -3,7 +3,7 @@ import {
   dropCredentials,
   exchangeCredentials,
   probeCredentials,
-} from '../api/bff'
+} from '../api/credentialsClient'
 import { useModalKeydownFocusTrap } from '../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { useSessionStore } from '../stores/session'

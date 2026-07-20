@@ -107,6 +107,9 @@ class LoadAllStreamErrorEvent(BaseModel):
 
     type: Literal["error"]
     detail: str
+    http_error: int = Field(
+        description="HTTP status that would apply for an equivalent non-stream failure."
+    )
 
 
 class StoredTurnPerspectivesResponse(OmitNullDiagnosticsBase):

@@ -30,6 +30,8 @@ import {
 
 export type UseShellGameSelectionOptions = {
   reportShellError: (message: string) => void
+  /** When true, load-all/refresh onError skips the shell error bar (modal handles it). */
+  reportCredentialSensitiveFailure?: (err: unknown) => boolean
 }
 
 export type LoadAllTurnsVars = {
@@ -50,7 +52,10 @@ function reportLoadAllFailure(
 }
 
 /** Game refresh, load-all (header or on commit), and a single activity model for the shell. */
-export function useShellGameSelection({ reportShellError }: UseShellGameSelectionOptions) {
+export function useShellGameSelection({
+  reportShellError,
+  reportCredentialSensitiveFailure,
+}: UseShellGameSelectionOptions) {
   const queryClient = useQueryClient()
   const loginName = useSessionStore((s) => s.name)
   const selectedGameId = useShellStore((s) => s.selectedGameId)
@@ -83,6 +88,9 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
       invalidateShellGameQueries(queryClient, vars.gameId)
     },
     onError: (err) => {
+      if (reportCredentialSensitiveFailure?.(err)) {
+        return
+      }
       const message =
         err instanceof Error
           ? err.message
@@ -147,6 +155,9 @@ export function useShellGameSelection({ reportShellError }: UseShellGameSelectio
       invalidateShellGameQueries(queryClient, vars.gameId)
     },
     onError: (err) => {
+      if (reportCredentialSensitiveFailure?.(err)) {
+        return
+      }
       const message =
         err instanceof Error ? err.message : typeof err === 'string' ? err : 'Game refresh failed'
       reportShellError(message)

@@ -61,11 +61,20 @@ describe('parseLoadAllStreamEvent', () => {
 
   it('parses error events', () => {
     expect(
-      parseLoadAllStreamEvent(JSON.stringify({ type: 'error', detail: 'Login required' }))
+      parseLoadAllStreamEvent(
+        JSON.stringify({ type: 'error', detail: 'Login required', http_error: 401 })
+      )
     ).toEqual({
       type: 'error',
       detail: 'Login required',
+      http_error: 401,
     })
+  })
+
+  it('throws when error event omits http_error', () => {
+    expect(() =>
+      parseLoadAllStreamEvent(JSON.stringify({ type: 'error', detail: 'Login required' }))
+    ).toThrow('invalid shape')
   })
 
   it('throws for unknown event types', () => {

@@ -23,3 +23,7 @@ export {
   useSilentLoginRestore,
   type SilentLoginRestoreStatus,
 } from './useSilentLoginRestore'
+export {
+  useIdentityLifecycle,
+  type UseIdentityLifecycleOptions,
+} from './useIdentityLifecycle'

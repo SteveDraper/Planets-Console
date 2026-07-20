@@ -3,15 +3,11 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../components/LoginModal'
 import { useSilentLoginRestore } from './useSilentLoginRestore'
 import { useSessionStore } from '../stores/session'
-import { probeCredentials } from '../api/bff'
+import { probeCredentials } from '../api/credentialsClient'
 
-vi.mock('../api/bff', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api/bff')>()
-  return {
-    ...actual,
-    probeCredentials: vi.fn(),
-  }
-})
+vi.mock('../api/credentialsClient', () => ({
+  probeCredentials: vi.fn(),
+}))
 
 describe('useSilentLoginRestore', () => {
   beforeEach(() => {

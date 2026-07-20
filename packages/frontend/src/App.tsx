@@ -21,7 +21,7 @@ import {
   fetchShellGameBootstrap,
 } from './shell/shellGameBootstrap'
 import { useShellContext, useShellGameSelection } from './shell'
-import { useSilentLoginRestore } from './shell/useSilentLoginRestore'
+import { useIdentityLifecycle } from './shell/useIdentityLifecycle'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
@@ -90,6 +90,10 @@ function ConsoleShell() {
     stepTurn,
   } = useShellContext({ reportShellError: addShellError })
 
+  const reportCredentialSensitiveFailureRef = useRef<(err: unknown) => boolean>(
+    () => false
+  )
+
   const {
     loadAllProgress,
     handleCommitGameSelection,
@@ -98,51 +102,27 @@ function ConsoleShell() {
     isLoadAllTurnsPending,
     handleLoadAllTurns,
     refreshUnfinishedSelectedGame,
-  } = useShellGameSelection({ reportShellError: addShellError })
+  } = useShellGameSelection({
+    reportShellError: addShellError,
+    reportCredentialSensitiveFailure: (err) =>
+      reportCredentialSensitiveFailureRef.current(err),
+  })
 
   const shellStoreHydrated = usePersistStoreHydrated(useShellStore)
   const {
-    status: silentLoginStatus,
-    shouldOpenLoginModal,
-    clearShouldOpenLoginModal,
-  } = useSilentLoginRestore(shellStoreHydrated)
-
-  const didSilentUnfinishedRefreshRef = useRef(false)
-  useEffect(() => {
-    if (silentLoginStatus !== 'restored') return
-    if (didSilentUnfinishedRefreshRef.current) return
-    if (!selectedGameId || gameInfoContext == null || gameInfoContext.isGameFinished) return
-    didSilentUnfinishedRefreshRef.current = true
-    refreshUnfinishedSelectedGame()
-  }, [
-    silentLoginStatus,
+    forceLoginModalOpen,
+    clearForceLoginModalOpen,
+    handleIdentityEstablished,
+    reportCredentialSensitiveFailure,
+  } = useIdentityLifecycle({
+    shellStoreHydrated,
     selectedGameId,
-    gameInfoContext,
+    isGameFinished: gameInfoContext?.isGameFinished ?? null,
     refreshUnfinishedSelectedGame,
-  ])
-
-  const handleIdentityEstablished = useCallback(() => {
-    refreshUnfinishedSelectedGame()
-  }, [refreshUnfinishedSelectedGame])
-
-  const [authFailureLoginModal, setAuthFailureLoginModal] = useState(false)
-
-  useEffect(() => {
-    if (!turnEnsureIsError || turnEnsureError == null) return
-    const message =
-      turnEnsureError instanceof Error
-        ? turnEnsureError.message
-        : String(turnEnsureError)
-    const lowered = message.toLowerCase()
-    if (
-      !lowered.includes('login credentials') &&
-      !lowered.includes('account api key was rejected')
-    ) {
-      return
-    }
-    useSessionStore.getState().clearSession()
-    setAuthFailureLoginModal(true)
-  }, [turnEnsureIsError, turnEnsureError])
+    turnEnsureIsError,
+    turnEnsureError,
+  })
+  reportCredentialSensitiveFailureRef.current = reportCredentialSensitiveFailure
 
   const prevLoginNameRef = useRef<string | null | undefined>(undefined)
   useEffect(() => {
@@ -363,11 +343,8 @@ function ConsoleShell() {
         onShellViewpointChange={handleShellViewpointChange}
         analyticScope={analyticScope}
         computeDiagnosticsEnabled={Boolean(shellBootstrap?.computeDiagnosticsEnabled)}
-        forceLoginModalOpen={shouldOpenLoginModal || authFailureLoginModal}
-        onForceLoginModalOpenConsumed={() => {
-          clearShouldOpenLoginModal()
-          setAuthFailureLoginModal(false)
-        }}
+        forceLoginModalOpen={forceLoginModalOpen}
+        onForceLoginModalOpenConsumed={clearForceLoginModalOpen}
         onIdentityEstablished={handleIdentityEstablished}
       />
       <ShellErrorBar errors={shellErrors} onDismiss={dismissShellError} />
