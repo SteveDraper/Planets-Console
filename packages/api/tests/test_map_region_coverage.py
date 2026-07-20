@@ -164,3 +164,26 @@ def test_disjoint_nebulas_emit_non_overlapping_patches():
     assert patch_cell_covered(b, 100, 0) is None
     assert patch_cell_covered(b, 400, 0) is not None
     assert patch_cell_covered(a, 400, 0) is None
+
+
+def test_l_shaped_nebula_chain_merges_pocket_nebula_into_one_patch():
+    """L-chain AABB union leaves a pocket; a nebula there must still merge.
+
+    Connected-component union alone emits two overlapping patch AABBs; exclusive
+    blit authority requires a single non-overlapping covering AABB.
+    """
+    origin = CoverageOrigin(x=0, y=0, base_range=200)
+    n1 = Nebula(id=1, x=0, y=0, name="A", radius=30, intensity=40)
+    n2 = Nebula(id=2, x=60, y=0, name="B", radius=30, intensity=40)
+    n3 = Nebula(id=3, x=0, y=60, name="C", radius=30, intensity=40)
+    n4 = Nebula(id=4, x=60, y=60, name="D", radius=20, intensity=40)
+    coverage = build_hybrid_coverage([origin], [n1, n2, n3, n4])
+
+    assert len(coverage.patches) == 1
+    patch = coverage.patches[0]
+    assert patch.origin_x == -30
+    assert patch.origin_y == -30
+    assert patch.width == 121
+    assert patch.height == 121
+    assert patch_cell_covered(patch, 0, 0) is not None
+    assert patch_cell_covered(patch, 60, 60) is not None

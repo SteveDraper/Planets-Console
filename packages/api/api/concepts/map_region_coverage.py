@@ -136,13 +136,36 @@ def _aabb_union(a: CellAabb, b: CellAabb) -> CellAabb:
     return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
 
 
+def _merge_until_disjoint(boxes: Sequence[CellAabb]) -> list[CellAabb]:
+    """Merge AABBs until no two results overlap.
+
+    Needed because AABB-union of an overlap connected component can still
+    contain a disjoint box that sits in a pocket of the union rectangle.
+    """
+    out = list(boxes)
+    changed = True
+    while changed:
+        changed = False
+        next_out: list[CellAabb] = []
+        for box in out:
+            for i, existing in enumerate(next_out):
+                if _aabbs_overlap(box, existing):
+                    next_out[i] = _aabb_union(existing, box)
+                    changed = True
+                    break
+            else:
+                next_out.append(box)
+        out = next_out
+    return out
+
+
 def _merged_patch_aabbs(
     origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter],
 ) -> list[CellAabb]:
-    """Union intersecting nebula AABBs that touch at least one coverage disk.
+    """Union nebula AABBs that touch at least one coverage disk.
 
-    Returns a non-overlapping partition (connected components of AABB overlap).
+    Returns a non-overlapping partition of covering AABBs (merge until disjoint).
     """
     boxes: list[CellAabb] = []
     for nebula in nebulas:
@@ -151,31 +174,7 @@ def _merged_patch_aabbs(
         boxes.append(_nebula_aabb(nebula))
     if not boxes:
         return []
-
-    parent = list(range(len(boxes)))
-
-    def find(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    def union(i: int, j: int) -> None:
-        root_i, root_j = find(i), find(j)
-        if root_i != root_j:
-            parent[root_j] = root_i
-
-    for i in range(len(boxes)):
-        for j in range(i + 1, len(boxes)):
-            if _aabbs_overlap(boxes[i], boxes[j]):
-                union(i, j)
-
-    merged: dict[int, CellAabb] = {}
-    for i, box in enumerate(boxes):
-        root = find(i)
-        existing = merged.get(root)
-        merged[root] = box if existing is None else _aabb_union(existing, box)
-    return list(merged.values())
+    return _merge_until_disjoint(boxes)
 
 
 def _cell_covered(
@@ -241,9 +240,9 @@ def build_hybrid_coverage(
     """Build ideal disks plus nebula-local patches for the given origins.
 
     Disks are one per origin at ``base_range``. Patches cover merged AABBs of
-    disk-intersecting nebulas (connected components of AABB overlap) so patch
-    regions never overlap. Inside a patch AABB, coverage truth includes ideal
-    reach outside density and V(P)-modulated reach where density > 0.
+    disk-intersecting nebulas (merge until no two patch AABBs overlap). Inside
+    a patch AABB, coverage truth includes ideal reach outside density and
+    V(P)-modulated reach where density > 0.
     """
     active_origins = [o for o in origins if o.base_range > 0]
     disks = tuple(MapRegionOverlayDisk(x=o.x, y=o.y, radius=o.base_range) for o in active_origins)
