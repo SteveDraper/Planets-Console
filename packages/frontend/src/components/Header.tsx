@@ -43,6 +43,10 @@ type HeaderProps = {
   onShellViewpointChange: (ordinal: number) => void
   analyticScope: AnalyticShellScope | null
   computeDiagnosticsEnabled: boolean
+  /** When true, open the login modal (e.g. silent restore probe failed). */
+  forceLoginModalOpen?: boolean
+  onForceLoginModalOpenConsumed?: () => void
+  onIdentityEstablished?: () => void
 }
 
 export function Header({
@@ -67,6 +71,9 @@ export function Header({
   onShellViewpointChange,
   analyticScope,
   computeDiagnosticsEnabled,
+  forceLoginModalOpen = false,
+  onForceLoginModalOpenConsumed,
+  onIdentityEstablished,
 }: HeaderProps) {
   const isMapMode = viewMode === 'map'
   const loginName = useSessionStore((s) => s.name)
@@ -104,6 +111,13 @@ export function Header({
     setLoginModalKey((k) => k + 1)
     setIsLoginModalOpen(true)
   }
+
+  useEffect(() => {
+    if (!forceLoginModalOpen) return
+    setLoginModalKey((k) => k + 1)
+    setIsLoginModalOpen(true)
+    onForceLoginModalOpenConsumed?.()
+  }, [forceLoginModalOpen, onForceLoginModalOpenConsumed])
 
   const closeHeaderMenu = useCallback(() => {
     setIsHeaderMenuOpen(false)
@@ -174,6 +188,8 @@ export function Header({
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         getFocusRestoreFallback={() => changeLoginButtonRef.current}
+        onIdentityEstablished={onIdentityEstablished}
+        reportShellError={reportShellError}
       />
       <GameControl
         selectedGameId={selectedGameId}

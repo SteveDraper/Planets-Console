@@ -173,7 +173,7 @@ describe('useShellGameSelection', () => {
     await waitFor(() => {
       expect(loadAllTurnsWithProgress).toHaveBeenCalledWith(
         '99',
-        { username: 'Alice', password: 'secret' },
+        { username: 'Alice' },
         expect.any(Function)
       )
     })

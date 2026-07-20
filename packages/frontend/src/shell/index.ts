@@ -19,3 +19,7 @@ export {
   type LoadAllTurnsVars,
   type UseShellGameSelectionOptions,
 } from './useShellGameSelection'
+export {
+  useSilentLoginRestore,
+  type SilentLoginRestoreStatus,
+} from './useSilentLoginRestore'

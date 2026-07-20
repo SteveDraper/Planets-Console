@@ -33,6 +33,9 @@ class ApiConfig:
     compute_diagnostics_timeline_capacity: int = 5000
     """Ring-buffer capacity for the compute concurrency timeline (drop oldest on wrap)."""
 
+    credentials_obfuscation_secret: str | None = None
+    """Optional secret mixed into HKDF when wrapping account API keys at rest."""
+
 
 def get_config() -> ApiConfig:
     """Return the current API config. Defaults if not yet set by server."""

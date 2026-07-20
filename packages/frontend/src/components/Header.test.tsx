@@ -8,6 +8,16 @@ import { LAST_LOGIN_USERNAME_STORAGE_KEY } from './LoginModal'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
 
+vi.mock('../api/bff', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/bff')>()
+  return {
+    ...actual,
+    exchangeCredentials: vi.fn().mockResolvedValue(undefined),
+    probeCredentials: vi.fn().mockResolvedValue(true),
+    dropCredentials: vi.fn().mockResolvedValue(undefined),
+  }
+})
+
 const headerQueryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
 })
@@ -359,8 +369,11 @@ describe('Header', () => {
     await user.type(screen.getByLabelText(/name/i), 'TestPlayer')
     await user.type(screen.getByLabelText(/password/i), 'secret')
     await user.click(screen.getByRole('button', { name: /log in/i }))
-    expect(screen.getByText('TestPlayer')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('TestPlayer')).toBeInTheDocument()
+    })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(useSessionStore.getState().password).toBeNull()
   })
 
   it('restores focus to change-login button when modal closes (Cancel)', async () => {
@@ -390,7 +403,9 @@ describe('Header', () => {
     await user.type(screen.getByLabelText(/^name$/i), 'User')
     await user.type(screen.getByLabelText(/^password$/i), 'sensitive-password')
     await user.click(screen.getByRole('button', { name: /log in/i }))
-    expect(localStorage.getItem(LAST_LOGIN_USERNAME_STORAGE_KEY)).toBe('User')
+    await waitFor(() => {
+      expect(localStorage.getItem(LAST_LOGIN_USERNAME_STORAGE_KEY)).toBe('User')
+    })
     expect(sessionStorage.length).toBe(0)
     const sessionKeys = Object.keys(sessionStorage)
     const sessionStr = sessionKeys.length

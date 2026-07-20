@@ -33,19 +33,59 @@ _Avoid_: session context (ambiguous with login credentials), query scope (implem
 ### Login and shell controls
 
 **Login identity**:
-The planets.nu account **name** (and in-session **password**) used to call upstream APIs. Distinct from **viewpoint** -- login determines what data may be fetched; viewpoint determines whose position is shown.
+The planets.nu account **name** (and in-session **password**, when the user has typed one this page load) used to call upstream APIs. Distinct from **viewpoint** -- login determines what data may be fetched; viewpoint determines whose position is shown.
 _Avoid_: user, account (when meaning planets.nu login specifically)
 
 **Session credentials**:
-Login name and password held **in memory** for the current page load only. Never persisted to localStorage, cookies, URLs, or any durable store.
-_Avoid_: auth token, saved login
+In-memory login name and optional password for the current page load. The password is never written to localStorage, cookies, URLs, or any durable store. After a successful **login exchange**, the client drops the password from memory and keeps the name. The name may be rehydrated into memory on page load via **silent login restore**.
+_Avoid_: auth token, saved password
+
+**Silent login restore**:
+On page load, the console restores the last login name into **session credentials** without opening the login modal only after a **credential probe** reports a usable **account API key** for that name. If a remembered name exists but the probe fails, the login modal opens automatically (name prefilled) for **login exchange**. The modal also appears when upstream auth fails later, or the user changes account. Does not run after **log out** (remembered name cleared).
+_Avoid_: remember me (password), auto-login with saved password, server session cookie
+
+**Credential probe**:
+A server check, given a login name and no password, for whether a decryptable **account API key** is already stored for that name. Does not call Planets.nu. Used by **silent login restore** before treating the restored name as logged in. If a later upstream call fails auth, the stored key is treated as unusable and the password modal opens (**account API key invalidation**). Decrypt failure is treated like a missing key.
+_Avoid_: session check, whoami, auth status (ambiguous with HTTP sessions)
+
+**Account API key invalidation**:
+After Planets.nu rejects a stored key (or equivalent auth failure), deleting that key material from the account **document** (same durable outcome as **account API key drop** for the key field) so the next **credential probe** fails and the user must complete a **login exchange** again. The SPA opens the login modal when this happens mid-session.
+_Avoid_: logout (client may still show a remembered name until cleared), session expiry, revoked-flag rows
+
+**Account API key**:
+Server-durable Planets.nu API key for one login name, obtained by exchanging a password with Planets.nu (**login exchange**) and used for later upstream calls instead of re-sending the password. Distinct from **session credentials** (client in-memory name/password). Stored in the existing **`credentials/accounts/*`** account **document** (one file per name), **machine-bound obfuscated** at rest so a copied account document alone is not usable on another machine. Legacy plaintext values are accepted on read and rewritten obfuscated (**lazy credential migrate**). See [ADR 0007](docs/adr/0007-account-api-key-and-silent-login.md).
+_Avoid_: auth token, session token, saved password
+
+**Lazy credential migrate**:
+On access, rewriting a legacy plaintext **account API key** into **machine-bound obfuscated** form in the same account document. No boot-time sweep required.
+_Avoid_: storage schema migration job, one-shot upgrade script (unless separately needed)
+
+**Machine-bound obfuscation**:
+At-rest protection for an **account API key** using AES-GCM (via the `cryptography` library), with a 256-bit key derived by HKDF from the OS native machine id by default (Windows `MachineGuid`, macOS `IOPlatformUUID`, Linux `/etc/machine-id`; optional configured secret override; plus a fixed app salt). The machine id is read by a small first-party Core helper (no `py-machineid` dependency). Stops casual copying of account **documents** to another machine; not a defense against an attacker who can run code on the server.
+_Avoid_: password encryption, full disk encryption, KMS, sealed secrets, home-rolled XOR obfuscation, hostname/MAC fingerprinting, Fernet for new account-key wraps
+
+**Login exchange**:
+Submitting a login name and password to the server so it obtains a Planets.nu **account API key** and stores it (**machine-bound obfuscated**). When a password is provided, the server always calls Planets.nu login and replaces any existing key for that name. The SPA’s primary path for writing keys; operational Planets.nu-backed calls from the SPA send username only after exchange or **name-only identity switch**. Non-SPA clients may still send a password on operational endpoints, which writes/replaces a key under the same rules. Distinct from **credential probe** and from name-only identity switch.
+_Avoid_: server login session, sign-in cookie
+
+**Name-only identity switch**:
+Adopting a login name into **session credentials** without a password after a successful **credential probe** for that name (e.g. from the login modal with an empty password, or **silent login restore**). Fails closed to requiring a **login exchange** when the probe fails.
+_Avoid_: passwordless Planets.nu login, anonymous access
+
+**Log out**:
+Clearing client **session credentials** and the remembered last login name so **silent login restore** does not run on the next page load. By default the server **account API key** remains stored. The user may optionally also perform **account API key drop** for the current name.
+_Avoid_: ending an HTTP session, revoking Planets.nu’s own key globally
+
+**Account API key drop**:
+User-requested deletion of this server’s stored **account API key** material for a login name (typically offered as an option during **log out**). Leaves the client logged out path the same as default **log out**; distinct from **account API key invalidation** only in that it is user-initiated rather than auth-failure-driven.
+_Avoid_: remote password reset, Planets.nu account deletion
 
 **Viewpoint**:
 The player whose position is analyzed and displayed. Resolved to a **perspective** slot; defaults from **login identity** and may be overridden in the header when the game allows.
 _Avoid_: perspective (when meaning the UI choice -- use viewpoint), player slot (use perspective)
 
 **Game info refresh**:
-Fetching current **GameInfo** from **Planets.nu upstream** (or confirming it is already in storage) and updating **shell context** -- max turn, player order, finished state, sector display name.
+Fetching current **GameInfo** from **Planets.nu upstream** (or confirming it is already in storage) and updating **shell context** -- max turn, player order, finished state, sector display name. Runs on game switch, and also for an unfinished selected game after **silent login restore** or a successful **login exchange**. On page load, stored game selection is applied from storage before **silent login restore**; the unfinished refresh waits until identity is established. Does not by itself advance the viewed turn to the latest host turn.
 _Avoid_: sync game, reload header
 
 **Shell error bar**:
@@ -850,7 +890,7 @@ _Avoid_: valid key (too generic)
 - `games/*/analytics/*` -- game-global **analytic persistence** document per analytic id
 - `games/*/*/analytics/*` -- per-**perspective** **analytic persistence** document per analytic id (nested keys such as `evidence` live inside the document)
 - `games/*/*/turns/*/analytics/*` -- per-turn **analytic persistence** document per analytic id (separate from the **TurnInfo** snapshot at the same turn path)
-- `credentials/accounts/*` -- account record (e.g. api_key and future fields)
+- `credentials/accounts/*` -- account record for one login name (**account API key** and future account fields); one **document** per name
 
 **Analytic persistence**:
 Server-side cached output for a **turn analytic** that must not recompute on every request. Three tiers under the `analytics/` namespace (see [ADR 0002](docs/adr/0002-analytic-persistence.md)): **game-global** `games/{gameId}/analytics/{analytic_id}` (e.g. **Scores** hull catalog mask overrides); **perspective supplement** `games/{gameId}/{perspective}/analytics/{analytic_id}/...` (e.g. **homeworld locator evidence**); **turn-scoped supplement** `games/{gameId}/{perspective}/turns/{turn}/analytics/{analytic_id}` (one JSON document per shell turn and **perspective**, distinct from the **TurnInfo** file at `.../turns/{turn}`). **Homeworld locator** is the reference two-tier consumer; **Scores inference row persistence** is the first **turn-scoped** consumer.
@@ -920,5 +960,9 @@ Use **perspective** in storage paths and API path segments; use **viewpoint** in
 **Dev:** Why does the map stay on the old turn for a moment when I step turns?  
 **Expert:** **Map display retention** -- the SPA keeps the last displayable **combined map** mounted during reload so React Flow preserves zoom and pan. It clears on game or **perspective** change, not on turn step within the same viewpoint.
 
-**Dev:** Connections feels slow -- how do I see where time went?  
-**Expert:** Open the **Diagnostics modal**, enable session diagnostics, repeat the request. **Request diagnostics** on the BFF response populate the **diagnostics buffer** with section timings from Core **turn analytics** and concept code.
+**Dev:** After a browser refresh, am I still logged in?  
+**Expert:** If a last login name was remembered, **silent login restore** runs a **credential probe**. On success the name is in **session credentials** (no password) and unfinished games may **game info refresh**. On probe failure the login modal opens for **login exchange**.
+
+**Dev:** Where is my Planets.nu API key stored?  
+**Expert:** In the **`credentials/accounts/{name}`** account **document**, under **machine-bound obfuscation**. **Log out** clears the remembered name; optional **account API key drop** deletes the stored key on this server. Auth failure triggers **account API key invalidation** (same key deletion) and opens the modal.
+

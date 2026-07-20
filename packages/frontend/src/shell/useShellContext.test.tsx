@@ -87,11 +87,10 @@ describe('useShellContext', () => {
       turn: 5,
       perspective: 1,
       username: 'Alice',
-      password: undefined,
     })
   })
 
-  it('sends trimmed password to ensureTurnData', async () => {
+  it('sends username only to ensureTurnData (no password)', async () => {
     useSessionStore.getState().setCredentials('Alice', '  secret  ')
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     useShellStore.setState({
@@ -115,7 +114,6 @@ describe('useShellContext', () => {
         turn: 5,
         perspective: 1,
         username: 'Alice',
-        password: 'secret',
       })
     })
   })
@@ -225,7 +223,6 @@ describe('useShellContext', () => {
       turn: 5,
       perspective: 1,
       username: 'Alice',
-      password: 'correct',
     })
   })
 

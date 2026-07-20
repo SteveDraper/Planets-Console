@@ -198,7 +198,12 @@ class TestRefreshGameInfo:
         gi = games.update_game_info(628580, body, planets)
         assert planets.login_calls == [("player1", "secret")]
         assert planets.load_calls == [628580]
-        assert backend.get("credentials/accounts/player1/api_key") == "stored-key"
+        stored = backend.get("credentials/accounts/player1/api_key")
+        from api.credentials.obfuscation import is_obfuscated_envelope
+        from api.services.credential_service import CredentialService
+
+        assert is_obfuscated_envelope(stored)
+        assert CredentialService(backend).get_stored_api_key("player1") == "stored-key"
         assert isinstance(gi, GameInfo)
         assert gi.game.id == 628580
 

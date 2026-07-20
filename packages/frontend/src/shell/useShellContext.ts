@@ -124,7 +124,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       credentialsRevision,
     ] as const,
     queryFn: () => {
-      const { name, password } = useSessionStore.getState()
+      const { name } = useSessionStore.getState()
       const user = name?.trim() ?? ''
       if (!analyticScopeForEnsure) {
         throw new Error('Missing shell scope')
@@ -133,7 +133,6 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
         turn: analyticScopeForEnsure.turn,
         perspective: analyticScopeForEnsure.perspective,
         username: user,
-        password: password || undefined,
       })
     },
     enabled: turnEnsureEnabled,

@@ -1,4 +1,9 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import {
+  dropCredentials,
+  exchangeCredentials,
+  probeCredentials,
+} from '../api/bff'
 import { useModalKeydownFocusTrap } from '../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { useSessionStore } from '../stores/session'
@@ -8,10 +13,37 @@ type LoginModalProps = {
   isOpen: boolean
   onClose: () => void
   getFocusRestoreFallback?: () => HTMLElement | null
+  /** Called after login exchange or name-only identity switch succeeds. */
+  onIdentityEstablished?: () => void
+  reportShellError?: (message: string) => void
 }
 
 /** Last successful login name only (never the password). */
 export const LAST_LOGIN_USERNAME_STORAGE_KEY = 'planetsConsoleLastLoginUsername'
+
+export function readRememberedLoginUsername(): string {
+  try {
+    return localStorage.getItem(LAST_LOGIN_USERNAME_STORAGE_KEY)?.trim() ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function writeRememberedLoginUsername(username: string): void {
+  try {
+    localStorage.setItem(LAST_LOGIN_USERNAME_STORAGE_KEY, username)
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+export function clearRememberedLoginUsername(): void {
+  try {
+    localStorage.removeItem(LAST_LOGIN_USERNAME_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
 
 /** Match non-autofill styling; browsers force autofill backgrounds unless overridden. */
 const loginFieldClassName = cn(
@@ -21,13 +53,23 @@ const loginFieldClassName = cn(
   '[&:autofill]:border-[#52575d] [&:autofill]:bg-[#2b2e32] [&:autofill]:text-slate-200'
 )
 
-export function LoginModal({ isOpen, onClose, getFocusRestoreFallback }: LoginModalProps) {
-  const setCredentials = useSessionStore((s) => s.setCredentials)
+export function LoginModal({
+  isOpen,
+  onClose,
+  getFocusRestoreFallback,
+  onIdentityEstablished,
+  reportShellError,
+}: LoginModalProps) {
+  const adoptLoginName = useSessionStore((s) => s.adoptLoginName)
+  const clearSession = useSessionStore((s) => s.clearSession)
+  const sessionName = useSessionStore((s) => s.name)
   const dialogRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [dropKeyOnLogout, setDropKeyOnLogout] = useState(false)
 
   function closeAndReturnFocus() {
     const target = returnFocusRef.current
@@ -39,15 +81,12 @@ export function LoginModal({ isOpen, onClose, getFocusRestoreFallback }: LoginMo
     if (!isOpen) return
     returnFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null
-    let savedName = ''
-    try {
-      savedName = localStorage.getItem(LAST_LOGIN_USERNAME_STORAGE_KEY)?.trim() ?? ''
-    } catch {
-      savedName = ''
-    }
+    const savedName = readRememberedLoginUsername()
     setName(savedName)
     setPassword('')
     setError(null)
+    setBusy(false)
+    setDropKeyOnLogout(false)
 
     const el = dialogRef.current
     if (!el) return
@@ -61,23 +100,67 @@ export function LoginModal({ isOpen, onClose, getFocusRestoreFallback }: LoginMo
 
   useModalKeydownFocusTrap(isOpen, dialogRef, closeAndReturnFocus)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const trimmedName = name.trim()
     if (!trimmedName) {
       setError('Name is required')
       return
     }
-    setCredentials(trimmedName, password)
+    setBusy(true)
+    setError(null)
     try {
-      localStorage.setItem(LAST_LOGIN_USERNAME_STORAGE_KEY, trimmedName)
-    } catch {
-      // ignore quota / private mode
+      if (password.trim() !== '') {
+        await exchangeCredentials(trimmedName, password)
+        adoptLoginName(trimmedName)
+        writeRememberedLoginUsername(trimmedName)
+        onIdentityEstablished?.()
+        closeAndReturnFocus()
+        return
+      }
+      const present = await probeCredentials(trimmedName)
+      if (!present) {
+        setError('Password required (no stored account API key for this name)')
+        return
+      }
+      adoptLoginName(trimmedName)
+      writeRememberedLoginUsername(trimmedName)
+      onIdentityEstablished?.()
+      closeAndReturnFocus()
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : typeof err === 'string' ? err : 'Login failed'
+      setError(message)
+      reportShellError?.(message)
+    } finally {
+      setBusy(false)
     }
-    closeAndReturnFocus()
+  }
+
+  const handleLogOut = async () => {
+    const current = sessionName?.trim() ?? name.trim()
+    setBusy(true)
+    setError(null)
+    try {
+      if (dropKeyOnLogout && current) {
+        await dropCredentials(current)
+      }
+      clearSession()
+      clearRememberedLoginUsername()
+      closeAndReturnFocus()
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : typeof err === 'string' ? err : 'Log out failed'
+      setError(message)
+      reportShellError?.(message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   if (!isOpen) return null
+
+  const showLogOut = Boolean(sessionName?.trim())
 
   return (
     <div
@@ -108,6 +191,7 @@ export function LoginModal({ isOpen, onClose, getFocusRestoreFallback }: LoginMo
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoComplete="username"
+              disabled={busy}
               className={loginFieldClassName}
             />
           </div>
@@ -121,6 +205,7 @@ export function LoginModal({ isOpen, onClose, getFocusRestoreFallback }: LoginMo
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
+              disabled={busy}
               className={loginFieldClassName}
             />
           </div>
@@ -133,18 +218,41 @@ export function LoginModal({ isOpen, onClose, getFocusRestoreFallback }: LoginMo
             <button
               type="button"
               onClick={closeAndReturnFocus}
+              disabled={busy}
               className="rounded border border-[#52575d] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="rounded border border-[#52575d] bg-[#52575d] px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-[#5e6369]"
+              disabled={busy}
+              className="rounded border border-[#52575d] bg-[#52575d] px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-[#5e6369] disabled:opacity-50"
             >
               Log in
             </button>
           </div>
         </form>
+        {showLogOut && (
+          <div className="flex flex-col gap-2 border-t border-[#52575d] pt-3">
+            <label className="flex items-center gap-2 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={dropKeyOnLogout}
+                onChange={(e) => setDropKeyOnLogout(e.target.checked)}
+                disabled={busy}
+              />
+              Also delete stored account API key on this server
+            </label>
+            <button
+              type="button"
+              onClick={() => void handleLogOut()}
+              disabled={busy}
+              className="self-start rounded border border-[#52575d] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 disabled:opacity-50"
+            >
+              Log out
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

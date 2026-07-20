@@ -16,12 +16,14 @@ from api.handlers.stellar_cartography import (
 from api.handlers.warp_well import coordinate_in_well, warp_well_cells
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
+from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import build_default_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
+from api.storage import get_storage
 from api.transport.concept_stellar_cartography import (
     StellarCartographySampleResponse,
     StellarCartographyTurnSummaryResponse,
@@ -58,6 +60,7 @@ class CoreClient:
         load_all_turns_service: LoadAllTurnsService,
         turn_concept_service: TurnConceptService,
         turn_analytic_service: TurnAnalyticService,
+        credential_service: CredentialService | None = None,
         planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
     ) -> None:
         self._games = game_service
@@ -65,6 +68,7 @@ class CoreClient:
         self._load_all = load_all_turns_service
         self._concepts = turn_concept_service
         self._analytics = turn_analytic_service
+        self._credentials = credential_service or CredentialService(get_storage())
         self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
 
     def _invoke(self, fn: Callable[[], T]) -> T:
@@ -75,6 +79,20 @@ class CoreClient:
                 status_code=getattr(exc, "http_error", 500),
                 detail=str(exc),
             ) from exc
+
+    def probe_credentials(self, username: str) -> bool:
+        return self._invoke(lambda: self._credentials.probe(username))
+
+    def exchange_credentials(self, username: str, password: str) -> None:
+        planets = self._planets_client_factory()
+
+        def work() -> None:
+            self._credentials.exchange(username, password, planets)
+
+        self._invoke(work)
+
+    def drop_credentials(self, username: str) -> None:
+        self._invoke(lambda: self._credentials.drop(username))
 
     def list_stored_games(self) -> dict[str, list[dict[str, str]]]:
         return self._invoke(self._games.list_stored_games)
