@@ -28,22 +28,23 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
 
     Fingerprint: cancel-on-detach raced with ScoresPersistencePolicy, which skips
     cancelled runs -- durable evidence dropped even though the worker finished a
-    RowComplete. Detach must leave DETACHED shell (ALLOW), not cancel admission.
+    RowComplete. Detach must leave DETACHED shell (allow late persist), not cancel.
     """
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
-        get_persist_admission,
+        decide_scores_row_persist,
         get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
-    from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
+    from api.streaming.table_stream.row_run_admission import RowRunPhase
 
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
@@ -78,7 +79,9 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         assert session.run_id not in scheduler._runs
         assert get_row_run(session.run_id) is row_run
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
-        assert get_persist_admission(session.run_id) is PersistAdmission.ALLOW
+        assert decide_scores_row_persist(session.run_id) == PersistDecision.allow(
+            retire_after_write=True
+        )
 
         ctx = make_analytic_query_context(
             sample_turn,
@@ -108,14 +111,16 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         assert stored.summary == "detach must not block persist"
         assert get_row_run_phase(session.run_id) is None
 
-        # After ALLOW retire, compact cancel admission still DENYs late persist.
+        # After ALLOW retire, compact cancel admission still refuses late persist.
         persistence.delete_row(628580, 1, turn_number, player_id)
         cancelled = RowRun(session)
         register_row_run(cancelled)
         from api.analytics.scores.tier_row_run_registry import _mark_row_run_cancelled
 
         _mark_row_run_cancelled(cancelled.run_id)
-        assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
+        assert decide_scores_row_persist(cancelled.run_id) == PersistDecision.refuse(
+            should_retire=True
+        )
         ScoresPersistencePolicy().persist(
             ctx,
             ComputeScope(
@@ -134,17 +139,18 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
 
 
 def test_detach_does_not_apply_lifecycle_cancel(sample_turn):
-    """begin_scope detach drops ownership without token or cancel admission."""
+    """begin_scope detach drops ownership without token or cancel refuse."""
     from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
-        get_persist_admission,
+        decide_scores_row_persist,
         get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
-    from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
+    from api.streaming.table_stream.row_run_admission import RowRunPhase
 
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
@@ -173,7 +179,9 @@ def test_detach_does_not_apply_lifecycle_cancel(sample_turn):
         scheduler.begin_scope(scope)
 
         assert not session.cancel_token.is_cancelled()
-        assert get_persist_admission(session.run_id) is PersistAdmission.ALLOW
+        assert decide_scores_row_persist(session.run_id) == PersistDecision.allow(
+            retire_after_write=True
+        )
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
         assert session.run_id not in scheduler._runs
     finally:
@@ -182,20 +190,21 @@ def test_detach_does_not_apply_lifecycle_cancel(sample_turn):
 
 
 def test_row_run_phase_survives_scheduler_remove(sample_turn):
-    """Cancel admission and DETACHED shells stay on the registry owner after scheduler drop.
+    """Cancel refuse and DETACHED shells stay on the registry owner after scheduler drop.
 
     Same-scope re-register supersedes cancel; cross-scope detach must not.
     """
     from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
         _detach_row_run,
         _mark_row_run_cancelled,
-        get_persist_admission,
+        decide_scores_row_persist,
         get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
-    from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
+    from api.streaming.table_stream.row_run_admission import RowRunPhase
 
     players = [s.ownerid for s in sample_turn.scores[:2]]
     assert len(players) == 2
@@ -205,34 +214,39 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
         register_row_run(cancelled)
         _mark_row_run_cancelled(cancelled.run_id)
         assert get_row_run_phase(cancelled.run_id) is None
-        assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
+        assert decide_scores_row_persist(cancelled.run_id) == PersistDecision.refuse(
+            should_retire=True
+        )
 
         detached = RowRun(_session_for_player(sample_turn, player_id=players[1]))
         register_row_run(detached)
         _detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
-        # Cross-scope detach must not clear another scope's cancelled admission.
-        assert get_persist_admission(cancelled.run_id) is PersistAdmission.CANCEL_DENY
+        # Cross-scope detach must not clear another scope's cancelled refuse.
+        assert decide_scores_row_persist(cancelled.run_id) == PersistDecision.refuse(
+            should_retire=True
+        )
     finally:
         reset_tier_row_run_registry_for_tests()
 
 
 def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_turn):
-    """Disconnect detaches without cancel admission; finish may persist."""
+    """Disconnect detaches without cancel refuse; finish may persist."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
-        get_persist_admission,
+        decide_scores_row_persist,
         get_row_run_phase,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
-    from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
+    from api.streaming.table_stream.row_run_admission import RowRunPhase
 
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
@@ -262,7 +276,9 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
         assert get_row_run(session.run_id) is row_run
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
-        assert get_persist_admission(session.run_id) is PersistAdmission.ALLOW
+        assert decide_scores_row_persist(session.run_id) == PersistDecision.allow(
+            retire_after_write=True
+        )
         assert not session.cancel_token.is_cancelled()
 
         ctx = make_analytic_query_context(
@@ -301,7 +317,9 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
+        decide_scores_row_persist,
         reset_tier_row_run_registry_for_tests,
     )
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
@@ -317,6 +335,7 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
     player_id = sample_turn.scores[0].ownerid
     unknown_run_id = "never-registered-run-id"
     assert get_row_run(unknown_run_id) is None
+    assert decide_scores_row_persist(unknown_run_id) == PersistDecision.refuse(should_retire=False)
 
     ctx = make_analytic_query_context(
         sample_turn,

@@ -2,17 +2,34 @@
 
 Ingest merge and inference refine both use :func:`option_set_respecting_locks`
 so hull, component ids, and positive weapon counts stay consistent.
+
+Empty after lock filter is never "wipe to []": call sites choose
+:class:`LockFilterEmptyPolicy` via :func:`resolve_option_sets_respecting_locks`
+(``SEED`` for ingest, ``KEEP_PRIOR`` for refine).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import StrEnum
+from typing import Literal, assert_never, overload
 
 from api.analytics.fleet.types import (
     FleetBuildOptionSet,
     FleetFieldKnown,
     FleetShipRecord,
 )
+
+
+class LockFilterEmptyPolicy(StrEnum):
+    """What to do when every candidate option set contradicts observation locks.
+
+    ``KEEP_PRIOR`` -- refine: leave existing sets untouched (return ``None``).
+    ``SEED`` -- ingest: replace with the observed / hull-only seed set.
+    """
+
+    KEEP_PRIOR = "keep_prior"
+    SEED = "seed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +153,65 @@ def option_sets_respecting_locks(
         if merged is not None:
             adjusted.append(merged)
     return tuple(adjusted)
+
+
+@overload
+def resolve_option_sets_respecting_locks(
+    option_sets: tuple[FleetBuildOptionSet, ...] | list[FleetBuildOptionSet],
+    locks: ObservationComponentLocks,
+    *,
+    on_empty: Literal[LockFilterEmptyPolicy.SEED],
+    seed: FleetBuildOptionSet,
+) -> tuple[FleetBuildOptionSet, ...]: ...
+
+
+@overload
+def resolve_option_sets_respecting_locks(
+    option_sets: tuple[FleetBuildOptionSet, ...] | list[FleetBuildOptionSet],
+    locks: ObservationComponentLocks,
+    *,
+    on_empty: Literal[LockFilterEmptyPolicy.KEEP_PRIOR],
+    seed: None = None,
+) -> tuple[FleetBuildOptionSet, ...] | None: ...
+
+
+@overload
+def resolve_option_sets_respecting_locks(
+    option_sets: tuple[FleetBuildOptionSet, ...] | list[FleetBuildOptionSet],
+    locks: ObservationComponentLocks,
+    *,
+    on_empty: LockFilterEmptyPolicy,
+    seed: FleetBuildOptionSet | None = None,
+) -> tuple[FleetBuildOptionSet, ...] | None: ...
+
+
+def resolve_option_sets_respecting_locks(
+    option_sets: tuple[FleetBuildOptionSet, ...] | list[FleetBuildOptionSet],
+    locks: ObservationComponentLocks,
+    *,
+    on_empty: LockFilterEmptyPolicy,
+    seed: FleetBuildOptionSet | None = None,
+) -> tuple[FleetBuildOptionSet, ...] | None:
+    """Filter candidates; apply a single empty-after-lock policy.
+
+    Returns the filtered (and lock-merged) sets when any survive.
+
+    When every candidate is dropped:
+    - ``KEEP_PRIOR`` → ``None`` (caller leaves existing sets untouched)
+    - ``SEED`` → ``(seed,)`` (``seed`` required)
+
+    Never returns an empty tuple: empty display sets are not a valid outcome.
+    """
+    filtered = option_sets_respecting_locks(option_sets, locks)
+    if filtered:
+        return filtered
+    if on_empty is LockFilterEmptyPolicy.KEEP_PRIOR:
+        return None
+    if on_empty is LockFilterEmptyPolicy.SEED:
+        if seed is None:
+            raise ValueError("LockFilterEmptyPolicy.SEED requires a seed option set")
+        return (seed,)
+    assert_never(on_empty)
 
 
 def _positive_known_id(constraint: object) -> int | None:

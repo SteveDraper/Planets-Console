@@ -6,8 +6,9 @@ import uuid
 
 from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
 from api.analytics.fleet.observation_option_locks import (
+    LockFilterEmptyPolicy,
     observation_locks_from_option_set,
-    option_set_respecting_locks,
+    resolve_option_sets_respecting_locks,
 )
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.turn_context import FleetTurnContext
@@ -190,13 +191,13 @@ def _apply_observed_option_set(
         record.display_default_option_set_index = 0
         return
     locks = observation_locks_from_option_set(observed_option_set)
-    merged_sets = [
-        merged
-        for existing in record.build_option_sets
-        if (merged := option_set_respecting_locks(existing, locks)) is not None
-    ]
-    # Empty after lock filter: seed hull-only (or observed) set rather than wipe.
-    record.build_option_sets = merged_sets if merged_sets else [observed_option_set]
+    resolved = resolve_option_sets_respecting_locks(
+        record.build_option_sets,
+        locks,
+        on_empty=LockFilterEmptyPolicy.SEED,
+        seed=observed_option_set,
+    )
+    record.build_option_sets = list(resolved)
     record.display_default_option_set_index = 0
 
 

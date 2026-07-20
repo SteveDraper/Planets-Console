@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from api.analytics.fleet.observation_option_locks import (
+    LockFilterEmptyPolicy,
     ObservationComponentLocks,
     observation_locks_from_option_set,
     observation_locks_from_record,
     option_set_compatible_with_locks,
     option_set_respecting_locks,
     option_sets_respecting_locks,
+    resolve_option_sets_respecting_locks,
 )
 from api.analytics.fleet.types import (
     FleetBuildOptionSet,
@@ -74,9 +76,6 @@ def test_observation_locks_from_option_set_ignore_zeros() -> None:
 
 def test_refine_compatible_helper_drops_same_hull_wrong_beam_count() -> None:
     """Matching hull with wrong beam count must not survive observation locks."""
-    from api.analytics.fleet.inferred_acquisition_refine import (
-        _option_sets_respecting_observation_locks,
-    )
     from api.analytics.fleet.types import FleetEvidenceEvent
 
     record = FleetShipRecord(
@@ -99,13 +98,40 @@ def test_refine_compatible_helper_drops_same_hull_wrong_beam_count() -> None:
             )
         ],
     )
-    kept = _option_sets_respecting_observation_locks(
-        record,
+    kept = resolve_option_sets_respecting_locks(
         (
             FleetBuildOptionSet(hull_id=87, beam_id=10, beam_count=4),
             FleetBuildOptionSet(hull_id=87, beam_id=10, beam_count=1),
             FleetBuildOptionSet(hull_id=87, beam_id=10, beam_count=None),
         ),
+        observation_locks_from_record(record),
+        on_empty=LockFilterEmptyPolicy.KEEP_PRIOR,
     )
+    assert kept is not None
     assert len(kept) == 2
     assert all(option.beam_count == 1 for option in kept)
+
+
+def test_resolve_empty_keep_prior_returns_none() -> None:
+    locks = ObservationComponentLocks(hull_id=87)
+    foreign = FleetBuildOptionSet(hull_id=105)
+    assert (
+        resolve_option_sets_respecting_locks(
+            (foreign,),
+            locks,
+            on_empty=LockFilterEmptyPolicy.KEEP_PRIOR,
+        )
+        is None
+    )
+
+
+def test_resolve_empty_seed_returns_seed() -> None:
+    locks = ObservationComponentLocks(hull_id=87)
+    foreign = FleetBuildOptionSet(hull_id=105)
+    seed = FleetBuildOptionSet(hull_id=87)
+    assert resolve_option_sets_respecting_locks(
+        (foreign,),
+        locks,
+        on_empty=LockFilterEmptyPolicy.SEED,
+        seed=seed,
+    ) == (seed,)

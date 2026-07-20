@@ -1,15 +1,23 @@
-"""Single production gate for scores durable persist admission and retire plan."""
+"""Scores durable persist plan type and pure admission→decision map.
+
+The sole production gate that *reads registry state* is
+:func:`api.analytics.scores.tier_row_run_registry.decide_scores_row_persist`
+(atomic under one lock). This module owns the decision type and the pure map
+from snapshotted admission + shell phase -- no registry import, no facade hop.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
+
 
 @dataclass(frozen=True, slots=True)
 class PersistDecision:
-    """Outcome of :func:`decide_scores_row_persist`.
+    """Outcome of :func:`~api.analytics.scores.tier_row_run_registry.decide_scores_row_persist`.
 
-    The only production persist gate for scores row writes. Registry
+    The only production persist plan for scores row writes. Registry
     :class:`~api.streaming.table_stream.row_run_admission.PersistAdmission`
     and retained-shell phase are snapshotted atomically into this decision
     (one registry lock hold) -- callers must not branch on admission or shell
@@ -49,31 +57,23 @@ class PersistDecision:
         )
 
 
-def decide_scores_row_persist(run_id: str) -> PersistDecision:
-    """Decide whether a scores ``rowComplete`` persist may write, and retire plan.
+def persist_decision_from_admission(
+    admission: PersistAdmission,
+    *,
+    phase: RowRunPhase | None,
+) -> PersistDecision:
+    """Pure map from snapshotted admission + shell phase to a persist plan.
 
-    Sole production persist gate. Delegates to
-    :func:`~api.analytics.scores.tier_row_run_registry.snapshot_persist_decision`
-    so admission and shell phase are read under one registry lock:
-
-    - ``ALLOW(retire_after_write=False)`` -- ``REGISTERED`` shell
-    - ``ALLOW(retire_after_write=True)`` -- ``DETACHED`` shell (late persist)
-    - ``REFUSE(should_retire=True)`` -- ``PersistAdmission.CANCEL_DENY``
-    - ``REFUSE(should_retire=False)`` -- ``PersistAdmission.ABSENT``
-
-    Both refuse outcomes must not write. Persist policy treats them as silent
-    no-ops (never raise): cancelled late workers and unknown ids share the same
-    "no durable write" contract. The only behavioral difference is whether
-    compact cancel admission should be retired.
-
-    Cancel intent must go through
-    :func:`api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
-    (``RowLifecycleOp.CANCEL``); the live cancel token is not a persist gate.
-    Callers must not re-read shell phase beside this decision --
-    ``retire_after_write`` owns post-write retire. After this returns, a
-    subsequent cancel race does not matter; the decision stands for that
-    persist attempt.
+    Call only with values read under the same registry lock hold as the
+    production gate. Shell must accompany ``ALLOW``; a missing shell is treated
+    as absent refuse.
     """
-    from api.analytics.scores.tier_row_run_registry import snapshot_persist_decision
-
-    return snapshot_persist_decision(run_id)
+    if admission is PersistAdmission.ALLOW:
+        if phase is None:
+            return PersistDecision.refuse(should_retire=False)
+        return PersistDecision.allow(
+            retire_after_write=phase is RowRunPhase.DETACHED,
+        )
+    if admission is PersistAdmission.CANCEL_DENY:
+        return PersistDecision.refuse(should_retire=True)
+    return PersistDecision.refuse(should_retire=False)

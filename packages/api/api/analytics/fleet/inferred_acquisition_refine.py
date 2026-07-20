@@ -16,6 +16,11 @@ from api.analytics.fleet.observation_ingest import (
     observation_established_full_fit,
     record_has_direct_observation,
 )
+from api.analytics.fleet.observation_option_locks import (
+    LockFilterEmptyPolicy,
+    observation_locks_from_record,
+    resolve_option_sets_respecting_locks,
+)
 from api.analytics.fleet.serialization import (
     append_fleet_evidence_event,
     fleet_build_option_set_from_inference_ship_build,
@@ -188,12 +193,17 @@ def _assign_option_sets_to_placeholders(
         if not option_sets:
             continue
         if record_has_direct_observation(record):
-            option_sets = _option_sets_respecting_observation_locks(record, option_sets)
+            resolved = resolve_option_sets_respecting_locks(
+                option_sets,
+                observation_locks_from_record(record),
+                on_empty=LockFilterEmptyPolicy.KEEP_PRIOR,
+            )
             # Foreign-hull (or otherwise incompatible) inference candidates were
-            # all dropped. Keep observation's prior sets (often a hull-only seed)
-            # rather than wiping to [].
-            if not option_sets:
+            # all dropped. KEEP_PRIOR leaves observation's prior sets (often a
+            # hull-only seed) rather than wiping to [].
+            if resolved is None:
                 continue
+            option_sets = resolved
         prior_sets = tuple(record.build_option_sets)
         if prior_sets == option_sets:
             continue
@@ -209,29 +219,6 @@ def _assign_option_sets_to_placeholders(
                 built_turn=built_turn,
             ),
         )
-
-
-def _option_sets_respecting_observation_locks(
-    record: FleetShipRecord,
-    option_sets: tuple[FleetBuildOptionSet, ...],
-) -> tuple[FleetBuildOptionSet, ...]:
-    """Keep only inference option sets compatible with observation-known axes.
-
-    Partial fog sightings lock hull (and any positively observed component ids
-    and counts). Option sets that contradict those locks are dropped -- rewriting
-    a foreign hull or retaining a 4-beam fit after a 1-beam sighting left illegal
-    display rows. Unknown weapon/engine axes on a compatible set stay open for
-    display from that set, then receive the locked values via merge.
-    """
-    from api.analytics.fleet.observation_option_locks import (
-        observation_locks_from_record,
-        option_sets_respecting_locks,
-    )
-
-    return option_sets_respecting_locks(
-        option_sets,
-        observation_locks_from_record(record),
-    )
 
 
 def _option_sets_for_slot(

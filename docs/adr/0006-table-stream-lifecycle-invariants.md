@@ -39,8 +39,9 @@ Drain-closed is only `RowStreamResolution.multiplex_closed`, written/read throug
 
 ### 3. Persist write / refuse / retire plan (scores)
 
-The full persist plan is only `PersistDecision` from `decide_scores_row_persist`
-(backed by `tier_row_run_registry.snapshot_persist_decision` under one lock):
+The full persist plan is only `PersistDecision` from
+`tier_row_run_registry.decide_scores_row_persist` (admission + shell phase under
+one lock; pure map in `persist_decision.persist_decision_from_admission`):
 
 - `allowed` -- may write
 - `should_retire` -- on refuse, retire compact cancel admission after silent no-write

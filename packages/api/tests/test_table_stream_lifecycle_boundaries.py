@@ -22,6 +22,7 @@ _RETIRED_BARE_NAMES = (
     "mark_multiplex_closed",  # use stream_drain / _mark_multiplex_closed only
     "seal_canceled_finish",  # use stream_drain / _seal_canceled_finish only
     "RowRunPhase.CANCELLED",
+    "snapshot_persist_decision",  # use decide_scores_row_persist only
 )
 
 _LIFECYCLE_MUTATOR_ALLOW = frozenset(

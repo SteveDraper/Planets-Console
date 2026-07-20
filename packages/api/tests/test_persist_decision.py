@@ -1,4 +1,8 @@
-"""Unit tests for scores PersistDecision gate (scope-keyed cancelled admission)."""
+"""Unit tests for scores PersistDecision gate (scope-keyed cancelled admission).
+
+Admission-memory probes (``get_persist_admission``) belong here and in cancel-
+admission suites. PersistDecision is the production gate under test.
+"""
 
 from __future__ import annotations
 
@@ -7,17 +11,20 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.scores.persist_decision import PersistDecision, decide_scores_row_persist
+from api.analytics.scores.persist_decision import (
+    PersistDecision,
+    persist_decision_from_admission,
+)
 from api.analytics.scores.tier_row_run_registry import (
     _detach_row_run,
     _mark_row_run_cancelled,
     _retire_row_run,
+    decide_scores_row_persist,
     get_persist_admission,
     get_row_run,
     get_row_run_phase,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
-    snapshot_persist_decision,
 )
 from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 
@@ -37,6 +44,25 @@ def _session(sample_turn, *, player_id: int | None = None) -> InferenceRowStream
     )
 
 
+def test_persist_decision_from_admission_pure_map() -> None:
+    assert (
+        persist_decision_from_admission(PersistAdmission.ALLOW, phase=RowRunPhase.REGISTERED)
+        == PersistDecision.allow()
+    )
+    assert persist_decision_from_admission(
+        PersistAdmission.ALLOW, phase=RowRunPhase.DETACHED
+    ) == PersistDecision.allow(retire_after_write=True)
+    assert persist_decision_from_admission(
+        PersistAdmission.ALLOW, phase=None
+    ) == PersistDecision.refuse(should_retire=False)
+    assert persist_decision_from_admission(
+        PersistAdmission.CANCEL_DENY, phase=None
+    ) == PersistDecision.refuse(should_retire=True)
+    assert persist_decision_from_admission(
+        PersistAdmission.ABSENT, phase=None
+    ) == PersistDecision.refuse(should_retire=False)
+
+
 def test_persist_decision_table(sample_turn) -> None:
     reset_tier_row_run_registry_for_tests()
     try:
@@ -45,7 +71,6 @@ def test_persist_decision_table(sample_turn) -> None:
         assert get_row_run_phase(run.run_id) is RowRunPhase.REGISTERED
         assert get_persist_admission(run.run_id) is PersistAdmission.ALLOW
         assert decide_scores_row_persist(run.run_id) == PersistDecision.allow()
-        assert snapshot_persist_decision(run.run_id) == PersistDecision.allow()
 
         # Token alone is not a persist gate; CANCEL sets cancel admission.
         run.session.cancel_token.cancel()

@@ -24,9 +24,9 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
-from api.analytics.scores.persist_decision import decide_scores_row_persist
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
+    decide_scores_row_persist,
     get_row_run,
     get_row_run_for_scope,
     get_tier_callbacks,

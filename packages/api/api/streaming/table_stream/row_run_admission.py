@@ -15,8 +15,8 @@ cancelled-admission memory is recorded separately.
 memory (shell present → ``ALLOW``; compact cancel → ``CANCEL_DENY``; else
 ``ABSENT``). Production persist writers must not branch on it directly -- use
 the analytic's ``PersistDecision`` / ``decide_*`` gate (scores:
-:func:`api.analytics.scores.persist_decision.decide_scores_row_persist`), which
-snapshots admission + shell phase under one registry lock and also owns
+:func:`api.analytics.scores.tier_row_run_registry.decide_scores_row_persist`),
+which snapshots admission + shell phase under one registry lock and also owns
 post-write / refuse retire flags. Once that decision is taken, a later cancel
 does not revoke it for that persist attempt. See ADR 0006.
 
