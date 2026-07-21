@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
@@ -14,7 +15,24 @@ from api.analytics.fleet.types import (
 )
 from api.models.game import TurnInfo
 
+if TYPE_CHECKING:
+    from api.analytics.fleet.turn_context import FleetTurnContext
+
 SCOREBOARD_SOURCE = "scoreboard"
+
+
+def tighten_inferred_ship_id_bounds_if_computable(
+    ledger: FleetAcquisitionLedger,
+    turn_context: FleetTurnContext,
+) -> None:
+    """Tighten id bounds when a max ship-id bound is computable for the shell turn."""
+    if turn_context.max_ship_id_bound is None:
+        return
+    tighten_inferred_ship_id_bounds(
+        ledger,
+        turn_context.turn,
+        shell_turn=turn_context.turn.settings.turn,
+    )
 
 
 def tighten_inferred_ship_id_bounds(

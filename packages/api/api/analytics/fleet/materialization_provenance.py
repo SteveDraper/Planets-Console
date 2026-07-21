@@ -38,9 +38,9 @@ def resolve_fleet_materialization_provenance(
     """Set provenance flags from legs actually closed at write time.
 
     Caller contract: apply turn-*N* fleet evidence deltas for ``player_id``
-    (scoreboard ingest, ship sightings, ship-id bound tightening, and optional
-    scores refinement, e.g. via ``apply_fleet_turn_delta_for_player``) before
-    calling this function. ``turnEvidenceAtN`` checks RST@*N* availability and
+    (scoreboard ingest, ship-id bound tightening, ship sightings via
+    ``apply_id_bounds_then_observations``, and optional scores refinement)
+    before calling this function. ``turnEvidenceAtN`` checks RST@*N* availability and
     terminal ``scores@N`` evidence for this player (not merely an ensure-admitted
     in-progress ``RowRun``); ingest and sightings are not re-verified here.
     """

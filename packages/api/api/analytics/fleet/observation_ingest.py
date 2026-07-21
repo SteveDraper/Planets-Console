@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds_if_computable
 from api.analytics.fleet.observation_option_locks import (
     LockFilterEmptyPolicy,
     ObservationComponentLocks,
@@ -63,6 +64,23 @@ class _OptionSetMatchSelection:
     candidate_set_size: int
 
 
+def apply_id_bounds_then_observations(
+    ledger: FleetAcquisitionLedger,
+    turn_context: FleetTurnContext,
+    *,
+    perspective: int,
+) -> None:
+    """Canonical ordering: tighten id bounds (when computable), then match sightings.
+
+    Use this whenever observation ingest follows acquisition or refine on a shell
+    turn. Call ``ingest_player_ship_observations`` alone only when bounds were
+    already applied for the same shell turn and no new unbound inferred rows
+    were created since.
+    """
+    tighten_inferred_ship_id_bounds_if_computable(ledger, turn_context)
+    ingest_player_ship_observations(ledger, turn_context, perspective=perspective)
+
+
 def ingest_turn_ship_observations(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
@@ -70,20 +88,11 @@ def ingest_turn_ship_observations(
     turn_context: FleetTurnContext | None = None,
 ) -> FleetTurnSnapshot:
     """Apply turn-T ship sightings to every player ledger in the snapshot."""
-    from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
-
     resolved_context = (
         turn_context if turn_context is not None else FleetTurnContext.from_turn(turn)
     )
-    turn_number = resolved_context.turn.settings.turn
     for ledger in snapshot.players:
-        if resolved_context.max_ship_id_bound is not None:
-            tighten_inferred_ship_id_bounds(
-                ledger,
-                resolved_context.turn,
-                shell_turn=turn_number,
-            )
-        ingest_player_ship_observations(
+        apply_id_bounds_then_observations(
             ledger,
             resolved_context,
             perspective=snapshot.perspective,
@@ -97,10 +106,13 @@ def ingest_player_ship_observations(
     *,
     perspective: int,
 ) -> None:
-    """Apply turn-T ship sightings for one player ledger.
+    """Apply turn-T ship sightings for one player ledger (matching only).
 
-    Callers must tighten id bounds (when computable) and refine inferred option
-    sets before this step so arbitration sees lock-compatible candidates.
+    Prefer ``apply_id_bounds_then_observations`` so id bounds run first when a
+    max ship-id bound is computable. Callers that invoke this directly must
+    already have tightened bounds for this shell turn (and refined inferred
+    option sets when scores evidence is available) so arbitration sees
+    lock-compatible candidates.
     """
     turn = turn_context.turn
     turn_number = turn.settings.turn

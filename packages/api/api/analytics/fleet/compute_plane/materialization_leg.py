@@ -54,7 +54,6 @@ def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> StepResult:
         game_id=int(job_wire["gameId"]),
         perspective=int(job_wire["perspective"]),
         inference_materialization=None,  # phase 2 persist hook owns scores inference
-        apply_observations=False,  # observations run after refine in persist
     )
     provenance = fleet_materialization_provenance_from_json(job_wire["provenanceWire"])
     persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)

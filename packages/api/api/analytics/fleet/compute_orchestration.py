@@ -293,19 +293,13 @@ class FleetPersistencePolicy:
                 ),
             )
 
-        # Observations after refine so option sets exist for arbitration. Id bounds
-        # again in case refine created rows (normally phase 1 already tightened).
-        from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
-        from api.analytics.fleet.observation_ingest import ingest_player_ship_observations
+        # Observations after refine so option sets exist for arbitration. Re-run
+        # id bounds via the canonical helper in case refine created rows
+        # (phase 1 already tightened placeholders).
+        from api.analytics.fleet.observation_ingest import apply_id_bounds_then_observations
 
         turn_context = FleetTurnContext.from_turn(turn)
-        if turn_context.max_ship_id_bound is not None:
-            tighten_inferred_ship_id_bounds(
-                persisted.ledger,
-                turn,
-                shell_turn=turn.settings.turn,
-            )
-        ingest_player_ship_observations(
+        apply_id_bounds_then_observations(
             persisted.ledger,
             turn_context,
             perspective=scope.perspective,
