@@ -723,7 +723,8 @@ Per-player, per-solve overlay on top of **inference build prior** (#86) weights 
 ```yaml
 fleetInferenceTuning:
   torpMisalignmentLogPenalty: <int>              # #87
-  componentTechGapLogPenaltyPerLevel: <int>     # #156
+  optionSetMassThreshold: 0.25                   # #253 (soft option sets for max-tech)
+  # componentTechGapLogPenaltyPerLevel: <int>   # #156 -- out of scope until enabled
 ```
 
 #### 8.8.1 Belief set
@@ -736,7 +737,14 @@ fleetInferenceTuning:
 
 Empty when no active row has a positive launcher id in any option set. **Absent overlay behaves like empty belief set** (turn 1 included) -- not legacy admit-all torps on early tiers.
 
-The same prior-turn fleet resolution also exposes **per-axis max tech** (`max_tech_by_axis`: `hulls` / `engines` / `beams` / `launchers`) for early tech-gate **admission** (#227; section 8.5.8). That path reuses final-ledger provenance; it does not read `$.composition.maxTechLevel` from the export tree. #156 tech-gap penalties (when implemented) remain ranking-only and are separate from admission.
+**Inference fleet launcher belief mass** (#253) scales ranking separately from admission membership:
+
+- **Hard**: known positive `fields.launchers` → mass 1 for that torp id from the row
+- **Soft** (ambiguous rows): softmax over all option sets on the row (including beam-only), log-score = `solution_rank_weight / INFERENCE_PROBABILITY_WEIGHT_SCALE`; soft mass for torp `t` = sum of probabilities of sets with `torp_id == t`
+- Player mass = **max** over active rows
+- Effective misalignment = `round(P * (1 - mass))` with `P = torpMisalignmentLogPenalty`
+
+The same prior-turn fleet resolution also exposes **per-axis max tech** (`max_tech_by_axis`: `hulls` / `engines` / `beams` / `launchers`) for early tech-gate **admission** (#227; section 8.5.8). Contributing component ids are known fitted components plus option sets whose per-row softmax probability meets **`optionSetMassThreshold`** (default 0.25). That path reuses final-ledger provenance; it does not read `$.composition.maxTechLevel` from the export tree. #156 tech-gap penalties (when implemented) remain ranking-only and are separate from admission.
 
 #### 8.8.2 Torp aggregate (#87)
 
@@ -746,18 +754,18 @@ Two coordinated mechanisms address combinatorial `ship_torps_loaded_{id}` noise:
 |-----------|--------|
 | **Inference aggregate admission** | On early torp-admitting tiers (`admit_ship_torpedoes` through `admit_starbase_defense_posts`): materialize torp-load actions for belief-set ids only, or **none** when belief set empty |
 | **Inference torp escape tier** | New penultimate ladder step (`alpha > 0`): first admit all `eligible_torp_ids` |
-| **Inference torp misalignment penalty** | Log down-weight on active non-belief torp bins (`fleetInferenceTuning.torpMisalignmentLogPenalty`); same penalty on all types when belief set was empty and types appear on escape tier |
+| **Inference torp misalignment penalty** | Log down-weight on active torp bins scaled by belief mass (`round(P * (1 - mass))`); full `P` when mass is 0 (including empty-belief escape tier) |
 
-`full_catalog_exact` remains the final exact pass. Prior merge is log-additive on #86 weights. Mild penalty for low-rank-only launcher alternates inside the belief set: deferred.
+`full_catalog_exact` remains the final exact pass. Prior merge is log-additive on #86 weights.
 
 #### 8.8.3 Ship-build tech gap (#156)
 
-Follow-on to #87. Per-axis fleet ceiling = max catalog `techlevel` over component ids on that axis from the same belief-set rows (union across option sets). Sum `componentTechGapLogPenaltyPerLevel * max(0, component_tech - ceiling)` on each ship build combo. No positive fleet histogram boosts beyond #86.
+Follow-on to #87. Per-axis fleet ceiling = max catalog `techlevel` over mass-threshold-filtered component ids on that axis (same rule as #227). Sum `componentTechGapLogPenaltyPerLevel * max(0, component_tech - ceiling)` on each ship build combo. No positive fleet histogram boosts beyond #86. Ranking penalty itself may ship later; ceiling gating (#253) does not require enabling the YAML knob.
 
 #### 8.8.4 Integration
 
 - Optional fleet overlay input on `build_action_catalog` / `build_inference_problem` (fleet torp path; section 8.8 -- not a global tier-policy overlay)
-- Diagnostics: belief-set summary, escape tier used, tuning constants loaded; `fleetTorpOverlay` on complete payloads when catalog diagnostics are emitted
+- Diagnostics: belief-set summary, per-torp belief mass, effective misalignment penalties, escape tier used, tuning constants loaded; `fleetTorpOverlay` on complete payloads when catalog diagnostics are emitted
 
 #### 8.8.5 Production wiring, stream warm, and input-status UX (#133, #158)
 
@@ -772,7 +780,9 @@ Follow-on to #87. Per-axis fleet ceiling = max catalog `techlevel` over componen
 | Field | Values | Meaning |
 |-------|--------|---------|
 | `diagnostics.fleetTorpInputStatus` | `not_applicable` \| `pending` \| `applied` \| `unavailable` | Whether prior-turn fleet overlay input was authoritative when the row completed |
-| `diagnostics.fleetTorpOverlay.beliefSetTorpIds` | `number[]` (when applied) | Torp ids in the belief set used for admission / misalignment |
+| `diagnostics.fleetTorpOverlay.beliefSetTorpIds` | `number[]` (when applied) | Torp ids in the belief set used for admission |
+| `diagnostics.fleetTorpOverlay.launcherBeliefMassByTorpId` | `{ "<torpId>": number }` | Per-torp **inference fleet launcher belief mass** used for ranking |
+| `diagnostics.fleetTorpOverlay.effectiveTorpMisalignmentLogPenaltyByTorpId` | `{ "<torpId>": number }` | Effective misalignment penalties applied |
 
 | Status | When |
 |--------|------|

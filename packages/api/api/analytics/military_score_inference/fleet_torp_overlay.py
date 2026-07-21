@@ -1,7 +1,8 @@
 """Fleet-informed torpedo admission and ranking overlay for scores inference (#87).
 
 Glossary: CONTEXT.md (**Inference fleet launcher belief set**, **Inference aggregate
-admission**, **Inference torp escape tier**, **Inference torp misalignment penalty**).
+admission**, **Inference torp escape tier**, **Inference torp misalignment penalty**,
+**Inference fleet launcher belief mass**).
 
 Absent ``FleetTorpOverlay`` input behaves like an **empty belief set** (no early torp
 admission; strong down-weight at escape tier). Use ``FleetTorpOverlay.disabled()`` to
@@ -10,10 +11,11 @@ skip overlay logic and retain the pre-#87 catalog (population priors only).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 
 from api.analytics.fleet.belief_set_components import launcher_component_ids_from_records
+from api.analytics.fleet.option_set_mass import launcher_belief_mass_by_torp_id_from_records
 from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.aggregate_action_registry import (
     SHIP_TORPS_LOADED_ACTION_PREFIX,
@@ -35,10 +37,12 @@ __all__ = [
     "admitted_torp_ids_for_policy_step",
     "apply_torp_misalignment_penalty_to_buckets",
     "effective_fleet_torp_overlay",
+    "effective_torp_misalignment_log_penalty",
     "launcher_belief_set_from_composition",
     "launcher_belief_set_from_fleet_records",
     "apply_torp_misalignment_penalties_to_catalog",
     "build_fleet_torp_overlay_diagnostics",
+    "overlay_from_fleet_records",
     "torp_load_action_id",
 ]
 
@@ -60,6 +64,9 @@ class FleetTorpOverlay:
 
     belief_set: FleetLauncherBeliefSet
     enabled: bool = True
+    # Player-level launcher belief mass per torp id (hard or soft). Missing ids
+    # are mass 0. ``from_torp_ids`` seeds mass 1 for each id (synthetic hard).
+    launcher_belief_mass_by_torp_id: Mapping[int, float] = field(default_factory=dict)
 
     @staticmethod
     def disabled() -> FleetTorpOverlay:
@@ -71,7 +78,19 @@ class FleetTorpOverlay:
 
     @staticmethod
     def from_torp_ids(torp_ids: frozenset[int] | Iterable[int]) -> FleetTorpOverlay:
-        return FleetTorpOverlay(belief_set=FleetLauncherBeliefSet(frozenset(torp_ids)))
+        ids = frozenset(torp_ids)
+        return FleetTorpOverlay(
+            belief_set=FleetLauncherBeliefSet(ids),
+            launcher_belief_mass_by_torp_id=dict.fromkeys(ids, 1.0),
+        )
+
+    def belief_mass_for_torp_id(self, torp_id: int) -> float:
+        mass = self.launcher_belief_mass_by_torp_id.get(torp_id, 0.0)
+        if mass <= 0.0:
+            return 0.0
+        if mass >= 1.0:
+            return 1.0
+        return float(mass)
 
 
 @dataclass(frozen=True)
@@ -83,6 +102,10 @@ class FleetTorpOverlayDiagnostics:
     policy_step_id: str
     escape_tier_used: bool
     torp_misalignment_log_penalty: int
+    launcher_belief_mass_by_torp_id: Mapping[int, float] = field(default_factory=dict)
+    effective_torp_misalignment_log_penalty_by_torp_id: Mapping[int, int] = field(
+        default_factory=dict
+    )
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -93,6 +116,16 @@ class FleetTorpOverlayDiagnostics:
             "policyStepId": self.policy_step_id,
             "escapeTierUsed": self.escape_tier_used,
             "torpMisalignmentLogPenalty": self.torp_misalignment_log_penalty,
+            "launcherBeliefMassByTorpId": {
+                str(torp_id): mass
+                for torp_id, mass in sorted(self.launcher_belief_mass_by_torp_id.items())
+            },
+            "effectiveTorpMisalignmentLogPenaltyByTorpId": {
+                str(torp_id): penalty
+                for torp_id, penalty in sorted(
+                    self.effective_torp_misalignment_log_penalty_by_torp_id.items()
+                )
+            },
         }
 
 
@@ -107,6 +140,16 @@ def launcher_belief_set_from_fleet_records(
 ) -> FleetLauncherBeliefSet:
     """Union launcher/torp ids from known fields and all fleet build option sets."""
     return FleetLauncherBeliefSet(launcher_component_ids_from_records(records))
+
+
+def overlay_from_fleet_records(records: Iterable[FleetShipRecord]) -> FleetTorpOverlay:
+    """Build overlay with flat admission union plus per-torp belief mass (#253)."""
+    record_list = list(records)
+    belief = launcher_belief_set_from_fleet_records(record_list)
+    return FleetTorpOverlay(
+        belief_set=belief,
+        launcher_belief_mass_by_torp_id=launcher_belief_mass_by_torp_id_from_records(record_list),
+    )
 
 
 def launcher_belief_set_from_composition(composition: dict[str, object]) -> FleetLauncherBeliefSet:
@@ -158,6 +201,20 @@ def admitted_torp_ids_for_policy_step(
     return frozenset()
 
 
+def effective_torp_misalignment_log_penalty(
+    *,
+    torp_id: int,
+    overlay: FleetTorpOverlay,
+    tuning: FleetInferenceTuning,
+) -> int:
+    """Mass-scaled misalignment: ``round(P * (1 - mass))`` (#253)."""
+    base = tuning.torp_misalignment_log_penalty
+    if base <= 0:
+        return 0
+    mass = overlay.belief_mass_for_torp_id(torp_id)
+    return round(base * (1.0 - mass))
+
+
 def apply_torp_misalignment_penalty_to_buckets(
     buckets: tuple[ProbabilityBucket, ...],
     *,
@@ -189,14 +246,17 @@ def apply_torp_misalignment_penalties_to_catalog(
     if not overlay.enabled or tuning.torp_misalignment_log_penalty <= 0:
         return probability_buckets
 
-    belief_ids = overlay.belief_set.torp_ids
-    penalty = tuning.torp_misalignment_log_penalty
     adjusted = dict(probability_buckets)
     for action_id in list(adjusted.keys()):
         if not is_torp_load_action_id(action_id):
             continue
         torp_id = int(action_id.removeprefix(SHIP_TORPS_LOADED_ACTION_PREFIX))
-        if torp_id in belief_ids:
+        penalty = effective_torp_misalignment_log_penalty(
+            torp_id=torp_id,
+            overlay=overlay,
+            tuning=tuning,
+        )
+        if penalty <= 0:
             continue
         adjusted[action_id] = apply_torp_misalignment_penalty_to_buckets(
             adjusted[action_id],
@@ -212,6 +272,22 @@ def build_fleet_torp_overlay_diagnostics(
     policy_step: InferenceTierPolicyStep,
     admitted_torp_ids: frozenset[int],
 ) -> FleetTorpOverlayDiagnostics:
+    mass_by_torp = {
+        torp_id: overlay.belief_mass_for_torp_id(torp_id)
+        for torp_id in sorted(overlay.launcher_belief_mass_by_torp_id)
+    }
+    # Also expose masses for admitted / belief-set ids even when mass map omitted 0s.
+    for torp_id in overlay.belief_set.torp_ids | admitted_torp_ids:
+        mass_by_torp.setdefault(torp_id, overlay.belief_mass_for_torp_id(torp_id))
+
+    effective_penalties = {
+        torp_id: effective_torp_misalignment_log_penalty(
+            torp_id=torp_id,
+            overlay=overlay,
+            tuning=tuning,
+        )
+        for torp_id in sorted(mass_by_torp)
+    }
     return FleetTorpOverlayDiagnostics(
         applied=overlay.enabled,
         enabled=overlay.enabled,
@@ -220,4 +296,6 @@ def build_fleet_torp_overlay_diagnostics(
         policy_step_id=policy_step.id,
         escape_tier_used=policy_step.id == TORP_ESCAPE_TIER_STEP_ID,
         torp_misalignment_log_penalty=tuning.torp_misalignment_log_penalty,
+        launcher_belief_mass_by_torp_id=mass_by_torp,
+        effective_torp_misalignment_log_penalty_by_torp_id=effective_penalties,
     )
