@@ -1,9 +1,10 @@
 """Pure fleet materialization leg for compute orchestrator interpreter steps.
 
 Phase 1 of two-phase fleet materialization: advance the acquisition ledger one
-turn in the interpreter compute plane without scores inference. Phase 2 is
-``FleetPersistencePolicy.persist`` in ``compute_orchestration``, which applies
-inference and may refresh provenance before storage.
+turn in the interpreter compute plane without scores inference or observation
+ingest. Phase 2 is ``FleetPersistencePolicy.persist`` in ``compute_orchestration``,
+which applies inference, then id bounds and ship observations, and may refresh
+provenance before storage.
 """
 
 from __future__ import annotations

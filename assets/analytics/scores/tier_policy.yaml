@@ -11,7 +11,7 @@
 # belief-set ids only; inference torp escape tier (penultimate step, alpha > 0) admits
 # all eligible torp types.
 fleetInferenceTuning:
-  torpMisalignmentLogPenalty: 50
+  torpMisalignmentLogPenalty: 200
   # componentTechGapLogPenaltyPerLevel: <int>   # #156
 version: 1
 

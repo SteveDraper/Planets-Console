@@ -17,7 +17,10 @@ from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
 from api.analytics.fleet.materialization_provenance import resolve_fleet_materialization_provenance
-from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
+from api.analytics.fleet.observation_ingest import (
+    apply_id_bounds_then_observations,
+    ingest_turn_ship_observations,
+)
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import (
@@ -397,6 +400,13 @@ def _materialize_and_persist_player_turn(
         game_id=game_id,
         perspective=perspective,
         inference_materialization=inference_materialization,
+    )
+    # Delta owns acquisitions + bounds; observations use the same bounds→observe
+    # helper as orchestrator persist (re-tighten is idempotent).
+    apply_id_bounds_then_observations(
+        ledger,
+        turn_context,
+        perspective=perspective,
     )
     provenance = resolve_fleet_materialization_provenance(
         materialize_turn=materialize_turn,

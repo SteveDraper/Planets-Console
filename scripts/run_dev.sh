@@ -5,8 +5,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # Run backend in its own process group so we can kill it and all children (e.g. uvicorn).
+# Forward CLI args (e.g. --config api.compute_diagnostics=true) to serve.
 set -m
-uv run serve &
+uv run serve "$@" &
 BACKEND_PID=$!
 set +m
 

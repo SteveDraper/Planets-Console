@@ -293,6 +293,18 @@ class FleetPersistencePolicy:
                 ),
             )
 
+        # Observations after refine so option sets exist for arbitration. Re-run
+        # id bounds via the canonical helper in case refine created rows
+        # (phase 1 already tightened placeholders).
+        from api.analytics.fleet.observation_ingest import apply_id_bounds_then_observations
+
+        turn_context = FleetTurnContext.from_turn(turn)
+        apply_id_bounds_then_observations(
+            persisted.ledger,
+            turn_context,
+            perspective=scope.perspective,
+        )
+
         # Stamp current materialization version and publish onto result_wire so
         # stream listeners and DependencyOutputs match what put_ledger stores.
         persisted = PersistedFleetLedger(

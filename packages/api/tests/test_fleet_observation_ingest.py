@@ -224,7 +224,20 @@ def test_bounded_placeholder_absorbs_matching_sighting():
             record_id="bounded-placeholder",
             fields=FleetShipRecordFields(
                 ship_id=FleetFieldBounded(operator="lte", value=5),
+                hull=FleetFieldKnown(13),
+                built_turn=FleetFieldKnown(1),
             ),
+            build_option_sets=[
+                FleetBuildOptionSet(
+                    hull_id=13,
+                    engine_id=9,
+                    beam_id=3,
+                    torp_id=6,
+                    beam_count=8,
+                    launcher_count=6,
+                    solution_rank_weight=40,
+                )
+            ],
             last_seen=FleetLastSeen(turn=1, x=200, y=200),
         )
     )
@@ -236,8 +249,65 @@ def test_bounded_placeholder_absorbs_matching_sighting():
     record = ledger.records[0]
     assert record.record_id == "bounded-placeholder"
     assert record.fields.ship_id == FleetFieldKnown(value=3)
-    assert record.events[-1].kind == "sighting"
+    assert [event.kind for event in record.events[-2:]] == ["option_set_match", "sighting"]
+    match_event = record.events[-2]
+    assert match_event.payload["shipId"] == 3
+    assert match_event.payload["optionSetIndex"] == 0
+    assert match_event.payload["solutionRankWeight"] == 40
+    assert match_event.payload["tieBreak"] == "rank_weight"
+    assert match_event.payload["candidateSetSize"] == 1
     assert record.events[-1].payload["shipId"] == 3
+
+
+def test_id_bounds_applied_before_observation_match():
+    """Scoreboard-inferred rows receive bounds before sighting arbitration."""
+    current_turn = single_ship_turn(turn_number=2, ship_id=2, owner_id=8, x=200, y=200)
+    score = replace(
+        current_turn.scores[0],
+        turn=2,
+        ownerid=8,
+        capitalships=2,
+        freighters=0,
+        shipchange=1,
+        freighterchange=0,
+    )
+    current_turn = replace(current_turn, scores=[score])
+    snapshot = ensure_fleet_baseline(628580, 1, current_turn)
+    snapshot.players[0].records.append(
+        FleetShipRecord(
+            record_id="inferred-placeholder",
+            fields=FleetShipRecordFields(
+                ship_id=FleetFieldUnknown(),
+                hull=FleetFieldKnown(13),
+                built_turn=FleetFieldKnown(1),
+            ),
+            build_option_sets=[
+                FleetBuildOptionSet(hull_id=13, solution_rank_weight=20),
+            ],
+            events=[
+                FleetEvidenceEvent(
+                    event_id="evt-placeholder",
+                    kind="scoreboard_delta",
+                    turn=2,
+                    source="scoreboard",
+                    payload={"shipClass": "warship", "warshipDelta": 1, "freighterDelta": 0},
+                )
+            ],
+        )
+    )
+
+    result = ingest_turn_ship_observations(snapshot, current_turn)
+
+    record = next(
+        rec
+        for rec in ledger_for_player(result, 8).records
+        if rec.record_id == "inferred-placeholder"
+    )
+    assert record.fields.ship_id == FleetFieldKnown(2)
+    kinds = [event.kind for event in record.events]
+    assert kinds.index("id_bound_tightened") < kinds.index("option_set_match")
+    observation_kind = "position_update" if "position_update" in kinds else "sighting"
+    assert kinds.index("option_set_match") < kinds.index(observation_kind)
 
 
 def test_compute_max_ship_id_bound_uses_scoreboard_totals(sample_turn):
@@ -349,8 +419,8 @@ def test_partial_sighting_does_not_lock_fog_zero_weapons():
     ]
 
 
-def test_partial_sighting_drops_prior_option_sets_for_other_hulls():
-    """Fog hull lock must not stamp Falcon onto prior Deep Space Scout inference fits."""
+def test_partial_sighting_merges_compatible_inferred_option_sets():
+    """Fog hull lock keeps lock-compatible inferred fits and drops foreign hulls."""
     turn = single_ship_turn(
         turn_number=6,
         ship_id=47,
@@ -379,10 +449,10 @@ def test_partial_sighting_drops_prior_option_sets_for_other_hulls():
             ),
             build_option_sets=[
                 FleetBuildOptionSet(
-                    combo_id="combo_91_1_2_none_4_0",
-                    label="Build Deep Space Scout: 1x StarDrive 1, 4x X-Ray Laser",
+                    combo_id="combo_87_1_2_none_4_0",
+                    label="Build Falcon: 1x StarDrive 1, 4x X-Ray Laser",
                     solution_rank_weight=-350,
-                    hull_id=91,
+                    hull_id=87,
                     engine_id=1,
                     beam_id=2,
                     beam_count=4,
@@ -406,21 +476,25 @@ def test_partial_sighting_drops_prior_option_sets_for_other_hulls():
     result = ingest_turn_ship_observations(snapshot, turn)
 
     record = ledger_for_player(result, 8).records[0]
+    assert record.record_id == "placeholder-warship"
     assert record.fields.ship_id == FleetFieldKnown(value=47)
     assert record.fields.hull == FleetFieldKnown(value=87)
     assert record.fields.engine == FleetFieldUnknown()
     assert record.fields.beams == FleetFieldUnknown()
     assert record.build_option_sets == [
         FleetBuildOptionSet(
+            combo_id="combo_87_1_2_none_4_0",
+            label="Build Falcon: 1x StarDrive 1, 4x X-Ray Laser",
+            solution_rank_weight=-350,
             hull_id=87,
-            engine_id=None,
-            beam_id=None,
-            torp_id=None,
-            beam_count=None,
-            launcher_count=None,
+            engine_id=1,
+            beam_id=2,
+            beam_count=4,
+            launcher_count=0,
         )
     ]
     assert record.display_default_option_set_index == 0
+    assert any(event.kind == "option_set_match" for event in record.events)
 
 
 def test_alibi_from_scoreboard_delta_event_on_record():

@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.models import (
     probability_buckets_from_bin_bounds,
 )
 from api.analytics.military_score_inference.prior_weights_asset import ShipLimitBand
+from api.concepts.races import is_solar_federation
 from api.models.components import Beam, Engine, Hull, Torpedo
 
 IntLogWeightTable: TypeAlias = dict[int, int]
@@ -185,7 +186,7 @@ class PriorWeightsCatalog:
                 field_name=f"{hull_category}.torpedoes",
             )
         if category_tables.slot_fill:
-            composed_weight += _required_log_weight(
+            composed_weight += self._slot_fill_log_weight(
                 category_tables.slot_fill,
                 fill,
                 field_name=f"{hull_category}.slotFill",
@@ -195,6 +196,24 @@ class PriorWeightsCatalog:
             combo_id=combo_id,
             composed_weight=composed_weight,
         )
+
+    def _slot_fill_log_weight(
+        self,
+        slot_fill: SlotFillLogWeightTable,
+        fill: str,
+        *,
+        field_name: str,
+    ) -> int:
+        weight = _required_log_weight(slot_fill, fill, field_name=field_name)
+        if fill != "partial":
+            return weight
+        race_id = self.diagnostics.race_id_used
+        if race_id is None or not is_solar_federation(race_id):
+            return weight
+        # Feds can Super Refit later, so early cheap partial fits are more plausible.
+        # Halve the log-gap from full to partial for this race only.
+        full_weight = _required_log_weight(slot_fill, "full", field_name=field_name)
+        return full_weight + (weight - full_weight) // 2
 
     def probability_buckets_for_action(
         self,

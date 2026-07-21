@@ -177,6 +177,8 @@ def minimal_prior_catalog(
     hull_log_overrides: dict[int, int] | None = None,
     generic_freighter_log_weight: int | None = 0,
     aggregate_bucket_marginal_weights: dict[str, tuple[int, ...]] | None = None,
+    race_id_used: int | None = None,
+    component_tables: dict | None = None,
 ) -> PriorWeightsCatalog:
     return PriorWeightsCatalog(
         diagnostics=PriorWeightsDiagnostics(
@@ -186,7 +188,7 @@ def minimal_prior_catalog(
             game_category_rules_version=2,
             fell_back_to_standard=False,
             ship_limit_band="before_ship_limit",
-            race_id_used=None,
+            race_id_used=race_id_used,
         ),
         _category_log_weights=(
             dict.fromkeys(INFERENCE_HULL_CATEGORIES, 0)
@@ -198,7 +200,9 @@ def minimal_prior_catalog(
             if hull_log_weights_by_category is None
             else hull_log_weights_by_category
         ),
-        _component_tables=_neutral_component_tables(),
+        _component_tables=component_tables
+        if component_tables is not None
+        else _neutral_component_tables(),
         _aggregate_bucket_marginal_weights=aggregate_bucket_marginal_weights
         or complete_test_aggregate_bucket_weights(),
         _combo_log_overrides=combo_log_overrides or {},

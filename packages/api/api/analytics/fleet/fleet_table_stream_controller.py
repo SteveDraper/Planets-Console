@@ -84,6 +84,12 @@ class FleetTableStreamController(
         return AdmissionDispatch(scheduled=scheduled)
 
     def reschedule_player(self, player_id: int) -> bool:
+        """Cancel and re-admit one player without holding ``stream_lock`` across schedule.
+
+        ``dispatch_admission`` may ``orchestrator.submit``, and scores persist can
+        re-enter ``reschedule_player`` via invalidation. Holding ``stream_lock``
+        across that path self-deadlocks (non-reentrant ``Lock``).
+        """
         cancel_run_ids: list[str] = []
         with self.stream_lock:
             old_row = self.scheduled_rows.get(player_id)
@@ -100,19 +106,20 @@ class FleetTableStreamController(
             if player_id in self.scheduled_rows:
                 self.wake_multiplex.set()
                 return True
-            admission = resolve_player_stream_admission(
-                self.persistence,
-                game_id=self.fleet_services.game_id,
-                perspective=self.fleet_services.perspective,
-                turn_number=self.turn.settings.turn,
-                player_id=player_id,
-            )
-            if not self.register_admitted_schedule(player_id, admission):
-                return False
-        self.wake_multiplex.set()
-        return True
+        admission = resolve_player_stream_admission(
+            self.persistence,
+            game_id=self.fleet_services.game_id,
+            perspective=self.fleet_services.perspective,
+            turn_number=self.turn.settings.turn,
+            player_id=player_id,
+        )
+        dispatch = self.dispatch_admission(player_id, admission)
+        if dispatch.schedule_failed:
+            return False
+        return self._install_admission_dispatch(player_id, dispatch)
 
     def reschedule_all_players(self, *, force_schedule: bool = False) -> bool:
+        """Cancel and re-admit every player; schedule/submit outside ``stream_lock``."""
         cancel_run_ids: list[str] = []
         with self.stream_lock:
             for player_id in self.player_ids:
@@ -122,18 +129,48 @@ class FleetTableStreamController(
             self.scheduled_rows.clear()
         for run_id in cancel_run_ids:
             self.scheduler.cancel_player_run(run_id)
+
+        dispatches: list[tuple[int, AdmissionDispatch[ScheduledFleetPlayer]]] = []
+        for player_id in self.player_ids:
+            admission = resolve_player_stream_admission(
+                self.persistence,
+                game_id=self.fleet_services.game_id,
+                perspective=self.fleet_services.perspective,
+                turn_number=self.turn.settings.turn,
+                player_id=player_id,
+                force_schedule=force_schedule,
+            )
+            dispatch = self.dispatch_admission(player_id, admission)
+            if dispatch.schedule_failed:
+                for _, prior in dispatches:
+                    if prior.scheduled is not None:
+                        self.scheduler.cancel_player_run(prior.scheduled.session.run_id)
+                return False
+            dispatches.append((player_id, dispatch))
+
+        for player_id, dispatch in dispatches:
+            if not self._install_admission_dispatch(player_id, dispatch):
+                return False
+        return True
+
+    def _install_admission_dispatch(
+        self,
+        player_id: int,
+        dispatch: AdmissionDispatch[ScheduledFleetPlayer],
+    ) -> bool:
+        """Apply one admission result under ``stream_lock``; cancel raced schedules."""
+        raced_run_id: str | None = None
         with self.stream_lock:
-            for player_id in self.player_ids:
-                admission = resolve_player_stream_admission(
-                    self.persistence,
-                    game_id=self.fleet_services.game_id,
-                    perspective=self.fleet_services.perspective,
-                    turn_number=self.turn.settings.turn,
-                    player_id=player_id,
-                    force_schedule=force_schedule,
-                )
-                if not self.register_admitted_schedule(player_id, admission):
-                    return False
+            if player_id in self.scheduled_rows:
+                if dispatch.scheduled is not None:
+                    raced_run_id = dispatch.scheduled.session.run_id
+            else:
+                if dispatch.wire_events:
+                    self.pending_wire_events.extend(dispatch.wire_events)
+                if dispatch.scheduled is not None:
+                    self.scheduled_rows[player_id] = dispatch.scheduled
+        if raced_run_id is not None:
+            self.scheduler.cancel_player_run(raced_run_id)
         self.wake_multiplex.set()
         return True
 

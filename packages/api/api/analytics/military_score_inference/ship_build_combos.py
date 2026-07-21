@@ -9,10 +9,17 @@ from api.analytics.military_score_inference.ship_build_scoring import (
     ship_build_military_score_delta_2x,
 )
 from api.analytics.military_score_inference.tier_policy import SlotCountMode
+from api.concepts.hulls import GENERIC_FREIGHTER_SENTINEL_HULL_ID
 from api.models.components import Beam, Engine, Hull, Torpedo
 
 GENERIC_FREIGHTER_COMBO_ID = "combo_freighter"
 GENERIC_ZERO_MILITARY_SCORE_LABEL = "Freighter"
+
+__all__ = [
+    "GENERIC_FREIGHTER_COMBO_ID",
+    "GENERIC_ZERO_MILITARY_SCORE_LABEL",
+    "is_generic_zero_military_score_combo_id",
+]
 
 
 def is_generic_zero_military_score_combo_id(combo_id: str) -> bool:
@@ -98,7 +105,7 @@ def _generic_freighter_combo(
 ) -> ShipBuildCombo:
     return ShipBuildCombo(
         combo_id=GENERIC_FREIGHTER_COMBO_ID,
-        hull_id=0,
+        hull_id=GENERIC_FREIGHTER_SENTINEL_HULL_ID,
         engine_id=0,
         beam_id=None,
         torp_id=None,

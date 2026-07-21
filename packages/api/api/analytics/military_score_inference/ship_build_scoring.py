@@ -14,7 +14,9 @@ class DefaultBuildComponents:
 
 
 def is_military_hull(hull: Hull) -> bool:
-    return hull.beams > 0 or hull.launchers > 0 or hull.fighterbays > 0
+    from api.concepts.hulls import hull_has_weapon_slots
+
+    return hull_has_weapon_slots(hull)
 
 
 def ship_build_counts_as_warship(

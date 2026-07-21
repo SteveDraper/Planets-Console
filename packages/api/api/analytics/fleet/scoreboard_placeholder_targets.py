@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from api.concepts.accelerated_scoreboard import (
+    HOMEBASE_STARTING_FREIGHTER_ENGINE_ID,
     HOMEBASE_STARTING_FREIGHTER_HULL_ID,
     accelerated_inference_segments,
     is_first_reliable_scoreboard_turn,
@@ -25,6 +26,10 @@ class ScoreboardPlaceholderTarget:
 
 def homeworld_starting_freighter_hull_id() -> int:
     return HOMEBASE_STARTING_FREIGHTER_HULL_ID
+
+
+def homeworld_starting_freighter_engine_id() -> int:
+    return HOMEBASE_STARTING_FREIGHTER_ENGINE_ID
 
 
 def homeworld_starting_inventory_counts(turn: TurnInfo) -> tuple[int, int]:

@@ -5,8 +5,8 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING
 
+from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds_if_computable
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_player_inferred_acquisitions
-from api.analytics.fleet.observation_ingest import ingest_player_ship_observations
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import FleetAcquisitionLedger
 from api.analytics.turn_roster import iter_turn_players
@@ -37,14 +37,19 @@ def apply_fleet_turn_delta_for_player(
     perspective: int,
     inference_materialization: FleetInferenceMaterialization | None = None,
 ) -> FleetAcquisitionLedger:
-    """Apply turn-T fleet evidence deltas for one player ledger."""
-    turn = turn_context.turn
+    """Apply turn-T acquisition deltas and id bounds for one player ledger.
+
+    Order: scoreboard placeholders (+ optional scores refine) → id bounds.
+    Observation matching is owned by ``apply_id_bounds_then_observations``:
+    orchestrator phase 1 stops here; phase 2 persist and sync/gap-fill call
+    that helper after refine (or after this delta when refine is inline).
+    """
     ingest_player_inferred_acquisitions(
         ledger,
-        turn,
+        turn_context.turn,
         game_id=game_id,
         perspective=perspective,
         inference_materialization=inference_materialization,
     )
-    ingest_player_ship_observations(ledger, turn_context, perspective=perspective)
+    tighten_inferred_ship_id_bounds_if_computable(ledger, turn_context)
     return ledger
