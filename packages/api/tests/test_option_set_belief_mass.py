@@ -212,7 +212,7 @@ def test_max_tech_known_counts_even_when_no_set_clears_threshold(sample_turn):
 
 def test_option_set_mass_threshold_in_tier_policy_tuning():
     tuning = resolve_fleet_inference_tuning()
-    assert tuning.option_set_mass_threshold == 0.25
+    assert tuning.option_set_mass_threshold == DEFAULT_OPTION_SET_MASS_THRESHOLD
 
 
 def test_brynhild_style_weak_tubes_keep_admission_but_near_full_misalignment():
