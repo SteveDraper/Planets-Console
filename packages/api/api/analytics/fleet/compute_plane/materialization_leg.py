@@ -1,9 +1,10 @@
 """Pure fleet materialization leg for compute orchestrator interpreter steps.
 
 Phase 1 of two-phase fleet materialization: advance the acquisition ledger one
-turn in the interpreter compute plane without scores inference. Phase 2 is
-``FleetPersistencePolicy.persist`` in ``compute_orchestration``, which applies
-inference and may refresh provenance before storage.
+turn in the interpreter compute plane without scores inference or observation
+ingest. Phase 2 is ``FleetPersistencePolicy.persist`` in ``compute_orchestration``,
+which applies inference, then id bounds and ship observations, and may refresh
+provenance before storage.
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> StepResult:
         game_id=int(job_wire["gameId"]),
         perspective=int(job_wire["perspective"]),
         inference_materialization=None,  # phase 2 persist hook owns scores inference
+        apply_observations=False,  # observations run after refine in persist
     )
     provenance = fleet_materialization_provenance_from_json(job_wire["provenanceWire"])
     persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)

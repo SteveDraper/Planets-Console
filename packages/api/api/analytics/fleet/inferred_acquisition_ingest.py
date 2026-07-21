@@ -9,9 +9,9 @@ from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
+    FleetBuildOptionSet,
     FleetEvidenceEvent,
     FleetFieldKnown,
-    FleetFieldUnknown,
     FleetShipRecord,
     FleetShipRecordFields,
     FleetTurnSnapshot,
@@ -136,12 +136,12 @@ def _ensure_starting_inventory_rows(
         return
     existing = _homeworld_starting_inventory_rows(ledger, shell_turn, ship_class=ship_class)
     for _ in range(expected_count - len(existing)):
+        fields, option_sets = _starting_inventory_fields_and_option_sets(ship_class)
         record = FleetShipRecord(
             record_id=str(uuid.uuid4()),
-            fields=FleetShipRecordFields(
-                built_turn=FleetFieldKnown(1),
-                hull=_starting_inventory_hull_field(ship_class),
-            ),
+            fields=fields,
+            build_option_sets=option_sets,
+            display_default_option_set_index=0,
         )
         append_fleet_evidence_event(
             record,
@@ -174,16 +174,41 @@ def _homeworld_starting_inventory_rows(
     return rows
 
 
-def _starting_inventory_hull_field(
+def _starting_inventory_fields_and_option_sets(
     ship_class: FleetShipClass,
-) -> FleetFieldKnown | FleetFieldUnknown:
+) -> tuple[FleetShipRecordFields, list[FleetBuildOptionSet]]:
+    """Field constraints and option sets for homeworld starting inventory rows.
+
+    Freighters are known MDSF + Transwarp (Nu starter fit) so observation match
+    can use a standard lock-compatible option set rather than an empty pool.
+    """
     if ship_class == "freighter":
         from api.analytics.fleet.scoreboard_placeholder_targets import (
+            homeworld_starting_freighter_engine_id,
             homeworld_starting_freighter_hull_id,
         )
 
-        return FleetFieldKnown(homeworld_starting_freighter_hull_id())
-    return FleetFieldUnknown()
+        hull_id = homeworld_starting_freighter_hull_id()
+        engine_id = homeworld_starting_freighter_engine_id()
+        return (
+            FleetShipRecordFields(
+                built_turn=FleetFieldKnown(1),
+                hull=FleetFieldKnown(hull_id),
+                engine=FleetFieldKnown(engine_id),
+            ),
+            [
+                FleetBuildOptionSet(
+                    hull_id=hull_id,
+                    engine_id=engine_id,
+                    beam_count=0,
+                    launcher_count=0,
+                )
+            ],
+        )
+    return (
+        FleetShipRecordFields(built_turn=FleetFieldKnown(1)),
+        [],
+    )
 
 
 def _homeworld_starting_inventory_event(

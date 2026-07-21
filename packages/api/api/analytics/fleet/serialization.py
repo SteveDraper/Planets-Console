@@ -180,8 +180,23 @@ def fleet_build_option_set_to_json(option_set: FleetBuildOptionSet) -> dict[str,
 
 
 def _resolved_fleet_component_id(component_id: int) -> int | None:
-    """Map solver sentinel ids (e.g. generic freighter hull 0) to unknown on the wire."""
+    """Map non-positive solver component ids to unknown on fleet option sets."""
     return component_id if component_id > 0 else None
+
+
+def _resolved_fleet_hull_id(hull_id: int) -> int | None:
+    """Preserve generic freighter sentinel; map other non-positive ids to unknown.
+
+    ``GENERIC_FREIGHTER_HULL_ID`` (0) is a documented fleet/solver pseudo-id meaning
+    "some freighter hull" -- not a host catalog id. It must survive on fleet option
+    sets so observation match can recognize generic freighter inference without
+    relying on the display ``label``.
+    """
+    from api.concepts.hulls import GENERIC_FREIGHTER_HULL_ID
+
+    if hull_id == GENERIC_FREIGHTER_HULL_ID:
+        return GENERIC_FREIGHTER_HULL_ID
+    return hull_id if hull_id > 0 else None
 
 
 def fleet_build_option_set_from_inference_ship_build(
@@ -201,7 +216,7 @@ def fleet_build_option_set_from_inference_ship_build(
         combo_id=combo_id,
         label=ship_build.label,
         solution_rank_weight=solution_rank_weight,
-        hull_id=_resolved_fleet_component_id(ship_build.hull_id),
+        hull_id=_resolved_fleet_hull_id(ship_build.hull_id),
         engine_id=_resolved_fleet_component_id(ship_build.engine_id),
         beam_id=_resolved_fleet_component_id(ship_build.beam_id)
         if ship_build.beam_id is not None

@@ -369,7 +369,7 @@ def test_refine_preserves_full_information_observation_option_set(sample_turn):
         ),
     )
     # Full information: perspective == ship owner. Seed a bounded placeholder the
-    # sighting will absorb (same-turn Unknown ship_id does not match).
+    # sighting will absorb (requires lock-compatible option sets for arbitration).
     snapshot = ensure_fleet_baseline(628580, player_id, turn)
     ledger_for_player(snapshot, player_id).records.append(
         FleetShipRecord(
@@ -378,6 +378,17 @@ def test_refine_preserves_full_information_observation_option_set(sample_turn):
                 ship_id=FleetFieldBounded(operator="lte", value=5),
                 built_turn=FleetFieldKnown(turn_number),
             ),
+            build_option_sets=[
+                FleetBuildOptionSet(
+                    hull_id=13,
+                    engine_id=9,
+                    beam_id=3,
+                    torp_id=6,
+                    beam_count=8,
+                    launcher_count=6,
+                    solution_rank_weight=10,
+                )
+            ],
             events=[
                 FleetEvidenceEvent(
                     event_id="evt-acq",
@@ -506,6 +517,9 @@ def test_refine_preserves_partial_observation_hull_and_fills_unknown_axes(sample
                 ship_id=FleetFieldBounded(operator="lte", value=5),
                 built_turn=FleetFieldKnown(turn_number),
             ),
+            build_option_sets=[
+                FleetBuildOptionSet(hull_id=13, solution_rank_weight=10),
+            ],
             events=[
                 FleetEvidenceEvent(
                     event_id="evt-acq",
@@ -553,7 +567,7 @@ def test_refine_drops_option_sets_for_hulls_other_than_observed(sample_turn):
     turn_number = sample_turn.settings.turn
     fog_ship_turn = single_ship_turn(
         turn_number=turn_number,
-        ship_id=47,
+        ship_id=10,
         owner_id=player_id,
         x=200,
         y=200,
@@ -621,9 +635,12 @@ def test_refine_drops_option_sets_for_hulls_other_than_observed(sample_turn):
         FleetShipRecord(
             record_id="matched-placeholder",
             fields=FleetShipRecordFields(
-                ship_id=FleetFieldBounded(operator="lte", value=50),
+                ship_id=FleetFieldBounded(operator="lte", value=15),
                 built_turn=FleetFieldKnown(turn_number),
             ),
+            build_option_sets=[
+                FleetBuildOptionSet(hull_id=87),
+            ],
             events=[
                 FleetEvidenceEvent(
                     event_id="evt-acq",
@@ -1040,6 +1057,7 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
 
 
 def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
+    """Generic freighter keeps hullId 0 sentinel; other zero component ids stay omitted."""
     turn = _turn_with_score_delta(turn_number=111, owner_id=8, freighterchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     persistence.put_row(
@@ -1082,13 +1100,13 @@ def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
 
     record = ledger_for_player(snapshot, 8).records[0]
     assert record.build_option_sets[0].combo_id == "combo_freighter"
-    assert record.build_option_sets[0].hull_id is None
+    assert record.build_option_sets[0].hull_id == 0
     assert record.build_option_sets[0].engine_id is None
 
     wire = fleet_turn_snapshot_to_compute_wire(snapshot)
     option_set = wire["players"][0]["records"][0]["buildOptionSets"][0]
     assert option_set["label"] == "Freighter"
-    assert "hullId" not in option_set
+    assert option_set["hullId"] == 0
     assert "engineId" not in option_set
 
 
@@ -1378,6 +1396,15 @@ def test_accelerated_first_reliable_arlowat_starting_mdsf_and_freighter_id_bound
     starting_rows = _homeworld_starting_freighter_rows(ledger, shell_turn=3)
     assert len(starting_rows) == 1
     assert starting_rows[0].fields.hull == FleetFieldKnown(16)
+    assert starting_rows[0].fields.engine == FleetFieldKnown(9)
+    assert starting_rows[0].build_option_sets == [
+        FleetBuildOptionSet(
+            hull_id=16,
+            engine_id=9,
+            beam_count=0,
+            launcher_count=0,
+        )
+    ]
     assert _ship_id_lte_bound(starting_rows[0]) == 11
 
     inferred_freighters = [

@@ -293,6 +293,24 @@ class FleetPersistencePolicy:
                 ),
             )
 
+        # Observations after refine so option sets exist for arbitration. Id bounds
+        # again in case refine created rows (normally phase 1 already tightened).
+        from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds
+        from api.analytics.fleet.observation_ingest import ingest_player_ship_observations
+
+        turn_context = FleetTurnContext.from_turn(turn)
+        if turn_context.max_ship_id_bound is not None:
+            tighten_inferred_ship_id_bounds(
+                persisted.ledger,
+                turn,
+                shell_turn=turn.settings.turn,
+            )
+        ingest_player_ship_observations(
+            persisted.ledger,
+            turn_context,
+            perspective=scope.perspective,
+        )
+
         # Stamp current materialization version and publish onto result_wire so
         # stream listeners and DependencyOutputs match what put_ledger stores.
         persisted = PersistedFleetLedger(

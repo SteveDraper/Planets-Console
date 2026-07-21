@@ -118,10 +118,21 @@ When a sighting of ship id `S` arrives (owner = ledger player), process sighting
 2. **Else candidate pool** -- active rows where all of the following hold:
    - id constraint **allows** `S` (e.g. `lte maxId`; not a different known id)
    - no prior direct observation (`sighting` / `position_update`) -- unlinked acquisitions only
-   - at least one **lock-compatible** **fleet build option set** (positively observed axes must agree; fog-of-war zeros are not locks). Empty `buildOptionSets` are not eligible.
-3. **Select** among the pool: maximize the matching set's **inference solution rank weight** (`solutionRankWeight`). Per row, use the max weight among its lock-compatible sets (that set is the matched index). Ties: earliest known `builtTurn`, then stable ledger order. FIFO is a tie-break only -- not the primary rule.
-4. **On match:** append `option_set_match` (record `shipId`, `optionSetIndex`, `solutionRankWeight`, tie-break reason, candidate-set size) then ordinary `sighting` / `position_update`; set `shipId` to **known** `S`; collapse **observation-reliable** fields and apply observation locks to option sets as today. Never delete prior events; do not change disposition -- support future **fleet reconciliation correction**.
+   - at least one **match-eligible** **fleet build option set** (see match kinds below). Empty `buildOptionSets` are not eligible.
+3. **Select** among the pool by match-kind preference, then maximize the matching set's **inference solution rank weight** (`solutionRankWeight`). Per row, use the best eligible set (kind first, then weight). Ties within a kind: earliest known `builtTurn`, then stable ledger order. FIFO is a tie-break only -- not the primary rule.
+
+**Match kinds** (higher preference first):
+
+| Kind | When |
+|------|------|
+| `standard` | Option set passes ordinary observation locks (positively observed axes; fog zeros are not locks) |
+| `generic_freighter` | Option set hull is the **generic freighter hull sentinel** (`hullId` **0**, not a host hull id -- "some freighter"); other axes lock-compatible; observed hull is a true freighter (catalog: no beam/tube/bay slots) |
+| `fed_refit` | **Solar Federation only** (`raceid` 1): same generic freighter sentinel may match **any** observed hull (Super Refit can arm an unarmed military build later). Always a fallback -- never preferred over `standard` or `generic_freighter` when those are available |
+
+4. **On match:** append `option_set_match` (record `shipId`, `optionSetIndex`, `solutionRankWeight`, `matchKind`, tie-break reason, candidate-set size) then ordinary `sighting` / `position_update`; set `shipId` to **known** `S`; collapse **observation-reliable** fields and apply observation locks to option sets as today. Never delete prior events; do not change disposition -- support future **fleet reconciliation correction**.
 5. **No match:** new **fleet observed ship** row. A sole id-bound candidate with incompatible option sets must not be force-merged.
+
+**Ordering:** scores refine must run **before** observation matching on the turn so inferred option sets exist for arbitration. Orchestrator phase 1 creates placeholders (and id bounds) only; phase 2 persist refines, then observes. Sync/gap-fill paths refine then observe in one delta.
 
 Global max-weight assignment across same-turn sightings is out of scope for v1.
 
@@ -134,7 +145,7 @@ Global max-weight assignment across same-turn sightings is out of scope for v1.
 
 Sequential host ship id allocation: if turn `N-1` had `X` ships globally and turn `N` had `Y` builds, `maxId <= X + Y` (refine when sighting fixes id).
 
-**Ordering invariant:** when a max ship-id bound is computable for the shell turn (scoreboard totals present), apply id bounds to scoreboard and homeworld inferred acquisitions **before** observation matching on that turn. Unconstrained `shipId` on those rows while a bound was computable is invalid -- not a legitimate observation-merge path. (Implementation today may still tighten after sightings; [#120](https://github.com/SteveDraper/Planets-Console/issues/120) moves bounds ahead of match.)
+**Ordering invariant:** when a max ship-id bound is computable for the shell turn (scoreboard totals present), apply id bounds to scoreboard and homeworld inferred acquisitions **before** observation matching on that turn. Unconstrained `shipId` on those rows while a bound was computable is invalid -- not a legitimate observation-merge path. Scores refine also runs before observation so option sets exist for arbitration (orchestrator: refine in persist, then observe).
 
 On the first reliable accelerated row (`turn == acceleratedturns`), apply **built-turn-aware** bounds when tightening inferred rows on that shell turn:
 
