@@ -15,9 +15,6 @@ from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
     InferenceHullCategory,
 )
-from api.concepts.inference_probability_scale import (
-    INFERENCE_PROBABILITY_WEIGHT_SCALE,
-)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     ProbabilityBinBounds,
@@ -53,6 +50,9 @@ from api.analytics.military_score_inference.torp_load_prior_pooling import (
     any_torp_load_histogram_for_band,
 )
 from api.concepts.game_category import GameCategory
+from api.concepts.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.models.game import GameSettings
 
 _GENERIC_FREIGHTER_HULL_PRIOR_KEY = "generic_freighter"
