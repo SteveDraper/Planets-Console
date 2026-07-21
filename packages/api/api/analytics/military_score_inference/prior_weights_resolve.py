@@ -15,7 +15,7 @@ from api.analytics.military_score_inference.hull_category import (
     INFERENCE_HULL_CATEGORIES,
     InferenceHullCategory,
 )
-from api.analytics.military_score_inference.inference_probability_scale import (
+from api.concepts.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.models import (

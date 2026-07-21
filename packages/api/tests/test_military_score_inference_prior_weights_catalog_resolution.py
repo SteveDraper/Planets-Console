@@ -11,7 +11,7 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     iter_aggregate_action_slots,
 )
 from api.analytics.military_score_inference.hull_category import INFERENCE_HULL_CATEGORIES
-from api.analytics.military_score_inference.inference_probability_scale import (
+from api.concepts.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.prior_weights_asset import (

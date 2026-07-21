@@ -8,7 +8,7 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     SHIP_TORPS_LOADED_ACTION_PREFIX,
     lookup_aggregate_action_spec,
 )
-from api.analytics.military_score_inference.inference_probability_scale import (
+from api.concepts.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.models import (

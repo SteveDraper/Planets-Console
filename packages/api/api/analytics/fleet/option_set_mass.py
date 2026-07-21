@@ -13,7 +13,7 @@ from collections.abc import Iterable, Sequence
 
 from api.analytics.fleet.field_constraints import known_positive_component_id
 from api.analytics.fleet.types import FleetBuildOptionSet, FleetShipRecord
-from api.analytics.military_score_inference.inference_probability_scale import (
+from api.concepts.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 

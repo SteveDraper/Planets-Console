@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from api.analytics.military_score_inference.inference_probability_scale import (
+from api.concepts.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 

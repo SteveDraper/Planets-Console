@@ -28,7 +28,7 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
     overlay_from_fleet_records,
     torp_load_action_id,
 )
-from api.analytics.military_score_inference.inference_probability_scale import (
+from api.concepts.inference_probability_scale import (
     INFERENCE_PROBABILITY_WEIGHT_SCALE,
 )
 from api.analytics.military_score_inference.tier_policy import (
