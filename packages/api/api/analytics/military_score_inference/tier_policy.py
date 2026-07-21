@@ -551,9 +551,7 @@ def parse_fleet_inference_tuning(document: dict[str, Any]) -> FleetInferenceTuni
             "tier policy fleetInferenceTuning.torpMisalignmentLogPenalty must be a "
             "non-negative integer"
         )
-    raw_threshold = raw_tuning.get(
-        "optionSetMassThreshold", DEFAULT_OPTION_SET_MASS_THRESHOLD
-    )
+    raw_threshold = raw_tuning.get("optionSetMassThreshold", DEFAULT_OPTION_SET_MASS_THRESHOLD)
     if isinstance(raw_threshold, bool) or not isinstance(raw_threshold, (int, float)):
         raise ValueError(
             "tier policy fleetInferenceTuning.optionSetMassThreshold must be a number in [0, 1]"
