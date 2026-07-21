@@ -10,11 +10,11 @@ from api.models.components import Hull
 
 # Solver / fleet sentinel: not a host hull id. Means "some freighter hull"
 # (no weapon slots). Preserved on fleet build option sets as hullId 0.
-GENERIC_FREIGHTER_HULL_ID = 0
+GENERIC_FREIGHTER_SENTINEL_HULL_ID = 0
 
 
-def is_generic_freighter_hull_id(hull_id: int | None) -> bool:
-    return hull_id == GENERIC_FREIGHTER_HULL_ID
+def is_generic_freighter_sentinel_hull_id(hull_id: int | None) -> bool:
+    return hull_id == GENERIC_FREIGHTER_SENTINEL_HULL_ID
 
 
 def hull_has_weapon_slots(hull: Hull) -> bool:

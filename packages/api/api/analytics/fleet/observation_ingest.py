@@ -31,7 +31,7 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
 )
-from api.concepts.hulls import hull_is_freighter, is_generic_freighter_hull_id
+from api.concepts.hulls import hull_is_freighter, is_generic_freighter_sentinel_hull_id
 from api.concepts.races import is_solar_federation
 from api.models.components import Hull
 from api.models.game import TurnInfo
@@ -462,7 +462,7 @@ def _option_set_match_kind(
 ) -> OptionSetMatchKind | None:
     if option_set_compatible_with_locks(option_set, observation_locks):
         return "standard"
-    if not is_generic_freighter_hull_id(option_set.hull_id):
+    if not is_generic_freighter_sentinel_hull_id(option_set.hull_id):
         return None
     # Generic freighter sentinel: ignore hull lock; require other axes compatible.
     locks_without_hull = replace(observation_locks, hull_id=None)
