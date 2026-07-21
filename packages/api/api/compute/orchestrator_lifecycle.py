@@ -95,6 +95,12 @@ class OrchestratorLifecycleMixin:
         nodes (no table-stream controller). Force-freshing the declared dependency
         reopens the ENSURE edge; when it completes, readiness promotes this node.
         Persist-deferred is a real dependency wait -- not soft ``parked``.
+
+        Graft ``recovery.dependency_scope`` onto ``node.dependency_scopes`` when the
+        plan-time ENSURE walk omitted it (e.g. dependency already satisfied when the
+        dependent was planned). Without that edge, dependency terminal completion
+        never refreshes this node and ``force_fresh_attach`` alone leaves it stuck
+        in ``waiting_deps`` (0% CPU hang).
         """
         priority_band = node.priority_band
         bundle = node.bundle
@@ -103,6 +109,11 @@ class OrchestratorLifecycleMixin:
                 return
             prior_step_index = self._reset_for_requeue(node)
             node.error = None
+            if recovery.dependency_scope not in node.dependency_scopes:
+                node.dependency_scopes = (
+                    *node.dependency_scopes,
+                    recovery.dependency_scope,
+                )
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
             self._metrics.epoch_discards += 1

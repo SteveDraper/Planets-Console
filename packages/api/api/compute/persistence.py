@@ -32,9 +32,9 @@ class PersistDeferredError(Exception):
     """Raised from ``PersistencePolicy.persist`` when the write must wait on a dependency.
 
     The orchestrator demotes the node to ``waiting_deps`` (not ``failed``, not
-    soft ``parked``) and, when ``recovery.force_fresh`` is true, submits
-    ``recovery.dependency_scope`` so a durable dependency close can wake
-    rematerialization.
+    soft ``parked``), grafts ``recovery.dependency_scope`` onto the node's
+    dependency edges when missing, and, when ``recovery.force_fresh`` is true,
+    submits that scope so a durable dependency close can wake rematerialization.
     """
 
     def __init__(self, message: str, *, recovery: PersistDependencyRecovery) -> None:

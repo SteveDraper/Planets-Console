@@ -66,6 +66,12 @@ class OrchestratorSubmissionMixin:
                         request=request,
                     )
                     self._maybe_wake_parked_node(existing)
+                    # Parked wake is handled above. ``waiting_deps`` / ``ready`` still
+                    # need a readiness refresh when deps are already terminal (e.g.
+                    # evidence-close force_fresh after scores completed but the
+                    # dependent missed the dependency-terminal callback).
+                    if existing.state in {"waiting_deps", "ready"}:
+                        self._refresh_node_readiness(existing)
                 handle = self._attach_to_existing(existing, request)
                 pending_inline, pending_pool = self._dispatch()
             else:
