@@ -182,6 +182,19 @@ def test_misalignment_penalty_reduces_active_bin_weights():
     assert penalized[1].marginal_weight == buckets[1].marginal_weight - 50
 
 
+def test_misalignment_penalty_subtracts_from_negative_log_probability_weights():
+    """Production bins are SCALE*log(p) (<= 0); do not clamp toward zero."""
+    buckets = probability_buckets_for_test_action(
+        "ship_torps_loaded_1",
+        marginal_weights=(-22, -181, -347, -531),
+    )
+    penalized = apply_torp_misalignment_penalty_to_buckets(buckets, penalty=50)
+    assert penalized[0].marginal_weight == -22
+    assert penalized[1].marginal_weight == -231
+    assert penalized[2].marginal_weight == -397
+    assert penalized[3].marginal_weight == -581
+
+
 def test_non_belief_torp_gets_penalty_on_escape_tier(synthetic_catalog_context):
     from api.models.components import Torpedo
 

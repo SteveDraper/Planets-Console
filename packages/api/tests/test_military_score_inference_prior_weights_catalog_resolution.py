@@ -474,3 +474,76 @@ def test_combo_probability_weight_differs_by_component_likelihood(sample_turn):
     )
     assert likely != unlikely
     assert likely > unlikely
+
+
+def test_federation_halves_partial_slot_fill_penalty():
+    from api.concepts.races import SOLAR_FEDERATION_RACE_ID, EVIL_EMPIRE_RACE_ID
+    from api.models.components import Engine, Beam
+    from tests.fixtures.military_score_inference_prior_weights import (
+        beam_ship_hull,
+        minimal_prior_catalog,
+        _neutral_component_tables,
+    )
+
+    tables = {
+        category: replace(shell, slot_fill={"full": -2, "partial": -417})
+        for category, shell in _neutral_component_tables().items()
+    }
+
+    hull = beam_ship_hull()  # 2 beam slots
+    engine = Engine(
+        id=1,
+        name="StarDrive 1",
+        cost=1,
+        tritanium=1,
+        duranium=1,
+        molybdenum=1,
+        techlevel=1,
+        warp1=1,
+        warp2=0,
+        warp3=0,
+        warp4=0,
+        warp5=0,
+        warp6=0,
+        warp7=0,
+        warp8=0,
+        warp9=0,
+    )
+    beam = Beam(
+        id=1,
+        name="Laser",
+        cost=1,
+        tritanium=1,
+        duranium=0,
+        molybdenum=0,
+        mass=1,
+        techlevel=1,
+        crewkill=1,
+        damage=1,
+    )
+    kwargs = dict(
+        hull=hull,
+        engine=engine,
+        beam=beam,
+        torpedo=None,
+        beam_count=1,
+        launcher_count=0,
+    )
+
+    non_fed = minimal_prior_catalog(
+        race_id_used=EVIL_EMPIRE_RACE_ID,
+        component_tables=tables,
+    )
+    fed = minimal_prior_catalog(
+        race_id_used=SOLAR_FEDERATION_RACE_ID,
+        component_tables=tables,
+    )
+    non_fed_weight = non_fed.combo_probability_weight(combo_id="n", **kwargs)
+    fed_weight = fed.combo_probability_weight(combo_id="f", **kwargs)
+    # Gap full→partial is -415; Fed uses half (-208) so Fed is 207 less negative.
+    assert fed_weight - non_fed_weight == 207
+
+    full_kwargs = {**kwargs, "beam_count": hull.beams}
+    assert fed.combo_probability_weight(combo_id="ff", **full_kwargs) == non_fed.combo_probability_weight(
+        combo_id="fn", **full_kwargs
+    )

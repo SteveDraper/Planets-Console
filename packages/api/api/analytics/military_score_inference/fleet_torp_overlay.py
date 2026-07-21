@@ -170,10 +170,11 @@ def apply_torp_misalignment_penalty_to_buckets(
         if bucket.lower_count == 0 and bucket.upper_count == 0:
             adjusted.append(bucket)
             continue
+        # Log-probability weights are <= 0; subtract the penalty without a floor.
         adjusted.append(
             replace(
                 bucket,
-                marginal_weight=max(0, bucket.marginal_weight - penalty),
+                marginal_weight=bucket.marginal_weight - penalty,
             )
         )
     return tuple(adjusted)
