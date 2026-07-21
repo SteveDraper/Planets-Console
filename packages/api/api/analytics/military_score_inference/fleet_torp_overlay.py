@@ -60,13 +60,35 @@ class FleetLauncherBeliefSet:
 
 @dataclass(frozen=True)
 class FleetTorpOverlay:
-    """Optional per-solve fleet torp overlay input."""
+    """Optional per-solve fleet torp overlay input.
+
+    Misalignment ranking uses belief mass, not set membership alone. Invariant:
+    when ``enabled`` and ``belief_set`` is non-empty, an **empty**
+    ``launcher_belief_mass_by_torp_id`` means membership-only evidence and is
+    seeded to hard mass 1.0 for every belief-set id. A **non-empty** mass map
+    is authoritative (missing keys stay mass 0 -- soft-mass overlays where
+    admission union may exceed high-mass ids).
+    """
 
     belief_set: FleetLauncherBeliefSet
     enabled: bool = True
-    # Player-level launcher belief mass per torp id (hard or soft). Missing ids
-    # are mass 0. ``from_torp_ids`` seeds mass 1 for each id (synthetic hard).
+    # Player-level launcher belief mass per torp id (hard or soft). Empty map
+    # with a non-empty enabled belief set is seeded to 1.0 per id in
+    # ``__post_init__``. Non-empty maps are left as provided; missing ids are
+    # mass 0. ``from_torp_ids`` also seeds mass 1 explicitly (synthetic hard).
     launcher_belief_mass_by_torp_id: Mapping[int, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (
+            self.enabled
+            and not self.belief_set.is_empty
+            and not self.launcher_belief_mass_by_torp_id
+        ):
+            object.__setattr__(
+                self,
+                "launcher_belief_mass_by_torp_id",
+                dict.fromkeys(self.belief_set.torp_ids, 1.0),
+            )
 
     @staticmethod
     def disabled() -> FleetTorpOverlay:

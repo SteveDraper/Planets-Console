@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
     FleetTorpOverlay,
     admitted_torp_ids_for_policy_step,
     apply_torp_misalignment_penalty_to_buckets,
+    effective_torp_misalignment_log_penalty,
     launcher_belief_set_from_composition,
     launcher_belief_set_from_fleet_records,
     torp_load_action_id,
@@ -33,6 +34,7 @@ from api.analytics.military_score_inference.ship_build_combos import ship_build_
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import (
     TORP_ESCAPE_TIER_STEP_ID,
+    FleetInferenceTuning,
     InferenceTierPolicyStep,
     resolve_fleet_inference_tuning,
     resolve_tier_policies,
@@ -397,3 +399,22 @@ def test_admitted_torp_ids_respects_option_set_union():
         overlay=overlay,
     )
     assert admitted == frozenset({4, 8})
+
+
+def test_belief_set_only_construction_seeds_hard_mass():
+    """Empty mass map + non-empty belief ⇒ hard mass 1.0; soft maps stay authoritative."""
+    overlay = FleetTorpOverlay(belief_set=FleetLauncherBeliefSet(frozenset({4, 8})))
+    assert overlay.belief_mass_for_torp_id(4) == 1.0
+    assert overlay.belief_mass_for_torp_id(8) == 1.0
+    assert overlay.belief_mass_for_torp_id(1) == 0.0
+    tuning = FleetInferenceTuning(torp_misalignment_log_penalty=200)
+    assert effective_torp_misalignment_log_penalty(torp_id=4, overlay=overlay, tuning=tuning) == 0
+    assert effective_torp_misalignment_log_penalty(torp_id=8, overlay=overlay, tuning=tuning) == 0
+    assert effective_torp_misalignment_log_penalty(torp_id=1, overlay=overlay, tuning=tuning) == 200
+
+    soft = FleetTorpOverlay(
+        belief_set=FleetLauncherBeliefSet(frozenset({4, 8})),
+        launcher_belief_mass_by_torp_id={4: 1.0, 8: 0.1},
+    )
+    assert soft.belief_mass_for_torp_id(8) == 0.1
+    assert effective_torp_misalignment_log_penalty(torp_id=8, overlay=soft, tuning=tuning) == 180
