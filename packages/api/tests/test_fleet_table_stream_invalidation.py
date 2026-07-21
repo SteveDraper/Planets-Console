@@ -576,3 +576,123 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
 
     _end_open_fleet_table_stream(scope, scheduler)
     thread.join(timeout=2.0)
+
+
+def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+    request,
+):
+    """Schedule under stream_lock must not re-enter reschedule via invalidation.
+
+    Production hang (game 680224): ``reschedule_player`` held ``stream_lock`` across
+    ``register_admitted_schedule`` → ``schedule_fleet_player_run`` → orchestrator
+    submit/persist. Scores persist then called ``on_inference_evidence_updated`` →
+    ``reschedule_fleet_table_player`` → ``reschedule_player``, which blocked forever
+    on the same non-reentrant lock (0% CPU; turn-6 workers stuck; turn-8 waiting_deps).
+    """
+    from api.analytics.fleet.compute_services import (
+        FleetComputeServices,
+        build_ephemeral_fleet_compute_services,
+    )
+    from api.analytics.fleet.fleet_table_player_run import (
+        FleetPlayerStreamSession,
+        ScheduledFleetPlayer,
+    )
+    from api.analytics.fleet.fleet_table_stream_controller import FleetTableStreamController
+    from api.analytics.fleet.fleet_table_stream_rows import SchedulePlayerAdmission
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_fleet_table_stream_registry_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    scheduler = FleetTableStreamScheduler()
+    persistence = FleetSnapshotPersistenceService(memory_backend)
+    ephemeral = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    fleet_services = FleetComputeServices(
+        persistence=persistence,
+        game_id=628580,
+        perspective=1,
+        load_turn=ephemeral.load_turn,
+        inference_materialization=ephemeral.inference_materialization,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    scope = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope)
+    controller = FleetTableStreamController(
+        scope=scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(player_id,),
+        scheduler=scheduler,
+        fleet_services=fleet_services,
+        persistence=persistence,
+    )
+    controller.attach()
+
+    def cleanup() -> None:
+        controller.end_stream(scheduler)
+        reset_fleet_table_stream_registry_for_tests()
+        reset_orchestrators_for_tests()
+        reset_compute_worker_pool_for_tests(worker_count=1)
+        reset_fleet_table_stream_scheduler_for_tests()
+
+    request.addfinalizer(cleanup)
+
+    monkeypatch.setattr(
+        "api.analytics.fleet.fleet_table_stream_controller.resolve_player_stream_admission",
+        lambda *_args, **_kwargs: SchedulePlayerAdmission(),
+    )
+
+    nest_depth = {"n": 0}
+
+    def schedule_that_reenters_invalidation(
+        _scheduler,
+        *,
+        turn,
+        player_id: int,
+        game_id: int,
+        perspective: int,
+        fleet_services,
+        persistence,
+        stream_token: str | None = None,
+    ) -> ScheduledFleetPlayer:
+        del _scheduler, fleet_services, persistence, stream_token
+        nest_depth["n"] += 1
+        if nest_depth["n"] == 1:
+            # Same-thread re-entry fingerprint: scores persist invalidation while
+            # outer reschedule still holds stream_lock (before the lock-order fix).
+            acquired = controller.stream_lock.acquire(blocking=False)
+            if not acquired:
+                raise AssertionError(
+                    "reschedule_player deadlocked (schedule re-entered stream_lock "
+                    "via scores→fleet invalidation)"
+                )
+            controller.stream_lock.release()
+            from api.analytics.fleet.fleet_table_stream_registry import (
+                reschedule_fleet_table_player,
+            )
+
+            assert reschedule_fleet_table_player(scope, player_id) is True
+        session = FleetPlayerStreamSession(
+            player_id=player_id,
+            turn=turn,
+            game_id=game_id,
+            perspective=perspective,
+        )
+        return ScheduledFleetPlayer(player_id=player_id, session=session)
+
+    monkeypatch.setattr(
+        "api.analytics.fleet.fleet_table_stream_controller.schedule_fleet_player_run",
+        schedule_that_reenters_invalidation,
+    )
+
+    assert controller.reschedule_player(player_id) is True
+    assert nest_depth["n"] >= 2
+    assert player_id in controller.scheduled_rows
