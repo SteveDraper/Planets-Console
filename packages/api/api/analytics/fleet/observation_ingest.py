@@ -43,7 +43,7 @@ _DIRECT_OBSERVATION_EVENT_KINDS = frozenset({"sighting", "position_update"})
 
 OptionSetMatchTieBreak = Literal["rank_weight", "built_turn", "ledger_order"]
 
-# Lower ordinal = higher preference when selecting among candidates.
+# Higher rank value = higher preference when selecting among candidates (max wins).
 OptionSetMatchKind = Literal["standard", "generic_freighter", "fed_refit"]
 _MATCH_KIND_RANK: dict[OptionSetMatchKind, int] = {
     "standard": 2,
