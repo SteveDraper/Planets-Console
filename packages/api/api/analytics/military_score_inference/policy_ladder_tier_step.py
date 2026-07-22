@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -112,13 +112,6 @@ def _explained_military_score_2x(
     return explained
 
 
-def _catalog_solve_max_solutions(merged_count: int, resolved_max_solutions: int) -> int:
-    remaining_slots = max(0, resolved_max_solutions - merged_count)
-    if remaining_slots > 0:
-        return remaining_slots
-    return resolved_max_solutions
-
-
 def _merge_exact_solutions(
     merged_solutions: list[InferenceSolution],
     seen_signatures: set[tuple[tuple[str, int], ...]],
@@ -167,6 +160,7 @@ def _solve_catalog(
     combo_count_neighborhood: int = 0,
     cancel_token: InferenceCancelToken | None = None,
     on_solution: Callable[[InferenceSolution], None] | None = None,
+    seed_no_good_solutions: Sequence[InferenceSolution] = (),
 ) -> tuple[InferenceResult, InferenceProblem]:
     problem = build_inference_problem(
         observation,
@@ -183,6 +177,7 @@ def _solve_catalog(
             problem,
             cancel_token=cancel_token,
             on_solution=on_solution,
+            seed_no_good_solutions=seed_no_good_solutions,
         ),
         problem,
     )
@@ -198,14 +193,14 @@ def _solve_seed_progression(
     time_limit_seconds: float,
     cancel_token: InferenceCancelToken | None = None,
     on_solution: Callable[[InferenceSolution], None] | None = None,
+    seed_no_good_solutions: Sequence[InferenceSolution] = (),
 ) -> tuple[InferenceResult | None, InferenceProblem | None]:
     fixed_counts = _combo_counts_from_solution(seed)
     if not fixed_counts:
         return None, None
 
-    remaining_slots = max_solutions
     for neighborhood in (0, 1):
-        if remaining_slots <= 0 or time_limit_seconds <= 0:
+        if time_limit_seconds <= 0:
             break
         if cancel_token is not None and cancel_token.is_cancelled():
             break
@@ -213,12 +208,13 @@ def _solve_seed_progression(
             observation,
             catalog,
             race_id=race_id,
-            max_solutions=remaining_slots,
+            max_solutions=max_solutions,
             time_limit_seconds=time_limit_seconds,
             fixed_combo_counts=fixed_counts,
             combo_count_neighborhood=neighborhood,
             cancel_token=cancel_token,
             on_solution=on_solution,
+            seed_no_good_solutions=seed_no_good_solutions,
         )
         if result.status == STATUS_STOPPED:
             return result, problem
@@ -232,10 +228,11 @@ def _solve_seed_progression(
         observation,
         catalog,
         race_id=race_id,
-        max_solutions=remaining_slots,
+        max_solutions=max_solutions,
         time_limit_seconds=time_limit_seconds,
         cancel_token=cancel_token,
         on_solution=on_solution,
+        seed_no_good_solutions=seed_no_good_solutions,
     )
     if result.solutions or result.status == STATUS_STOPPED:
         return result, problem
@@ -562,10 +559,8 @@ def run_policy_ladder_tier_step(
     state.prior_aggregate_action_ids = current_aggregate_action_ids
 
     admit_solution = _make_incremental_admitter(state, on_admitted)
-    catalog_solve_max = _catalog_solve_max_solutions(
-        len(state.merged_solutions),
-        state.resolved_max_solutions,
-    )
+    catalog_solve_max = state.resolved_max_solutions
+    held_no_goods: tuple[InferenceSolution, ...] = tuple(state.merged_solutions)
 
     new_exact_before_step = len(state.merged_solutions)
     seeds_for_step = list(state.band_seeds)
@@ -583,6 +578,7 @@ def run_policy_ladder_tier_step(
             time_limit_seconds=run.remaining_seconds(),
             cancel_token=cancel_token,
             on_solution=admit_solution,
+            seed_no_good_solutions=held_no_goods,
         )
         if seed_result is None or seed_problem is None:
             continue
@@ -599,11 +595,9 @@ def run_policy_ladder_tier_step(
     if run.should_stop():
         return
 
-    catalog_solve_max = _catalog_solve_max_solutions(
-        len(state.merged_solutions),
-        state.resolved_max_solutions,
-    )
-
+    # Include anything admitted during seed progression so the main catalog
+    # solve does not rediscover those structures.
+    held_no_goods = tuple(state.merged_solutions)
     exact_result, problem = _solve_catalog(
         observation,
         catalog,
@@ -612,6 +606,7 @@ def run_policy_ladder_tier_step(
         time_limit_seconds=run.remaining_seconds(),
         cancel_token=cancel_token,
         on_solution=admit_solution,
+        seed_no_good_solutions=held_no_goods,
     )
     state.last_status = exact_result.status
     state.last_diagnostics = dict(exact_result.diagnostics)
@@ -638,6 +633,7 @@ def run_policy_ladder_tier_step(
                 time_limit_seconds=run.remaining_seconds(),
                 military_score_alpha=policy_step.alpha,
                 cancel_token=cancel_token,
+                seed_no_good_solutions=tuple(state.merged_solutions),
             )
             state.problem = band_problem
             state.last_diagnostics = dict(band_result.diagnostics)

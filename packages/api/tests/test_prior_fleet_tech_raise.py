@@ -250,9 +250,10 @@ def test_ladder_does_not_skip_early_step_when_prior_fleet_pending(
         combo_count_neighborhood=0,
         cancel_token=None,
         on_solution=None,
+        seed_no_good_solutions=(),
     ):
         del race_id, max_solutions, time_limit_seconds, military_score_alpha
-        del fixed_combo_counts, combo_count_neighborhood, cancel_token, on_solution
+        del fixed_combo_counts, combo_count_neighborhood, cancel_token, on_solution, seed_no_good_solutions
         solve_calls.append(_catalog.policy_step_id)
         from api.analytics.military_score_inference.actions import build_inference_problem
 

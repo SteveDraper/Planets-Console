@@ -584,6 +584,88 @@ def _add_no_good_cut(
     model.add_at_least_one(differs)
 
 
+def _member_combo_id_to_merged_id(
+    merged_combo_catalog: _MergedComboCatalog,
+) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for merged_id, members in merged_combo_catalog.members_by_merged_id.items():
+        mapping[merged_id] = merged_id
+        for member in members:
+            mapping[member.combo_id] = merged_id
+    return mapping
+
+
+def merged_assignment_from_solution(
+    solution: InferenceSolution,
+    *,
+    problem: InferenceProblem,
+    merged_combo_catalog: _MergedComboCatalog,
+) -> tuple[dict[str, int], dict[str, int]] | None:
+    """Map a held (possibly labeled) solution onto current CP-SAT count vars.
+
+    Returns full action/combo count vectors including zeros, or ``None`` when the
+    solution cannot be expressed in this catalog (unknown combo or aggregate).
+    """
+    member_to_merged = _member_combo_id_to_merged_id(merged_combo_catalog)
+    action_ids = {action.id for action in problem.aggregate_actions}
+    action_counts = {action.id: 0 for action in problem.aggregate_actions}
+    for action in solution.actions:
+        if action.count == 0:
+            continue
+        if action.action_id not in action_ids:
+            return None
+        action_counts[action.action_id] = action.count
+
+    combo_counts = {combo.combo_id: 0 for combo in merged_combo_catalog.combos}
+    for ship_build in solution.ship_builds:
+        if ship_build.count == 0:
+            continue
+        merged_id = member_to_merged.get(ship_build.combo_id)
+        if merged_id is None or merged_id not in combo_counts:
+            return None
+        combo_counts[merged_id] += ship_build.count
+    return action_counts, combo_counts
+
+
+def _seed_no_good_cuts_for_held_solutions(
+    model: cp_model.CpModel,
+    *,
+    problem: InferenceProblem,
+    merged_combo_catalog: _MergedComboCatalog,
+    action_count_vars: dict[str, cp_model.IntVar],
+    combo_count_vars: dict[str, cp_model.IntVar],
+    seed_solutions: Sequence[InferenceSolution],
+) -> tuple[int, int]:
+    """Add no-goods for prior-tier held solutions. Returns (applied, skipped)."""
+    applied = 0
+    skipped = 0
+    seen_assignments: set[tuple[tuple[str, int], ...]] = set()
+    for seed in seed_solutions:
+        mapped = merged_assignment_from_solution(
+            seed,
+            problem=problem,
+            merged_combo_catalog=merged_combo_catalog,
+        )
+        if mapped is None:
+            skipped += 1
+            continue
+        action_counts, combo_counts = mapped
+        assignment_key = tuple(sorted(action_counts.items()) + sorted(combo_counts.items()))
+        if assignment_key in seen_assignments:
+            continue
+        seen_assignments.add(assignment_key)
+        _add_no_good_cut(
+            model,
+            action_count_vars,
+            combo_count_vars,
+            action_counts,
+            combo_counts,
+            cut_index=-(applied + 1),
+        )
+        applied += 1
+    return applied, skipped
+
+
 def solution_signature(solution: InferenceSolution) -> tuple[tuple[str, int], ...]:
     action_counts = ((action.action_id, action.count) for action in solution.actions)
     combo_counts = ((build.combo_id, build.count) for build in solution.ship_builds)
@@ -605,8 +687,14 @@ def solve_inference_problem(
     *,
     on_solution: Callable[[InferenceSolution], None] | None = None,
     cancel_token: InferenceCancelToken | None = None,
+    seed_no_good_solutions: Sequence[InferenceSolution] = (),
 ) -> InferenceResult:
-    """Return up to max_solutions ranked feasible explanations for one player turn."""
+    """Return up to max_solutions ranked feasible explanations for one player turn.
+
+    ``seed_no_good_solutions`` are prior-tier held explanations mapped into this
+    catalog as no-goods so search finds *new* structures instead of rediscovering
+    already-held near-best ship-only (or other) assignments.
+    """
     validation_error = _validate_problem(problem)
     if validation_error is not None:
         return InferenceResult(
@@ -659,6 +747,14 @@ def solve_inference_problem(
     action_count_vars = built_model.action_count_vars
     combo_count_vars = built_model.combo_count_vars
     objective_var = built_model.objective_var
+    seed_no_goods_applied, seed_no_goods_skipped = _seed_no_good_cuts_for_held_solutions(
+        model,
+        problem=problem,
+        merged_combo_catalog=merged_combo_catalog,
+        action_count_vars=action_count_vars,
+        combo_count_vars=combo_count_vars,
+        seed_solutions=seed_no_good_solutions,
+    )
     solver = cp_model.CpSolver()
     structural_hits: list[tuple[dict[str, int], dict[str, int]]] = []
     started_at = time.monotonic()
@@ -772,6 +868,9 @@ def solve_inference_problem(
         diagnostics["nearBestObjectiveThreshold"] = near_best_threshold
     if tier_max_objective is not None:
         diagnostics["tierMaxObjective"] = tier_max_objective
+    if seed_no_good_solutions:
+        diagnostics["seedNoGoodCount"] = seed_no_goods_applied
+        diagnostics["seedNoGoodSkippedCount"] = seed_no_goods_skipped
     if time_limited:
         diagnostics["time_limited"] = True
     if top_solution_bucket_counts:

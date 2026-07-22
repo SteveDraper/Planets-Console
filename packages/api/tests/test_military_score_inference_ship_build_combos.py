@@ -646,6 +646,74 @@ def test_near_best_objective_banding_skips_far_worse_structures():
     assert frozenset({"b_hi", "b_lo"}) in held_ids
     assert frozenset({"c_hi", "c_lo"}) not in held_ids
 
+
+def test_seed_no_goods_skip_already_held_structures():
+    """Prior-tier held solutions are no-gooded so search finds the next structure."""
+    from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
+
+    def _combo(
+        combo_id: str,
+        *,
+        hull_id: int,
+        score_delta_2x: int,
+        probability_weight: int,
+    ) -> ShipBuildCombo:
+        return ShipBuildCombo(
+            combo_id=combo_id,
+            hull_id=hull_id,
+            engine_id=1,
+            beam_id=None,
+            torp_id=None,
+            beam_count=0,
+            launcher_count=0,
+            labels=(combo_id,),
+            score_delta_2x=score_delta_2x,
+            warship_delta=1,
+            upper_bound=1,
+            probability_weight=probability_weight,
+        )
+
+    structure_a = (
+        _combo("a_hi", hull_id=1, score_delta_2x=600, probability_weight=100),
+        _combo("a_lo", hull_id=2, score_delta_2x=400, probability_weight=100),
+    )
+    structure_b = (
+        _combo("b_hi", hull_id=3, score_delta_2x=700, probability_weight=80),
+        _combo("b_lo", hull_id=4, score_delta_2x=300, probability_weight=80),
+    )
+    observation = InferenceObservation(
+        player_id=1,
+        turn=5,
+        military_delta_2x=1000,
+        warship_delta=2,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=2,
+        is_after_ship_limit=False,
+    )
+    problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(),
+        ship_build_combos=(*structure_a, *structure_b),
+        max_solutions=1,
+    )
+    first = solve_inference_problem(problem)
+    assert first.status == STATUS_EXACT
+    assert len(first.solutions) == 1
+    first_ids = frozenset(build.combo_id for build in first.solutions[0].ship_builds)
+    assert first_ids == frozenset({"a_hi", "a_lo"})
+
+    second = solve_inference_problem(
+        problem,
+        seed_no_good_solutions=first.solutions,
+    )
+    assert second.status == STATUS_EXACT
+    assert second.diagnostics["seedNoGoodCount"] == 1
+    assert len(second.solutions) == 1
+    second_ids = frozenset(build.combo_id for build in second.solutions[0].ship_builds)
+    assert second_ids == frozenset({"b_hi", "b_lo"})
+
+
 def test_solver_no_good_cuts_include_combo_variables():
     from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
 
