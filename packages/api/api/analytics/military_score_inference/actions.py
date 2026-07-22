@@ -88,6 +88,7 @@ class ActionCatalog:
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
     prior_weights_diagnostics: PriorWeightsDiagnostics | None = None
     fleet_torp_overlay_diagnostics: FleetTorpOverlayDiagnostics | None = None
+    near_best_objective_threshold: int | None = None
 
     @property
     def catalog_size(self) -> int:
@@ -106,6 +107,8 @@ class ActionCatalog:
                 if action.id in self.probability_buckets_by_action_id
             ),
         }
+        if self.near_best_objective_threshold is not None:
+            payload["nearBestObjectiveThreshold"] = self.near_best_objective_threshold
         if self.prior_weights_diagnostics is not None:
             payload["priorWeights"] = self.prior_weights_diagnostics.to_payload()
         if self.fleet_torp_overlay_diagnostics is not None:
@@ -146,6 +149,7 @@ def build_inference_problem(
         ranking_heuristics=catalog.ranking_heuristics,
         admission_caps_by_action_id=catalog.admission_caps_by_action_id,
         tier_overflow_by_action_id=catalog.tier_overflow_by_action_id,
+        near_best_objective_threshold=catalog.near_best_objective_threshold,
     )
 
 
@@ -340,6 +344,7 @@ def build_action_catalog(
         tier_overflow_by_action_id=tier_overflow_by_action_id,
         prior_weights_diagnostics=prior_diagnostics,
         fleet_torp_overlay_diagnostics=fleet_overlay_diagnostics,
+        near_best_objective_threshold=resolved_policy_step.near_best_objective_threshold,
     )
 
 

@@ -2,8 +2,9 @@
 
 import os
 import time
+from bisect import bisect_right
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from itertools import product
 from typing import TYPE_CHECKING
@@ -46,6 +47,10 @@ STATUS_TIME_LIMITED = "time_limited"
 
 _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
 
+# Ranking objective domain for the exposed IntVar used by near-best banding.
+_RANKING_OBJECTIVE_VAR_LB = -10_000_000
+_RANKING_OBJECTIVE_VAR_UB = 1_000_000
+
 
 def _configured_num_search_workers(combo_count: int) -> int | None:
     raw = os.environ.get("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS")
@@ -67,6 +72,7 @@ class _BuiltModel:
     model: cp_model.CpModel
     action_count_vars: dict[str, cp_model.IntVar]
     combo_count_vars: dict[str, cp_model.IntVar]
+    objective_var: cp_model.IntVar
     merged_combo_catalog: _MergedComboCatalog
     diversity_caps_applied: tuple[dict[str, object], ...]
 
@@ -263,11 +269,21 @@ def _build_model(
         action_count_vars,
         combo_count_vars,
     )
-    model.maximize(sum(objective_terms))
+    objective_var = model.new_int_var(
+        _RANKING_OBJECTIVE_VAR_LB,
+        _RANKING_OBJECTIVE_VAR_UB,
+        "ranking_objective",
+    )
+    if objective_terms:
+        model.add(objective_var == sum(objective_terms))
+    else:
+        model.add(objective_var == 0)
+    model.maximize(objective_var)
     return _BuiltModel(
         model=model,
         action_count_vars=action_count_vars,
         combo_count_vars=combo_count_vars,
+        objective_var=objective_var,
         merged_combo_catalog=merged_combo_catalog,
         diversity_caps_applied=tuple(diversity_caps_applied),
     )
@@ -387,24 +403,20 @@ def _ship_build_variants_for_merged_count(
     )
 
 
-def _score_equivalent_expansion_budget(
-    problem: InferenceProblem,
-    action_counts: dict[str, int],
-    *,
-    solutions_found: int,
+def _full_expansion_limit_for_combo_counts(
+    combo_counts: dict[str, int],
+    merged_combo_catalog: _MergedComboCatalog,
 ) -> int:
-    """Cap per-CP-SAT expansion so aggregate-action alternatives can surface.
-
-    Score-equivalent ship-build variants can exhaust ``max_solutions`` in one
-    iteration and prevent no-good cuts from reaching distinct aggregate patterns
-    (for example planet defense vs torpedo loads).
-    """
-    remaining = problem.max_solutions - solutions_found
-    if remaining <= 0:
-        return 0
-    if any(count > 0 for count in action_counts.values()):
-        return 1
-    return remaining
+    """Upper bound on label variants for one structural hit (product of group sizes)."""
+    limit = 1
+    for merged_combo_id, count in combo_counts.items():
+        if count <= 0:
+            continue
+        members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
+        if is_generic_zero_military_score_combo_id(merged_combo_id) or count != 1:
+            continue
+        limit *= max(1, len(members))
+    return max(1, limit)
 
 
 def _expand_score_equivalent_solutions(
@@ -438,9 +450,18 @@ def _expand_score_equivalent_solutions(
         for merged_combo_id, count in combo_counts.items()
         if count > 0
     ]
+    if not ship_build_variant_lists and not solution_actions:
+        return []
+    # Action-only hits have no ship-build axes; synthesize one empty combination.
+    ship_build_combinations: list[tuple[InferenceSolutionShipBuild, ...]]
+    if not ship_build_variant_lists:
+        ship_build_combinations = [()]
+    else:
+        ship_build_combinations = [
+            tuple(ship_build_variant) for ship_build_variant in product(*ship_build_variant_lists)
+        ]
     solutions: list[InferenceSolution] = []
-    for ship_build_variant in product(*ship_build_variant_lists):
-        ship_builds = tuple(ship_build_variant)
+    for ship_builds in ship_build_combinations:
         solutions.append(
             InferenceSolution(
                 objective_value=_objective_value(problem, action_counts, ship_builds),
@@ -450,6 +471,87 @@ def _expand_score_equivalent_solutions(
         )
     solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
     return solutions[: max(1, max_expansions)]
+
+
+def _insert_solution_by_objective(
+    output: list[InferenceSolution],
+    solution: InferenceSolution,
+) -> None:
+    """Insert ``solution`` into ``output`` keeping objective descending order.
+
+    Equal objectives append after existing ties so expansion encounter order
+    (probability then combo id) is preserved.
+    """
+    objectives = [-held.objective_value for held in output]
+    index = bisect_right(objectives, -solution.objective_value)
+    output.insert(index, solution)
+
+
+def expand_structural_hits_to_top_k(
+    problem: InferenceProblem,
+    structural_hits: Sequence[tuple[dict[str, int], dict[str, int]]],
+    merged_combo_catalog: _MergedComboCatalog,
+    *,
+    max_solutions: int,
+) -> list[InferenceSolution]:
+    """Expand distinct CP-SAT hits into label variants; keep a streaming top-K.
+
+    Solve-loop budget is structural (merged signatures). Label variants of the same
+    military arithmetic are expanded here and culled so at most ``max_solutions``
+    rows are retained, ranked by objective.
+    """
+    if max_solutions <= 0 or not structural_hits:
+        return []
+
+    ranked_hits: list[tuple[int, dict[str, int], dict[str, int]]] = []
+    for action_counts, combo_counts in structural_hits:
+        best_only = _expand_score_equivalent_solutions(
+            problem,
+            action_counts,
+            combo_counts,
+            merged_combo_catalog,
+            max_expansions=1,
+        )
+        if not best_only:
+            continue
+        ranked_hits.append((best_only[0].objective_value, action_counts, combo_counts))
+    ranked_hits.sort(key=lambda item: item[0], reverse=True)
+
+    output: list[InferenceSolution] = []
+    seen_signatures: set[tuple[tuple[str, int], ...]] = set()
+    kth_objective: int | None = None
+    for best_objective, action_counts, combo_counts in ranked_hits:
+        if (
+            kth_objective is not None
+            and len(output) >= max_solutions
+            and best_objective <= kth_objective
+        ):
+            break
+        expansions = _expand_score_equivalent_solutions(
+            problem,
+            action_counts,
+            combo_counts,
+            merged_combo_catalog,
+            max_expansions=_full_expansion_limit_for_combo_counts(
+                combo_counts,
+                merged_combo_catalog,
+            ),
+        )
+        for expansion in expansions:
+            if kth_objective is not None and expansion.objective_value <= kth_objective:
+                # Expansions are objective-descending; remaining cannot enter.
+                break
+            signature = solution_signature(expansion)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            _insert_solution_by_objective(output, expansion)
+            if len(output) > max_solutions:
+                evicted = output.pop()
+                seen_signatures.discard(solution_signature(evicted))
+            if len(output) >= max_solutions:
+                kth_objective = output[max_solutions - 1].objective_value
+    return output
 
 
 def _add_no_good_cut(
@@ -556,16 +658,20 @@ def solve_inference_problem(
     model = built_model.model
     action_count_vars = built_model.action_count_vars
     combo_count_vars = built_model.combo_count_vars
+    objective_var = built_model.objective_var
     solver = cp_model.CpSolver()
-    solutions: list[InferenceSolution] = []
-    seen_signatures: set[tuple[tuple[str, int], ...]] = set()
+    structural_hits: list[tuple[dict[str, int], dict[str, int]]] = []
     started_at = time.monotonic()
     last_solver_status = cp_model.UNKNOWN
     stopped_reason = "exhausted"
     time_limited = False
     top_solution_bucket_counts: dict[str, tuple[int, ...]] = {}
+    near_best_threshold = problem.near_best_objective_threshold
+    tier_max_objective: int | None = None
+    max_objective: int | None = None
+    near_best_band_applied = False
 
-    while len(solutions) < problem.max_solutions:
+    while len(structural_hits) < problem.max_solutions:
         if cancel_token is not None and cancel_token.is_cancelled():
             stopped_reason = "cancelled"
             break
@@ -591,10 +697,12 @@ def solve_inference_problem(
             stopped_reason = "cancelled"
             break
         if last_solver_status not in _SUCCESS_STATUSES:
-            if last_solver_status == cp_model.UNKNOWN and solutions:
+            if last_solver_status == cp_model.UNKNOWN and structural_hits:
                 time_limited = True
                 stopped_reason = "time_budget"
-            elif not solutions:
+            elif near_best_band_applied and structural_hits:
+                stopped_reason = "near_best_band_exhausted"
+            elif not structural_hits:
                 stopped_reason = "infeasible"
             else:
                 stopped_reason = "infeasible"
@@ -609,39 +717,22 @@ def solve_inference_problem(
         action_counts = _read_action_counts(problem, action_count_vars, solver)
         combo_counts = _read_combo_counts(merged_combo_catalog, combo_count_vars, solver)
         ranking_bin_indicators = _ranking_bin_indicators_by_action_id(problem, action_counts)
-        expansion_budget = _score_equivalent_expansion_budget(
-            problem,
-            action_counts,
-            solutions_found=len(solutions),
-        )
-        expanded_solutions = _expand_score_equivalent_solutions(
-            problem,
-            action_counts,
-            combo_counts,
-            merged_combo_catalog,
-            max_expansions=expansion_budget,
-        )
-        expanded_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
-        added_solution = False
-        for solution in expanded_solutions:
-            if len(solutions) >= problem.max_solutions:
-                stopped_reason = "max_solutions"
-                break
-            signature = solution_signature(solution)
-            if signature in seen_signatures:
-                continue
-            seen_signatures.add(signature)
-            solutions.append(solution)
-            top_solution_bucket_counts = ranking_bin_indicators
-            added_solution = True
-            if on_solution is not None:
-                on_solution(solution)
+        structural_hits.append((action_counts, combo_counts))
+        top_solution_bucket_counts = ranking_bin_indicators
 
-        if stopped_reason == "max_solutions":
-            break
-        if not added_solution:
-            stopped_reason = "duplicate_solution"
-            break
+        found_objective = int(solver.ObjectiveValue())
+        if tier_max_objective is None:
+            tier_max_objective = found_objective
+            max_objective = found_objective
+            if near_best_threshold is not None:
+                model.add(objective_var >= tier_max_objective - near_best_threshold)
+                near_best_band_applied = True
+        else:
+            max_objective = found_objective
+
+        if near_best_band_applied and max_objective is not None:
+            # Sliding ceiling: next maximize walks next-best inside [Z*-T, max].
+            model.add(objective_var <= max_objective)
 
         _add_no_good_cut(
             model,
@@ -649,23 +740,38 @@ def solve_inference_problem(
             combo_count_vars,
             action_counts,
             combo_counts,
-            len(solutions),
+            len(structural_hits),
         )
 
-        if len(solutions) >= problem.max_solutions:
+        if len(structural_hits) >= problem.max_solutions:
             stopped_reason = "max_solutions"
             break
+
+    solutions = expand_structural_hits_to_top_k(
+        problem,
+        structural_hits,
+        merged_combo_catalog,
+        max_solutions=problem.max_solutions,
+    )
+    if on_solution is not None:
+        for solution in solutions:
+            on_solution(solution)
 
     diagnostics: dict[str, object] = {
         **build_diagnostics,
         "solver_status": solver.status_name(last_solver_status),
         "solution_count": len(solutions),
+        "structural_hit_count": len(structural_hits),
         "stopped_reason": stopped_reason,
         "wall_time_seconds": time.monotonic() - started_at,
         "policy_step_id": problem.policy_step_id,
         "policy_step_index": problem.policy_step_index,
         "military_score_alpha": problem.military_score_alpha,
     }
+    if near_best_threshold is not None:
+        diagnostics["nearBestObjectiveThreshold"] = near_best_threshold
+    if tier_max_objective is not None:
+        diagnostics["tierMaxObjective"] = tier_max_objective
     if time_limited:
         diagnostics["time_limited"] = True
     if top_solution_bucket_counts:

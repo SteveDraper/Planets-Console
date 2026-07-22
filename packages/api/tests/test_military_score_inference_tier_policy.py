@@ -61,6 +61,7 @@ def test_policy_loader_validates_final_alpha_zero():
     assert all(step.allow_ship_only_exact_early_stop for step in steps[2:])
     assert steps[2].hull_collision_twin_widen is True
     assert sum(1 for step in steps if step.hull_collision_twin_widen) == 1
+    assert all(step.near_best_objective_threshold == 250 for step in steps)
 
 
 def test_policy_loader_reads_aggregate_probability_bins():
@@ -91,6 +92,26 @@ def test_policy_loader_rejects_non_int_solver_threshold():
                 }
             }
         )
+
+
+def test_policy_loader_rejects_invalid_near_best_objective_threshold():
+    document = {
+        "steps": [
+            {
+                "id": "invalid",
+                "filters": {
+                    "hulls": {"all": True},
+                    "engines": {"all": True},
+                    "beams": {"all": True},
+                    "launchers": {"all": True},
+                },
+                "alpha": 0,
+                "nearBestObjectiveThreshold": -1,
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="nearBestObjectiveThreshold"):
+        parse_tier_policy_steps(document)
 
 
 def test_policy_loader_rejects_non_int_no_new_exact_signatures_threshold():

@@ -499,6 +499,153 @@ def test_score_equivalent_expansion_prefers_top_k_by_probability():
     assert all(solution.objective_value == 0 for solution in result.solutions)
 
 
+def test_structural_top_k_not_flooded_by_score_equivalent_labels():
+    """Solve budget is structural; label expansion must not crowd out other hits.
+
+    One score-equivalent group with many low-prior labels used to consume
+    ``max_solutions`` in a single CP-SAT iteration and block a second distinct
+    military-exact structure from entering the held set.
+    """
+    from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
+
+    def _combo(
+        combo_id: str,
+        *,
+        hull_id: int,
+        score_delta_2x: int,
+        probability_weight: int,
+    ) -> ShipBuildCombo:
+        return ShipBuildCombo(
+            combo_id=combo_id,
+            hull_id=hull_id,
+            engine_id=1,
+            beam_id=None,
+            torp_id=None,
+            beam_count=0,
+            launcher_count=0,
+            labels=(combo_id,),
+            score_delta_2x=score_delta_2x,
+            warship_delta=1,
+            upper_bound=1,
+            probability_weight=probability_weight,
+        )
+
+    # Structure A: 600 + 400 (many equiv labels on the 600 class).
+    equiv_600 = tuple(
+        _combo(
+            f"combo_600_{index}",
+            hull_id=10 + index,
+            score_delta_2x=600,
+            probability_weight=100 - (10 * index),
+        )
+        for index in range(8)
+    )
+    combo_400 = _combo("combo_400", hull_id=2, score_delta_2x=400, probability_weight=100)
+    # Structure B: 700 + 300 (distinct merged signature, slightly worse best prior).
+    combo_700 = _combo("combo_700", hull_id=3, score_delta_2x=700, probability_weight=95)
+    combo_300 = _combo("combo_300", hull_id=4, score_delta_2x=300, probability_weight=95)
+
+    observation = InferenceObservation(
+        player_id=1,
+        turn=5,
+        military_delta_2x=1000,
+        warship_delta=2,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=2,
+        is_after_ship_limit=False,
+    )
+    problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(),
+        ship_build_combos=(*equiv_600, combo_400, combo_700, combo_300),
+        max_solutions=3,
+    )
+    result = solve_inference_problem(problem)
+
+    assert result.status == STATUS_EXACT
+    assert result.diagnostics["structural_hit_count"] >= 2
+    assert len(result.solutions) == 3
+    held_combo_ids = {
+        frozenset(build.combo_id for build in solution.ship_builds)
+        for solution in result.solutions
+    }
+    assert frozenset({"combo_700", "combo_300"}) in held_combo_ids
+    assert any("combo_600_" in combo_id for combo_ids in held_combo_ids for combo_id in combo_ids)
+
+
+def test_near_best_objective_banding_skips_far_worse_structures():
+    """Within-tier band keeps near-Z* hits and stops before far-worse exact matches."""
+    from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
+
+    def _combo(
+        combo_id: str,
+        *,
+        hull_id: int,
+        score_delta_2x: int,
+        probability_weight: int,
+    ) -> ShipBuildCombo:
+        return ShipBuildCombo(
+            combo_id=combo_id,
+            hull_id=hull_id,
+            engine_id=1,
+            beam_id=None,
+            torp_id=None,
+            beam_count=0,
+            launcher_count=0,
+            labels=(combo_id,),
+            score_delta_2x=score_delta_2x,
+            warship_delta=1,
+            upper_bound=1,
+            probability_weight=probability_weight,
+        )
+
+    # Three distinct merged signatures for military 1000 / warships 2.
+    # Ranking: A best (0), B near (-40), C far (-160). Band T=50 keeps A+B.
+    structure_a = (
+        _combo("a_hi", hull_id=1, score_delta_2x=600, probability_weight=100),
+        _combo("a_lo", hull_id=2, score_delta_2x=400, probability_weight=100),
+    )
+    structure_b = (
+        _combo("b_hi", hull_id=3, score_delta_2x=700, probability_weight=80),
+        _combo("b_lo", hull_id=4, score_delta_2x=300, probability_weight=80),
+    )
+    structure_c = (
+        _combo("c_hi", hull_id=5, score_delta_2x=550, probability_weight=20),
+        _combo("c_lo", hull_id=6, score_delta_2x=450, probability_weight=20),
+    )
+    observation = InferenceObservation(
+        player_id=1,
+        turn=5,
+        military_delta_2x=1000,
+        warship_delta=2,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=2,
+        is_after_ship_limit=False,
+    )
+    problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(),
+        ship_build_combos=(*structure_a, *structure_b, *structure_c),
+        max_solutions=5,
+        near_best_objective_threshold=50,
+    )
+    result = solve_inference_problem(problem)
+
+    assert result.status == STATUS_EXACT
+    assert result.diagnostics["tierMaxObjective"] == 0
+    assert result.diagnostics["nearBestObjectiveThreshold"] == 50
+    assert result.diagnostics["stopped_reason"] == "near_best_band_exhausted"
+    assert result.diagnostics["structural_hit_count"] == 2
+    held_ids = {
+        frozenset(build.combo_id for build in solution.ship_builds)
+        for solution in result.solutions
+    }
+    assert frozenset({"a_hi", "a_lo"}) in held_ids
+    assert frozenset({"b_hi", "b_lo"}) in held_ids
+    assert frozenset({"c_hi", "c_lo"}) not in held_ids
+
 def test_solver_no_good_cuts_include_combo_variables():
     from api.analytics.military_score_inference.models import InferenceProblem, ShipBuildCombo
 

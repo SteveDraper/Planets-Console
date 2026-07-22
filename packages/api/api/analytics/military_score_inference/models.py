@@ -139,6 +139,8 @@ class InferenceProblem:
     )
     admission_caps_by_action_id: dict[str, int] = field(default_factory=dict)
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
+    # Within-tier near-best ranking band width T; None disables banding.
+    near_best_objective_threshold: int | None = None
 
 
 @dataclass(frozen=True)

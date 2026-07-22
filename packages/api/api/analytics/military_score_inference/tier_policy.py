@@ -102,9 +102,12 @@ class InferenceTierPolicyStep:
     max_seeds: int = DEFAULT_MAX_SEEDS
     allow_ship_only_exact_early_stop: bool = False
     hull_collision_twin_widen: bool = False
+    # After the first maximize in a tier, further structural solves only accept
+    # ranking objectives in [Z* - T, max_objective] (sliding ceiling). None disables.
+    near_best_objective_threshold: int | None = None
 
     def constraint_snapshot(self) -> dict[str, object]:
-        return {
+        snapshot: dict[str, object] = {
             "id": self.id,
             "filters": self.filters.to_snapshot(),
             "beamSlotCounts": self.beam_slot_counts,
@@ -115,6 +118,9 @@ class InferenceTierPolicyStep:
             "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
             "hullCollisionTwinWiden": self.hull_collision_twin_widen,
         }
+        if self.near_best_objective_threshold is not None:
+            snapshot["nearBestObjectiveThreshold"] = self.near_best_objective_threshold
+        return snapshot
 
 
 @dataclass(frozen=True)
@@ -283,6 +289,16 @@ def _parse_hull_collision_twin_widen(raw: object, *, step_id: str) -> bool:
     return raw
 
 
+def _parse_near_best_objective_threshold(raw: object, *, step_id: str) -> int | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise ValueError(
+            f"step {step_id}: nearBestObjectiveThreshold must be a non-negative integer"
+        )
+    return raw
+
+
 def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolicyStep:
     step_id = raw.get("id")
     if not isinstance(step_id, str) or not step_id:
@@ -321,6 +337,10 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
         ),
         hull_collision_twin_widen=_parse_hull_collision_twin_widen(
             raw.get("hullCollisionTwinWiden"),
+            step_id=step_id,
+        ),
+        near_best_objective_threshold=_parse_near_best_objective_threshold(
+            raw.get("nearBestObjectiveThreshold"),
             step_id=step_id,
         ),
     )

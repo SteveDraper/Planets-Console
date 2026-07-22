@@ -101,6 +101,9 @@ solverThresholds:
   # when the best held exact already meets this plausibility (#236).
   noNewExactSignaturesEarlyStopMinPlausibility: -300
 
+# nearBestObjectiveThreshold (per step): after first maximize Z*, further
+# structural solves only accept ranking obj in [Z*-T, sliding max].
+# T=250 covers ~122 gap for lizard t9 truth vs early ship-only Z* (~-378 vs -500).
 steps:
   - id: early_game_bands
     filters:
@@ -120,6 +123,7 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: false
 
   - id: widen_launchers
@@ -140,6 +144,7 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: false
 
   # After widen_launchers so twin combos that need launcher tech >5 (e.g. Gamma on
@@ -164,6 +169,7 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
     hullCollisionTwinWiden: true
 
@@ -184,6 +190,7 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
 
   - id: full_components
@@ -201,6 +208,7 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
 
   - id: admit_ship_torpedoes
@@ -219,6 +227,7 @@ steps:
       ship_torps_per_type: 40
     alpha: 30
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
 
   - id: full_components_planet_defense
@@ -241,6 +250,7 @@ steps:
       fighter_transfers_per_direction: 50
     alpha: 50
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
 
   - id: admit_starbase_defense_posts
@@ -264,6 +274,7 @@ steps:
       fighter_transfers_per_direction: 50
     alpha: 30
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
 
   - id: torp_escape_tier
@@ -287,6 +298,7 @@ steps:
       fighter_transfers_per_direction: 50
     alpha: 30
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
 
   - id: full_catalog_exact
@@ -310,4 +322,5 @@ steps:
       fighter_transfers_per_direction: 100
     alpha: 0
     maxSeeds: 5
+    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
