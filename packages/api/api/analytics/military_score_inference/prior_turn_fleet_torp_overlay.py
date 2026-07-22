@@ -14,8 +14,9 @@ from api.analytics.fleet.max_tech import max_tech_by_axis_from_fleet_records
 from api.analytics.fleet.types import FleetShipRecord, FleetTurnSnapshot
 from api.analytics.military_score_inference.fleet_torp_overlay import (
     FleetTorpOverlay,
-    launcher_belief_set_from_fleet_records,
+    overlay_from_fleet_records,
 )
+from api.analytics.military_score_inference.tier_policy import resolve_fleet_inference_tuning
 from api.analytics.options import TurnAnalyticsOptions
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import TurnInfo
@@ -66,12 +67,21 @@ def resolution_from_fleet_records(
     *,
     prior_turn: TurnInfo,
     input_status: FleetTorpInputStatus = "applied",
+    option_set_mass_threshold: float | None = None,
 ) -> PriorTurnFleetTorpResolution:
-    belief = launcher_belief_set_from_fleet_records(records)
+    threshold = (
+        resolve_fleet_inference_tuning().option_set_mass_threshold
+        if option_set_mass_threshold is None
+        else option_set_mass_threshold
+    )
     return PriorTurnFleetTorpResolution(
-        overlay=FleetTorpOverlay(belief_set=belief),
+        overlay=overlay_from_fleet_records(records),
         input_status=input_status,
-        max_tech_by_axis=max_tech_by_axis_from_fleet_records(records, prior_turn),
+        max_tech_by_axis=max_tech_by_axis_from_fleet_records(
+            records,
+            prior_turn,
+            option_set_mass_threshold=threshold,
+        ),
     )
 
 

@@ -11,9 +11,6 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     iter_aggregate_action_slots,
 )
 from api.analytics.military_score_inference.hull_category import INFERENCE_HULL_CATEGORIES
-from api.analytics.military_score_inference.inference_probability_scale import (
-    INFERENCE_PROBABILITY_WEIGHT_SCALE,
-)
 from api.analytics.military_score_inference.prior_weights_asset import (
     load_prior_weights_for_category,
 )
@@ -29,6 +26,9 @@ from api.analytics.military_score_inference.prior_weights_resolve import (
 )
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.concepts.game_category import GameCategory
+from api.concepts.inference_probability_scale import (
+    INFERENCE_PROBABILITY_WEIGHT_SCALE,
+)
 from api.concepts.races import EVIL_EMPIRE_RACE_ID, SOLAR_FEDERATION_RACE_ID
 from api.models.components import Beam, Engine, Torpedo
 

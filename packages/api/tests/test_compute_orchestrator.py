@@ -1766,6 +1766,102 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
     assert orchestrator.nodes[branch_b_scope].error is None
 
 
+def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
+    sample_turn,
+):
+    """Persist-deferred must wake even when the node was planned without the ENSURE edge.
+
+    Production hang (game 680224 Fed fleet@t3): fleet raced ahead while scores was
+    already satisfied at plan time, so ``dependency_scopes`` omitted scores. Persist
+    refused open evidence → ``waiting_deps`` + force_fresh scores. Scores later
+    completed, but ``_on_dependency_terminal`` never refreshed fleet (no edge) and
+    ``force_fresh_attach`` on ``waiting_deps`` did not re-check readiness → 0% CPU
+    spin forever.
+    """
+    from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    recovery = PersistDependencyRecovery(
+        dependency_scope=shared_scope,
+        force_fresh=True,
+        step_kind="materialize",
+    )
+
+    class _DeferredOncePersistence(_StubPersistencePolicy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            self.calls += 1
+            if self.calls == 1:
+                raise PersistDeferredError(
+                    "dependency evidence still open",
+                    recovery=recovery,
+                )
+
+    deferred_persistence = _DeferredOncePersistence()
+    pool_submissions: list[tuple[str, str | None]] = []
+
+    def pool_submitter(node, step) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.step_kind))
+
+    registry = build_compute_registry(
+        (
+            _pool_compute_registration(SHARED_ID, backend="thread"),
+            _pool_compute_registration(
+                BRANCH_B_ID,
+                backend="thread",
+                persistence_policy=deferred_persistence,
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    assert orchestrator.nodes[branch_b_scope].state == "running"
+
+    # Simulate plan-time race: dependent ran with no ENSURE edge to the dependency.
+    orchestrator.nodes[branch_b_scope].dependency_scopes = ()
+
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+
+    assert deferred_persistence.calls == 1
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert shared_scope in orchestrator.nodes[branch_b_scope].dependency_scopes
+    assert orchestrator.nodes[shared_scope].state == "running"
+
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "running"
+
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert deferred_persistence.calls == 2
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
+
+
 def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_turn):
     """Diagnostics must read nodes and ready queue atomically, not via live mappings."""
     ctx = make_fixture_query_context(

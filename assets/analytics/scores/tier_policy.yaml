@@ -12,6 +12,7 @@
 # all eligible torp types.
 fleetInferenceTuning:
   torpMisalignmentLogPenalty: 200
+  optionSetMassThreshold: 0.25
   # componentTechGapLogPenaltyPerLevel: <int>   # #156
 version: 1
 

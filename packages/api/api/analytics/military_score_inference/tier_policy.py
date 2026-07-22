@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 import yaml
 
+from api.analytics.fleet.option_set_mass import DEFAULT_OPTION_SET_MASS_THRESHOLD
 from api.analytics.military_score_inference.models import ProbabilityBinBounds
 from api.analytics.scores_assets import Scores
 
@@ -125,6 +126,7 @@ class SolverThresholds:
 @dataclass(frozen=True)
 class FleetInferenceTuning:
     torp_misalignment_log_penalty: int
+    option_set_mass_threshold: float = DEFAULT_OPTION_SET_MASS_THRESHOLD
 
 
 def default_tier_policy_path() -> Path:
@@ -549,7 +551,20 @@ def parse_fleet_inference_tuning(document: dict[str, Any]) -> FleetInferenceTuni
             "tier policy fleetInferenceTuning.torpMisalignmentLogPenalty must be a "
             "non-negative integer"
         )
-    return FleetInferenceTuning(torp_misalignment_log_penalty=penalty)
+    raw_threshold = raw_tuning.get("optionSetMassThreshold", DEFAULT_OPTION_SET_MASS_THRESHOLD)
+    if isinstance(raw_threshold, bool) or not isinstance(raw_threshold, (int, float)):
+        raise ValueError(
+            "tier policy fleetInferenceTuning.optionSetMassThreshold must be a number in [0, 1]"
+        )
+    threshold = float(raw_threshold)
+    if threshold < 0.0 or threshold > 1.0:
+        raise ValueError(
+            "tier policy fleetInferenceTuning.optionSetMassThreshold must be a number in [0, 1]"
+        )
+    return FleetInferenceTuning(
+        torp_misalignment_log_penalty=penalty,
+        option_set_mass_threshold=threshold,
+    )
 
 
 _default_fleet_inference_tuning: FleetInferenceTuning | None = None

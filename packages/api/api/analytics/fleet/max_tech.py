@@ -59,10 +59,14 @@ def max_tech_by_axis_from_fleet_records(
     turn: TurnInfo,
     *,
     active_only: bool = True,
+    option_set_mass_threshold: float | None = None,
 ) -> dict[str, int]:
     """Per-axis max tech from fleet records (keys: hulls/engines/beams/launchers).
 
-    Axes with no known component ids (or ids missing from the turn catalog) are omitted.
+    Known positive fitted components always contribute. When
+    ``option_set_mass_threshold`` is set, only option sets whose per-row softmax
+    probability meets that floor contribute soft ids (#253). Axes with no
+    contributing ids (or ids missing from the turn catalog) are omitted.
     """
     catalogs = _catalogs_by_axis(turn)
     record_list = list(records)
@@ -73,6 +77,7 @@ def max_tech_by_axis_from_fleet_records(
             record_list,
             field_name,
             active_only=active_only,
+            option_set_mass_threshold=option_set_mass_threshold,
         )
         axis_max = max_tech_level_for_component_ids(component_ids, catalogs[axis_key])
         if axis_max is not None:
