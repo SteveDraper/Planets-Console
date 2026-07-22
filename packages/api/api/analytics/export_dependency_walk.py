@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, TypeVar
 from api.analytics.export_errors import ExportCycleDetectedError
 from api.analytics.export_types import (
     EnsureDependency,
+    EnsureDependencyQuality,
     EnsureMissingStep,
     ExportScope,
     UnavailableReason,
@@ -209,15 +210,40 @@ def _is_at_baseline(
     return False
 
 
+def is_ensure_dependency_satisfied(
+    ctx: AnalyticQueryContext,
+    dependency: EnsureDependency,
+    scope: ExportScope,
+) -> bool:
+    """Cheap probe: whether one declared ensure edge is already satisfied."""
+    dependency_scope = dependency_scope_for(scope, dependency)
+    catalog = ctx.export_registry.get(dependency.analytic_id)
+    if catalog is None or catalog.is_empty:
+        return True
+    return _is_ensure_satisfied(
+        ctx,
+        dependency.analytic_id,
+        dependency_scope,
+        catalog,
+        quality=dependency.quality,
+    )
+
+
 def _is_ensure_satisfied(
     ctx: AnalyticQueryContext,
     analytic_id: str,
     scope: ExportScope,
     catalog: AnalyticExportCatalog,
+    *,
+    quality: EnsureDependencyQuality = "final",
 ) -> bool:
     """Cheap probe/ensure gate: must not run inference or materialize export payloads."""
     if ctx.is_scope_ensured(analytic_id, scope):
         return True
+    if quality == "observation" and analytic_id == "fleet":
+        from api.analytics.fleet.exports import is_fleet_export_observation_satisfied
+
+        return is_fleet_export_observation_satisfied(ctx, scope)
     if catalog.is_ensure_satisfied is not None:
         return catalog.is_ensure_satisfied(ctx, scope)
     if catalog.is_persisted is None:

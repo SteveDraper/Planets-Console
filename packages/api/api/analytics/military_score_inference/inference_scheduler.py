@@ -748,6 +748,11 @@ _scheduler: InferenceRowScheduler | None = None
 _scheduler_lock = threading.Lock()
 
 
+def inference_row_scheduler_if_initialized() -> InferenceRowScheduler | None:
+    """Return the process scheduler when already constructed (no lazy init)."""
+    return _scheduler
+
+
 def get_inference_row_scheduler(
     *,
     on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,

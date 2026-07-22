@@ -252,8 +252,9 @@ def test_production_compute_registry_imports_fleet_and_scores():
 def test_fleet_compute_profile_uses_interpreter_backend():
     from api.analytics.fleet.compute_orchestration import FLEET_COMPUTE_PROFILE
 
-    assert len(FLEET_COMPUTE_PROFILE.steps) == 1
+    assert len(FLEET_COMPUTE_PROFILE.steps) == 2
     assert FLEET_COMPUTE_PROFILE.steps[0].backend == "interpreter"
+    assert FLEET_COMPUTE_PROFILE.steps[1].backend == "inline"
 
 
 def test_fleet_materialization_leg_import_does_not_load_transport_stack():
@@ -265,7 +266,7 @@ def test_fleet_materialization_leg_import_does_not_load_transport_stack():
     api_root = Path(__file__).resolve().parent.parent
     script = """
 import sys
-from api.analytics.fleet.compute_plane.materialization_leg import run_fleet_materialization_leg
+from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
 blocked = [
     name
     for name in sys.modules
@@ -278,8 +279,8 @@ blocked = [
 ]
 if blocked:
     raise SystemExit(f"unexpected transport modules: {blocked}")
-if run_fleet_materialization_leg is None:
-    raise SystemExit("run_fleet_materialization_leg import failed")
+if run_fleet_observation_leg is None:
+    raise SystemExit("run_fleet_observation_leg import failed")
 """
     result = subprocess.run(
         [sys.executable, "-c", script],

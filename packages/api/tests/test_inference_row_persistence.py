@@ -133,6 +133,35 @@ def test_persisted_inference_row_from_wire_complete_omits_diagnostics():
     assert stored["solutions"] == row.solutions
 
 
+def test_persisted_inference_row_round_trips_fleet_torp_input_status():
+    from api.serialization.inference_row_persistence import (
+        persisted_inference_row_from_json,
+        persisted_inference_row_from_wire_complete,
+        persisted_inference_row_to_json,
+        wire_complete_from_persisted_row,
+    )
+
+    row = persisted_inference_row_from_wire_complete(
+        {
+            "type": "complete",
+            "status": STATUS_EXACT,
+            "summary": "done",
+            "solutionCount": 0,
+            "isComplete": True,
+            "solutions": [],
+        },
+        fleet_torp_input_status="applied",
+    )
+    assert row.fleet_torp_input_status == "applied"
+    stored = persisted_inference_row_to_json(row)
+    assert stored["fleetTorpInputStatus"] == "applied"
+    assert "diagnostics" not in stored
+    loaded = persisted_inference_row_from_json(stored)
+    assert loaded.fleet_torp_input_status == "applied"
+    wire = wire_complete_from_persisted_row(loaded)
+    assert wire["fleetTorpInputStatus"] == "applied"
+
+
 def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persistence):
     persistence.put_row(
         628580,

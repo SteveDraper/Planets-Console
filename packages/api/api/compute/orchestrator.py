@@ -250,10 +250,12 @@ class ComputeOrchestrator(
             builder = registration.build_step_job_wire[step.step_kind]
             node_scope = node.scope
             ctx = self._ctx_for_node(node)
+            node_result_wire = node.result_wire
         job_wire = builder(
             node_scope,
             dependency_outputs=dependency_outputs,
             ctx=ctx,
+            node_result_wire=node_result_wire,
         )
         return run_step(job_wire)
 

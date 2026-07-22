@@ -4,10 +4,12 @@ from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.fleet.compute_orchestration import (
     FLEET_COMPUTE_PROFILE,
-    FLEET_MATERIALIZATION_LEG,
+    FLEET_FINALIZATION_LEG,
+    FLEET_OBSERVATION_LEG,
     FLEET_PERSISTENCE_POLICY,
     FLEET_SCOPE_KEY_SPEC,
-    build_fleet_materialization_leg_job_wire,
+    build_fleet_finalization_leg_job_wire,
+    build_fleet_observation_leg_job_wire,
 )
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.registration import TurnAnalyticRegistration
@@ -15,10 +17,16 @@ from api.compute.wire import StepResult
 from api.models.game import TurnInfo
 
 
-def _run_fleet_materialization_leg(job_wire: dict[str, object]) -> StepResult:
-    from api.analytics.fleet.compute_plane.materialization_leg import run_fleet_materialization_leg
+def _run_fleet_observation_leg(job_wire: dict[str, object]) -> StepResult:
+    from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
 
-    return run_fleet_materialization_leg(job_wire)
+    return run_fleet_observation_leg(job_wire)
+
+
+def _run_fleet_finalization_leg(job_wire: dict[str, object]) -> StepResult:
+    from api.analytics.fleet.compute_plane.finalization_leg import run_fleet_finalization_leg
+
+    return run_fleet_finalization_leg(job_wire)
 
 
 def compute_fleet(ctx: AnalyticComputeContext) -> dict:
@@ -88,6 +96,12 @@ REGISTRATION = TurnAnalyticRegistration(
     scope_key_spec=FLEET_SCOPE_KEY_SPEC,
     compute_profile=FLEET_COMPUTE_PROFILE,
     persistence_policy=FLEET_PERSISTENCE_POLICY,
-    build_step_job_wires=((FLEET_MATERIALIZATION_LEG, build_fleet_materialization_leg_job_wire),),
-    run_steps=((FLEET_MATERIALIZATION_LEG, _run_fleet_materialization_leg),),
+    build_step_job_wires=(
+        (FLEET_OBSERVATION_LEG, build_fleet_observation_leg_job_wire),
+        (FLEET_FINALIZATION_LEG, build_fleet_finalization_leg_job_wire),
+    ),
+    run_steps=(
+        (FLEET_OBSERVATION_LEG, _run_fleet_observation_leg),
+        (FLEET_FINALIZATION_LEG, _run_fleet_finalization_leg),
+    ),
 )

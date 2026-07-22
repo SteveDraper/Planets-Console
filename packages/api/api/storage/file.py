@@ -45,9 +45,35 @@ class FileStorageBackend:
         with open(file_path, encoding="utf-8") as handle:
             return json.load(handle)
 
+    @staticmethod
+    def _ensure_dir(path: Path, *, attempts: int = 8) -> None:
+        """Create ``path`` as a directory, tolerating concurrent creators/pruners.
+
+        ``Path.mkdir(parents=True, exist_ok=True)`` can still raise
+        ``FileExistsError`` under TOCTOU: another thread creates the dir (mkdir
+        raises EEXIST), then a pruner deletes it before ``is_dir()`` runs, so
+        CPython re-raises. Concurrent fleet/scores analytic puts after a clear
+        hit this on ``…/turns/N/analytics``. Retry while the path is absent or
+        already a directory; only fail when a non-directory occupies the path.
+        """
+        last_error: FileExistsError | None = None
+        for _ in range(attempts):
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+                return
+            except FileExistsError as exc:
+                last_error = exc
+                if path.is_dir():
+                    return
+                if path.exists():
+                    raise
+        if last_error is not None:
+            raise last_error
+        path.mkdir(parents=True, exist_ok=True)
+
     def _atomic_write(self, file_path: Path, value: JSONValue) -> None:
         validate_no_reserved_at_keys(value)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_dir(file_path.parent)
         temp_path = file_path.with_name(
             f".{file_path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
         )
@@ -66,7 +92,14 @@ class FileStorageBackend:
             try:
                 next(current.iterdir())
             except StopIteration:
-                current.rmdir()
+                try:
+                    current.rmdir()
+                except FileNotFoundError:
+                    # Concurrent prune or recreate removed this directory.
+                    break
+                except OSError:
+                    # Concurrent put populated the directory after our empty check.
+                    break
                 current = current.parent
             else:
                 break

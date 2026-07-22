@@ -567,8 +567,7 @@ def test_structural_top_k_not_flooded_by_score_equivalent_labels():
     assert result.diagnostics["structural_hit_count"] >= 2
     assert len(result.solutions) == 3
     held_combo_ids = {
-        frozenset(build.combo_id for build in solution.ship_builds)
-        for solution in result.solutions
+        frozenset(build.combo_id for build in solution.ship_builds) for solution in result.solutions
     }
     assert frozenset({"combo_700", "combo_300"}) in held_combo_ids
     assert any("combo_600_" in combo_id for combo_ids in held_combo_ids for combo_id in combo_ids)
@@ -639,8 +638,7 @@ def test_near_best_objective_banding_skips_far_worse_structures():
     assert result.diagnostics["stopped_reason"] == "near_best_band_exhausted"
     assert result.diagnostics["structural_hit_count"] == 2
     held_ids = {
-        frozenset(build.combo_id for build in solution.ship_builds)
-        for solution in result.solutions
+        frozenset(build.combo_id for build in solution.ship_builds) for solution in result.solutions
     }
     assert frozenset({"a_hi", "a_lo"}) in held_ids
     assert frozenset({"b_hi", "b_lo"}) in held_ids

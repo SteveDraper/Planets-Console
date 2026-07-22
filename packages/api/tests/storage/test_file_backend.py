@@ -61,6 +61,34 @@ def test_atomic_write_uses_temp_then_replace(backend, storage_root):
     assert any("tmp" in call for call in calls)
 
 
+def test_ensure_dir_retries_file_exists_after_concurrent_prune(backend, storage_root):
+    """CPython mkdir TOCTOU: EEXIST then is_dir False when a peer pruned the dir."""
+    parent = storage_root / "games" / "628580" / "1" / "turns" / "111" / "analytics"
+    calls = {"n": 0}
+    real_mkdir = Path.mkdir
+
+    def flaky_mkdir(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise FileExistsError(17, "File exists", str(self))
+        return real_mkdir(self, *args, **kwargs)
+
+    with patch.object(Path, "mkdir", flaky_mkdir):
+        with patch.object(Path, "is_dir", return_value=False):
+            with patch.object(Path, "exists", return_value=False):
+                FileStorageBackend._ensure_dir(parent)
+
+    assert calls["n"] >= 2
+
+
+def test_ensure_dir_raises_when_path_is_a_file(backend, storage_root):
+    storage_root.mkdir(parents=True, exist_ok=True)
+    blocker = storage_root / "not-a-dir"
+    blocker.write_text("x", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        FileStorageBackend._ensure_dir(blocker)
+
+
 def test_atomic_write_uses_unique_temp_name_per_write(backend, storage_root):
     temp_names: list[str] = []
     original_replace = __import__("os").replace

@@ -60,7 +60,7 @@ ORDERING_SEMANTICS = {
 }
 
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
-    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
 )
 
 

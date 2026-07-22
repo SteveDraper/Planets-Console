@@ -153,55 +153,42 @@ Every `run_step` result wire carries an explicit **step outcome** the orchestrat
 | Outcome | Orchestrator action |
 |---------|---------------------|
 | **`continue`** | Increment `step_index`; re-queue the same `step_kind` for the same node |
-| **`persist`** | After epoch re-check, call analytic `PersistencePolicy.persist`, then mark node `complete` |
+| **`persist`** | After epoch re-check, call analytic `PersistencePolicy.persist`; when `persist_then_continue` is set, increment `step_index` instead of completing (fleet observation → finalization). Otherwise mark node `complete`. |
 | **`complete`** | Mark node `complete` **without** calling `persist` |
-| **`park`** | Demote node to `parked` until an explicit `force_fresh` wake. May store an optional `result_wire` payload; does **not** call `persist`. Not hot `continue`; not `complete`. |
+| **`waiting_deps`** | Demote node to `waiting_deps` until a dependency closes or `force_fresh` refresh (scores soft defer; same recovery shape as persist-deferred). Optional `result_wire` payload. |
+| **`park`** | (Generic orchestrator machinery; scores production path retired.) Demote node to `parked` until an explicit `force_fresh` wake. |
 
 Analytics own **what** `persist` writes and **how readers** gate on terminal quality. Examples:
 
-- **Fleet** -- `persist` on every materialization leg; `provenance.is_final` distinguishes gap-fill intermediates from ensure-satisfied finals. Readers use `has_final_ledger` / `is_fleet_export_ensure_satisfied`, not raw `has_ledger`, where terminal quality matters.
-- **Scores inference** -- `persist` for durable turn-evidence row statuses (`exact`, `no_exact_solution`, stopped / `time_limited`, and fallback terminals per `is_durable_turn_evidence_row_status`). Soft / empty non-durable outcomes use `park` until a later `force_fresh` wake -- not hot `continue`. Evidence-closed skip may still `complete` without persist. Ladder state between tiers stays in the stream adapter (`RowRun`), not on the wire.
+- **Fleet** -- two-step profile: `observation_leg` writes a non-final ledger (host turn delta / placeholders only; never claims `turnEvidenceAtN`); `finalization_leg` refines from scores then applies ship-observation ingest and persists final provenance. `EnsureDependency.quality` distinguishes observation (`has_ledger`) vs final (`has_final_ledger`). ENSURE catalog lists only prior-turn fleet `quality="final"`; same-turn scores couples on finalization via `PersistDeferredError`, not ENSURE.
+- **Scores inference** -- `persist` for durable turn-evidence row statuses. Soft / empty non-durable outcomes demote the node to `waiting_deps` and emit soft stream rows from the tier/row path (`TerminalSource.ROW_DEFER` + `SoftTerminalReason`), not orchestrator `park`. Evidence-closed skip may still `complete` without persist.
 
-**Scores `park` wake ownership** is encoded by `ScoresParkReason` and
-`ScoresWakeReason`; `wake_scores_scope` is the only scores wake coordinator.
-The orchestrator does **not** demand-wake parked ENSURE ancestors when dependents
-enter `waiting_deps` -- that papered over un-wakeable parks and reintroduced thrash.
+**Scores soft defer** is keyed by `SoftTerminalReason` at the stream boundary
+(`military_score_inference.soft_stream_policy`: `(TerminalSource, soft_terminal_reason,
+has_event) → SoftStreamDispatch`). `deliver_scores_row_defer_terminal` runs from
+tier outcome mapping before the orchestrator sees `waiting_deps`.
 
-| Park site | Soft stream on park? | Mandatory wake owner |
-|-----------|----------------------|----------------------|
-| Non-durable `rowComplete` | Yes (upgradable) | `STREAM_RESCHEDULED` / `EVIDENCE_CLOSED` |
-| Empty `TierJobOutcome` | Cheap admission only (else silent) | `STREAM_RESCHEDULED` / `ROW_RUN_ADOPTED` |
-| Missing `RowRun` | No | `ROW_RUN_ADOPTED` or `EVIDENCE_CLOSED` |
+**Scores wake** uses `wake_scores_scope` (`force_fresh` submit when the node is
+non-terminal and not already `running`; `STREAM_RESCHEDULED` always submits).
 
-Park soft-stream policy is enforced at the scores stream boundary from
-`ScopeLifecycleSnapshot.park_reason` (`ScoresParkReason`), not from scheduler
-membership heuristics. The orchestrator stashes the step's `park_reason` on the
-node while `parked` and copies it into the scope-outcome snapshot.
+| Defer reason | Soft stream on row path? | Typical wake |
+|--------------|--------------------------|--------------|
+| Non-durable `rowComplete` | Yes (upgradable) | stream reschedule / evidence close |
+| Empty `TierJobOutcome` | Cheap admission only (else silent) | stream reschedule / RowRun adopt |
+| Missing `RowRun` | No | RowRun adopt |
 
-Soft-stream *delivery* is a table dispatch
-(`military_score_inference.soft_stream_policy`: `(TerminalSource, park_reason,
-has_event) → SoftStreamDispatch`) rather than an if-ladder in
-`_deliver_row_terminal`. `TerminalSource.SCOPE_OUTCOME` covers durable complete /
-failed notifications from `notify_scope_outcome`. Park / wake reason enums live in
-the leaf module `scores_park_wake` (sibling of `scores_assets`) so stream resolution
-can import them without the scores package ↔ scheduler cycle.
+Ensure edges may carry `EnsureDependency.quality` (`observation` | `final`, default
+`final`). Scores declares `fleet@(N-1, quality=final)` so belief-ready prior fleet
+satisfies ENSURE before tier work starts.
 
 **Scores `tier_solve` wire invariant:** when ensure is satisfied and turn evidence is
 still open, wire build must attach a `runId` (tier registry or successful scheduler
 adopt) or emit the evidence-closed skip sentinel. A bare `{runId: null}` open-evidence
-wait wire is forbidden -- that state has no armed wake publisher and hung dependents.
+wait wire is forbidden.
 
-Park never marks the node `complete`, so same-turn fleet ENSURE stays blocked until durable persist or evidence-closed skip. Soft stream delivery rides on process-wide park notify, not on `complete`.
-
-A parked scores node can also be reopened by fleet: when fleet persist refuses
-for open turn evidence, it raises `PersistDependencyRecovery(force_fresh=True)`
-on the scores scope. The orchestrator's persist-deferred recovery then
-`submit`s the scores scope with `force_fresh=True`, which wakes parked,
-absent, and terminal nodes alike -- the sole reopen mechanism for this case.
-Fleet does not additionally call `wake_scores_scope`; that would be a second
-encoding of the same reopen policy.
-
-Fleet and scores share the orchestrator contract; persistence semantics differ by domain.
+Fleet finalization refuses persist while same-turn scores evidence is open
+(`PersistDeferredError` on scores `tier_solve`). The orchestrator demotes fleet to
+`waiting_deps` and `force_fresh` submits scores -- the sole reopen mechanism for this case.
 
 ---
 

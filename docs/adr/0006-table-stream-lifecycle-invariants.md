@@ -61,13 +61,26 @@ Shell + admission + cancel seal + session token cancel go only through `apply_sc
 - No parallel `cancel_intent` module or second cancel entrypoint.
 - Scheduler `abort_scope` and stream-map pops stay on the scheduler plane (outside the lifecycle command), invoked from `cancel_run` after CANCEL -- not from DETACH.
 
-### 5. Soft park wake
+### 5. Soft defer wake (scores)
 
-Soft park wake is **scores-owned** (`wake_if_parked` / `ScoresWakeReason` coordination in scores compute orchestration via `wake_scores_scope`).
+Scores soft defer uses orchestrator ``waiting_deps`` (not ``parked``) plus stream
+``TerminalSource.ROW_DEFER``. Wake is **scores-owned** via ``wake_scores_scope``
+(``ScoresWakeReason`` → ``force_fresh`` submit).
 
-- The orchestrator does **not** demand-wake or ENSURE-ancestor auto-wake parked nodes.
-- Soft provisional / pending-wire upgrade is stream policy, not DAG state.
-- **Justified non-`wake_scores_scope` reopen:** when fleet persist refuses for open turn evidence, it raises `PersistDependencyRecovery(force_fresh=True)` on the scores scope. Orchestrator persist-deferred recovery then `submit`s that scope with `force_fresh=True`, which wakes parked (and absent / terminal) nodes. Fleet must **not** also call `wake_scores_scope` for the same reopen -- that would be a second encoding of one policy. Details: [design-compute-orchestrator.md](../design-compute-orchestrator.md) (park / PersistDeferred section).
+- The orchestrator does **not** demand-wake ``waiting_deps`` / parked nodes just
+  because dependents enter the DAG.
+- Soft provisional / pending-wire upgrade is stream policy
+  (``soft_stream_policy``), not DAG completion.
+- **Justified non-`wake_scores_scope` reopen:** when fleet finalization persist
+  refuses for open turn evidence, it raises ``PersistDependencyRecovery(force_fresh=True)``
+  on the scores scope. Orchestrator persist-deferred recovery then ``submit``s that
+  scope with ``force_fresh=True``, which refreshes ``waiting_deps`` / absent /
+  terminal nodes. Fleet must **not** also call ``wake_scores_scope`` for the same
+  reopen -- that would be a second encoding of one policy. Details:
+  [design-compute-orchestrator.md](../design-compute-orchestrator.md).
+
+Generic orchestrator ``park`` / ``wake_if_parked`` machinery may remain for
+non-scores use; scores production no longer emits ``outcome="park"``.
 
 ### 6. Overlay / observation locks stay out of lifecycle PRs
 

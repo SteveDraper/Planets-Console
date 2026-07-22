@@ -25,18 +25,23 @@ from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 from api.serialization.turn import turn_info_to_json
 
-FLEET_MATERIALIZATION_LEG = "materialization_leg"
+FLEET_OBSERVATION_LEG = "observation_leg"
+FLEET_FINALIZATION_LEG = "finalization_leg"
+# Legacy alias for tests and diagnostics that still name the interpreter leg.
+FLEET_MATERIALIZATION_LEG = FLEET_OBSERVATION_LEG
 
 # Two-phase fleet materialization:
-# 1. Interpreter leg (materialization_leg) advances the ledger without inference.
-# 2. FleetPersistencePolicy.persist refines inferred acquisitions from scores,
-#    may re-resolve provenance, writes the refined ledger back onto result_wire,
-#    then put_ledger. Stream listeners and DependencyOutputs priors read that wire.
+# 1. Observation leg advances the ledger and applies ship observations (non-final).
+# 2. Finalization persist refines inferred acquisitions from scores, re-resolves
+#    provenance, and writes the final ledger.
 
 FLEET_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
 FLEET_COMPUTE_PROFILE = AnalyticComputeProfile(
-    steps=(ComputeStepSpec(step_kind=FLEET_MATERIALIZATION_LEG, backend="interpreter"),),
+    steps=(
+        ComputeStepSpec(step_kind=FLEET_OBSERVATION_LEG, backend="interpreter"),
+        ComputeStepSpec(step_kind=FLEET_FINALIZATION_LEG, backend="inline"),
+    ),
 )
 
 
@@ -59,11 +64,27 @@ def _fleet_prior_scope(
     )
 
 
+def build_fleet_observation_leg_job_wire(
+    scope: ComputeScope,
+    *,
+    dependency_outputs: DependencyOutputs,
+    ctx: AnalyticQueryContext | None = None,
+    **_kwargs: object,
+) -> dict[str, Any]:
+    """Assemble a serializable job wire for one fleet observation leg."""
+    return build_fleet_materialization_leg_job_wire(
+        scope,
+        dependency_outputs=dependency_outputs,
+        ctx=ctx,
+    )
+
+
 def build_fleet_materialization_leg_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet materialization leg.
 
@@ -149,6 +170,20 @@ def build_fleet_materialization_leg_job_wire(
     }
 
 
+def build_fleet_finalization_leg_job_wire(
+    scope: ComputeScope,
+    *,
+    dependency_outputs: DependencyOutputs,
+    ctx: AnalyticQueryContext | None = None,
+    node_result_wire: object | None = None,
+) -> dict[str, Any]:
+    """Pass the observation continue wire into the inline finalization leg."""
+    del dependency_outputs, ctx
+    if not isinstance(node_result_wire, dict):
+        raise RuntimeError("fleet finalization leg requires observation result wire on node")
+    return dict(node_result_wire)
+
+
 class FleetPersistencePolicy:
     """Orchestrator persistence hooks for per-player fleet ledger scopes.
 
@@ -203,6 +238,58 @@ class FleetPersistencePolicy:
         ctx: AnalyticQueryContext,
         scope: ComputeScope,
         result_wire: object,
+    ) -> Callable[[], None] | None:
+        if not isinstance(result_wire, dict):
+            raise TypeError(f"fleet result wire must be dict, got {type(result_wire).__name__}")
+        persist_leg = result_wire.get("fleetPersistLeg")
+        if persist_leg == "observation":
+            return self._persist_observation(ctx, scope, result_wire)
+        return self._persist_finalization(ctx, scope, result_wire)
+
+    def _persist_observation(
+        self,
+        ctx: AnalyticQueryContext,
+        scope: ComputeScope,
+        result_wire: dict[str, object],
+    ) -> Callable[[], None] | None:
+        from api.analytics.fleet.compute_services import resolve_fleet_services
+        from api.analytics.fleet.types import FleetMaterializationProvenance
+
+        persisted_wire = result_wire.get("persistedLedgerWire")
+        if not isinstance(persisted_wire, dict):
+            raise TypeError("fleet observation wire missing persistedLedgerWire object")
+        persisted = persisted_fleet_ledger_from_json(persisted_wire)
+        services = resolve_fleet_services(ctx)
+        if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
+            raise ValueError("fleet observation persist requires concrete player_id")
+        if scope.turn == WILDCARD or not isinstance(scope.turn, int):
+            raise ValueError("fleet observation persist requires concrete turn")
+
+        # Observation must never claim turn evidence closed -- only finalization
+        # after scores refine may set turnEvidenceAtN and satisfy has_final_ledger.
+        persisted = PersistedFleetLedger(
+            ledger=persisted.ledger,
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=False,
+                prior_ledger_at_n_minus_1=persisted.provenance.prior_ledger_at_n_minus_1,
+            ),
+            materialization_version=persisted.materialization_version,
+        )
+        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(persisted)
+        return services.persistence.put_ledger(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+            persisted,
+            defer_ledger_persisted_notification=True,
+        )
+
+    def _persist_finalization(
+        self,
+        ctx: AnalyticQueryContext,
+        scope: ComputeScope,
+        result_wire: dict[str, object],
     ) -> Callable[[], None] | None:
         from api.analytics.fleet.compute_services import resolve_fleet_services
         from api.analytics.fleet.inferred_acquisition_refine import (
@@ -267,9 +354,9 @@ class FleetPersistencePolicy:
             # automatic rematerialization (empty scores complete hang fingerprint).
             # PersistDependencyRecovery.force_fresh is the sole reopen mechanism here:
             # the orchestrator's persist-deferred recovery submits the scores scope
-            # with force_fresh=True, which wakes parked, absent, and terminal nodes
-            # alike. Do not also call wake_scores_scope for this path -- that would
-            # be a second encoding of the same reopen policy.
+            # with force_fresh=True, which refreshes waiting_deps / absent / terminal
+            # nodes alike. Do not also call wake_scores_scope for this path -- that
+            # would be a second encoding of the same reopen policy.
             from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
             from api.compute.persistence import PersistDependencyRecovery
             from api.errors import FleetScoresEvidenceOpenError

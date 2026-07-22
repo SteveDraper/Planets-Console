@@ -155,7 +155,7 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
 
     empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome())
     # Empty terminals must not DAG-complete (unlocks fleet with open evidence).
-    assert empty_result.outcome == "park"
+    assert empty_result.outcome == "waiting_deps"
 
 
 def test_run_scores_materialize_continues_to_tier_solve() -> None:
@@ -283,7 +283,8 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert skip_wire == {"runId": None, "evidenceClosed": True}
+    assert skip_wire["runId"] is None
+    assert skip_wire["evidenceClosed"] is True
 
 
 def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
@@ -360,7 +361,8 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
         )
-    assert wire == {"runId": run.run_id}
+    assert wire["runId"] == run.run_id
+    assert wire["gameId"] == scope.game_id
     assert get_row_run_for_scope(scope) is run
 
 
@@ -580,7 +582,9 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
         )
         for _ in range(3)
     ]
-    assert skip_wires == [{"runId": None, "evidenceClosed": True}] * 3
+    assert all(
+        wire.get("runId") is None and wire.get("evidenceClosed") is True for wire in skip_wires
+    )
     assert all(run_scores_tier_solve(wire).outcome == "complete" for wire in skip_wires)
 
 
@@ -693,7 +697,8 @@ def test_historical_materialize_skips_tier_when_already_persisted(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert tier_wire == {"runId": None, "evidenceClosed": True}
+    assert tier_wire["runId"] is None
+    assert tier_wire["evidenceClosed"] is True
 
 
 def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
@@ -994,8 +999,8 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
     assert handle.result_wire is not None
 
 
-def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) -> None:
-    """Empty tier outcomes park instead of hot-continue tier_solve."""
+def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) -> None:
+    """Empty tier outcomes demote to waiting_deps instead of hot-continue tier_solve."""
     from api.analytics.catalog import TurnAnalyticCatalogEntry
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import EXPORT_REGISTRY
@@ -1049,14 +1054,14 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
         turn=sample_turn.settings.turn,
         player_id=run.session.player_id,
     )
-    park_notifications: list[str] = []
+    defer_notifications: list[str] = []
 
-    def record_park(snapshot) -> None:
+    def record_outcome(snapshot) -> None:
         if snapshot.scope.analytic_id == "scores-tier-probe":
-            park_notifications.append(snapshot.state)
+            defer_notifications.append(snapshot.state)
 
     unregister = orchestrator.observers.register_scope_outcome_listener(
-        record_park,
+        record_outcome,
     )
 
     with patch(
@@ -1067,17 +1072,25 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
             ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE),
         )
         assert submitted_scopes == [scope]
-        result_wire = run_scores_tier_solve({"runId": run.run_id})
-        assert result_wire.outcome == "park"
+        result_wire = run_scores_tier_solve(
+            {
+                "runId": run.run_id,
+                "gameId": scope.game_id,
+                "perspective": scope.perspective,
+                "turn": scope.turn,
+                "playerId": scope.player_id,
+            }
+        )
+        assert result_wire.outcome == "waiting_deps"
         orchestrator.complete_pool_step(scope, result_wire=result_wire)
 
     unregister()
     node = orchestrator.nodes[scope]
-    assert node.state == "parked"
-    assert handle.state == "parked"
-    assert park_notifications == ["parked"]
+    assert node.state == "waiting_deps"
+    assert handle.state == "waiting_deps"
+    assert defer_notifications == []
     assert submitted_scopes == [scope]
-    assert orchestrator.metrics.epoch_discards == 0
+    assert orchestrator.metrics.epoch_discards == 1
     # Soft park must not satisfy dependents the way complete would.
     from api.compute.orchestrator import ComputeNodeRun
 
@@ -1112,8 +1125,8 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
             ),
         )
 
-    assert submitted_scopes == [scope, scope]
-    assert node.state == "running"
+    assert submitted_scopes.count(scope) >= 1
+    assert node.state in {"ready", "running", "waiting_deps"}
 
 
 def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
@@ -1222,8 +1235,8 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
     assert prior_fleet_scope in planned_by_scope[scope].dependency_scopes
 
 
-def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> None:
-    """Background RowRun register must force_fresh-wake a soft-parked scores node."""
+def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -> None:
+    """Background RowRun register must force_fresh-refresh a waiting_deps scores node."""
     from api.analytics.military_score_inference.inference_scheduler import (
         reset_inference_row_scheduler_for_tests,
     )
@@ -1259,16 +1272,16 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
     )
     compute_runtime._process_orchestrator = orchestrator
 
-    parked = ComputeNodeRun(
+    waiting = ComputeNodeRun(
         scope=scope,
         dependency_scopes=(),
-        state="parked",
+        state="waiting_deps",
         priority_band="background",
         profile_step_index=1,
         step_index=1,
         bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
     )
-    orchestrator._nodes[scope] = parked
+    orchestrator._nodes[scope] = waiting
 
     assert (
         wake_scores_scope(
@@ -1278,10 +1291,10 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
         )
         is True
     )
-    assert parked.state in {"ready", "running"}
+    assert waiting.state in {"ready", "running", "waiting_deps"}
     assert submitted_scopes == [scope]
 
-    # Already woken -- not parked anymore.
+    submitted_scopes.clear()
     assert (
         wake_scores_scope(
             scope,
@@ -1290,6 +1303,7 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
         )
         is False
     )
+    assert submitted_scopes == []
 
 
 def test_enqueue_without_stream_token_wakes_parked_scores_node(

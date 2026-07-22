@@ -1,8 +1,9 @@
 """Map orchestrator scope outcomes onto scores inference row-run / stream terminals.
 
 Owns the scores ``register_scope_outcome_listener`` decision tree: cancel-abort
-ignore, soft park, peer-binding races, empty-complete, orphan fallback, and
-row-run finalize. Stream terminal *delivery* stays in
+ignore, peer-binding races, durable complete/fail, orphan fallback, and
+row-run finalize. Soft defer delivery is row-path owned (``ROW_DEFER``), not
+scope-outcome park notify. Stream terminal *delivery* stays in
 ``inference_stream_resolution``.
 """
 
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
 
 class InferenceStreamScopeOutcomesMixin:
-    """Scores DAG scope-outcome listener: decide park / complete / fail / orphan."""
+    """Scores DAG scope-outcome listener: decide complete / fail / orphan."""
 
     def _on_orchestrator_scope_outcome(
         self: InferenceRowScheduler,
@@ -40,16 +41,6 @@ class InferenceStreamScopeOutcomesMixin:
         # Intentional row-run cancel aborts in-flight DAG nodes. Do not fail (or
         # orphan-complete) the open multiplex -- reschedule will admit a replacement.
         if self._is_cancel_abort_failure(snapshot):
-            return
-
-        # Soft park: reattach empty/non-durable stream delivery without completing
-        # the scores node (fleet ENSURE stays blocked until durable close).
-        if snapshot.state == "parked":
-            self._deliver_row_terminal(
-                source=TerminalSource.PARKED,
-                scope=scope,
-                snapshot=snapshot,
-            )
             return
 
         self._apply_scope_outcome_to_matching_runs(snapshot)

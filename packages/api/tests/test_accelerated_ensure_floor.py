@@ -94,7 +94,7 @@ def test_scores_ensure_walk_skips_missing_turn_below_accelerated_floor(sample_tu
     pending_turns = {(analytic_id, scope.turn) for analytic_id, scope, _ in walk.pending_ensure}
     assert ("scores", 4) in pending_turns
     assert ("fleet", 3) in pending_turns
-    assert ("scores", 3) in pending_turns
+    assert ("scores", 3) not in pending_turns
     assert ("fleet", 2) not in pending_turns
     assert ("fleet", 1) not in pending_turns
 

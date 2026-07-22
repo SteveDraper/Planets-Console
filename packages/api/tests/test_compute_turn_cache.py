@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 
+import pytest
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.exports.empty import empty_export_catalog_for
@@ -45,6 +46,18 @@ from tests.test_compute_foundation import _StubPersistencePolicy
 
 _ROW_SCOPE_KEY = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 _FLEET_ANALYTIC_ID = "fleet"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_compute_pool_singleton():
+    from api.compute.pools import shutdown_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    shutdown_compute_worker_pool_for_tests()
+    reset_orchestrators_for_tests()
+    yield
+    shutdown_compute_worker_pool_for_tests()
+    reset_orchestrators_for_tests()
 
 
 def _catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
@@ -302,8 +315,7 @@ def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> No
     player_id = next(row.ownerid for row in sample_turn.scores)
     inference_persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     scores_services = ScoresExportContext(persistence=inference_persistence)
-    # Fleet@2 ENSURE-depends on scores@2; durable closed evidence under the same
-    # perspective lets scores skip-complete so the fleet pool leg can finish.
+    # Durable closed scores@2 lets finalization refine; observation has no scores ENSURE edge.
     put_persisted_row(
         inference_persistence,
         stored_turns[2],

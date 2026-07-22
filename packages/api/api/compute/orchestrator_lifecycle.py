@@ -176,6 +176,22 @@ class OrchestratorLifecycleMixin:
             self._park_node_step(node, reason=step_result.park_reason)
             return
 
+        if step_result.outcome == "waiting_deps":
+            if step_result.payload is not None:
+                node.result_wire = step_result.payload
+            recovery = step_result.wait_recovery
+            if recovery is None:
+                raise RuntimeError("waiting_deps step outcome requires wait_recovery")
+
+            def _defer_waiting_deps(
+                deferred_node: ComputeNodeRun = node,
+                deferred_recovery: PersistDependencyRecovery = recovery,
+            ) -> None:
+                self._recover_after_persist_deferred(deferred_node, deferred_recovery)
+
+            self._observers.schedule_post_lock(_defer_waiting_deps)
+            return
+
         if step_result.outcome == "persist":
             node.result_wire = step_result.payload
             self._metrics.persist_calls += 1
@@ -190,11 +206,13 @@ class OrchestratorLifecycleMixin:
             # or skipped scores reschedule decisions). Notifications returned from
             # ``persist`` run only after complete so skip-reschedule sees ``complete``.
             payload = step_result.payload
+            persist_then_continue = step_result.persist_then_continue
 
             def _persist_then_complete(
                 completed_node: ComputeNodeRun = node,
                 completed_payload: object = payload,
                 completed_registration: AnalyticComputeRegistration = registration,
+                should_continue: bool = persist_then_continue,
             ) -> None:
                 # Cancel/preempt may have aborted this node after the step succeeded
                 # but before post-lock persist. Do not persist or complete in that case.
@@ -228,7 +246,10 @@ class OrchestratorLifecycleMixin:
                 with self._condition:
                     if completed_node.state != "running":
                         return
-                    self._complete_node(completed_node)
+                    if should_continue:
+                        self._continue_node_step(completed_node, completed_registration)
+                    else:
+                        self._complete_node(completed_node)
                     if post_lock_callback is not None:
                         self._observers.schedule_post_lock(post_lock_callback)
 
