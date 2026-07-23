@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import MagicMock
 
+from api.analytics.military_score_inference.models import (
+    InferenceResult,
+    InferenceSolution,
+    InferenceSolutionShipBuild,
+)
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
     _TierStepRun,
     ensure_ladder_clock_started,
     remaining_time,
 )
+from api.analytics.military_score_inference.policy_ladder_tier_step import (
+    _solve_seed_progression,
+)
+from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import (
     ComponentFilter,
     InferenceCatalogFilters,
@@ -278,3 +288,127 @@ def test_batch_ladder_dispatches_later_absolute_mins_after_soft_global_exhaust(
     ]
     assert dispatched[1][1] == 3.0
     assert dispatched[2][1] == 1.0
+
+
+class _SeedProgressionBudget:
+    """Monotonic remaining wall that shrinks after each grant (probe-style)."""
+
+    def __init__(self, grants: list[float]) -> None:
+        self._grants = list(grants)
+        self._index = 0
+        self.sampled: list[float] = []
+
+    def should_stop(self) -> bool:
+        return self._index >= len(self._grants)
+
+    def remaining_seconds(self) -> float:
+        if self._index >= len(self._grants):
+            return 0.0
+        remaining = self._grants[self._index]
+        self._index += 1
+        self.sampled.append(remaining)
+        return remaining
+
+
+def _empty_catalog_result() -> InferenceResult:
+    return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
+
+
+def test_seed_progression_samples_remaining_per_sub_solve(monkeypatch) -> None:
+    """Neighborhood 0/1 then unfixed each see a fresh remaining, not one snapshot."""
+    recorded_limits: list[float] = []
+
+    def fake_solve_catalog(*_args, **kwargs):
+        recorded_limits.append(float(kwargs["time_limit_seconds"]))
+        return _empty_catalog_result(), MagicMock()
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
+        fake_solve_catalog,
+    )
+    budget = _SeedProgressionBudget([5.0, 3.0, 1.0])
+    seed = InferenceSolution(
+        objective_value=0,
+        actions=(),
+        ship_builds=(
+            InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),
+        ),
+    )
+    result, problem = _solve_seed_progression(
+        MagicMock(),
+        MagicMock(),
+        seed,
+        max_solutions=5,
+        remaining_seconds=budget.remaining_seconds,
+        should_stop=budget.should_stop,
+    )
+    assert result is None
+    assert problem is None
+    assert recorded_limits == [5.0, 3.0, 1.0]
+    assert budget.sampled == [5.0, 3.0, 1.0]
+
+
+def test_seed_progression_stops_when_remaining_exhausted(monkeypatch) -> None:
+    """Exhausted tier wall skips later neighborhood / unfixed passes."""
+    recorded_limits: list[float] = []
+
+    def fake_solve_catalog(*_args, **kwargs):
+        recorded_limits.append(float(kwargs["time_limit_seconds"]))
+        return _empty_catalog_result(), MagicMock()
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
+        fake_solve_catalog,
+    )
+    budget = _SeedProgressionBudget([2.0])  # one grant only; later remaining is 0
+    seed = InferenceSolution(
+        objective_value=0,
+        actions=(),
+        ship_builds=(
+            InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),
+        ),
+    )
+    result, problem = _solve_seed_progression(
+        MagicMock(),
+        MagicMock(),
+        seed,
+        max_solutions=5,
+        remaining_seconds=budget.remaining_seconds,
+        should_stop=budget.should_stop,
+    )
+    assert result is None
+    assert problem is None
+    assert recorded_limits == [2.0]
+    assert budget.sampled == [2.0]
+
+
+def test_seed_progression_skips_all_solves_when_should_stop(monkeypatch) -> None:
+    calls = 0
+
+    def fake_solve_catalog(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return _empty_catalog_result(), MagicMock()
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
+        fake_solve_catalog,
+    )
+    seed = InferenceSolution(
+        objective_value=0,
+        actions=(),
+        ship_builds=(
+            InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),
+        ),
+    )
+    result, problem = _solve_seed_progression(
+        MagicMock(),
+        MagicMock(),
+        seed,
+        max_solutions=5,
+        remaining_seconds=lambda: 5.0,
+        should_stop=lambda: True,
+    )
+    assert result is None
+    assert problem is None
+    assert calls == 0

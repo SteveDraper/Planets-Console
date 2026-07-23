@@ -198,26 +198,44 @@ def _solve_seed_progression(
     *,
     race_id: int | None = None,
     max_solutions: int,
-    time_limit_seconds: float,
+    remaining_seconds: Callable[[], float],
+    should_stop: Callable[[], bool] | None = None,
     cancel_token: InferenceCancelToken | None = None,
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
 ) -> tuple[InferenceResult | None, InferenceProblem | None]:
+    """Run neighborhood then unfixed catalog solves under one shared wall.
+
+    Each sub-solve samples ``remaining_seconds()`` at call time so successive
+    passes cannot each claim the full tier allowance independently.
+    """
     fixed_counts = _combo_counts_from_solution(seed)
     if not fixed_counts:
         return None, None
 
+    def _abort() -> bool:
+        if should_stop is not None and should_stop():
+            return True
+        return cancel_token is not None and cancel_token.is_cancelled()
+
+    def _solve_cap() -> float | None:
+        if _abort():
+            return None
+        limit = remaining_seconds()
+        if limit <= 0:
+            return None
+        return limit
+
     for neighborhood in (0, 1):
-        if time_limit_seconds <= 0:
-            break
-        if cancel_token is not None and cancel_token.is_cancelled():
-            break
+        limit = _solve_cap()
+        if limit is None:
+            return None, None
         result, problem = _solve_catalog(
             observation,
             catalog,
             race_id=race_id,
             max_solutions=max_solutions,
-            time_limit_seconds=time_limit_seconds,
+            time_limit_seconds=limit,
             fixed_combo_counts=fixed_counts,
             combo_count_neighborhood=neighborhood,
             cancel_token=cancel_token,
@@ -229,7 +247,8 @@ def _solve_seed_progression(
         if result.solutions:
             return result, problem
 
-    if cancel_token is not None and cancel_token.is_cancelled():
+    limit = _solve_cap()
+    if limit is None:
         return None, None
 
     result, problem = _solve_catalog(
@@ -237,7 +256,7 @@ def _solve_seed_progression(
         catalog,
         race_id=race_id,
         max_solutions=max_solutions,
-        time_limit_seconds=time_limit_seconds,
+        time_limit_seconds=limit,
         cancel_token=cancel_token,
         on_solution=on_solution,
         seed_no_good_solutions=seed_no_good_solutions,
@@ -735,7 +754,8 @@ def run_policy_ladder_tier_step(
             seed,
             race_id=player_race_id,
             max_solutions=catalog_solve_max,
-            time_limit_seconds=run.remaining_seconds(),
+            remaining_seconds=run.remaining_seconds,
+            should_stop=run.should_stop,
             cancel_token=cancel_token,
             on_solution=admit_solution,
             seed_no_good_solutions=held_no_goods,
