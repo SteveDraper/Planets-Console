@@ -327,33 +327,6 @@ def _parse_max_seconds(raw: object, *, step_id: str) -> float | None:
     return float(raw)
 
 
-def tier_step_allowance_seconds(
-    steps: tuple[InferenceTierPolicyStep, ...],
-    step_index: int,
-    *,
-    global_remaining_seconds: float,
-) -> tuple[float, float, float]:
-    """Return ``(allowance, reserved_for_later, spendable)`` for one ladder step.
-
-    Soft-global remainder **steers** the target slice: later steps' ``min_seconds``
-    are reserved so earlier steps prefer not to consume them
-    (``spendable = max(0, global_remaining - reserved)``, then capped by
-    ``max_seconds``). The current step's ``min_seconds`` is an **absolute floor**
-    on allowance even when that exceeds ``spendable`` / soft-global remainder
-    (intentional overshoot so high-prior aggregate tiers still run).
-    """
-    if step_index < 0 or step_index >= len(steps):
-        raise ValueError(f"step_index {step_index} out of range for {len(steps)} steps")
-    step = steps[step_index]
-    reserved = sum(later.min_seconds for later in steps[step_index + 1 :])
-    spendable = max(0.0, float(global_remaining_seconds) - reserved)
-    steered = spendable
-    if step.max_seconds is not None:
-        steered = min(steered, step.max_seconds)
-    allowance = max(step.min_seconds, steered)
-    return allowance, reserved, spendable
-
-
 def _parse_policy_step(
     raw: dict[str, Any],
     *,

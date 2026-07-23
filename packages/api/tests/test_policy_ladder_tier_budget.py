@@ -12,9 +12,10 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
-    _TierStepRun,
+    TierStepRun,
     ensure_ladder_clock_started,
     remaining_time,
+    tier_step_allowance_seconds,
 )
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     _solve_seed_progression,
@@ -25,7 +26,6 @@ from api.analytics.military_score_inference.tier_policy import (
     InferenceCatalogFilters,
     InferenceTierPolicyStep,
     resolve_tier_policies,
-    tier_step_allowance_seconds,
 )
 
 
@@ -111,7 +111,7 @@ def test_continues_share_one_row_budget_from_first_dispatch() -> None:
     """Soft-global remaining is shared from first dispatch; tier slice is separate."""
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
     started = ensure_ladder_clock_started(state, now=time.monotonic() - 15.0)
-    run = _TierStepRun(
+    run = TierStepRun(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
@@ -130,7 +130,7 @@ def test_soft_global_exhaustion_does_not_abort_funded_tier() -> None:
     """Absolute mins may overshoot soft global; only tier allowance stops the slice."""
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
     started = ensure_ladder_clock_started(state, now=time.monotonic() - 21.0)
-    run = _TierStepRun(
+    run = TierStepRun(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
@@ -149,7 +149,7 @@ def test_stale_pre_deferred_started_at_does_not_abort_funded_tier() -> None:
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
     state.started_at = time.monotonic() - 45.0
     assert remaining_time(state.started_at, 20.0) <= 0
-    run = _TierStepRun(
+    run = TierStepRun(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
@@ -172,7 +172,7 @@ def test_waiting_deps_before_first_dispatch_does_not_burn_shared_budget() -> Non
     # Long wait with no stamp -- budget must still be full at first dispatch.
     time.sleep(0.01)
     started = ensure_ladder_clock_started(state)
-    run = _TierStepRun(
+    run = TierStepRun(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
@@ -187,7 +187,7 @@ def test_waiting_deps_before_first_dispatch_does_not_burn_shared_budget() -> Non
 def test_tier_allowance_stop_does_not_complete_ladder() -> None:
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:2]))
     started = ensure_ladder_clock_started(state)
-    run = _TierStepRun(
+    run = TierStepRun(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,

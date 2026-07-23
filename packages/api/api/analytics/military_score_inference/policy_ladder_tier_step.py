@@ -37,9 +37,10 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
-    _TierStepRun,
+    TierStepRun,
     ensure_ladder_clock_started,
     remaining_time,
+    tier_step_allowance_seconds,
 )
 from api.analytics.military_score_inference.prior_fleet_tech_raise import (
     PriorFleetTechRaisePlan,
@@ -58,17 +59,8 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
     resolve_solver_thresholds,
-    tier_step_allowance_seconds,
 )
 from api.models.game import TurnInfo
-
-# Stable re-exports for callers/tests that import budget helpers from this module.
-__all__ = (
-    "ensure_ladder_clock_started",
-    "remaining_time",
-    "run_policy_ladder_tier_step",
-    "_TierStepRun",
-)
 
 
 def _combo_counts_from_solution(solution: InferenceSolution) -> dict[str, int]:
@@ -546,7 +538,7 @@ def run_policy_ladder_tier_step(
         global_remaining_seconds=global_remaining,
     )
     tier_started_at = time.monotonic()
-    run = _TierStepRun(
+    run = TierStepRun(
         state,
         time_limit_seconds,
         cancel_token,
