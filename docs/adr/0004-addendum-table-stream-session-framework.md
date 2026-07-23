@@ -15,7 +15,7 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 | `multiplex.py` | Generic round-robin drain over per-row `event_queue`, `is_stream_active`, `wake_event`, terminal-type predicate |
 | `scope_guard.py` | `TableStreamScopeGuard` composed into both schedulers (`begin_scope`, `owns_table_stream`, `end_table_stream`) |
 | `registry.py` | Generic scope-keyed controller registry (attach/detach, in-place reschedule lookup) |
-| `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, scheduled-row map) |
+| `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, scheduled-row map); safe reschedule lock choreography (`reschedule_one` / `reschedule_all` / `install_admission_dispatch` -- never hold `stream_lock` across cancel, schedule, or orchestrator submit) |
 | `connect.py` | `iter_table_stream_connect` / `iter_table_stream_connect_with_scope` with guaranteed `finally` scope teardown |
 | `row_stream_resolution.py` | Analytic-independent row terminal FSM (`OPEN` / `SOFT_PROVISIONAL` / `HARD_TERMINAL` / `CANCELED`) plus `multiplex_closed` drain bit |
 | `row_stream_resolution_registry.py` | Process-wide FIFO-bounded resolution table; stores delivery state + `multiplex_closed` (not a public drain write API) |

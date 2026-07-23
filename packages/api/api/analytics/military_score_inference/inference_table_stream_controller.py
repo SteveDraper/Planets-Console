@@ -154,6 +154,12 @@ class InferenceTableStreamController(
         if self.reload_host_turn is not None:
             self.turn = self.reload_host_turn()
 
+    def _active_run_id_for_player(self, player_id: int) -> str | None:
+        active = self.scheduler.row_run_for_player(self.scope, player_id)
+        if active is None:
+            return None
+        return active.session.run_id
+
     def reschedule_row(self, player_id: int) -> bool:
         """Cancel and re-admit one row without holding ``stream_lock`` across schedule.
 
@@ -161,32 +167,17 @@ class InferenceTableStreamController(
         fleet ledger persist (or soft-defer delivery) can re-enter ``reschedule_row`` or
         ``deliver_domain_event``. Holding ``stream_lock`` across that path self-deadlocks
         on the non-reentrant lock (fleet ``reschedule_player`` parity).
+
+        Cancel runs outside ``stream_lock``: cancel aborts orchestrator scopes and drains
+        node-complete listeners that call ``deliver_domain_event`` (needs this lock).
         """
-        cancel_run_ids: list[str] = []
-        with self.stream_lock:
-            self._refresh_host_turn()
-            old_row = self.scheduled_rows.get(player_id)
-            if old_row is not None:
-                cancel_run_ids.append(old_row.session.run_id)
-                self.scheduled_rows.pop(player_id, None)
-            else:
-                active = self.scheduler.row_run_for_player(self.scope, player_id)
-                if active is not None:
-                    cancel_run_ids.append(active.session.run_id)
-        # Cancel outside stream_lock: cancel aborts orchestrator scopes and drains
-        # node-complete listeners that call ``deliver_domain_event`` (needs this lock).
-        for run_id in cancel_run_ids:
-            self.scheduler.cancel_row_run(run_id)
-        with self.stream_lock:
-            if player_id in self.scheduled_rows:
-                # Concurrent admit/reschedule already replaced the row.
-                self.wake_multiplex.set()
-                return True
-        admission = self.resolve_row_admission(player_id)
-        dispatch = self.dispatch_admission(player_id, admission)
-        if dispatch.schedule_failed:
-            return False
-        return self._install_admission_dispatch(player_id, dispatch)
+        return self.reschedule_one(
+            player_id,
+            cancel_run_id=self.scheduler.cancel_row_run,
+            resolve_admission=self.resolve_row_admission,
+            active_run_id_for_player=self._active_run_id_for_player,
+            before_collect_cancels=self._refresh_host_turn,
+        )
 
     def adopt_admission_scheduled_row(
         self,
@@ -198,27 +189,6 @@ class InferenceTableStreamController(
             row,
             cancel_run_id=self.scheduler.cancel_row_run,
         )
-
-    def _install_admission_dispatch(
-        self,
-        player_id: int,
-        dispatch: AdmissionDispatch[ScheduledInferenceRow],
-    ) -> bool:
-        """Apply one admission result under ``stream_lock``; cancel raced schedules."""
-        raced_run_id: str | None = None
-        with self.stream_lock:
-            if player_id in self.scheduled_rows:
-                if dispatch.scheduled is not None:
-                    raced_run_id = dispatch.scheduled.session.run_id
-            else:
-                if dispatch.wire_events:
-                    self.pending_wire_events.extend(dispatch.wire_events)
-                if dispatch.scheduled is not None:
-                    self.scheduled_rows[player_id] = dispatch.scheduled
-        if raced_run_id is not None:
-            self.scheduler.cancel_row_run(raced_run_id)
-        self.wake_multiplex.set()
-        return True
 
     def push_admission_wire_terminal(self, session: InferenceRowStreamSession) -> bool:
         """Push immediate/cached admission wire for an empty peer complete.
@@ -295,35 +265,14 @@ class InferenceTableStreamController(
 
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
         """Cancel and re-admit every row; schedule/submit outside ``stream_lock``."""
-        cancel_run_ids: list[str] = []
-        with self.stream_lock:
-            self._refresh_host_turn()
-            for player_id in self.player_ids:
-                old_row = self.scheduled_rows.get(player_id)
-                if old_row is not None:
-                    cancel_run_ids.append(old_row.session.run_id)
-            self.scheduled_rows.clear()
-        for run_id in cancel_run_ids:
-            self.scheduler.cancel_row_run(run_id)
-
-        dispatches: list[tuple[int, AdmissionDispatch[ScheduledInferenceRow]]] = []
-        for player_id in self.player_ids:
-            admission = self.resolve_row_admission(
+        return self.reschedule_all(
+            cancel_run_id=self.scheduler.cancel_row_run,
+            resolve_admission=lambda player_id: self.resolve_row_admission(
                 player_id,
                 force_schedule=force_schedule,
-            )
-            dispatch = self.dispatch_admission(player_id, admission)
-            if dispatch.schedule_failed:
-                for _, prior in dispatches:
-                    if prior.scheduled is not None:
-                        self.scheduler.cancel_row_run(prior.scheduled.session.run_id)
-                return False
-            dispatches.append((player_id, dispatch))
-
-        for player_id, dispatch in dispatches:
-            if not self._install_admission_dispatch(player_id, dispatch):
-                return False
-        return True
+            ),
+            before_collect_cancels=self._refresh_host_turn,
+        )
 
     def attach(self) -> None:
         attach_inference_table_stream(self)
