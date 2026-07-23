@@ -10,7 +10,6 @@ class SoftTerminalReason(StrEnum):
 
     NON_DURABLE_ROW_COMPLETE = "scores_non_durable_row_complete"
     EMPTY_TIER_OUTCOME = "scores_empty_tier_outcome"
-    MISSING_ROW_RUN = "scores_missing_row_run"
 
 
 class ScoresWakeReason(StrEnum):

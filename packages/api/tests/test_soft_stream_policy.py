@@ -39,18 +39,6 @@ from api.analytics.military_score_inference.soft_stream_policy import (
             True,
             SoftStreamDispatch.EMIT_SOFT_PROVISIONAL,
         ),
-        (
-            TerminalSource.ROW_DEFER,
-            SoftTerminalReason.MISSING_ROW_RUN,
-            True,
-            SoftStreamDispatch.SILENCE,
-        ),
-        (
-            TerminalSource.ROW_DEFER,
-            SoftTerminalReason.MISSING_ROW_RUN,
-            False,
-            SoftStreamDispatch.SILENCE,
-        ),
         (TerminalSource.ROW_DEFER, None, False, SoftStreamDispatch.SILENCE),
         (TerminalSource.ROW_DEFER, None, True, SoftStreamDispatch.EMIT_SOFT_PROVISIONAL),
         (TerminalSource.ROW_DEFER, "unknown_defer", False, SoftStreamDispatch.SILENCE),

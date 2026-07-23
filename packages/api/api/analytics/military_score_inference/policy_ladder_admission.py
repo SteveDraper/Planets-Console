@@ -25,7 +25,6 @@ __all__ = (
     "make_incremental_admitter",
     "maybe_early_stop_after_step",
     "maybe_no_new_exact_signatures_early_stop",
-    "merge_exact_solutions",
 )
 
 
@@ -56,24 +55,6 @@ def _solution_qualifies_for_ship_only_exact_early_stop(
         return False
     thresholds = resolve_solver_thresholds()
     return solution.objective_value >= thresholds.ship_only_exact_early_stop_min_plausibility
-
-
-def merge_exact_solutions(
-    merged_solutions: list[InferenceSolution],
-    seen_signatures: set[tuple[tuple[str, int], ...]],
-    candidates: tuple[InferenceSolution, ...],
-    *,
-    resolved_max_solutions: int,
-    on_admitted: Callable[[InferenceSolution], None] | None = None,
-) -> int:
-    """Merge candidates into the held top-K by objective (signature-deduped)."""
-    return admit_ranked_solutions(
-        merged_solutions,
-        seen_signatures,
-        candidates,
-        max_solutions=resolved_max_solutions,
-        on_admitted=on_admitted,
-    )
 
 
 def maybe_early_stop_after_step(
@@ -117,8 +98,8 @@ def maybe_no_new_exact_signatures_early_stop(
     if added_combo_ids or added_aggregate_action_ids:
         return False
     best_solution = _best_merged_solution(state.merged_solutions)
-    # Emptiness already gated above; _best_merged_solution only returns None for [].
-    assert best_solution is not None
+    if best_solution is None:
+        return False
     thresholds = resolve_solver_thresholds()
     if (
         best_solution.objective_value
@@ -137,11 +118,11 @@ def make_incremental_admitter(
     """Merge each solver solution into held top-K as soon as it is found."""
 
     def admit(solution: InferenceSolution) -> None:
-        merge_exact_solutions(
+        admit_ranked_solutions(
             state.merged_solutions,
             state.seen_signatures,
             (solution,),
-            resolved_max_solutions=state.resolved_max_solutions,
+            max_solutions=state.resolved_max_solutions,
             on_admitted=on_admitted,
         )
 

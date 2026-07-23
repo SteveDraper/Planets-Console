@@ -57,12 +57,6 @@ class _SoftStreamPolicyKey:
 _SOFT_STREAM_POLICY: dict[_SoftStreamPolicyKey, SoftStreamDispatch] = {
     # ROW_DEFER -- former park table, now keyed off row defer reason
     _SoftStreamPolicyKey(
-        TerminalSource.ROW_DEFER, SoftTerminalReason.MISSING_ROW_RUN, True
-    ): SoftStreamDispatch.SILENCE,
-    _SoftStreamPolicyKey(
-        TerminalSource.ROW_DEFER, SoftTerminalReason.MISSING_ROW_RUN, False
-    ): SoftStreamDispatch.SILENCE,
-    _SoftStreamPolicyKey(
         TerminalSource.ROW_DEFER, SoftTerminalReason.EMPTY_TIER_OUTCOME, True
     ): SoftStreamDispatch.EMIT_SOFT_PROVISIONAL,
     _SoftStreamPolicyKey(

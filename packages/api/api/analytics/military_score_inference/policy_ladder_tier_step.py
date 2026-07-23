@@ -35,6 +35,7 @@ from api.analytics.military_score_inference.policy_ladder_admission import (
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
     TierStepRun,
+    TierStopKind,
     ensure_ladder_clock_started,
     remaining_time,
     tier_step_allowance_seconds,
@@ -257,28 +258,33 @@ def run_policy_ladder_tier_step(
         reserved_for_later_seconds=reserved,
         spendable_seconds=spendable,
     )
-    if run.should_stop():
-        # Zero tier allowance (min=0 and nothing spendable), or cancel.
-        if run.is_tier_only_stop():
-            state.policy_steps_attempted.append(policy_step.id)
-            finish_tier_step(
-                state,
-                policy_step=policy_step,
-                policy_step_index=step_index,
-                catalog=state.catalog,
-                turn=turn,
-                observation=observation,
-                seed_count=len(state.band_seeds),
-                band_residual_2x=None,
-                step_started_at=tier_started_at,
-                held_count_before=len(state.merged_solutions),
-                newly_admitted=[],
-                skipped=True,
-                finish_mode=TierStepFinishMode.BUDGET_STOP,
-                tier_allowance_seconds=allowance,
-                reserved_for_later_seconds=reserved,
-                spendable_seconds=spendable,
-            )
+    entry_stop = run.peek_stop()
+    if entry_stop is not None:
+        # Zero tier allowance (min=0 and nothing spendable), or cancel before work.
+        run.commit_stop(entry_stop)
+        state.policy_steps_attempted.append(policy_step.id)
+        finish_tier_step(
+            state,
+            policy_step=policy_step,
+            policy_step_index=step_index,
+            catalog=state.catalog,
+            turn=turn,
+            observation=observation,
+            seed_count=len(state.band_seeds),
+            band_residual_2x=None,
+            step_started_at=tier_started_at,
+            held_count_before=len(state.merged_solutions),
+            newly_admitted=[],
+            skipped=True,
+            finish_mode=(
+                TierStepFinishMode.BUDGET_STOP
+                if entry_stop is TierStopKind.TIER_TIME
+                else TierStepFinishMode.DIAGNOSTICS_ONLY
+            ),
+            tier_allowance_seconds=allowance,
+            reserved_for_later_seconds=reserved,
+            spendable_seconds=spendable,
+        )
         return
 
     state.policy_steps_attempted.append(policy_step.id)
@@ -396,6 +402,9 @@ def run_policy_ladder_tier_step(
     seeds_for_step = list(state.band_seeds)
     state.band_seeds = []
 
+    def budget_exhausted() -> bool:
+        return run.peek_stop() is not None
+
     if policy_step.run_degrade_aggregate_probe and state.merged_solutions:
         for rewrite in probe_degrade_aggregate_rewrites(
             state.merged_solutions,
@@ -403,10 +412,10 @@ def run_policy_ladder_tier_step(
             observation=observation,
             catalog=catalog,
             max_solutions=catalog_solve_max,
-            should_stop=run.should_stop,
+            should_stop=budget_exhausted,
             remaining_seconds=run.remaining_seconds,
         ):
-            if run.should_stop():
+            if budget_exhausted():
                 break
             admit_solution(rewrite)
 
@@ -439,15 +448,19 @@ def run_policy_ladder_tier_step(
             **budget_kwargs,
         )
 
-    def stop_after_budget() -> None:
+    def stop_after_budget() -> bool:
+        stop = run.peek_stop()
+        if stop is None:
+            return False
+        run.commit_stop(stop)
         if run.is_tier_only_stop():
             finish_step(finish_mode=TierStepFinishMode.BUDGET_STOP)
         else:
             finish_step()
+        return True
 
     for seed in seeds_for_step[: policy_step.max_seeds]:
-        if run.should_stop():
-            stop_after_budget()
+        if stop_after_budget():
             return
         seed_result, seed_problem = _solve_seed_progression(
             observation,
@@ -456,7 +469,7 @@ def run_policy_ladder_tier_step(
             race_id=player_race_id,
             max_solutions=catalog_solve_max,
             remaining_seconds=run.remaining_seconds,
-            should_stop=run.should_stop,
+            should_stop=budget_exhausted,
             cancel_token=cancel_token,
             on_solution=admit_solution,
             seed_no_good_solutions=held_no_goods,
@@ -475,8 +488,7 @@ def run_policy_ladder_tier_step(
         state.ladder_complete = True
         return
 
-    if run.should_stop():
-        stop_after_budget()
+    if stop_after_budget():
         return
 
     # Include anything admitted during seed progression so the main catalog
@@ -510,7 +522,7 @@ def run_policy_ladder_tier_step(
 
     band_residual_2x: int | None = None
     if not exact_result.solutions and policy_step.alpha > 0:
-        if not run.should_stop() and run.remaining_seconds() > 0:
+        if not budget_exhausted() and run.remaining_seconds() > 0:
             band_result, band_problem = _solve_catalog(
                 observation,
                 catalog,

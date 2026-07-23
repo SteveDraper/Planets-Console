@@ -163,7 +163,8 @@ def finish_tier_step(
             _annotate_last_step_early_stop(state)
             return
     if finish_mode is TierStepFinishMode.COMPLETE:
-        assert new_exact_before_step is not None
+        if new_exact_before_step is None:
+            raise RuntimeError("finish_tier_step COMPLETE requires new_exact_before_step")
         if maybe_no_new_exact_signatures_early_stop(
             state,
             added_combo_ids=added_combo_ids,

@@ -6,10 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.fleet.prior_selection import select_fleet_prior_persisted
-from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
-from api.analytics.fleet.types import FleetTurnSnapshot, PersistedFleetLedger
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
@@ -18,13 +14,14 @@ from api.analytics.military_score_inference.inference_row_runner import (
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
-    records_for_scope,
-    resolution_from_fleet_records,
-    resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
+from api.analytics.scores.prior_fleet_resolution import (
+    fleet_compute_services,
+    resolve_prior_fleet_for_scores,
+)
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
@@ -36,10 +33,8 @@ from api.analytics.scores.tier_row_run_registry import (
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
-from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
+from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
-from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-from api.models.game import GameSettings
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
@@ -57,109 +52,6 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
         ComputeStepSpec(step_kind=SCORES_TIER_SOLVE, backend="thread"),
     ),
 )
-
-
-def _scores_prior_fleet_scope(
-    scope: ComputeScope,
-    *,
-    settings: GameSettings,
-) -> ComputeScope | None:
-    if scope.turn == WILDCARD or not isinstance(scope.turn, int):
-        return None
-    if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
-        return None
-    if scope.turn <= accelerated_ensure_floor(settings, scope.turn):
-        return None
-    return ComputeScope(
-        analytic_id=FLEET_ANALYTIC_ID,
-        game_id=scope.game_id,
-        perspective=scope.perspective,
-        turn=scope.turn - 1,
-        player_id=scope.player_id,
-    )
-
-
-def _resolution_from_persisted_fleet(
-    persisted: PersistedFleetLedger,
-    export_scope: ExportScope,
-    *,
-    prior_turn,
-) -> PriorTurnFleetTorpResolution:
-    snapshot = FleetTurnSnapshot(
-        analytic_id=FLEET_ANALYTIC_ID,
-        game_id=export_scope.game_id,
-        perspective=export_scope.perspective,
-        turn=export_scope.turn,
-        players=[persisted.ledger],
-    )
-    records = records_for_scope(snapshot, export_scope)
-    return resolution_from_fleet_records(records, prior_turn=prior_turn)
-
-
-def _resolve_prior_fleet_for_tier_wire(
-    scope: ComputeScope,
-    *,
-    dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext,
-) -> PriorTurnFleetTorpResolution:
-    from api.analytics.export_context import export_service_for
-    from api.analytics.fleet.compute_services import FleetComputeServices
-
-    export_scope = _export_scope_for_compute(scope)
-    if export_scope is None:
-        raise ValueError("scores tier_solve requires concrete scores scope")
-
-    turn = ctx.load_turn(export_scope.turn)
-    if turn is None:
-        return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
-
-    prior_fleet_scope = _scores_prior_fleet_scope(scope, settings=turn.settings)
-    if prior_fleet_scope is None:
-        return PriorTurnFleetTorpResolution(overlay=None, input_status="not_applicable")
-
-    prior_export_scope = compute_scope_to_export_scope(prior_fleet_scope)
-    prior_turn = ctx.load_turn(prior_fleet_scope.turn)
-
-    prior_from_deps: PersistedFleetLedger | None = None
-    fleet_result_wire = dependency_outputs.get(prior_fleet_scope)
-    # Satisfaction short-circuit may leave ``{}`` (or a wire without ledger).
-    # Treat missing ``persistedLedgerWire`` like an absent prior and reload.
-    if isinstance(fleet_result_wire, dict):
-        persisted_wire = fleet_result_wire.get("persistedLedgerWire")
-        if isinstance(persisted_wire, dict):
-            prior_from_deps = persisted_fleet_ledger_from_json(persisted_wire)
-
-    prior_from_disk: PersistedFleetLedger | None = None
-    fleet_services = export_service_for(ctx, FLEET_ANALYTIC_ID, FleetComputeServices)
-    if fleet_services is None:
-        injected = ctx.export_services.get(FLEET_ANALYTIC_ID)
-        if isinstance(injected, FleetComputeServices):
-            fleet_services = injected
-    if fleet_services is not None:
-        prior_from_disk = fleet_services.persistence.get_ledger(
-            scope.game_id,
-            scope.perspective,
-            prior_fleet_scope.turn,
-            prior_fleet_scope.player_id,
-        )
-    prior_persisted = select_fleet_prior_persisted(
-        from_dependency_outputs=prior_from_deps,
-        from_disk=prior_from_disk,
-    )
-    if prior_persisted is not None and prior_turn is not None:
-        return _resolution_from_persisted_fleet(
-            prior_persisted,
-            prior_export_scope,
-            prior_turn=prior_turn,
-        )
-
-    return resolve_prior_turn_fleet_torp_overlay(
-        turn=turn,
-        player_id=export_scope.player_id,
-        load_turn=ctx.load_turn,
-        query_context=ctx,
-        ensure=False,
-    )
 
 
 def _apply_fleet_resolution_to_row_run(
@@ -250,11 +142,23 @@ def build_scores_tier_solve_job_wire(
             f"turn={scope.turn}, player_id={scope.player_id})"
         )
 
-    fleet_resolution = _resolve_prior_fleet_for_tier_wire(
-        scope,
-        dependency_outputs=dependency_outputs,
-        ctx=ctx,
-    )
+    turn = ctx.load_turn(export_scope.turn)
+    if turn is None or export_scope.player_id is None:
+        fleet_resolution = PriorTurnFleetTorpResolution(
+            overlay=None,
+            input_status="pending",
+        )
+    else:
+        fleet_resolution = resolve_prior_fleet_for_scores(
+            ctx,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn_number=export_scope.turn,
+            player_id=export_scope.player_id,
+            turn=turn,
+            dependency_outputs=dependency_outputs,
+            overlay_ensure=False,
+        )
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
 
     return {
@@ -545,20 +449,13 @@ class ScoresPersistencePolicy:
         ``scores@N`` tracks ``fleet@(N-1)``'s turn-scoped generation only. Same-player
         activity on other turns must not discard in-flight tier work.
         """
-        from api.analytics.export_context import export_service_for
-        from api.analytics.fleet.compute_services import FleetComputeServices
-
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None or export_scope.player_id is None:
             return 0
         if export_scope.turn <= 1:
             return 0
 
-        fleet_services = export_service_for(ctx, FLEET_ANALYTIC_ID, FleetComputeServices)
-        if fleet_services is None:
-            injected = ctx.export_services.get(FLEET_ANALYTIC_ID)
-            if isinstance(injected, FleetComputeServices):
-                fleet_services = injected
+        fleet_services = fleet_compute_services(ctx)
         if fleet_services is None:
             return 0
 

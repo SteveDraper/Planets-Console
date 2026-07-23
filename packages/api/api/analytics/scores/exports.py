@@ -16,9 +16,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
-    resolve_prior_turn_fleet_torp_overlay,
-)
 from api.analytics.military_score_inference.tier_emission_ledger import (
     compact_tier_emissions_from_step_diagnostics,
     tier_emissions_from_wire_complete,
@@ -39,6 +36,7 @@ from api.analytics.scores.export_snapshot import (
     scores_inference_stream_scope,
 )
 from api.analytics.scores.export_wire import wire_complete_event_from_terminal_admission
+from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.models.game import TurnInfo
@@ -304,11 +302,14 @@ def _ensure_admit_inference_row(
     if services.scheduler.row_run_for_player(inputs.stream_scope, inputs.player_id) is not None:
         return False
 
-    fleet_resolution = resolve_prior_turn_fleet_torp_overlay(
-        turn=turn,
+    fleet_resolution = resolve_prior_fleet_for_scores(
+        ctx,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn_number=scope.turn,
         player_id=inputs.player_id,
-        load_turn=ctx.load_turn,
-        query_context=ctx,
+        turn=turn,
+        overlay_ensure=True,
     )
     schedule_inference_row(
         services.scheduler,

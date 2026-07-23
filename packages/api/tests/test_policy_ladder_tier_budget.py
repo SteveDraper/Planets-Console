@@ -123,7 +123,7 @@ def test_continues_share_one_row_budget_from_first_dispatch() -> None:
     assert 0.0 < run.global_remaining_seconds() < 6.0
     # Funded tier allowance still runs (soft global does not abort mid-slice).
     assert run.remaining_seconds() > 19.0
-    assert not run.should_stop()
+    assert run.peek_stop() is None
 
 
 def test_soft_global_exhaustion_does_not_abort_funded_tier() -> None:
@@ -139,7 +139,7 @@ def test_soft_global_exhaustion_does_not_abort_funded_tier() -> None:
         tier_started_at=time.monotonic(),
     )
     assert run.global_remaining_seconds() <= 0
-    assert not run.should_stop()
+    assert run.peek_stop() is None
     assert run.remaining_seconds() > 2.0
     assert not state.ladder_complete
 
@@ -158,7 +158,7 @@ def test_stale_pre_deferred_started_at_does_not_abort_funded_tier() -> None:
         tier_started_at=time.monotonic(),
     )
     assert run.global_remaining_seconds() <= 0
-    assert not run.should_stop()
+    assert run.peek_stop() is None
     assert run.remaining_seconds() > 2.0
 
 
@@ -180,11 +180,13 @@ def test_waiting_deps_before_first_dispatch_does_not_burn_shared_budget() -> Non
         tier_allowance_seconds=20.0,
         tier_started_at=time.monotonic(),
     )
-    assert not run.should_stop()
+    assert run.peek_stop() is None
     assert run.remaining_seconds() > 19.0
 
 
 def test_tier_allowance_stop_does_not_complete_ladder() -> None:
+    from api.analytics.military_score_inference.policy_ladder_tier_budget import TierStopKind
+
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:2]))
     started = ensure_ladder_clock_started(state)
     run = TierStepRun(
@@ -195,10 +197,39 @@ def test_tier_allowance_stop_does_not_complete_ladder() -> None:
         tier_allowance_seconds=0.0,
         tier_started_at=time.monotonic(),
     )
-    assert run.should_stop()
+    stop = run.peek_stop()
+    assert stop is TierStopKind.TIER_TIME
+    assert not state.time_limited
+    assert not state.ladder_complete
+    run.commit_stop(stop)
     assert run.is_tier_only_stop()
     assert state.time_limited
     assert not state.ladder_complete
+
+
+def test_peek_stop_cancel_does_not_mutate_until_commit() -> None:
+    from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+    from api.analytics.military_score_inference.policy_ladder_tier_budget import TierStopKind
+
+    token = InferenceCancelToken()
+    token.cancel()
+    state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
+    started = ensure_ladder_clock_started(state)
+    run = TierStepRun(
+        state,
+        time_limit_seconds=20.0,
+        cancel_token=token,
+        budget_started_at=started,
+        tier_allowance_seconds=20.0,
+        tier_started_at=time.monotonic(),
+    )
+    assert run.peek_stop() is TierStopKind.CANCEL
+    assert not state.cancelled
+    assert not state.ladder_complete
+    run.commit_stop(TierStopKind.CANCEL)
+    assert state.cancelled
+    assert state.ladder_complete
+    assert not run.is_tier_only_stop()
 
 
 def test_later_absolute_min_allowance_survives_soft_global_overshoot() -> None:
