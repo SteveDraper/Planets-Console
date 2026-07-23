@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
-from api.analytics.military_score_inference.policy_ladder_tier_step import (
+from api.analytics.military_score_inference.policy_ladder_tier_budget import (
     _TierStepRun,
     ensure_ladder_clock_started,
     remaining_time,
