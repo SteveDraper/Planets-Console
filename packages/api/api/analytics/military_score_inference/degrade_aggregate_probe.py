@@ -11,7 +11,9 @@ Admissions require catalog combo resolution and hard equality checks -- syntheti
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Literal, Protocol
 
 from ortools.sat.python import cp_model
 
@@ -31,16 +33,13 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.scoring import (
-    loaded_ship_torpedo_score_delta_2x,
-    ship_construction_score_delta_2x,
-)
+from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.analytics.military_score_inference.solver import solution_rank_objective
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 
-AxisName = str  # "engine" | "beam" | "launcher"
+AxisName = Literal["engine", "beam", "launcher"]
 
 PROBE_STEP_IDS = frozenset({"admit_ship_torpedoes"})
 
@@ -63,32 +62,66 @@ class _AxisFit:
     variants: tuple[tuple[int, int, int], ...]
 
 
-def _component_minerals(component: Hull | Engine | Beam | Torpedo) -> int:
+class _AxisComponent(Protocol):
+    id: int
+    techlevel: int
+    tritanium: int
+    duranium: int
+    molybdenum: int
+
+
+def _component_minerals(component: _AxisComponent) -> int:
     return component.tritanium + component.duranium + component.molybdenum
 
 
-def _engine_axis_score_2x(engine: Engine, *, engine_count: int, ship_count: int) -> int:
+def _axis_score_2x(*, mc_cost: int, minerals: int, slot_count: int, ship_count: int) -> int:
     per_ship = ship_construction_score_delta_2x(
-        engine.cost * engine_count,
-        _component_minerals(engine) * engine_count,
+        mc_cost * slot_count,
+        minerals * slot_count,
     )
     return per_ship * ship_count
 
 
-def _beam_axis_score_2x(beam: Beam, *, beam_count: int, ship_count: int) -> int:
-    per_ship = ship_construction_score_delta_2x(
-        beam.cost * beam_count,
-        _component_minerals(beam) * beam_count,
+def _axis_fit_for_component[T: _AxisComponent](
+    *,
+    ship_index: int,
+    axis: AxisName,
+    slot_count: int,
+    ship_count: int,
+    original: T,
+    candidates: Mapping[int, T],
+    eligible_ids: frozenset[int],
+    mc_cost: Callable[[T], int],
+) -> _AxisFit:
+    original_score = _axis_score_2x(
+        mc_cost=mc_cost(original),
+        minerals=_component_minerals(original),
+        slot_count=slot_count,
+        ship_count=ship_count,
     )
-    return per_ship * ship_count
-
-
-def _launcher_axis_score_2x(torpedo: Torpedo, *, launcher_count: int, ship_count: int) -> int:
-    per_ship = ship_construction_score_delta_2x(
-        torpedo.launchercost * launcher_count,
-        _component_minerals(torpedo) * launcher_count,
+    variants: list[tuple[int, int, int]] = []
+    for candidate in candidates.values():
+        if candidate.id not in eligible_ids:
+            continue
+        if candidate.techlevel > original.techlevel or candidate.id == original.id:
+            continue
+        score = _axis_score_2x(
+            mc_cost=mc_cost(candidate),
+            minerals=_component_minerals(candidate),
+            slot_count=slot_count,
+            ship_count=ship_count,
+        )
+        if score < original_score:
+            variants.append((candidate.id, candidate.techlevel, score))
+    return _AxisFit(
+        ship_index=ship_index,
+        axis=axis,
+        slot_count=slot_count,
+        original_id=original.id,
+        original_tech=original.techlevel,
+        original_score_2x=original_score,
+        variants=tuple(variants),
     )
-    return per_ship * ship_count
 
 
 def _axes_for_ship_build(
@@ -113,109 +146,46 @@ def _axes_for_ship_build(
     if ship_build.engine_id is not None and hull.engines > 0:
         engine = engines_by_id.get(ship_build.engine_id)
         if engine is not None:
-            original_score = _engine_axis_score_2x(
-                engine, engine_count=hull.engines, ship_count=ship_count
-            )
-            variants = tuple(
-                (
-                    candidate.id,
-                    candidate.techlevel,
-                    score,
-                )
-                for candidate in engines_by_id.values()
-                if candidate.id in eligible_engine_ids
-                and candidate.techlevel <= engine.techlevel
-                and candidate.id != engine.id
-                for score in (
-                    _engine_axis_score_2x(
-                        candidate, engine_count=hull.engines, ship_count=ship_count
-                    ),
-                )
-                if score < original_score
-            )
             axes.append(
-                _AxisFit(
+                _axis_fit_for_component(
                     ship_index=ship_index,
                     axis="engine",
                     slot_count=hull.engines,
-                    original_id=engine.id,
-                    original_tech=engine.techlevel,
-                    original_score_2x=original_score,
-                    variants=variants,
+                    ship_count=ship_count,
+                    original=engine,
+                    candidates=engines_by_id,
+                    eligible_ids=eligible_engine_ids,
+                    mc_cost=lambda component: component.cost,
                 )
             )
     if ship_build.beam_id is not None and ship_build.beam_count > 0:
         beam = beams_by_id.get(ship_build.beam_id)
         if beam is not None:
-            original_score = _beam_axis_score_2x(
-                beam, beam_count=ship_build.beam_count, ship_count=ship_count
-            )
-            variants = tuple(
-                (
-                    candidate.id,
-                    candidate.techlevel,
-                    score,
-                )
-                for candidate in beams_by_id.values()
-                if candidate.id in eligible_beam_ids
-                and candidate.techlevel <= beam.techlevel
-                and candidate.id != beam.id
-                for score in (
-                    _beam_axis_score_2x(
-                        candidate,
-                        beam_count=ship_build.beam_count,
-                        ship_count=ship_count,
-                    ),
-                )
-                if score < original_score
-            )
             axes.append(
-                _AxisFit(
+                _axis_fit_for_component(
                     ship_index=ship_index,
                     axis="beam",
                     slot_count=ship_build.beam_count,
-                    original_id=beam.id,
-                    original_tech=beam.techlevel,
-                    original_score_2x=original_score,
-                    variants=variants,
+                    ship_count=ship_count,
+                    original=beam,
+                    candidates=beams_by_id,
+                    eligible_ids=eligible_beam_ids,
+                    mc_cost=lambda component: component.cost,
                 )
             )
     if ship_build.torp_id is not None and ship_build.launcher_count > 0:
         torpedo = torpedos_by_id.get(ship_build.torp_id)
         if torpedo is not None:
-            original_score = _launcher_axis_score_2x(
-                torpedo,
-                launcher_count=ship_build.launcher_count,
-                ship_count=ship_count,
-            )
-            variants = tuple(
-                (
-                    candidate.id,
-                    candidate.techlevel,
-                    score,
-                )
-                for candidate in torpedos_by_id.values()
-                if candidate.id in eligible_torp_ids
-                and candidate.techlevel <= torpedo.techlevel
-                and candidate.id != torpedo.id
-                for score in (
-                    _launcher_axis_score_2x(
-                        candidate,
-                        launcher_count=ship_build.launcher_count,
-                        ship_count=ship_count,
-                    ),
-                )
-                if score < original_score
-            )
             axes.append(
-                _AxisFit(
+                _axis_fit_for_component(
                     ship_index=ship_index,
                     axis="launcher",
                     slot_count=ship_build.launcher_count,
-                    original_id=torpedo.id,
-                    original_tech=torpedo.techlevel,
-                    original_score_2x=original_score,
-                    variants=variants,
+                    ship_count=ship_count,
+                    original=torpedo,
+                    candidates=torpedos_by_id,
+                    eligible_ids=eligible_torp_ids,
+                    mc_cost=lambda component: component.launchercost,
                 )
             )
     return axes
@@ -467,7 +437,6 @@ def should_run_degrade_aggregate_probe(policy_step_id: str) -> bool:
 
 __all__ = [
     "PROBE_STEP_IDS",
-    "loaded_ship_torpedo_score_delta_2x",
     "probe_degrade_aggregate_rewrites",
     "should_run_degrade_aggregate_probe",
     "torpedo_id_from_ship_torps_loaded_action_id",
