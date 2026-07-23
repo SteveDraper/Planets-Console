@@ -459,8 +459,16 @@ def _expand_score_equivalent_solutions(
         for merged_combo_id, count in combo_counts.items()
         if count > 0
     ]
+    # Idle exact (all-zero counts) is a valid structural hit when observation deltas
+    # are zero; keep it instead of dropping the expansion.
     if not ship_build_variant_lists and not solution_actions:
-        return []
+        return [
+            InferenceSolution(
+                objective_value=_objective_value(problem, action_counts, ()),
+                actions=(),
+                ship_builds=(),
+            )
+        ]
     # Action-only hits have no ship-build axes; synthesize one empty combination.
     ship_build_combinations: list[tuple[InferenceSolutionShipBuild, ...]]
     if not ship_build_variant_lists:

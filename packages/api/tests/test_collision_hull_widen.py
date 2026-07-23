@@ -161,4 +161,4 @@ def test_policy_step_with_included_hull_ids_preserves_step_id() -> None:
     assert widened.id == COLLISION_HULL_WIDEN_STEP_ID
     assert widened.hull_collision_twin_widen is True
     assert widened.filters.hulls.include_component_ids == (29, 31)
-    assert widened.allow_ship_only_exact_early_stop is True
+    assert widened.allow_ship_only_exact_early_stop is False

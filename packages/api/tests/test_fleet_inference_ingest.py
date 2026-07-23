@@ -1220,12 +1220,14 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
     ledger = ledger_for_player(snapshot, player_id)
     warship_rows = _inferred_warship_rows(ledger, shell_turn=3)
     assert len(warship_rows) == 2
-    # Collision twin widen keeps Cobol and Iron Lady visible for military change 2258.
-    expected_combo_ids = {"combo_96_9_5_6_4_2", "combo_89_8_4_3_8_2"}
+    # Rank-1 Cobol twin for military change 2258 remains after the ladder continues
+    # past collision_hull_widen (ship-only early-stop is deferred until after high-prior
+    # aggregates; #256). Option sets may include later exacts beyond the twin pair.
+    expected_primary = "combo_96_9_5_6_4_2"
     for record in warship_rows:
         combo_ids = {option.combo_id for option in record.build_option_sets}
-        assert combo_ids == expected_combo_ids
-        assert record.build_option_sets[0].combo_id == "combo_96_9_5_6_4_2"
+        assert expected_primary in combo_ids
+        assert record.build_option_sets[0].combo_id == expected_primary
         inference_event = next(event for event in record.events if event.kind == "inference_update")
         assert inference_event.payload["acceleratedIngest"] is True
         assert inference_event.payload["segmentHostTurn"] == _known_built_turn(record)
@@ -1267,12 +1269,14 @@ def test_accelerated_first_reliable_refines_without_scores_diagnostics():
     ledger = ledger_for_player(snapshot, player_id)
     warship_rows = _inferred_warship_rows(ledger, shell_turn=3)
     assert len(warship_rows) == 2
-    # Collision twin widen keeps Cobol and Iron Lady visible for military change 2258.
-    expected_combo_ids = {"combo_96_9_5_6_4_2", "combo_89_8_4_3_8_2"}
+    # Rank-1 Cobol twin for military change 2258 remains after the ladder continues
+    # past collision_hull_widen (ship-only early-stop is deferred until after high-prior
+    # aggregates; #256). Option sets may include later exacts beyond the twin pair.
+    expected_primary = "combo_96_9_5_6_4_2"
     for record in warship_rows:
         combo_ids = {option.combo_id for option in record.build_option_sets}
-        assert combo_ids == expected_combo_ids
-        assert record.build_option_sets[0].combo_id == "combo_96_9_5_6_4_2"
+        assert expected_primary in combo_ids
+        assert record.build_option_sets[0].combo_id == expected_primary
 
 
 def test_accelerated_window_refine_when_intermediate_scoreboard_turn_missing():
