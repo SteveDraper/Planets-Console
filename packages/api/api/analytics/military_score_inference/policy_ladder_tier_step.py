@@ -24,6 +24,10 @@ from api.analytics.military_score_inference.component_eligibility import (
 from api.analytics.military_score_inference.constraints import (
     solution_satisfies_exact_hard_equalities,
 )
+from api.analytics.military_score_inference.degrade_aggregate_probe import (
+    probe_degrade_aggregate_rewrites,
+    should_run_degrade_aggregate_probe,
+)
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -43,9 +47,13 @@ from api.analytics.military_score_inference.solver import (
     solution_signature,
     solve_inference_problem,
 )
+from api.analytics.military_score_inference.tier_emission_ledger import (
+    tier_emission_fields,
+)
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
     resolve_solver_thresholds,
+    tier_step_allowance_seconds,
 )
 from api.models.game import TurnInfo
 
@@ -248,6 +256,7 @@ def _policy_step_diagnostics(
     observation: InferenceObservation,
     seed_count: int,
     band_residual_2x: int | None,
+    emission_fields: dict[str, object] | None = None,
     collision_widen: CollisionHullWidenPlan | None = None,
     prior_fleet_tech_raise: PriorFleetTechRaisePlan | None = None,
 ) -> dict[str, object]:
@@ -272,11 +281,20 @@ def _policy_step_diagnostics(
         "allowShipOnlyExactEarlyStop": policy_step.allow_ship_only_exact_early_stop,
         "hullCollisionTwinWiden": policy_step.hull_collision_twin_widen,
     }
+    if emission_fields is not None:
+        diagnostics.update(emission_fields)
     if collision_widen is not None:
         diagnostics.update(collision_widen.to_diagnostics())
     if prior_fleet_tech_raise is not None:
         diagnostics.update(prior_fleet_tech_raise.to_diagnostics())
     return diagnostics
+
+
+def _annotate_last_step_early_stop(state: PolicyLadderState) -> None:
+    reason = state.ladder_early_stop_reason
+    if reason is None or not state.step_diagnostics:
+        return
+    state.step_diagnostics[-1]["ladderEarlyStopReason"] = reason
 
 
 def _ensure_hull_collision_twins_loaded(state: PolicyLadderState, turn: TurnInfo) -> None:
@@ -351,8 +369,14 @@ def _finish_skipped_policy_step(
     turn: TurnInfo,
     observation: InferenceObservation,
     seed_count: int,
+    step_started_at: float,
+    held_count_before: int,
+    newly_admitted: list[InferenceSolution],
     collision_widen: CollisionHullWidenPlan | None = None,
     prior_fleet_tech_raise: PriorFleetTechRaisePlan | None = None,
+    tier_allowance_seconds: float | None = None,
+    reserved_for_later_seconds: float | None = None,
+    spendable_seconds: float | None = None,
 ) -> None:
     state.step_diagnostics.append(
         _policy_step_diagnostics(
@@ -363,6 +387,18 @@ def _finish_skipped_policy_step(
             observation=observation,
             seed_count=seed_count,
             band_residual_2x=None,
+            emission_fields=tier_emission_fields(
+                duration_ms=(time.monotonic() - step_started_at) * 1000.0,
+                held_count_before=held_count_before,
+                held_count_after=len(state.merged_solutions),
+                newly_admitted=newly_admitted,
+                time_limited=state.time_limited,
+                last_status=state.last_status,
+                skipped=True,
+                tier_allowance_seconds=tier_allowance_seconds,
+                reserved_for_later_seconds=reserved_for_later_seconds,
+                spendable_seconds=spendable_seconds,
+            ),
             collision_widen=collision_widen,
             prior_fleet_tech_raise=prior_fleet_tech_raise,
         )
@@ -374,7 +410,62 @@ def _finish_skipped_policy_step(
         observation=observation,
         catalog=state.catalog,
     ):
+        _annotate_last_step_early_stop(state)
         return
+    if state.next_step_index >= len(state.policy_steps):
+        state.ladder_complete = True
+
+
+def _append_tier_step_diagnostics(
+    state: PolicyLadderState,
+    *,
+    policy_step: InferenceTierPolicyStep,
+    policy_step_index: int,
+    catalog: ActionCatalog | None,
+    turn: TurnInfo,
+    observation: InferenceObservation,
+    seed_count: int,
+    band_residual_2x: int | None,
+    step_started_at: float,
+    held_count_before: int,
+    newly_admitted: list[InferenceSolution],
+    collision_widen: CollisionHullWidenPlan | None = None,
+    prior_fleet_tech_raise: PriorFleetTechRaisePlan | None = None,
+    skipped: bool = False,
+    tier_allowance_seconds: float | None = None,
+    reserved_for_later_seconds: float | None = None,
+    spendable_seconds: float | None = None,
+) -> None:
+    state.step_diagnostics.append(
+        _policy_step_diagnostics(
+            policy_step=policy_step,
+            policy_step_index=policy_step_index,
+            catalog=catalog,
+            turn=turn,
+            observation=observation,
+            seed_count=seed_count,
+            band_residual_2x=band_residual_2x,
+            emission_fields=tier_emission_fields(
+                duration_ms=(time.monotonic() - step_started_at) * 1000.0,
+                held_count_before=held_count_before,
+                held_count_after=len(state.merged_solutions),
+                newly_admitted=newly_admitted,
+                time_limited=state.time_limited,
+                last_status=state.last_status,
+                skipped=skipped,
+                tier_allowance_seconds=tier_allowance_seconds,
+                reserved_for_later_seconds=reserved_for_later_seconds,
+                spendable_seconds=spendable_seconds,
+            ),
+            collision_widen=collision_widen,
+            prior_fleet_tech_raise=prior_fleet_tech_raise,
+        )
+    )
+
+
+def _advance_after_tier_time_stop(state: PolicyLadderState, step_index: int) -> None:
+    """Tier allowance exhausted: close this step and continue the ladder when possible."""
+    state.next_step_index = step_index + 1
     if state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True
 
@@ -401,30 +492,50 @@ def _make_incremental_admitter(
 class _TierStepRun:
     """Cancel and time-budget guards shared across one tier step.
 
-    ``budget_started_at`` is the ladder clock (stamped on first dispatch). Stream and
-    batch both share one wall budget across continues so waiting_deps delay cannot
-    burn the allotment before work starts, without giving every tier a fresh full
-    ``time_limit_seconds`` window.
+    Soft-global wall budget is anchored at first ladder dispatch (``budget_started_at``).
+    Each tier also gets a reserved allowance (``tier_allowance_seconds``) that cannot
+    spend later tiers' ``min_seconds``. Exhausting the tier allowance stops this step
+    only; exhausting the soft global completes the ladder.
     """
 
     state: PolicyLadderState
     time_limit_seconds: float | None
     cancel_token: InferenceCancelToken | None
     budget_started_at: float
+    tier_allowance_seconds: float
+    tier_started_at: float
+    reserved_for_later_seconds: float = 0.0
+    spendable_seconds: float = 0.0
+    stop_kind: str | None = None  # cancel | global_time | tier_time
+
+    def global_remaining_seconds(self) -> float:
+        return remaining_time(self.budget_started_at, self.time_limit_seconds)
+
+    def tier_remaining_seconds(self) -> float:
+        return remaining_time(self.tier_started_at, self.tier_allowance_seconds)
 
     def should_stop(self) -> bool:
         if self.cancel_token is not None and self.cancel_token.is_cancelled():
             self.state.cancelled = True
             self.state.ladder_complete = True
+            self.stop_kind = "cancel"
             return True
-        if remaining_time(self.budget_started_at, self.time_limit_seconds) <= 0:
+        if self.global_remaining_seconds() <= 0:
             self.state.time_limited = True
             self.state.ladder_complete = True
+            self.stop_kind = "global_time"
+            return True
+        if self.tier_remaining_seconds() <= 0:
+            self.state.time_limited = True
+            self.stop_kind = "tier_time"
             return True
         return False
 
     def remaining_seconds(self) -> float:
-        return remaining_time(self.budget_started_at, self.time_limit_seconds)
+        return min(self.global_remaining_seconds(), self.tier_remaining_seconds())
+
+    def is_tier_only_stop(self) -> bool:
+        return self.stop_kind == "tier_time"
 
 
 def _abort_tier_step_on_seed_result(
@@ -470,18 +581,69 @@ def run_policy_ladder_tier_step(
         return
 
     ladder_started_at = ensure_ladder_clock_started(state)
+    step_index = state.next_step_index
+    policy_step = state.policy_steps[step_index]
+    global_remaining = remaining_time(ladder_started_at, time_limit_seconds)
+    if global_remaining <= 0:
+        state.time_limited = True
+        state.ladder_complete = True
+        return
+
+    allowance, reserved, spendable = tier_step_allowance_seconds(
+        state.policy_steps,
+        step_index,
+        global_remaining_seconds=global_remaining,
+    )
+    tier_started_at = time.monotonic()
     run = _TierStepRun(
         state,
         time_limit_seconds,
         cancel_token,
         budget_started_at=ladder_started_at,
+        tier_allowance_seconds=allowance,
+        tier_started_at=tier_started_at,
+        reserved_for_later_seconds=reserved,
+        spendable_seconds=spendable,
     )
     if run.should_stop():
+        # Global/cancel before work, or zero tier allowance.
+        if run.is_tier_only_stop():
+            state.policy_steps_attempted.append(policy_step.id)
+            _append_tier_step_diagnostics(
+                state,
+                policy_step=policy_step,
+                policy_step_index=step_index,
+                catalog=state.catalog,
+                turn=turn,
+                observation=observation,
+                seed_count=len(state.band_seeds),
+                band_residual_2x=None,
+                step_started_at=tier_started_at,
+                held_count_before=len(state.merged_solutions),
+                newly_admitted=[],
+                skipped=True,
+                tier_allowance_seconds=allowance,
+                reserved_for_later_seconds=reserved,
+                spendable_seconds=spendable,
+            )
+            _advance_after_tier_time_stop(state, step_index)
         return
 
-    step_index = state.next_step_index
-    policy_step = state.policy_steps[step_index]
     state.policy_steps_attempted.append(policy_step.id)
+    step_started_at = tier_started_at
+    held_count_before = len(state.merged_solutions)
+    newly_admitted: list[InferenceSolution] = []
+    budget_kwargs = {
+        "tier_allowance_seconds": allowance,
+        "reserved_for_later_seconds": reserved,
+        "spendable_seconds": spendable,
+    }
+
+    def track_admitted(solution: InferenceSolution) -> None:
+        newly_admitted.append(solution)
+        if on_admitted is not None:
+            on_admitted(solution)
+
     collision_widen: CollisionHullWidenPlan | None = None
     if policy_step.hull_collision_twin_widen:
         _ensure_hull_collision_twins_loaded(state, turn)
@@ -508,7 +670,11 @@ def run_policy_ladder_tier_step(
                 turn=turn,
                 observation=observation,
                 seed_count=len(state.band_seeds),
+                step_started_at=step_started_at,
+                held_count_before=held_count_before,
+                newly_admitted=newly_admitted,
                 collision_widen=collision_widen,
+                **budget_kwargs,
             )
             return
         policy_step = collision_widen.policy_step
@@ -527,8 +693,12 @@ def run_policy_ladder_tier_step(
                 turn=turn,
                 observation=observation,
                 seed_count=len(state.band_seeds),
+                step_started_at=step_started_at,
+                held_count_before=held_count_before,
+                newly_admitted=newly_admitted,
                 collision_widen=collision_widen,
                 prior_fleet_tech_raise=prior_fleet_tech_raise,
+                **budget_kwargs,
             )
             return
         policy_step = prior_fleet_tech_raise.policy_step
@@ -558,7 +728,7 @@ def run_policy_ladder_tier_step(
     )
     state.prior_aggregate_action_ids = current_aggregate_action_ids
 
-    admit_solution = _make_incremental_admitter(state, on_admitted)
+    admit_solution = _make_incremental_admitter(state, track_admitted)
     catalog_solve_max = state.resolved_max_solutions
     held_no_goods: tuple[InferenceSolution, ...] = tuple(state.merged_solutions)
 
@@ -566,8 +736,44 @@ def run_policy_ladder_tier_step(
     seeds_for_step = list(state.band_seeds)
     state.band_seeds = []
 
+    if should_run_degrade_aggregate_probe(policy_step.id) and state.merged_solutions:
+        for rewrite in probe_degrade_aggregate_rewrites(
+            state.merged_solutions,
+            turn=turn,
+            observation=observation,
+            catalog=catalog,
+            max_solutions=catalog_solve_max,
+        ):
+            if run.should_stop():
+                break
+            admit_solution(rewrite)
+
+    def finish_partial_step() -> None:
+        _append_tier_step_diagnostics(
+            state,
+            policy_step=policy_step,
+            policy_step_index=step_index,
+            catalog=catalog,
+            turn=turn,
+            observation=observation,
+            seed_count=len(seeds_for_step),
+            band_residual_2x=None,
+            step_started_at=step_started_at,
+            held_count_before=held_count_before,
+            newly_admitted=newly_admitted,
+            collision_widen=collision_widen,
+            prior_fleet_tech_raise=prior_fleet_tech_raise,
+            **budget_kwargs,
+        )
+
+    def stop_after_budget() -> None:
+        finish_partial_step()
+        if run.is_tier_only_stop():
+            _advance_after_tier_time_stop(state, step_index)
+
     for seed in seeds_for_step[: policy_step.max_seeds]:
         if run.should_stop():
+            stop_after_budget()
             return
         seed_result, seed_problem = _solve_seed_progression(
             observation,
@@ -583,16 +789,19 @@ def run_policy_ladder_tier_step(
         if seed_result is None or seed_problem is None:
             continue
         if _abort_tier_step_on_seed_result(state, seed_result, seed_problem):
+            finish_partial_step()
             return
         state.problem = seed_problem
         if seed_result.status == STATUS_TIME_LIMITED:
             state.time_limited = True
 
     if state.last_status == STATUS_INVALID_PROBLEM:
+        finish_partial_step()
         state.ladder_complete = True
         return
 
     if run.should_stop():
+        stop_after_budget()
         return
 
     # Include anything admitted during seed progression so the main catalog
@@ -612,10 +821,12 @@ def run_policy_ladder_tier_step(
     state.last_diagnostics = dict(exact_result.diagnostics)
     state.problem = problem
     if exact_result.status == STATUS_INVALID_PROBLEM:
+        finish_partial_step()
         state.ladder_complete = True
         return
     if exact_result.status == STATUS_STOPPED:
         state.cancelled = True
+        finish_partial_step()
         state.ladder_complete = True
         return
 
@@ -639,6 +850,7 @@ def run_policy_ladder_tier_step(
             state.last_diagnostics = dict(band_result.diagnostics)
             if band_result.status == STATUS_STOPPED:
                 state.cancelled = True
+                finish_partial_step()
                 state.ladder_complete = True
                 return
             if band_result.solutions:
@@ -653,21 +865,25 @@ def run_policy_ladder_tier_step(
                     state.best_band_residual_2x = band_residual_2x
             elif band_result.status == STATUS_INVALID_PROBLEM:
                 state.last_status = band_result.status
+                finish_partial_step()
                 state.ladder_complete = True
                 return
 
-    state.step_diagnostics.append(
-        _policy_step_diagnostics(
-            policy_step=policy_step,
-            policy_step_index=step_index,
-            catalog=catalog,
-            turn=turn,
-            observation=observation,
-            seed_count=len(seeds_for_step),
-            band_residual_2x=band_residual_2x,
-            collision_widen=collision_widen,
-            prior_fleet_tech_raise=prior_fleet_tech_raise,
-        )
+    _append_tier_step_diagnostics(
+        state,
+        policy_step=policy_step,
+        policy_step_index=step_index,
+        catalog=catalog,
+        turn=turn,
+        observation=observation,
+        seed_count=len(seeds_for_step),
+        band_residual_2x=band_residual_2x,
+        step_started_at=step_started_at,
+        held_count_before=held_count_before,
+        newly_admitted=newly_admitted,
+        collision_widen=collision_widen,
+        prior_fleet_tech_raise=prior_fleet_tech_raise,
+        **budget_kwargs,
     )
 
     state.next_step_index = step_index + 1
@@ -678,6 +894,7 @@ def run_policy_ladder_tier_step(
         observation=observation,
         catalog=catalog,
     ):
+        _annotate_last_step_early_stop(state)
         return
 
     if _maybe_no_new_exact_signatures_early_stop(
@@ -686,6 +903,7 @@ def run_policy_ladder_tier_step(
         added_aggregate_action_ids=added_aggregate_action_ids,
         new_exact_before_step=new_exact_before_step,
     ):
+        _annotate_last_step_early_stop(state)
         return
 
     if state.next_step_index >= len(state.policy_steps):

@@ -162,6 +162,75 @@ def test_persisted_inference_row_round_trips_fleet_torp_input_status():
     assert wire["fleetTorpInputStatus"] == "applied"
 
 
+def test_persisted_inference_row_round_trips_tier_emissions():
+    from api.serialization.inference_row_persistence import (
+        persisted_inference_row_from_json,
+        persisted_inference_row_from_wire_complete,
+        persisted_inference_row_to_json,
+        wire_complete_from_persisted_row,
+    )
+
+    fat_attempt = {
+        "policyStepId": "admit_ship_torpedoes",
+        "policyStepIndex": 5,
+        "durationMs": 320.5,
+        "comboCount": 1200,
+        "seedCount": 0,
+        "heldCountBefore": 12,
+        "heldCountAfter": 20,
+        "newlyAdmittedCount": 1,
+        "newlyAdmitted": [
+            {
+                "objectiveValue": -100,
+                "actions": [
+                    {"actionId": "torp_mk4", "label": "MK4 torp", "count": 20},
+                ],
+                "shipBuilds": [
+                    {"comboId": "lcc", "label": "LCC", "count": 1},
+                ],
+            }
+        ],
+        "timeLimited": False,
+        "lastStatus": "exact",
+        "skipped": False,
+        "constraintSnapshot": {"filters": ["huge"]},
+        "resolvedEligibleTorpIds": list(range(50)),
+    }
+    row = persisted_inference_row_from_wire_complete(
+        {
+            "type": "complete",
+            "status": STATUS_EXACT,
+            "summary": "done",
+            "solutionCount": 1,
+            "isComplete": True,
+            "solutions": [{"objectiveValue": -100, "actions": [], "shipBuilds": []}],
+            "diagnostics": {
+                "actionCatalog": {"shipBuildCombos": [{"comboId": "x"}] * 100},
+                "policy_step_attempts": [fat_attempt],
+            },
+            "tierEmissions": [fat_attempt],
+        }
+    )
+    assert row.diagnostics is None
+    assert row.tier_emissions is not None
+    assert len(row.tier_emissions) == 1
+    emission = row.tier_emissions[0]
+    assert emission["policyStepId"] == "admit_ship_torpedoes"
+    assert emission["newlyAdmittedCount"] == 1
+    assert emission["newlyAdmitted"][0]["objectiveValue"] == -100
+    assert "constraintSnapshot" not in emission
+    assert "resolvedEligibleTorpIds" not in emission
+
+    stored = persisted_inference_row_to_json(row)
+    assert "diagnostics" not in stored
+    assert "tier_emissions" not in stored
+    assert stored["tierEmissions"][0]["policyStepId"] == "admit_ship_torpedoes"
+    loaded = persisted_inference_row_from_json(stored)
+    assert loaded.tier_emissions == row.tier_emissions
+    wire = wire_complete_from_persisted_row(loaded)
+    assert wire["tierEmissions"] == row.tier_emissions
+
+
 def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persistence):
     persistence.put_row(
         628580,

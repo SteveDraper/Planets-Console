@@ -21,6 +21,10 @@ from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     fleet_torp_complete_wire_fields,
 )
+from api.analytics.military_score_inference.tier_emission_ledger import (
+    compact_tier_emissions_from_step_diagnostics,
+    tier_emissions_from_wire_complete,
+)
 from api.models.game import TurnInfo
 from api.transport.inference_stream import (
     inference_complete_event,
@@ -38,6 +42,24 @@ def _wire_host_turn_targets(
     if parsed is None:
         return None
     return [host_turn_functional_target_to_wire_dict(target) for target in parsed]
+
+
+def _tier_emissions_for_complete_wire(
+    *,
+    payload: dict[str, object] | None = None,
+    diagnostics: dict[str, object] | None = None,
+) -> list[dict[str, object]] | None:
+    if payload is not None:
+        from_payload = tier_emissions_from_wire_complete(payload)
+        if from_payload is not None:
+            return from_payload
+    if diagnostics is None:
+        return None
+    attempts = diagnostics.get("policy_step_attempts")
+    if not isinstance(attempts, list) or not attempts:
+        return None
+    emissions = compact_tier_emissions_from_step_diagnostics(attempts)
+    return emissions or None
 
 
 def inference_api_payload_to_wire_complete(
@@ -64,6 +86,10 @@ def inference_api_payload_to_wire_complete(
         host_turn_targets=_wire_host_turn_targets(payload.get("hostTurnTargets")),
         fleet_torp_input_status=fleet_torp_input_status,
         fleet_torp_overlay_belief_set_torp_ids=fleet_torp_overlay_belief_set_torp_ids,
+        tier_emissions=_tier_emissions_for_complete_wire(
+            payload=payload,
+            diagnostics=diagnostics_dict,
+        ),
     )
 
 
@@ -90,6 +116,7 @@ def row_complete_to_complete_wire_event(
         host_turn_targets=wire_targets,
         fleet_torp_input_status=fleet_torp_input_status,
         fleet_torp_overlay_belief_set_torp_ids=fleet_torp_overlay_belief_set_torp_ids,
+        tier_emissions=_tier_emissions_for_complete_wire(diagnostics=payload.diagnostics),
     )
 
 

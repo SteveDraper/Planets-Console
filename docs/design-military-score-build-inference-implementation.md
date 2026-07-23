@@ -599,15 +599,43 @@ Static YAML steps widen by **strict superset on `techLevels` lists** or by switc
 
 #### 8.5.3 v1 ladder (sketch A)
 
-Tunable constants in YAML; illustrative starting point from design review:
+Tunable constants in YAML; high-prior aggregates run before noisy full-catalog ship polish:
 
-| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` | Early-stop? |
-|------|------------------|---------------------------------------|---------|-------------|
-| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no |
-| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no |
-| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | yes |
-| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | yes |
-| … | (partial slots, aggregates, torp escape, full catalog) | … | … | yes |
+| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` | Early-stop? | Time envelope |
+|------|------------------|---------------------------------------|---------|-------------|---------------|
+| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no | max 8s |
+| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no | max 8s |
+| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | no | max 5s |
+| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | no | max 8s |
+| 4 `admit_ship_torpedoes` | Full components + partial slots | belief `ship_torps_per_type` ≤40 | 30 | no | min 3s / max 8s |
+| 5 `modest_planet_defense` | Same | + planet defense ≤16 | 50 | no | min 1s / max 5s |
+| 6 `full_components` | Full catalog polish (retain prior aggregates) | torps + PD | 50 | yes | max 5s |
+| … | Heavier SB defense / torp escape / full catalog | cumulative widen | … | yes | … |
+
+**Per-tier time envelopes (reserved soft global):** each row keeps one soft-global wall budget (stream default ~20s). Step `i` receives
+
+- `reserved = sum(minSeconds_j for j > i)`
+- `spendable = max(0, global_remaining - reserved)`
+- `allowance = min(spendable, maxSeconds_i)` (omit `maxSeconds` ⇒ uncapped within spendable)
+
+Exhausting a tier's allowance stops **that step** and continues the ladder; exhausting the soft global completes the row. `minSeconds` on later steps is reserved by earlier steps (no soft-global overshoot).
+
+#### 8.5.3a Homogeneous per-axis degrade → aggregate probe
+
+Cheap **exploitation** when held ship-only exacts already have the right hulls: rewrite \(C \rightarrow C' + A\) without a full-catalog CP-SAT retread. Exploration of new hulls stays on the ladder.
+
+| Item | Rule |
+|------|------|
+| Hook | Start of `admit_ship_torpedoes` (after catalog build, before seed / free search) |
+| Candidates | Ship-builds-only held exacts; aggregate \(A\) from the step catalog (v1: belief-eligible `ship_torps_loaded_*`) |
+| Decision unit | **(ship, axis)** for axes with \(k > 0\) fitted type \(c\) (engine / beam / launcher) |
+| Rewrite | Keep \(c \times k\), or replace with exactly one \(c'\) where \(\mathrm{tech}(c') \le \mathrm{tech}(c)\) and \(c' \neq c\), still \(c' \times k\) |
+| Gap | \(\mathrm{score}(A) \cdot n = \sum_{\text{changed axes}} k(\mathrm{score}(c)-\mathrm{score}(c'))\), \(n \ge 1\), at least one axis degraded |
+| Mixed fittings | Impossible by construction (one type per axis per ship) |
+| Merge | Probe hits admit via the same `_merge_exact_solutions` / on-admitted path as solver solutions |
+| Catalog gate | Rewritten fittings must resolve to existing catalog `combo_*` ids; admissions must pass hard equalities. Synthetic `degrade_probe:` ids are never emitted. |
+
+Module: `degrade_aggregate_probe.py`. Out of scope for v1: planet-defense degrade probe, multi-aggregate joint solves, inventing new hulls.
 
 #### 8.5.4 Per-player solve loop
 
@@ -672,7 +700,7 @@ Single-warship **score collisions** between early-tier hulls and higher-tech twi
 2. Look up twin high-tech partners for those lows at `military_change = military_delta_2x // 2`, intersected with buildable hulls.
 3. If the admitted set is empty, **skip** the step (no catalog growth; no `no_new_exact_signatures` stop from the skip itself).
 4. Otherwise solve with prior hull eligibility ∪ admitted ids.
-5. `allowShipOnlyExactEarlyStop: true` on this step (and later steps); `false` on `early_game_bands` and `widen_launchers`.
+5. `allowShipOnlyExactEarlyStop: false` on this step (and all steps before high-prior aggregates); `true` from `full_components` onward.
 6. `hullCollisionTwinWiden: true` on this step only.
 
 Regenerate when prior weights or component catalogs change:

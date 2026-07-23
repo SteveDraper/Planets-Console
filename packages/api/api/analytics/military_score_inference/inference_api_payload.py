@@ -25,6 +25,9 @@ from api.analytics.military_score_inference.solver import (
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
+from api.analytics.military_score_inference.tier_emission_ledger import (
+    compact_tier_emissions_from_step_diagnostics,
+)
 from api.models.game import TurnInfo
 
 STATUS_NO_PRIOR_TURN = "no_prior_turn"
@@ -182,6 +185,11 @@ def inference_api_payload(
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:
         payload["fleetTorpOverlayBeliefSetTorpIds"] = fleet_torp_overlay_belief_set_torp_ids
+    attempts = diagnostics.get("policy_step_attempts")
+    if isinstance(attempts, list) and attempts:
+        tier_emissions = compact_tier_emissions_from_step_diagnostics(attempts)
+        if tier_emissions:
+            payload["tierEmissions"] = tier_emissions
     return payload
 
 

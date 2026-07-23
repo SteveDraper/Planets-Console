@@ -55,13 +55,25 @@ def test_policy_loader_validates_final_alpha_zero():
     assert steps[0].id == "early_game_bands"
     assert steps[1].id == "widen_launchers"
     assert steps[2].id == "collision_hull_widen"
+    assert [step.id for step in steps[3:7]] == [
+        "widen_hulls",
+        "admit_ship_torpedoes",
+        "modest_planet_defense",
+        "full_components",
+    ]
     assert steps[0].allow_ship_only_exact_early_stop is False
     assert steps[1].allow_ship_only_exact_early_stop is False
-    assert steps[2].allow_ship_only_exact_early_stop is True
-    assert all(step.allow_ship_only_exact_early_stop for step in steps[2:])
+    assert steps[2].allow_ship_only_exact_early_stop is False
+    assert all(not step.allow_ship_only_exact_early_stop for step in steps[:6])
+    assert all(step.allow_ship_only_exact_early_stop for step in steps[6:])
     assert steps[2].hull_collision_twin_widen is True
     assert sum(1 for step in steps if step.hull_collision_twin_widen) == 1
     assert all(step.near_best_objective_threshold == 250 for step in steps)
+    torps = next(step for step in steps if step.id == "admit_ship_torpedoes")
+    assert torps.min_seconds == 3.0
+    assert torps.max_seconds == 8.0
+    full = next(step for step in steps if step.id == "full_components")
+    assert full.max_seconds == 5.0
 
 
 def test_policy_loader_reads_aggregate_probability_bins():
@@ -281,7 +293,7 @@ def test_slack_deferred_on_early_steps(sample_turn):
     assert "ship_fighters_added_total" not in action_ids
 
 
-def test_full_components_step_opens_ship_slots_before_aggregates(sample_turn):
+def test_full_components_step_opens_ship_slots_before_heavier_aggregates(sample_turn):
     observation = _observation(warship_delta=1, freighter_delta=1, starbases_owned=5)
     widen_hulls = next(step for step in resolve_tier_policies() if step.id == "widen_hulls")
     full_components = next(step for step in resolve_tier_policies() if step.id == "full_components")
@@ -297,9 +309,10 @@ def test_full_components_step_opens_ship_slots_before_aggregates(sample_turn):
     )
     assert full_components.beam_slot_counts == "partial"
     assert full_components.launcher_slot_counts == "partial"
-    assert full_components.aggregate_allowlist == {}
+    # Monotonic allowlist retains prior high-prior aggregates; fighters still deferred.
+    assert "ship_torps_per_type" in full_components.aggregate_allowlist
+    assert "planet_defense_posts_added_total" in full_components.aggregate_allowlist
     action_ids = {action.id for action in full_components_catalog.aggregate_actions}
-    assert "planet_defense_posts_added_total" not in action_ids
     assert "starbase_fighters_added_total" not in action_ids
     assert "ship_fighters_added_total" not in action_ids
     assert "fighters_starbase_to_ship" not in action_ids
@@ -307,10 +320,10 @@ def test_full_components_step_opens_ship_slots_before_aggregates(sample_turn):
     assert len(full_components_catalog.ship_build_combos) >= len(widen_catalog.ship_build_combos)
 
 
-def test_fighter_builds_admitted_on_full_components_step_with_caps(sample_turn):
+def test_fighter_builds_admitted_on_starbase_defense_step_with_caps(sample_turn):
     observation = _observation(military_delta_2x=500)
     full_components_step = next(
-        step for step in resolve_tier_policies() if step.id == "full_components_planet_defense"
+        step for step in resolve_tier_policies() if step.id == "admit_starbase_defense_posts"
     )
     catalog = build_action_catalog_from_turn(
         observation,
@@ -351,7 +364,7 @@ def test_ship_torpedoes_admitted_after_full_components_with_caps(sample_turn):
 def test_slack_admitted_on_later_steps_with_caps(sample_turn):
     observation = _observation(military_delta_2x=500)
     defense_step = next(
-        step for step in resolve_tier_policies() if step.id == "full_components_planet_defense"
+        step for step in resolve_tier_policies() if step.id == "modest_planet_defense"
     )
     catalog = build_action_catalog_from_turn(
         observation,
@@ -587,11 +600,20 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
     assert collision.id not in call_step_ids  # skipped when no twin partners
     assert widen_hulls.id in call_step_ids
     assert [solution.objective_value for solution in result.solutions] == [100, 50]
-    assert catalog.policy_step_id == "full_components"
-    assert problem.policy_step_id == "full_components"
+    assert catalog.policy_step_id == "admit_ship_torpedoes"
+    assert problem.policy_step_id == "admit_ship_torpedoes"
     assert step_diagnostics
     assert step_diagnostics[0]["policyStepId"] == early.id
     assert "filters" in step_diagnostics[0]["constraintSnapshot"]
+    assert "durationMs" in step_diagnostics[0]
+    assert step_diagnostics[0]["heldCountBefore"] == 0
+    assert step_diagnostics[0]["newlyAdmittedCount"] == 0
+    widen_diag = next(
+        diag for diag in step_diagnostics if diag["policyStepId"] == widen_launchers.id
+    )
+    assert widen_diag["newlyAdmittedCount"] >= 1
+    assert widen_diag["newlyAdmitted"][0]["objectiveValue"] == 100
+    assert step_diagnostics[-1].get("ladderEarlyStopReason") == "no_new_exact_signatures"
     assert result.diagnostics["stopped_reason"] == "no_new_exact_signatures"
 
 
@@ -639,9 +661,7 @@ def test_solve_with_policy_ladder_continues_no_new_signatures_when_best_below_th
     early = policy_steps[0]
     widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
     widen_hulls = next(step for step in policy_steps if step.id == "widen_hulls")
-    planet_defense = next(
-        step for step in policy_steps if step.id == "full_components_planet_defense"
-    )
+    planet_defense = next(step for step in policy_steps if step.id == "modest_planet_defense")
 
     def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == early.id:
@@ -697,7 +717,7 @@ def test_solve_with_policy_ladder_continues_no_new_signatures_when_best_below_th
     # Empty-belief admit_ship_torpedoes is a catalog no-op, but the weak held exact
     # is below the plausibility floor so the ladder must continue into aggregate tiers.
     assert "admit_ship_torpedoes" in attempted
-    assert "full_components_planet_defense" in attempted
+    assert "modest_planet_defense" in attempted
     assert [solution.objective_value for solution in result.solutions] == [-200, -1133]
 
 
@@ -820,7 +840,7 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
     )
 
     assert "admit_ship_torpedoes" in attempted
-    assert "full_components_planet_defense" in attempted
+    assert "modest_planet_defense" in attempted
     assert result.status == STATUS_EXACT
 
 
@@ -1024,8 +1044,9 @@ def test_solve_with_policy_ladder_defers_ship_only_early_stop_past_early_bands(
 ):
     """Ship-only exact that meets plausibility must not stop on early ladder steps.
 
-    ``early_game_bands`` / ``widen_launchers`` set ``allowShipOnlyExactEarlyStop: false``;
-    a qualifying exact on those steps must still reach ``collision_hull_widen``.
+    Steps through ``modest_planet_defense`` set ``allowShipOnlyExactEarlyStop: false``;
+    a qualifying exact on early bands must still reach ``admit_ship_torpedoes`` /
+    later aggregate steps before ship-only early-stop is armed.
     """
     observation = _observation(military_delta_2x=400, warship_delta=1)
     policy_steps = resolve_tier_policies()
@@ -1035,7 +1056,7 @@ def test_solve_with_policy_ladder_defers_ship_only_early_stop_past_early_bands(
     assert early.id == "early_game_bands"
     assert early.allow_ship_only_exact_early_stop is False
     assert widen_launchers.allow_ship_only_exact_early_stop is False
-    assert collision.allow_ship_only_exact_early_stop is True
+    assert collision.allow_ship_only_exact_early_stop is False
 
     early_exact = _ship_build_solution(combo_id="combo_early", objective_value=-300)
     widen_exact = _ship_build_solution(combo_id="combo_widen", objective_value=-300)
@@ -1148,7 +1169,10 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
 ):
     observation = _observation(military_delta_2x=400, warship_delta=1)
     policy_steps = resolve_tier_policies()
-    threshold_solution = _ship_build_solution(combo_id="combo_a", objective_value=-300)
+    first_early_stop_step = next(
+        step for step in policy_steps if step.allow_ship_only_exact_early_stop
+    )
+    assert first_early_stop_step.id == "full_components"
 
     def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == policy_steps[0].id:
@@ -1156,6 +1180,11 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
                 InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
                 **kwargs,
             )
+        # Distinct combo ids per step so #236 no-new-signatures does not fire first.
+        threshold_solution = _ship_build_solution(
+            combo_id=f"combo_{problem.policy_step_id}",
+            objective_value=-300,
+        )
         return _emit_mock_solver_solutions(
             InferenceResult(
                 status=STATUS_EXACT,
@@ -1179,11 +1208,9 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
         time_limit_seconds=60.0,
     )
 
-    assert attempted == [
-        policy_steps[0].id,
-        policy_steps[1].id,
-        policy_steps[2].id,
-    ]
+    expected = [step.id for step in policy_steps if not step.allow_ship_only_exact_early_stop]
+    expected.append(first_early_stop_step.id)
+    assert attempted == expected
 
 
 def test_solve_with_policy_ladder_continues_when_ship_only_exact_below_plausibility_threshold(

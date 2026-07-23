@@ -357,6 +357,15 @@ def _objective_value(
     return objective_value
 
 
+def solution_rank_objective(
+    problem: InferenceProblem,
+    solution: InferenceSolution,
+) -> int:
+    """Rank weight for an already-built solution (same terms as the CP-SAT objective)."""
+    action_counts = {action.action_id: action.count for action in solution.actions}
+    return _objective_value(problem, action_counts, solution.ship_builds)
+
+
 def _ship_build_from_member(
     member: ShipBuildCombo,
     count: int,

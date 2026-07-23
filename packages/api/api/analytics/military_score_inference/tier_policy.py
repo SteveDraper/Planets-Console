@@ -105,6 +105,9 @@ class InferenceTierPolicyStep:
     # After the first maximize in a tier, further structural solves only accept
     # ranking objectives in [Z* - T, max_objective] (sliding ceiling). None disables.
     near_best_objective_threshold: int | None = None
+    # Reserved soft-global envelopes (seconds). min defaults 0; max None = uncapped.
+    min_seconds: float = 0.0
+    max_seconds: float | None = None
 
     def constraint_snapshot(self) -> dict[str, object]:
         snapshot: dict[str, object] = {
@@ -117,7 +120,10 @@ class InferenceTierPolicyStep:
             "maxSeeds": self.max_seeds,
             "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
             "hullCollisionTwinWiden": self.hull_collision_twin_widen,
+            "minSeconds": self.min_seconds,
         }
+        if self.max_seconds is not None:
+            snapshot["maxSeconds"] = self.max_seconds
         if self.near_best_objective_threshold is not None:
             snapshot["nearBestObjectiveThreshold"] = self.near_best_objective_threshold
         return snapshot
@@ -299,6 +305,46 @@ def _parse_near_best_objective_threshold(raw: object, *, step_id: str) -> int | 
     return raw
 
 
+def _parse_min_seconds(raw: object, *, step_id: str) -> float:
+    if raw is None:
+        return 0.0
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
+        raise ValueError(f"step {step_id}: minSeconds must be a non-negative number")
+    return float(raw)
+
+
+def _parse_max_seconds(raw: object, *, step_id: str) -> float | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
+        raise ValueError(f"step {step_id}: maxSeconds must be a non-negative number")
+    return float(raw)
+
+
+def tier_step_allowance_seconds(
+    steps: tuple[InferenceTierPolicyStep, ...],
+    step_index: int,
+    *,
+    global_remaining_seconds: float,
+) -> tuple[float, float, float]:
+    """Return ``(allowance, reserved_for_later, spendable)`` for one ladder step.
+
+    Forward reservation: later steps' ``min_seconds`` are held back from the soft
+    global remainder so high-prior aggregate tiers still get a funded slice.
+    ``min_seconds`` on the *current* step does not raise the allowance above
+    ``spendable`` (no soft-global overshoot); it only affects earlier reservations.
+    """
+    if step_index < 0 or step_index >= len(steps):
+        raise ValueError(f"step_index {step_index} out of range for {len(steps)} steps")
+    step = steps[step_index]
+    reserved = sum(later.min_seconds for later in steps[step_index + 1 :])
+    spendable = max(0.0, float(global_remaining_seconds) - reserved)
+    allowance = spendable
+    if step.max_seconds is not None:
+        allowance = min(allowance, step.max_seconds)
+    return allowance, reserved, spendable
+
+
 def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolicyStep:
     step_id = raw.get("id")
     if not isinstance(step_id, str) or not step_id:
@@ -311,6 +357,13 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
     max_seeds = raw.get("maxSeeds", DEFAULT_MAX_SEEDS)
     if not isinstance(max_seeds, int) or max_seeds < 0:
         raise ValueError(f"step {step_id}: maxSeeds must be a non-negative integer")
+
+    min_seconds = _parse_min_seconds(raw.get("minSeconds"), step_id=step_id)
+    max_seconds = _parse_max_seconds(raw.get("maxSeconds"), step_id=step_id)
+    if max_seconds is not None and max_seconds < min_seconds:
+        raise ValueError(
+            f"step {step_id}: maxSeconds ({max_seconds}) must be >= minSeconds ({min_seconds})"
+        )
 
     return InferenceTierPolicyStep(
         id=step_id,
@@ -343,6 +396,8 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
             raw.get("nearBestObjectiveThreshold"),
             step_id=step_id,
         ),
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
     )
 
 

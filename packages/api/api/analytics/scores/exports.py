@@ -19,6 +19,10 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     resolve_prior_turn_fleet_torp_overlay,
 )
+from api.analytics.military_score_inference.tier_emission_ledger import (
+    compact_tier_emissions_from_step_diagnostics,
+    tier_emissions_from_wire_complete,
+)
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
     ScoresExportResolved,
@@ -409,6 +413,9 @@ def build_scores_export_materialized_tree(
     }
     if payload.diagnostics is not None:
         tree["diagnostics"] = payload.diagnostics
+    tier_emissions = _tier_emissions_from_resolved(resolved)
+    if tier_emissions is not None:
+        tree["tierEmissions"] = tier_emissions
 
     if scope.player_id is not None:
         resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
@@ -418,6 +425,29 @@ def build_scores_export_materialized_tree(
             )
 
     return tree
+
+
+def _tier_emissions_from_resolved(
+    resolved: ScoresExportResolved,
+) -> list[dict[str, object]] | None:
+    """Compact per-tier emission ledger when available on the resolved snapshot."""
+    persisted_row = resolved.snapshot.persisted_row
+    if persisted_row is not None and persisted_row.tier_emissions:
+        return list(persisted_row.tier_emissions)
+
+    terminal = resolved.snapshot.resolved_terminal_admission()
+    if terminal is not None:
+        wire_event = wire_complete_event_from_terminal_admission(terminal)
+        return tier_emissions_from_wire_complete(wire_event)
+
+    scheduler_run = resolved.snapshot.scheduler_run
+    if scheduler_run is None or scheduler_run.ladder_state is None:
+        return None
+    step_diagnostics = scheduler_run.ladder_state.step_diagnostics
+    if not step_diagnostics:
+        return None
+    emissions = compact_tier_emissions_from_step_diagnostics(step_diagnostics)
+    return emissions or None
 
 
 def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope) -> dict[str, Any]:

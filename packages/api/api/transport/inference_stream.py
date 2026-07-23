@@ -65,6 +65,7 @@ def inference_complete_event(
     host_turn_targets: list[dict[str, object]] | None = None,
     fleet_torp_input_status: str | None = None,
     fleet_torp_overlay_belief_set_torp_ids: list[int] | None = None,
+    tier_emissions: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "complete",
@@ -83,6 +84,8 @@ def inference_complete_event(
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:
         payload["fleetTorpOverlayBeliefSetTorpIds"] = fleet_torp_overlay_belief_set_torp_ids
+    if tier_emissions is not None:
+        payload["tierEmissions"] = tier_emissions
     return payload
 
 
