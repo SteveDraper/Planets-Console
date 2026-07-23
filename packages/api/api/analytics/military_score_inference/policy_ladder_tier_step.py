@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
+from enum import Enum
 from pathlib import Path
 
 from api.analytics.military_score_inference.actions import (
@@ -36,7 +37,6 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
-    _advance_after_tier_time_stop,
     _TierStepRun,
     ensure_ladder_clock_started,
     remaining_time,
@@ -361,6 +361,22 @@ def _maybe_no_new_exact_signatures_early_stop(
     return True
 
 
+class TierStepFinishMode(Enum):
+    """How ``_finish_tier_step`` closes the step after appending diagnostics."""
+
+    DIAGNOSTICS_ONLY = "diagnostics_only"
+    """Append diagnostics; caller owns ladder completion (cancel / invalid / abort)."""
+
+    SKIP = "skip"
+    """Advance index + ship-only early-stop (widen / raise skip paths)."""
+
+    COMPLETE = "complete"
+    """Advance index + ship-only and no-new-signatures early-stops (happy path)."""
+
+    BUDGET_STOP = "budget_stop"
+    """Advance index with no early-stop (tier allowance exhausted)."""
+
+
 def _finish_tier_step(
     state: PolicyLadderState,
     *,
@@ -377,12 +393,15 @@ def _finish_tier_step(
     collision_widen: CollisionHullWidenPlan | None = None,
     prior_fleet_tech_raise: PriorFleetTechRaisePlan | None = None,
     skipped: bool = False,
-    close_step: bool = False,
+    finish_mode: TierStepFinishMode = TierStepFinishMode.DIAGNOSTICS_ONLY,
     tier_allowance_seconds: float | None = None,
     reserved_for_later_seconds: float | None = None,
     spendable_seconds: float | None = None,
+    added_combo_ids: frozenset[str] = frozenset(),
+    added_aggregate_action_ids: frozenset[str] = frozenset(),
+    new_exact_before_step: int | None = None,
 ) -> None:
-    """Append tier diagnostics; when ``close_step``, advance index and early-stop."""
+    """Append tier diagnostics, then advance / early-stop per ``finish_mode``."""
     state.step_diagnostics.append(
         _policy_step_diagnostics(
             policy_step=policy_step,
@@ -408,17 +427,32 @@ def _finish_tier_step(
             prior_fleet_tech_raise=prior_fleet_tech_raise,
         )
     )
-    if not close_step:
+    if finish_mode is TierStepFinishMode.DIAGNOSTICS_ONLY:
         return
+
     state.next_step_index = policy_step_index + 1
-    if _maybe_early_stop_after_step(
-        state,
-        policy_step=policy_step,
-        observation=observation,
-        catalog=catalog,
-    ):
-        _annotate_last_step_early_stop(state)
-        return
+
+    if finish_mode in (TierStepFinishMode.SKIP, TierStepFinishMode.COMPLETE):
+        if _maybe_early_stop_after_step(
+            state,
+            policy_step=policy_step,
+            observation=observation,
+            catalog=catalog,
+        ):
+            _annotate_last_step_early_stop(state)
+            return
+    if finish_mode is TierStepFinishMode.COMPLETE:
+        assert new_exact_before_step is not None
+        if _maybe_no_new_exact_signatures_early_stop(
+            state,
+            added_combo_ids=added_combo_ids,
+            added_aggregate_action_ids=added_aggregate_action_ids,
+            new_exact_before_step=new_exact_before_step,
+        ):
+            _annotate_last_step_early_stop(state)
+            return
+    # BUDGET_STOP: advance only -- no early-stop.
+
     if state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True
 
@@ -520,11 +554,11 @@ def run_policy_ladder_tier_step(
                 held_count_before=len(state.merged_solutions),
                 newly_admitted=[],
                 skipped=True,
+                finish_mode=TierStepFinishMode.BUDGET_STOP,
                 tier_allowance_seconds=allowance,
                 reserved_for_later_seconds=reserved,
                 spendable_seconds=spendable,
             )
-            _advance_after_tier_time_stop(state, step_index)
         return
 
     state.policy_steps_attempted.append(policy_step.id)
@@ -575,7 +609,7 @@ def run_policy_ladder_tier_step(
                 newly_admitted=newly_admitted,
                 collision_widen=collision_widen,
                 skipped=True,
-                close_step=True,
+                finish_mode=TierStepFinishMode.SKIP,
                 **budget_kwargs,
             )
             return
@@ -603,7 +637,7 @@ def run_policy_ladder_tier_step(
                 collision_widen=collision_widen,
                 prior_fleet_tech_raise=prior_fleet_tech_raise,
                 skipped=True,
-                close_step=True,
+                finish_mode=TierStepFinishMode.SKIP,
                 **budget_kwargs,
             )
             return
@@ -654,7 +688,14 @@ def run_policy_ladder_tier_step(
                 break
             admit_solution(rewrite)
 
-    def finish_partial_step() -> None:
+    def finish_step(
+        *,
+        finish_mode: TierStepFinishMode = TierStepFinishMode.DIAGNOSTICS_ONLY,
+        band_residual_2x: int | None = None,
+        added_combo_ids: frozenset[str] = frozenset(),
+        added_aggregate_action_ids: frozenset[str] = frozenset(),
+        new_exact_before_step: int | None = None,
+    ) -> None:
         _finish_tier_step(
             state,
             policy_step=policy_step,
@@ -663,19 +704,24 @@ def run_policy_ladder_tier_step(
             turn=turn,
             observation=observation,
             seed_count=len(seeds_for_step),
-            band_residual_2x=None,
+            band_residual_2x=band_residual_2x,
             step_started_at=step_started_at,
             held_count_before=held_count_before,
             newly_admitted=newly_admitted,
             collision_widen=collision_widen,
             prior_fleet_tech_raise=prior_fleet_tech_raise,
+            finish_mode=finish_mode,
+            added_combo_ids=added_combo_ids,
+            added_aggregate_action_ids=added_aggregate_action_ids,
+            new_exact_before_step=new_exact_before_step,
             **budget_kwargs,
         )
 
     def stop_after_budget() -> None:
-        finish_partial_step()
         if run.is_tier_only_stop():
-            _advance_after_tier_time_stop(state, step_index)
+            finish_step(finish_mode=TierStepFinishMode.BUDGET_STOP)
+        else:
+            finish_step()
 
     for seed in seeds_for_step[: policy_step.max_seeds]:
         if run.should_stop():
@@ -695,14 +741,14 @@ def run_policy_ladder_tier_step(
         if seed_result is None or seed_problem is None:
             continue
         if _abort_tier_step_on_seed_result(state, seed_result, seed_problem):
-            finish_partial_step()
+            finish_step()
             return
         state.problem = seed_problem
         if seed_result.status == STATUS_TIME_LIMITED:
             state.time_limited = True
 
     if state.last_status == STATUS_INVALID_PROBLEM:
-        finish_partial_step()
+        finish_step()
         state.ladder_complete = True
         return
 
@@ -727,12 +773,12 @@ def run_policy_ladder_tier_step(
     state.last_diagnostics = dict(exact_result.diagnostics)
     state.problem = problem
     if exact_result.status == STATUS_INVALID_PROBLEM:
-        finish_partial_step()
+        finish_step()
         state.ladder_complete = True
         return
     if exact_result.status == STATUS_STOPPED:
         state.cancelled = True
-        finish_partial_step()
+        finish_step()
         state.ladder_complete = True
         return
 
@@ -756,7 +802,7 @@ def run_policy_ladder_tier_step(
             state.last_diagnostics = dict(band_result.diagnostics)
             if band_result.status == STATUS_STOPPED:
                 state.cancelled = True
-                finish_partial_step()
+                finish_step()
                 state.ladder_complete = True
                 return
             if band_result.solutions:
@@ -771,46 +817,14 @@ def run_policy_ladder_tier_step(
                     state.best_band_residual_2x = band_residual_2x
             elif band_result.status == STATUS_INVALID_PROBLEM:
                 state.last_status = band_result.status
-                finish_partial_step()
+                finish_step()
                 state.ladder_complete = True
                 return
 
-    _finish_tier_step(
-        state,
-        policy_step=policy_step,
-        policy_step_index=step_index,
-        catalog=catalog,
-        turn=turn,
-        observation=observation,
-        seed_count=len(seeds_for_step),
+    finish_step(
+        finish_mode=TierStepFinishMode.COMPLETE,
         band_residual_2x=band_residual_2x,
-        step_started_at=step_started_at,
-        held_count_before=held_count_before,
-        newly_admitted=newly_admitted,
-        collision_widen=collision_widen,
-        prior_fleet_tech_raise=prior_fleet_tech_raise,
-        **budget_kwargs,
-    )
-
-    state.next_step_index = step_index + 1
-
-    if _maybe_early_stop_after_step(
-        state,
-        policy_step=policy_step,
-        observation=observation,
-        catalog=catalog,
-    ):
-        _annotate_last_step_early_stop(state)
-        return
-
-    if _maybe_no_new_exact_signatures_early_stop(
-        state,
         added_combo_ids=added_combo_ids,
         added_aggregate_action_ids=added_aggregate_action_ids,
         new_exact_before_step=new_exact_before_step,
-    ):
-        _annotate_last_step_early_stop(state)
-        return
-
-    if state.next_step_index >= len(state.policy_steps):
-        state.ladder_complete = True
+    )

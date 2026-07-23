@@ -22,13 +22,6 @@ def ensure_ladder_clock_started(state: PolicyLadderState, *, now: float | None =
     return state.started_at
 
 
-def _advance_after_tier_time_stop(state: PolicyLadderState, step_index: int) -> None:
-    """Tier allowance exhausted: close this step and continue the ladder when possible."""
-    state.next_step_index = step_index + 1
-    if state.next_step_index >= len(state.policy_steps):
-        state.ladder_complete = True
-
-
 @dataclass
 class _TierStepRun:
     """Cancel and time-budget guards shared across one tier step.
