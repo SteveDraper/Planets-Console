@@ -93,11 +93,9 @@ def resolve_soft_stream_dispatch(
     *,
     source: TerminalSource,
     soft_terminal_reason: SoftTerminalReason | str | None = None,
-    park_reason: SoftTerminalReason | str | None = None,
     has_event: bool,
 ) -> SoftStreamDispatch:
     """Look up soft-stream dispatch for one defer / durable / orphan delivery."""
-    del park_reason  # legacy callers during migration; prefer soft_terminal_reason
     reason = (
         _coerce_soft_terminal_reason(soft_terminal_reason)
         if source is TerminalSource.ROW_DEFER
