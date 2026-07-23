@@ -84,8 +84,18 @@ def component_ids_for_axis_from_records(
 
 def launcher_component_ids_from_records(
     records: Iterable[FleetShipRecord],
+    *,
+    option_set_mass_threshold: float | None = None,
 ) -> frozenset[int]:
-    """Union launcher/torp ids from active records' known fields and build option sets."""
+    """Union launcher/torp ids from active records' known fields and build option sets.
+
+    When ``option_set_mass_threshold`` is set, soft option sets must meet that
+    per-row softmax floor (known launcher ids always count).
+    """
     return frozenset(
-        component_ids_for_axis_from_records(records, LAUNCHERS_AXIS_FIELD_NAME),
+        component_ids_for_axis_from_records(
+            records,
+            LAUNCHERS_AXIS_FIELD_NAME,
+            option_set_mass_threshold=option_set_mass_threshold,
+        )
     )

@@ -215,8 +215,8 @@ def test_option_set_mass_threshold_in_tier_policy_tuning():
     assert tuning.option_set_mass_threshold == DEFAULT_OPTION_SET_MASS_THRESHOLD
 
 
-def test_brynhild_style_weak_tubes_keep_admission_but_near_full_misalignment():
-    """Accel-start: Brynhild-best + weaker tube alts on one placeholder."""
+def test_brynhild_style_weak_tubes_leave_admission_but_near_full_misalignment():
+    """Accel-start: Brynhild-best + weaker tube alts -- tubes fail mass threshold."""
     record = FleetShipRecord(
         record_id="warship-placeholder",
         disposition="active",
@@ -244,7 +244,10 @@ def test_brynhild_style_weak_tubes_keep_admission_but_near_full_misalignment():
         ],
     )
     overlay = overlay_from_fleet_records([record])
-    assert overlay.belief_set.torp_ids == frozenset({8, 10})
+    assert overlay.belief_set.torp_ids == frozenset()
+    masses = overlay.launcher_belief_mass_by_torp_id
+    assert masses[10] < DEFAULT_OPTION_SET_MASS_THRESHOLD
+    assert masses[8] < DEFAULT_OPTION_SET_MASS_THRESHOLD
 
     tuning = FleetInferenceTuning(torp_misalignment_log_penalty=200)
     mark8_penalty = effective_torp_misalignment_log_penalty(
@@ -282,8 +285,33 @@ def test_brynhild_style_weak_tubes_keep_admission_but_near_full_misalignment():
         admitted_torp_ids=frozenset({8, 10}),
     )
     payload = diagnostics.to_payload()
-    assert payload["beliefSetTorpIds"] == [8, 10]
+    assert payload["beliefSetTorpIds"] == []
     assert "10" in payload["launcherBeliefMassByTorpId"]
     assert "8" in payload["launcherBeliefMassByTorpId"]
     assert payload["effectiveTorpMisalignmentLogPenaltyByTorpId"]["10"] == mark8_penalty
     assert payload["effectiveTorpMisalignmentLogPenaltyByTorpId"]["8"] == gamma_penalty
+
+
+def test_belief_set_includes_option_sets_meeting_mass_threshold():
+    record = FleetShipRecord(
+        record_id="tube-ship",
+        disposition="active",
+        fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
+        build_option_sets=[
+            FleetBuildOptionSet(
+                label="Mk4 primary",
+                solution_rank_weight=200,
+                torp_id=4,
+            ),
+            FleetBuildOptionSet(
+                label="Mk1c weak",
+                solution_rank_weight=10,
+                torp_id=1,
+            ),
+        ],
+    )
+    overlay = overlay_from_fleet_records([record])
+    assert 4 in overlay.belief_set.torp_ids
+    assert 1 not in overlay.belief_set.torp_ids
+    assert overlay.launcher_belief_mass_by_torp_id[1] < DEFAULT_OPTION_SET_MASS_THRESHOLD
+    assert overlay.launcher_belief_mass_by_torp_id[4] >= DEFAULT_OPTION_SET_MASS_THRESHOLD

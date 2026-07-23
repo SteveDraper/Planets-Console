@@ -75,7 +75,10 @@ def resolution_from_fleet_records(
         else option_set_mass_threshold
     )
     return PriorTurnFleetTorpResolution(
-        overlay=overlay_from_fleet_records(records),
+        overlay=overlay_from_fleet_records(
+            records,
+            option_set_mass_threshold=threshold,
+        ),
         input_status=input_status,
         max_tech_by_axis=max_tech_by_axis_from_fleet_records(
             records,

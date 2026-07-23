@@ -754,7 +754,7 @@ Per-player, per-solve overlay on top of **inference build prior** (#86) weights 
 ```yaml
 fleetInferenceTuning:
   torpMisalignmentLogPenalty: <int>              # #87
-  optionSetMassThreshold: 0.25                   # #253 (soft option sets for max-tech)
+  optionSetMassThreshold: 0.25                   # soft option sets for belief-set admission + max-tech
   # componentTechGapLogPenaltyPerLevel: <int>   # #156 -- out of scope until enabled
 ```
 
@@ -762,16 +762,16 @@ fleetInferenceTuning:
 
 **Inference fleet launcher belief set** = torp ids fitted on ships the player is believed to own at prior turn:
 
-- **Fleet observed ship** rows with known launchers
+- **Fleet observed ship** rows with known launchers (always)
 - **Fleet inferred acquisition** rows from prior-turn scores (required)
-- Ambiguous rows: **union** of launcher ids across all **fleet build option set** tuples
+- Ambiguous rows: soft **fleet build option set**s whose per-row softmax probability meets **`optionSetMassThreshold`** (default 0.25; same floor as max-tech)
 
-Empty when no active row has a positive launcher id in any option set. **Absent overlay behaves like empty belief set** (turn 1 included) -- not legacy admit-all torps on early tiers.
+Empty when no active row has a known launcher or a mass-eligible soft tube fit. **Absent overlay behaves like empty belief set** (turn 1 included) -- not legacy admit-all torps on early tiers.
 
 **Inference fleet launcher belief mass** (#253) scales ranking separately from admission membership:
 
 - **Hard**: known positive `fields.launchers` → mass 1 for that torp id from the row
-- **Soft** (ambiguous rows): softmax over all option sets on the row (including beam-only), log-score = `solution_rank_weight / INFERENCE_PROBABILITY_WEIGHT_SCALE`; soft mass for torp `t` = sum of probabilities of sets with `torp_id == t`
+- **Soft** (ambiguous rows): softmax over all option sets on the row (including beam-only), log-score = `solution_rank_weight / INFERENCE_PROBABILITY_WEIGHT_SCALE`; soft mass for torp `t` = sum of probabilities of sets with `torp_id == t` (not gated by the admission threshold)
 - Player mass = **max** over active rows
 - Effective misalignment = `round(P * (1 - mass))` with `P = torpMisalignmentLogPenalty`
 
