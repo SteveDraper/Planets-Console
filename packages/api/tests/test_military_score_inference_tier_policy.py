@@ -709,7 +709,7 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -825,7 +825,7 @@ def test_solve_with_policy_ladder_continues_no_new_signatures_when_best_below_th
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -949,7 +949,7 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -1146,7 +1146,7 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -1201,7 +1201,7 @@ def test_solve_with_policy_ladder_defers_ship_only_early_stop_past_early_bands(
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        "api.analytics.military_score_inference.policy_ladder_admission.solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
     _, _, _, attempted, _ = solve_with_policy_ladder(
@@ -1262,7 +1262,7 @@ def test_solve_with_policy_ladder_runs_collision_hull_widen_on_twin_hit(sample_t
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -1323,7 +1323,7 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        "api.analytics.military_score_inference.policy_ladder_admission.solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
     _, _, _, attempted, _ = solve_with_policy_ladder(
@@ -1364,7 +1364,7 @@ def test_solve_with_policy_ladder_continues_when_ship_only_exact_below_plausibil
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        "api.analytics.military_score_inference.policy_ladder_admission.solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
     _, _, _, attempted_low, _ = solve_with_policy_ladder(
