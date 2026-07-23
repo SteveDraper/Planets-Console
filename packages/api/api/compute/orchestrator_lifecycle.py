@@ -129,10 +129,7 @@ class OrchestratorLifecycleMixin:
             prior_step_index = self._reset_for_requeue(node)
             node.error = None
             dependency_scope = recovery.dependency_scope
-            if (
-                dependency_scope != node.scope
-                and dependency_scope not in node.dependency_scopes
-            ):
+            if dependency_scope != node.scope and dependency_scope not in node.dependency_scopes:
                 node.dependency_scopes = (
                     *node.dependency_scopes,
                     dependency_scope,

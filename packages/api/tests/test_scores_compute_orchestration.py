@@ -1138,6 +1138,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
     assert node.state in {"ready", "running"}
     assert scope not in node.dependency_scopes
 
+
 def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
     sample_turn,
     persistence,
