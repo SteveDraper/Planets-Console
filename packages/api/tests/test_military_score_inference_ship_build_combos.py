@@ -849,7 +849,22 @@ def test_missouri_host_turn_2_regression_reports_policy_ladder_diagnostics():
     assert payload["solutionCount"] > 0
     assert payload["diagnostics"]["policy_steps_attempted"]
     policy_steps_attempted = payload["diagnostics"]["policy_steps_attempted"]
-    assert payload["diagnostics"]["policy_step_id"] == policy_steps_attempted[-1]
+    # Terminal policy_step_id is the catalog that produced solutions (last
+    # catalog-building tier). Soft-global steering may still walk later
+    # zero-allowance skips, so the last attempted id need not match.
+    assert payload["diagnostics"]["policy_step_id"] in policy_steps_attempted
+    attempts = payload["diagnostics"].get("policy_step_attempts")
+    if isinstance(attempts, list) and attempts:
+        last_catalog_step = next(
+            (
+                entry
+                for entry in reversed(attempts)
+                if isinstance(entry, dict) and not entry.get("skipped")
+            ),
+            None,
+        )
+        if last_catalog_step is not None:
+            assert last_catalog_step.get("policyStepId") == payload["diagnostics"]["policy_step_id"]
     assert catalog is not None
     assert payload["diagnostics"]["ship_build_combo_count"] > 0
     missouri_combo_id = "combo_13_9_3_6_8_6"
