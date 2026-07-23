@@ -42,6 +42,7 @@ from api.models.game import TurnInfo
 AxisName = Literal["engine", "beam", "launcher"]
 
 PROBE_STEP_IDS = frozenset({"admit_ship_torpedoes"})
+PROBE_SOLVE_MAX_SECONDS = 0.25
 
 
 def torpedo_id_from_ship_torps_loaded_action_id(action_id: str) -> int | None:
@@ -269,11 +270,14 @@ def _solve_degrade_for_aggregate(
     *,
     ammo_score_2x: int,
     max_count: int,
+    max_time_in_seconds: float = PROBE_SOLVE_MAX_SECONDS,
 ) -> tuple[int, dict[tuple[int, AxisName], int | None]] | None:
     """Return (aggregate_count, axis→variant_id|None) or None when infeasible."""
     if ammo_score_2x <= 0 or max_count <= 0 or not axes:
         return None
     if not any(axis.variants for axis in axes):
+        return None
+    if max_time_in_seconds <= 0:
         return None
 
     model = cp_model.CpModel()
@@ -309,7 +313,7 @@ def _solve_degrade_for_aggregate(
     model.add(sum(gap_terms) == count_var * ammo_score_2x)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 0.25
+    solver.parameters.max_time_in_seconds = max_time_in_seconds
     status = solver.solve(model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
@@ -332,11 +336,17 @@ def probe_degrade_aggregate_rewrites(
     observation: InferenceObservation,
     catalog: ActionCatalog,
     max_solutions: int = 20,
+    should_stop: Callable[[], bool] | None = None,
+    remaining_seconds: Callable[[], float] | None = None,
 ) -> list[InferenceSolution]:
     """Generate catalog-resolved C' + torp-ammo rewrites from ship-only held exacts.
 
     Only emits solutions that resolve to catalog combo ids and satisfy hard
     equalities against ``observation``.
+
+    Optional ``should_stop`` / ``remaining_seconds`` bind the held×torp CP-SAT
+    loop to an outer tier wall (cancel + remaining). Each inner solve is capped
+    at ``min(PROBE_SOLVE_MAX_SECONDS, remaining)``.
     """
     combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
     if not combos_by_id:
@@ -366,9 +376,22 @@ def probe_degrade_aggregate_rewrites(
     if not torp_actions:
         return []
 
+    def _abort() -> bool:
+        return should_stop is not None and should_stop()
+
+    def _solve_time_cap() -> float | None:
+        if remaining_seconds is None:
+            return PROBE_SOLVE_MAX_SECONDS
+        remaining = remaining_seconds()
+        if remaining <= 0:
+            return None
+        return min(PROBE_SOLVE_MAX_SECONDS, remaining)
+
     problem = build_inference_problem(observation, catalog)
     out: list[InferenceSolution] = []
     for held in held_solutions:
+        if _abort():
+            return out
         if held.actions or not held.ship_builds:
             continue
         if not solution_satisfies_exact_hard_equalities(held, observation, catalog):
@@ -392,10 +415,16 @@ def probe_degrade_aggregate_rewrites(
         if not axes:
             continue
         for action in torp_actions:
+            if _abort():
+                return out
+            solve_time = _solve_time_cap()
+            if solve_time is None:
+                return out
             solved = _solve_degrade_for_aggregate(
                 axes,
                 ammo_score_2x=action.score_delta_2x,
                 max_count=action.upper_bound,
+                max_time_in_seconds=solve_time,
             )
             if solved is None:
                 continue
@@ -436,6 +465,7 @@ def should_run_degrade_aggregate_probe(policy_step_id: str) -> bool:
 
 
 __all__ = [
+    "PROBE_SOLVE_MAX_SECONDS",
     "PROBE_STEP_IDS",
     "probe_degrade_aggregate_rewrites",
     "should_run_degrade_aggregate_probe",

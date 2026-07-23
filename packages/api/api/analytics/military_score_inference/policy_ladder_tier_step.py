@@ -683,6 +683,8 @@ def run_policy_ladder_tier_step(
             observation=observation,
             catalog=catalog,
             max_solutions=catalog_solve_max,
+            should_stop=run.should_stop,
+            remaining_seconds=run.remaining_seconds,
         ):
             if run.should_stop():
                 break

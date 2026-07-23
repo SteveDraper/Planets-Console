@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.degrade_aggregate_probe import (
+    PROBE_SOLVE_MAX_SECONDS,
     probe_degrade_aggregate_rewrites,
     should_run_degrade_aggregate_probe,
     torpedo_id_from_ship_torps_loaded_action_id,
@@ -512,6 +513,126 @@ def test_homogeneous_axis_emits_single_beam_id_per_ship() -> None:
             assert ship_build.beam_id in {high.id, mid.id, low.id}
             assert ship_build.beam_count == 4
             assert not ship_build.combo_id.startswith("degrade_probe:")
+
+
+class _ProbeBudget:
+    """Injectable stop/remaining that counts granted solve caps (no real sleep)."""
+
+    def __init__(self, *, max_solves: int, solve_cap: float = PROBE_SOLVE_MAX_SECONDS) -> None:
+        self._granted = 0
+        self._max_solves = max_solves
+        self._solve_cap = solve_cap
+        self.solve_time_caps: list[float] = []
+
+    def should_stop(self) -> bool:
+        return self._granted >= self._max_solves
+
+    def remaining_seconds(self) -> float:
+        if self._granted >= self._max_solves:
+            return 0.0
+        self._granted += 1
+        self.solve_time_caps.append(self._solve_cap)
+        return self._solve_cap
+
+
+def _beam_degrade_fixture() -> tuple[
+    list[InferenceSolution],
+    TurnInfo,
+    InferenceObservation,
+    ActionCatalog,
+]:
+    high = _beam(beam_id=10, tech=5, cost=100, name="Disruptor")
+    low = _beam(beam_id=1, tech=1, cost=0, name="Laser")
+    engine = _engine(engine_id=1, tech=1, cost=1)
+    torp_a = _torpedo(torp_id=6, tech=5, launchercost=20, torpedocost=35, name="Mark 4")
+    torp_b = _torpedo(torp_id=7, tech=6, launchercost=20, torpedocost=35, name="Mark 5")
+    hull = _hull(beams=1, launchers=0, engines=1)
+    high_combo = _combo(hull, engine, high, None, beam_count=1, launcher_count=0)
+    low_combo = _combo(hull, engine, low, None, beam_count=1, launcher_count=0)
+    actions = [
+        _ammo_action(torp_id=6, torpedocost=35),
+        _ammo_action(torp_id=7, torpedocost=35),
+    ]
+    catalog = _catalog(combos=[high_combo, low_combo], actions=actions)
+    turn = _minimal_turn(
+        hulls=[hull],
+        engines=[engine],
+        beams=[high, low],
+        torpedos=[torp_a, torp_b],
+    )
+    held = InferenceSolution(
+        objective_value=-50,
+        actions=(),
+        ship_builds=(_ship_build_from_combo(high_combo),),
+    )
+    observation = _observation(military_delta_2x=high_combo.score_delta_2x)
+    return [held], turn, observation, catalog
+
+
+def test_probe_returns_empty_when_should_stop_before_any_solve() -> None:
+    helds, turn, observation, catalog = _beam_degrade_fixture()
+    budget = _ProbeBudget(max_solves=0)
+    rewrites = probe_degrade_aggregate_rewrites(
+        helds,
+        turn=turn,
+        observation=observation,
+        catalog=catalog,
+        should_stop=budget.should_stop,
+        remaining_seconds=budget.remaining_seconds,
+    )
+    assert rewrites == []
+    assert budget.solve_time_caps == []
+
+
+def test_probe_stops_after_budget_grants_one_solve() -> None:
+    helds, turn, observation, catalog = _beam_degrade_fixture()
+    unlimited = probe_degrade_aggregate_rewrites(
+        helds,
+        turn=turn,
+        observation=observation,
+        catalog=catalog,
+    )
+    assert len(unlimited) >= 2
+
+    budget = _ProbeBudget(max_solves=1)
+    rewrites = probe_degrade_aggregate_rewrites(
+        helds,
+        turn=turn,
+        observation=observation,
+        catalog=catalog,
+        should_stop=budget.should_stop,
+        remaining_seconds=budget.remaining_seconds,
+    )
+    assert len(rewrites) == 1
+    assert budget.solve_time_caps == [PROBE_SOLVE_MAX_SECONDS]
+    assert not rewrites[0].ship_builds[0].combo_id.startswith("degrade_probe:")
+
+
+def test_probe_caps_inner_solve_to_remaining_seconds(monkeypatch) -> None:
+    from api.analytics.military_score_inference import degrade_aggregate_probe as probe_mod
+
+    helds, turn, observation, catalog = _beam_degrade_fixture()
+    short_cap = 0.05
+    recorded_caps: list[float] = []
+    original = probe_mod._solve_degrade_for_aggregate
+
+    def _spy(*args, **kwargs):
+        recorded_caps.append(float(kwargs["max_time_in_seconds"]))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(probe_mod, "_solve_degrade_for_aggregate", _spy)
+    budget = _ProbeBudget(max_solves=1, solve_cap=short_cap)
+    rewrites = probe_degrade_aggregate_rewrites(
+        helds,
+        turn=turn,
+        observation=observation,
+        catalog=catalog,
+        should_stop=budget.should_stop,
+        remaining_seconds=budget.remaining_seconds,
+    )
+    assert recorded_caps == [short_cap]
+    assert short_cap < PROBE_SOLVE_MAX_SECONDS
+    assert len(rewrites) <= 1
 
 
 # Keep scoring helper import referenced for gap arithmetic assertions above.
