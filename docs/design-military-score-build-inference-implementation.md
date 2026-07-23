@@ -612,13 +612,14 @@ Tunable constants in YAML; high-prior aggregates run before noisy full-catalog s
 | 6 `full_components` | Full catalog polish (retain prior aggregates) | torps + PD | 50 | yes | max 5s |
 | … | Heavier SB defense / torp escape / full catalog | cumulative widen | … | yes | … |
 
-**Per-tier time envelopes (reserved soft global):** each row keeps one soft-global wall budget (stream default ~20s). Step `i` receives
+**Per-tier time envelopes (reserved soft global):** each row keeps one soft-global wall budget (stream default ~20s) that **steers** target slices. Step `i` receives
 
 - `reserved = sum(minSeconds_j for j > i)`
 - `spendable = max(0, global_remaining - reserved)`
-- `allowance = min(spendable, maxSeconds_i)` (omit `maxSeconds` ⇒ uncapped within spendable)
+- `steered = min(spendable, maxSeconds_i)` (omit `maxSeconds` ⇒ uncapped within spendable)
+- `allowance = max(minSeconds_i, steered)`
 
-Exhausting a tier's allowance stops **that step** and continues the ladder; exhausting the soft global completes the row. `minSeconds` on later steps is reserved by earlier steps (no soft-global overshoot).
+`minSeconds` is an **absolute floor**: a tier always gets at least its min even when soft-global remainder / spendable is insufficient (intentional overshoot). Soft global and later-step reservations steer how much *above* min early steps take; exhausting a tier's allowance stops **that step** and continues the ladder. Soft-global exhaustion alone does not abort an in-flight funded tier, complete the row (batch or stream), or deny later steps with `minSeconds > 0` -- those still receive their absolute floor. Steps with `minSeconds == 0` and zero spendable skip.
 
 #### 8.5.3a Homogeneous per-axis degrade → aggregate probe
 

@@ -492,10 +492,13 @@ def _make_incremental_admitter(
 class _TierStepRun:
     """Cancel and time-budget guards shared across one tier step.
 
-    Soft-global wall budget is anchored at first ladder dispatch (``budget_started_at``).
-    Each tier also gets a reserved allowance (``tier_allowance_seconds``) that cannot
-    spend later tiers' ``min_seconds``. Exhausting the tier allowance stops this step
-    only; exhausting the soft global completes the ladder.
+    Soft-global wall budget **steers** each step's target allowance at dispatch
+    (via ``tier_step_allowance_seconds``). Once a step has an allowance -- including
+    an absolute ``min_seconds`` floor that may overshoot soft-global remainder --
+    that tier slice runs until cancelled or the tier allowance is exhausted.
+    Soft-global exhaustion alone does not abort an in-flight tier or complete the
+    ladder; steps with ``min_seconds == 0`` and zero steered spendable get a zero
+    allowance and skip.
     """
 
     state: PolicyLadderState
@@ -506,7 +509,7 @@ class _TierStepRun:
     tier_started_at: float
     reserved_for_later_seconds: float = 0.0
     spendable_seconds: float = 0.0
-    stop_kind: str | None = None  # cancel | global_time | tier_time
+    stop_kind: str | None = None  # cancel | tier_time
 
     def global_remaining_seconds(self) -> float:
         return remaining_time(self.budget_started_at, self.time_limit_seconds)
@@ -520,11 +523,6 @@ class _TierStepRun:
             self.state.ladder_complete = True
             self.stop_kind = "cancel"
             return True
-        if self.global_remaining_seconds() <= 0:
-            self.state.time_limited = True
-            self.state.ladder_complete = True
-            self.stop_kind = "global_time"
-            return True
         if self.tier_remaining_seconds() <= 0:
             self.state.time_limited = True
             self.stop_kind = "tier_time"
@@ -532,7 +530,7 @@ class _TierStepRun:
         return False
 
     def remaining_seconds(self) -> float:
-        return min(self.global_remaining_seconds(), self.tier_remaining_seconds())
+        return self.tier_remaining_seconds()
 
     def is_tier_only_stop(self) -> bool:
         return self.stop_kind == "tier_time"
@@ -584,11 +582,6 @@ def run_policy_ladder_tier_step(
     step_index = state.next_step_index
     policy_step = state.policy_steps[step_index]
     global_remaining = remaining_time(ladder_started_at, time_limit_seconds)
-    if global_remaining <= 0:
-        state.time_limited = True
-        state.ladder_complete = True
-        return
-
     allowance, reserved, spendable = tier_step_allowance_seconds(
         state.policy_steps,
         step_index,
@@ -606,7 +599,7 @@ def run_policy_ladder_tier_step(
         spendable_seconds=spendable,
     )
     if run.should_stop():
-        # Global/cancel before work, or zero tier allowance.
+        # Zero tier allowance (min=0 and nothing spendable), or cancel.
         if run.is_tier_only_stop():
             state.policy_steps_attempted.append(policy_step.id)
             _append_tier_step_diagnostics(

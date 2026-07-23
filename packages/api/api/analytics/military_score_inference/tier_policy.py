@@ -329,19 +329,22 @@ def tier_step_allowance_seconds(
 ) -> tuple[float, float, float]:
     """Return ``(allowance, reserved_for_later, spendable)`` for one ladder step.
 
-    Forward reservation: later steps' ``min_seconds`` are held back from the soft
-    global remainder so high-prior aggregate tiers still get a funded slice.
-    ``min_seconds`` on the *current* step does not raise the allowance above
-    ``spendable`` (no soft-global overshoot); it only affects earlier reservations.
+    Soft-global remainder **steers** the target slice: later steps' ``min_seconds``
+    are reserved so earlier steps prefer not to consume them
+    (``spendable = max(0, global_remaining - reserved)``, then capped by
+    ``max_seconds``). The current step's ``min_seconds`` is an **absolute floor**
+    on allowance even when that exceeds ``spendable`` / soft-global remainder
+    (intentional overshoot so high-prior aggregate tiers still run).
     """
     if step_index < 0 or step_index >= len(steps):
         raise ValueError(f"step_index {step_index} out of range for {len(steps)} steps")
     step = steps[step_index]
     reserved = sum(later.min_seconds for later in steps[step_index + 1 :])
     spendable = max(0.0, float(global_remaining_seconds) - reserved)
-    allowance = spendable
+    steered = spendable
     if step.max_seconds is not None:
-        allowance = min(allowance, step.max_seconds)
+        steered = min(steered, step.max_seconds)
+    allowance = max(step.min_seconds, steered)
     return allowance, reserved, spendable
 
 
