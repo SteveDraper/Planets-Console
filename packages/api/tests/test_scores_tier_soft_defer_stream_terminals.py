@@ -1,4 +1,4 @@
-"""Soft park / stream terminal regressions for scores tier RowRun sharing."""
+"""Soft defer / stream terminal regressions for scores tier RowRun sharing."""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ def test_soft_row_defer_delivers_stream_terminal_without_completing_node(sample_
             break
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals, (
-        f"soft park left open stream without terminal (session={session.run_id}, queued={queued!r})"
+        f"soft defer left open stream without terminal (session={session.run_id}, queued={queued!r})"
     )
     assert isinstance(domain_terminals[0], RowComplete)
     assert orchestrator.nodes[scope].state == "waiting_deps"
@@ -164,7 +164,7 @@ def test_empty_park_schedule_row_stays_silent_for_wake(sample_turn) -> None:
     assert get_stream_resolution(session.run_id) is None
 
 
-def test_soft_park_revert_preserves_hard_terminal_claimed_during_admission(
+def test_soft_defer_revert_preserves_hard_terminal_claimed_during_admission(
     sample_turn, monkeypatch
 ) -> None:
     """Revert miss must not pop HARD_TERMINAL that landed between claim and pop."""

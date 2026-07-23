@@ -17,8 +17,8 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
 )
 from api.analytics.military_score_inference.policy_ladder_admission import (
-    _maybe_early_stop_after_step,
-    _maybe_no_new_exact_signatures_early_stop,
+    maybe_early_stop_after_step,
+    maybe_no_new_exact_signatures_early_stop,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.prior_fleet_tech_raise import (
@@ -154,7 +154,7 @@ def finish_tier_step(
     state.next_step_index = policy_step_index + 1
 
     if finish_mode in (TierStepFinishMode.SKIP, TierStepFinishMode.COMPLETE):
-        if _maybe_early_stop_after_step(
+        if maybe_early_stop_after_step(
             state,
             policy_step=policy_step,
             observation=observation,
@@ -164,7 +164,7 @@ def finish_tier_step(
             return
     if finish_mode is TierStepFinishMode.COMPLETE:
         assert new_exact_before_step is not None
-        if _maybe_no_new_exact_signatures_early_stop(
+        if maybe_no_new_exact_signatures_early_stop(
             state,
             added_combo_ids=added_combo_ids,
             added_aggregate_action_ids=added_aggregate_action_ids,

@@ -1,7 +1,6 @@
 """OR-Tools CP-SAT adapter for military score build inference."""
 
 import time
-from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -29,6 +28,10 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.near_best_structural_search import (
     collect_near_best_structural_hits,
     merged_assignment_from_solution,  # noqa: F401 -- re-export for stable solver import path
+)
+from api.analytics.military_score_inference.ranked_solution_buffer import (
+    admit_ranked_solution,
+    solution_signature,  # noqa: F401 -- re-export for stable solver import path
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
     compute_bin_penalty_objective_contribution,
@@ -446,20 +449,6 @@ def _expand_score_equivalent_solutions(
     return solutions[: max(1, max_expansions)]
 
 
-def _insert_solution_by_objective(
-    output: list[InferenceSolution],
-    solution: InferenceSolution,
-) -> None:
-    """Insert ``solution`` into ``output`` keeping objective descending order.
-
-    Equal objectives append after existing ties so expansion encounter order
-    (probability then combo id) is preserved.
-    """
-    objectives = [-held.objective_value for held in output]
-    index = bisect_right(objectives, -solution.objective_value)
-    output.insert(index, solution)
-
-
 def expand_structural_hits_to_top_k(
     problem: InferenceProblem,
     structural_hits: Sequence[tuple[dict[str, int], dict[str, int]]],
@@ -514,23 +503,16 @@ def expand_structural_hits_to_top_k(
             if kth_objective is not None and expansion.objective_value <= kth_objective:
                 # Expansions are objective-descending; remaining cannot enter.
                 break
-            signature = solution_signature(expansion)
-            if signature in seen_signatures:
+            if not admit_ranked_solution(
+                output,
+                seen_signatures,
+                expansion,
+                max_solutions=max_solutions,
+            ):
                 continue
-            seen_signatures.add(signature)
-            _insert_solution_by_objective(output, expansion)
-            if len(output) > max_solutions:
-                evicted = output.pop()
-                seen_signatures.discard(solution_signature(evicted))
             if len(output) >= max_solutions:
                 kth_objective = output[max_solutions - 1].objective_value
     return output
-
-
-def solution_signature(solution: InferenceSolution) -> tuple[tuple[str, int], ...]:
-    action_counts = ((action.action_id, action.count) for action in solution.actions)
-    combo_counts = ((build.combo_id, build.count) for build in solution.ship_builds)
-    return tuple(sorted(action_counts) + sorted(combo_counts))
 
 
 def solve_inference_problem(

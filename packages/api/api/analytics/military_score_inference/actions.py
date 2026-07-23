@@ -29,6 +29,7 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.models import (
+    DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
     CandidateAction,
     InferenceObservation,
     InferenceProblem,
@@ -53,7 +54,6 @@ from api.analytics.military_score_inference.ship_build_combos import (
     generate_ship_build_combos,
 )
 from api.analytics.military_score_inference.tier_policy import (
-    DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
     InferenceTierPolicyStep,
     compute_aggregate_admission_caps,
     resolve_fleet_inference_tuning,

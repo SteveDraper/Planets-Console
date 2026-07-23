@@ -635,7 +635,7 @@ Cheap **exploitation** when held ship-only exacts already have the right hulls: 
 | Rewrite | Keep \(c \times k\), or replace with exactly one \(c'\) where \(\mathrm{tech}(c') \le \mathrm{tech}(c)\) and \(c' \neq c\), still \(c' \times k\) |
 | Gap | \(\mathrm{score}(A) \cdot n = \sum_{\text{changed axes}} k(\mathrm{score}(c)-\mathrm{score}(c'))\), \(n \ge 1\), at least one axis degraded |
 | Mixed fittings | Impossible by construction (one type per axis per ship) |
-| Merge | Probe hits admit via the same `_merge_exact_solutions` / on-admitted path as solver solutions |
+| Merge | Probe hits admit via the same `merge_exact_solutions` / on-admitted path as solver solutions |
 | Catalog gate | Rewritten fittings must resolve to existing catalog `combo_*` ids; admissions must pass hard equalities. Synthetic `degrade_probe:` ids are never emitted. |
 
 Module: `degrade_aggregate_probe.py`. Out of scope for v1: planet-defense degrade probe, multi-aggregate joint solves, inventing new hulls.

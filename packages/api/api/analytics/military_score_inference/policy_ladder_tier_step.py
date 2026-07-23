@@ -30,7 +30,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
 )
 from api.analytics.military_score_inference.policy_ladder_admission import (
-    _make_incremental_admitter,
+    make_incremental_admitter,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
@@ -388,7 +388,7 @@ def run_policy_ladder_tier_step(
     )
     state.prior_aggregate_action_ids = current_aggregate_action_ids
 
-    admit_solution = _make_incremental_admitter(state, track_admitted)
+    admit_solution = make_incremental_admitter(state, track_admitted)
     catalog_solve_max = state.resolved_max_solutions
     held_no_goods: tuple[InferenceSolution, ...] = tuple(state.merged_solutions)
 

@@ -13,10 +13,6 @@ class SoftTerminalReason(StrEnum):
     MISSING_ROW_RUN = "scores_missing_row_run"
 
 
-# Backward-compatible alias for tests and wire migration.
-ScoresParkReason = SoftTerminalReason
-
-
 class ScoresWakeReason(StrEnum):
     """Publishers allowed to resume scores tier solving after a soft defer."""
 

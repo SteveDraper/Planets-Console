@@ -264,7 +264,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
     )
 
     # Open evidence + ensure still needs work (schedule patched away): hard fail --
-    # not empty-complete, and not a soft park without an armed wake publisher.
+    # not empty-complete, and not a soft defer without an armed wake publisher.
     with patch("api.analytics.scores.exports.schedule_inference_row"):
         with pytest.raises(RuntimeError, match="invariant broken"):
             build_scores_tier_solve_job_wire(
@@ -1341,7 +1341,7 @@ def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -
         reset_inference_row_scheduler_for_tests,
     )
     from api.analytics.scores.compute_orchestration import wake_scores_scope
-    from api.analytics.scores_park_wake import ScoresWakeReason
+    from api.analytics.scores_defer_wake import ScoresWakeReason
     from api.compute import runtime as compute_runtime
     from api.compute.orchestrator import ComputeNodeRun
     from api.compute.runtime import reset_orchestrators_for_tests

@@ -189,7 +189,7 @@ class InferenceStreamResolutionMixin:
         if controller is not None and controller.push_admission_wire_terminal(session):
             return True
         if on_miss == "revert":
-            # Empty soft park: drop the provisional claim so wake can rebuild.
+            # Empty soft defer: drop the provisional claim so wake can rebuild.
             # Compare-and-pop: a peer may have advanced to HARD_TERMINAL /
             # CANCELED between claim and this miss; that marker must survive.
             with self._lock:

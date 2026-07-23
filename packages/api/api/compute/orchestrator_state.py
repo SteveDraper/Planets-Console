@@ -83,7 +83,7 @@ class ComputeNodeRun:
     generation_at_submit: int | None = None
     result_wire: object | None = None
     error: BaseException | None = None
-    # Analytic park site reason (e.g. ScoresParkReason); set while ``parked``.
+    # Analytic park site reason (e.g. SoftTerminalReason); set while ``parked``.
     park_reason: str | None = None
     waiters: list[ComputeHandle] = field(default_factory=list)
     # Leader-retained query context / export services.

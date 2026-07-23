@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from api.analytics.scores_park_wake import SoftTerminalReason
+from api.analytics.scores_defer_wake import SoftTerminalReason
 
 __all__ = [
     "SoftTerminalReason",

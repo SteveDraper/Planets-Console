@@ -392,7 +392,7 @@ class InferenceRowScheduler(
     ) -> None:
         submit_binding: InferenceStreamOrchestratorBinding | None = None
         submit_scope: ComputeScope | None = None
-        wake_parked_scope: ComputeScope | None = None
+        wake_deferred_scope: ComputeScope | None = None
         with self._lock:
             resolved_token = (
                 stream_token
@@ -412,7 +412,7 @@ class InferenceRowScheduler(
             if resolved_token is None:
                 # Background ensure / adopt registered a RowRun with no stream submit.
                 # Soft-parked scores nodes must still get an explicit force_fresh wake.
-                wake_parked_scope = root_scope
+                wake_deferred_scope = root_scope
             elif self._scope_guard.active_table_stream_token != resolved_token:
                 return
             else:
@@ -430,8 +430,8 @@ class InferenceRowScheduler(
                 submit_scope = root_scope
         if submit_binding is not None and submit_scope is not None:
             self._submit_tier_solve_locked(submit_binding, submit_scope)
-        elif wake_parked_scope is not None:
-            self._wake_parked_scores_after_row_run_adopt(wake_parked_scope, session)
+        elif wake_deferred_scope is not None:
+            self._wake_deferred_scores_after_row_run_adopt(wake_deferred_scope, session)
 
     def cancel_row_run(self, run_id: str) -> None:
         """Cancel one row run."""
@@ -556,14 +556,14 @@ class InferenceRowScheduler(
         self._apply_dispatch_gates_locked()
         return binding
 
-    def _wake_parked_scores_after_row_run_adopt(
+    def _wake_deferred_scores_after_row_run_adopt(
         self,
         root_scope: ComputeScope,
         session: InferenceRowStreamSession,
     ) -> None:
-        """Wake a soft-parked scores node after background RowRun register."""
+        """Wake a deferred scores node after background RowRun register."""
         from api.analytics.scores.compute_orchestration import wake_scores_scope
-        from api.analytics.scores_park_wake import ScoresWakeReason
+        from api.analytics.scores_defer_wake import ScoresWakeReason
 
         wake_scores_scope(
             root_scope,
@@ -589,7 +589,7 @@ class InferenceRowScheduler(
         if self._defer_orchestrator_submit:
             return
         from api.analytics.scores.compute_orchestration import wake_scores_scope
-        from api.analytics.scores_park_wake import ScoresWakeReason
+        from api.analytics.scores_defer_wake import ScoresWakeReason
 
         # force_fresh may replace a prior empty/admission terminal. Reopen the multiplex
         # row so progress drains and a later RowComplete can upgrade the soft terminal.

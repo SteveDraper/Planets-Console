@@ -13,10 +13,19 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
-from api.analytics.military_score_inference.solver import solution_signature
+from api.analytics.military_score_inference.ranked_solution_buffer import (
+    admit_ranked_solutions,
+)
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
     resolve_solver_thresholds,
+)
+
+__all__ = (
+    "make_incremental_admitter",
+    "maybe_early_stop_after_step",
+    "maybe_no_new_exact_signatures_early_stop",
+    "merge_exact_solutions",
 )
 
 
@@ -49,7 +58,7 @@ def _solution_qualifies_for_ship_only_exact_early_stop(
     return solution.objective_value >= thresholds.ship_only_exact_early_stop_min_plausibility
 
 
-def _merge_exact_solutions(
+def merge_exact_solutions(
     merged_solutions: list[InferenceSolution],
     seen_signatures: set[tuple[tuple[str, int], ...]],
     candidates: tuple[InferenceSolution, ...],
@@ -57,35 +66,17 @@ def _merge_exact_solutions(
     resolved_max_solutions: int,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
 ) -> int:
-    new_solutions = 0
-    for solution in candidates:
-        signature = solution_signature(solution)
-        if signature in seen_signatures:
-            continue
-        if len(merged_solutions) < resolved_max_solutions:
-            seen_signatures.add(signature)
-            merged_solutions.append(solution)
-            new_solutions += 1
-            if on_admitted is not None:
-                on_admitted(solution)
-            continue
-        worst_index = min(
-            range(len(merged_solutions)),
-            key=lambda index: merged_solutions[index].objective_value,
-        )
-        worst_solution = merged_solutions[worst_index]
-        if solution.objective_value <= worst_solution.objective_value:
-            continue
-        seen_signatures.remove(solution_signature(worst_solution))
-        seen_signatures.add(signature)
-        merged_solutions[worst_index] = solution
-        new_solutions += 1
-        if on_admitted is not None:
-            on_admitted(solution)
-    return new_solutions
+    """Merge candidates into the held top-K by objective (signature-deduped)."""
+    return admit_ranked_solutions(
+        merged_solutions,
+        seen_signatures,
+        candidates,
+        max_solutions=resolved_max_solutions,
+        on_admitted=on_admitted,
+    )
 
 
-def _maybe_early_stop_after_step(
+def maybe_early_stop_after_step(
     state: PolicyLadderState,
     *,
     policy_step: InferenceTierPolicyStep,
@@ -111,7 +102,7 @@ def _maybe_early_stop_after_step(
     return True
 
 
-def _maybe_no_new_exact_signatures_early_stop(
+def maybe_no_new_exact_signatures_early_stop(
     state: PolicyLadderState,
     *,
     added_combo_ids: frozenset[str],
@@ -139,14 +130,14 @@ def _maybe_no_new_exact_signatures_early_stop(
     return True
 
 
-def _make_incremental_admitter(
+def make_incremental_admitter(
     state: PolicyLadderState,
     on_admitted: Callable[[InferenceSolution], None] | None,
 ) -> Callable[[InferenceSolution], None]:
     """Merge each solver solution into held top-K as soon as it is found."""
 
     def admit(solution: InferenceSolution) -> None:
-        _merge_exact_solutions(
+        merge_exact_solutions(
             state.merged_solutions,
             state.seen_signatures,
             (solution,),

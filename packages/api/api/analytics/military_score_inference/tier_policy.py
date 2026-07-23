@@ -15,7 +15,10 @@ from typing import Any, Literal
 import yaml
 
 from api.analytics.fleet.option_set_mass import DEFAULT_OPTION_SET_MASS_THRESHOLD
-from api.analytics.military_score_inference.models import ProbabilityBinBounds
+from api.analytics.military_score_inference.models import (
+    DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
+    ProbabilityBinBounds,
+)
 from api.analytics.scores_assets import Scores
 
 SlotCountMode = Literal["none", "partial"]
@@ -23,9 +26,6 @@ FilterAxis = Literal["hulls", "engines", "beams", "launchers"]
 FILTER_AXES: tuple[FilterAxis, ...] = ("hulls", "engines", "beams", "launchers")
 
 DEFAULT_MAX_SEEDS = 5
-# After first maximize Z*, further structural solves only accept ranking objectives
-# in [Z* - T, sliding max]. Global default; steps may override.
-DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD = 250
 
 TORP_ESCAPE_TIER_STEP_ID = "torp_escape_tier"
 
