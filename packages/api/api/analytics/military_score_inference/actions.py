@@ -53,6 +53,7 @@ from api.analytics.military_score_inference.ship_build_combos import (
     generate_ship_build_combos,
 )
 from api.analytics.military_score_inference.tier_policy import (
+    DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
     InferenceTierPolicyStep,
     compute_aggregate_admission_caps,
     resolve_fleet_inference_tuning,
@@ -88,7 +89,7 @@ class ActionCatalog:
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
     prior_weights_diagnostics: PriorWeightsDiagnostics | None = None
     fleet_torp_overlay_diagnostics: FleetTorpOverlayDiagnostics | None = None
-    near_best_objective_threshold: int | None = None
+    near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
 
     @property
     def catalog_size(self) -> int:
@@ -106,9 +107,8 @@ class ActionCatalog:
                 for action in self.aggregate_actions
                 if action.id in self.probability_buckets_by_action_id
             ),
+            "nearBestObjectiveThreshold": self.near_best_objective_threshold,
         }
-        if self.near_best_objective_threshold is not None:
-            payload["nearBestObjectiveThreshold"] = self.near_best_objective_threshold
         if self.prior_weights_diagnostics is not None:
             payload["priorWeights"] = self.prior_weights_diagnostics.to_payload()
         if self.fleet_torp_overlay_diagnostics is not None:

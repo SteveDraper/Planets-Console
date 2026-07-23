@@ -43,7 +43,7 @@ class NearBestStructuralSearchOutcome:
     stopped_reason: str
     time_limited: bool
     tier_max_objective: int | None
-    near_best_threshold: int | None
+    near_best_threshold: int
     seed_no_goods_applied: int
     seed_no_goods_skipped: int
     top_solution_bucket_counts: dict[str, tuple[int, ...]]
@@ -306,9 +306,8 @@ def collect_near_best_structural_hits(
         if tier_max_objective is None:
             tier_max_objective = found_objective
             max_objective = found_objective
-            if near_best_threshold is not None:
-                model.add(objective_var >= tier_max_objective - near_best_threshold)
-                near_best_band_applied = True
+            model.add(objective_var >= tier_max_objective - near_best_threshold)
+            near_best_band_applied = True
         else:
             max_objective = found_objective
 

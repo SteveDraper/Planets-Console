@@ -106,8 +106,9 @@ class InferenceTierPolicyStep:
     allow_ship_only_exact_early_stop: bool = False
     hull_collision_twin_widen: bool = False
     # After the first maximize in a tier, further structural solves only accept
-    # ranking objectives in [Z* - T, max_objective] (sliding ceiling). None disables.
-    near_best_objective_threshold: int | None = None
+    # ranking objectives in [Z* - T, max_objective] (sliding ceiling). Always on;
+    # omit the YAML key to inherit solverThresholds / DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD.
+    near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
     # Reserved soft-global envelopes (seconds). min defaults 0; max None = uncapped.
     min_seconds: float = 0.0
     max_seconds: float | None = None
@@ -124,11 +125,10 @@ class InferenceTierPolicyStep:
             "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
             "hullCollisionTwinWiden": self.hull_collision_twin_widen,
             "minSeconds": self.min_seconds,
+            "nearBestObjectiveThreshold": self.near_best_objective_threshold,
         }
         if self.max_seconds is not None:
             snapshot["maxSeconds"] = self.max_seconds
-        if self.near_best_objective_threshold is not None:
-            snapshot["nearBestObjectiveThreshold"] = self.near_best_objective_threshold
         return snapshot
 
 
@@ -305,12 +305,6 @@ def _parse_required_near_best_objective_threshold(raw: object, *, location: str)
     return raw
 
 
-def _parse_optional_near_best_objective_threshold(raw: object, *, location: str) -> int | None:
-    if raw is None:
-        return None
-    return _parse_required_near_best_objective_threshold(raw, location=location)
-
-
 def _parse_min_seconds(raw: object, *, step_id: str) -> float:
     if raw is None:
         return 0.0
@@ -353,7 +347,7 @@ def _parse_policy_step(
         )
 
     if "nearBestObjectiveThreshold" in raw:
-        near_best_objective_threshold = _parse_optional_near_best_objective_threshold(
+        near_best_objective_threshold = _parse_required_near_best_objective_threshold(
             raw.get("nearBestObjectiveThreshold"),
             location=f"step {step_id}",
         )

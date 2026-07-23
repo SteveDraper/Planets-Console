@@ -127,6 +127,26 @@ def test_policy_loader_rejects_invalid_near_best_objective_threshold():
         parse_tier_policy_steps(document)
 
 
+def test_policy_loader_rejects_null_step_near_best_objective_threshold():
+    document = {
+        "steps": [
+            {
+                "id": "null_threshold",
+                "filters": {
+                    "hulls": {"all": True},
+                    "engines": {"all": True},
+                    "beams": {"all": True},
+                    "launchers": {"all": True},
+                },
+                "alpha": 0,
+                "nearBestObjectiveThreshold": None,
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="nearBestObjectiveThreshold"):
+        parse_tier_policy_steps(document)
+
+
 def test_policy_loader_applies_global_near_best_default_when_step_omits():
     document = {
         "solverThresholds": {
