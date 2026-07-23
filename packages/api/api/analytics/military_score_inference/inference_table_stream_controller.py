@@ -155,6 +155,13 @@ class InferenceTableStreamController(
             self.turn = self.reload_host_turn()
 
     def reschedule_row(self, player_id: int) -> bool:
+        """Cancel and re-admit one row without holding ``stream_lock`` across schedule.
+
+        ``dispatch_admission`` may ``enqueue_tier_ladder`` / ``orchestrator.submit``, and
+        fleet ledger persist (or soft-defer delivery) can re-enter ``reschedule_row`` or
+        ``deliver_domain_event``. Holding ``stream_lock`` across that path self-deadlocks
+        on the non-reentrant lock (fleet ``reschedule_player`` parity).
+        """
         cancel_run_ids: list[str] = []
         with self.stream_lock:
             self._refresh_host_turn()
@@ -175,11 +182,11 @@ class InferenceTableStreamController(
                 # Concurrent admit/reschedule already replaced the row.
                 self.wake_multiplex.set()
                 return True
-            admission = self.resolve_row_admission(player_id)
-            if not self.register_admitted_schedule(player_id, admission):
-                return False
-        self.wake_multiplex.set()
-        return True
+        admission = self.resolve_row_admission(player_id)
+        dispatch = self.dispatch_admission(player_id, admission)
+        if dispatch.schedule_failed:
+            return False
+        return self._install_admission_dispatch(player_id, dispatch)
 
     def adopt_admission_scheduled_row(
         self,
@@ -191,6 +198,27 @@ class InferenceTableStreamController(
             row,
             cancel_run_id=self.scheduler.cancel_row_run,
         )
+
+    def _install_admission_dispatch(
+        self,
+        player_id: int,
+        dispatch: AdmissionDispatch[ScheduledInferenceRow],
+    ) -> bool:
+        """Apply one admission result under ``stream_lock``; cancel raced schedules."""
+        raced_run_id: str | None = None
+        with self.stream_lock:
+            if player_id in self.scheduled_rows:
+                if dispatch.scheduled is not None:
+                    raced_run_id = dispatch.scheduled.session.run_id
+            else:
+                if dispatch.wire_events:
+                    self.pending_wire_events.extend(dispatch.wire_events)
+                if dispatch.scheduled is not None:
+                    self.scheduled_rows[player_id] = dispatch.scheduled
+        if raced_run_id is not None:
+            self.scheduler.cancel_row_run(raced_run_id)
+        self.wake_multiplex.set()
+        return True
 
     def push_admission_wire_terminal(self, session: InferenceRowStreamSession) -> bool:
         """Push immediate/cached admission wire for an empty peer complete.
@@ -266,6 +294,7 @@ class InferenceTableStreamController(
         self.wake_multiplex.set()
 
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
+        """Cancel and re-admit every row; schedule/submit outside ``stream_lock``."""
         cancel_run_ids: list[str] = []
         with self.stream_lock:
             self._refresh_host_turn()
@@ -276,15 +305,24 @@ class InferenceTableStreamController(
             self.scheduled_rows.clear()
         for run_id in cancel_run_ids:
             self.scheduler.cancel_row_run(run_id)
-        with self.stream_lock:
-            for player_id in self.player_ids:
-                admission = self.resolve_row_admission(
-                    player_id,
-                    force_schedule=force_schedule,
-                )
-                if not self.register_admitted_schedule(player_id, admission):
-                    return False
-        self.wake_multiplex.set()
+
+        dispatches: list[tuple[int, AdmissionDispatch[ScheduledInferenceRow]]] = []
+        for player_id in self.player_ids:
+            admission = self.resolve_row_admission(
+                player_id,
+                force_schedule=force_schedule,
+            )
+            dispatch = self.dispatch_admission(player_id, admission)
+            if dispatch.schedule_failed:
+                for _, prior in dispatches:
+                    if prior.scheduled is not None:
+                        self.scheduler.cancel_row_run(prior.scheduled.session.run_id)
+                return False
+            dispatches.append((player_id, dispatch))
+
+        for player_id, dispatch in dispatches:
+            if not self._install_admission_dispatch(player_id, dispatch):
+                return False
         return True
 
     def attach(self) -> None:

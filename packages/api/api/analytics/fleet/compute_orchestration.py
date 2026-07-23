@@ -64,6 +64,27 @@ def _fleet_prior_scope(
     )
 
 
+def _select_fleet_prior_persisted(
+    *,
+    from_dependency_outputs: PersistedFleetLedger | None,
+    from_disk: PersistedFleetLedger | None,
+) -> PersistedFleetLedger | None:
+    """Choose the prior ledger for fleet@N job-wire assembly.
+
+    In-run ``DependencyOutputs`` is preferred when it already carries a final
+    prior (or when disk has nothing better). A non-final DepOutputs prior must
+    not override a final disk ledger -- that orphans refined recordIds and is
+    the Cyborg turn-5 identity-loss fingerprint.
+    """
+    if from_dependency_outputs is not None and from_dependency_outputs.provenance.is_final:
+        return from_dependency_outputs
+    if from_disk is not None and from_disk.provenance.is_final:
+        return from_disk
+    if from_dependency_outputs is not None:
+        return from_dependency_outputs
+    return from_disk
+
+
 def build_fleet_observation_leg_job_wire(
     scope: ComputeScope,
     *,
@@ -115,20 +136,24 @@ def build_fleet_materialization_leg_job_wire(
     prior_scope = _fleet_prior_scope(scope, settings=turn.settings)
     prior_persisted: PersistedFleetLedger | None = None
     if prior_scope is not None:
+        prior_from_deps: PersistedFleetLedger | None = None
         prior_wire = dependency_outputs.get(prior_scope)
         # Satisfaction short-circuit may leave ``{}`` (or a wire without ledger).
         # Treat missing ``persistedLedgerWire`` like an absent prior and reload.
         if isinstance(prior_wire, dict):
             persisted_wire = prior_wire.get("persistedLedgerWire")
             if isinstance(persisted_wire, dict):
-                prior_persisted = persisted_fleet_ledger_from_json(persisted_wire)
-        if prior_persisted is None:
-            prior_persisted = services.persistence.get_ledger(
-                scope.game_id,
-                scope.perspective,
-                prior_scope.turn,
-                player_id,
-            )
+                prior_from_deps = persisted_fleet_ledger_from_json(persisted_wire)
+        prior_from_disk = services.persistence.get_ledger(
+            scope.game_id,
+            scope.perspective,
+            prior_scope.turn,
+            player_id,
+        )
+        prior_persisted = _select_fleet_prior_persisted(
+            from_dependency_outputs=prior_from_deps,
+            from_disk=prior_from_disk,
+        )
 
     if prior_persisted is None:
         baseline_ledger = ensure_fleet_baseline_for_player(
