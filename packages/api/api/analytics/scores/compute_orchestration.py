@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet.prior_selection import select_fleet_prior_persisted
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
-from api.analytics.fleet.types import FleetTurnSnapshot
+from api.analytics.fleet.types import FleetTurnSnapshot, PersistedFleetLedger
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
@@ -78,13 +79,12 @@ def _scores_prior_fleet_scope(
     )
 
 
-def _resolution_from_persisted_fleet_wire(
-    persisted_wire: dict[str, object],
+def _resolution_from_persisted_fleet(
+    persisted: PersistedFleetLedger,
     export_scope: ExportScope,
     *,
     prior_turn,
 ) -> PriorTurnFleetTorpResolution:
-    persisted = persisted_fleet_ledger_from_json(persisted_wire)
     snapshot = FleetTurnSnapshot(
         analytic_id=FLEET_ANALYTIC_ID,
         game_id=export_scope.game_id,
@@ -102,6 +102,9 @@ def _resolve_prior_fleet_for_tier_wire(
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext,
 ) -> PriorTurnFleetTorpResolution:
+    from api.analytics.export_context import export_service_for
+    from api.analytics.fleet.compute_services import FleetComputeServices
+
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
         raise ValueError("scores tier_solve requires concrete scores scope")
@@ -116,15 +119,39 @@ def _resolve_prior_fleet_for_tier_wire(
 
     prior_export_scope = compute_scope_to_export_scope(prior_fleet_scope)
     prior_turn = ctx.load_turn(prior_fleet_scope.turn)
+
+    prior_from_deps: PersistedFleetLedger | None = None
     fleet_result_wire = dependency_outputs.get(prior_fleet_scope)
-    if isinstance(fleet_result_wire, dict) and prior_turn is not None:
+    # Satisfaction short-circuit may leave ``{}`` (or a wire without ledger).
+    # Treat missing ``persistedLedgerWire`` like an absent prior and reload.
+    if isinstance(fleet_result_wire, dict):
         persisted_wire = fleet_result_wire.get("persistedLedgerWire")
         if isinstance(persisted_wire, dict):
-            return _resolution_from_persisted_fleet_wire(
-                persisted_wire,
-                prior_export_scope,
-                prior_turn=prior_turn,
-            )
+            prior_from_deps = persisted_fleet_ledger_from_json(persisted_wire)
+
+    prior_from_disk: PersistedFleetLedger | None = None
+    fleet_services = export_service_for(ctx, FLEET_ANALYTIC_ID, FleetComputeServices)
+    if fleet_services is None:
+        injected = ctx.export_services.get(FLEET_ANALYTIC_ID)
+        if isinstance(injected, FleetComputeServices):
+            fleet_services = injected
+    if fleet_services is not None:
+        prior_from_disk = fleet_services.persistence.get_ledger(
+            scope.game_id,
+            scope.perspective,
+            prior_fleet_scope.turn,
+            prior_fleet_scope.player_id,
+        )
+    prior_persisted = select_fleet_prior_persisted(
+        from_dependency_outputs=prior_from_deps,
+        from_disk=prior_from_disk,
+    )
+    if prior_persisted is not None and prior_turn is not None:
+        return _resolution_from_persisted_fleet(
+            prior_persisted,
+            prior_export_scope,
+            prior_turn=prior_turn,
+        )
 
     return resolve_prior_turn_fleet_torp_overlay(
         turn=turn,

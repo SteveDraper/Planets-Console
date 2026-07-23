@@ -14,7 +14,14 @@ from api.analytics.fleet.compute_services import (
 )
 from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
-from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+from api.analytics.fleet.types import (
+    FleetAcquisitionLedger,
+    FleetFieldKnown,
+    FleetMaterializationProvenance,
+    FleetShipRecord,
+    FleetShipRecordFields,
+    PersistedFleetLedger,
+)
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -822,6 +829,89 @@ def test_build_scores_tier_solve_job_wire_uses_fleet_dependency_output(sample_tu
 
     assert run.session.fleet_torp_input_status == "applied"
     assert run.session.fleet_torp_overlay is not None
+
+
+def test_scores_tier_wire_stale_dependency_prior_must_not_override_final_disk(
+    sample_turn, persistence
+):
+    """Non-final DepOutputs fleet prior must not beat a final disk ledger.
+
+    Mirrors fleet ``test_stale_dependency_prior_must_not_override_final_disk_ledger``:
+    scores tier-wire prior selection must share ``select_fleet_prior_persisted`` so
+    inference overlay / max-tech gates see the refined disk ledger.
+    """
+    host_turn = host_turn_at(sample_turn, HOST_TURN)[0]
+    ctx = export_chain_query_context(host_turn, persistence=persistence)
+    player_id = host_turn.scores[0].ownerid
+    prior_turn = HOST_TURN - 1
+
+    disk_final = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(
+            player_id=player_id,
+            records=[
+                FleetShipRecord(
+                    record_id="disk-final",
+                    fields=FleetShipRecordFields(launchers=FleetFieldKnown(6)),
+                ),
+            ],
+        ),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    stale_prior = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(
+            player_id=player_id,
+            records=[
+                FleetShipRecord(
+                    record_id="stale-deps",
+                    fields=FleetShipRecordFields(launchers=FleetFieldKnown(3)),
+                ),
+            ],
+        ),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=False,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+
+    fleet_services = ctx.export_services["fleet"]
+    fleet_services.persistence.put_ledger(
+        628580,
+        1,
+        prior_turn,
+        player_id,
+        disk_final,
+    )
+
+    run = _register_run(host_turn, player_id=player_id)
+    run.session.fleet_torp_input_status = "pending"
+
+    prior_fleet_scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=prior_turn,
+        player_id=player_id,
+    )
+    dependency_outputs = DependencyOutputs()
+    dependency_outputs.put(
+        prior_fleet_scope,
+        {"persistedLedgerWire": persisted_fleet_ledger_to_json(stale_prior)},
+    )
+
+    build_scores_tier_solve_job_wire(
+        _scores_scope(host_turn, player_id),
+        dependency_outputs=dependency_outputs,
+        ctx=ctx,
+    )
+
+    assert run.session.fleet_torp_input_status == "applied"
+    assert run.session.fleet_torp_overlay is not None
+    belief = run.session.fleet_torp_overlay.belief_set.torp_ids
+    assert 6 in belief, "tier wire preferred stale DepOutputs prior over final disk"
+    assert 3 not in belief
 
 
 def test_scores_invalidation_generation_tracks_fleet_epoch(sample_turn, persistence):

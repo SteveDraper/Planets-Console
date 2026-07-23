@@ -7,6 +7,7 @@ from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.prior_selection import select_fleet_prior_persisted
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
     persisted_fleet_ledger_from_json,
@@ -62,27 +63,6 @@ def _fleet_prior_scope(
         player_id=scope.player_id,
         parameters=scope.parameters,
     )
-
-
-def _select_fleet_prior_persisted(
-    *,
-    from_dependency_outputs: PersistedFleetLedger | None,
-    from_disk: PersistedFleetLedger | None,
-) -> PersistedFleetLedger | None:
-    """Choose the prior ledger for fleet@N job-wire assembly.
-
-    In-run ``DependencyOutputs`` is preferred when it already carries a final
-    prior (or when disk has nothing better). A non-final DepOutputs prior must
-    not override a final disk ledger -- that orphans refined recordIds and is
-    the Cyborg turn-5 identity-loss fingerprint.
-    """
-    if from_dependency_outputs is not None and from_dependency_outputs.provenance.is_final:
-        return from_dependency_outputs
-    if from_disk is not None and from_disk.provenance.is_final:
-        return from_disk
-    if from_dependency_outputs is not None:
-        return from_dependency_outputs
-    return from_disk
 
 
 def build_fleet_observation_leg_job_wire(
@@ -150,7 +130,7 @@ def build_fleet_materialization_leg_job_wire(
             prior_scope.turn,
             player_id,
         )
-        prior_persisted = _select_fleet_prior_persisted(
+        prior_persisted = select_fleet_prior_persisted(
             from_dependency_outputs=prior_from_deps,
             from_disk=prior_from_disk,
         )
