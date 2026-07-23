@@ -109,7 +109,8 @@ def test_soft_row_defer_delivers_stream_terminal_without_completing_node(sample_
             break
     domain_terminals = [event for event in queued if isinstance(event, (RowComplete, RowFailed))]
     assert domain_terminals, (
-        f"soft defer left open stream without terminal (session={session.run_id}, queued={queued!r})"
+        "soft defer left open stream without terminal "
+        f"(session={session.run_id}, queued={queued!r})"
     )
     assert isinstance(domain_terminals[0], RowComplete)
     assert orchestrator.nodes[scope].state == "waiting_deps"
