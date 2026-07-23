@@ -1,6 +1,5 @@
 """OR-Tools CP-SAT adapter for military score build inference."""
 
-import os
 import time
 from bisect import bisect_right
 from collections import defaultdict
@@ -27,6 +26,10 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.near_best_structural_search import (
+    collect_near_best_structural_hits,
+    merged_assignment_from_solution,  # noqa: F401 -- re-export for stable solver import path
+)
 from api.analytics.military_score_inference.ranking_heuristics import (
     compute_bin_penalty_objective_contribution,
     compute_overflow_objective_contribution,
@@ -45,20 +48,9 @@ STATUS_NO_EXACT_SOLUTION = "no_exact_solution"
 STATUS_STOPPED = "stopped"
 STATUS_TIME_LIMITED = "time_limited"
 
-_SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
-
 # Ranking objective domain for the exposed IntVar used by near-best banding.
 _RANKING_OBJECTIVE_VAR_LB = -10_000_000
 _RANKING_OBJECTIVE_VAR_UB = 1_000_000
-
-
-def _configured_num_search_workers(combo_count: int) -> int | None:
-    raw = os.environ.get("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS")
-    if raw is not None:
-        return int(raw)
-    if combo_count > 100:
-        return 8
-    return None
 
 
 @dataclass(frozen=True)
@@ -287,42 +279,6 @@ def _build_model(
         merged_combo_catalog=merged_combo_catalog,
         diversity_caps_applied=tuple(diversity_caps_applied),
     )
-
-
-def _read_action_counts(
-    problem: InferenceProblem,
-    action_count_vars: dict[str, cp_model.IntVar],
-    solver: cp_model.CpSolver,
-) -> dict[str, int]:
-    return {
-        action.id: solver.value(action_count_vars[action.id])
-        for action in problem.aggregate_actions
-    }
-
-
-def _read_combo_counts(
-    merged_combo_catalog: _MergedComboCatalog,
-    combo_count_vars: dict[str, cp_model.IntVar],
-    solver: cp_model.CpSolver,
-) -> dict[str, int]:
-    return {
-        combo.combo_id: solver.value(combo_count_vars[combo.combo_id])
-        for combo in merged_combo_catalog.combos
-    }
-
-
-def _ranking_bin_indicators_by_action_id(
-    problem: InferenceProblem,
-    action_counts: dict[str, int],
-) -> dict[str, tuple[int, ...]]:
-    from api.analytics.military_score_inference.ranking_heuristics import (
-        active_ranking_bin_indicators,
-    )
-
-    return {
-        action_id: active_ranking_bin_indicators(action_counts.get(action_id, 0), buckets)
-        for action_id, buckets in problem.probability_buckets_by_action_id.items()
-    }
 
 
 def _objective_value(
@@ -571,132 +527,10 @@ def expand_structural_hits_to_top_k(
     return output
 
 
-def _add_no_good_cut(
-    model: cp_model.CpModel,
-    action_count_vars: dict[str, cp_model.IntVar],
-    combo_count_vars: dict[str, cp_model.IntVar],
-    action_counts: dict[str, int],
-    combo_counts: dict[str, int],
-    cut_index: int,
-) -> None:
-    differs: list[cp_model.IntVar] = []
-    for action_id, previous_count in action_counts.items():
-        differs_from_previous = model.new_bool_var(f"diff_{cut_index}_{action_id}")
-        model.add(action_count_vars[action_id] != previous_count).only_enforce_if(
-            differs_from_previous
-        )
-        model.add(action_count_vars[action_id] == previous_count).only_enforce_if(
-            differs_from_previous.Not()
-        )
-        differs.append(differs_from_previous)
-    for combo_id, previous_count in combo_counts.items():
-        differs_from_previous = model.new_bool_var(f"diff_{cut_index}_{combo_id}")
-        model.add(combo_count_vars[combo_id] != previous_count).only_enforce_if(
-            differs_from_previous
-        )
-        model.add(combo_count_vars[combo_id] == previous_count).only_enforce_if(
-            differs_from_previous.Not()
-        )
-        differs.append(differs_from_previous)
-    model.add_at_least_one(differs)
-
-
-def _member_combo_id_to_merged_id(
-    merged_combo_catalog: _MergedComboCatalog,
-) -> dict[str, str]:
-    mapping: dict[str, str] = {}
-    for merged_id, members in merged_combo_catalog.members_by_merged_id.items():
-        mapping[merged_id] = merged_id
-        for member in members:
-            mapping[member.combo_id] = merged_id
-    return mapping
-
-
-def merged_assignment_from_solution(
-    solution: InferenceSolution,
-    *,
-    problem: InferenceProblem,
-    merged_combo_catalog: _MergedComboCatalog,
-) -> tuple[dict[str, int], dict[str, int]] | None:
-    """Map a held (possibly labeled) solution onto current CP-SAT count vars.
-
-    Returns full action/combo count vectors including zeros, or ``None`` when the
-    solution cannot be expressed in this catalog (unknown combo or aggregate).
-    """
-    member_to_merged = _member_combo_id_to_merged_id(merged_combo_catalog)
-    action_ids = {action.id for action in problem.aggregate_actions}
-    action_counts = {action.id: 0 for action in problem.aggregate_actions}
-    for action in solution.actions:
-        if action.count == 0:
-            continue
-        if action.action_id not in action_ids:
-            return None
-        action_counts[action.action_id] = action.count
-
-    combo_counts = {combo.combo_id: 0 for combo in merged_combo_catalog.combos}
-    for ship_build in solution.ship_builds:
-        if ship_build.count == 0:
-            continue
-        merged_id = member_to_merged.get(ship_build.combo_id)
-        if merged_id is None or merged_id not in combo_counts:
-            return None
-        combo_counts[merged_id] += ship_build.count
-    return action_counts, combo_counts
-
-
-def _seed_no_good_cuts_for_held_solutions(
-    model: cp_model.CpModel,
-    *,
-    problem: InferenceProblem,
-    merged_combo_catalog: _MergedComboCatalog,
-    action_count_vars: dict[str, cp_model.IntVar],
-    combo_count_vars: dict[str, cp_model.IntVar],
-    seed_solutions: Sequence[InferenceSolution],
-) -> tuple[int, int]:
-    """Add no-goods for prior-tier held solutions. Returns (applied, skipped)."""
-    applied = 0
-    skipped = 0
-    seen_assignments: set[tuple[tuple[str, int], ...]] = set()
-    for seed in seed_solutions:
-        mapped = merged_assignment_from_solution(
-            seed,
-            problem=problem,
-            merged_combo_catalog=merged_combo_catalog,
-        )
-        if mapped is None:
-            skipped += 1
-            continue
-        action_counts, combo_counts = mapped
-        assignment_key = tuple(sorted(action_counts.items()) + sorted(combo_counts.items()))
-        if assignment_key in seen_assignments:
-            continue
-        seen_assignments.add(assignment_key)
-        _add_no_good_cut(
-            model,
-            action_count_vars,
-            combo_count_vars,
-            action_counts,
-            combo_counts,
-            cut_index=-(applied + 1),
-        )
-        applied += 1
-    return applied, skipped
-
-
 def solution_signature(solution: InferenceSolution) -> tuple[tuple[str, int], ...]:
     action_counts = ((action.action_id, action.count) for action in solution.actions)
     combo_counts = ((build.combo_id, build.count) for build in solution.ship_builds)
     return tuple(sorted(action_counts) + sorted(combo_counts))
-
-
-class _StopSearchOnCancel(cp_model.CpSolverSolutionCallback):
-    def __init__(self, cancel_token: InferenceCancelToken) -> None:
-        super().__init__()
-        self._cancel_token = cancel_token
-
-    def on_solution_callback(self) -> None:
-        if self._cancel_token.is_cancelled():
-            self.StopSearch()
 
 
 def solve_inference_problem(
@@ -760,109 +594,21 @@ def solve_inference_problem(
     merged_combo_catalog = _merge_score_equivalent_combos(problem.ship_build_combos)
     built_model = _build_model(problem, merged_combo_catalog)
     build_diagnostics = _solver_build_diagnostics(problem, built_model)
-    model = built_model.model
-    action_count_vars = built_model.action_count_vars
-    combo_count_vars = built_model.combo_count_vars
-    objective_var = built_model.objective_var
-    seed_no_goods_applied, seed_no_goods_skipped = _seed_no_good_cuts_for_held_solutions(
-        model,
-        problem=problem,
-        merged_combo_catalog=merged_combo_catalog,
-        action_count_vars=action_count_vars,
-        combo_count_vars=combo_count_vars,
-        seed_solutions=seed_no_good_solutions,
-    )
-    solver = cp_model.CpSolver()
-    structural_hits: list[tuple[dict[str, int], dict[str, int]]] = []
     started_at = time.monotonic()
-    last_solver_status = cp_model.UNKNOWN
-    stopped_reason = "exhausted"
-    time_limited = False
-    top_solution_bucket_counts: dict[str, tuple[int, ...]] = {}
-    near_best_threshold = problem.near_best_objective_threshold
-    tier_max_objective: int | None = None
-    max_objective: int | None = None
-    near_best_band_applied = False
-
-    while len(structural_hits) < problem.max_solutions:
-        if cancel_token is not None and cancel_token.is_cancelled():
-            stopped_reason = "cancelled"
-            break
-
-        elapsed_seconds = time.monotonic() - started_at
-        remaining_seconds = problem.time_limit_seconds - elapsed_seconds
-        if remaining_seconds <= 0:
-            time_limited = True
-            stopped_reason = "time_budget"
-            break
-
-        solver.parameters.max_time_in_seconds = remaining_seconds
-        num_search_workers = _configured_num_search_workers(len(problem.ship_build_combos))
-        if num_search_workers is not None:
-            solver.parameters.num_search_workers = num_search_workers
-        if cancel_token is not None:
-            callback = _StopSearchOnCancel(cancel_token)
-            last_solver_status = solver.solve(model, callback)
-        else:
-            last_solver_status = solver.solve(model)
-
-        if cancel_token is not None and cancel_token.is_cancelled():
-            stopped_reason = "cancelled"
-            break
-        if last_solver_status not in _SUCCESS_STATUSES:
-            if last_solver_status == cp_model.UNKNOWN and structural_hits:
-                time_limited = True
-                stopped_reason = "time_budget"
-            elif near_best_band_applied and structural_hits:
-                stopped_reason = "near_best_band_exhausted"
-            elif not structural_hits:
-                stopped_reason = "infeasible"
-            else:
-                stopped_reason = "infeasible"
-            break
-
-        if last_solver_status == cp_model.FEASIBLE:
-            elapsed_seconds = time.monotonic() - started_at
-            if elapsed_seconds >= problem.time_limit_seconds:
-                time_limited = True
-                stopped_reason = "time_budget"
-
-        action_counts = _read_action_counts(problem, action_count_vars, solver)
-        combo_counts = _read_combo_counts(merged_combo_catalog, combo_count_vars, solver)
-        ranking_bin_indicators = _ranking_bin_indicators_by_action_id(problem, action_counts)
-        structural_hits.append((action_counts, combo_counts))
-        top_solution_bucket_counts = ranking_bin_indicators
-
-        found_objective = int(solver.ObjectiveValue())
-        if tier_max_objective is None:
-            tier_max_objective = found_objective
-            max_objective = found_objective
-            if near_best_threshold is not None:
-                model.add(objective_var >= tier_max_objective - near_best_threshold)
-                near_best_band_applied = True
-        else:
-            max_objective = found_objective
-
-        if near_best_band_applied and max_objective is not None:
-            # Sliding ceiling: next maximize walks next-best inside [Z*-T, max].
-            model.add(objective_var <= max_objective)
-
-        _add_no_good_cut(
-            model,
-            action_count_vars,
-            combo_count_vars,
-            action_counts,
-            combo_counts,
-            len(structural_hits),
-        )
-
-        if len(structural_hits) >= problem.max_solutions:
-            stopped_reason = "max_solutions"
-            break
+    search = collect_near_best_structural_hits(
+        problem,
+        model=built_model.model,
+        action_count_vars=built_model.action_count_vars,
+        combo_count_vars=built_model.combo_count_vars,
+        objective_var=built_model.objective_var,
+        merged_combo_catalog=merged_combo_catalog,
+        seed_no_good_solutions=seed_no_good_solutions,
+        cancel_token=cancel_token,
+    )
 
     solutions = expand_structural_hits_to_top_k(
         problem,
-        structural_hits,
+        search.structural_hits,
         merged_combo_catalog,
         max_solutions=problem.max_solutions,
     )
@@ -872,35 +618,35 @@ def solve_inference_problem(
 
     diagnostics: dict[str, object] = {
         **build_diagnostics,
-        "solver_status": solver.status_name(last_solver_status),
+        "solver_status": cp_model.CpSolver().status_name(search.last_solver_status),
         "solution_count": len(solutions),
-        "structural_hit_count": len(structural_hits),
-        "stopped_reason": stopped_reason,
+        "structural_hit_count": len(search.structural_hits),
+        "stopped_reason": search.stopped_reason,
         "wall_time_seconds": time.monotonic() - started_at,
         "policy_step_id": problem.policy_step_id,
         "policy_step_index": problem.policy_step_index,
         "military_score_alpha": problem.military_score_alpha,
     }
-    if near_best_threshold is not None:
-        diagnostics["nearBestObjectiveThreshold"] = near_best_threshold
-    if tier_max_objective is not None:
-        diagnostics["tierMaxObjective"] = tier_max_objective
+    if search.near_best_threshold is not None:
+        diagnostics["nearBestObjectiveThreshold"] = search.near_best_threshold
+    if search.tier_max_objective is not None:
+        diagnostics["tierMaxObjective"] = search.tier_max_objective
     if seed_no_good_solutions:
-        diagnostics["seedNoGoodCount"] = seed_no_goods_applied
-        diagnostics["seedNoGoodSkippedCount"] = seed_no_goods_skipped
-    if time_limited:
+        diagnostics["seedNoGoodCount"] = search.seed_no_goods_applied
+        diagnostics["seedNoGoodSkippedCount"] = search.seed_no_goods_skipped
+    if search.time_limited:
         diagnostics["time_limited"] = True
-    if top_solution_bucket_counts:
-        diagnostics["rankingBinIndicatorsByActionId"] = top_solution_bucket_counts
+    if search.top_solution_bucket_counts:
+        diagnostics["rankingBinIndicatorsByActionId"] = search.top_solution_bucket_counts
 
     if solutions:
         solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
 
-    if stopped_reason == "cancelled":
+    if search.stopped_reason == "cancelled":
         status = STATUS_STOPPED
     elif not solutions:
-        status = STATUS_TIME_LIMITED if time_limited else STATUS_NO_EXACT_SOLUTION
+        status = STATUS_TIME_LIMITED if search.time_limited else STATUS_NO_EXACT_SOLUTION
     else:
-        status = STATUS_TIME_LIMITED if time_limited else STATUS_EXACT
+        status = STATUS_TIME_LIMITED if search.time_limited else STATUS_EXACT
 
     return InferenceResult(status=status, solutions=tuple(solutions), diagnostics=diagnostics)
