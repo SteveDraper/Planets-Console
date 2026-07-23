@@ -82,6 +82,24 @@ class OrchestratorLifecycleMixin:
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
+    def _demote_to_waiting_deps(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """Demote a running node to ``waiting_deps`` without grafting dependencies.
+
+        Soft defer (scores empty tier / non-durable rowComplete, missing RowRun)
+        waits for an external ``force_fresh`` / ``wake_scores_scope`` wake -- not
+        for another scope to reach ``complete``. Grafting ``node.scope`` onto
+        ``dependency_scopes`` would make ``_deps_complete`` require self-complete
+        while the node is non-terminal, so force_fresh attach could never promote.
+        """
+        with self._condition:
+            if node.state != "running":
+                return
+            self._reset_for_requeue(node)
+            node.error = None
+            node.state = "waiting_deps"
+            self._dequeue_ready(node.scope)
+            self._metrics.epoch_discards += 1
+
     def _recover_after_persist_deferred(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
@@ -100,7 +118,8 @@ class OrchestratorLifecycleMixin:
         plan-time ENSURE walk omitted it (e.g. dependency already satisfied when the
         dependent was planned). Without that edge, dependency terminal completion
         never refreshes this node and ``force_fresh_attach`` alone leaves it stuck
-        in ``waiting_deps`` (0% CPU hang).
+        in ``waiting_deps`` (0% CPU hang). Never graft the node's own scope -- that
+        self-edge can never become ``complete`` while this node is ``waiting_deps``.
         """
         priority_band = node.priority_band
         bundle = node.bundle
@@ -109,10 +128,14 @@ class OrchestratorLifecycleMixin:
                 return
             prior_step_index = self._reset_for_requeue(node)
             node.error = None
-            if recovery.dependency_scope not in node.dependency_scopes:
+            dependency_scope = recovery.dependency_scope
+            if (
+                dependency_scope != node.scope
+                and dependency_scope not in node.dependency_scopes
+            ):
                 node.dependency_scopes = (
                     *node.dependency_scopes,
-                    recovery.dependency_scope,
+                    dependency_scope,
                 )
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
@@ -125,7 +148,7 @@ class OrchestratorLifecycleMixin:
                 detail={
                     "reason": "persist_deferred",
                     "priorProfileStepIndex": node.profile_step_index,
-                    "relatedScopeKey": format_compute_scope_key(recovery.dependency_scope),
+                    "relatedScopeKey": format_compute_scope_key(dependency_scope),
                     "forceFresh": recovery.force_fresh,
                     "dependencyStepKind": recovery.step_kind,
                     "priorityBand": priority_band,
@@ -135,7 +158,6 @@ class OrchestratorLifecycleMixin:
         if not recovery.force_fresh:
             return
 
-        dependency_scope = recovery.dependency_scope
         step_kind = recovery.step_kind
 
         def _force_fresh_dependency() -> None:
@@ -181,7 +203,14 @@ class OrchestratorLifecycleMixin:
                 node.result_wire = step_result.payload
             recovery = step_result.wait_recovery
             if recovery is None:
-                raise RuntimeError("waiting_deps step outcome requires wait_recovery")
+                # Soft defer: demote without PersistDependencyRecovery self-graft.
+                def _soft_waiting_deps(
+                    deferred_node: ComputeNodeRun = node,
+                ) -> None:
+                    self._demote_to_waiting_deps(deferred_node)
+
+                self._observers.schedule_post_lock(_soft_waiting_deps)
+                return
 
             def _defer_waiting_deps(
                 deferred_node: ComputeNodeRun = node,

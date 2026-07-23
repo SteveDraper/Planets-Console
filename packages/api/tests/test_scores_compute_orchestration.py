@@ -156,6 +156,7 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
     empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome())
     # Empty terminals must not DAG-complete (unlocks fleet with open evidence).
     assert empty_result.outcome == "waiting_deps"
+    assert empty_result.wait_recovery is None
 
 
 def test_run_scores_materialize_continues_to_tier_solve() -> None:
@@ -1000,7 +1001,12 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
 
 
 def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) -> None:
-    """Empty tier outcomes demote to waiting_deps instead of hot-continue tier_solve."""
+    """Empty tier soft-defers to waiting_deps; force_fresh wake re-queues work.
+
+    Soft defer must not graft the scores scope onto its own dependency_scopes --
+    that self-edge leaves ``_deps_complete`` false forever so force_fresh attach
+    cannot promote the node out of waiting_deps.
+    """
     from api.analytics.catalog import TurnAnalyticCatalogEntry
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import EXPORT_REGISTRY
@@ -1082,12 +1088,14 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
             }
         )
         assert result_wire.outcome == "waiting_deps"
+        assert result_wire.wait_recovery is None
         orchestrator.complete_pool_step(scope, result_wire=result_wire)
 
     unregister()
     node = orchestrator.nodes[scope]
     assert node.state == "waiting_deps"
     assert handle.state == "waiting_deps"
+    assert scope not in node.dependency_scopes
     assert defer_notifications == []
     assert submitted_scopes == [scope]
     assert orchestrator.metrics.epoch_discards == 1
@@ -1107,6 +1115,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
     )
     assert orchestrator._deps_complete(dependent) is False
 
+    submits_before_wake = len(submitted_scopes)
     with patch(
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
         return_value=TierJobOutcome(
@@ -1125,9 +1134,9 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
             ),
         )
 
-    assert submitted_scopes.count(scope) >= 1
-    assert node.state in {"ready", "running", "waiting_deps"}
-
+    assert len(submitted_scopes) > submits_before_wake
+    assert node.state in {"ready", "running"}
+    assert scope not in node.dependency_scopes
 
 def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
     sample_turn,
@@ -1291,7 +1300,7 @@ def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -
         )
         is True
     )
-    assert waiting.state in {"ready", "running", "waiting_deps"}
+    assert waiting.state in {"ready", "running"}
     assert submitted_scopes == [scope]
 
     submitted_scopes.clear()

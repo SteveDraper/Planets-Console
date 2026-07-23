@@ -34,7 +34,6 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_park_wake import ScoresWakeReason, SoftTerminalReason
-from api.compute.persistence import PersistDependencyRecovery
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
@@ -329,14 +328,13 @@ def _scores_compute_scope_for_run(run: RowRun) -> ComputeScope:
     )
 
 
-def _waiting_deps_without_submit(scope: ComputeScope) -> StepResult:
-    return StepResult(
-        outcome="waiting_deps",
-        wait_recovery=PersistDependencyRecovery(
-            dependency_scope=scope,
-            force_fresh=False,
-        ),
-    )
+def _waiting_deps_without_submit() -> StepResult:
+    """Soft-defer demotion: ``waiting_deps`` with no dependency graft or force_fresh.
+
+    Omits ``wait_recovery`` so the orchestrator demotes without treating this scope
+    as its own ENSURE dependency (self-graft leaves ``_deps_complete`` false forever).
+    """
+    return StepResult(outcome="waiting_deps")
 
 
 def _emit_soft_defer_and_wait(
@@ -358,13 +356,9 @@ def _emit_soft_defer_and_wait(
             soft_reason=soft_reason,
             event=row_complete,
         )
-    result = _waiting_deps_without_submit(scope)
+    result = _waiting_deps_without_submit()
     if payload is not None:
-        return StepResult(
-            outcome=result.outcome,
-            payload=payload,
-            wait_recovery=result.wait_recovery,
-        )
+        return StepResult(outcome=result.outcome, payload=payload)
     return result
 
 
@@ -398,23 +392,6 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     )
 
 
-def _scores_scope_from_tier_job_wire(job_wire: dict[str, Any]) -> ComputeScope:
-    if all(key in job_wire for key in ("gameId", "perspective", "turn", "playerId")):
-        return ComputeScope(
-            analytic_id=SCORES_ANALYTIC_ID,
-            game_id=int(job_wire["gameId"]),
-            perspective=int(job_wire["perspective"]),
-            turn=int(job_wire["turn"]),
-            player_id=int(job_wire["playerId"]),
-        )
-    run_id = job_wire.get("runId")
-    if isinstance(run_id, str):
-        run = get_row_run(run_id)
-        if run is not None:
-            return _scores_compute_scope_for_run(run)
-    raise KeyError("scores tier_solve job wire missing scope fields and resolvable runId")
-
-
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one scores inference tier step and return an explicit orchestrator outcome."""
     run_id = job_wire.get("runId")
@@ -431,14 +408,9 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
-        scope = _scores_scope_from_tier_job_wire(job_wire)
-        return StepResult(
-            outcome="waiting_deps",
-            wait_recovery=PersistDependencyRecovery(
-                dependency_scope=scope,
-                force_fresh=False,
-            ),
-        )
+        # Missing RowRun: soft-wait for force_fresh wake to rebuild wire / reschedule.
+        # Do not self-graft via PersistDependencyRecovery -- that blocks readiness.
+        return _waiting_deps_without_submit()
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:
