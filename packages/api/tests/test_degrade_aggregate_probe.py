@@ -8,7 +8,6 @@ from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.degrade_aggregate_probe import (
     PROBE_SOLVE_MAX_SECONDS,
     probe_degrade_aggregate_rewrites,
-    should_run_degrade_aggregate_probe,
     torpedo_id_from_ship_torps_loaded_action_id,
 )
 from api.analytics.military_score_inference.models import (
@@ -258,12 +257,6 @@ def _observation(*, military_delta_2x: int, warship_delta: int = 1) -> Inference
         starbases_owned=3,
         is_after_ship_limit=False,
     )
-
-
-def test_should_run_probe_only_on_admit_ship_torpedoes() -> None:
-    assert should_run_degrade_aggregate_probe("admit_ship_torpedoes")
-    assert not should_run_degrade_aggregate_probe("widen_hulls")
-    assert not should_run_degrade_aggregate_probe("full_components")
 
 
 def test_torpedo_id_parser() -> None:

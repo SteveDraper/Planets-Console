@@ -221,6 +221,7 @@ steps:
     alpha: 30
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: false
+    runDegradeAggregateProbe: true
     minSeconds: 3
     maxSeconds: 8
 

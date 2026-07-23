@@ -41,7 +41,6 @@ from api.models.game import TurnInfo
 
 AxisName = Literal["engine", "beam", "launcher"]
 
-PROBE_STEP_IDS = frozenset({"admit_ship_torpedoes"})
 PROBE_SOLVE_MAX_SECONDS = 0.25
 
 
@@ -460,14 +459,8 @@ def probe_degrade_aggregate_rewrites(
     return out
 
 
-def should_run_degrade_aggregate_probe(policy_step_id: str) -> bool:
-    return policy_step_id in PROBE_STEP_IDS
-
-
 __all__ = [
     "PROBE_SOLVE_MAX_SECONDS",
-    "PROBE_STEP_IDS",
     "probe_degrade_aggregate_rewrites",
-    "should_run_degrade_aggregate_probe",
     "torpedo_id_from_ship_torps_loaded_action_id",
 ]

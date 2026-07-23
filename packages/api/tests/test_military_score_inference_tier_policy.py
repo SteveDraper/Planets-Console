@@ -70,6 +70,8 @@ def test_policy_loader_validates_final_alpha_zero():
     assert sum(1 for step in steps if step.hull_collision_twin_widen) == 1
     assert all(step.near_best_objective_threshold == 250 for step in steps)
     torps = next(step for step in steps if step.id == "admit_ship_torpedoes")
+    assert torps.run_degrade_aggregate_probe is True
+    assert sum(1 for step in steps if step.run_degrade_aggregate_probe) == 1
     assert torps.min_seconds == 3.0
     assert torps.max_seconds == 8.0
     full = next(step for step in steps if step.id == "full_components")
@@ -125,6 +127,45 @@ def test_policy_loader_rejects_invalid_near_best_objective_threshold():
     }
     with pytest.raises(ValueError, match="nearBestObjectiveThreshold"):
         parse_tier_policy_steps(document)
+
+
+def test_policy_loader_run_degrade_aggregate_probe_defaults_and_parses():
+    base_filters = {
+        "hulls": {"all": True},
+        "engines": {"all": True},
+        "beams": {"all": True},
+        "launchers": {"all": True},
+    }
+    omitted = parse_tier_policy_steps(
+        {"steps": [{"id": "omit", "filters": base_filters, "alpha": 0}]}
+    )
+    assert omitted[0].run_degrade_aggregate_probe is False
+    enabled = parse_tier_policy_steps(
+        {
+            "steps": [
+                {
+                    "id": "probe",
+                    "filters": base_filters,
+                    "alpha": 0,
+                    "runDegradeAggregateProbe": True,
+                }
+            ]
+        }
+    )
+    assert enabled[0].run_degrade_aggregate_probe is True
+    with pytest.raises(ValueError, match="runDegradeAggregateProbe must be a boolean"):
+        parse_tier_policy_steps(
+            {
+                "steps": [
+                    {
+                        "id": "bad",
+                        "filters": base_filters,
+                        "alpha": 0,
+                        "runDegradeAggregateProbe": "true",
+                    }
+                ]
+            }
+        )
 
 
 def test_policy_loader_rejects_null_step_near_best_objective_threshold():

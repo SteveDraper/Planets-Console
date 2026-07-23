@@ -26,7 +26,6 @@ from api.analytics.military_score_inference.constraints import (
 )
 from api.analytics.military_score_inference.degrade_aggregate_probe import (
     probe_degrade_aggregate_rewrites,
-    should_run_degrade_aggregate_probe,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.models import (
@@ -291,6 +290,7 @@ def _policy_step_diagnostics(
         "bandResidual2x": band_residual_2x,
         "allowShipOnlyExactEarlyStop": policy_step.allow_ship_only_exact_early_stop,
         "hullCollisionTwinWiden": policy_step.hull_collision_twin_widen,
+        "runDegradeAggregateProbe": policy_step.run_degrade_aggregate_probe,
     }
     if emission_fields is not None:
         diagnostics.update(emission_fields)
@@ -687,7 +687,7 @@ def run_policy_ladder_tier_step(
     seeds_for_step = list(state.band_seeds)
     state.band_seeds = []
 
-    if should_run_degrade_aggregate_probe(policy_step.id) and state.merged_solutions:
+    if policy_step.run_degrade_aggregate_probe and state.merged_solutions:
         for rewrite in probe_degrade_aggregate_rewrites(
             state.merged_solutions,
             turn=turn,

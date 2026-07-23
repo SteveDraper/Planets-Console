@@ -105,6 +105,8 @@ class InferenceTierPolicyStep:
     max_seeds: int = DEFAULT_MAX_SEEDS
     allow_ship_only_exact_early_stop: bool = False
     hull_collision_twin_widen: bool = False
+    # Homogeneous per-axis degrade → aggregate probe at step start (YAML-gated).
+    run_degrade_aggregate_probe: bool = False
     # After the first maximize in a tier, further structural solves only accept
     # ranking objectives in [Z* - T, max_objective] (sliding ceiling). Always on;
     # omit the YAML key to inherit solverThresholds / DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD.
@@ -124,6 +126,7 @@ class InferenceTierPolicyStep:
             "maxSeeds": self.max_seeds,
             "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
             "hullCollisionTwinWiden": self.hull_collision_twin_widen,
+            "runDegradeAggregateProbe": self.run_degrade_aggregate_probe,
             "minSeconds": self.min_seconds,
             "nearBestObjectiveThreshold": self.near_best_objective_threshold,
         }
@@ -299,6 +302,14 @@ def _parse_hull_collision_twin_widen(raw: object, *, step_id: str) -> bool:
     return raw
 
 
+def _parse_run_degrade_aggregate_probe(raw: object, *, step_id: str) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ValueError(f"step {step_id}: runDegradeAggregateProbe must be a boolean")
+    return raw
+
+
 def _parse_required_near_best_objective_threshold(raw: object, *, location: str) -> int:
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
         raise ValueError(f"{location}: nearBestObjectiveThreshold must be a non-negative integer")
@@ -379,6 +390,10 @@ def _parse_policy_step(
         ),
         hull_collision_twin_widen=_parse_hull_collision_twin_widen(
             raw.get("hullCollisionTwinWiden"),
+            step_id=step_id,
+        ),
+        run_degrade_aggregate_probe=_parse_run_degrade_aggregate_probe(
+            raw.get("runDegradeAggregateProbe"),
             step_id=step_id,
         ),
         near_best_objective_threshold=near_best_objective_threshold,

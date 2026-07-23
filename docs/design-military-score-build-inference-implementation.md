@@ -629,7 +629,7 @@ Cheap **exploitation** when held ship-only exacts already have the right hulls: 
 
 | Item | Rule |
 |------|------|
-| Hook | Start of `admit_ship_torpedoes` (after catalog build, before seed / free search) |
+| Hook | Start of any policy step with ``runDegradeAggregateProbe: true`` (after catalog build, before seed / free search). Production YAML sets this on ``admit_ship_torpedoes`` only. |
 | Candidates | Ship-builds-only held exacts; aggregate \(A\) from the step catalog (v1: belief-eligible `ship_torps_loaded_*`) |
 | Decision unit | **(ship, axis)** for axes with \(k > 0\) fitted type \(c\) (engine / beam / launcher) |
 | Rewrite | Keep \(c \times k\), or replace with exactly one \(c'\) where \(\mathrm{tech}(c') \le \mathrm{tech}(c)\) and \(c' \neq c\), still \(c' \times k\) |
