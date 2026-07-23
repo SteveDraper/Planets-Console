@@ -17,6 +17,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.military_score_inference.soft_stream_policy import (
     SoftStreamDispatch,
+    SoftTerminalReason,
     TerminalSource,
     resolve_soft_stream_dispatch,
 )
@@ -55,6 +56,7 @@ class InferenceStreamResolutionMixin:
         snapshot: ScopeLifecycleSnapshot | None = None,
         session: InferenceRowStreamSession | None = None,
         event: RowComplete | RowFailed | None = None,
+        soft_terminal_reason: SoftTerminalReason | str | None = None,
     ) -> bool:
         """Deliver one stream-row terminal for park / durable / orphan sources.
 
@@ -72,10 +74,9 @@ class InferenceStreamResolutionMixin:
         if resolved_event is None and snapshot is not None:
             resolved_event = self._row_complete_from_result_wire(snapshot.result_wire)
 
-        park_reason = None if snapshot is None else snapshot.park_reason
         dispatch = resolve_soft_stream_dispatch(
             source=source,
-            park_reason=park_reason,
+            soft_terminal_reason=soft_terminal_reason,
             has_event=resolved_event is not None,
         )
 
@@ -108,6 +109,21 @@ class InferenceStreamResolutionMixin:
             case SoftStreamDispatch.ORPHAN_EMPTY:
                 return self._deliver_orphan_empty(scope, resolved, snapshot)
         return False
+
+    def deliver_scores_row_defer_terminal(
+        self: InferenceRowScheduler,
+        scope: ComputeScope,
+        *,
+        soft_reason: SoftTerminalReason,
+        event: RowComplete | RowFailed | None = None,
+    ) -> bool:
+        """Emit soft-stream policy for one tier defer without completing the DAG node."""
+        return self._deliver_row_terminal(
+            source=TerminalSource.ROW_DEFER,
+            scope=scope,
+            event=event,
+            soft_terminal_reason=soft_reason,
+        )
 
     def _emit_domain_terminal(
         self: InferenceRowScheduler,
@@ -173,7 +189,7 @@ class InferenceStreamResolutionMixin:
         if controller is not None and controller.push_admission_wire_terminal(session):
             return True
         if on_miss == "revert":
-            # Empty soft park: drop the provisional claim so wake can rebuild.
+            # Empty soft defer: drop the provisional claim so wake can rebuild.
             # Compare-and-pop: a peer may have advanced to HARD_TERMINAL /
             # CANCELED between claim and this miss; that marker must survive.
             with self._lock:

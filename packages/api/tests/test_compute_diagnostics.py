@@ -2260,10 +2260,12 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         step_index=0,
         priority_band="interactive",
     )
+    from api.analytics.fleet.compute_orchestration import FLEET_OBSERVATION_LEG
+
     controller._on_step_complete(
         ancestor_scope,
         completed_node,
-        "materialization_leg",
+        FLEET_OBSERVATION_LEG,
         completed_node.step_index,
         "pool",
         "success",

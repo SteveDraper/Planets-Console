@@ -976,7 +976,7 @@ def test_wire_builder_receives_dependency_slices(sample_turn):
     branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
     captured: list[dict[str, object]] = []
 
-    def build_branch_b_wire(scope, *, dependency_outputs, ctx=None):
+    def build_branch_b_wire(scope, *, dependency_outputs, ctx=None, **_kwargs):
         del ctx
         captured.append(
             {

@@ -300,7 +300,11 @@ _DIAGNOSTICS_SCHEMA: dict[str, Any] = {
         },
         "policy_step_attempts": {
             "type": "array",
-            "description": "Per-step attempt diagnostics from multi-step inference.",
+            "description": (
+                "Per-step attempt diagnostics from multi-step inference, including "
+                "durationMs and newlyAdmitted solution emissions (objective + compact "
+                "build/action signature)."
+            ),
             "items": {
                 "type": "object",
                 "description": "Diagnostics for one policy step attempt.",
@@ -350,6 +354,19 @@ EXPORT_VALUE_SCHEMA: dict[str, Any] = {
             "items": _SOLUTION_WIRE_SCHEMA,
         },
         "diagnostics": _DIAGNOSTICS_SCHEMA,
+        "tierEmissions": {
+            "type": "array",
+            "description": (
+                "Compact per-policy-step emission ledger (step id, wall ms, newly "
+                "admitted solutions with objective values). Durable first-class "
+                "field; not stripped with full solver diagnostics."
+            ),
+            "items": {
+                "type": "object",
+                "description": "One policy-step emission record.",
+                "additionalProperties": True,
+            },
+        },
         "hullCatalogMask": _HULL_CATALOG_MASK_SCHEMA,
     },
 }

@@ -6,9 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
-from api.analytics.fleet.types import FleetTurnSnapshot
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
@@ -17,13 +14,14 @@ from api.analytics.military_score_inference.inference_row_runner import (
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
-    records_for_scope,
-    resolution_from_fleet_records,
-    resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
+from api.analytics.scores.prior_fleet_resolution import (
+    fleet_compute_services,
+    resolve_prior_fleet_for_scores,
+)
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
@@ -32,12 +30,11 @@ from api.analytics.scores.tier_row_run_registry import (
     get_tier_callbacks,
     register_row_run,
 )
-from api.analytics.scores_park_wake import ScoresParkReason, ScoresWakeReason
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
-from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
+from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
-from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-from api.models.game import GameSettings
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
@@ -55,83 +52,6 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
         ComputeStepSpec(step_kind=SCORES_TIER_SOLVE, backend="thread"),
     ),
 )
-
-
-def _scores_prior_fleet_scope(
-    scope: ComputeScope,
-    *,
-    settings: GameSettings,
-) -> ComputeScope | None:
-    if scope.turn == WILDCARD or not isinstance(scope.turn, int):
-        return None
-    if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
-        return None
-    if scope.turn <= accelerated_ensure_floor(settings, scope.turn):
-        return None
-    return ComputeScope(
-        analytic_id=FLEET_ANALYTIC_ID,
-        game_id=scope.game_id,
-        perspective=scope.perspective,
-        turn=scope.turn - 1,
-        player_id=scope.player_id,
-    )
-
-
-def _resolution_from_persisted_fleet_wire(
-    persisted_wire: dict[str, object],
-    export_scope: ExportScope,
-    *,
-    prior_turn,
-) -> PriorTurnFleetTorpResolution:
-    persisted = persisted_fleet_ledger_from_json(persisted_wire)
-    snapshot = FleetTurnSnapshot(
-        analytic_id=FLEET_ANALYTIC_ID,
-        game_id=export_scope.game_id,
-        perspective=export_scope.perspective,
-        turn=export_scope.turn,
-        players=[persisted.ledger],
-    )
-    records = records_for_scope(snapshot, export_scope)
-    return resolution_from_fleet_records(records, prior_turn=prior_turn)
-
-
-def _resolve_prior_fleet_for_tier_wire(
-    scope: ComputeScope,
-    *,
-    dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext,
-) -> PriorTurnFleetTorpResolution:
-    export_scope = _export_scope_for_compute(scope)
-    if export_scope is None:
-        raise ValueError("scores tier_solve requires concrete scores scope")
-
-    turn = ctx.load_turn(export_scope.turn)
-    if turn is None:
-        return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
-
-    prior_fleet_scope = _scores_prior_fleet_scope(scope, settings=turn.settings)
-    if prior_fleet_scope is None:
-        return PriorTurnFleetTorpResolution(overlay=None, input_status="not_applicable")
-
-    prior_export_scope = compute_scope_to_export_scope(prior_fleet_scope)
-    prior_turn = ctx.load_turn(prior_fleet_scope.turn)
-    fleet_result_wire = dependency_outputs.get(prior_fleet_scope)
-    if isinstance(fleet_result_wire, dict) and prior_turn is not None:
-        persisted_wire = fleet_result_wire.get("persistedLedgerWire")
-        if isinstance(persisted_wire, dict):
-            return _resolution_from_persisted_fleet_wire(
-                persisted_wire,
-                prior_export_scope,
-                prior_turn=prior_turn,
-            )
-
-    return resolve_prior_turn_fleet_torp_overlay(
-        turn=turn,
-        player_id=export_scope.player_id,
-        load_turn=ctx.load_turn,
-        query_context=ctx,
-        ensure=False,
-    )
 
 
 def _apply_fleet_resolution_to_row_run(
@@ -153,6 +73,7 @@ def build_scores_materialize_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    **_kwargs: object,
 ) -> dict[str, Any]:
     """Materialize scores export tree on the orchestration plane."""
     from api.analytics.scores.exports import ensure_scores_export, materialize_scores_export_tree
@@ -171,6 +92,7 @@ def build_scores_tier_solve_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
@@ -203,7 +125,15 @@ def build_scores_tier_solve_job_wire(
         run = _adopt_scheduler_row_run_for_tier_wire(ctx, export_scope)
     if run is None:
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
-            return {"runId": None, "evidenceClosed": True}
+            export_scope = compute_scope_to_export_scope(scope)
+            return {
+                "runId": None,
+                "evidenceClosed": True,
+                "gameId": scope.game_id,
+                "perspective": scope.perspective,
+                "turn": scope.turn,
+                "playerId": scope.player_id,
+            }
         raise RuntimeError(
             "scores tier_solve invariant broken: ensure "
             f"{'satisfied' if ensure_satisfied else 'unsatisfied'} but no attachable "
@@ -212,14 +142,32 @@ def build_scores_tier_solve_job_wire(
             f"turn={scope.turn}, player_id={scope.player_id})"
         )
 
-    fleet_resolution = _resolve_prior_fleet_for_tier_wire(
-        scope,
-        dependency_outputs=dependency_outputs,
-        ctx=ctx,
-    )
+    turn = ctx.load_turn(export_scope.turn)
+    if turn is None or export_scope.player_id is None:
+        fleet_resolution = PriorTurnFleetTorpResolution(
+            overlay=None,
+            input_status="pending",
+        )
+    else:
+        fleet_resolution = resolve_prior_fleet_for_scores(
+            ctx,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn_number=export_scope.turn,
+            player_id=export_scope.player_id,
+            turn=turn,
+            dependency_outputs=dependency_outputs,
+            overlay_ensure=False,
+        )
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
 
-    return {"runId": run.run_id}
+    return {
+        "runId": run.run_id,
+        "gameId": scope.game_id,
+        "perspective": scope.perspective,
+        "turn": scope.turn,
+        "playerId": scope.player_id,
+    }
 
 
 def _adopt_scheduler_row_run_for_tier_wire(
@@ -254,9 +202,10 @@ def _adopt_scheduler_row_run_for_tier_wire(
 def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
     """Inline scores materialize then continue into ``tier_solve`` on the same node.
 
-    Fleet ENSURE-depends on same-turn scores. Completing after materialize alone
-    unlocked fleet before inference solutions existed; continuing keeps the scores
-    node non-terminal until tier_solve finishes (or skips when no RowRun is needed).
+    Fleet finalization PersistDeferred-depends on same-turn scores evidence.
+    Completing after materialize alone unlocked finalization before inference
+    solutions existed; continuing keeps the scores node non-terminal until
+    tier_solve finishes (or skips when no RowRun is needed).
 
     The export tree is carried as the continue payload so no-work skip paths still
     leave a dependency ``result_wire`` for fleet dispatch.
@@ -275,10 +224,8 @@ def wake_scores_scope(
 ) -> bool:
     """Submit an encoded scores wake publisher through one coordinator.
 
-    Wake *behavior* is total over ``ScoresWakeReason``:
-
-    - ``ROW_RUN_ADOPTED`` / ``EVIDENCE_CLOSED`` -- ``wake_if_parked`` only
-    - ``STREAM_RESCHEDULED`` -- ``force_fresh`` submit (reopens parked or running)
+    All wake reasons use ``force_fresh`` submit so ``waiting_deps`` nodes refresh
+    readiness without the retired soft-park path.
     """
     from api.compute.orchestrator import ComputeRequest
     from api.compute.runtime import get_compute_orchestrator
@@ -294,30 +241,64 @@ def wake_scores_scope(
     if reason is ScoresWakeReason.STREAM_RESCHEDULED:
         resolved_orchestrator.submit(request)
         return True
-    if reason in {
-        ScoresWakeReason.ROW_RUN_ADOPTED,
-        ScoresWakeReason.EVIDENCE_CLOSED,
-    }:
-        return resolved_orchestrator.wake_if_parked(request) is not None
-    raise ValueError(f"unsupported scores wake reason: {reason!r}")
+    node = resolved_orchestrator.nodes.get(scope)
+    if node is None or node.is_terminal or node.state == "running":
+        return False
+    resolved_orchestrator.submit(request)
+    return True
+
+
+def _scores_compute_scope_for_run(run: RowRun) -> ComputeScope:
+    session = run.session
+    return ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn=session.turn_number,
+        player_id=session.player_id,
+    )
+
+
+def _waiting_deps_without_submit() -> StepResult:
+    """Soft-defer demotion: ``waiting_deps`` with no dependency graft or force_fresh.
+
+    Omits ``wait_recovery`` so the orchestrator demotes without treating this scope
+    as its own ENSURE dependency (self-graft leaves ``_deps_complete`` false forever).
+    """
+    return StepResult(outcome="waiting_deps")
+
+
+def _emit_soft_defer_and_wait(
+    run: RowRun,
+    *,
+    soft_reason: SoftTerminalReason,
+    row_complete: RowComplete | None = None,
+    payload: dict[str, object] | None = None,
+) -> StepResult:
+    from api.analytics.military_score_inference.inference_scheduler import (
+        inference_row_scheduler_if_initialized,
+    )
+
+    scope = _scores_compute_scope_for_run(run)
+    scheduler = inference_row_scheduler_if_initialized()
+    if scheduler is not None:
+        scheduler.deliver_scores_row_defer_terminal(
+            scope,
+            soft_reason=soft_reason,
+            event=row_complete,
+        )
+    result = _waiting_deps_without_submit()
+    if payload is not None:
+        return StepResult(outcome=result.outcome, payload=payload)
+    return result
 
 
 def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> StepResult:
     """Map one inference tier job outcome to an orchestrator step result.
 
-    Soft / empty terminals must not ``complete`` the scores node while turn
-    evidence is still open: that unlocks same-turn fleet ENSURE and triggers the
-    fleet ``persist_deferred`` → force_fresh scores reopen loop. Persist only
-    statuses that close evidence on disk. Non-durable or empty outcomes park
-    (``outcome="park"`` → node ``parked``) until ``force_fresh`` wake -- not hot
-    ``continue``.
-
-    Park sites and wake owners:
-
-    - Non-durable ``rowComplete`` → park (+ soft stream delivery on park notify);
-      wake via stream reschedule / evidence close / fleet reopen
-    - Empty ``TierJobOutcome`` → park (cheap admission soft-stream when available;
-      otherwise silent); wake via stream reschedule / RowRun re-adopt
+    Non-durable or empty outcomes demote the node to ``waiting_deps`` and emit
+    soft stream rows from the row path (not orchestrator park). Durable terminals
+    persist and complete the scores node.
     """
     if outcome.enqueue_continuation:
         if outcome.next_ladder_state is not None:
@@ -329,28 +310,21 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
         status = outcome.row_complete.wire_payload.status
         if is_durable_turn_evidence_row_status(status):
             return StepResult(outcome="persist", payload=payload)
-        return StepResult(
-            outcome="park",
+        return _emit_soft_defer_and_wait(
+            run,
+            soft_reason=SoftTerminalReason.NON_DURABLE_ROW_COMPLETE,
+            row_complete=outcome.row_complete,
             payload=payload,
-            park_reason=ScoresParkReason.NON_DURABLE_ROW_COMPLETE,
         )
 
-    return StepResult(outcome="park", park_reason=ScoresParkReason.EMPTY_TIER_OUTCOME)
+    return _emit_soft_defer_and_wait(
+        run,
+        soft_reason=SoftTerminalReason.EMPTY_TIER_OUTCOME,
+    )
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
-    """Run one scores inference tier step and return an explicit orchestrator outcome.
-
-    Empty complete is allowed only for the evidence-closed skip sentinel. A bare
-    ``runId: None`` wire is an invariant break (wire build must attach or
-    skip-complete). Missing ``RowRun`` lookups park until a replacement is
-    registered (``ROW_RUN_ADOPTED``) or evidence closes.
-
-    Park sites and wake owners (no soft stream terminal -- wait for work):
-
-    - Missing ``RowRun`` → park; wake when a replacement ``RowRun`` is registered
-      (``enqueue_tier_ladder``) or evidence closes
-    """
+    """Run one scores inference tier step and return an explicit orchestrator outcome."""
     run_id = job_wire.get("runId")
     if run_id is None:
         if job_wire.get("evidenceClosed") is True:
@@ -365,11 +339,9 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
-        # Cross-binding race: peer may have finalized/retired the shared RowRun.
-        # Do not empty-complete here -- that unlocked fleet with open scores evidence
-        # and left the scoreboard in-progress. Park until wire-build can re-check
-        # ``is_satisfied`` / re-ensures a RowRun.
-        return StepResult(outcome="park", park_reason=ScoresParkReason.MISSING_ROW_RUN)
+        # Missing RowRun: soft-wait for force_fresh wake to rebuild wire / reschedule.
+        # Do not self-graft via PersistDependencyRecovery -- that blocks readiness.
+        return _waiting_deps_without_submit()
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:
@@ -452,6 +424,7 @@ class ScoresPersistencePolicy:
             perspective=export_scope.perspective,
             host_turn=export_scope.turn,
             player_id=export_scope.player_id,
+            fleet_torp_input_status=_fleet_torp_input_status_for_persist(run_id),
         )
         if decision.retire_after_write:
             apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run_id)
@@ -476,20 +449,13 @@ class ScoresPersistencePolicy:
         ``scores@N`` tracks ``fleet@(N-1)``'s turn-scoped generation only. Same-player
         activity on other turns must not discard in-flight tier work.
         """
-        from api.analytics.export_context import export_service_for
-        from api.analytics.fleet.compute_services import FleetComputeServices
-
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None or export_scope.player_id is None:
             return 0
         if export_scope.turn <= 1:
             return 0
 
-        fleet_services = export_service_for(ctx, FLEET_ANALYTIC_ID, FleetComputeServices)
-        if fleet_services is None:
-            injected = ctx.export_services.get(FLEET_ANALYTIC_ID)
-            if isinstance(injected, FleetComputeServices):
-                fleet_services = injected
+        fleet_services = fleet_compute_services(ctx)
         if fleet_services is None:
             return 0
 
@@ -499,6 +465,13 @@ class ScoresPersistencePolicy:
             export_scope.player_id,
             export_scope.turn - 1,
         )
+
+
+def _fleet_torp_input_status_for_persist(run_id: str) -> str | None:
+    run = get_row_run(run_id)
+    if run is None:
+        return None
+    return run.session.fleet_torp_input_status
 
 
 def _export_scope_for_compute(scope: ComputeScope) -> ExportScope | None:

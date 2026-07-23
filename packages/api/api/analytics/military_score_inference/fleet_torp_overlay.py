@@ -15,7 +15,10 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
 from api.analytics.fleet.belief_set_components import launcher_component_ids_from_records
-from api.analytics.fleet.option_set_mass import launcher_belief_mass_by_torp_id_from_records
+from api.analytics.fleet.option_set_mass import (
+    DEFAULT_OPTION_SET_MASS_THRESHOLD,
+    launcher_belief_mass_by_torp_id_from_records,
+)
 from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.aggregate_action_registry import (
     SHIP_TORPS_LOADED_ACTION_PREFIX,
@@ -159,15 +162,36 @@ def effective_fleet_torp_overlay(overlay: FleetTorpOverlay | None) -> FleetTorpO
 
 def launcher_belief_set_from_fleet_records(
     records: Iterable[FleetShipRecord],
+    *,
+    option_set_mass_threshold: float | None = None,
 ) -> FleetLauncherBeliefSet:
-    """Union launcher/torp ids from known fields and all fleet build option sets."""
-    return FleetLauncherBeliefSet(launcher_component_ids_from_records(records))
+    """Union launcher/torp ids from known fields and mass-eligible option sets."""
+    return FleetLauncherBeliefSet(
+        launcher_component_ids_from_records(
+            records,
+            option_set_mass_threshold=option_set_mass_threshold,
+        )
+    )
 
 
-def overlay_from_fleet_records(records: Iterable[FleetShipRecord]) -> FleetTorpOverlay:
-    """Build overlay with flat admission union plus per-torp belief mass (#253)."""
+def overlay_from_fleet_records(
+    records: Iterable[FleetShipRecord],
+    *,
+    option_set_mass_threshold: float | None = DEFAULT_OPTION_SET_MASS_THRESHOLD,
+) -> FleetTorpOverlay:
+    """Build overlay with thresholded belief-set admission plus per-torp belief mass.
+
+    Soft option sets contribute to the **inference fleet launcher belief set** only
+    when their per-row softmax probability meets ``option_set_mass_threshold``
+    (same floor as prior-fleet max-tech). Known launchers always count. Pass
+    ``option_set_mass_threshold=None`` for a flat union (tests / legacy). Mass
+    for misalignment ranking is still computed over all option sets.
+    """
     record_list = list(records)
-    belief = launcher_belief_set_from_fleet_records(record_list)
+    belief = launcher_belief_set_from_fleet_records(
+        record_list,
+        option_set_mass_threshold=option_set_mass_threshold,
+    )
     return FleetTorpOverlay(
         belief_set=belief,
         launcher_belief_mass_by_torp_id=launcher_belief_mass_by_torp_id_from_records(record_list),

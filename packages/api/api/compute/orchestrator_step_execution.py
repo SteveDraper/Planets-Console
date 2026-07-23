@@ -194,6 +194,7 @@ class OrchestratorStepExecutionMixin:
                 node.scope,
                 dependency_outputs=pending.dependency_outputs,
                 ctx=ctx,
+                node_result_wire=node.result_wire,
             )
         except BaseException as exc:
             with self._condition:
@@ -259,6 +260,7 @@ class OrchestratorStepExecutionMixin:
                         node.scope,
                         dependency_outputs=submission.dependency_outputs,
                         ctx=ctx,
+                        node_result_wire=node.result_wire,
                     )
                     with self._condition:
                         if node.state != "running":

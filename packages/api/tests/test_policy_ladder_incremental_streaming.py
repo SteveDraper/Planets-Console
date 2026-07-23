@@ -46,9 +46,10 @@ def test_run_policy_ladder_tier_step_calls_on_admitted_for_each_within_tier_solu
         combo_count_neighborhood=0,
         cancel_token=None,
         on_solution=None,
+        seed_no_good_solutions=(),
     ):
         del race_id, max_solutions, time_limit_seconds, military_score_alpha
-        del fixed_combo_counts, combo_count_neighborhood, cancel_token
+        del fixed_combo_counts, combo_count_neighborhood, cancel_token, seed_no_good_solutions
         if on_solution is not None:
             on_solution(solution_one)
             on_solution(solution_two)

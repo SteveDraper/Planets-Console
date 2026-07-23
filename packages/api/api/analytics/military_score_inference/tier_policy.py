@@ -15,7 +15,10 @@ from typing import Any, Literal
 import yaml
 
 from api.analytics.fleet.option_set_mass import DEFAULT_OPTION_SET_MASS_THRESHOLD
-from api.analytics.military_score_inference.models import ProbabilityBinBounds
+from api.analytics.military_score_inference.models import (
+    DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
+    ProbabilityBinBounds,
+)
 from api.analytics.scores_assets import Scores
 
 SlotCountMode = Literal["none", "partial"]
@@ -102,9 +105,18 @@ class InferenceTierPolicyStep:
     max_seeds: int = DEFAULT_MAX_SEEDS
     allow_ship_only_exact_early_stop: bool = False
     hull_collision_twin_widen: bool = False
+    # Homogeneous per-axis degrade → aggregate probe at step start (YAML-gated).
+    run_degrade_aggregate_probe: bool = False
+    # After the first maximize in a tier, further structural solves only accept
+    # ranking objectives in [Z* - T, max_objective] (sliding ceiling). Always on;
+    # omit the YAML key to inherit solverThresholds / DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD.
+    near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
+    # Reserved soft-global envelopes (seconds). min defaults 0; max None = uncapped.
+    min_seconds: float = 0.0
+    max_seconds: float | None = None
 
     def constraint_snapshot(self) -> dict[str, object]:
-        return {
+        snapshot: dict[str, object] = {
             "id": self.id,
             "filters": self.filters.to_snapshot(),
             "beamSlotCounts": self.beam_slot_counts,
@@ -114,13 +126,20 @@ class InferenceTierPolicyStep:
             "maxSeeds": self.max_seeds,
             "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
             "hullCollisionTwinWiden": self.hull_collision_twin_widen,
+            "runDegradeAggregateProbe": self.run_degrade_aggregate_probe,
+            "minSeconds": self.min_seconds,
+            "nearBestObjectiveThreshold": self.near_best_objective_threshold,
         }
+        if self.max_seconds is not None:
+            snapshot["maxSeconds"] = self.max_seconds
+        return snapshot
 
 
 @dataclass(frozen=True)
 class SolverThresholds:
     ship_only_exact_early_stop_min_plausibility: int
     no_new_exact_signatures_early_stop_min_plausibility: int
+    near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
 
 
 @dataclass(frozen=True)
@@ -283,7 +302,42 @@ def _parse_hull_collision_twin_widen(raw: object, *, step_id: str) -> bool:
     return raw
 
 
-def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolicyStep:
+def _parse_run_degrade_aggregate_probe(raw: object, *, step_id: str) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ValueError(f"step {step_id}: runDegradeAggregateProbe must be a boolean")
+    return raw
+
+
+def _parse_required_near_best_objective_threshold(raw: object, *, location: str) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise ValueError(f"{location}: nearBestObjectiveThreshold must be a non-negative integer")
+    return raw
+
+
+def _parse_min_seconds(raw: object, *, step_id: str) -> float:
+    if raw is None:
+        return 0.0
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
+        raise ValueError(f"step {step_id}: minSeconds must be a non-negative number")
+    return float(raw)
+
+
+def _parse_max_seconds(raw: object, *, step_id: str) -> float | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
+        raise ValueError(f"step {step_id}: maxSeconds must be a non-negative number")
+    return float(raw)
+
+
+def _parse_policy_step(
+    raw: dict[str, Any],
+    *,
+    index: int,
+    default_near_best_objective_threshold: int,
+) -> InferenceTierPolicyStep:
     step_id = raw.get("id")
     if not isinstance(step_id, str) or not step_id:
         raise ValueError(f"step {index}: id must be a non-empty string")
@@ -295,6 +349,21 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
     max_seeds = raw.get("maxSeeds", DEFAULT_MAX_SEEDS)
     if not isinstance(max_seeds, int) or max_seeds < 0:
         raise ValueError(f"step {step_id}: maxSeeds must be a non-negative integer")
+
+    min_seconds = _parse_min_seconds(raw.get("minSeconds"), step_id=step_id)
+    max_seconds = _parse_max_seconds(raw.get("maxSeconds"), step_id=step_id)
+    if max_seconds is not None and max_seconds < min_seconds:
+        raise ValueError(
+            f"step {step_id}: maxSeconds ({max_seconds}) must be >= minSeconds ({min_seconds})"
+        )
+
+    if "nearBestObjectiveThreshold" in raw:
+        near_best_objective_threshold = _parse_required_near_best_objective_threshold(
+            raw.get("nearBestObjectiveThreshold"),
+            location=f"step {step_id}",
+        )
+    else:
+        near_best_objective_threshold = default_near_best_objective_threshold
 
     return InferenceTierPolicyStep(
         id=step_id,
@@ -323,6 +392,13 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
             raw.get("hullCollisionTwinWiden"),
             step_id=step_id,
         ),
+        run_degrade_aggregate_probe=_parse_run_degrade_aggregate_probe(
+            raw.get("runDegradeAggregateProbe"),
+            step_id=step_id,
+        ),
+        near_best_objective_threshold=near_best_objective_threshold,
+        min_seconds=min_seconds,
+        max_seconds=max_seconds,
     )
 
 
@@ -532,9 +608,18 @@ def parse_solver_thresholds(document: dict[str, Any]) -> SolverThresholds:
             "tier policy solverThresholds.noNewExactSignaturesEarlyStopMinPlausibility "
             "must be an int"
         )
+    near_best_raw = raw_thresholds.get(
+        "nearBestObjectiveThreshold",
+        DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
+    )
+    near_best_threshold = _parse_required_near_best_objective_threshold(
+        near_best_raw,
+        location="tier policy solverThresholds",
+    )
     return SolverThresholds(
         ship_only_exact_early_stop_min_plausibility=ship_only_threshold,
         no_new_exact_signatures_early_stop_min_plausibility=no_new_signatures_threshold,
+        near_best_objective_threshold=near_best_threshold,
     )
 
 
@@ -592,12 +677,31 @@ def resolve_solver_thresholds(base_path: Path | None = None) -> SolverThresholds
     return parsed
 
 
+def _near_best_objective_threshold_default(document: dict[str, Any]) -> int:
+    """Resolve global near-best T from ``solverThresholds``, else the code default."""
+    raw_thresholds = document.get("solverThresholds")
+    if not isinstance(raw_thresholds, dict):
+        return DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
+    if "nearBestObjectiveThreshold" not in raw_thresholds:
+        return DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
+    return _parse_required_near_best_objective_threshold(
+        raw_thresholds.get("nearBestObjectiveThreshold"),
+        location="tier policy solverThresholds",
+    )
+
+
 def parse_tier_policy_steps(document: dict[str, Any]) -> tuple[InferenceTierPolicyStep, ...]:
     raw_steps = document.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ValueError("tier policy must contain a non-empty steps list")
+    default_near_best = _near_best_objective_threshold_default(document)
     steps = tuple(
-        _parse_policy_step(raw_step, index=index) for index, raw_step in enumerate(raw_steps)
+        _parse_policy_step(
+            raw_step,
+            index=index,
+            default_near_best_objective_threshold=default_near_best,
+        )
+        for index, raw_step in enumerate(raw_steps)
     )
     validate_tier_policy_steps(steps)
     return steps

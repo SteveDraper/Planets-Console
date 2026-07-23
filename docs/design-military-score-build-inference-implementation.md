@@ -567,13 +567,15 @@ Per-step fields (informal schema; exact YAML shape is implementation-owned):
 | `maxSeeds` | Band near-solutions to carry to next step (default **5**) |
 | `allowShipOnlyExactEarlyStop` | When `true`, the ladder may stop after this step if a ship-builds-only exact meets `shipOnlyExactEarlyStopMinPlausibility`. Default `false` when omitted. |
 | `hullCollisionTwinWiden` | When `true`, the ladder loads hull-collision twin assets and may union admitted high-tech hull ids via runtime `includeComponentIds` (or skip when no partners). Default `false` when omitted. Gated by this flag, not by step `id`. |
+| `nearBestObjectiveThreshold` | Optional per-step override of `solverThresholds.nearBestObjectiveThreshold`. Omit to inherit the global default. When present, must be a non-negative int (null is rejected; banding is always on). |
 
-Top-level `solverThresholds` (required ints):
+Top-level `solverThresholds` (required ints unless noted):
 
 | Key | Meaning |
 |-----|---------|
 | `shipOnlyExactEarlyStopMinPlausibility` | Minimum `objectiveValue` for ship-only exact early-stop (#226). |
 | `noNewExactSignaturesEarlyStopMinPlausibility` | Minimum best-held `objectiveValue` before a catalog-noop / no-new-signature step may halt the ladder (#236). Production YAML uses the same value as ship-only exact early-stop. |
+| `nearBestObjectiveThreshold` | Default within-tier near-best band width T (ranking obj in `[Z*-T, sliding max]` after first maximize). Defaults to **250** when omitted. Individual steps may override with the same key; omit on a step to inherit this global default. |
 
 **`filters` object:** required keys `hulls`, `engines`, `beams`, `launchers`. Each value uses the same shape:
 
@@ -599,15 +601,44 @@ Static YAML steps widen by **strict superset on `techLevels` lists** or by switc
 
 #### 8.5.3 v1 ladder (sketch A)
 
-Tunable constants in YAML; illustrative starting point from design review:
+Tunable constants in YAML; high-prior aggregates run before noisy full-catalog ship polish:
 
-| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` | Early-stop? |
-|------|------------------|---------------------------------------|---------|-------------|
-| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no |
-| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no |
-| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | yes |
-| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | yes |
-| … | (partial slots, aggregates, torp escape, full catalog) | … | … | yes |
+| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` | Early-stop? | Time envelope |
+|------|------------------|---------------------------------------|---------|-------------|---------------|
+| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no | max 8s |
+| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no | max 8s |
+| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | no | max 5s |
+| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | no | max 8s |
+| 4 `admit_ship_torpedoes` | Full components + partial slots | belief `ship_torps_per_type` ≤40 | 30 | no | min 3s / max 8s |
+| 5 `modest_planet_defense` | Same | + planet defense ≤16 | 50 | no | min 1s / max 5s |
+| 6 `full_components` | Full catalog polish (retain prior aggregates) | torps + PD | 50 | yes | max 5s |
+| … | Heavier SB defense / torp escape / full catalog | cumulative widen | … | yes | … |
+
+**Per-tier time envelopes (reserved soft global):** each row keeps one soft-global wall budget (stream default ~20s) that **steers** target slices. Step `i` receives
+
+- `reserved = sum(minSeconds_j for j > i)`
+- `spendable = max(0, global_remaining - reserved)`
+- `steered = min(spendable, maxSeconds_i)` (omit `maxSeconds` ⇒ uncapped within spendable)
+- `allowance = max(minSeconds_i, steered)`
+
+`minSeconds` is an **absolute floor**: a tier always gets at least its min even when soft-global remainder / spendable is insufficient (intentional overshoot). Soft global and later-step reservations steer how much *above* min early steps take; exhausting a tier's allowance stops **that step** and continues the ladder. Soft-global exhaustion alone does not abort an in-flight funded tier, complete the row (batch or stream), or deny later steps with `minSeconds > 0` -- those still receive their absolute floor. Steps with `minSeconds == 0` and zero spendable skip.
+
+#### 8.5.3a Homogeneous per-axis degrade → aggregate probe
+
+Cheap **exploitation** when held ship-only exacts already have the right hulls: rewrite \(C \rightarrow C' + A\) without a full-catalog CP-SAT retread. Exploration of new hulls stays on the ladder.
+
+| Item | Rule |
+|------|------|
+| Hook | Start of any policy step with ``runDegradeAggregateProbe: true`` (after catalog build, before seed / free search). Production YAML sets this on ``admit_ship_torpedoes`` only. |
+| Candidates | Ship-builds-only held exacts; aggregate \(A\) from the step catalog (v1: belief-eligible `ship_torps_loaded_*`) |
+| Decision unit | **(ship, axis)** for axes with \(k > 0\) fitted type \(c\) (engine / beam / launcher) |
+| Rewrite | Keep \(c \times k\), or replace with exactly one \(c'\) where \(\mathrm{tech}(c') \le \mathrm{tech}(c)\) and \(c' \neq c\), still \(c' \times k\) |
+| Gap | \(\mathrm{score}(A) \cdot n = \sum_{\text{changed axes}} k(\mathrm{score}(c)-\mathrm{score}(c'))\), \(n \ge 1\), at least one axis degraded |
+| Mixed fittings | Impossible by construction (one type per axis per ship) |
+| Merge | Probe hits admit via the same `merge_exact_solutions` / on-admitted path as solver solutions |
+| Catalog gate | Rewritten fittings must resolve to existing catalog `combo_*` ids; admissions must pass hard equalities. Synthetic `degrade_probe:` ids are never emitted. |
+
+Module: `degrade_aggregate_probe.py`. Out of scope for v1: planet-defense degrade probe, multi-aggregate joint solves, inventing new hulls.
 
 #### 8.5.4 Per-player solve loop
 
@@ -672,7 +703,7 @@ Single-warship **score collisions** between early-tier hulls and higher-tech twi
 2. Look up twin high-tech partners for those lows at `military_change = military_delta_2x // 2`, intersected with buildable hulls.
 3. If the admitted set is empty, **skip** the step (no catalog growth; no `no_new_exact_signatures` stop from the skip itself).
 4. Otherwise solve with prior hull eligibility ∪ admitted ids.
-5. `allowShipOnlyExactEarlyStop: true` on this step (and later steps); `false` on `early_game_bands` and `widen_launchers`.
+5. `allowShipOnlyExactEarlyStop: false` on this step (and all steps before high-prior aggregates); `true` from `full_components` onward.
 6. `hullCollisionTwinWiden: true` on this step only.
 
 Regenerate when prior weights or component catalogs change:
@@ -723,7 +754,7 @@ Per-player, per-solve overlay on top of **inference build prior** (#86) weights 
 ```yaml
 fleetInferenceTuning:
   torpMisalignmentLogPenalty: <int>              # #87
-  optionSetMassThreshold: 0.25                   # #253 (soft option sets for max-tech)
+  optionSetMassThreshold: 0.25                   # soft option sets for belief-set admission + max-tech
   # componentTechGapLogPenaltyPerLevel: <int>   # #156 -- out of scope until enabled
 ```
 
@@ -731,16 +762,16 @@ fleetInferenceTuning:
 
 **Inference fleet launcher belief set** = torp ids fitted on ships the player is believed to own at prior turn:
 
-- **Fleet observed ship** rows with known launchers
+- **Fleet observed ship** rows with known launchers (always)
 - **Fleet inferred acquisition** rows from prior-turn scores (required)
-- Ambiguous rows: **union** of launcher ids across all **fleet build option set** tuples
+- Ambiguous rows: soft **fleet build option set**s whose per-row softmax probability meets **`optionSetMassThreshold`** (default 0.25; same floor as max-tech)
 
-Empty when no active row has a positive launcher id in any option set. **Absent overlay behaves like empty belief set** (turn 1 included) -- not legacy admit-all torps on early tiers.
+Empty when no active row has a known launcher or a mass-eligible soft tube fit. **Absent overlay behaves like empty belief set** (turn 1 included) -- not legacy admit-all torps on early tiers.
 
 **Inference fleet launcher belief mass** (#253) scales ranking separately from admission membership:
 
 - **Hard**: known positive `fields.launchers` → mass 1 for that torp id from the row
-- **Soft** (ambiguous rows): softmax over all option sets on the row (including beam-only), log-score = `solution_rank_weight / INFERENCE_PROBABILITY_WEIGHT_SCALE`; soft mass for torp `t` = sum of probabilities of sets with `torp_id == t`
+- **Soft** (ambiguous rows): softmax over all option sets on the row (including beam-only), log-score = `solution_rank_weight / INFERENCE_PROBABILITY_WEIGHT_SCALE`; soft mass for torp `t` = sum of probabilities of sets with `torp_id == t` (not gated by the admission threshold)
 - Player mass = **max** over active rows
 - Effective misalignment = `round(P * (1 - mass))` with `P = torpMisalignmentLogPenalty`
 

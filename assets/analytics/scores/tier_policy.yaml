@@ -10,6 +10,10 @@
 # Fleet-informed torp admission + ranking (#87, section 8.8): early torp tiers use
 # belief-set ids only; inference torp escape tier (penultimate step, alpha > 0) admits
 # all eligible torp types.
+#
+# Order: ship bands first, then high-prior aggregates (belief torps, modest planet
+# defense), then full-catalog ship polish (capped), then heavier aggregates / escape.
+# Per-step minSeconds / maxSeconds: reserved soft-global envelopes (see design §8.5.3).
 fleetInferenceTuning:
   torpMisalignmentLogPenalty: 200
   optionSetMassThreshold: 0.25
@@ -100,6 +104,10 @@ solverThresholds:
   # Same floor as ship-only exact early-stop: a no-op tier may halt the ladder only
   # when the best held exact already meets this plausibility (#236).
   noNewExactSignaturesEarlyStopMinPlausibility: -300
+  # After first maximize Z*, further structural solves only accept ranking obj in
+  # [Z*-T, sliding max]. T=250 covers ~122 gap for lizard t9 truth vs early
+  # ship-only Z* (~-378 vs -500). Steps may override with nearBestObjectiveThreshold.
+  nearBestObjectiveThreshold: 250
 
 steps:
   - id: early_game_bands
@@ -121,6 +129,8 @@ steps:
     alpha: 50
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: false
+    minSeconds: 0
+    maxSeconds: 8
 
   - id: widen_launchers
     filters:
@@ -141,6 +151,8 @@ steps:
     alpha: 50
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: false
+    minSeconds: 0
+    maxSeconds: 8
 
   # After widen_launchers so twin combos that need launcher tech >5 (e.g. Gamma on
   # Resolute) are expressible. Hull admission is runtime-conditional via twin asset
@@ -164,8 +176,10 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
-    allowShipOnlyExactEarlyStop: true
+    allowShipOnlyExactEarlyStop: false
     hullCollisionTwinWiden: true
+    minSeconds: 0
+    maxSeconds: 5
 
   - id: widen_hulls
     filters:
@@ -184,25 +198,12 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
-    allowShipOnlyExactEarlyStop: true
+    allowShipOnlyExactEarlyStop: false
+    minSeconds: 0
+    maxSeconds: 8
 
-  - id: full_components
-    filters:
-      hulls:
-        all: true
-      engines:
-        all: true
-      beams:
-        all: true
-      launchers:
-        all: true
-    beamSlotCounts: partial
-    launcherSlotCounts: partial
-    aggregateAllowlist: {}
-    alpha: 50
-    maxSeeds: 5
-    allowShipOnlyExactEarlyStop: true
-
+  # High-prior belief torps before full-catalog ship polish. Open full beam/launcher
+  # eligibility (``all``) so activetorps / activebeams intersection applies.
   - id: admit_ship_torpedoes
     filters:
       hulls:
@@ -219,9 +220,12 @@ steps:
       ship_torps_per_type: 40
     alpha: 30
     maxSeeds: 5
-    allowShipOnlyExactEarlyStop: true
+    allowShipOnlyExactEarlyStop: false
+    runDegradeAggregateProbe: true
+    minSeconds: 3
+    maxSeconds: 8
 
-  - id: full_components_planet_defense
+  - id: modest_planet_defense
     filters:
       hulls:
         all: true
@@ -236,12 +240,33 @@ steps:
     aggregateAllowlist:
       ship_torps_per_type: 40
       planet_defense_posts_added_total: 16
-      starbase_fighters_added_total: 50
-      ship_fighters_added_total: 20
-      fighter_transfers_per_direction: 50
+    alpha: 50
+    maxSeeds: 5
+    allowShipOnlyExactEarlyStop: false
+    minSeconds: 1
+    maxSeconds: 5
+
+  # Full-catalog ship polish retread; retain prior aggregates (monotonic allowlist).
+  - id: full_components
+    filters:
+      hulls:
+        all: true
+      engines:
+        all: true
+      beams:
+        all: true
+      launchers:
+        all: true
+    beamSlotCounts: partial
+    launcherSlotCounts: partial
+    aggregateAllowlist:
+      ship_torps_per_type: 40
+      planet_defense_posts_added_total: 16
     alpha: 50
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
+    minSeconds: 0
+    maxSeconds: 5
 
   - id: admit_starbase_defense_posts
     filters:
@@ -265,6 +290,8 @@ steps:
     alpha: 30
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
+    minSeconds: 0
+    maxSeconds: 8
 
   - id: torp_escape_tier
     filters:
@@ -288,6 +315,8 @@ steps:
     alpha: 30
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
+    minSeconds: 0
+    maxSeconds: 8
 
   - id: full_catalog_exact
     filters:
@@ -311,3 +340,5 @@ steps:
     alpha: 0
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
+    minSeconds: 0
+    maxSeconds: 8

@@ -55,12 +55,27 @@ def test_policy_loader_validates_final_alpha_zero():
     assert steps[0].id == "early_game_bands"
     assert steps[1].id == "widen_launchers"
     assert steps[2].id == "collision_hull_widen"
+    assert [step.id for step in steps[3:7]] == [
+        "widen_hulls",
+        "admit_ship_torpedoes",
+        "modest_planet_defense",
+        "full_components",
+    ]
     assert steps[0].allow_ship_only_exact_early_stop is False
     assert steps[1].allow_ship_only_exact_early_stop is False
-    assert steps[2].allow_ship_only_exact_early_stop is True
-    assert all(step.allow_ship_only_exact_early_stop for step in steps[2:])
+    assert steps[2].allow_ship_only_exact_early_stop is False
+    assert all(not step.allow_ship_only_exact_early_stop for step in steps[:6])
+    assert all(step.allow_ship_only_exact_early_stop for step in steps[6:])
     assert steps[2].hull_collision_twin_widen is True
     assert sum(1 for step in steps if step.hull_collision_twin_widen) == 1
+    assert all(step.near_best_objective_threshold == 250 for step in steps)
+    torps = next(step for step in steps if step.id == "admit_ship_torpedoes")
+    assert torps.run_degrade_aggregate_probe is True
+    assert sum(1 for step in steps if step.run_degrade_aggregate_probe) == 1
+    assert torps.min_seconds == 3.0
+    assert torps.max_seconds == 8.0
+    full = next(step for step in steps if step.id == "full_components")
+    assert full.max_seconds == 5.0
 
 
 def test_policy_loader_reads_aggregate_probability_bins():
@@ -79,6 +94,7 @@ def test_policy_loader_reads_solver_thresholds():
     thresholds = resolve_solver_thresholds()
     assert thresholds.ship_only_exact_early_stop_min_plausibility == -300
     assert thresholds.no_new_exact_signatures_early_stop_min_plausibility == -300
+    assert thresholds.near_best_objective_threshold == 250
 
 
 def test_policy_loader_rejects_non_int_solver_threshold():
@@ -88,6 +104,147 @@ def test_policy_loader_rejects_non_int_solver_threshold():
                 "solverThresholds": {
                     "shipOnlyExactEarlyStopMinPlausibility": "-300",
                     "noNewExactSignaturesEarlyStopMinPlausibility": -300,
+                }
+            }
+        )
+
+
+def test_policy_loader_rejects_invalid_near_best_objective_threshold():
+    document = {
+        "steps": [
+            {
+                "id": "invalid",
+                "filters": {
+                    "hulls": {"all": True},
+                    "engines": {"all": True},
+                    "beams": {"all": True},
+                    "launchers": {"all": True},
+                },
+                "alpha": 0,
+                "nearBestObjectiveThreshold": -1,
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="nearBestObjectiveThreshold"):
+        parse_tier_policy_steps(document)
+
+
+def test_policy_loader_run_degrade_aggregate_probe_defaults_and_parses():
+    base_filters = {
+        "hulls": {"all": True},
+        "engines": {"all": True},
+        "beams": {"all": True},
+        "launchers": {"all": True},
+    }
+    omitted = parse_tier_policy_steps(
+        {"steps": [{"id": "omit", "filters": base_filters, "alpha": 0}]}
+    )
+    assert omitted[0].run_degrade_aggregate_probe is False
+    enabled = parse_tier_policy_steps(
+        {
+            "steps": [
+                {
+                    "id": "probe",
+                    "filters": base_filters,
+                    "alpha": 0,
+                    "runDegradeAggregateProbe": True,
+                }
+            ]
+        }
+    )
+    assert enabled[0].run_degrade_aggregate_probe is True
+    with pytest.raises(ValueError, match="runDegradeAggregateProbe must be a boolean"):
+        parse_tier_policy_steps(
+            {
+                "steps": [
+                    {
+                        "id": "bad",
+                        "filters": base_filters,
+                        "alpha": 0,
+                        "runDegradeAggregateProbe": "true",
+                    }
+                ]
+            }
+        )
+
+
+def test_policy_loader_rejects_null_step_near_best_objective_threshold():
+    document = {
+        "steps": [
+            {
+                "id": "null_threshold",
+                "filters": {
+                    "hulls": {"all": True},
+                    "engines": {"all": True},
+                    "beams": {"all": True},
+                    "launchers": {"all": True},
+                },
+                "alpha": 0,
+                "nearBestObjectiveThreshold": None,
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="nearBestObjectiveThreshold"):
+        parse_tier_policy_steps(document)
+
+
+def test_policy_loader_applies_global_near_best_default_when_step_omits():
+    document = {
+        "solverThresholds": {
+            "shipOnlyExactEarlyStopMinPlausibility": -300,
+            "noNewExactSignaturesEarlyStopMinPlausibility": -300,
+            "nearBestObjectiveThreshold": 100,
+        },
+        "steps": [
+            {
+                "id": "uses_global",
+                "filters": {
+                    "hulls": {"all": True},
+                    "engines": {"all": True},
+                    "beams": {"all": True},
+                    "launchers": {"all": True},
+                },
+                "alpha": 0,
+            }
+        ],
+    }
+    steps = parse_tier_policy_steps(document)
+    assert steps[0].near_best_objective_threshold == 100
+
+
+def test_policy_loader_step_near_best_overrides_global_default():
+    document = {
+        "solverThresholds": {
+            "shipOnlyExactEarlyStopMinPlausibility": -300,
+            "noNewExactSignaturesEarlyStopMinPlausibility": -300,
+            "nearBestObjectiveThreshold": 100,
+        },
+        "steps": [
+            {
+                "id": "override",
+                "filters": {
+                    "hulls": {"all": True},
+                    "engines": {"all": True},
+                    "beams": {"all": True},
+                    "launchers": {"all": True},
+                },
+                "alpha": 0,
+                "nearBestObjectiveThreshold": 40,
+            }
+        ],
+    }
+    steps = parse_tier_policy_steps(document)
+    assert steps[0].near_best_objective_threshold == 40
+
+
+def test_policy_loader_rejects_invalid_global_near_best_objective_threshold():
+    with pytest.raises(ValueError, match="nearBestObjectiveThreshold"):
+        parse_solver_thresholds(
+            {
+                "solverThresholds": {
+                    "shipOnlyExactEarlyStopMinPlausibility": -300,
+                    "noNewExactSignaturesEarlyStopMinPlausibility": -300,
+                    "nearBestObjectiveThreshold": -1,
                 }
             }
         )
@@ -260,7 +417,7 @@ def test_slack_deferred_on_early_steps(sample_turn):
     assert "ship_fighters_added_total" not in action_ids
 
 
-def test_full_components_step_opens_ship_slots_before_aggregates(sample_turn):
+def test_full_components_step_opens_ship_slots_before_heavier_aggregates(sample_turn):
     observation = _observation(warship_delta=1, freighter_delta=1, starbases_owned=5)
     widen_hulls = next(step for step in resolve_tier_policies() if step.id == "widen_hulls")
     full_components = next(step for step in resolve_tier_policies() if step.id == "full_components")
@@ -276,9 +433,10 @@ def test_full_components_step_opens_ship_slots_before_aggregates(sample_turn):
     )
     assert full_components.beam_slot_counts == "partial"
     assert full_components.launcher_slot_counts == "partial"
-    assert full_components.aggregate_allowlist == {}
+    # Monotonic allowlist retains prior high-prior aggregates; fighters still deferred.
+    assert "ship_torps_per_type" in full_components.aggregate_allowlist
+    assert "planet_defense_posts_added_total" in full_components.aggregate_allowlist
     action_ids = {action.id for action in full_components_catalog.aggregate_actions}
-    assert "planet_defense_posts_added_total" not in action_ids
     assert "starbase_fighters_added_total" not in action_ids
     assert "ship_fighters_added_total" not in action_ids
     assert "fighters_starbase_to_ship" not in action_ids
@@ -286,10 +444,10 @@ def test_full_components_step_opens_ship_slots_before_aggregates(sample_turn):
     assert len(full_components_catalog.ship_build_combos) >= len(widen_catalog.ship_build_combos)
 
 
-def test_fighter_builds_admitted_on_full_components_step_with_caps(sample_turn):
+def test_fighter_builds_admitted_on_starbase_defense_step_with_caps(sample_turn):
     observation = _observation(military_delta_2x=500)
     full_components_step = next(
-        step for step in resolve_tier_policies() if step.id == "full_components_planet_defense"
+        step for step in resolve_tier_policies() if step.id == "admit_starbase_defense_posts"
     )
     catalog = build_action_catalog_from_turn(
         observation,
@@ -330,7 +488,7 @@ def test_ship_torpedoes_admitted_after_full_components_with_caps(sample_turn):
 def test_slack_admitted_on_later_steps_with_caps(sample_turn):
     observation = _observation(military_delta_2x=500)
     defense_step = next(
-        step for step in resolve_tier_policies() if step.id == "full_components_planet_defense"
+        step for step in resolve_tier_policies() if step.id == "modest_planet_defense"
     )
     catalog = build_action_catalog_from_turn(
         observation,
@@ -551,7 +709,7 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -566,11 +724,20 @@ def test_solve_with_policy_ladder_stops_when_no_new_exact_signatures(sample_turn
     assert collision.id not in call_step_ids  # skipped when no twin partners
     assert widen_hulls.id in call_step_ids
     assert [solution.objective_value for solution in result.solutions] == [100, 50]
-    assert catalog.policy_step_id == "full_components"
-    assert problem.policy_step_id == "full_components"
+    assert catalog.policy_step_id == "admit_ship_torpedoes"
+    assert problem.policy_step_id == "admit_ship_torpedoes"
     assert step_diagnostics
     assert step_diagnostics[0]["policyStepId"] == early.id
     assert "filters" in step_diagnostics[0]["constraintSnapshot"]
+    assert "durationMs" in step_diagnostics[0]
+    assert step_diagnostics[0]["heldCountBefore"] == 0
+    assert step_diagnostics[0]["newlyAdmittedCount"] == 0
+    widen_diag = next(
+        diag for diag in step_diagnostics if diag["policyStepId"] == widen_launchers.id
+    )
+    assert widen_diag["newlyAdmittedCount"] >= 1
+    assert widen_diag["newlyAdmitted"][0]["objectiveValue"] == 100
+    assert step_diagnostics[-1].get("ladderEarlyStopReason") == "no_new_exact_signatures"
     assert result.diagnostics["stopped_reason"] == "no_new_exact_signatures"
 
 
@@ -618,9 +785,7 @@ def test_solve_with_policy_ladder_continues_no_new_signatures_when_best_below_th
     early = policy_steps[0]
     widen_launchers = next(step for step in policy_steps if step.id == "widen_launchers")
     widen_hulls = next(step for step in policy_steps if step.id == "widen_hulls")
-    planet_defense = next(
-        step for step in policy_steps if step.id == "full_components_planet_defense"
-    )
+    planet_defense = next(step for step in policy_steps if step.id == "modest_planet_defense")
 
     def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == early.id:
@@ -660,7 +825,7 @@ def test_solve_with_policy_ladder_continues_no_new_signatures_when_best_below_th
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -676,7 +841,7 @@ def test_solve_with_policy_ladder_continues_no_new_signatures_when_best_below_th
     # Empty-belief admit_ship_torpedoes is a catalog no-op, but the weak held exact
     # is below the plausibility floor so the ladder must continue into aggregate tiers.
     assert "admit_ship_torpedoes" in attempted
-    assert "full_components_planet_defense" in attempted
+    assert "modest_planet_defense" in attempted
     assert [solution.objective_value for solution in result.solutions] == [-200, -1133]
 
 
@@ -784,7 +949,7 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -799,7 +964,7 @@ def test_solve_with_policy_ladder_continues_when_aggregate_actions_are_added(
     )
 
     assert "admit_ship_torpedoes" in attempted
-    assert "full_components_planet_defense" in attempted
+    assert "modest_planet_defense" in attempted
     assert result.status == STATUS_EXACT
 
 
@@ -981,7 +1146,7 @@ def test_solve_with_policy_ladder_evicts_worst_when_k_best_full(sample_turn, mon
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -1003,8 +1168,9 @@ def test_solve_with_policy_ladder_defers_ship_only_early_stop_past_early_bands(
 ):
     """Ship-only exact that meets plausibility must not stop on early ladder steps.
 
-    ``early_game_bands`` / ``widen_launchers`` set ``allowShipOnlyExactEarlyStop: false``;
-    a qualifying exact on those steps must still reach ``collision_hull_widen``.
+    Steps through ``modest_planet_defense`` set ``allowShipOnlyExactEarlyStop: false``;
+    a qualifying exact on early bands must still reach ``admit_ship_torpedoes`` /
+    later aggregate steps before ship-only early-stop is armed.
     """
     observation = _observation(military_delta_2x=400, warship_delta=1)
     policy_steps = resolve_tier_policies()
@@ -1014,7 +1180,7 @@ def test_solve_with_policy_ladder_defers_ship_only_early_stop_past_early_bands(
     assert early.id == "early_game_bands"
     assert early.allow_ship_only_exact_early_stop is False
     assert widen_launchers.allow_ship_only_exact_early_stop is False
-    assert collision.allow_ship_only_exact_early_stop is True
+    assert collision.allow_ship_only_exact_early_stop is False
 
     early_exact = _ship_build_solution(combo_id="combo_early", objective_value=-300)
     widen_exact = _ship_build_solution(combo_id="combo_widen", objective_value=-300)
@@ -1035,7 +1201,7 @@ def test_solve_with_policy_ladder_defers_ship_only_early_stop_past_early_bands(
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        "api.analytics.military_score_inference.policy_ladder_admission.solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
     _, _, _, attempted, _ = solve_with_policy_ladder(
@@ -1096,7 +1262,7 @@ def test_solve_with_policy_ladder_runs_collision_hull_widen_on_twin_hit(sample_t
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step."
+        "api.analytics.military_score_inference.policy_ladder_admission."
         "_solution_qualifies_for_ship_only_exact_early_stop",
         lambda *args, **kwargs: False,
     )
@@ -1127,7 +1293,10 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
 ):
     observation = _observation(military_delta_2x=400, warship_delta=1)
     policy_steps = resolve_tier_policies()
-    threshold_solution = _ship_build_solution(combo_id="combo_a", objective_value=-300)
+    first_early_stop_step = next(
+        step for step in policy_steps if step.allow_ship_only_exact_early_stop
+    )
+    assert first_early_stop_step.id == "full_components"
 
     def _solve_side_effect(problem, **kwargs):
         if problem.policy_step_id == policy_steps[0].id:
@@ -1135,6 +1304,11 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
                 InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
                 **kwargs,
             )
+        # Distinct combo ids per step so #236 no-new-signatures does not fire first.
+        threshold_solution = _ship_build_solution(
+            combo_id=f"combo_{problem.policy_step_id}",
+            objective_value=-300,
+        )
         return _emit_mock_solver_solutions(
             InferenceResult(
                 status=STATUS_EXACT,
@@ -1149,7 +1323,7 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        "api.analytics.military_score_inference.policy_ladder_admission.solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
     _, _, _, attempted, _ = solve_with_policy_ladder(
@@ -1158,11 +1332,9 @@ def test_solve_with_policy_ladder_stops_when_ship_only_exact_meets_plausibility_
         time_limit_seconds=60.0,
     )
 
-    assert attempted == [
-        policy_steps[0].id,
-        policy_steps[1].id,
-        policy_steps[2].id,
-    ]
+    expected = [step.id for step in policy_steps if not step.allow_ship_only_exact_early_stop]
+    expected.append(first_early_stop_step.id)
+    assert attempted == expected
 
 
 def test_solve_with_policy_ladder_continues_when_ship_only_exact_below_plausibility_threshold(
@@ -1192,7 +1364,7 @@ def test_solve_with_policy_ladder_continues_when_ship_only_exact_below_plausibil
         _solve_side_effect,
     )
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step.solution_satisfies_exact_hard_equalities",
+        "api.analytics.military_score_inference.policy_ladder_admission.solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
     _, _, _, attempted_low, _ = solve_with_policy_ladder(

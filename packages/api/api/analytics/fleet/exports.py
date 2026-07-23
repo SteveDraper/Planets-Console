@@ -32,8 +32,7 @@ PATH_PREFIX_SCOPE_RULES = (
 )
 
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
-    EnsureDependency(analytic_id="scores", turn_delta=0, player_id="same"),
-    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
 )
 
 
@@ -78,6 +77,23 @@ def _fleet_snapshot_for_scope(
         )
 
     return ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
+
+
+def is_fleet_export_observation_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Probe/ensure hook: any stored ledger (non-final allowed)."""
+    if scope.player_id is None:
+        return True
+
+    services = resolve_fleet_services(ctx)
+    if ctx.load_turn(scope.turn) is None:
+        return True
+
+    return services.persistence.has_ledger(
+        services.game_id,
+        services.perspective,
+        scope.turn,
+        scope.player_id,
+    )
 
 
 def is_fleet_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:

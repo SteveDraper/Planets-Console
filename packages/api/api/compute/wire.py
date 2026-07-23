@@ -7,12 +7,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack
 
 from api.analytics.exports.jsonpath import resolve_jsonpath
+from api.compute.persistence import PersistDependencyRecovery
 from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
-StepOutcome = Literal["continue", "persist", "complete", "park"]
+StepOutcome = Literal["continue", "persist", "complete", "park", "waiting_deps"]
 
 # Compute plane: job payload -> serializable result payload.
 RunStepFn = Callable[[Any], Any]
@@ -25,6 +26,11 @@ class StepResult:
     outcome: StepOutcome
     payload: object | None = None
     park_reason: str | None = None
+    # When true, ``persist`` runs but the node advances to the next profile step.
+    persist_then_continue: bool = False
+    # Optional cross-scope recovery (graft + optional force_fresh). Soft defer
+    # omits this so demotion does not self-graft the waiting node.
+    wait_recovery: PersistDependencyRecovery | None = None
 
 
 def coerce_step_result(result_wire: object) -> StepResult:
@@ -33,15 +39,21 @@ def coerce_step_result(result_wire: object) -> StepResult:
         return result_wire
     if isinstance(result_wire, dict) and "outcome" in result_wire:
         outcome = result_wire["outcome"]
-        if outcome not in {"continue", "persist", "complete", "park"}:
+        if outcome not in {"continue", "persist", "complete", "park", "waiting_deps"}:
             raise ValueError(f"invalid step outcome {outcome!r}")
         park_reason = result_wire.get("parkReason")
         if park_reason is not None and not isinstance(park_reason, str):
             raise ValueError("parkReason must be a string when provided")
+        persist_then_continue = bool(result_wire.get("persistThenContinue", False))
+        wait_recovery = result_wire.get("waitRecovery")
+        if wait_recovery is not None and not isinstance(wait_recovery, PersistDependencyRecovery):
+            raise ValueError("waitRecovery must be PersistDependencyRecovery when provided")
         return StepResult(
             outcome=outcome,
             payload=result_wire.get("payload"),
             park_reason=park_reason,
+            persist_then_continue=persist_then_continue,
+            wait_recovery=wait_recovery,
         )
     return StepResult(outcome="persist", payload=result_wire)
 
@@ -79,11 +91,12 @@ class DependencyOutputs:
         return self._by_scope
 
 
-class BuildStepJobWireKwargs(TypedDict):
+class BuildStepJobWireKwargs(TypedDict, total=False):
     """Keyword arguments passed to job-wire builders by the orchestrator."""
 
     dependency_outputs: DependencyOutputs
     ctx: AnalyticQueryContext | None
+    node_result_wire: object | None
 
 
 # Orchestration plane: scope + dependency outputs -> serializable job payload.

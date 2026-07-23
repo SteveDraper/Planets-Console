@@ -84,6 +84,56 @@ def test_partial_fleet_ledger_is_not_ensure_satisfied(sample_turn, persistence):
     assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is False
 
 
+def test_non_final_ledger_satisfies_observation_but_not_final_quality(
+    sample_turn,
+    persistence,
+):
+    from api.analytics.export_dependency_walk import is_ensure_dependency_satisfied
+    from api.analytics.export_types import EnsureDependency
+    from api.analytics.fleet.exports import is_fleet_export_observation_satisfied
+
+    player_id = first_player_id(sample_turn)
+    turn_number = 8
+    stored_turns = _turn_chain_through(sample_turn, through_turn=turn_number)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        stored_turns=stored_turns,
+    )
+    fleet_services = ctx.export_services["fleet"]
+    fleet_services.persistence.put_ledger(
+        GAME_ID,
+        perspective(sample_turn),
+        turn_number,
+        player_id,
+        _partial_persisted_ledger(player_id),
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=turn_number,
+        player_id=player_id,
+    )
+    assert is_fleet_export_observation_satisfied(ctx, scope) is True
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is False
+    assert (
+        is_ensure_dependency_satisfied(
+            ctx,
+            EnsureDependency(analytic_id="fleet", quality="observation"),
+            scope,
+        )
+        is True
+    )
+    assert (
+        is_ensure_dependency_satisfied(
+            ctx,
+            EnsureDependency(analytic_id="fleet", quality="final"),
+            scope,
+        )
+        is False
+    )
+
+
 def test_probe_fleet_at_8_lists_missing_scores_5_6_7_with_partial_ledgers(
     sample_turn,
     persistence,
@@ -121,12 +171,13 @@ def test_probe_fleet_at_8_lists_missing_scores_5_6_7_with_partial_ledgers(
     probe = ctx.probe("fleet", {"turn": turn_number, "player_id": player_id})
     assert probe.status == "ok"
 
-    missing_scores_turns = sorted(
+    missing_fleet_turns = sorted(
         step.turn
         for step in probe.missing_steps
-        if step.analytic_id == "scores" and step.player_id == player_id
+        if step.analytic_id == "fleet" and step.player_id == player_id
     )
-    assert {5, 6, 7}.issubset(missing_scores_turns)
+    assert {5, 6, 7}.issubset(missing_fleet_turns)
+    assert not any(step.analytic_id == "scores" for step in probe.missing_steps)
 
     walk = walk_dependency_tree(
         ctx,
@@ -139,12 +190,13 @@ def test_probe_fleet_at_8_lists_missing_scores_5_6_7_with_partial_ledgers(
         ),
         visiting=set(),
     )
-    walk_scores_turns = sorted(
+    walk_fleet_turns = sorted(
         step.turn
         for step in walk.missing_steps
-        if step.analytic_id == "scores" and step.player_id == player_id
+        if step.analytic_id == "fleet" and step.player_id == player_id
     )
-    assert {5, 6, 7}.issubset(walk_scores_turns)
+    assert {5, 6, 7}.issubset(walk_fleet_turns)
+    assert not any(step.analytic_id == "scores" for step in walk.missing_steps)
     fleet_step = ensure_missing_step(
         probe,
         analytic_id="fleet",

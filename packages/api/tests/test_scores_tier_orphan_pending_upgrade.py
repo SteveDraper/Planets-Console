@@ -163,7 +163,18 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
     assert not stream_drain.is_closed(session.run_id)
 
     # Missing RowRun parks until force_fresh wake can rebuild wire / reschedule.
-    assert run_scores_tier_solve({"runId": run.run_id}).outcome == "park"
+    assert (
+        run_scores_tier_solve(
+            {
+                "runId": run.run_id,
+                "gameId": scope.game_id,
+                "perspective": scope.perspective,
+                "turn": scope.turn,
+                "playerId": scope.player_id,
+            }
+        ).outcome
+        == "waiting_deps"
+    )
 
     scheduler._on_orchestrator_scope_outcome(
         _outcome_snapshot(scope, state="complete", result_wire={"exportTree": {"ok": True}}),

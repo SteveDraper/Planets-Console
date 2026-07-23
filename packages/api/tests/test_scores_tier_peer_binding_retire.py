@@ -40,9 +40,18 @@ def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> Non
     register_row_run(run)
     _retire_row_run(run.run_id)
 
-    result = run_scores_tier_solve({"runId": run.run_id})
+    scope = _scope_for(session)
+    result = run_scores_tier_solve(
+        {
+            "runId": run.run_id,
+            "gameId": scope.game_id,
+            "perspective": scope.perspective,
+            "turn": scope.turn,
+            "playerId": scope.player_id,
+        }
+    )
 
-    assert result.outcome == "park"
+    assert result.outcome == "waiting_deps"
 
 
 def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -> None:

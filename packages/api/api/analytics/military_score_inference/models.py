@@ -18,6 +18,11 @@ def _default_ranking_heuristics() -> InferenceRankingHeuristics:
     return InferenceRankingHeuristics()
 
 
+# After first maximize Z*, further structural solves only accept ranking objectives
+# in [Z* - T, sliding max]. Shared by InferenceProblem, ActionCatalog, and tier YAML.
+DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD = 250
+
+
 @dataclass(frozen=True)
 class InferenceObservation:
     player_id: int
@@ -139,6 +144,8 @@ class InferenceProblem:
     )
     admission_caps_by_action_id: dict[str, int] = field(default_factory=dict)
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
+    # Within-tier near-best ranking band width T (always applied after first maximize).
+    near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
 
 
 @dataclass(frozen=True)

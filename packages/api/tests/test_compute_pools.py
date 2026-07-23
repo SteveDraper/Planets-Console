@@ -45,6 +45,19 @@ _POOL_EXPORT_REGISTRY = merge_export_registry(
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_compute_pool_singleton():
+    """Prevent process-wide pool singleton pollution from other test modules."""
+    from api.compute.pools import shutdown_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    shutdown_compute_worker_pool_for_tests()
+    reset_orchestrators_for_tests()
+    yield
+    shutdown_compute_worker_pool_for_tests()
+    reset_orchestrators_for_tests()
+
+
 def _catalog_entry(analytic_id: str = _ANALYTIC_ID) -> TurnAnalyticCatalogEntry:
     return TurnAnalyticCatalogEntry(
         id=analytic_id,
@@ -620,11 +633,15 @@ def test_concurrent_submit_with_multiple_pool_workers(sample_turn):
 
 
 def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
-    from api.analytics.fleet.compute_orchestration import FLEET_MATERIALIZATION_LEG
-    from api.analytics.fleet.compute_plane.materialization_leg import run_fleet_materialization_leg
+    from api.analytics.fleet.compute_orchestration import (
+        FLEET_FINALIZATION_LEG,
+        FLEET_MATERIALIZATION_LEG,
+    )
+    from api.analytics.fleet.compute_plane.finalization_leg import run_fleet_finalization_leg
+    from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
 
     def build_job_wire(scope, *, dependency_outputs, ctx=None, **_kwargs):
-        del dependency_outputs
+        del dependency_outputs, _kwargs
         from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
         from api.analytics.fleet.types import FleetAcquisitionLedger
         from api.serialization.turn import turn_info_to_json
@@ -658,17 +675,39 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
             },
         }
 
+    def build_finalization_wire(
+        scope,
+        *,
+        dependency_outputs,
+        ctx=None,
+        node_result_wire=None,
+        **_kwargs,
+    ):
+        del scope, dependency_outputs, ctx, _kwargs
+        if not isinstance(node_result_wire, dict):
+            raise RuntimeError("fleet finalization test wire requires observation result")
+        return dict(node_result_wire)
+
     return TurnAnalyticRegistration(
         catalog_entry=_catalog_entry(_FLEET_ANALYTIC_ID),
         compute=lambda _ctx: {"analyticId": _FLEET_ANALYTIC_ID},
         export_catalog=make_fixture_catalog(_FLEET_ANALYTIC_ID),
         scope_key_spec=_ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
-            steps=(ComputeStepSpec(step_kind=FLEET_MATERIALIZATION_LEG, backend="interpreter"),),
+            steps=(
+                ComputeStepSpec(step_kind=FLEET_MATERIALIZATION_LEG, backend="interpreter"),
+                ComputeStepSpec(step_kind=FLEET_FINALIZATION_LEG, backend="inline"),
+            ),
         ),
         persistence_policy=_StubPersistencePolicy(),
-        build_step_job_wires=((FLEET_MATERIALIZATION_LEG, build_job_wire),),
-        run_steps=((FLEET_MATERIALIZATION_LEG, run_fleet_materialization_leg),),
+        build_step_job_wires=(
+            (FLEET_MATERIALIZATION_LEG, build_job_wire),
+            (FLEET_FINALIZATION_LEG, build_finalization_wire),
+        ),
+        run_steps=(
+            (FLEET_MATERIALIZATION_LEG, run_fleet_observation_leg),
+            (FLEET_FINALIZATION_LEG, run_fleet_finalization_leg),
+        ),
     )
 
 

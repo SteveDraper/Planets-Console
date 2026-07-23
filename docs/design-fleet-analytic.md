@@ -246,14 +246,16 @@ Register `analytics/fleet/exports.py`:
 
 ```python
 ENSURE_DEPENDENCIES = (
-    EnsureDependency(analytic_id="scores", turn_delta=0, player_id="same"),
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
 )
 ```
 
-Wire **scores** provider edge (currently empty in #93d):
+Same-turn **scores** is not an ENSURE edge on fleet observation. Finalization waits on scores via `PersistDeferredError` (orchestrator `waiting_deps` + `force_fresh` on scores `tier_solve`). Compute profile: `observation_leg` (interpreter, non-final host ledger + continue; no ship-observation ingest) then `finalization_leg` (inline, scores refine then observation ingest + final persist).
+
+Wire **scores** provider edge for prior-turn belief:
 
 ```python
-EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
 ```
 
 Export tree mirrors ledger: per-player records, discrepancies, `meta.searchStatus` when scores materialization incomplete for the scoped `player_id`. `is_ensure_satisfied` for `fleet@N` requires per-player provenance `(true, true)`, not merely a stored document. See [design-analytic-exports.md](design-analytic-exports.md) and [ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).

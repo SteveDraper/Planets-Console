@@ -14,7 +14,14 @@ from api.analytics.fleet.compute_services import (
 )
 from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
-from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+from api.analytics.fleet.types import (
+    FleetAcquisitionLedger,
+    FleetFieldKnown,
+    FleetMaterializationProvenance,
+    FleetShipRecord,
+    FleetShipRecordFields,
+    PersistedFleetLedger,
+)
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -155,7 +162,8 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
 
     empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome())
     # Empty terminals must not DAG-complete (unlocks fleet with open evidence).
-    assert empty_result.outcome == "park"
+    assert empty_result.outcome == "waiting_deps"
+    assert empty_result.wait_recovery is None
 
 
 def test_run_scores_materialize_continues_to_tier_solve() -> None:
@@ -256,7 +264,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
     )
 
     # Open evidence + ensure still needs work (schedule patched away): hard fail --
-    # not empty-complete, and not a soft park without an armed wake publisher.
+    # not empty-complete, and not a soft defer without an armed wake publisher.
     with patch("api.analytics.scores.exports.schedule_inference_row"):
         with pytest.raises(RuntimeError, match="invariant broken"):
             build_scores_tier_solve_job_wire(
@@ -283,7 +291,8 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert skip_wire == {"runId": None, "evidenceClosed": True}
+    assert skip_wire["runId"] is None
+    assert skip_wire["evidenceClosed"] is True
 
 
 def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
@@ -360,7 +369,8 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
         )
-    assert wire == {"runId": run.run_id}
+    assert wire["runId"] == run.run_id
+    assert wire["gameId"] == scope.game_id
     assert get_row_run_for_scope(scope) is run
 
 
@@ -580,7 +590,9 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
         )
         for _ in range(3)
     ]
-    assert skip_wires == [{"runId": None, "evidenceClosed": True}] * 3
+    assert all(
+        wire.get("runId") is None and wire.get("evidenceClosed") is True for wire in skip_wires
+    )
     assert all(run_scores_tier_solve(wire).outcome == "complete" for wire in skip_wires)
 
 
@@ -693,7 +705,8 @@ def test_historical_materialize_skips_tier_when_already_persisted(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert tier_wire == {"runId": None, "evidenceClosed": True}
+    assert tier_wire["runId"] is None
+    assert tier_wire["evidenceClosed"] is True
 
 
 def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
@@ -816,6 +829,89 @@ def test_build_scores_tier_solve_job_wire_uses_fleet_dependency_output(sample_tu
 
     assert run.session.fleet_torp_input_status == "applied"
     assert run.session.fleet_torp_overlay is not None
+
+
+def test_scores_tier_wire_stale_dependency_prior_must_not_override_final_disk(
+    sample_turn, persistence
+):
+    """Non-final DepOutputs fleet prior must not beat a final disk ledger.
+
+    Mirrors fleet ``test_stale_dependency_prior_must_not_override_final_disk_ledger``:
+    scores tier-wire prior selection must share ``select_fleet_prior_persisted`` so
+    inference overlay / max-tech gates see the refined disk ledger.
+    """
+    host_turn = host_turn_at(sample_turn, HOST_TURN)[0]
+    ctx = export_chain_query_context(host_turn, persistence=persistence)
+    player_id = host_turn.scores[0].ownerid
+    prior_turn = HOST_TURN - 1
+
+    disk_final = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(
+            player_id=player_id,
+            records=[
+                FleetShipRecord(
+                    record_id="disk-final",
+                    fields=FleetShipRecordFields(launchers=FleetFieldKnown(6)),
+                ),
+            ],
+        ),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    stale_prior = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(
+            player_id=player_id,
+            records=[
+                FleetShipRecord(
+                    record_id="stale-deps",
+                    fields=FleetShipRecordFields(launchers=FleetFieldKnown(3)),
+                ),
+            ],
+        ),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=False,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+
+    fleet_services = ctx.export_services["fleet"]
+    fleet_services.persistence.put_ledger(
+        628580,
+        1,
+        prior_turn,
+        player_id,
+        disk_final,
+    )
+
+    run = _register_run(host_turn, player_id=player_id)
+    run.session.fleet_torp_input_status = "pending"
+
+    prior_fleet_scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=prior_turn,
+        player_id=player_id,
+    )
+    dependency_outputs = DependencyOutputs()
+    dependency_outputs.put(
+        prior_fleet_scope,
+        {"persistedLedgerWire": persisted_fleet_ledger_to_json(stale_prior)},
+    )
+
+    build_scores_tier_solve_job_wire(
+        _scores_scope(host_turn, player_id),
+        dependency_outputs=dependency_outputs,
+        ctx=ctx,
+    )
+
+    assert run.session.fleet_torp_input_status == "applied"
+    assert run.session.fleet_torp_overlay is not None
+    belief = run.session.fleet_torp_overlay.belief_set.torp_ids
+    assert 6 in belief, "tier wire preferred stale DepOutputs prior over final disk"
+    assert 3 not in belief
 
 
 def test_scores_invalidation_generation_tracks_fleet_epoch(sample_turn, persistence):
@@ -994,8 +1090,13 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
     assert handle.result_wire is not None
 
 
-def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) -> None:
-    """Empty tier outcomes park instead of hot-continue tier_solve."""
+def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) -> None:
+    """Empty tier soft-defers to waiting_deps; force_fresh wake re-queues work.
+
+    Soft defer must not graft the scores scope onto its own dependency_scopes --
+    that self-edge leaves ``_deps_complete`` false forever so force_fresh attach
+    cannot promote the node out of waiting_deps.
+    """
     from api.analytics.catalog import TurnAnalyticCatalogEntry
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.exports.registry import EXPORT_REGISTRY
@@ -1049,14 +1150,14 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
         turn=sample_turn.settings.turn,
         player_id=run.session.player_id,
     )
-    park_notifications: list[str] = []
+    defer_notifications: list[str] = []
 
-    def record_park(snapshot) -> None:
+    def record_outcome(snapshot) -> None:
         if snapshot.scope.analytic_id == "scores-tier-probe":
-            park_notifications.append(snapshot.state)
+            defer_notifications.append(snapshot.state)
 
     unregister = orchestrator.observers.register_scope_outcome_listener(
-        record_park,
+        record_outcome,
     )
 
     with patch(
@@ -1067,17 +1168,27 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
             ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE),
         )
         assert submitted_scopes == [scope]
-        result_wire = run_scores_tier_solve({"runId": run.run_id})
-        assert result_wire.outcome == "park"
+        result_wire = run_scores_tier_solve(
+            {
+                "runId": run.run_id,
+                "gameId": scope.game_id,
+                "perspective": scope.perspective,
+                "turn": scope.turn,
+                "playerId": scope.player_id,
+            }
+        )
+        assert result_wire.outcome == "waiting_deps"
+        assert result_wire.wait_recovery is None
         orchestrator.complete_pool_step(scope, result_wire=result_wire)
 
     unregister()
     node = orchestrator.nodes[scope]
-    assert node.state == "parked"
-    assert handle.state == "parked"
-    assert park_notifications == ["parked"]
+    assert node.state == "waiting_deps"
+    assert handle.state == "waiting_deps"
+    assert scope not in node.dependency_scopes
+    assert defer_notifications == []
     assert submitted_scopes == [scope]
-    assert orchestrator.metrics.epoch_discards == 0
+    assert orchestrator.metrics.epoch_discards == 1
     # Soft park must not satisfy dependents the way complete would.
     from api.compute.orchestrator import ComputeNodeRun
 
@@ -1094,6 +1205,7 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
     )
     assert orchestrator._deps_complete(dependent) is False
 
+    submits_before_wake = len(submitted_scopes)
     with patch(
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
         return_value=TierJobOutcome(
@@ -1112,8 +1224,9 @@ def test_orchestrator_parks_empty_soft_terminal_without_redispatch(sample_turn) 
             ),
         )
 
-    assert submitted_scopes == [scope, scope]
-    assert node.state == "running"
+    assert len(submitted_scopes) > submits_before_wake
+    assert node.state in {"ready", "running"}
+    assert scope not in node.dependency_scopes
 
 
 def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
@@ -1222,13 +1335,13 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
     assert prior_fleet_scope in planned_by_scope[scope].dependency_scopes
 
 
-def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> None:
-    """Background RowRun register must force_fresh-wake a soft-parked scores node."""
+def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -> None:
+    """Background RowRun register must force_fresh-refresh a waiting_deps scores node."""
     from api.analytics.military_score_inference.inference_scheduler import (
         reset_inference_row_scheduler_for_tests,
     )
     from api.analytics.scores.compute_orchestration import wake_scores_scope
-    from api.analytics.scores_park_wake import ScoresWakeReason
+    from api.analytics.scores_defer_wake import ScoresWakeReason
     from api.compute import runtime as compute_runtime
     from api.compute.orchestrator import ComputeNodeRun
     from api.compute.runtime import reset_orchestrators_for_tests
@@ -1259,16 +1372,16 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
     )
     compute_runtime._process_orchestrator = orchestrator
 
-    parked = ComputeNodeRun(
+    waiting = ComputeNodeRun(
         scope=scope,
         dependency_scopes=(),
-        state="parked",
+        state="waiting_deps",
         priority_band="background",
         profile_step_index=1,
         step_index=1,
         bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
     )
-    orchestrator._nodes[scope] = parked
+    orchestrator._nodes[scope] = waiting
 
     assert (
         wake_scores_scope(
@@ -1278,10 +1391,10 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
         )
         is True
     )
-    assert parked.state in {"ready", "running"}
+    assert waiting.state in {"ready", "running"}
     assert submitted_scopes == [scope]
 
-    # Already woken -- not parked anymore.
+    submitted_scopes.clear()
     assert (
         wake_scores_scope(
             scope,
@@ -1290,6 +1403,7 @@ def test_row_run_adopt_wakes_parked_scores_node(sample_turn, persistence) -> Non
         )
         is False
     )
+    assert submitted_scopes == []
 
 
 def test_enqueue_without_stream_token_wakes_parked_scores_node(

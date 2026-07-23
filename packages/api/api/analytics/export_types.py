@@ -70,6 +70,9 @@ class PathPrefixScopeRule:
     requires: tuple[str, ...] = ()
 
 
+EnsureDependencyQuality = Literal["observation", "final"]
+
+
 @dataclass(frozen=True)
 class EnsureDependency:
     """Provider-declared upstream ensure edge."""
@@ -77,6 +80,7 @@ class EnsureDependency:
     analytic_id: str
     turn_delta: int = 0
     player_id: Literal["same"] | None = "same"
+    quality: EnsureDependencyQuality = "final"
 
 
 @dataclass(frozen=True)

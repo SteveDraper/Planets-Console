@@ -91,8 +91,34 @@ def test_belief_set_from_fleet_records_unions_option_sets():
             FleetBuildOptionSet(torp_id=8, label="Mk VIII alt"),
         ],
     )
-    belief = launcher_belief_set_from_fleet_records([record])
+    # Flat union (None) keeps both soft ids; production overlay applies mass threshold.
+    belief = launcher_belief_set_from_fleet_records(
+        [record],
+        option_set_mass_threshold=None,
+    )
     assert belief.torp_ids == frozenset({4, 8})
+
+
+def test_belief_set_from_fleet_records_applies_mass_threshold():
+    record = FleetShipRecord(
+        record_id="inferred",
+        disposition="active",
+        fields=FleetShipRecordFields(
+            launchers=FleetFieldKnown(4),
+        ),
+        build_option_sets=[
+            FleetBuildOptionSet(torp_id=4, label="Mk IV default", solution_rank_weight=200),
+            FleetBuildOptionSet(torp_id=8, label="Mk VIII alt", solution_rank_weight=10),
+        ],
+    )
+    from api.analytics.fleet.option_set_mass import DEFAULT_OPTION_SET_MASS_THRESHOLD
+
+    belief = launcher_belief_set_from_fleet_records(
+        [record],
+        option_set_mass_threshold=DEFAULT_OPTION_SET_MASS_THRESHOLD,
+    )
+    assert 4 in belief.torp_ids
+    assert 8 not in belief.torp_ids
 
 
 def test_absent_overlay_is_empty_belief_set_on_early_torp_tier(sample_turn):

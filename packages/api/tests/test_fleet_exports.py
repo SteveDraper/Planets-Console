@@ -40,8 +40,7 @@ def test_export_registry_includes_non_empty_fleet_catalog():
     assert catalog.analytic_id == "fleet"
     assert not catalog.is_empty
     assert catalog.ensure_dependencies == (
-        EnsureDependency(analytic_id="scores", turn_delta=0, player_id="same"),
-        EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+        EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
     )
     assert catalog.materialize_export_tree is not None
     assert catalog.ensure_export is not None
@@ -50,7 +49,7 @@ def test_export_registry_includes_non_empty_fleet_catalog():
 def test_scores_catalog_references_fleet_with_non_empty_target():
     catalog = SCORES_EXPORT_CATALOG
     assert catalog.ensure_dependencies == (
-        EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+        EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
     )
     assert not EXPORT_CATALOG.is_empty
 
@@ -251,6 +250,7 @@ def test_materialized_tree_surfaces_in_progress_scores_status(sample_turn, persi
 
 def test_materialized_tree_includes_placeholder_records_with_incomplete_search(sample_turn):
     reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
 
     player_id = first_player_id(sample_turn)
     turn = turn_with_score_delta(
@@ -265,7 +265,13 @@ def test_materialized_tree_includes_placeholder_records_with_incomplete_search(s
     ctx = export_chain_query_context(
         turn,
         stored_turns=stored_turns,
-        scheduler=InferenceRowScheduler(worker_count=0),
+        scheduler=scheduler,
+    )
+    schedule_row_with_ladder(
+        scheduler,
+        turn,
+        player_id,
+        merged_solutions=[],
     )
     tree, _scope = materialize_fleet_tree(ctx, player_id, turn=5)
     ledger = tree["players"][0]
@@ -372,7 +378,7 @@ def test_ensure_fleet_export_materializes_snapshot_when_missing(sample_turn, per
     )
 
 
-def test_probe_and_walk_report_fleet_depends_on_scores_same_turn(sample_turn, persistence):
+def test_probe_and_walk_report_fleet_depends_on_prior_turn_final_fleet(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
     turn_number = 8
     host_turn, stored_turns = host_turn_at(sample_turn, turn_number)
@@ -391,27 +397,19 @@ def test_probe_and_walk_report_fleet_depends_on_scores_same_turn(sample_turn, pe
 
     probe = ctx.probe("fleet", {"player_id": player_id})
     assert probe.status == "ok"
-    assert probe.total_missing == 2
-    scores_step = ensure_missing_step(
-        probe,
-        analytic_id="scores",
-        turn=turn_number,
-        player_id=player_id,
-    )
+    assert probe.total_missing == 1
     fleet_step = ensure_missing_step(
         probe,
         analytic_id="fleet",
         turn=turn_number,
         player_id=player_id,
     )
-    assert scores_step.status == "not_persisted"
     assert fleet_step.status == "not_persisted"
-    assert probe.missing_steps.index(scores_step) < probe.missing_steps.index(fleet_step)
 
     walk = walk_dependency_tree(ctx, "fleet", scope, visiting=set())
     assert walk.turn_unavailable is None
     walk_keys = [(step.analytic_id, step.turn) for step in walk.missing_steps]
-    assert walk_keys == [("scores", turn_number), ("fleet", turn_number)]
+    assert walk_keys == [("fleet", turn_number)]
 
 
 def test_ensure_fleet_export_no_op_when_turn_not_stored(sample_turn, persistence):

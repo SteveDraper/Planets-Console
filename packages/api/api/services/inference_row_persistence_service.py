@@ -162,6 +162,7 @@ class InferenceRowPersistenceService:
         perspective: int,
         host_turn: int,
         player_id: int,
+        fleet_torp_input_status: str | None = None,
     ) -> None:
         """Write durable turn evidence from a RowComplete payload alone."""
         status = event.wire_payload.status
@@ -171,7 +172,10 @@ class InferenceRowPersistenceService:
         if not is_durable_turn_evidence_row_status(status):
             return
         wire_event = row_complete_to_complete_wire_event(event)
-        row = persisted_inference_row_from_wire_complete(wire_event)
+        row = persisted_inference_row_from_wire_complete(
+            wire_event,
+            fleet_torp_input_status=fleet_torp_input_status,  # type: ignore[arg-type]
+        )
         self.put_row(game_id, perspective, host_turn, player_id, row)
 
     def persist_row_complete(

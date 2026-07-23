@@ -16,8 +16,9 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
-    resolve_prior_turn_fleet_torp_overlay,
+from api.analytics.military_score_inference.tier_emission_ledger import (
+    compact_tier_emissions_from_step_diagnostics,
+    tier_emissions_from_wire_complete,
 )
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
@@ -35,6 +36,7 @@ from api.analytics.scores.export_snapshot import (
     scores_inference_stream_scope,
 )
 from api.analytics.scores.export_wire import wire_complete_event_from_terminal_admission
+from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.errors import ValidationError
 from api.models.game import TurnInfo
@@ -60,7 +62,7 @@ ORDERING_SEMANTICS = {
 }
 
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
-    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same"),
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
 )
 
 
@@ -288,7 +290,7 @@ def _ensure_admit_inference_row(
         # ScoresPersistencePolicy.is_satisfied) agrees with ensure -- ephemeral
         # alone cannot close turnEvidenceAtN.
         _persist_immediate_row_admission(services, scope, admission)
-        _wake_parked_scores_after_evidence_close(ctx, scope)
+        _wake_deferred_scores_after_evidence_close(ctx, scope)
         return True
 
     inputs = _scores_row_ensure_inputs(services, scope, turn)
@@ -300,11 +302,14 @@ def _ensure_admit_inference_row(
     if services.scheduler.row_run_for_player(inputs.stream_scope, inputs.player_id) is not None:
         return False
 
-    fleet_resolution = resolve_prior_turn_fleet_torp_overlay(
-        turn=turn,
+    fleet_resolution = resolve_prior_fleet_for_scores(
+        ctx,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn_number=scope.turn,
         player_id=inputs.player_id,
-        load_turn=ctx.load_turn,
-        query_context=ctx,
+        turn=turn,
+        overlay_ensure=True,
     )
     schedule_inference_row(
         services.scheduler,
@@ -324,15 +329,15 @@ def _ensure_admit_inference_row(
     return True
 
 
-def _wake_parked_scores_after_evidence_close(
+def _wake_deferred_scores_after_evidence_close(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
 ) -> None:
-    """force_fresh wake soft-parked scores after cheap admit closes turn evidence."""
+    """force_fresh wake deferred scores after cheap admit closes turn evidence."""
     if scope.player_id is None:
         return
     from api.analytics.scores.compute_orchestration import wake_scores_scope
-    from api.analytics.scores_park_wake import ScoresWakeReason
+    from api.analytics.scores_defer_wake import ScoresWakeReason
     from api.compute.scope import ComputeScope
 
     wake_scores_scope(
@@ -409,6 +414,9 @@ def build_scores_export_materialized_tree(
     }
     if payload.diagnostics is not None:
         tree["diagnostics"] = payload.diagnostics
+    tier_emissions = _tier_emissions_from_resolved(resolved)
+    if tier_emissions is not None:
+        tree["tierEmissions"] = tier_emissions
 
     if scope.player_id is not None:
         resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
@@ -418,6 +426,29 @@ def build_scores_export_materialized_tree(
             )
 
     return tree
+
+
+def _tier_emissions_from_resolved(
+    resolved: ScoresExportResolved,
+) -> list[dict[str, object]] | None:
+    """Compact per-tier emission ledger when available on the resolved snapshot."""
+    persisted_row = resolved.snapshot.persisted_row
+    if persisted_row is not None and persisted_row.tier_emissions:
+        return list(persisted_row.tier_emissions)
+
+    terminal = resolved.snapshot.resolved_terminal_admission()
+    if terminal is not None:
+        wire_event = wire_complete_event_from_terminal_admission(terminal)
+        return tier_emissions_from_wire_complete(wire_event)
+
+    scheduler_run = resolved.snapshot.scheduler_run
+    if scheduler_run is None or scheduler_run.ladder_state is None:
+        return None
+    step_diagnostics = scheduler_run.ladder_state.step_diagnostics
+    if not step_diagnostics:
+        return None
+    emissions = compact_tier_emissions_from_step_diagnostics(step_diagnostics)
+    return emissions or None
 
 
 def materialize_scores_export_tree(ctx: AnalyticQueryContext, scope: ExportScope) -> dict[str, Any]:

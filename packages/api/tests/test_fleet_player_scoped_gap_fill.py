@@ -781,7 +781,7 @@ def test_forward_unwind_scores_before_fleet_per_player(
     for event_index, (analytic_id, turn, player_id) in enumerate(ensure_events):
         if analytic_id != "fleet" or turn not in gap_turns:
             continue
-        prior_scores = [
+        prior_same_turn_scores = [
             index
             for index, (dependency_id, dependency_turn, dependency_player_id) in enumerate(
                 ensure_events[:event_index],
@@ -790,9 +790,9 @@ def test_forward_unwind_scores_before_fleet_per_player(
             and dependency_turn == turn
             and dependency_player_id == player_id
         ]
-        assert prior_scores, (
-            f"expected scores ensure before fleet ensure at turn {turn} "
-            f"for player {player_id}; events={ensure_events}"
+        assert not prior_same_turn_scores, (
+            f"fleet ensure at turn {turn} for player {player_id} must not require "
+            f"same-turn scores ensure; events={ensure_events}"
         )
 
 
