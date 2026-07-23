@@ -23,6 +23,9 @@ FilterAxis = Literal["hulls", "engines", "beams", "launchers"]
 FILTER_AXES: tuple[FilterAxis, ...] = ("hulls", "engines", "beams", "launchers")
 
 DEFAULT_MAX_SEEDS = 5
+# After first maximize Z*, further structural solves only accept ranking objectives
+# in [Z* - T, sliding max]. Global default; steps may override.
+DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD = 250
 
 TORP_ESCAPE_TIER_STEP_ID = "torp_escape_tier"
 
@@ -133,6 +136,7 @@ class InferenceTierPolicyStep:
 class SolverThresholds:
     ship_only_exact_early_stop_min_plausibility: int
     no_new_exact_signatures_early_stop_min_plausibility: int
+    near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
 
 
 @dataclass(frozen=True)
@@ -295,14 +299,16 @@ def _parse_hull_collision_twin_widen(raw: object, *, step_id: str) -> bool:
     return raw
 
 
-def _parse_near_best_objective_threshold(raw: object, *, step_id: str) -> int | None:
+def _parse_required_near_best_objective_threshold(raw: object, *, location: str) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise ValueError(f"{location}: nearBestObjectiveThreshold must be a non-negative integer")
+    return raw
+
+
+def _parse_optional_near_best_objective_threshold(raw: object, *, location: str) -> int | None:
     if raw is None:
         return None
-    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
-        raise ValueError(
-            f"step {step_id}: nearBestObjectiveThreshold must be a non-negative integer"
-        )
-    return raw
+    return _parse_required_near_best_objective_threshold(raw, location=location)
 
 
 def _parse_min_seconds(raw: object, *, step_id: str) -> float:
@@ -348,7 +354,12 @@ def tier_step_allowance_seconds(
     return allowance, reserved, spendable
 
 
-def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolicyStep:
+def _parse_policy_step(
+    raw: dict[str, Any],
+    *,
+    index: int,
+    default_near_best_objective_threshold: int,
+) -> InferenceTierPolicyStep:
     step_id = raw.get("id")
     if not isinstance(step_id, str) or not step_id:
         raise ValueError(f"step {index}: id must be a non-empty string")
@@ -367,6 +378,14 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
         raise ValueError(
             f"step {step_id}: maxSeconds ({max_seconds}) must be >= minSeconds ({min_seconds})"
         )
+
+    if "nearBestObjectiveThreshold" in raw:
+        near_best_objective_threshold = _parse_optional_near_best_objective_threshold(
+            raw.get("nearBestObjectiveThreshold"),
+            location=f"step {step_id}",
+        )
+    else:
+        near_best_objective_threshold = default_near_best_objective_threshold
 
     return InferenceTierPolicyStep(
         id=step_id,
@@ -395,10 +414,7 @@ def _parse_policy_step(raw: dict[str, Any], *, index: int) -> InferenceTierPolic
             raw.get("hullCollisionTwinWiden"),
             step_id=step_id,
         ),
-        near_best_objective_threshold=_parse_near_best_objective_threshold(
-            raw.get("nearBestObjectiveThreshold"),
-            step_id=step_id,
-        ),
+        near_best_objective_threshold=near_best_objective_threshold,
         min_seconds=min_seconds,
         max_seconds=max_seconds,
     )
@@ -610,9 +626,18 @@ def parse_solver_thresholds(document: dict[str, Any]) -> SolverThresholds:
             "tier policy solverThresholds.noNewExactSignaturesEarlyStopMinPlausibility "
             "must be an int"
         )
+    near_best_raw = raw_thresholds.get(
+        "nearBestObjectiveThreshold",
+        DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
+    )
+    near_best_threshold = _parse_required_near_best_objective_threshold(
+        near_best_raw,
+        location="tier policy solverThresholds",
+    )
     return SolverThresholds(
         ship_only_exact_early_stop_min_plausibility=ship_only_threshold,
         no_new_exact_signatures_early_stop_min_plausibility=no_new_signatures_threshold,
+        near_best_objective_threshold=near_best_threshold,
     )
 
 
@@ -670,12 +695,31 @@ def resolve_solver_thresholds(base_path: Path | None = None) -> SolverThresholds
     return parsed
 
 
+def _near_best_objective_threshold_default(document: dict[str, Any]) -> int:
+    """Resolve global near-best T from ``solverThresholds``, else the code default."""
+    raw_thresholds = document.get("solverThresholds")
+    if not isinstance(raw_thresholds, dict):
+        return DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
+    if "nearBestObjectiveThreshold" not in raw_thresholds:
+        return DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
+    return _parse_required_near_best_objective_threshold(
+        raw_thresholds.get("nearBestObjectiveThreshold"),
+        location="tier policy solverThresholds",
+    )
+
+
 def parse_tier_policy_steps(document: dict[str, Any]) -> tuple[InferenceTierPolicyStep, ...]:
     raw_steps = document.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ValueError("tier policy must contain a non-empty steps list")
+    default_near_best = _near_best_objective_threshold_default(document)
     steps = tuple(
-        _parse_policy_step(raw_step, index=index) for index, raw_step in enumerate(raw_steps)
+        _parse_policy_step(
+            raw_step,
+            index=index,
+            default_near_best_objective_threshold=default_near_best,
+        )
+        for index, raw_step in enumerate(raw_steps)
     )
     validate_tier_policy_steps(steps)
     return steps

@@ -92,6 +92,7 @@ def test_policy_loader_reads_solver_thresholds():
     thresholds = resolve_solver_thresholds()
     assert thresholds.ship_only_exact_early_stop_min_plausibility == -300
     assert thresholds.no_new_exact_signatures_early_stop_min_plausibility == -300
+    assert thresholds.near_best_objective_threshold == 250
 
 
 def test_policy_loader_rejects_non_int_solver_threshold():
@@ -124,6 +125,68 @@ def test_policy_loader_rejects_invalid_near_best_objective_threshold():
     }
     with pytest.raises(ValueError, match="nearBestObjectiveThreshold"):
         parse_tier_policy_steps(document)
+
+
+def test_policy_loader_applies_global_near_best_default_when_step_omits():
+    document = {
+        "solverThresholds": {
+            "shipOnlyExactEarlyStopMinPlausibility": -300,
+            "noNewExactSignaturesEarlyStopMinPlausibility": -300,
+            "nearBestObjectiveThreshold": 100,
+        },
+        "steps": [
+            {
+                "id": "uses_global",
+                "filters": {
+                    "hulls": {"all": True},
+                    "engines": {"all": True},
+                    "beams": {"all": True},
+                    "launchers": {"all": True},
+                },
+                "alpha": 0,
+            }
+        ],
+    }
+    steps = parse_tier_policy_steps(document)
+    assert steps[0].near_best_objective_threshold == 100
+
+
+def test_policy_loader_step_near_best_overrides_global_default():
+    document = {
+        "solverThresholds": {
+            "shipOnlyExactEarlyStopMinPlausibility": -300,
+            "noNewExactSignaturesEarlyStopMinPlausibility": -300,
+            "nearBestObjectiveThreshold": 100,
+        },
+        "steps": [
+            {
+                "id": "override",
+                "filters": {
+                    "hulls": {"all": True},
+                    "engines": {"all": True},
+                    "beams": {"all": True},
+                    "launchers": {"all": True},
+                },
+                "alpha": 0,
+                "nearBestObjectiveThreshold": 40,
+            }
+        ],
+    }
+    steps = parse_tier_policy_steps(document)
+    assert steps[0].near_best_objective_threshold == 40
+
+
+def test_policy_loader_rejects_invalid_global_near_best_objective_threshold():
+    with pytest.raises(ValueError, match="nearBestObjectiveThreshold"):
+        parse_solver_thresholds(
+            {
+                "solverThresholds": {
+                    "shipOnlyExactEarlyStopMinPlausibility": -300,
+                    "noNewExactSignaturesEarlyStopMinPlausibility": -300,
+                    "nearBestObjectiveThreshold": -1,
+                }
+            }
+        )
 
 
 def test_policy_loader_rejects_non_int_no_new_exact_signatures_threshold():

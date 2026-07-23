@@ -104,10 +104,11 @@ solverThresholds:
   # Same floor as ship-only exact early-stop: a no-op tier may halt the ladder only
   # when the best held exact already meets this plausibility (#236).
   noNewExactSignaturesEarlyStopMinPlausibility: -300
+  # After first maximize Z*, further structural solves only accept ranking obj in
+  # [Z*-T, sliding max]. T=250 covers ~122 gap for lizard t9 truth vs early
+  # ship-only Z* (~-378 vs -500). Steps may override with nearBestObjectiveThreshold.
+  nearBestObjectiveThreshold: 250
 
-# nearBestObjectiveThreshold (per step): after first maximize Z*, further
-# structural solves only accept ranking obj in [Z*-T, sliding max].
-# T=250 covers ~122 gap for lizard t9 truth vs early ship-only Z* (~-378 vs -500).
 steps:
   - id: early_game_bands
     filters:
@@ -127,7 +128,6 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: false
     minSeconds: 0
     maxSeconds: 8
@@ -150,7 +150,6 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: false
     minSeconds: 0
     maxSeconds: 8
@@ -177,7 +176,6 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: false
     hullCollisionTwinWiden: true
     minSeconds: 0
@@ -200,7 +198,6 @@ steps:
     aggregateAllowlist: {}
     alpha: 50
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: false
     minSeconds: 0
     maxSeconds: 8
@@ -223,7 +220,6 @@ steps:
       ship_torps_per_type: 40
     alpha: 30
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: false
     minSeconds: 3
     maxSeconds: 8
@@ -245,7 +241,6 @@ steps:
       planet_defense_posts_added_total: 16
     alpha: 50
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: false
     minSeconds: 1
     maxSeconds: 5
@@ -268,7 +263,6 @@ steps:
       planet_defense_posts_added_total: 16
     alpha: 50
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
     minSeconds: 0
     maxSeconds: 5
@@ -294,7 +288,6 @@ steps:
       fighter_transfers_per_direction: 50
     alpha: 30
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
     minSeconds: 0
     maxSeconds: 8
@@ -320,7 +313,6 @@ steps:
       fighter_transfers_per_direction: 50
     alpha: 30
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
     minSeconds: 0
     maxSeconds: 8
@@ -346,7 +338,6 @@ steps:
       fighter_transfers_per_direction: 100
     alpha: 0
     maxSeeds: 5
-    nearBestObjectiveThreshold: 250
     allowShipOnlyExactEarlyStop: true
     minSeconds: 0
     maxSeconds: 8

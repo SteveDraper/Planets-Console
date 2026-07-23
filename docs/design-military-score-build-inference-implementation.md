@@ -567,13 +567,15 @@ Per-step fields (informal schema; exact YAML shape is implementation-owned):
 | `maxSeeds` | Band near-solutions to carry to next step (default **5**) |
 | `allowShipOnlyExactEarlyStop` | When `true`, the ladder may stop after this step if a ship-builds-only exact meets `shipOnlyExactEarlyStopMinPlausibility`. Default `false` when omitted. |
 | `hullCollisionTwinWiden` | When `true`, the ladder loads hull-collision twin assets and may union admitted high-tech hull ids via runtime `includeComponentIds` (or skip when no partners). Default `false` when omitted. Gated by this flag, not by step `id`. |
+| `nearBestObjectiveThreshold` | Optional per-step override of `solverThresholds.nearBestObjectiveThreshold`. Omit to inherit the global default. |
 
-Top-level `solverThresholds` (required ints):
+Top-level `solverThresholds` (required ints unless noted):
 
 | Key | Meaning |
 |-----|---------|
 | `shipOnlyExactEarlyStopMinPlausibility` | Minimum `objectiveValue` for ship-only exact early-stop (#226). |
 | `noNewExactSignaturesEarlyStopMinPlausibility` | Minimum best-held `objectiveValue` before a catalog-noop / no-new-signature step may halt the ladder (#236). Production YAML uses the same value as ship-only exact early-stop. |
+| `nearBestObjectiveThreshold` | Default within-tier near-best band width T (ranking obj in `[Z*-T, sliding max]` after first maximize). Defaults to **250** when omitted. Individual steps may override with the same key; omit on a step to inherit this global default. |
 
 **`filters` object:** required keys `hulls`, `engines`, `beams`, `launchers`. Each value uses the same shape:
 
