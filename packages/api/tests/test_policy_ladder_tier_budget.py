@@ -330,9 +330,7 @@ def test_seed_progression_samples_remaining_per_sub_solve(monkeypatch) -> None:
     seed = InferenceSolution(
         objective_value=0,
         actions=(),
-        ship_builds=(
-            InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),
-        ),
+        ship_builds=(InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),),
     )
     result, problem = _solve_seed_progression(
         MagicMock(),
@@ -364,9 +362,7 @@ def test_seed_progression_stops_when_remaining_exhausted(monkeypatch) -> None:
     seed = InferenceSolution(
         objective_value=0,
         actions=(),
-        ship_builds=(
-            InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),
-        ),
+        ship_builds=(InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),),
     )
     result, problem = _solve_seed_progression(
         MagicMock(),
@@ -397,9 +393,7 @@ def test_seed_progression_skips_all_solves_when_should_stop(monkeypatch) -> None
     seed = InferenceSolution(
         objective_value=0,
         actions=(),
-        ship_builds=(
-            InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),
-        ),
+        ship_builds=(InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),),
     )
     result, problem = _solve_seed_progression(
         MagicMock(),
