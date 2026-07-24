@@ -27,10 +27,10 @@ from api.analytics.fleet.serialization import (
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetBuildOptionSet,
-    FleetShipClass,
     FleetEvidenceEvent,
     FleetFieldKnown,
     FleetFieldUnknown,
+    FleetShipClass,
     FleetShipRecord,
     FleetTurnSnapshot,
 )
