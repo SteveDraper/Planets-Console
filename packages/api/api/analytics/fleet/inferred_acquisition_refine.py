@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import uuid
 
+from api.analytics.fleet.field_constraints import (
+    known_built_turn_value,
+    record_has_direct_observation,
+)
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.inferred_acquisition_ingest import (
     FleetShipClass,
-    _known_built_turn,
     _ledger_has_placeholders_for_turn,
     _placeholder_rows_for_built_turn,
     _placeholder_rows_for_turn,
 )
-from api.analytics.fleet.observation_ingest import (
-    observation_established_full_fit,
-    record_has_direct_observation,
-)
+from api.analytics.fleet.observation_ingest import observation_established_full_fit
 from api.analytics.fleet.observation_option_locks import (
     LockFilterEmptyPolicy,
     observation_locks_from_record,
@@ -109,7 +109,7 @@ def _distinct_placeholder_built_turns(
     built_turns: set[int] = set()
     for ship_class in ("warship", "freighter"):
         for record in _placeholder_rows_for_turn(ledger, shell_turn, ship_class=ship_class):
-            built_turn = _known_built_turn(record)
+            built_turn = known_built_turn_value(record)
             if built_turn is not None:
                 built_turns.add(built_turn)
     return tuple(sorted(built_turns))

@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 from api.analytics.fleet.chain import ensure_fleet_baseline
+from api.analytics.fleet.field_constraints import record_has_direct_observation
 from api.analytics.fleet.observation_ingest import (
     ingest_turn_ship_observations,
-    record_has_direct_observation,
 )
 from api.analytics.fleet.types import (
     FleetBuildOptionSet,

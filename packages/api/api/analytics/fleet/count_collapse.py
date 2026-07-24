@@ -5,11 +5,12 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from api.analytics.fleet.inferred_acquisition_ingest import FleetShipClass
-from api.analytics.fleet.observation_ingest import (
+from api.analytics.fleet.field_constraints import (
+    known_built_turn_value,
     record_has_direct_observation,
     ship_id_matches_constraint,
 )
+from api.analytics.fleet.inferred_acquisition_ingest import FleetShipClass
 from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
@@ -194,15 +195,8 @@ def _ship_id_admits_survivor(constraint: FleetFieldConstraint, ship_id: int) -> 
     return ship_id_matches_constraint(constraint, ship_id)
 
 
-def _known_built_turn_value(record: FleetShipRecord) -> int | None:
-    built_turn = record.fields.built_turn
-    if isinstance(built_turn, FleetFieldKnown) and isinstance(built_turn.value, int):
-        return built_turn.value
-    return None
-
-
 def _absorbable_sort_key(record: FleetShipRecord, ledger_index: int) -> tuple[object, ...]:
-    built_turn = _known_built_turn_value(record)
+    built_turn = known_built_turn_value(record)
     built_turn_key = built_turn if built_turn is not None else float("inf")
     return (
         _constraint_tightness_key(record.fields.ship_id),

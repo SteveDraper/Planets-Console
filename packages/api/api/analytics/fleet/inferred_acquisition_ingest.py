@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Literal
 
+from api.analytics.fleet.field_constraints import known_built_turn_value
 from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
@@ -332,15 +333,8 @@ def _placeholder_rows_for_built_turn(
     return [
         record
         for record in _placeholder_rows_for_turn(ledger, shell_turn, ship_class=ship_class)
-        if _known_built_turn(record) == built_turn
+        if known_built_turn_value(record) == built_turn
     ]
-
-
-def _known_built_turn(record: FleetShipRecord) -> int | None:
-    built_turn = record.fields.built_turn
-    if isinstance(built_turn, FleetFieldKnown) and isinstance(built_turn.value, int):
-        return built_turn.value
-    return None
 
 
 def _scoreboard_acquisition_event(

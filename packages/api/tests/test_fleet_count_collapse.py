@@ -7,10 +7,10 @@ from dataclasses import replace
 
 from api.analytics.fleet.chain import ensure_fleet_baseline
 from api.analytics.fleet.count_collapse import apply_fleet_count_collapse
+from api.analytics.fleet.field_constraints import record_has_direct_observation
 from api.analytics.fleet.observation_ingest import (
     apply_id_bounds_then_observations,
     ingest_turn_ship_observations,
-    record_has_direct_observation,
 )
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import (
