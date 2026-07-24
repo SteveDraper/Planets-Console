@@ -31,6 +31,8 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 from api.transport.fleet_table_stream import fleet_complete_event
 
+from tests.table_stream_lock_helpers import assert_stream_lock_not_held
+
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
 
@@ -668,13 +670,13 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
         if nest_depth["n"] == 1:
             # Same-thread re-entry fingerprint: scores persist invalidation while
             # outer reschedule still holds stream_lock (before the lock-order fix).
-            acquired = controller.stream_lock.acquire(blocking=False)
-            if not acquired:
-                raise AssertionError(
+            assert_stream_lock_not_held(
+                controller.stream_lock,
+                message=(
                     "reschedule_player deadlocked (schedule re-entered stream_lock "
                     "via scores→fleet invalidation)"
-                )
-            controller.stream_lock.release()
+                ),
+            )
             from api.analytics.fleet.fleet_table_stream_registry import (
                 reschedule_fleet_table_player,
             )
