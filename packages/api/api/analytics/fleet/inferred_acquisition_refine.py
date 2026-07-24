@@ -10,7 +10,6 @@ from api.analytics.fleet.field_constraints import (
 )
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.inferred_acquisition_ingest import (
-    FleetShipClass,
     _ledger_has_placeholders_for_turn,
     _placeholder_rows_for_built_turn,
     _placeholder_rows_for_turn,
@@ -28,6 +27,7 @@ from api.analytics.fleet.serialization import (
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetBuildOptionSet,
+    FleetShipClass,
     FleetEvidenceEvent,
     FleetFieldKnown,
     FleetFieldUnknown,

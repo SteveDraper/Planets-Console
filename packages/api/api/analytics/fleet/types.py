@@ -9,6 +9,8 @@ from api.analytics.fleet.constants import ANALYTIC_ID
 
 FleetShipDisposition = Literal["active", "lost", "traded", "unknown", "merged"]
 
+FleetShipClass = Literal["warship", "freighter"]
+
 FleetBoundedOperator = Literal["lte", "gte", "lt", "gt", "eq"]
 
 FleetEvidenceEventKind = Literal[

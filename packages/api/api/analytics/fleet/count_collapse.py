@@ -3,24 +3,21 @@
 from __future__ import annotations
 
 import uuid
-from typing import Literal
 
 from api.analytics.fleet.field_constraints import (
     known_built_turn_value,
     record_has_direct_observation,
     ship_id_matches_constraint,
 )
-from api.analytics.fleet.inferred_acquisition_ingest import FleetShipClass
 from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetEvidenceEvent,
     FleetFieldBounded,
-    FleetFieldConstraint,
     FleetFieldKnown,
-    FleetFieldOptions,
     FleetFieldUnknown,
+    FleetShipClass,
     FleetShipRecord,
 )
 from api.concepts.hulls import hull_is_freighter
@@ -30,8 +27,7 @@ from api.models.player import Score
 
 COUNT_COLLAPSE_SOURCE = "fleet.count_collapse"
 
-# Active rows with no attributable ship class are excluded from per-class pools and counts.
-ShipClass = Literal["warship", "freighter"]
+AbsorbableShipId = FleetFieldUnknown | FleetFieldBounded
 
 
 def apply_fleet_count_collapse(
@@ -41,11 +37,11 @@ def apply_fleet_count_collapse(
     """Collapse surplus unobserved unknowns onto knowns per ship class. Mutates ledger."""
     turn_number = turn.settings.turn
     hulls_by_id = {hull.id: hull for hull in turn.hulls}
+    score = _player_score(turn, ledger.player_id)
+    if score is None:
+        return
 
     for ship_class in ("warship", "freighter"):
-        score = _player_score(turn, ledger.player_id)
-        if score is None:
-            continue
         implied = _implied_count(score, ship_class)
         class_records = _active_records_for_class(ledger, ship_class, hulls_by_id)
         active_class = len(class_records)
@@ -53,24 +49,27 @@ def apply_fleet_count_collapse(
         if surplus <= 0:
             continue
 
-        absorbables = [
-            (index, record)
-            for index, record in enumerate(ledger.records)
-            if record in class_records and _is_absorbable(record)
-        ]
+        absorbables: list[tuple[int, FleetShipRecord, AbsorbableShipId]] = []
+        for index, record in enumerate(ledger.records):
+            if record not in class_records:
+                continue
+            absorbable_ship_id = _absorbable_ship_id(record)
+            if absorbable_ship_id is None:
+                continue
+            absorbables.append((index, record, absorbable_ship_id))
         survivors = [record for record in class_records if _is_survivor(record, hulls_by_id)]
-        absorbables.sort(key=lambda item: _absorbable_sort_key(item[1], item[0]))
+        absorbables.sort(key=lambda item: _absorbable_sort_key(item[2], item[1], item[0]))
 
         free_survivors = list(survivors)
         absorbable_index = 0
         while surplus > 0 and absorbable_index < len(absorbables):
-            _, absorbable = absorbables[absorbable_index]
+            _, absorbable, absorbable_ship_id = absorbables[absorbable_index]
             absorbable_index += 1
             compatible: list[tuple[int, FleetShipRecord]] = [
                 (known_id, survivor)
                 for survivor in free_survivors
                 if (known_id := _known_ship_id(survivor)) is not None
-                and _ship_id_admits_survivor(absorbable.fields.ship_id, known_id)
+                and _ship_id_admits_survivor(absorbable_ship_id, known_id)
             ]
             if not compatible:
                 continue
@@ -85,6 +84,7 @@ def apply_fleet_count_collapse(
                 known_ship_id=known_id,
                 candidate_set_size=candidate_set_size,
                 remaining_surplus=surplus,
+                absorbable_ship_id=absorbable_ship_id,
             )
             free_survivors.remove(survivor)
 
@@ -96,7 +96,7 @@ def _player_score(turn: TurnInfo, player_id: int) -> Score | None:
     return None
 
 
-def _implied_count(score: Score, ship_class: ShipClass) -> int:
+def _implied_count(score: Score, ship_class: FleetShipClass) -> int:
     if ship_class == "warship":
         return score.capitalships
     return score.freighters
@@ -104,9 +104,10 @@ def _implied_count(score: Score, ship_class: ShipClass) -> int:
 
 def _active_records_for_class(
     ledger: FleetAcquisitionLedger,
-    ship_class: ShipClass,
+    ship_class: FleetShipClass,
     hulls_by_id: dict[int, Hull],
 ) -> list[FleetShipRecord]:
+    # Active rows with no attributable ship class are excluded from per-class pools.
     records: list[FleetShipRecord] = []
     for record in ledger.records:
         if record.disposition != "active":
@@ -120,14 +121,14 @@ def _active_records_for_class(
 def _record_ship_class(
     record: FleetShipRecord,
     hulls_by_id: dict[int, Hull],
-) -> ShipClass | None:
+) -> FleetShipClass | None:
     survivor_class = _record_ship_class_survivor(record, hulls_by_id)
     if survivor_class is not None:
         return survivor_class
     return _record_ship_class_absorbable(record)
 
 
-def _record_ship_class_absorbable(record: FleetShipRecord) -> ShipClass | None:
+def _record_ship_class_absorbable(record: FleetShipRecord) -> FleetShipClass | None:
     for event in record.events:
         if event.kind != "scoreboard_delta":
             continue
@@ -140,7 +141,7 @@ def _record_ship_class_absorbable(record: FleetShipRecord) -> ShipClass | None:
 def _record_ship_class_survivor(
     record: FleetShipRecord,
     hulls_by_id: dict[int, Hull],
-) -> ShipClass | None:
+) -> FleetShipClass | None:
     hull_constraint = record.fields.hull
     if not isinstance(hull_constraint, FleetFieldKnown):
         return None
@@ -152,16 +153,17 @@ def _record_ship_class_survivor(
     return "freighter" if hull_is_freighter(hull) else "warship"
 
 
-def _is_absorbable(record: FleetShipRecord) -> bool:
+def _absorbable_ship_id(record: FleetShipRecord) -> AbsorbableShipId | None:
     if record.disposition != "active":
-        return False
+        return None
     if record_has_direct_observation(record):
-        return False
-    if isinstance(record.fields.ship_id, FleetFieldKnown):
-        return False
-    if not isinstance(record.fields.ship_id, (FleetFieldUnknown, FleetFieldBounded)):
-        return False
-    return _record_ship_class_absorbable(record) is not None
+        return None
+    ship_id = record.fields.ship_id
+    if not isinstance(ship_id, (FleetFieldUnknown, FleetFieldBounded)):
+        return None
+    if _record_ship_class_absorbable(record) is None:
+        return None
+    return ship_id
 
 
 def _is_survivor(record: FleetShipRecord, hulls_by_id: dict[int, Hull]) -> bool:
@@ -179,7 +181,7 @@ def _known_ship_id(record: FleetShipRecord) -> int | None:
     return None
 
 
-def _ship_id_admits_survivor(constraint: FleetFieldConstraint, ship_id: int) -> bool:
+def _ship_id_admits_survivor(constraint: AbsorbableShipId, ship_id: int) -> bool:
     """Collapse-local admit: Unknown matches any survivor id; else shared constraint match.
 
     Keep Unknown universal-admit here only. Shared ``ship_id_matches_constraint`` is
@@ -190,17 +192,22 @@ def _ship_id_admits_survivor(constraint: FleetFieldConstraint, ship_id: int) -> 
     return ship_id_matches_constraint(constraint, ship_id)
 
 
-def _absorbable_sort_key(record: FleetShipRecord, ledger_index: int) -> tuple[object, ...]:
+def _absorbable_sort_key(
+    ship_id: AbsorbableShipId,
+    record: FleetShipRecord,
+    ledger_index: int,
+) -> tuple[object, ...]:
     built_turn = known_built_turn_value(record)
     built_turn_key = built_turn if built_turn is not None else float("inf")
     return (
-        _constraint_tightness_key(record.fields.ship_id),
+        _constraint_tightness_key(ship_id),
         built_turn_key,
         ledger_index,
     )
 
 
-def _constraint_tightness_key(constraint: FleetFieldConstraint) -> tuple[int, int | float]:
+def _constraint_tightness_key(constraint: AbsorbableShipId) -> tuple[int, int | float]:
+    """Sort key for absorbable shipId: eq, then numeric bounds, then fully unknown."""
     if isinstance(constraint, FleetFieldBounded):
         bound = constraint.value
         if not isinstance(bound, (int, float)):
@@ -212,21 +219,13 @@ def _constraint_tightness_key(constraint: FleetFieldConstraint) -> tuple[int, in
         if constraint.operator in ("gte", "gt"):
             return (3, -bound)
         return (5, 0)
-    if isinstance(constraint, FleetFieldOptions):
-        return (1, len(constraint.values))
-    if isinstance(constraint, FleetFieldUnknown):
-        return (4, 0)
-    return (5, 0)
+    return (4, 0)
 
 
-def _constraint_tightness_label(constraint: FleetFieldConstraint) -> str:
+def _constraint_tightness_label(constraint: AbsorbableShipId) -> str:
     if isinstance(constraint, FleetFieldBounded):
         return f"{constraint.operator}:{constraint.value}"
-    if isinstance(constraint, FleetFieldOptions):
-        return f"options:{len(constraint.values)}"
-    if isinstance(constraint, FleetFieldUnknown):
-        return "unknown"
-    return "other"
+    return "unknown"
 
 
 def _collapse_one(
@@ -238,8 +237,9 @@ def _collapse_one(
     known_ship_id: int,
     candidate_set_size: int,
     remaining_surplus: int,
+    absorbable_ship_id: AbsorbableShipId,
 ) -> None:
-    constraint_tightness = _constraint_tightness_label(absorbable.fields.ship_id)
+    constraint_tightness = _constraint_tightness_label(absorbable_ship_id)
 
     if isinstance(survivor.fields.built_turn, FleetFieldUnknown) and isinstance(
         absorbable.fields.built_turn, FleetFieldKnown

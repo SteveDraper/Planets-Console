@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from api.analytics.fleet.field_constraints import known_built_turn_value
 from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
@@ -13,6 +13,7 @@ from api.analytics.fleet.types import (
     FleetBuildOptionSet,
     FleetEvidenceEvent,
     FleetFieldKnown,
+    FleetShipClass,
     FleetShipRecord,
     FleetShipRecordFields,
     FleetTurnSnapshot,
@@ -25,8 +26,6 @@ if TYPE_CHECKING:
     from api.analytics.fleet.scoreboard_placeholder_targets import ScoreboardPlaceholderTarget
 
 SCOREBOARD_SOURCE = "scoreboard"
-
-FleetShipClass = Literal["warship", "freighter"]
 
 
 def ingest_turn_inferred_acquisitions(
