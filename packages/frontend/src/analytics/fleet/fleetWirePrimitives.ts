@@ -93,7 +93,13 @@ export const fleetLastSeenSchema = z.object({
   planetId: z.number().int().optional(),
 })
 
-export const fleetShipDispositionSchema = z.enum(['active', 'lost', 'traded', 'unknown'])
+export const fleetShipDispositionSchema = z.enum([
+  'active',
+  'lost',
+  'traded',
+  'unknown',
+  'merged',
+])
 
 export type FleetFieldConstraint = z.infer<typeof fleetFieldConstraintSchema>
 export type FleetRowQualifiers = z.infer<typeof fleetRowQualifiersSchema>

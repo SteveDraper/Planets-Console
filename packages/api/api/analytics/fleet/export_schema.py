@@ -63,7 +63,7 @@ _EVIDENCE_EVENT_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": (
                 "Evidence kind, e.g. scoreboard_delta, inference_update, sighting, "
-                "option_set_match."
+                "option_set_match, count_collapse."
             ),
         },
         "turn": {
@@ -87,7 +87,7 @@ _SHIP_RECORD_SCHEMA: dict[str, Any] = {
         },
         "disposition": {
             "type": "string",
-            "description": "Fleet ship disposition: active, lost, traded, or unknown.",
+            "description": "Fleet ship disposition: active, lost, traded, unknown, or merged.",
         },
         "qualifiers": {
             "type": "object",

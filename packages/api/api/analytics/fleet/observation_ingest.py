@@ -70,15 +70,18 @@ def apply_id_bounds_then_observations(
     *,
     perspective: int,
 ) -> None:
-    """Canonical ordering: tighten id bounds (when computable), then match sightings.
+    """Canonical ordering: id bounds, then sightings, then count collapse.
 
     Use this whenever observation ingest follows acquisition or refine on a shell
     turn. Call ``ingest_player_ship_observations`` alone only when bounds were
     already applied for the same shell turn and no new unbound inferred rows
     were created since.
     """
+    from api.analytics.fleet.count_collapse import apply_fleet_count_collapse
+
     tighten_inferred_ship_id_bounds_if_computable(ledger, turn_context)
     ingest_player_ship_observations(ledger, turn_context, perspective=perspective)
+    apply_fleet_count_collapse(ledger, turn_context.turn)
 
 
 def ingest_turn_ship_observations(
