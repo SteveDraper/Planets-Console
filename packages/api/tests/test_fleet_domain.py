@@ -402,6 +402,48 @@ def test_fleet_evidence_event_rejects_invalid_kind():
         )
 
 
+def test_fleet_ship_record_merged_disposition_round_trip():
+    record = FleetShipRecord(
+        record_id="rec-merged",
+        disposition="merged",
+        fields=FleetShipRecordFields(
+            ship_id=FleetFieldKnown(value=101),
+            hull=FleetFieldKnown(value=13),
+        ),
+    )
+    wire = fleet_ship_record_to_json(record)
+    restored = fleet_ship_record_from_json(wire)
+    assert restored == record
+    assert fleet_ship_record_to_json(restored) == wire
+
+
+def test_fleet_count_collapse_event_round_trip():
+    payload = {
+        "peerRecordId": "absorbed-or-survivor-id",
+        "shipId": 101,
+        "shipClass": "warship",
+        "constraintTightness": "bounded_lte",
+        "tieBreak": "ship_id",
+        "candidateSetSize": 4,
+        "remainingSurplus": 3,
+    }
+    event = FleetEvidenceEvent(
+        event_id="evt-collapse",
+        kind="count_collapse",
+        turn=9,
+        source="fleet.count_collapse",
+        payload=payload,
+    )
+    record = FleetShipRecord(
+        record_id="rec-collapse",
+        events=[event],
+    )
+    wire = fleet_ship_record_to_json(record)
+    restored = fleet_ship_record_from_json(wire)
+    assert restored.events == [event]
+    assert fleet_evidence_event_to_json(restored.events[0]) == fleet_evidence_event_to_json(event)
+
+
 def test_fleet_field_constraint_region_round_trip_overlay_only():
     constraint = FleetFieldRegion(overlay_id="sb-region-2")
     wire = fleet_field_constraint_to_json(constraint)

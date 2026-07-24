@@ -7,7 +7,9 @@ from typing import Literal
 
 from api.analytics.fleet.constants import ANALYTIC_ID
 
-FleetShipDisposition = Literal["active", "lost", "traded", "unknown"]
+FleetShipDisposition = Literal["active", "lost", "traded", "unknown", "merged"]
+
+FleetShipClass = Literal["warship", "freighter"]
 
 FleetBoundedOperator = Literal["lte", "gte", "lt", "gt", "eq"]
 
@@ -23,9 +25,10 @@ FleetEvidenceEventKind = Literal[
     "possibly_lost",
     "reconciliation_correction",
     "report",
+    "count_collapse",
 ]
 
-FLEET_SHIP_DISPOSITIONS = frozenset({"active", "lost", "traded", "unknown"})
+FLEET_SHIP_DISPOSITIONS = frozenset({"active", "lost", "traded", "unknown", "merged"})
 
 FLEET_BOUNDED_OPERATORS = frozenset({"lte", "gte", "lt", "gt", "eq"})
 
@@ -42,6 +45,7 @@ FLEET_EVIDENCE_EVENT_KINDS = frozenset(
         "possibly_lost",
         "reconciliation_correction",
         "report",
+        "count_collapse",
     }
 )
 

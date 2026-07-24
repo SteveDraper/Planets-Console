@@ -58,7 +58,7 @@ One **fleet ship record** = one acquired ship tracked across turns until retired
 | `hull`, `engine`, `beams`, `launchers` | Component ids / labels; may be unknown or option-set-driven |
 | `builtTurn` | Host turn of scoreboard `+N` acquisition or first inference |
 | `lastSeen` | Turn, `x/y`, optional planet id |
-| `disposition` | **Fleet ship disposition**: `active`, `lost`, `traded`, `unknown` |
+| `disposition` | **Fleet ship disposition**: `active`, `lost`, `traded`, `unknown`, `merged` |
 | `qualifiers` | **Fleet possibly lost**, **fleet alibi** (row-level; not disposition) |
 | `buildOptionSets` | List of **fleet build option set** while ambiguous; observed rows carry a single confirmed fit for slot fills |
 | `events` | Append-only **fleet evidence event** timeline |
@@ -88,6 +88,7 @@ Display default: highest **inference solution rank weight** option set. Row expa
 | Concept | When |
 |---------|------|
 | **`active` disposition** | Ship still in fleet accounting |
+| **`merged` disposition** | Identity absorbed into another row via **fleet count collapse** (§4.7); not strong-evidence loss |
 | **`lost` / `traded` / `unknown` disposition** | Only with **strong evidence** (future: destruction/trade in scores or reports) |
 | **Fleet possibly lost** | Candidate for loss after count decrease; row stays `active` |
 | **Fleet alibi** | Sighting after a destruction event proves this row was not the one lost |
@@ -171,6 +172,39 @@ When scoreboard implies fewer ships than **active** rows:
 - Apply **fleet alibi** when a row has post-event sighting
 - **Do not** change disposition without strong evidence (no FIFO demotion in v1)
 - Future: scores destruction actions and report text may resolve which row was lost
+
+### 4.7 Active-row over-count (count collapse)
+
+When observation-inference match (#120) leaves more **active** rows in a ship class than the scoreboard implies (`capitalships` / `freighters`), **fleet count collapse** absorbs surplus inferred rows into id-known survivors of the same class. Tracker: [#259](https://github.com/SteveDraper/Planets-Console/issues/259).
+
+**Trigger:** after id bounds and per-sighting observation match on the turn (`apply_id_bounds_then_observations`), per class compare active row count to scoreboard-implied count. When `activeCount > scoreboardImplied`, collapse only the residual over-count.
+
+**Direction:** always unknown/unobserved absorbable → id-known survivor within the same class. Survivor class comes from the observed hull via the freighter hull catalog rule; absorbable class comes from placeholder evidence (`shipClass`).
+
+**Absorbable pool:** `active`, unobserved (no prior `sighting` / `position_update`), `shipId` not known (unknown or bounded only), class from placeholder `shipClass`.
+
+**Survivor pool:** `active`, `shipId` **known**, class from hull via `hull_is_freighter`.
+
+**Pair legality:** absorbable `shipId` **fleet field constraint** must admit the survivor's known id (`ship_id_matches_constraint`).
+
+**Selection:**
+
+| Step | Rule |
+|------|------|
+| Absorbable order | Most-constrained id first (`eq` / singleton before tighter numeric bounds before looser bounds before fully unknown); ties: earlier known `builtTurn`, then ledger order |
+| Survivor pick | Among free compatible survivors: **lowest known `shipId`** |
+
+**On absorption:**
+
+1. Set absorbed row `shipId` to **known**(survivor id); set disposition to **`merged`**.
+2. Append **`count_collapse`** **fleet evidence event** on **both** rows (peer record id, known `shipId`, `constraintTightness`, `tieBreak`, `candidateSetSize`, `remainingSurplus`). Never delete prior events.
+3. **Soft inherit** onto survivor only when empty/unknown there: `builtTurn`, **fleet build option set**s, and `displayDefaultOptionSetIndex`. Do not copy other field axes, duplicate prior events, or weaken observation locks.
+
+**Ordering vs #120:** collapse runs only on residual over-count after observation match; it does not replace or weaken #120 eligibility (empty `buildOptionSets` stay ineligible for sighting match).
+
+**Missing scoreboard:** skip collapse for that class when the player's scoreboard class count is unavailable -- do not invent a cap. Residual over-count remains for **fleet count discrepancy** detection ([#122](https://github.com/SteveDraper/Planets-Console/issues/122)); collapse does not write or clear `ledger.discrepancy`.
+
+**Hook:** closing step of `apply_id_bounds_then_observations` (after id bounds and per-sighting match) so orchestrator finalization and chain/gap-fill share one path. No-op when per-class active count is already within scoreboard-implied size.
 
 ---
 
@@ -384,7 +418,7 @@ F0.2 registration uses a single `api/analytics/fleet.py` module (same pattern as
 | Snapshot chain | T-1 -> T; turn-1 baseline; invalidation on turn replace |
 | Observation ingest | Sighting creates/updates row; id bounds |
 | Inference ingest | Placeholder rows from delta; option sets from top-K |
-| Reconciliation | Exact known id vs id-bound + lock-compatible option sets; max rank weight then builtTurn; event append immutability; bounds before observation |
+| Reconciliation | Exact known id vs id-bound + lock-compatible option sets; max rank weight then builtTurn; event append immutability; bounds before observation; count collapse (#259) |
 | Discrepancy | Player flag without disposition change; alibi excludes possibly-lost |
 | Exports | Ensure deps; materialize shape; scores edge registration |
 | BFF | Table/map wire golden fixtures |

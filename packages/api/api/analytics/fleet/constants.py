@@ -14,6 +14,7 @@ GAP_FILL_TARGET_TURN_COLLECT_SEC = 0.05
 
 # Persisted fleet turn snapshot materialization semantics. Bump conservatively when
 # materialization output would change for the same stored RST + scores inputs
-# (chain/gap-fill rules, inferred acquisition ingest, observation-inference merge).
+# (chain/gap-fill rules, inferred acquisition ingest, observation-inference merge,
+# fleet count collapse / merged disposition).
 # Missing or stale versions on read are deleted and re-materialized on next access.
-FLEET_MATERIALIZATION_VERSION = 8
+FLEET_MATERIALIZATION_VERSION = 9

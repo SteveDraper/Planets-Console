@@ -6,6 +6,12 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from api.analytics.fleet.count_collapse import apply_fleet_count_collapse
+from api.analytics.fleet.field_constraints import (
+    known_built_turn_value,
+    record_has_direct_observation,
+    ship_id_matches_constraint,
+)
 from api.analytics.fleet.id_bound_ingest import tighten_inferred_ship_id_bounds_if_computable
 from api.analytics.fleet.observation_option_locks import (
     LockFilterEmptyPolicy,
@@ -22,7 +28,6 @@ from api.analytics.fleet.types import (
     FleetBuildOptionSet,
     FleetEvidenceEvent,
     FleetEvidenceEventKind,
-    FleetFieldBounded,
     FleetFieldConstraint,
     FleetFieldKnown,
     FleetFieldUnknown,
@@ -38,8 +43,6 @@ from api.models.game import TurnInfo
 from api.models.ship import Ship
 
 TURN_SHIPS_SOURCE = "turnInfo.ships"
-
-_DIRECT_OBSERVATION_EVENT_KINDS = frozenset({"sighting", "position_update"})
 
 OptionSetMatchTieBreak = Literal["rank_weight", "built_turn", "ledger_order"]
 
@@ -70,7 +73,7 @@ def apply_id_bounds_then_observations(
     *,
     perspective: int,
 ) -> None:
-    """Canonical ordering: tighten id bounds (when computable), then match sightings.
+    """Canonical ordering: id bounds, then sightings, then count collapse.
 
     Use this whenever observation ingest follows acquisition or refine on a shell
     turn. Call ``ingest_player_ship_observations`` alone only when bounds were
@@ -79,6 +82,7 @@ def apply_id_bounds_then_observations(
     """
     tighten_inferred_ship_id_bounds_if_computable(ledger, turn_context)
     ingest_player_ship_observations(ledger, turn_context, perspective=perspective)
+    apply_fleet_count_collapse(ledger, turn_context.turn)
 
 
 def ingest_turn_ship_observations(
@@ -134,11 +138,6 @@ def ingest_player_ship_observations(
             race_id=race_id,
             hulls_by_id=hulls_by_id,
         )
-
-
-def record_has_direct_observation(record: FleetShipRecord) -> bool:
-    """True when the record carries a turnInfo.ships sighting or position update."""
-    return any(event.kind in _DIRECT_OBSERVATION_EVENT_KINDS for event in record.events)
 
 
 def observation_established_full_fit(record: FleetShipRecord) -> bool:
@@ -407,7 +406,7 @@ def _select_option_set_match(
                 option_set_index=matched_index,
                 solution_rank_weight=matched_weight,
                 match_kind=matched_kind,
-                built_turn=_known_built_turn_value(record),
+                built_turn=known_built_turn_value(record),
                 ledger_index=ledger_index,
             )
         )
@@ -498,33 +497,6 @@ def _race_id_for_player(turn: TurnInfo, player_id: int) -> int | None:
     if turn.player.id == player_id:
         return turn.player.raceid
     return None
-
-
-def _known_built_turn_value(record: FleetShipRecord) -> int | None:
-    built_turn = record.fields.built_turn
-    if isinstance(built_turn, FleetFieldKnown) and isinstance(built_turn.value, int):
-        return built_turn.value
-    return None
-
-
-def ship_id_matches_constraint(constraint: FleetFieldConstraint, ship_id: int) -> bool:
-    if isinstance(constraint, FleetFieldKnown):
-        return constraint.value == ship_id
-    if isinstance(constraint, FleetFieldBounded):
-        bound = constraint.value
-        if not isinstance(bound, (int, float)):
-            return False
-        if constraint.operator == "lte":
-            return ship_id <= bound
-        if constraint.operator == "lt":
-            return ship_id < bound
-        if constraint.operator == "gte":
-            return ship_id >= bound
-        if constraint.operator == "gt":
-            return ship_id > bound
-        if constraint.operator == "eq":
-            return ship_id == bound
-    return False
 
 
 def _observed_fields_from_ship(

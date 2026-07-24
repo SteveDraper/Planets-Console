@@ -44,6 +44,22 @@ const activeRecord: FleetTableRecord = {
   displayDefaultOptionSetIndex: 0,
 }
 
+const mergedRecord: FleetTableRecord = {
+  recordId: 'rec-merged',
+  disposition: 'merged',
+  qualifiers: {},
+  fields: {
+    shipId: { kind: 'known', value: 318 },
+    hull: { kind: 'unknown' },
+    engine: { kind: 'unknown' },
+    beams: { kind: 'unknown' },
+    launchers: { kind: 'unknown' },
+    builtTurn: { kind: 'unknown' },
+    location: { kind: 'unknown' },
+  },
+  buildOptionSets: [],
+}
+
 const lostRecord: FleetTableRecord = {
   recordId: 'rec-lost',
   disposition: 'lost',
@@ -62,7 +78,9 @@ const lostRecord: FleetTableRecord = {
 
 describe('fleetRecordDisplay', () => {
   it('filters to active disposition rows only', () => {
-    expect(activeFleetRecords([activeRecord, lostRecord])).toEqual([activeRecord])
+    expect(activeFleetRecords([activeRecord, lostRecord, mergedRecord])).toEqual([
+      activeRecord,
+    ])
   })
 
   it('uses displayDefaultOptionSetIndex when present', () => {

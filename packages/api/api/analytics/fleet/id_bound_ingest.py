@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from api.analytics.fleet.field_constraints import known_built_turn_value
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -55,7 +56,7 @@ def tighten_inferred_ship_id_bounds(
         max_bound = max_ship_id_bound_for_inferred_record(
             turn,
             shell_turn=shell_turn,
-            built_turn=_known_built_turn(record),
+            built_turn=known_built_turn_value(record),
             is_starting_inventory=_is_homeworld_starting_inventory_event(event),
         )
         if max_bound is None:
@@ -86,13 +87,6 @@ def _apply_ship_id_bound(
             payload={"maxShipId": max_bound},
         ),
     )
-
-
-def _known_built_turn(record: FleetShipRecord) -> int | None:
-    built_turn = record.fields.built_turn
-    if isinstance(built_turn, FleetFieldKnown) and isinstance(built_turn.value, int):
-        return built_turn.value
-    return None
 
 
 def _scoreboard_acquisition_event(

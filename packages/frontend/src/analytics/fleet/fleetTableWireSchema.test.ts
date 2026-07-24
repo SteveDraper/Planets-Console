@@ -78,6 +78,17 @@ describe('fleetTableWireSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('accepts merged disposition on records', () => {
+    expect(primaryGolden).toBeDefined()
+    const withMerged = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    withMerged.players[0]!.records[0]!.disposition = 'merged'
+
+    const result = fleetTableWireSchema.safeParse(withMerged)
+    expect(result.success).toBe(true)
+  })
+
   it('rejects invalid disposition values', () => {
     expect(primaryGolden).toBeDefined()
     const invalid = structuredClone(primaryGolden) as {
