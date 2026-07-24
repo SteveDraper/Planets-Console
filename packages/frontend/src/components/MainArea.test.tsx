@@ -52,7 +52,7 @@ const sampleAnalytics: AnalyticItem[] = [
   {
     id: 'connections',
     name: 'Connections',
-    supportsTable: true,
+    supportsTable: false,
     supportsMap: true,
     type: 'selectable',
   },
@@ -167,6 +167,7 @@ describe('MainArea map hook mounting', () => {
     render(
       <MainArea
         {...defaultMainAreaProps('tabular')}
+        enabledAnalyticIds={['scores']}
         turnDataReady={false}
         turnEnsurePending={true}
       />,
@@ -212,41 +213,38 @@ describe('MainArea tabular analytic sections', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(fetchAnalyticTable).mockResolvedValue({
-      analyticId: 'connections',
-      columns: ['From', 'To'],
-      rows: [['A', 'B']],
+      analyticId: 'scores',
+      columns: ['Player'],
+      rows: [['Alice']],
     })
   })
 
   it('collapses and expands the analytic table body from the title line', async () => {
     const user = userEvent.setup()
 
-    render(<MainArea {...defaultMainAreaProps('tabular')} />, { wrapper: createWrapper() })
+    render(
+      <MainArea {...defaultMainAreaProps('tabular')} enabledAnalyticIds={['scores']} />,
+      { wrapper: createWrapper() }
+    )
 
-    expect(await screen.findByText('B')).toBeInTheDocument()
+    expect(await screen.findByText('Alice')).toBeInTheDocument()
 
-    const toggle = screen.getByRole('button', { name: 'Collapse Connections' })
+    const toggle = screen.getByRole('button', { name: 'Collapse Scores' })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
 
     await user.click(toggle)
 
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(toggle).toHaveAccessibleName('Expand Connections')
-    expect(screen.queryByText('B')).not.toBeInTheDocument()
+    expect(toggle).toHaveAccessibleName('Expand Scores')
+    expect(screen.queryByText('Alice')).not.toBeInTheDocument()
 
     await user.click(toggle)
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(await screen.findByText('B')).toBeInTheDocument()
+    expect(await screen.findByText('Alice')).toBeInTheDocument()
   })
 
   it('does not fetch scores table until preferences are hydrated', async () => {
-    vi.mocked(fetchAnalyticTable).mockResolvedValue({
-      analyticId: 'scores',
-      columns: ['Player'],
-      rows: [['Alice']],
-    })
-
     render(
       <MainArea
         {...defaultMainAreaProps('tabular')}
@@ -257,6 +255,41 @@ describe('MainArea tabular analytic sections', () => {
     )
 
     expect(screen.getByText('Loading…')).toBeInTheDocument()
+    expect(fetchAnalyticTable).not.toHaveBeenCalled()
+  })
+
+  it('omits map-only analytics from tabular sections and does not fetch their tables', () => {
+    render(
+      <MainArea
+        {...defaultMainAreaProps('tabular')}
+        enabledAnalyticIds={['connections', 'scores', 'stellar-cartography']}
+      />,
+      { wrapper: createWrapper() }
+    )
+
+    expect(screen.getByRole('button', { name: 'Collapse Scores' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Connections/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Stellar Cartography/i })).not.toBeInTheDocument()
+    expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
+    expect(fetchAnalyticTable).toHaveBeenCalledWith(
+      'scores',
+      sampleScope,
+      expect.anything()
+    )
+  })
+
+  it('shows empty-state guidance when only map-only analytics are enabled', () => {
+    render(
+      <MainArea
+        {...defaultMainAreaProps('tabular')}
+        enabledAnalyticIds={['connections', 'stellar-cartography']}
+      />,
+      { wrapper: createWrapper() }
+    )
+
+    expect(
+      screen.getByText('Enable at least one analytic in the left bar.')
+    ).toBeInTheDocument()
     expect(fetchAnalyticTable).not.toHaveBeenCalled()
   })
 })

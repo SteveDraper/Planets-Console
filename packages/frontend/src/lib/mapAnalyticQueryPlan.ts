@@ -11,22 +11,11 @@ import {
   type CombineMapDataOptionsBase,
 } from '../analytics/mapLayers'
 
+export { enabledMapAnalyticIds } from './enabledModeAnalyticIds'
+
 /** Canonical base map analytic id when present in the analytics catalog. */
 export function resolveBaseMapAnalyticId(analytics: AnalyticItem[]): string | null {
   return analytics.some((a) => a.id === BASE_MAP_ANALYTIC_ID) ? BASE_MAP_ANALYTIC_ID : null
-}
-
-/** User-enabled analytic ids that support map view (selectable only). */
-export function enabledMapAnalyticIds(
-  enabledAnalyticIds: string[],
-  analytics: AnalyticItem[]
-): string[] {
-  const set = new Set(
-    analytics
-      .filter((a) => a.supportsMap && a.id !== BASE_MAP_ANALYTIC_ID)
-      .map((a) => a.id)
-  )
-  return enabledAnalyticIds.filter((id) => set.has(id))
 }
 
 /** Map data ids to fetch: base map first, then enabled selectable map analytics. */

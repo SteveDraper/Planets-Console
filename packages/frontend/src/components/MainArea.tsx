@@ -28,6 +28,7 @@ import { ShellCenterPane, ShellErrorPane } from './shell/ShellPlaceholders'
 import { MapShellContent, type MapShellContentProps } from './shell/MapShellContent'
 import { deriveTurnEnsureLoadingView } from '../lib/mapDisplayRetention'
 import { errorDetailFromUnknown } from '../lib/queryRetry'
+import { enabledTableAnalyticIds } from '../lib/enabledModeAnalyticIds'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 import { useStellarCartographyMapContext } from '../lib/useStellarCartographyMapContext'
@@ -331,8 +332,10 @@ export function MainArea({
   const [planetLabelOptions, setPlanetLabelOptions] = useState<PlanetLabelOptions>(
     DEFAULT_PLANET_LABEL_OPTIONS
   )
+  const tableAnalyticIds =
+    viewMode === 'tabular' ? enabledTableAnalyticIds(enabledAnalyticIds, analytics) : []
 
-  if (viewMode === 'tabular' && enabledAnalyticIds.length === 0) {
+  if (viewMode === 'tabular' && tableAnalyticIds.length === 0) {
     return <ShellCenterPane message="Enable at least one analytic in the left bar." />
   }
 
@@ -365,7 +368,7 @@ export function MainArea({
 
     return (
       <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-black p-4">
-        {enabledAnalyticIds.map((id) => {
+        {tableAnalyticIds.map((id) => {
           const fetchEnabled =
             analyticFetchEnabled && (id !== 'scores' || scoresPreferencesHydrated)
           return (
