@@ -28,12 +28,13 @@ jobs:
           PROJECT_NODE_ID="${PROJECT_NODE_ID:-PVT_kwHOAFd56s4BRlN7}"
           ISSUE_NODE_ID="${{ github.event.issue.node_id }}"
           res=$(curl -sS -w "\n%{http_code}" -X POST -H "Authorization: bearer $TOKEN" -H "Content-Type: application/json" \
-            -d "{\"query\":\"mutation { addProjectV2ItemById(input: {projectId: \\\"$PROJECT_NODE_ID\\\", contentId: \\\"$ISSUE_NODE_ID\\\"}) { projectItem { id } } }\"}" \
+            -d "{\"query\":\"mutation { addProjectV2ItemById(input: {projectId: \\\"$PROJECT_NODE_ID\\\", contentId: \\\"$ISSUE_NODE_ID\\\"}) { item { id } } }\"}" \
             https://api.github.com/graphql)
           http_code=$(echo "$res" | tail -n1)
           body=$(echo "$res" | sed '$d')
           if [ "$http_code" != "200" ] || echo "$body" | grep -q '"errors"'; then
-            echo "Response ($http_code): $body"
+            echo "Response ($http_code):"
+            echo "$body" | jq -r '.errors // .' 2>/dev/null || echo "$body"
             exit 1
           fi
           echo "Issue added to project."
