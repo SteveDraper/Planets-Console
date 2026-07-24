@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AnalyticItem } from '../api/bff'
-import { enabledTableAnalyticIds } from './enabledTableAnalyticIds'
+import { enabledMapAnalyticIds, enabledTableAnalyticIds } from './enabledModeAnalyticIds'
 
 const sampleAnalytics: AnalyticItem[] = [
   { id: 'base-map', name: 'Base', supportsTable: false, supportsMap: true, type: 'base' },
@@ -54,6 +54,24 @@ describe('enabledTableAnalyticIds', () => {
     expect(enabledTableAnalyticIds(['fleet', 'scores'], sampleAnalytics)).toEqual([
       'fleet',
       'scores',
+    ])
+  })
+})
+
+describe('enabledMapAnalyticIds', () => {
+  it('keeps selectable map analytics and excludes base-map', () => {
+    expect(
+      enabledMapAnalyticIds(
+        ['base-map', 'connections', 'scores', 'stellar-cartography', 'fleet'],
+        sampleAnalytics
+      )
+    ).toEqual(['connections', 'stellar-cartography', 'fleet'])
+  })
+
+  it('preserves enabled order among map-supported ids', () => {
+    expect(enabledMapAnalyticIds(['fleet', 'connections'], sampleAnalytics)).toEqual([
+      'fleet',
+      'connections',
     ])
   })
 })
