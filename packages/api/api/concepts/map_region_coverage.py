@@ -18,11 +18,16 @@ from api.concepts.stellar_cartography.nebula_visibility import (
 )
 
 # Optional hook: (base_range, density) -> effective range at a modulated cell.
-# Default applies min(base_range, V(P)). Nebula Scanner and similar land later.
+# When omitted, each origin uses default V(P) capping, with a Nebula Scanner
+# floor when ``CoverageOrigin.has_nebula_scanner`` is set.
 EffectiveRangeFn = Callable[[float, float], float]
 
 # Inclusive map-cell AABB: (min_x, min_y, max_x, max_y).
 CellAabb = tuple[int, int, int, int]
+
+# Nebula Scanner ability: floor effective reach inside nebulae (still capped
+# by base_range when base_range < 100).
+NEBULA_SCANNER_FLOOR_LY = 100.0
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,7 @@ class CoverageOrigin:
     x: int
     y: int
     base_range: float
+    has_nebula_scanner: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,6 +96,32 @@ def default_effective_range(base_range: float, density: float) -> float:
     if visibility is None:
         return base_range
     return min(base_range, float(visibility))
+
+
+def nebula_scanner_effective_range(base_range: float, density: float) -> float:
+    """Nebula Scanner reach: ``max(min(base, V(P)), min(base, 100))`` in density.
+
+    Outside density the ideal ``base_range`` applies. The 100 ly floor only
+    raises reach where density would cut deeper; if ``base_range < 100``, the
+    floor is capped by ``base_range``.
+    """
+    if density <= 0:
+        return base_range
+    capped = default_effective_range(base_range, density)
+    return max(capped, min(base_range, NEBULA_SCANNER_FLOOR_LY))
+
+
+def _origin_effective_range(
+    origin: CoverageOrigin,
+    density: float,
+    *,
+    effective_range: EffectiveRangeFn | None,
+) -> float:
+    if effective_range is not None:
+        return effective_range(origin.base_range, density)
+    if origin.has_nebula_scanner:
+        return nebula_scanner_effective_range(origin.base_range, density)
+    return default_effective_range(origin.base_range, density)
 
 
 def _encode_coverage_rle(cells: Sequence[bool]) -> tuple[CoverageRleRun, ...]:
@@ -183,13 +215,16 @@ def _cell_covered(
     origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter],
     *,
-    effective_range: EffectiveRangeFn,
+    effective_range: EffectiveRangeFn | None,
 ) -> bool:
     density = nebula_density_at(nebulas, x, y)
     for origin in origins:
         if origin.base_range <= 0:
             continue
-        reach = effective_range(origin.base_range, density) if density > 0 else origin.base_range
+        if density <= 0:
+            reach = origin.base_range
+        else:
+            reach = _origin_effective_range(origin, density, effective_range=effective_range)
         if distance_ly(origin.x, origin.y, x, y) <= reach:
             return True
     return False
@@ -200,7 +235,7 @@ def _build_patch_for_aabb(
     origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter],
     *,
-    effective_range: EffectiveRangeFn,
+    effective_range: EffectiveRangeFn | None,
 ) -> MapRegionOverlayPatch | None:
     min_x, min_y, max_x, max_y = aabb
     width = max_x - min_x + 1
@@ -249,14 +284,13 @@ def build_hybrid_coverage(
     if not active_origins:
         return HybridCoverage(disks=(), patches=())
 
-    modulation = effective_range or default_effective_range
     patches: list[MapRegionOverlayPatch] = []
     for aabb in _merged_patch_aabbs(active_origins, nebulas):
         patch = _build_patch_for_aabb(
             aabb,
             active_origins,
             nebulas,
-            effective_range=modulation,
+            effective_range=effective_range,
         )
         if patch is not None:
             patches.append(patch)

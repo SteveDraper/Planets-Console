@@ -10,8 +10,8 @@ export const STELLAR_CARTOGRAPHY_ANALYTIC_ID = 'stellar-cartography'
 /** Canonical id for the Fleet map overlay analytic. */
 export const FLEET_ANALYTIC_ID = 'fleet'
 
-/** Temporary demo analytic for hybrid map region overlays. */
-export const MAP_REGION_DEMO_ANALYTIC_ID = 'map-region-demo'
+/** Canonical id for the Visibility map overlay analytic. */
+export const VISIBILITY_ANALYTIC_ID = 'visibility'
 
 /** Prefix for merged Stellar Cartography node and edge ids on the combined map. */
 export const STELLAR_CARTOGRAPHY_NODE_ID_PREFIX = `${STELLAR_CARTOGRAPHY_ANALYTIC_ID}:`

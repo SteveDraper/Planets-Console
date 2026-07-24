@@ -29,6 +29,8 @@ import { nodeTypes, toFlowNodes } from './map-graph/nodes'
 import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
+import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
+import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import {
   WormholeInteractionProvider,
   useWormholeInteractionState,
@@ -171,6 +173,11 @@ function MapGraphFlow({
     () => toEdges(cartographyDisplayEdges(frame, policy, wormholeLineRevealKey)),
     [frame, policy, wormholeLineRevealKey]
   )
+  const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
+  const regionOverlays = useMemo(
+    () => applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
+    [data.regionOverlays, visibilityKinds]
+  )
 
   return (
     <ReactFlow
@@ -210,7 +217,7 @@ function MapGraphFlow({
           nuIonStorms={data.nuIonStorms}
         />
       ) : null}
-      <MapRegionOverlayPane regionOverlays={data.regionOverlays} />
+      <MapRegionOverlayPane regionOverlays={regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <FixedSizeDotsOverlay
         planetGrid={planetGrid}

@@ -3,6 +3,7 @@ import { ConnectionsMapTile } from '../analytics/connections/ConnectionsMapTile'
 import { FleetAnalyticTile } from '../analytics/fleet/FleetAnalyticTile'
 import { ScoresTableTile } from '../analytics/scores/ScoresTableTile'
 import { StellarCartographyMapTile } from '../analytics/stellar-cartography/StellarCartographyMapTile'
+import { VisibilityMapTile } from '../analytics/visibility/VisibilityMapTile'
 import { tileClassName } from '../analytics/tileChrome'
 import type { StellarCartographySettingsGates } from '../analytics/stellar-cartography/layers'
 import type { AnalyticItem, ConnectionsMapParams, ScoresTableParams } from '../api/bff'
@@ -57,6 +58,7 @@ export function AnalyticsBar({
           const isConnectionsMap = a.id === 'connections' && viewMode === 'map'
           const isScoresTable = a.id === 'scores' && viewMode === 'tabular'
           const isStellarCartographyMap = a.id === 'stellar-cartography' && viewMode === 'map'
+          const isVisibilityMap = a.id === 'visibility' && viewMode === 'map'
           const isFleet = a.id === 'fleet'
 
           if (isScoresTable) {
@@ -116,6 +118,20 @@ export function AnalyticsBar({
                   onToggle={() => onToggle(a.id)}
                   settingsGates={stellarCartographyGates}
                   ionStormCount={ionStormCount}
+                />
+              </li>
+            )
+          }
+
+          if (isVisibilityMap) {
+            return (
+              <li key={a.id} className="min-w-0">
+                <VisibilityMapTile
+                  name={a.name}
+                  enabled={enabled}
+                  supportsMode={supportsMode}
+                  depressed={depressed}
+                  onToggle={() => onToggle(a.id)}
                 />
               </li>
             )

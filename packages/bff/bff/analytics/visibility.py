@@ -1,4 +1,4 @@
-"""BFF map-region-demo analytic handler (passthrough)."""
+"""BFF Visibility analytic handler (passthrough)."""
 
 from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics
@@ -11,7 +11,7 @@ from bff.analytics.models import (
     load_core_analytic,
 )
 
-ANALYTIC_ID = "map-region-demo"
+ANALYTIC_ID = "visibility"
 
 
 def get_map(

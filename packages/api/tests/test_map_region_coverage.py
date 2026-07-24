@@ -187,3 +187,36 @@ def test_l_shaped_nebula_chain_merges_pocket_nebula_into_one_patch():
     assert patch.height == 121
     assert patch_cell_covered(patch, 0, 0) is not None
     assert patch_cell_covered(patch, 60, 60) is not None
+
+
+def test_nebula_scanner_floor_raises_reach_inside_dense_nebula():
+    """Nebula Scanner keeps a 100 ly floor where V(P) would cut deeper."""
+    origin = CoverageOrigin(x=0, y=0, base_range=200, has_nebula_scanner=True)
+    # High intensity → V(P) at center well below 100.
+    nebula = Nebula(id=1, x=100, y=0, name="Fog", radius=40, intensity=90)
+    coverage = build_hybrid_coverage([origin], [nebula])
+    assert len(coverage.patches) == 1
+    patch = coverage.patches[0]
+
+    density_at_center = 90.0
+    visibility = nebula_visibility_ly(density_at_center)
+    assert visibility is not None
+    assert visibility < 100
+
+    # Dist 100 from origin: without scanner, not covered; with floor, covered.
+    assert patch_cell_covered(patch, 100, 0) is True
+
+    plain = CoverageOrigin(x=0, y=0, base_range=200, has_nebula_scanner=False)
+    plain_coverage = build_hybrid_coverage([plain], [nebula])
+    plain_patch = plain_coverage.patches[0]
+    assert patch_cell_covered(plain_patch, 100, 0) is False
+
+
+def test_nebula_scanner_floor_capped_by_base_range_below_100():
+    origin = CoverageOrigin(x=0, y=0, base_range=80, has_nebula_scanner=True)
+    nebula = Nebula(id=1, x=50, y=0, name="Fog", radius=40, intensity=90)
+    coverage = build_hybrid_coverage([origin], [nebula])
+    patch = coverage.patches[0]
+    # Dist 50 < 80 → covered by capped floor; dist 90 > 80 → not covered.
+    assert patch_cell_covered(patch, 50, 0) is True
+    assert patch_cell_covered(patch, 90, 0) is False

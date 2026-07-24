@@ -132,7 +132,7 @@ def get_analytic_map(
 
     **stellar-cartography** returns overlay circles and wormhole graph geometry.
 
-    **map-region-demo** returns hybrid ``regionOverlays`` (ideal disks + nebula-local patches).
+    **visibility** returns hybrid ``regionOverlays`` (ship-scan and Sensor Sweep kinds).
 
     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).

@@ -54,8 +54,8 @@ TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = (
         type="selectable",
     ),
     TurnAnalyticCatalogEntry(
-        id="map-region-demo",
-        name="Map region demo",
+        id="visibility",
+        name="Visibility",
         supports_table=False,
         supports_map=True,
         type="selectable",
