@@ -66,20 +66,15 @@ def apply_fleet_count_collapse(
         while surplus > 0 and absorbable_index < len(absorbables):
             _, absorbable = absorbables[absorbable_index]
             absorbable_index += 1
-            compatible = [
-                survivor
+            compatible: list[tuple[int, FleetShipRecord]] = [
+                (known_id, survivor)
                 for survivor in free_survivors
-                if _known_ship_id(survivor) is not None
-                and _ship_id_admits_survivor(
-                    absorbable.fields.ship_id,
-                    _known_ship_id(survivor),  # type: ignore[arg-type]
-                )
+                if (known_id := _known_ship_id(survivor)) is not None
+                and _ship_id_admits_survivor(absorbable.fields.ship_id, known_id)
             ]
             if not compatible:
                 continue
-            survivor = min(compatible, key=lambda record: _known_ship_id(record))  # type: ignore[arg-type, return-value]
-            known_id = _known_ship_id(survivor)
-            assert known_id is not None
+            known_id, survivor = min(compatible, key=lambda item: item[0])
             candidate_set_size = len(compatible)
             surplus -= 1
             _collapse_one(
