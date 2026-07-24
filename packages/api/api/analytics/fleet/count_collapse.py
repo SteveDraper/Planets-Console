@@ -69,7 +69,7 @@ def apply_fleet_count_collapse(
                 survivor
                 for survivor in free_survivors
                 if _known_ship_id(survivor) is not None
-                and ship_id_matches_constraint(
+                and _ship_id_admits_survivor(
                     absorbable.fields.ship_id,
                     _known_ship_id(survivor),  # type: ignore[arg-type]
                 )
@@ -181,6 +181,17 @@ def _known_ship_id(record: FleetShipRecord) -> int | None:
     if isinstance(ship_id, FleetFieldKnown) and isinstance(ship_id.value, int):
         return ship_id.value
     return None
+
+
+def _ship_id_admits_survivor(constraint: FleetFieldConstraint, ship_id: int) -> bool:
+    """Collapse-local admit: Unknown matches any survivor id; else shared constraint match.
+
+    Keep Unknown universal-admit here only. Shared ``ship_id_matches_constraint`` is
+    used by observation matching and must not treat Unknown as a match for every id.
+    """
+    if isinstance(constraint, FleetFieldUnknown):
+        return True
+    return ship_id_matches_constraint(constraint, ship_id)
 
 
 def _known_built_turn_value(record: FleetShipRecord) -> int | None:

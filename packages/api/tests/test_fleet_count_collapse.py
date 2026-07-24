@@ -251,6 +251,67 @@ def test_most_constrained_absorbable_collapses_first():
     assert isinstance(loose.fields.ship_id, FleetFieldBounded)
 
 
+def test_fully_unknown_absorbable_collapses_onto_survivor():
+    turn_number = 2
+    turn = single_ship_turn(turn_number=turn_number, ship_id=99, owner_id=PLAYER_ID, x=0, y=0)
+    turn = _turn_with_player_score(
+        turn,
+        owner_id=PLAYER_ID,
+        turn_number=turn_number,
+        capitalships=1,
+        freighters=0,
+    )
+    absorbable = _absorbable_row(
+        "unknown",
+        turn=turn_number,
+        ship_class="warship",
+        ship_id=FleetFieldUnknown(),
+    )
+    survivor = _survivor_row("survivor", 77)
+    ledger = _ledger_with_records(turn, [absorbable, survivor])
+
+    apply_fleet_count_collapse(ledger, turn)
+
+    assert absorbable.disposition == "merged"
+    assert absorbable.fields.ship_id == FleetFieldKnown(77)
+    collapse = next(event for event in absorbable.events if event.kind == "count_collapse")
+    assert collapse.payload["constraintTightness"] == "unknown"
+    assert collapse.payload["shipId"] == 77
+
+
+def test_bounded_preferred_over_fully_unknown_absorbable():
+    turn_number = 2
+    turn = single_ship_turn(turn_number=turn_number, ship_id=99, owner_id=PLAYER_ID, x=0, y=0)
+    turn = _turn_with_player_score(
+        turn,
+        owner_id=PLAYER_ID,
+        turn_number=turn_number,
+        capitalships=1,
+        freighters=0,
+    )
+    unknown = _absorbable_row(
+        "unknown",
+        turn=turn_number,
+        ship_class="warship",
+        ship_id=FleetFieldUnknown(),
+    )
+    bounded = _absorbable_row(
+        "bounded",
+        turn=turn_number,
+        ship_class="warship",
+        ship_id=FleetFieldBounded(operator="lte", value=50),
+    )
+    survivor = _survivor_row("survivor", 40)
+    ledger = _ledger_with_records(turn, [unknown, bounded, survivor])
+
+    apply_fleet_count_collapse(ledger, turn)
+
+    assert bounded.disposition == "merged"
+    assert bounded.fields.ship_id == FleetFieldKnown(40)
+    assert unknown.disposition == "active"
+    assert isinstance(unknown.fields.ship_id, FleetFieldUnknown)
+
+
 def test_survivor_pick_uses_lowest_compatible_ship_id():
     turn_number = 2
     turn = single_ship_turn(turn_number=turn_number, ship_id=99, owner_id=PLAYER_ID, x=0, y=0)
