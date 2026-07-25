@@ -322,6 +322,7 @@ def get_turn_analytics(
         alias=INCLUDE_ILLUSTRATIVE_ROUTES_QUERY,
         description=INCLUDE_ILLUSTRATIVE_ROUTES_DESCRIPTION,
     ),
+    username: Annotated[str, Query()] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
 ):
     """Return per-analytic map data derived from turn state."""
@@ -335,4 +336,5 @@ def get_turn_analytics(
         connection_flare_mode=flare_mode,
         connection_flare_depth=flare_depth,
         connection_include_illustrative_routes=include_illustrative_routes,
+        username=username,
     )

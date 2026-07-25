@@ -224,10 +224,12 @@ export function deriveAnalyticScope(inputs: ShellContextInputs): AnalyticShellSc
     deriveShellTurnMax(inputs.gameInfoContext)
   )
   if (dataTurn == null) return null
+  const username = inputs.loginName?.trim() ?? ''
   return {
     gameId: inputs.selectedGameId,
     turn: dataTurn,
     perspective: ordinal,
+    ...(username ? { username } : {}),
   }
 }
 

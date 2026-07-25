@@ -117,6 +117,32 @@ def test_fleet_table_dispatch_forwards_to_core():
     ]
 
 
+def test_load_core_analytic_forwards_username_when_set():
+    calls = []
+
+    def load_core(game_id, perspective, turn, analytic_id, **kwargs):
+        calls.append((game_id, perspective, turn, analytic_id, kwargs))
+        return {"analyticId": analytic_id}
+
+    from bff.analytics.models import load_core_analytic
+
+    load_core_analytic(
+        load_core,
+        TurnScope(628580, 1, 111, username="captain"),
+        "homeworld-locator",
+        diagnostics=NOOP_DIAGNOSTICS,
+    )
+    assert calls == [
+        (
+            628580,
+            1,
+            111,
+            "homeworld-locator",
+            {"diagnostics": NOOP_DIAGNOSTICS, "username": "captain"},
+        )
+    ]
+
+
 def test_fleet_map_dispatch_shapes_scaffold_nodes():
     calls = []
 

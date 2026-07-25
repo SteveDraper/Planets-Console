@@ -16,14 +16,16 @@ from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersiste
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
-from api.errors import NotFoundError
+from api.errors import LoginCredentialsRequiredError, NotFoundError, UpstreamPlanetsError
 from api.models.game import TurnInfo
+from api.planets_nu import PlanetsNuClient
 from api.services.inference_hull_catalog_service import InferenceHullCatalogService
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
 from api.transport.connections_options import FlareConnectionMode
+from api.transport.game_info_update import RefreshGameInfoParams
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -43,8 +45,10 @@ class TurnAnalyticService:
         inference_scheduler: InferenceRowScheduler | None = None,
         fleet_persistence: FleetSnapshotPersistenceService | None = None,
         homeworld_persistence: HomeworldLocatorPersistenceService | None = None,
+        planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
     ) -> None:
         self._turns = turns
+        self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
         if storage is None:
             from api.storage import get_storage
 
@@ -106,6 +110,7 @@ class TurnAnalyticService:
         connection_flare_depth: int = 1,
         connection_include_illustrative_routes: bool = False,
         diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
+        username: str = "",
     ) -> dict:
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
         return get_turn_analytic(
@@ -120,13 +125,19 @@ class TurnAnalyticService:
                 diagnostics=diagnostics,
             ),
             load_turn=self._load_scoreboard_turn(game_id, perspective),
-            export_services=self._turn_export_services(game_id, perspective),
+            export_services=self._turn_export_services(
+                game_id,
+                perspective,
+                username=username,
+            ),
         )
 
     def _turn_export_services(
         self,
         game_id: int,
         perspective: int,
+        *,
+        username: str = "",
     ) -> dict[str, object]:
         scores_services = self._scores_export_context(game_id, perspective)
         return {
@@ -136,13 +147,44 @@ class TurnAnalyticService:
                 perspective,
                 scores_services=scores_services,
             ),
-            HOMEWORLD_ANALYTIC_ID: self._homeworld_compute_services(game_id, perspective),
+            HOMEWORLD_ANALYTIC_ID: self._homeworld_compute_services(
+                game_id,
+                perspective,
+                username=username,
+            ),
         }
+
+    def _homeworld_ensure_turn(
+        self,
+        game_id: int,
+        perspective: int,
+        username: str,
+    ) -> Callable[[int], TurnInfo | None] | None:
+        trimmed = username.strip()
+        if not trimmed:
+            return None
+
+        def ensure_turn(turn_number: int) -> TurnInfo | None:
+            """Load missing turn via stored account API key; None when credentials/upstream fail."""
+            try:
+                return self._turns.ensure_turn_loaded(
+                    game_id,
+                    perspective,
+                    turn_number,
+                    RefreshGameInfoParams(username=trimmed),
+                    self._planets_client_factory(),
+                )
+            except LoginCredentialsRequiredError, UpstreamPlanetsError, NotFoundError, OSError:
+                return None
+
+        return ensure_turn
 
     def _homeworld_compute_services(
         self,
         game_id: int,
         perspective: int,
+        *,
+        username: str = "",
     ) -> HomeworldLocatorComputeServices:
         load_turn = self._load_scoreboard_turn(game_id, perspective)
 
@@ -155,7 +197,7 @@ class TurnAnalyticService:
             perspective=perspective,
             load_turn=load_turn,
             list_stored_turns=list_stored_turns,
-            ensure_turn=None,
+            ensure_turn=self._homeworld_ensure_turn(game_id, perspective, username),
         )
 
     def _fleet_compute_services(

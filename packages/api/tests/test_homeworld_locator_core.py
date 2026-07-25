@@ -203,6 +203,65 @@ def test_baseline_auto_ensure_turn_one(persistence, sample_turn) -> None:
     assert result.game_state.baseline_degraded is False
 
 
+def test_turn_analytic_service_wires_ensure_turn_when_username_set(
+    persistence, sample_turn, monkeypatch
+) -> None:
+    """Production path: username on get_turn_analytics installs ensure_turn hook."""
+    from api.analytics.homeworld_locator.constants import ANALYTIC_ID
+    from api.services.turn_analytic_service import TurnAnalyticService
+
+    late = replace(sample_turn, settings=replace(sample_turn.settings, turn=111))
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    ensure_calls: list[tuple[int, str]] = []
+
+    class _Turns:
+        def get_turn_info(self, game_id, perspective, turn_number):
+            assert (game_id, perspective, turn_number) == (628580, 1, 111)
+            return late
+
+        def list_stored_turn_numbers(self, game_id, perspective):
+            return [111]
+
+        def ensure_turn_loaded(self, game_id, perspective, turn_number, params, planets):
+            ensure_calls.append((turn_number, params.username))
+            assert planets is not None
+            return turn_one
+
+    class _FakePlanets:
+        @staticmethod
+        def from_config():
+            return object()
+
+    svc = TurnAnalyticService(
+        _Turns(),  # type: ignore[arg-type]
+        storage=persistence._storage,
+        homeworld_persistence=persistence,
+        planets_client_factory=_FakePlanets.from_config,
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_get_turn_analytic(analytic_id, turn, options, *, load_turn, export_services):
+        captured["export_services"] = export_services
+        return {"analyticId": analytic_id}
+
+    monkeypatch.setattr(
+        "api.services.turn_analytic_service.get_turn_analytic",
+        fake_get_turn_analytic,
+    )
+
+    svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="captain")
+    homeworld = captured["export_services"][ANALYTIC_ID]
+    assert homeworld.ensure_turn is not None
+    ensured = homeworld.ensure_turn(1)
+    assert ensured is turn_one
+    assert ensure_calls == [(1, "captain")]
+
+    svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="")
+    homeworld_no_user = captured["export_services"][ANALYTIC_ID]
+    assert homeworld_no_user.ensure_turn is None
+
+
 def test_recompute_when_turn_one_appears_after_degraded(persistence, sample_turn) -> None:
     late = replace(sample_turn, settings=replace(sample_turn.settings, turn=111))
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))

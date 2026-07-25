@@ -74,12 +74,13 @@ def get_analytic_table(
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=0),
+    username: str = Query(""),
     include_build_inference: bool = Query(False, alias="includeBuildInference"),
     include: IncludeDiagnostics = False,
 ):
     """Tabular data scoped to the selected game, turn, and perspective."""
     bff_path = f"/analytics/{analytic_id}/table"
-    scope = TurnScope(game_id=game_id, perspective=perspective, turn=turn)
+    scope = TurnScope(game_id=game_id, perspective=perspective, turn=turn, username=username)
 
     root = optional_request_root(
         include,
@@ -109,6 +110,7 @@ def get_analytic_map(
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=0),
+    username: str = Query(""),
     warp_speed: int = Query(DEFAULT_WARP_SPEED, ge=1, le=9, alias=WARP_SPEED_QUERY),
     gravitonic_movement: bool = Query(False, alias=GRAVITONIC_MOVEMENT_QUERY),
     flare_mode: FlareConnectionMode = Query(FlareConnectionMode.OFF, alias=FLARE_MODE_QUERY),
@@ -139,7 +141,7 @@ def get_analytic_map(
     """
     bff_path = f"/analytics/{analytic_id}/map"
 
-    scope = TurnScope(game_id=game_id, perspective=perspective, turn=turn)
+    scope = TurnScope(game_id=game_id, perspective=perspective, turn=turn, username=username)
     query = ConnectionsMapQuery(
         warp_speed=warp_speed,
         gravitonic_movement=gravitonic_movement,
