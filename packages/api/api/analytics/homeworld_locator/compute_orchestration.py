@@ -5,8 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.homeworld_locator.baseline_ensure import ensure_homeworld_baseline
-from api.analytics.homeworld_locator.compute_services import resolve_homeworld_services
+from api.analytics.homeworld_locator.baseline_ensure import compute_homeworld_baseline
+from api.analytics.homeworld_locator.compute_services import (
+    HomeworldLocatorComputeServices,
+    resolve_homeworld_services,
+)
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.serialization import (
     homeworld_evidence_aggregate_from_json,
@@ -28,6 +31,9 @@ HOMEWORLD_COMPUTE_PROFILE = AnalyticComputeProfile(
     steps=(ComputeStepSpec(step_kind=HOMEWORLD_BASELINE_STEP, backend="inline"),),
 )
 
+# Inline-only job-wire key: HomeworldLocatorComputeServices (not JSON-serializable).
+_COMPUTE_SERVICES_KEY = "computeServices"
+
 
 def build_homeworld_baseline_job_wire(
     scope: ComputeScope,
@@ -36,7 +42,10 @@ def build_homeworld_baseline_job_wire(
     ctx: AnalyticQueryContext | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
-    """Assemble a serializable job wire for baseline-only homeworld ensure."""
+    """Assemble a job wire for baseline-only homeworld compute.
+
+    Attaches ``computeServices`` for the inline step (same process; not pool-safe).
+    """
     del dependency_outputs
     if ctx is None:
         raise RuntimeError("homeworld baseline job wire requires AnalyticQueryContext")
@@ -56,16 +65,15 @@ def build_homeworld_baseline_job_wire(
         "shellTurn": scope.turn,
         "turnWire": turn_info_to_json(turn),
         "analyticId": ANALYTIC_ID,
+        _COMPUTE_SERVICES_KEY: resolve_homeworld_services(ctx),
     }
 
 
 def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
-    """Run baseline inference; persist via PersistencePolicy on ``persist`` outcome.
+    """Compute baseline inference; durable write via PersistencePolicy.persist.
 
-    The inline step returns a persist payload; durable writes happen in
-    ``HomeworldLocatorPersistencePolicy.persist`` so orchestrator epoch checks apply.
-    Actual ensure for map/table/export paths calls ``ensure_homeworld_baseline``
-    directly; this step supports ComputeRequest submission of the same work.
+    Produces ``gameState`` + ``floorAggregate`` wires. Map/table/export still call
+    ``ensure_homeworld_baseline`` directly (compute + write) as the interim path.
     """
     from api.serialization.turn import turn_info_from_json
 
@@ -80,14 +88,20 @@ def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
     if not is_homeworld_locator_available(turn.settings):
         return StepResult(outcome="complete", payload={"available": False})
 
-    # Persist payload is filled by the policy after ensure; carry shell scope ids.
+    services = job_wire.get(_COMPUTE_SERVICES_KEY)
+    if not isinstance(services, HomeworldLocatorComputeServices):
+        raise TypeError(
+            "homeworld baseline job wire requires computeServices "
+            f"(HomeworldLocatorComputeServices), got {type(services).__name__}"
+        )
+
+    result = compute_homeworld_baseline(services, shell_turn=turn)
     return StepResult(
         outcome="persist",
         payload={
-            "gameId": job_wire.get("gameId"),
-            "perspective": job_wire.get("perspective"),
-            "shellTurn": job_wire.get("shellTurn"),
-            "runBaselineEnsure": True,
+            "available": True,
+            "gameState": homeworld_locator_game_state_to_json(result.game_state),
+            "floorAggregate": homeworld_evidence_aggregate_to_json(result.floor_aggregate),
         },
     )
 
@@ -123,33 +137,25 @@ class HomeworldLocatorPersistencePolicy:
             )
         if result_wire.get("available") is False:
             return
-        if result_wire.get("runBaselineEnsure") is not True:
-            # Allow pre-built state wires from tests.
-            game_state_wire = result_wire.get("gameState")
-            floor_wire = result_wire.get("floorAggregate")
-            if isinstance(game_state_wire, dict) and isinstance(floor_wire, dict):
-                services = resolve_homeworld_services(ctx)
-                state = homeworld_locator_game_state_from_json(game_state_wire)
-                floor = homeworld_evidence_aggregate_from_json(floor_wire)
-                services.persistence.put_baseline(
-                    services.game_id,
-                    services.perspective,
-                    state,
-                    floor,
-                )
-            return
-
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None:
             return
+        game_state_wire = result_wire.get("gameState")
+        floor_wire = result_wire.get("floorAggregate")
+        if not isinstance(game_state_wire, dict):
+            raise TypeError("homeworld persist result wire missing gameState object")
+        if not isinstance(floor_wire, dict):
+            raise TypeError("homeworld persist result wire missing floorAggregate object")
+
         services = resolve_homeworld_services(ctx)
-        turn = ctx.load_turn(export_scope.turn)
-        if turn is None:
-            return
-        result = ensure_homeworld_baseline(services, shell_turn=turn)
-        # Stash durable wires for dependents / diagnostics.
-        result_wire["gameState"] = homeworld_locator_game_state_to_json(result.game_state)
-        result_wire["floorAggregate"] = homeworld_evidence_aggregate_to_json(result.floor_aggregate)
+        state = homeworld_locator_game_state_from_json(game_state_wire)
+        floor = homeworld_evidence_aggregate_from_json(floor_wire)
+        services.persistence.put_baseline(
+            export_scope.game_id,
+            export_scope.perspective,
+            state,
+            floor,
+        )
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
         export_scope = _export_scope_for_compute(scope)

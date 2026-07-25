@@ -79,14 +79,16 @@ def needs_baseline_recompute(
     return False
 
 
-def ensure_homeworld_baseline(
+def compute_homeworld_baseline(
     services: HomeworldLocatorComputeServices,
     *,
     shell_turn: TurnInfo | None = None,
 ) -> HomeworldBaselineEnsureResult:
-    """Run baseline-only ensure: game-global candidates + floor evidence aggregate.
+    """Compute baseline game-global + floor aggregate without a durable write.
 
-    Does not copy-forward empty aggregates through the shell turn (#36).
+    Orchestrator ``run_homeworld_baseline`` uses this so ``PersistencePolicy.persist``
+    owns the write after epoch checks. Map/table/export call
+    :func:`ensure_homeworld_baseline`, which computes then persists.
     """
     settings_source = shell_turn if shell_turn is not None else None
     if settings_source is None:
@@ -163,17 +165,32 @@ def ensure_homeworld_baseline(
         baseline_turn=baseline_turn,
         evidence_hits=(),
     )
-    services.persistence.put_baseline(
-        services.game_id,
-        services.perspective,
-        state,
-        floor,
-    )
     return HomeworldBaselineEnsureResult(
         game_state=state,
         floor_aggregate=floor,
         recomputed=True,
     )
+
+
+def ensure_homeworld_baseline(
+    services: HomeworldLocatorComputeServices,
+    *,
+    shell_turn: TurnInfo | None = None,
+) -> HomeworldBaselineEnsureResult:
+    """Run baseline-only ensure: compute then persist game-global + floor.
+
+    Does not copy-forward empty aggregates through the shell turn (#36).
+    """
+    result = compute_homeworld_baseline(services, shell_turn=shell_turn)
+    if not result.recomputed:
+        return result
+    services.persistence.put_baseline(
+        services.game_id,
+        services.perspective,
+        result.game_state,
+        result.floor_aggregate,
+    )
+    return result
 
 
 def materialize_homeworld_candidate_view(

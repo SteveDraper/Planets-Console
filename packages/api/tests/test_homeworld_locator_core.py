@@ -363,3 +363,93 @@ def test_registration_in_catalog() -> None:
     assert entry.supports_table is True
     assert ANALYTIC_ID in TURN_ANALYTICS
     assert ANALYTIC_ID in COMPUTE_REGISTRY
+
+
+def test_run_homeworld_baseline_persist_round_trip(persistence, sample_turn) -> None:
+    """Step computes wires without writing; PersistencePolicy.persist writes only."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.homeworld_locator.compute_orchestration import (
+        HomeworldLocatorPersistencePolicy,
+        build_homeworld_baseline_job_wire,
+        run_homeworld_baseline,
+    )
+    from api.compute.scope import ComputeScope
+    from api.compute.wire import DependencyOutputs
+
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    turns = {1: turn_one, 111: sample_turn}
+    services = _services(persistence, turns)
+    ctx = make_analytic_compute_context(
+        sample_turn,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    scope = ComputeScope(
+        analytic_id=ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=111,
+    )
+
+    job_wire = build_homeworld_baseline_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    result = run_homeworld_baseline(job_wire)
+
+    assert result.outcome == "persist"
+    assert isinstance(result.payload, dict)
+    assert result.payload.get("available") is True
+    assert isinstance(result.payload.get("gameState"), dict)
+    assert isinstance(result.payload.get("floorAggregate"), dict)
+    assert "runBaselineEnsure" not in result.payload
+    # Step must not durable-write; persist owns put_baseline after epoch checks.
+    assert persistence.get_game_state(628580) is None
+    assert persistence.has_baseline_floor(628580, 1) is False
+
+    HomeworldLocatorPersistencePolicy().persist(ctx, scope, result.payload)
+
+    assert persistence.has_baseline_floor(628580, 1) is True
+    stored = persistence.get_game_state(628580)
+    assert stored is not None
+    assert stored.baseline_turn == 1
+    assert stored.baseline_degraded is False
+
+
+def test_run_homeworld_baseline_inactive_completes_without_persist(
+    persistence, sample_turn
+) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.homeworld_locator.compute_orchestration import (
+        HomeworldLocatorPersistencePolicy,
+        build_homeworld_baseline_job_wire,
+        run_homeworld_baseline,
+    )
+    from api.compute.scope import ComputeScope
+    from api.compute.wire import DependencyOutputs
+
+    inactive = replace(sample_turn, settings=replace(sample_turn.settings, nohomeworld=True))
+    services = _services(persistence, {111: inactive})
+    ctx = make_analytic_compute_context(
+        inactive,
+        load_turn=lambda n: {111: inactive}.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    scope = ComputeScope(
+        analytic_id=ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=111,
+    )
+    job_wire = build_homeworld_baseline_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    result = run_homeworld_baseline(job_wire)
+    assert result.outcome == "complete"
+    assert result.payload == {"available": False}
+
+    HomeworldLocatorPersistencePolicy().persist(ctx, scope, result.payload)
+    assert persistence.get_game_state(628580) is None
