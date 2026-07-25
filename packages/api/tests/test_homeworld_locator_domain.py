@@ -100,7 +100,9 @@ def test_supports_circular_round_only(sample_settings) -> None:
 
 def test_availability_helpers(sample_settings) -> None:
     from api.concepts.homeworld_layout import (
+        HW_DISTRIBUTION_ONE_VS_CIRCLE,
         INACTIVE_REASON_NO_HOMEWORLD,
+        INACTIVE_REASON_SCENARIO_OVERRIDE,
         INACTIVE_REASON_WANDERING_TRIBES,
         homeworld_locator_inactive_reason,
         is_homeworld_locator_available,
@@ -112,6 +114,27 @@ def test_availability_helpers(sample_settings) -> None:
     )
     assert (
         homeworld_locator_inactive_reason(replace(sample_settings, wanderingtribescount=1))
+        == INACTIVE_REASON_WANDERING_TRIBES
+    )
+    # Ashes of the Evil Empire: One vs. Circle distribution.
+    ashes = replace(sample_settings, hwdistribution=HW_DISTRIBUTION_ONE_VS_CIRCLE)
+    assert homeworld_locator_inactive_reason(ashes) == INACTIVE_REASON_SCENARIO_OVERRIDE
+    # Crazy Intermix: extra planets with random locations.
+    intermix = replace(sample_settings, extraplanets=3, extraplanetsrandomloc=True)
+    assert homeworld_locator_inactive_reason(intermix) == INACTIVE_REASON_SCENARIO_OVERRIDE
+    # Disunited Kingdoms: extra planets without random locations.
+    disunited = replace(sample_settings, extraplanets=3, extraplanetsrandomloc=False)
+    assert homeworld_locator_inactive_reason(disunited) == INACTIVE_REASON_SCENARIO_OVERRIDE
+    # nohomeworld wins over scenario recipe knobs.
+    assert (
+        homeworld_locator_inactive_reason(
+            replace(ashes, nohomeworld=True, extraplanets=2, extraplanetsrandomloc=True)
+        )
+        == INACTIVE_REASON_NO_HOMEWORLD
+    )
+    # Wandering Tribes wins over scenario recipe knobs.
+    assert (
+        homeworld_locator_inactive_reason(replace(ashes, wanderingtribescount=1))
         == INACTIVE_REASON_WANDERING_TRIBES
     )
 

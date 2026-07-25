@@ -31,7 +31,7 @@ Output: **slot-anchored homeworld candidates**, **orphan homeworld candidates**,
 |-----------|---------|
 | `nohomeworld: true` | Game created without homeworld planets |
 | `wanderingtribescount > 0` | **Wandering Tribes** -- players start in STF fleets, not on HW planets |
-| Scenario overrides | e.g. Disunited Kingdoms, Crazy Intermix, Ashes of the Evil Empire (no normal HW setup) |
+| Scenario overrides | e.g. Disunited Kingdoms, Crazy Intermix, Ashes of the Evil Empire (no normal HW setup). No scenario-name field on **GameSettings** -- detect via recipe heuristics: Ashes `hwdistribution=4`; Crazy Intermix `extraplanets>0` + `extraplanetsrandomloc`; Disunited Kingdoms `extraplanets>0` without random loc. |
 
 Fleet spawn region inference for Wandering Tribes is a future alternate mode, not v1.
 

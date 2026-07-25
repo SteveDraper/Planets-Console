@@ -1,12 +1,19 @@
 import type { GameInfoResponse } from '../../api/bff'
 import {
   INACTIVE_REASON_NO_HOMEWORLD,
+  INACTIVE_REASON_SCENARIO_OVERRIDE,
   INACTIVE_REASON_WANDERING_TRIBES,
 } from './constants'
+
+/** Mirror of Core ``HW_DISTRIBUTION_ONE_VS_CIRCLE`` (Ashes recipe signal). */
+const HW_DISTRIBUTION_ONE_VS_CIRCLE = 4
 
 /**
  * Mirror Core ``homeworld_locator_inactive_reason`` from GameInfo settings.
  * Catalog greying uses this so the sidebar can hint before the analytic is enabled.
+ *
+ * Scenario recipes have no name field -- detect Ashes via ``hwdistribution === 4``,
+ * Crazy Intermix / Disunited Kingdoms via ``extraplanets > 0``.
  */
 export function homeworldLocatorInactiveReasonFromGameInfo(
   data: GameInfoResponse | null | undefined
@@ -21,6 +28,18 @@ export function homeworldLocatorInactiveReasonFromGameInfo(
     const wandering = rec.wanderingtribescount
     if (typeof wandering === 'number' && Number.isFinite(wandering) && wandering > 0) {
       return INACTIVE_REASON_WANDERING_TRIBES
+    }
+    const hwdistribution = rec.hwdistribution
+    if (
+      typeof hwdistribution === 'number' &&
+      Number.isFinite(hwdistribution) &&
+      hwdistribution === HW_DISTRIBUTION_ONE_VS_CIRCLE
+    ) {
+      return INACTIVE_REASON_SCENARIO_OVERRIDE
+    }
+    const extraplanets = rec.extraplanets
+    if (typeof extraplanets === 'number' && Number.isFinite(extraplanets) && extraplanets > 0) {
+      return INACTIVE_REASON_SCENARIO_OVERRIDE
     }
   }
   return null

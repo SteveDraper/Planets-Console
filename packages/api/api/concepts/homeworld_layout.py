@@ -36,18 +36,40 @@ def supports_circular_round_candidate_geometry(settings: GameSettings) -> bool:
 
 INACTIVE_REASON_NO_HOMEWORLD = "nohomeworld"
 INACTIVE_REASON_WANDERING_TRIBES = "wandering_tribes"
+# Named Nu recipes (Ashes / Crazy Intermix / Disunited Kingdoms) have no scenario
+# name field on GameSettings -- detect via recipe-shaped knobs below.
+INACTIVE_REASON_SCENARIO_OVERRIDE = "scenario_override"
+
+
+def _has_scenario_override_recipe(settings: GameSettings) -> bool:
+    """True for recipe-shaped settings that design treats as inactive.
+
+    Precedence among recipes is not exposed -- all map to
+    ``INACTIVE_REASON_SCENARIO_OVERRIDE``. Ashes is ``hwdistribution == 4``;
+    Crazy Intermix / Disunited Kingdoms use ``extraplanets`` with / without
+    ``extraplanetsrandomloc``. Private games can set the same knobs without the
+    UI recipe name; that is an accepted product-gate false positive.
+    """
+    if settings.hwdistribution == HW_DISTRIBUTION_ONE_VS_CIRCLE:
+        return True
+    if settings.extraplanets > 0:
+        return True
+    return False
 
 
 def homeworld_locator_inactive_reason(settings: GameSettings) -> str | None:
     """Return an inactive reason when traditional homeworld planets do not exist.
 
-    ``None`` means the homeworld locator may run. Named multi-planet-start recipes
-    (Ashes, Crazy Intermix, Disunited Kingdoms) still have homeworlds and stay active.
+    ``None`` means the homeworld locator may run. Precedence: ``nohomeworld``,
+    Wandering Tribes, then scenario-recipe heuristics (Ashes / Crazy Intermix /
+    Disunited Kingdoms).
     """
     if settings.nohomeworld:
         return INACTIVE_REASON_NO_HOMEWORLD
     if settings.wanderingtribescount > 0:
         return INACTIVE_REASON_WANDERING_TRIBES
+    if _has_scenario_override_recipe(settings):
+        return INACTIVE_REASON_SCENARIO_OVERRIDE
     return None
 
 
@@ -62,6 +84,8 @@ HOMEWORLD_RELEVANT_SETTINGS_FIELDS: tuple[str, ...] = (
     "nohomeworld",
     "wanderingtribescount",
     "hwdistribution",
+    "extraplanets",
+    "extraplanetsrandomloc",
     "mapshape",
     "mapwidth",
     "mapheight",

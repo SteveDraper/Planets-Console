@@ -110,6 +110,23 @@ def test_availability_nohomeworld_and_wandering_tribes(sample_turn) -> None:
     assert homeworld_locator_inactive_reason(wt) == INACTIVE_REASON_WANDERING_TRIBES
 
 
+def test_availability_scenario_override_recipes(sample_turn) -> None:
+    from api.concepts.homeworld_layout import (
+        HW_DISTRIBUTION_ONE_VS_CIRCLE,
+        INACTIVE_REASON_SCENARIO_OVERRIDE,
+    )
+
+    ashes = replace(sample_turn.settings, hwdistribution=HW_DISTRIBUTION_ONE_VS_CIRCLE)
+    assert is_homeworld_locator_available(ashes) is False
+    assert homeworld_locator_inactive_reason(ashes) == INACTIVE_REASON_SCENARIO_OVERRIDE
+
+    intermix = replace(sample_turn.settings, extraplanets=2, extraplanetsrandomloc=True)
+    assert homeworld_locator_inactive_reason(intermix) == INACTIVE_REASON_SCENARIO_OVERRIDE
+
+    disunited = replace(sample_turn.settings, extraplanets=2, extraplanetsrandomloc=False)
+    assert homeworld_locator_inactive_reason(disunited) == INACTIVE_REASON_SCENARIO_OVERRIDE
+
+
 def test_persistence_round_trip_ephemeral(persistence) -> None:
     state = HomeworldLocatorGameState(
         candidates=(

@@ -6,11 +6,15 @@ export const CONFIDENCE_POSSIBLE = 'possible' as const
 
 export const INACTIVE_REASON_NO_HOMEWORLD = 'nohomeworld'
 export const INACTIVE_REASON_WANDERING_TRIBES = 'wandering_tribes'
+/** Ashes / Crazy Intermix / Disunited Kingdoms (recipe-shaped GameSettings). */
+export const INACTIVE_REASON_SCENARIO_OVERRIDE = 'scenario_override'
 
 export const HOMEWORLD_INACTIVE_HINTS: Record<string, string> = {
   [INACTIVE_REASON_NO_HOMEWORLD]: 'This game has no homeworld planets',
   [INACTIVE_REASON_WANDERING_TRIBES]:
     'Wandering Tribes games start in fleets, not on homeworld planets',
+  [INACTIVE_REASON_SCENARIO_OVERRIDE]:
+    'Scenario recipes (Ashes, Crazy Intermix, Disunited Kingdoms) use a nontraditional homeworld setup',
 }
 
 export function homeworldInactiveHint(reason: string | null | undefined): string {

@@ -3,6 +3,7 @@ import {
   homeworldInactiveHint,
   homeworldBaselineDegradedMessage,
   INACTIVE_REASON_NO_HOMEWORLD,
+  INACTIVE_REASON_SCENARIO_OVERRIDE,
   INACTIVE_REASON_WANDERING_TRIBES,
 } from './constants'
 import { homeworldLocatorInactiveReasonFromGameInfo } from './homeworldAvailability'
@@ -14,7 +15,12 @@ describe('homeworldLocatorInactiveReasonFromGameInfo', () => {
     expect(
       homeworldLocatorInactiveReasonFromGameInfo({
         game: { id: 1 },
-        settings: { nohomeworld: false, wanderingtribescount: 0 },
+        settings: {
+          nohomeworld: false,
+          wanderingtribescount: 0,
+          hwdistribution: 2,
+          extraplanets: 0,
+        },
       })
     ).toBeNull()
   })
@@ -36,12 +42,44 @@ describe('homeworldLocatorInactiveReasonFromGameInfo', () => {
       })
     ).toBe(INACTIVE_REASON_WANDERING_TRIBES)
   })
+
+  it('detects Ashes via hwdistribution One vs. Circle', () => {
+    expect(
+      homeworldLocatorInactiveReasonFromGameInfo({
+        game: { id: 1 },
+        settings: { hwdistribution: 4 },
+      })
+    ).toBe(INACTIVE_REASON_SCENARIO_OVERRIDE)
+  })
+
+  it('detects Crazy Intermix via extraplanets + random loc', () => {
+    expect(
+      homeworldLocatorInactiveReasonFromGameInfo({
+        game: { id: 1 },
+        settings: { extraplanets: 3, extraplanetsrandomloc: true },
+      })
+    ).toBe(INACTIVE_REASON_SCENARIO_OVERRIDE)
+  })
+
+  it('detects Disunited Kingdoms via extraplanets without random loc', () => {
+    expect(
+      homeworldLocatorInactiveReasonFromGameInfo({
+        game: { id: 1 },
+        settings: { extraplanets: 3, extraplanetsrandomloc: false },
+      })
+    ).toBe(INACTIVE_REASON_SCENARIO_OVERRIDE)
+  })
 })
 
 describe('homeworldInactiveHint', () => {
   it('maps known reasons to user-facing hints', () => {
     expect(homeworldInactiveHint(INACTIVE_REASON_NO_HOMEWORLD)).toContain('no homeworld')
     expect(homeworldInactiveHint(INACTIVE_REASON_WANDERING_TRIBES)).toContain('Wandering Tribes')
+    expect(homeworldInactiveHint(INACTIVE_REASON_SCENARIO_OVERRIDE)).toContain('Ashes')
+    expect(homeworldInactiveHint(INACTIVE_REASON_SCENARIO_OVERRIDE)).toContain('Crazy Intermix')
+    expect(homeworldInactiveHint(INACTIVE_REASON_SCENARIO_OVERRIDE)).toContain(
+      'Disunited Kingdoms'
+    )
   })
 })
 
