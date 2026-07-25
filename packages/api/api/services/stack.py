@@ -7,6 +7,8 @@ from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersiste
 from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
 )
+from api.concepts.homeworld_layout import homeworld_settings_fingerprint
+from api.models.game import GameInfo
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -42,13 +44,23 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
     inference_invalidation.wire_fleet_invalidation_to_persistence()
     inference_invalidation.wire_scores_invalidation_to_fleet_persistence()
 
-    def on_homeworld_settings_changed(game_id: int) -> None:
+    def on_game_info_refreshed(
+        game_id: int,
+        previous: GameInfo | None,
+        updated: GameInfo,
+    ) -> None:
+        if previous is None:
+            return
+        if homeworld_settings_fingerprint(previous.settings) == homeworld_settings_fingerprint(
+            updated.settings
+        ):
+            return
         homeworld_persistence.invalidate_inferred_game_state(game_id)
 
     games = GameService(
         storage,
         credentials,
-        on_homeworld_settings_changed=on_homeworld_settings_changed,
+        on_game_info_refreshed=on_game_info_refreshed,
     )
 
     def on_held_solutions_updated(session) -> None:

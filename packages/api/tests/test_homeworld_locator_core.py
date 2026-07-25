@@ -208,7 +208,7 @@ def test_baseline_auto_ensure_turn_one(persistence, sample_turn) -> None:
 def test_turn_analytic_service_wires_ensure_turn_when_username_set(
     persistence, sample_turn, monkeypatch
 ) -> None:
-    """Production path: username on get_turn_analytics installs ensure_turn hook."""
+    """Turn-load username credential installs ensure_turn on homeworld compute services."""
     from api.analytics.homeworld_locator.constants import ANALYTIC_ID
     from api.services.turn_analytic_service import TurnAnalyticService
 

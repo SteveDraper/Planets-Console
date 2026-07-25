@@ -4,7 +4,6 @@ from collections.abc import Callable
 
 from dacite.exceptions import DaciteError
 
-from api.concepts.homeworld_layout import homeworld_settings_fingerprint
 from api.errors import NotFoundError, ValidationError
 from api.models.enums import GameStatus
 from api.models.game import GameInfo
@@ -23,7 +22,8 @@ from api.transport.sector_display import (
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
 
-OnHomeworldSettingsChanged = Callable[[int], None]
+# (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.
+OnGameInfoRefreshed = Callable[[int, GameInfo | None, GameInfo], None]
 
 
 def clear_sector_title_cache() -> None:
@@ -38,11 +38,11 @@ class GameService:
         storage: StorageBackend,
         credentials: CredentialService | None = None,
         *,
-        on_homeworld_settings_changed: OnHomeworldSettingsChanged | None = None,
+        on_game_info_refreshed: OnGameInfoRefreshed | None = None,
     ) -> None:
         self._storage = storage
         self._credentials = credentials or CredentialService(storage)
-        self._on_homeworld_settings_changed = on_homeworld_settings_changed
+        self._on_game_info_refreshed = on_game_info_refreshed
 
     @staticmethod
     def is_game_finished(info: GameInfo) -> bool:
@@ -125,24 +125,9 @@ class GameService:
         store_key = f"games/{game_id}/info"
         self._storage.put(store_key, remote)
         self.remember_sector_title_for_game(game_id, info)
-        self._maybe_invalidate_homeworld_for_settings_change(game_id, previous, info)
+        if self._on_game_info_refreshed is not None:
+            self._on_game_info_refreshed(game_id, previous, info)
         return info
-
-    def _maybe_invalidate_homeworld_for_settings_change(
-        self,
-        game_id: int,
-        previous: GameInfo | None,
-        updated: GameInfo,
-    ) -> None:
-        if self._on_homeworld_settings_changed is None:
-            return
-        if previous is None:
-            return
-        if homeworld_settings_fingerprint(previous.settings) == homeworld_settings_fingerprint(
-            updated.settings
-        ):
-            return
-        self._on_homeworld_settings_changed(game_id)
 
     def remember_sector_title_for_game(self, game_id: int, info: GameInfo) -> None:
         title = sector_display_name_from_game_info(info)

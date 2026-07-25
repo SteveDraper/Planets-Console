@@ -322,7 +322,15 @@ def get_turn_analytics(
         alias=INCLUDE_ILLUSTRATIVE_ROUTES_QUERY,
         description=INCLUDE_ILLUSTRATIVE_ROUTES_DESCRIPTION,
     ),
-    username: Annotated[str, Query()] = "",
+    username: Annotated[
+        str,
+        Query(
+            description=(
+                "Optional turn-load credential username for analytics that auto-ensure "
+                "missing turns (uses the stored account API key)."
+            ),
+        ),
+    ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
 ):
     """Return per-analytic map data derived from turn state."""

@@ -112,6 +112,11 @@ class TurnAnalyticService:
         diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
         username: str = "",
     ) -> dict:
+        """Dispatch a registered turn analytic.
+
+        ``username`` is an optional turn-load credential for analytics that may
+        auto-ensure missing turns (stored account API key lookup). Empty skips ensure.
+        """
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
         return get_turn_analytic(
             analytic_id,
@@ -140,6 +145,7 @@ class TurnAnalyticService:
         username: str = "",
     ) -> dict[str, object]:
         scores_services = self._scores_export_context(game_id, perspective)
+        ensure_turn = self._ensure_turn_loader(game_id, perspective, username)
         return {
             SCORES_ANALYTIC_ID: scores_services,
             FLEET_ANALYTIC_ID: self._fleet_compute_services(
@@ -150,16 +156,17 @@ class TurnAnalyticService:
             HOMEWORLD_ANALYTIC_ID: self._homeworld_compute_services(
                 game_id,
                 perspective,
-                username=username,
+                ensure_turn=ensure_turn,
             ),
         }
 
-    def _homeworld_ensure_turn(
+    def _ensure_turn_loader(
         self,
         game_id: int,
         perspective: int,
         username: str,
     ) -> Callable[[int], TurnInfo | None] | None:
+        """Build a turn-ensure hook when a turn-load username credential is present."""
         trimmed = username.strip()
         if not trimmed:
             return None
@@ -184,7 +191,7 @@ class TurnAnalyticService:
         game_id: int,
         perspective: int,
         *,
-        username: str = "",
+        ensure_turn: Callable[[int], TurnInfo | None] | None = None,
     ) -> HomeworldLocatorComputeServices:
         load_turn = self._load_scoreboard_turn(game_id, perspective)
 
@@ -197,7 +204,7 @@ class TurnAnalyticService:
             perspective=perspective,
             load_turn=load_turn,
             list_stored_turns=list_stored_turns,
-            ensure_turn=self._homeworld_ensure_turn(game_id, perspective, username),
+            ensure_turn=ensure_turn,
         )
 
     def _fleet_compute_services(
