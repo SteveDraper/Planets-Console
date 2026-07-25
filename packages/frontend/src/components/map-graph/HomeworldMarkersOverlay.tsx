@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import { CONFIDENCE_DEFINITE } from '../../analytics/homeworld-locator/constants'
 import type { HomeworldMapMarkerDisplay } from '../../analytics/homeworld-locator/mapAnalytic'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
+import { useOverlayPaneSize } from './useOverlayPaneSize'
 
 /** Outer ring diameter in screen pixels (independent of zoom). */
 const MARKER_DIAMETER_PX = 12
@@ -21,29 +21,13 @@ export function HomeworldMarkersOverlay({
 }) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
-  const [size, setSize] = useState({ width: 0, height: 0 })
+  const { width, height } = useOverlayPaneSize(domNode)
 
-  useEffect(() => {
-    if (!domNode) return
-    let raf = 0
-    const ro = new ResizeObserver((entries) => {
-      const { width, height } = entries[0]?.contentRect ?? { width: 0, height: 0 }
-      cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => setSize({ width, height }))
-    })
-    ro.observe(domNode)
-    return () => {
-      cancelAnimationFrame(raf)
-      ro.disconnect()
-    }
-  }, [domNode])
-
-  if (!transform || size.width <= 0 || size.height <= 0) return null
+  if (!transform || width <= 0 || height <= 0) return null
   if (markers.length === 0) return null
 
   const [tx, ty, rawScale] = transform
   const scale = safeZoomScale(rawScale)
-  const { width, height } = size
   const r = MARKER_DIAMETER_PX / 2
 
   return (

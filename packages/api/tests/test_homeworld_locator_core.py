@@ -15,17 +15,19 @@ from api.analytics.homeworld_locator.baseline_ensure import (
 )
 from api.analytics.homeworld_locator.compute import get_homeworld_locator
 from api.analytics.homeworld_locator.compute_services import build_ephemeral_homeworld_services
-from api.analytics.homeworld_locator.constants import ANALYTIC_ID, ATTRIBUTION_INFERRED
+from api.analytics.homeworld_locator.constants import ANALYTIC_ID, ATTRIBUTION_INFERRED, ATTRIBUTION_USER_ASSERTED
 from api.analytics.homeworld_locator.exports import (
     EXPORT_CATALOG,
     ensure_homeworld_export,
     is_homeworld_export_ensure_satisfied,
 )
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
+from api.analytics.homeworld_locator.serialization import homeworld_locator_game_state_from_json
 from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
+    merge_candidates_preserving_user_asserted,
 )
 from api.analytics.persistence_paths import (
     game_global_analytic_document_key,
@@ -37,6 +39,7 @@ from api.concepts.homeworld_layout import (
     homeworld_locator_inactive_reason,
     is_homeworld_locator_available,
 )
+from api.errors import ValidationError
 from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_from_json
 from api.storage.file import FileStorageBackend
@@ -148,6 +151,99 @@ def test_persistence_round_trip_file(tmp_path, sample_turn) -> None:
     reloaded = HomeworldLocatorPersistenceService(FileStorageBackend(tmp_path))
     assert reloaded.get_game_state(628580) == state
     assert reloaded.get_evidence_aggregate(628580, 1, 1) == floor
+
+
+def test_game_state_from_json_rejects_non_dict_candidate() -> None:
+    with pytest.raises(ValidationError, match="must be a JSON object"):
+        homeworld_locator_game_state_from_json(
+            {
+                "candidates": ["not-an-object"],
+                "baselineTurn": 1,
+                "baselineDegraded": False,
+                "settingsFingerprint": [],
+            }
+        )
+
+
+def test_merge_candidates_preserving_user_asserted() -> None:
+    inferred = (
+        HomeworldCandidateRecord(
+            planet_id=1,
+            perspective=1,
+            confidence_tier="definite",
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=2,
+            perspective=None,
+            confidence_tier="possible",
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+    )
+    existing = (
+        HomeworldCandidateRecord(
+            planet_id=2,
+            perspective=9,
+            confidence_tier="definite",
+            attribution=ATTRIBUTION_USER_ASSERTED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=3,
+            perspective=1,
+            confidence_tier="definite",
+            attribution=ATTRIBUTION_USER_ASSERTED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=4,
+            perspective=1,
+            confidence_tier="possible",
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+    )
+    merged = merge_candidates_preserving_user_asserted(inferred=inferred, existing=existing)
+    assert [row.planet_id for row in merged] == [1, 2, 3]
+    by_planet = {row.planet_id: row for row in merged}
+    assert by_planet[1].attribution == ATTRIBUTION_INFERRED
+    assert by_planet[2].attribution == ATTRIBUTION_USER_ASSERTED
+    assert by_planet[2].perspective == 9
+    assert by_planet[3].attribution == ATTRIBUTION_USER_ASSERTED
+
+
+def test_invalidate_inferred_preserves_user_asserted(persistence) -> None:
+    persistence.put_game_state(
+        628580,
+        HomeworldLocatorGameState(
+            candidates=(
+                HomeworldCandidateRecord(
+                    planet_id=10,
+                    perspective=1,
+                    confidence_tier="definite",
+                    attribution=ATTRIBUTION_INFERRED,
+                ),
+                HomeworldCandidateRecord(
+                    planet_id=20,
+                    perspective=2,
+                    confidence_tier="possible",
+                    attribution=ATTRIBUTION_USER_ASSERTED,
+                ),
+            ),
+            baseline_turn=1,
+            baseline_degraded=False,
+            settings_fingerprint=(1, 2, 3),
+        ),
+    )
+    retained = persistence.invalidate_inferred_game_state(628580)
+    assert retained is not None
+    assert retained.candidates == (
+        HomeworldCandidateRecord(
+            planet_id=20,
+            perspective=2,
+            confidence_tier="possible",
+            attribution=ATTRIBUTION_USER_ASSERTED,
+        ),
+    )
+    assert retained.settings_fingerprint == ()
+    assert persistence.get_game_state(628580) == retained
 
 
 def test_invalidate_evidence_from_turn(persistence) -> None:

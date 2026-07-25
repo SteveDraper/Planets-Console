@@ -41,13 +41,3 @@ export function parseHomeworldLocatorPayload(raw: unknown): HomeworldLocatorPayl
   const result = homeworldLocatorPayloadSchema.safeParse(raw)
   return result.success ? result.data : null
 }
-
-export function parseHomeworldMapMarkers(raw: unknown): HomeworldMapMarker[] {
-  if (!Array.isArray(raw)) return []
-  const out: HomeworldMapMarker[] = []
-  for (const entry of raw) {
-    const parsed = homeworldMapMarkerSchema.safeParse(entry)
-    if (parsed.success) out.push(parsed.data)
-  }
-  return out
-}

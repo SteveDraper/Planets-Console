@@ -3,6 +3,7 @@
  * Wire JSON normalization lives in `normalizeMapDataResponse.ts`.
  */
 
+import type { HomeworldMapMarker } from '../analytics/homeworld-locator/wireSchema'
 import type { components } from './schema-games'
 import type { MapRegionOverlay } from './mapRegionOverlayTypes'
 
@@ -172,13 +173,11 @@ export type PlanetPairRoute = {
   illustrativeRoute?: IllustrativeRouteStep[]
 }
 
-/** Homeworld locator marker on the map wire (passthrough from Core). */
-export type HomeworldMapMarkerWire = {
-  planetId: number
-  perspective: number | null
-  confidenceTier: 'definite' | 'possible'
-  attribution: string
-}
+/**
+ * Homeworld locator marker on the map wire (passthrough from Core).
+ * Owned by Zod in `analytics/homeworld-locator/wireSchema`; re-exported here for map types.
+ */
+export type HomeworldMapMarkerWire = HomeworldMapMarker
 
 export type MapDataResponse = {
   analyticId: string
@@ -216,13 +215,9 @@ export type RouteMapWaypoint = {
 }
 
 /** Homeworld locator marker with base-map coordinates for overlay paint. */
-export type HomeworldMapMarkerDisplay = {
-  planetId: number
+export type HomeworldMapMarkerDisplay = HomeworldMapMarkerWire & {
   x: number
   y: number
-  confidenceTier: 'definite' | 'possible'
-  perspective: number | null
-  attribution: string
 }
 
 /** Combined nodes/edges from multiple analytics for the single shared map. */

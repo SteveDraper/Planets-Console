@@ -1,6 +1,5 @@
 import type {
   HomeworldMapMarkerDisplay,
-  HomeworldMapMarkerWire,
   MapDataResponse,
   MapNode,
 } from '../../api/bff'
@@ -63,7 +62,7 @@ export function homeworldLocatorMapQueryKey(analyticScope: MapAnalyticQueryConte
   return ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'map', analyticScope, 'markers-v1'] as const
 }
 
-function markersFromMapResponse(data: MapDataResponse): HomeworldMapMarkerWire[] {
+function markersFromMapResponse(data: MapDataResponse): HomeworldMapMarker[] {
   return data.homeworldMarkers ?? []
 }
 

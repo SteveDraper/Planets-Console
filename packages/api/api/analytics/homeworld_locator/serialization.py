@@ -75,11 +75,7 @@ def homeworld_locator_game_state_from_json(data: dict[str, Any]) -> HomeworldLoc
     if not isinstance(fingerprint_raw, list):
         raise ValidationError("homeworld locator settingsFingerprint must be a JSON array")
     return HomeworldLocatorGameState(
-        candidates=tuple(
-            homeworld_candidate_record_from_json(row)
-            for row in candidates_raw
-            if isinstance(row, dict)
-        ),
+        candidates=tuple(homeworld_candidate_record_from_json(row) for row in candidates_raw),
         baseline_turn=baseline_turn,
         baseline_degraded=baseline_degraded,
         settings_fingerprint=tuple(fingerprint_raw),

@@ -216,10 +216,9 @@ def materialize_homeworld_candidate_view(
     *,
     shell_turn: TurnInfo,
 ) -> HomeworldCandidateView:
-    """Materialize map/table candidate view from game-global + shell-turn aggregate.
+    """Materialize map/table candidate view from game-global baseline candidates.
 
-    Phase 2 (#34): shell-turn aggregate is usually absent (no copy-forward); view
-    comes from game-global baseline candidates. #36 will refine via shell aggregate.
+    Shell-turn evidence aggregates are not merged here (no copy-forward in baseline).
     """
     inactive = homeworld_locator_inactive_reason(shell_turn.settings)
     if inactive is not None:
@@ -227,12 +226,6 @@ def materialize_homeworld_candidate_view(
 
     result = ensure_homeworld_baseline(services, shell_turn=shell_turn)
     state = result.game_state
-    # Optional shell-turn aggregate merge point for #36; unused in #34.
-    _ = services.persistence.get_evidence_aggregate(
-        services.game_id,
-        services.perspective,
-        shell_turn.settings.turn,
-    )
     return HomeworldCandidateView(
         candidates=state.candidates,
         baseline_turn=state.baseline_turn,
