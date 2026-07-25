@@ -66,6 +66,7 @@ describe('useShellContext', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
     })
@@ -76,6 +77,7 @@ describe('useShellContext', () => {
         gameId: '628580',
         turn: 5,
         perspective: 1,
+        username: 'Alice',
       })
     })
     expect(result.current.turnEnsureEnabled).toBe(true)
@@ -101,6 +103,7 @@ describe('useShellContext', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
     })
@@ -129,6 +132,7 @@ describe('useShellContext', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
       storageOnlyLoad: false,
@@ -161,6 +165,7 @@ describe('useShellContext', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
       storageOnlyLoad: true,
@@ -200,6 +205,7 @@ describe('useShellContext', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
     })
@@ -237,6 +243,7 @@ describe('useShellContext', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
     })
@@ -260,6 +267,7 @@ describe('useShellContext', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
     })
@@ -291,6 +299,7 @@ describe('useShellContext', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
     })
@@ -324,6 +333,7 @@ describe('useShellContext', () => {
         isGameFinished: false,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
       storageOnlyLoad: true,

@@ -266,6 +266,61 @@ describe('combineMapData', () => {
     expect(combined.overlayCircles[0]).toMatchObject({ layer: 'nebulae', x: 1, y: 2 })
     expect(combined.overlayCircles[1]).toMatchObject({ layer: 'ion-storms', x: 100, y: 200 })
   })
+
+  it('resolves homeworld markers onto base-map planet coordinates', () => {
+    const baseWithPlanets: MapDataResponse = {
+      analyticId: 'base-map',
+      nodes: [
+        { id: 'p1', label: 'p1', x: 10, y: 20, planet: { id: 1 } },
+        { id: 'p2', label: 'p2', x: 30, y: 40, planet: { id: 2 } },
+      ],
+      edges: [],
+    }
+    const homeworld: MapDataResponse = {
+      analyticId: 'homeworld-locator',
+      nodes: [],
+      edges: [],
+      homeworldMarkers: [
+        {
+          planetId: 1,
+          perspective: 1,
+          confidenceTier: 'definite',
+          attribution: 'inferred',
+        },
+        {
+          planetId: 2,
+          perspective: null,
+          confidenceTier: 'possible',
+          attribution: 'inferred',
+        },
+      ],
+    }
+
+    const combined = combineMapData(
+      ['base-map', 'homeworld-locator'],
+      [baseWithPlanets, homeworld],
+      { liveConnectionsParams: null }
+    )
+
+    expect(combined.homeworldMarkers).toEqual([
+      {
+        planetId: 1,
+        x: 10,
+        y: 20,
+        confidenceTier: 'definite',
+        perspective: 1,
+        attribution: 'inferred',
+      },
+      {
+        planetId: 2,
+        x: 30,
+        y: 40,
+        confidenceTier: 'possible',
+        perspective: null,
+        attribution: 'inferred',
+      },
+    ])
+  })
 })
 
 describe('cartography display filters (render-time)', () => {

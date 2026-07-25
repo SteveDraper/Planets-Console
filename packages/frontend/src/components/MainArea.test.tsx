@@ -85,6 +85,7 @@ const emptyCombined = {
   overlayCircles: [],
   regionOverlays: [],
   wormholeUnknownEntrances: [],
+  homeworldMarkers: [],
 }
 
 function createWrapper() {

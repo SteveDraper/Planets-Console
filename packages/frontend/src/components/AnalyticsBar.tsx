@@ -4,6 +4,7 @@ import { FleetAnalyticTile } from '../analytics/fleet/FleetAnalyticTile'
 import { ScoresTableTile } from '../analytics/scores/ScoresTableTile'
 import { StellarCartographyMapTile } from '../analytics/stellar-cartography/StellarCartographyMapTile'
 import { VisibilityMapTile } from '../analytics/visibility/VisibilityMapTile'
+import { HomeworldLocatorTile } from '../analytics/homeworld-locator/HomeworldLocatorTile'
 import { tileClassName } from '../analytics/tileChrome'
 import type { StellarCartographySettingsGates } from '../analytics/stellar-cartography/layers'
 import type { AnalyticItem, ConnectionsMapParams, ScoresTableParams } from '../api/bff'
@@ -21,6 +22,8 @@ type AnalyticsBarProps = {
   onScoresTableParamsChange: (next: ScoresTableParams) => void
   stellarCartographyGates: StellarCartographySettingsGates
   ionStormCount: number | null
+  /** When set, Homeworld locator catalog entry is greyed with a hint. */
+  homeworldInactiveReason: string | null
 }
 
 function supportsCurrentMode(a: AnalyticItem, viewMode: ViewMode): boolean {
@@ -43,6 +46,7 @@ export function AnalyticsBar({
   onScoresTableParamsChange,
   stellarCartographyGates,
   ionStormCount,
+  homeworldInactiveReason,
 }: AnalyticsBarProps) {
   const list = selectableAnalytics(analytics)
   return (
@@ -60,6 +64,7 @@ export function AnalyticsBar({
           const isStellarCartographyMap = a.id === 'stellar-cartography' && viewMode === 'map'
           const isVisibilityMap = a.id === 'visibility' && viewMode === 'map'
           const isFleet = a.id === 'fleet'
+          const isHomeworldLocator = a.id === 'homeworld-locator'
 
           if (isScoresTable) {
             return (
@@ -134,6 +139,20 @@ export function AnalyticsBar({
                   onToggle={() => onToggle(a.id)}
                 />
               </li>
+            )
+          }
+
+          if (isHomeworldLocator) {
+            return (
+              <HomeworldLocatorTile
+                key={a.id}
+                name={a.name}
+                enabled={enabled}
+                supportsMode={supportsMode}
+                depressed={depressed}
+                onToggle={() => onToggle(a.id)}
+                inactiveReason={homeworldInactiveReason}
+              />
             )
           }
 

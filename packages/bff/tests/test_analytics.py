@@ -281,6 +281,20 @@ def test_list_analytics_includes_visibility_map_analytic():
     }
 
 
+def test_list_analytics_includes_homeworld_locator_analytic():
+    response = client.get("/analytics")
+    assert response.status_code == 200
+    analytics = response.json()["analytics"]
+    homeworld = next(a for a in analytics if a["id"] == "homeworld-locator")
+    assert homeworld == {
+        "id": "homeworld-locator",
+        "name": "Homeworld locator",
+        "supportsTable": True,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
 def test_visibility_map_returns_region_overlays():
     storage = get_storage()
     with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:

@@ -21,6 +21,8 @@ export type GameInfoShellContext = {
   sectorDisplayName: string | null
   /** NuHost settings gates for Stellar Cartography layer checkboxes. */
   stellarCartographyGates: StellarCartographySettingsGates
+  /** When set, Homeworld locator is inactive (catalog greyed + hint). */
+  homeworldInactiveReason: string | null
 }
 
 type ShellState = {

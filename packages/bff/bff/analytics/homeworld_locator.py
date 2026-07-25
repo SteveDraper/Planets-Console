@@ -1,4 +1,4 @@
-"""BFF Homeworld locator analytic handlers (passthrough; Phase 2 Core wire-up)."""
+"""BFF Homeworld locator analytic handlers (passthrough to Core candidate view)."""
 
 from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics

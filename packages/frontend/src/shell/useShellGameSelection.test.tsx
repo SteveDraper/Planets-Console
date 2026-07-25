@@ -58,6 +58,7 @@ describe('useShellGameSelection', () => {
         isGameFinished: false,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
       selectedTurn: 5,
       perspectiveOverrideOrdinal: null,
@@ -211,6 +212,7 @@ describe('useShellGameSelection', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
     })
     vi.mocked(loadAllTurnsWithProgress).mockResolvedValue({
@@ -274,6 +276,7 @@ describe('useShellGameSelection', () => {
         isGameFinished: false,
         sectorDisplayName: null,
         stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
       },
     })
     vi.mocked(refreshGameInfo).mockResolvedValue({

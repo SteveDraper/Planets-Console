@@ -48,6 +48,7 @@ describe('StellarCartographyMapTile', () => {
         isGameFinished: true,
         sectorDisplayName: null,
         stellarCartographyGates: allGatesEnabled,
+        homeworldInactiveReason: null,
       },
     })
     useStellarCartographyLayersStore.setState({

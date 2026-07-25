@@ -16,6 +16,7 @@ import { scoresTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
 import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
+import { HomeworldLocatorTableTile } from '../analytics/homeworld-locator/HomeworldLocatorTableTile'
 import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
 import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
@@ -378,6 +379,11 @@ export function MainArea({
             >
               {id === 'fleet' ? (
                 <FleetAnalyticTableTile analyticScope={analyticScope} fetchEnabled={fetchEnabled} />
+              ) : id === 'homeworld-locator' ? (
+                <HomeworldLocatorTableTile
+                  analyticScope={analyticScope}
+                  fetchEnabled={fetchEnabled}
+                />
               ) : (
                 <TableTile
                   analyticId={id}

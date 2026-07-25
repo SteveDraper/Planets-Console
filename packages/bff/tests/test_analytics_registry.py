@@ -68,6 +68,17 @@ def test_registry_metadata_keeps_fleet_selectable_table_and_map():
     }
 
 
+def test_registry_metadata_keeps_homeworld_locator_selectable_table_and_map():
+    homeworld = next(a for a in ANALYTICS_LIST if a["id"] == "homeworld-locator")
+    assert homeworld == {
+        "id": "homeworld-locator",
+        "name": "Homeworld locator",
+        "supportsTable": True,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
 def test_fleet_table_dispatch_forwards_to_core():
     calls = []
 

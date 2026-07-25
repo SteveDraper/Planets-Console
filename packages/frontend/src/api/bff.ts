@@ -61,6 +61,8 @@ export type {
   CartographyOverlayLayerId,
   CombinedMapData,
   DebrisDiskOverlayCircle,
+  HomeworldMapMarkerDisplay,
+  HomeworldMapMarkerWire,
   IllustrativeRouteStep,
   IonStormOverlayCircle,
   MapCell,

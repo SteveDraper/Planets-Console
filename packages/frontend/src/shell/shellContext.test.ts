@@ -29,6 +29,7 @@ function shellContext(overrides: Partial<GameInfoShellContext> = {}): GameInfoSh
     isGameFinished: true,
     sectorDisplayName: 'Test Sector',
     stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+    homeworldInactiveReason: null,
     ...overrides,
   }
 }

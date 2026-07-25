@@ -172,6 +172,14 @@ export type PlanetPairRoute = {
   illustrativeRoute?: IllustrativeRouteStep[]
 }
 
+/** Homeworld locator marker on the map wire (passthrough from Core). */
+export type HomeworldMapMarkerWire = {
+  planetId: number
+  perspective: number | null
+  confidenceTier: 'definite' | 'possible'
+  attribution: string
+}
+
 export type MapDataResponse = {
   analyticId: string
   nodes: MapNode[]
@@ -180,6 +188,8 @@ export type MapDataResponse = {
   overlayCircles?: StellarCartographyOverlayCircle[]
   /** Hybrid shaded regions (disks + nebula-local patches); not cartography circles. */
   regionOverlays?: MapRegionOverlay[]
+  /** Homeworld locator candidate markers (empty nodes/edges for that analytic). */
+  homeworldMarkers?: HomeworldMapMarkerWire[]
   meta?: {
     nebulae?: number
     ionStorms?: number
@@ -201,6 +211,16 @@ export type RouteMapWaypoint = {
   gy: number
 }
 
+/** Homeworld locator marker with base-map coordinates for overlay paint. */
+export type HomeworldMapMarkerDisplay = {
+  planetId: number
+  x: number
+  y: number
+  confidenceTier: 'definite' | 'possible'
+  perspective: number | null
+  attribution: string
+}
+
 /** Combined nodes/edges from multiple analytics for the single shared map. */
 export type CombinedMapData = {
   nodes: MapDataResponse['nodes']
@@ -213,6 +233,8 @@ export type CombinedMapData = {
   regionOverlays: MapRegionOverlay[]
   /** Wormhole entrances with unknown targets (6px sky dots). */
   wormholeUnknownEntrances: WormholeUnknownEntrance[]
+  /** Homeworld locator markers resolved onto base-map planet coordinates. */
+  homeworldMarkers: HomeworldMapMarkerDisplay[]
   /** Stellar Cartography ion storm mode from turn settings (`nuionstorms`). */
   nuIonStorms?: boolean
 }

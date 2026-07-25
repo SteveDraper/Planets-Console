@@ -2,6 +2,7 @@ import type { GameInfoResponse } from '../api/bff'
 import type { GameInfoShellContext } from '../stores/shell'
 import { resolveRaceDisplayNameFromGameInfo } from './planetsNuRaceDisplayName'
 import { stellarCartographySettingsGatesFromGameInfo } from './stellarCartographySettings'
+import { homeworldLocatorInactiveReasonFromGameInfo } from '../analytics/homeworld-locator/homeworldAvailability'
 
 import { ELIMINATED_PLAYER_WIRE_STATUS } from './turnPlayerUsernames'
 
@@ -288,5 +289,6 @@ export function buildGameInfoShellContext(data: GameInfoResponse): GameInfoShell
     isGameFinished: isGameFinishedFromGameInfo(data),
     sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
     stellarCartographyGates: stellarCartographySettingsGatesFromGameInfo(data),
+    homeworldInactiveReason: homeworldLocatorInactiveReasonFromGameInfo(data),
   }
 }

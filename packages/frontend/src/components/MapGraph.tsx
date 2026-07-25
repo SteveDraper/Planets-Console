@@ -29,6 +29,7 @@ import { nodeTypes, toFlowNodes } from './map-graph/nodes'
 import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
+import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import {
@@ -219,6 +220,7 @@ function MapGraphFlow({
       ) : null}
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
+      <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
       <FixedSizeDotsOverlay
         planetGrid={planetGrid}
         planetLabelOptions={planetLabelOptions}

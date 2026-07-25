@@ -24,6 +24,7 @@ const displayMapData = {
   overlayCircles: [],
   regionOverlays: [],
   wormholeUnknownEntrances: [],
+  homeworldMarkers: [],
 }
 
 describe('MapShellContent', () => {

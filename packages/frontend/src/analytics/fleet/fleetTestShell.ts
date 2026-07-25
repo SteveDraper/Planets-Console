@@ -17,6 +17,7 @@ export function seedShellViewpoint(viewpointOrdinal: FleetTestViewpointOrdinal) 
       isGameFinished: true,
       sectorDisplayName: 'Test Sector',
       stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+      homeworldInactiveReason: null,
     },
     selectedTurn: 5,
     perspectiveOverrideOrdinal: viewpointOrdinal,
