@@ -15,7 +15,11 @@ from api.analytics.homeworld_locator.baseline_ensure import (
 )
 from api.analytics.homeworld_locator.compute import get_homeworld_locator
 from api.analytics.homeworld_locator.compute_services import build_ephemeral_homeworld_services
-from api.analytics.homeworld_locator.constants import ANALYTIC_ID, ATTRIBUTION_INFERRED, ATTRIBUTION_USER_ASSERTED
+from api.analytics.homeworld_locator.constants import (
+    ANALYTIC_ID,
+    ATTRIBUTION_INFERRED,
+    ATTRIBUTION_USER_ASSERTED,
+)
 from api.analytics.homeworld_locator.exports import (
     EXPORT_CATALOG,
     ensure_homeworld_export,
