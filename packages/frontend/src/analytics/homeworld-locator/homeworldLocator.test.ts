@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   homeworldInactiveHint,
+  homeworldBaselineDegradedMessage,
   INACTIVE_REASON_NO_HOMEWORLD,
   INACTIVE_REASON_WANDERING_TRIBES,
 } from './constants'
@@ -41,6 +42,19 @@ describe('homeworldInactiveHint', () => {
   it('maps known reasons to user-facing hints', () => {
     expect(homeworldInactiveHint(INACTIVE_REASON_NO_HOMEWORLD)).toContain('no homeworld')
     expect(homeworldInactiveHint(INACTIVE_REASON_WANDERING_TRIBES)).toContain('Wandering Tribes')
+  })
+})
+
+describe('homeworldBaselineDegradedMessage', () => {
+  it('includes the baseline turn when present', () => {
+    expect(homeworldBaselineDegradedMessage(4)).toContain('using turn 4')
+    expect(homeworldBaselineDegradedMessage(4)).toContain('Baseline degraded')
+  })
+
+  it('omits the turn clause when turn is null', () => {
+    expect(homeworldBaselineDegradedMessage(null)).toBe(
+      'Baseline degraded. Definite matches are applied cautiously.'
+    )
   })
 })
 

@@ -4,6 +4,7 @@ import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import {
   CONFIDENCE_DEFINITE,
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
+  homeworldBaselineDegradedMessage,
   homeworldInactiveHint,
 } from './constants'
 import { fetchHomeworldLocatorTable } from './api'
@@ -61,15 +62,12 @@ export function HomeworldLocatorTableTile({
   }
 
   const rows = data.rows ?? []
-  const baselineTurn = data.baselineTurn ?? null
 
   return (
     <div className="flex flex-col gap-2 p-2">
       {data.baselineDegraded ? (
         <p className="px-2 text-xs text-amber-300/90" role="status">
-          Baseline degraded
-          {baselineTurn != null ? ` (using turn ${baselineTurn}; turn 1 not available)` : ''}.
-          Definite matches are applied cautiously.
+          {homeworldBaselineDegradedMessage(data.baselineTurn)}
         </p>
       ) : null}
       {rows.length === 0 ? (

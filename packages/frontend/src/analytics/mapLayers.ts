@@ -37,6 +37,8 @@ export function combineMapData(
     wormholeUnknownEntrances,
     homeworldMarkers,
     waypointsByKey: new Map<string, { x: number; y: number }>(),
+    baselineDegraded: undefined,
+    baselineTurn: undefined,
     nuIonStorms: undefined,
   }
   mapData.forEach((data, idx) => {
@@ -52,6 +54,8 @@ export function combineMapData(
     regionOverlays: context.regionOverlays,
     wormholeUnknownEntrances,
     homeworldMarkers: context.homeworldMarkers,
+    baselineDegraded: context.baselineDegraded,
+    baselineTurn: context.baselineTurn,
     nuIonStorms: context.nuIonStorms,
   }
 }

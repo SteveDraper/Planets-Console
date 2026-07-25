@@ -190,6 +190,10 @@ export type MapDataResponse = {
   regionOverlays?: MapRegionOverlay[]
   /** Homeworld locator candidate markers (empty nodes/edges for that analytic). */
   homeworldMarkers?: HomeworldMapMarkerWire[]
+  /** Homeworld locator: baseline used a turn later than 1. */
+  baselineDegraded?: boolean
+  /** Homeworld locator: turn number used when baseline is degraded. */
+  baselineTurn?: number | null
   meta?: {
     nebulae?: number
     ionStorms?: number
@@ -235,6 +239,10 @@ export type CombinedMapData = {
   wormholeUnknownEntrances: WormholeUnknownEntrance[]
   /** Homeworld locator markers resolved onto base-map planet coordinates. */
   homeworldMarkers: HomeworldMapMarkerDisplay[]
+  /** Homeworld locator: baseline used a turn later than 1. */
+  baselineDegraded?: boolean
+  /** Homeworld locator: turn number used when baseline is degraded. */
+  baselineTurn?: number | null
   /** Stellar Cartography ion storm mode from turn settings (`nuionstorms`). */
   nuIonStorms?: boolean
 }

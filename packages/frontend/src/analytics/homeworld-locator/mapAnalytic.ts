@@ -80,17 +80,27 @@ export const homeworldLocatorMapAnalytic: MapAnalyticRegistration = {
           throw new Error('Homeworld locator map query requires analytic scope')
         }
         const payload = await fetchHomeworldLocatorMap(context.analyticScope)
+        const available = payload.available
         return {
           analyticId: HOMEWORLD_LOCATOR_ANALYTIC_ID,
           nodes: [],
           edges: [],
-          homeworldMarkers: payload.available ? (payload.markers ?? []) : [],
+          homeworldMarkers: available ? (payload.markers ?? []) : [],
+          // Only surface degraded metadata when the analytic is active (matches table tile).
+          baselineDegraded: available ? payload.baselineDegraded : false,
+          baselineTurn: available ? (payload.baselineTurn ?? null) : null,
         }
       },
       enabled: context.analyticFetchEnabled && context.analyticScope != null,
     }
   },
   mergeLayer(data, context) {
+    if (data.baselineDegraded != null) {
+      context.baselineDegraded = data.baselineDegraded
+    }
+    if (data.baselineTurn !== undefined) {
+      context.baselineTurn = data.baselineTurn
+    }
     const markers = markersFromMapResponse(data)
     if (markers.length === 0) return
     const resolved = resolveHomeworldMarkerDisplays(

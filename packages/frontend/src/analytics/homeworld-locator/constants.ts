@@ -19,3 +19,12 @@ export function homeworldInactiveHint(reason: string | null | undefined): string
   }
   return HOMEWORLD_INACTIVE_HINTS[reason] ?? `Homeworld locator unavailable (${reason})`
 }
+
+/** Shared table/map copy when baseline used a turn later than 1. */
+export function homeworldBaselineDegradedMessage(
+  baselineTurn: number | null | undefined
+): string {
+  const turnClause =
+    baselineTurn != null ? ` (using turn ${baselineTurn}; turn 1 not available)` : ''
+  return `Baseline degraded${turnClause}. Definite matches are applied cautiously.`
+}

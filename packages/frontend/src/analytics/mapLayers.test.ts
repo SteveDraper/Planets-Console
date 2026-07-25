@@ -321,6 +321,58 @@ describe('combineMapData', () => {
       },
     ])
   })
+
+  it('carries homeworld baseline degraded metadata even with no markers', () => {
+    const homeworld: MapDataResponse = {
+      analyticId: 'homeworld-locator',
+      nodes: [],
+      edges: [],
+      homeworldMarkers: [],
+      baselineDegraded: true,
+      baselineTurn: 5,
+    }
+
+    const combined = combineMapData(['homeworld-locator'], [homeworld], {
+      liveConnectionsParams: null,
+    })
+
+    expect(combined.homeworldMarkers).toEqual([])
+    expect(combined.baselineDegraded).toBe(true)
+    expect(combined.baselineTurn).toBe(5)
+  })
+
+  it('carries homeworld baseline degraded metadata with markers', () => {
+    const baseWithPlanets: MapDataResponse = {
+      analyticId: 'base-map',
+      nodes: [{ id: 'p1', label: 'p1', x: 10, y: 20, planet: { id: 1 } }],
+      edges: [],
+    }
+    const homeworld: MapDataResponse = {
+      analyticId: 'homeworld-locator',
+      nodes: [],
+      edges: [],
+      homeworldMarkers: [
+        {
+          planetId: 1,
+          perspective: 1,
+          confidenceTier: 'definite',
+          attribution: 'inferred',
+        },
+      ],
+      baselineDegraded: true,
+      baselineTurn: 3,
+    }
+
+    const combined = combineMapData(
+      ['base-map', 'homeworld-locator'],
+      [baseWithPlanets, homeworld],
+      { liveConnectionsParams: null }
+    )
+
+    expect(combined.baselineDegraded).toBe(true)
+    expect(combined.baselineTurn).toBe(3)
+    expect(combined.homeworldMarkers).toHaveLength(1)
+  })
 })
 
 describe('cartography display filters (render-time)', () => {

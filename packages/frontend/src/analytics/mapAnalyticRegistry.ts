@@ -42,6 +42,8 @@ export type MapLayerMergeContext = {
   wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances']
   homeworldMarkers: CombinedMapData['homeworldMarkers']
   waypointsByKey: Map<string, { x: number; y: number }>
+  baselineDegraded: boolean | undefined
+  baselineTurn: number | null | undefined
   nuIonStorms: boolean | undefined
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { homeworldBaselineDegradedMessage } from '../../analytics/homeworld-locator/constants'
 import type { StellarCartographyMapContext } from '../../analytics/stellar-cartography/mapUiConfig'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
@@ -83,8 +84,31 @@ function MapShellShowingMap({
           cartography={cartography}
         />
       </MapPaneWithDisplayControls>
+      <HomeworldBaselineDegradedBanner
+        baselineDegraded={mapShellView.displayMapData.baselineDegraded === true}
+        baselineTurn={mapShellView.displayMapData.baselineTurn}
+      />
       <DeferredPendingMessage pending={mapShellView.showDeferredPending} />
     </main>
+  )
+}
+
+/** Map-mode metadata note when homeworld baseline used a turn later than 1. */
+function HomeworldBaselineDegradedBanner({
+  baselineDegraded,
+  baselineTurn,
+}: {
+  baselineDegraded: boolean
+  baselineTurn: number | null | undefined
+}) {
+  if (!baselineDegraded) return null
+  return (
+    <p
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-black/90 px-4 py-1 text-xs text-amber-300/90"
+      role="status"
+    >
+      {homeworldBaselineDegradedMessage(baselineTurn)}
+    </p>
   )
 }
 
