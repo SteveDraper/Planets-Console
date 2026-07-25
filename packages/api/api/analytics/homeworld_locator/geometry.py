@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from api.concepts.homeworld_layout import DEFAULT_MAP_CENTER_XY
 from api.concepts.stellar_cartography.nebula_visibility import distance_ly
+from api.concepts.warp_well import planet_is_planetoid
 from api.models.planet import Planet
 
 # How far a planet may sit from the ideal ring radius / expected sector point.
@@ -64,6 +65,8 @@ def find_circular_ring_homeworld_sites(
         best_dist = match_tolerance_ly
         for planet in planets:
             if planet.id in chosen:
+                continue
+            if planet_is_planetoid(planet):
                 continue
             dist = distance_ly(planet.x, planet.y, expected_x, expected_y)
             if dist <= best_dist:

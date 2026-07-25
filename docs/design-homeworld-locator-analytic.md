@@ -66,6 +66,8 @@ There is **no separate API knob** for minimum LY between player homeworlds; spac
 
 Use these to validate cluster structure around candidate planets: a plausible HW should have neighbor counts consistent with settings (within tolerance for map generation variance).
 
+**Planetoids** (`debrisdisk == 1`, colonizable bodies inside debris disks) are **not** counted in either band and are **never** homeworld candidates (baseline profile, ring sites, or cluster orphans).
+
 ### 3.3 Starting conditions on the HW planet
 
 | UI | API field | Default | Role for baseline profile |
@@ -313,3 +315,4 @@ Hybrid phases (each independently reviewable):
 |------|------|
 | 2026-06-01 | Initial doc from homeworld locator design review (grill session + Starmap settings handoff) |
 | 2026-07-25 | Grill-with-docs for #34: orchestrator baseline chain; turn-scoped evidence aggregates + on-read candidate view; candidate geometry + cluster orphans in #34; overlays deferred to #35; phased plan §11.1 |
+| 2026-07-25 | Planetoids (`debrisdisk == 1`) excluded from cluster neighbor counts and all homeworld candidacy |

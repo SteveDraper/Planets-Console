@@ -19,6 +19,7 @@ from api.analytics.homeworld_locator.models import (
     InferredHomeworldCandidate,
 )
 from api.concepts.homeworld_layout import supports_circular_round_candidate_geometry
+from api.concepts.warp_well import planet_is_planetoid
 from api.models.game import GameSettings
 from api.models.planet import Planet
 
@@ -39,7 +40,8 @@ def infer_homeworld_baseline_candidates(
     Viewpoint unique baseline-profile match -> definite slot-anchored. On circular +
     round maps, remaining ring sites become orphan possibles. Cluster-constraint
     matches also yield orphan possibles (including when ring math does not apply).
-    Rival slots are not cross-product bound in v1 baseline.
+    Rival slots are not cross-product bound in v1 baseline. Debris-disk planetoids
+    are never candidates and never count toward cluster neighborhood minima.
     """
     pin = unique_baseline_profile_match(
         planets,
@@ -80,6 +82,8 @@ def infer_homeworld_baseline_candidates(
 
     for planet in planets:
         if planet.id in emitted:
+            continue
+        if planet_is_planetoid(planet):
             continue
         counts = count_cluster_neighbors(planet, planets)
         if not meets_homeworld_cluster_constraint(counts, settings):

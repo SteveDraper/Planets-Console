@@ -56,6 +56,7 @@ def _planet(
     ownerid: int = 0,
     clans: int = 0,
     temp: int = 0,
+    debrisdisk: int = 0,
 ) -> Planet:
     return replace(
         template,
@@ -66,6 +67,7 @@ def _planet(
         ownerid=ownerid,
         clans=clans,
         temp=temp,
+        debrisdisk=debrisdisk,
     )
 
 
@@ -246,6 +248,116 @@ def test_cluster_neighbor_bands_and_deficit(template_planet, sample_settings) ->
     strict = replace(sample_settings, verycloseplanets=3, closeplanets=4)
     assert not meets_homeworld_cluster_constraint(counts, strict)
     assert cluster_constraint_deficit(counts, strict) == 3
+
+
+def test_cluster_neighbors_ignore_planetoids(template_planet, sample_settings) -> None:
+    candidate = _planet(template_planet, planet_id=1, x=0, y=0)
+    neighbors = [
+        _planet(template_planet, planet_id=2, x=50, y=0),  # traditional very close
+        _planet(template_planet, planet_id=3, x=40, y=0, debrisdisk=1),  # planetoid -- ignored
+        _planet(template_planet, planet_id=4, x=100, y=0),  # traditional close band
+        _planet(template_planet, planet_id=5, x=120, y=0, debrisdisk=1),  # planetoid -- ignored
+    ]
+    counts = count_cluster_neighbors(candidate, [candidate, *neighbors])
+    assert counts.very_close == 1
+    assert counts.close_band == 1
+
+
+def test_baseline_profile_rejects_planetoid(template_planet, sample_settings) -> None:
+    planetoid = _planet(
+        template_planet,
+        planet_id=1,
+        x=0,
+        y=0,
+        ownerid=1,
+        clans=20_000,
+        temp=50,
+        debrisdisk=1,
+    )
+    assert not matches_homeworld_baseline_profile(
+        planetoid,
+        owner_id=1,
+        race_id=1,
+        settings=replace(sample_settings, homeworldhasstarbase=False),
+        starbase_planet_ids=set(),
+        min_baseline_clans=10_000,
+    )
+
+
+def test_ring_sites_skip_planetoids(template_planet) -> None:
+    center = (0.0, 0.0)
+    radius = 100.0
+    player_count = 4
+    sites = []
+    for index in range(player_count):
+        angle = index * (2.0 * math.pi / player_count)
+        sites.append(
+            _planet(
+                template_planet,
+                planet_id=index + 1,
+                x=int(round(radius * math.cos(angle))),
+                y=int(round(radius * math.sin(angle))),
+            )
+        )
+    # Planetoid sitting on a rival ring slot must not be chosen.
+    planetoid = replace(sites[1], id=99, debrisdisk=1)
+    pin = sites[0]
+    found = find_circular_ring_homeworld_sites(
+        [sites[0], planetoid, sites[2], sites[3]],
+        center=center,
+        player_count=player_count,
+        pin=pin,
+    )
+    assert {planet.id for planet in found} == {1, 3, 4}
+    assert all(planet.debrisdisk == 0 for planet in found)
+
+
+def test_infer_baseline_never_emits_planetoid_candidates(template_planet, sample_settings) -> None:
+    settings = replace(
+        sample_settings,
+        hwdistribution=HW_DISTRIBUTION_RANDOM_SPACED,
+        mapshape=MAP_SHAPE_RECTANGULAR,
+        homeworldhasstarbase=False,
+        verycloseplanets=1,
+        closeplanets=1,
+    )
+    hw = _planet(template_planet, planet_id=1, x=0, y=0, ownerid=1, clans=20_000, temp=50)
+    near = _planet(template_planet, planet_id=2, x=50, y=0)
+    close = _planet(template_planet, planet_id=3, x=100, y=0)
+    planetoid = _planet(
+        template_planet,
+        planet_id=4,
+        x=0,
+        y=0,
+        ownerid=1,
+        clans=20_000,
+        temp=50,
+        debrisdisk=1,
+    )
+    # Planetoid that would otherwise look like a cluster-satisfying orphan.
+    clusterish_planetoid = _planet(
+        template_planet,
+        planet_id=5,
+        x=500,
+        y=0,
+        debrisdisk=1,
+    )
+    clusterish_near = _planet(template_planet, planet_id=6, x=550, y=0)
+    clusterish_close = _planet(template_planet, planet_id=7, x=600, y=0)
+
+    candidates = infer_homeworld_baseline_candidates(
+        [hw, near, close, planetoid, clusterish_planetoid, clusterish_near, clusterish_close],
+        settings=settings,
+        viewpoint_perspective=1,
+        viewpoint_race_id=1,
+        player_count=2,
+        starbase_planet_ids=set(),
+        min_baseline_clans=10_000,
+    )
+    ids = {row.planet_id for row in candidates}
+    assert 4 not in ids
+    assert 5 not in ids
+    assert 1 in ids
 
 
 def test_find_circular_ring_sites_from_pin(template_planet) -> None:

@@ -30,6 +30,15 @@ def planet_is_in_debris_disk(planet: Planet) -> bool:
     return planet.debrisdisk != 0
 
 
+def planet_is_planetoid(planet: Planet) -> bool:
+    """True when ``debrisdisk == 1`` -- a colonizable body inside a debris disk.
+
+    Planetoids are not traditional planets for homeworld candidacy or for
+    ``verycloseplanets`` / ``closeplanets`` neighborhood counts.
+    """
+    return planet.debrisdisk == 1
+
+
 def warp_well_cartesian_distance(ax: float, ay: float, bx: float, by: float) -> float:
     return math.hypot(ax - bx, ay - by)
 
