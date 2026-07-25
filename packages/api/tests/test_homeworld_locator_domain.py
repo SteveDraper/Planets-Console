@@ -348,6 +348,7 @@ def test_infer_baseline_never_emits_planetoid_candidates(template_planet, sample
     candidates = infer_homeworld_baseline_candidates(
         [hw, near, close, planetoid, clusterish_planetoid, clusterish_near, clusterish_close],
         settings=settings,
+        viewpoint_player_id=1,
         viewpoint_perspective=1,
         viewpoint_race_id=1,
         player_count=2,
@@ -423,6 +424,7 @@ def test_infer_baseline_viewpoint_definite_and_ring_orphans(
     candidates = infer_homeworld_baseline_candidates(
         ring,
         settings=settings,
+        viewpoint_player_id=1,
         viewpoint_perspective=1,
         viewpoint_race_id=1,
         player_count=player_count,
@@ -465,6 +467,7 @@ def test_infer_baseline_non_circular_uses_cluster_orphans_only(
     candidates = infer_homeworld_baseline_candidates(
         [hw, near, mid, far],
         settings=settings,
+        viewpoint_player_id=1,
         viewpoint_perspective=1,
         viewpoint_race_id=1,
         player_count=4,
@@ -485,3 +488,45 @@ def test_infer_baseline_non_circular_uses_cluster_orphans_only(
     assert 13 not in by_id
     assert by_id[12].perspective is None
     assert by_id[12].confidence_tier == CONFIDENCE_POSSIBLE
+
+
+def test_infer_baseline_player_id_distinct_from_perspective_slot(
+    template_planet, sample_settings
+) -> None:
+    """Domain matches ownerid (Player.id) but emits the shell perspective slot."""
+    settings = replace(
+        sample_settings,
+        hwdistribution=HW_DISTRIBUTION_RANDOM_SPACED,
+        mapshape=MAP_SHAPE_ROUND,
+        homeworldhasstarbase=False,
+        verycloseplanets=99,
+        closeplanets=99,
+    )
+    viewpoint_player_id = 99
+    viewpoint_perspective = 3
+    hw = _planet(
+        template_planet,
+        planet_id=10,
+        x=0,
+        y=0,
+        ownerid=viewpoint_player_id,
+        clans=20_000,
+        temp=50,
+    )
+    decoy = _planet(template_planet, planet_id=11, x=400, y=0)
+
+    candidates = infer_homeworld_baseline_candidates(
+        [hw, decoy],
+        settings=settings,
+        viewpoint_player_id=viewpoint_player_id,
+        viewpoint_perspective=viewpoint_perspective,
+        viewpoint_race_id=1,
+        player_count=4,
+        starbase_planet_ids=set(),
+        min_baseline_clans=10_000,
+    )
+    assert len(candidates) == 1
+    assert candidates[0].planet_id == 10
+    assert candidates[0].perspective == viewpoint_perspective
+    assert candidates[0].perspective != viewpoint_player_id
+    assert candidates[0].confidence_tier == CONFIDENCE_DEFINITE

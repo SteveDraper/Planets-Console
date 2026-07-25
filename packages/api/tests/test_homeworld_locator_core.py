@@ -68,6 +68,7 @@ def _services(
     game_id: int = 628580,
     perspective: int = 1,
     ensure_turn=None,
+    game_info=None,
 ):
     return build_ephemeral_homeworld_services(
         persistence=persistence,
@@ -76,6 +77,7 @@ def _services(
         load_turn=lambda n: turns.get(n),
         list_stored_turns=lambda: sorted(turns),
         ensure_turn=ensure_turn,
+        game_info=game_info,
     )
 
 
@@ -293,6 +295,86 @@ def test_export_ensure_satisfied_without_shell_aggregate(persistence, sample_tur
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is True
     assert ensure_homeworld_export(ctx, scope) is True
     assert persistence.get_evidence_aggregate(628580, 1, 111) is None
+
+
+def test_baseline_ensure_durable_perspective_uses_slot_not_player_id(
+    persistence, sample_turn
+) -> None:
+    """Player.id may differ from shell perspective; durable candidates use the slot.
+
+    When GameInfo is available, slot resolution goes through
+    GameService.perspective_for_player_id rather than equality remap.
+    """
+    from api.serialization.game import game_info_from_json
+    from api.services.game_service import GameService
+
+    viewpoint_player_id = 99
+    shell_perspective = 2
+    game_id = 628580
+
+    raw_info = json.loads((ASSETS_DIR / "game_info_sample.json").read_text(encoding="utf-8"))
+    game_info = game_info_from_json(raw_info)
+    # Slot 2 owns player id 99; other slots keep distinct ids.
+    remapped_players = [
+        replace(player, id=(viewpoint_player_id if index == shell_perspective - 1 else 10 + index))
+        for index, player in enumerate(game_info.players)
+    ]
+    game_info = replace(game_info, players=remapped_players)
+    assert (
+        GameService.perspective_for_player_id(game_info, viewpoint_player_id, game_id)
+        == shell_perspective
+    )
+    assert (
+        GameService.player_id_for_perspective(game_info, shell_perspective, game_id)
+        == viewpoint_player_id
+    )
+
+    settings = replace(
+        sample_turn.settings,
+        turn=1,
+        homeworldhasstarbase=False,
+        verycloseplanets=99,
+        closeplanets=99,
+    )
+    hw = replace(
+        sample_turn.planets[0],
+        id=42,
+        ownerid=viewpoint_player_id,
+        clans=20_000,
+        temp=50,
+        debrisdisk=0,
+    )
+    other = replace(
+        sample_turn.planets[1] if len(sample_turn.planets) > 1 else sample_turn.planets[0],
+        id=43,
+        ownerid=0,
+        clans=0,
+        temp=0,
+        debrisdisk=0,
+        x=hw.x + 500,
+        y=hw.y,
+    )
+    viewpoint_player = replace(sample_turn.player, id=viewpoint_player_id, raceid=1)
+    turn_one = replace(
+        sample_turn,
+        settings=settings,
+        player=viewpoint_player,
+        planets=[hw, other],
+        starbases=[],
+    )
+    services = _services(
+        persistence,
+        {1: turn_one},
+        perspective=shell_perspective,
+        game_info=game_info,
+    )
+    result = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    assert result.recomputed is True
+    anchored = [row for row in result.game_state.candidates if row.perspective is not None]
+    assert len(anchored) == 1
+    assert anchored[0].planet_id == 42
+    assert anchored[0].perspective == shell_perspective
+    assert anchored[0].perspective != viewpoint_player_id
 
 
 def test_map_table_payload_smoke(persistence, sample_turn) -> None:

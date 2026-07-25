@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from api.analytics.homeworld_locator.baseline import infer_homeworld_baseline_candidates
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
-from api.analytics.homeworld_locator.models import InferredHomeworldCandidate
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
     HomeworldCandidateView,
@@ -23,6 +22,7 @@ from api.concepts.homeworld_layout import (
 from api.config import get_config
 from api.errors import ValidationError
 from api.models.game import TurnInfo
+from api.services.game_service import GameService
 
 
 def _starbase_planet_ids(turn: TurnInfo) -> set[int]:
@@ -31,6 +31,32 @@ def _starbase_planet_ids(turn: TurnInfo) -> set[int]:
 
 def _player_count(turn: TurnInfo) -> int:
     return len(players_by_id(turn))
+
+
+def _durable_viewpoint_perspective(
+    services: HomeworldLocatorComputeServices,
+    *,
+    viewpoint_player_id: int,
+) -> int:
+    """Resolve the shell storage slot for the viewpoint player.
+
+    Prefer ``GameService.perspective_for_player_id`` when a ``GameInfo`` roster is
+    available; it must agree with the compute-scope ``services.perspective`` used
+    for persistence paths. Otherwise the turn was loaded for that shell slot, so
+    ``services.perspective`` is authoritative.
+    """
+    if services.game_info is not None:
+        mapped = GameService.perspective_for_player_id(
+            services.game_info, viewpoint_player_id, services.game_id
+        )
+        if mapped != services.perspective:
+            raise ValidationError(
+                f"viewpoint player id {viewpoint_player_id} maps to perspective "
+                f"{mapped} for game {services.game_id}, but compute scope is "
+                f"perspective {services.perspective}"
+            )
+        return mapped
+    return services.perspective
 
 
 def resolve_baseline_turn(
@@ -126,32 +152,24 @@ def compute_homeworld_baseline(
     baseline_turn_info, baseline_turn, degraded = resolve_baseline_turn(services)
     existing = services.persistence.get_game_state(services.game_id)
     min_clans = get_config().homeworld_locator.min_baseline_clans
-    # Viewpoint identity comes from the baseline turn's perspective player
-    # (slot number != player id).
+    # Ownership matching uses Player.id; durable candidates use the shell slot.
     viewpoint_player = baseline_turn_info.player
+    viewpoint_perspective = _durable_viewpoint_perspective(
+        services,
+        viewpoint_player_id=viewpoint_player.id,
+    )
     inferred = infer_homeworld_baseline_candidates(
         baseline_turn_info.planets,
         settings=baseline_turn_info.settings,
-        viewpoint_perspective=viewpoint_player.id,
+        viewpoint_player_id=viewpoint_player.id,
+        viewpoint_perspective=viewpoint_perspective,
         viewpoint_race_id=viewpoint_player.raceid,
         player_count=_player_count(baseline_turn_info),
         starbase_planet_ids=_starbase_planet_ids(baseline_turn_info),
         min_baseline_clans=min_clans,
     )
-    # Domain matcher keys on player id (ownerid); durable/serve records use the
-    # shell perspective slot for slot-anchored candidates.
-    inferred_for_slot = tuple(
-        InferredHomeworldCandidate(
-            planet_id=row.planet_id,
-            perspective=(
-                services.perspective if row.perspective == viewpoint_player.id else row.perspective
-            ),
-            confidence_tier=row.confidence_tier,
-        )
-        for row in inferred
-    )
     candidates = merge_candidates_preserving_user_asserted(
-        inferred=candidate_records_from_inferred(inferred_for_slot),
+        inferred=candidate_records_from_inferred(inferred),
         existing=existing.candidates if existing is not None else None,
     )
     state = HomeworldLocatorGameState(

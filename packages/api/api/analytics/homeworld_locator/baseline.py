@@ -28,6 +28,7 @@ def infer_homeworld_baseline_candidates(
     planets: Sequence[Planet],
     *,
     settings: GameSettings,
+    viewpoint_player_id: int,
     viewpoint_perspective: int,
     viewpoint_race_id: int,
     player_count: int,
@@ -42,10 +43,14 @@ def infer_homeworld_baseline_candidates(
     matches also yield orphan possibles (including when ring math does not apply).
     Rival slots are not cross-product bound in v1 baseline. Debris-disk planetoids
     are never candidates and never count toward cluster neighborhood minima.
+
+    ``viewpoint_player_id`` matches planet ``ownerid`` (Player.id).
+    ``viewpoint_perspective`` is the 1-based shell storage slot written on
+    slot-anchored candidates -- it is not interchangeable with player id.
     """
     pin = unique_baseline_profile_match(
         planets,
-        owner_id=viewpoint_perspective,
+        owner_id=viewpoint_player_id,
         race_id=viewpoint_race_id,
         settings=settings,
         starbase_planet_ids=starbase_planet_ids,

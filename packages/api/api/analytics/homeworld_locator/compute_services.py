@@ -9,7 +9,7 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.errors import ValidationError
-from api.models.game import TurnInfo
+from api.models.game import GameInfo, TurnInfo
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,8 @@ class HomeworldLocatorComputeServices:
     list_stored_turns: Callable[[], list[int]]
     ensure_turn: Callable[[int], TurnInfo | None] | None = None
     """Optional auto-ensure hook (e.g. turn 1). Returns loaded turn or None on failure."""
+    game_info: GameInfo | None = None
+    """Optional roster for Player.id ↔ perspective slot mapping via GameService."""
 
 
 def resolve_homeworld_services(ctx: AnalyticQueryContext) -> HomeworldLocatorComputeServices:
@@ -45,6 +47,7 @@ def build_ephemeral_homeworld_services(
     load_turn: Callable[[int], TurnInfo | None],
     list_stored_turns: Callable[[], list[int]] | None = None,
     ensure_turn: Callable[[int], TurnInfo | None] | None = None,
+    game_info: GameInfo | None = None,
 ) -> HomeworldLocatorComputeServices:
     def _list_stored() -> list[int]:
         if list_stored_turns is not None:
@@ -65,4 +68,5 @@ def build_ephemeral_homeworld_services(
         load_turn=load_turn,
         list_stored_turns=_list_stored,
         ensure_turn=ensure_turn,
+        game_info=game_info,
     )
