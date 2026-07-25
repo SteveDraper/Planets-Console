@@ -21,6 +21,24 @@ describe('HomeworldLocatorTile', () => {
     expect(screen.getByTitle(/no homeworld planets/i)).toBeInTheDocument()
   })
 
+  it('shows unchecked when persisted enabled but inactive', () => {
+    render(
+      <ul>
+        <HomeworldLocatorTile
+          name="Homeworld locator"
+          enabled
+          supportsMode
+          depressed
+          onToggle={() => undefined}
+          inactiveReason="nohomeworld"
+        />
+      </ul>
+    )
+    const checkbox = screen.getByRole('checkbox')
+    expect(checkbox).toBeDisabled()
+    expect(checkbox).not.toBeChecked()
+  })
+
   it('allows enabling when available and mode is supported', () => {
     render(
       <ul>

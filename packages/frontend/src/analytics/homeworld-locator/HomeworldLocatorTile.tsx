@@ -44,7 +44,7 @@ export function HomeworldLocatorTile({
       >
         <input
           type="checkbox"
-          checked={enabled}
+          checked={enabled && available}
           onChange={() => canToggle && onToggle()}
           disabled={!canToggle}
           className="h-4 w-4 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"

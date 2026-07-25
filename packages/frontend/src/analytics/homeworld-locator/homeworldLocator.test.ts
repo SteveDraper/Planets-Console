@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  HOMEWORLD_LOCATOR_ANALYTIC_ID,
   homeworldInactiveHint,
   homeworldBaselineDegradedMessage,
   INACTIVE_REASON_NO_HOMEWORLD,
   INACTIVE_REASON_SCENARIO_OVERRIDE,
   INACTIVE_REASON_WANDERING_TRIBES,
 } from './constants'
-import { homeworldLocatorInactiveReasonFromGameInfo } from './homeworldAvailability'
+import {
+  homeworldLocatorInactiveReasonFromGameInfo,
+  withoutInactiveHomeworldLocator,
+} from './homeworldAvailability'
 import { parseHomeworldLocatorPayload } from './wireSchema'
 import { resolveHomeworldMarkerDisplays } from './mapAnalytic'
 
@@ -80,6 +84,26 @@ describe('homeworldInactiveHint', () => {
     expect(homeworldInactiveHint(INACTIVE_REASON_SCENARIO_OVERRIDE)).toContain(
       'Disunited Kingdoms'
     )
+  })
+})
+
+describe('withoutInactiveHomeworldLocator', () => {
+  it('keeps homeworld-locator when available', () => {
+    expect(
+      withoutInactiveHomeworldLocator(
+        ['scores', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'fleet'],
+        null
+      )
+    ).toEqual(['scores', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'fleet'])
+  })
+
+  it('drops homeworld-locator from effective enabled ids when inactive', () => {
+    expect(
+      withoutInactiveHomeworldLocator(
+        ['scores', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'fleet'],
+        INACTIVE_REASON_NO_HOMEWORLD
+      )
+    ).toEqual(['scores', 'fleet'])
   })
 })
 

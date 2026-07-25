@@ -1,5 +1,6 @@
 import type { GameInfoResponse } from '../../api/bff'
 import {
+  HOMEWORLD_LOCATOR_ANALYTIC_ID,
   INACTIVE_REASON_NO_HOMEWORLD,
   INACTIVE_REASON_SCENARIO_OVERRIDE,
   INACTIVE_REASON_WANDERING_TRIBES,
@@ -49,4 +50,18 @@ export function isHomeworldLocatorAvailableFromGameInfo(
   data: GameInfoResponse | null | undefined
 ): boolean {
   return homeworldLocatorInactiveReasonFromGameInfo(data) == null
+}
+
+/**
+ * Drop homeworld-locator from the effective enabled list when GameInfo marks it inactive.
+ * Persisted store enablement is left intact so it can restore when the game becomes available.
+ */
+export function withoutInactiveHomeworldLocator(
+  enabledAnalyticIds: readonly string[],
+  inactiveReason: string | null
+): string[] {
+  if (inactiveReason == null) {
+    return [...enabledAnalyticIds]
+  }
+  return enabledAnalyticIds.filter((id) => id !== HOMEWORLD_LOCATOR_ANALYTIC_ID)
 }

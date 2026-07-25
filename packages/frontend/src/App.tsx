@@ -16,6 +16,7 @@ import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
+import { withoutInactiveHomeworldLocator } from './analytics/homeworld-locator/homeworldAvailability'
 import {
   applyShellGameBootstrapResult,
   fetchShellGameBootstrap,
@@ -285,8 +286,12 @@ function ConsoleShell() {
 
   const analytics = analyticsData?.analytics ?? []
   const enabledAnalyticIds = useMemo(
-    () => analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),
-    [analytics, enabledIds]
+    () =>
+      withoutInactiveHomeworldLocator(
+        analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),
+        homeworldInactiveReason
+      ),
+    [analytics, enabledIds, homeworldInactiveReason]
   )
   const globalInferencePauseEnabled =
     viewMode === 'tabular' &&
