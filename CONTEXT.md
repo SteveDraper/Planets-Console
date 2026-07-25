@@ -373,12 +373,20 @@ Server-side **analytic policy** for the **homeworld locator**, loaded from amalg
 _Avoid_: HW settings panel, client-side heuristic config
 
 **Homeworld locator state**:
-Persisted server-side record for a **homeworld locator** run -- cached **homeworld candidates**, confidence tiers, slot assignments, and user overrides. Split across **homeworld locator state (game-global)** and **homeworld locator evidence (perspective)**. Not recomputed every session; refreshed when **homeworld locator invalidation** rules fire or the user requests **homeworld locator refresh**. **User-asserted** records are preserved across recomputes.
-_Avoid_: HW cache blob, analytic snapshot (generic)
+Persisted server-side record for a **homeworld locator** run -- cached **homeworld candidates**, slot assignments, and user overrides in **homeworld locator state (game-global)**, plus per-turn **homeworld evidence aggregates**. Serving materializes a **homeworld candidate view** from those layers. Not recomputed every session; refreshed when **homeworld locator invalidation** rules fire or the user requests **homeworld locator refresh**. **User-asserted** records are preserved across recomputes.
+_Avoid_: HW cache blob, analytic snapshot (generic), storing only a posterior without the evidence aggregate
 
 **Homeworld locator invalidation**:
-When inferred **homeworld locator** state is stale and must recompute or append evidence. Triggers: a new **TurnInfo** stored for the shell **perspective** beyond the cached evidence horizon; **GameInfo** re-fetch with changed homeworld-relevant settings (`hwdistribution`, `homeworldclans`, `nohomeworld`, etc.). Does not remove **user-asserted** records -- those merge back after inference.
-_Avoid_: cache TTL, automatic refresh timer
+When inferred **homeworld locator** state is stale and must recompute. Triggers: **TurnInfo** replace/store for the shell **perspective** at turn *T* (clears turn-scoped **homeworld evidence aggregates** at turns `>= T`, fleet-like); **GameInfo** re-fetch with changed homeworld-relevant settings (`hwdistribution`, `homeworldclans`, `nohomeworld`, etc.) invalidating game-global inferred candidates. Does not remove **user-asserted** records -- those merge back after inference.
+_Avoid_: cache TTL, automatic refresh timer, append-only horizon cursor as the sole invalidation model
+
+**Homeworld evidence aggregate**:
+Turn-scoped durable accumulation of **homeworld inference evidence** through turn *T* for one **perspective**. Computed as a refine over **homeworld locator state (game-global)**, the aggregate at *T−1* (empty at the analytic **ensure baseline**), and observations from **TurnInfo** at *T*. Stored under **analytic persistence** at `games/{gameId}/{perspective}/turns/{turn}/analytics/homeworld-locator` (evidence payload in-document). The chain catches up aggregates through the shell turn; the aggregate is not itself the displayed confidence map.
+_Avoid_: homeworld locator evidence (perspective) as a single non-turn document, posterior-as-sole-persistence, omniscient cross-perspective aggregate
+
+**Homeworld candidate view**:
+Materialized slot/orphan **homeworld candidate records** with **homeworld confidence tiers** for map and table -- derived from **homeworld locator state (game-global)** plus the **homeworld evidence aggregate** at the shell turn. Computed on read (optional cache allowed); never a substitute for persisting the evidence aggregate.
+_Avoid_: posterior document (as the primary store), baking display tiers into the aggregate as the only durable form
 
 **Homeworld locator refresh**:
 Explicit user action (sidebar control in the **homeworld locator** analytic) that forces recomputation of inferred state regardless of invalidation triggers. **User-asserted** records are preserved and re-merged.
@@ -404,9 +412,9 @@ _Avoid_: omniscient evidence, all-perspectives merge
 Cached slot assignments, orphan candidates, and user-asserted records shared across viewers. Stored at `games/{gameId}/analytics/homeworld-locator` under the **analytic persistence** path convention.
 _Avoid_: games/{gameId}/homeworld-locator (collides with other top-level game keys)
 
-**Homeworld locator evidence (perspective)**:
-Per-**perspective** evidence accumulation and evidence-driven confidence promotions. Stored at `games/{gameId}/{perspective}/analytics/homeworld-locator/evidence`. Merged with **homeworld locator state (game-global)** when serving the analytic.
-_Avoid_: per-viewer HW file, evidence cache (generic)
+**Homeworld locator evidence (perspective)** *(superseded naming)*:
+Older name for a single per-**perspective** evidence document. Replaced by turn-scoped **homeworld evidence aggregate**; do not use for new work.
+_Avoid_: as current architecture -- use **homeworld evidence aggregate**
 
 **Homeworld map marker**:
 Map decoration on a **base map** planet node for a **homeworld candidate** at a known planet id. **Definite** tiers use a solid marker; **possible** tiers use a lighter or dashed marker. **User-asserted** **definite** uses the same definite marker with a distinct attribution cue (border or badge).
@@ -425,8 +433,16 @@ Whether the **homeworld locator** can run for the loaded game. Inactive (greyed 
 _Avoid_: disabled analytic (generic), HW not applicable toast
 
 **Homeworld region geometry (v1)**:
-Settings-driven **homeworld region overlay** math shipped for **`hwdistribution=2` (Circular)** on round maps (`mapshape=0`) only. Other distributions remain active for baseline profile, evidence, and manual annotation, but skip sector/ring overlay geometry until extended.
-_Avoid_: full hwdistribution support (v1 claim)
+Settings-driven circular-ring / sector math for **`hwdistribution=2` (Circular)** on round maps (`mapshape=0`) only. Used first to emit **possible** **slot-anchored homeworld candidates** (and planet-in-sector options) under fog-of-war when baseline profile details are missing for rival slots; **homeworld region overlay** rendering can reuse the same geometry. Other distributions still run baseline profile, evidence, and manual annotation but skip ring/sector geometry until extended.
+_Avoid_: full hwdistribution support (v1 claim), treating ring math as overlay-only paint
+
+**Homeworld candidate geometry**:
+The non-rendering use of **homeworld region geometry (v1)** -- constraining which planets (or sectors) are plausible **homeworld candidates** per **perspective** slot when **TurnInfo** lacks full planet detail for that owner. Distinct from drawing **homeworld region overlay** arcs on the map.
+_Avoid_: overlay-only geometry, profile-only baseline (as sufficient for early-turn multi-slot inference)
+
+**Homeworld cluster constraint**:
+Map-gen neighborhood rules from **GameSettings** (`verycloseplanets` within 81 LY, `closeplanets` in the 81--162 LY band, and related spacing) used to score whether a planet is a plausible **homeworld planet** site. Applies even when **homeworld region geometry (v1)** ring/sector math does not (non-circular or non-round maps), so **orphan homeworld candidates** can still be constructed from planet positions alone under fog-of-war.
+_Avoid_: ring-only candidate generation, treating cluster counts as overlay paint only
 
 **Fleet analytic**:
 A **turn analytic** (tabular and map) that maintains each **Player**'s inferred fleet composition as of the shell turn. Computed at `(game, turn T, perspective P)` using turns `1..T` stored at **perspective** `P` only -- not an omniscient merge across slots. Combines **fleet observed ship** sightings from `TurnInfo.ships` with **fleet inferred acquisition** rows from **military score build inference** (and later trade/capture sources). Map layers are per-player, individually color-coded and toggleable; tabular output is one ship list per **Player**. v1 may leave many **fleet field constraint** branches empty; the wire and export schema must still represent partial knowledge when available. See [design-fleet-analytic.md](docs/design-fleet-analytic.md) ([#114](https://github.com/SteveDraper/Planets-Console/issues/114)).
@@ -917,8 +933,8 @@ _Avoid_: valid key (too generic)
 - `credentials/accounts/*` -- account record for one login name (**account API key** and future account fields); one **document** per name
 
 **Analytic persistence**:
-Server-side cached output for a **turn analytic** that must not recompute on every request. Three tiers under the `analytics/` namespace (see [ADR 0002](docs/adr/0002-analytic-persistence.md)): **game-global** `games/{gameId}/analytics/{analytic_id}` (e.g. **Scores** hull catalog mask overrides); **perspective supplement** `games/{gameId}/{perspective}/analytics/{analytic_id}/...` (e.g. **homeworld locator evidence**); **turn-scoped supplement** `games/{gameId}/{perspective}/turns/{turn}/analytics/{analytic_id}` (one JSON document per shell turn and **perspective**, distinct from the **TurnInfo** file at `.../turns/{turn}`). **Homeworld locator** is the reference two-tier consumer; **Scores inference row persistence** is the first **turn-scoped** consumer.
-_Avoid_: analytic cache at game root, `{gameId}/homeworld-locator`, nesting computed cache inside **TurnInfo** documents
+Server-side cached output for a **turn analytic** that must not recompute on every request. Three tiers under the `analytics/` namespace (see [ADR 0002](docs/adr/0002-analytic-persistence.md)): **game-global** `games/{gameId}/analytics/{analytic_id}` (e.g. **Scores** hull catalog mask overrides, **homeworld locator state (game-global)**); **perspective supplement** `games/{gameId}/{perspective}/analytics/{analytic_id}/...`; **turn-scoped supplement** `games/{gameId}/{perspective}/turns/{turn}/analytics/{analytic_id}` (one JSON document per shell turn and **perspective**, distinct from the **TurnInfo** file at `.../turns/{turn}` -- e.g. **Scores inference row persistence**, **fleet ledger persistence**, **homeworld evidence aggregate**). **Homeworld locator** uses game-global state plus turn-scoped evidence aggregates; the **homeworld candidate view** is materialized for serve.
+_Avoid_: analytic cache at game root, `{gameId}/homeworld-locator`, nesting computed cache inside **TurnInfo** documents, treating homeworld evidence as a single non-turn perspective blob
 
 **Scores inference row persistence**:
 Server-side terminal **military score build inference** result for one scoreboard row, keyed by game, shell **perspective**, **inference host turn**, and target **Player** (`playerId`). Stored at logical path `games/{gameId}/{perspective}/turns/{turn}/analytics/scores/inference_rows/{playerId}` inside document `games/{gameId}/{perspective}/turns/{turn}/analytics/scores.json`. Durable payload is the functional row only: status, summary, solutions, and **host turn functional targets** -- enough to render the **Scores** table row and **inference solution detail modal** without reopening the scheduler. Solver **diagnostics** (including full action catalogs / ship-build combo lists) are wire and in-memory only and are not written to storage. Written only when a row completes with status **`exact`** or **`no_exact_solution`**; not written for `stopped`, `fetch_error`, immediate path terminals (`no_prior_turn`, `player_not_found`), or in-progress / `paused` rows. After orchestrator migration (**#200**), terminal `tier_solve` writes go through **`ScoresPersistencePolicy.persist`** (same pattern as fleet ledger persist); the inference stream adapter node-complete listener emits wire events only. Dropped or marked stale on **scores inference row invalidation**. Distinct from game-global hull catalog mask overrides at `games/{gameId}/analytics/scores/inference_hull_catalog_masks/{playerId}`.

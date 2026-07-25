@@ -1,8 +1,19 @@
 """Core API sub-config: storage and API behaviour. Set by server from amalgamated config."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _config: "ApiConfig | None" = None
+
+
+@dataclass(frozen=True)
+class HomeworldLocatorConfig:
+    """Server-side analytic policy for the homeworld locator (YAML, not SPA UI)."""
+
+    min_baseline_clans: int = 10_000
+    """Floor for homeworld baseline profile clan matching."""
+
+    evidence_promotion_threshold: int = 2
+    """Independent evidence hits required for possible -> definite (unused until evidence refine)."""
 
 
 @dataclass(frozen=True)
@@ -35,6 +46,9 @@ class ApiConfig:
 
     credentials_obfuscation_secret: str | None = None
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
+
+    homeworld_locator: HomeworldLocatorConfig = field(default_factory=HomeworldLocatorConfig)
+    """Homeworld locator analytic policy (min baseline clans, evidence promotion threshold)."""
 
 
 def get_config() -> ApiConfig:

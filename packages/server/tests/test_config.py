@@ -284,3 +284,46 @@ def test_load_config_show_initial_game_bool_raises():
             override_specs=["bff.show_initial_game=true"],
             default_config_path=base,
         )
+
+
+def test_load_config_homeworld_locator_defaults():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(default_config_path=base)
+    assert root.api.homeworld_locator.min_baseline_clans == 10_000
+    assert root.api.homeworld_locator.evidence_promotion_threshold == 2
+
+
+def test_load_config_homeworld_locator_overrides(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "server: {}\n"
+        "api:\n"
+        "  homeworld_locator:\n"
+        "    min_baseline_clans: 8000\n"
+        "    evidence_promotion_threshold: 3\n"
+        "bff: {}\n",
+        encoding="utf-8",
+    )
+    root = load_config(default_config_path=cfg)
+    assert root.api.homeworld_locator.min_baseline_clans == 8000
+    assert root.api.homeworld_locator.evidence_promotion_threshold == 3
+
+
+def test_load_config_homeworld_locator_leaf_override():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(
+        override_specs=["api.homeworld_locator.min_baseline_clans=12000"],
+        default_config_path=base,
+    )
+    assert root.api.homeworld_locator.min_baseline_clans == 12000
+    assert root.api.homeworld_locator.evidence_promotion_threshold == 2
+
+
+def test_load_config_homeworld_locator_invalid_type_raises(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "server: {}\napi:\n  homeworld_locator: notamap\nbff: {}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(TypeError, match="homeworld_locator"):
+        load_config(default_config_path=cfg)
