@@ -46,7 +46,7 @@ describe('normalizeMapRegionOverlay', () => {
 
   it('normalizes regionOverlays on map data responses', () => {
     const out = normalizeMapDataResponse({
-      analyticId: 'map-region-demo',
+      analyticId: 'visibility',
       nodes: [],
       edges: [],
       regionOverlays: [validOverlay],

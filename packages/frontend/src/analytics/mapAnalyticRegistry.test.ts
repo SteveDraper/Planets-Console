@@ -6,8 +6,8 @@ import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
   FLEET_ANALYTIC_ID,
-  MAP_REGION_DEMO_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+  VISIBILITY_ANALYTIC_ID,
 } from './mapAnalyticIds'
 import {
   defaultMapAnalyticRegistration,
@@ -18,7 +18,7 @@ import {
   REGISTERED_MAP_ANALYTIC_IDS,
   isRegisteredMapAnalytic,
 } from './mapAnalyticRegistry'
-import { mapRegionDemoMapAnalytic } from './map-region-demo/mapAnalytic'
+import { visibilityMapAnalytic } from './visibility/mapAnalytic'
 import {
   defaultConnectionsParams,
   sampleScope,
@@ -37,7 +37,7 @@ describe('map analytic registry', () => {
       CONNECTIONS_ANALYTIC_ID,
       STELLAR_CARTOGRAPHY_ANALYTIC_ID,
       FLEET_ANALYTIC_ID,
-      MAP_REGION_DEMO_ANALYTIC_ID,
+      VISIBILITY_ANALYTIC_ID,
     ])
     for (const analyticId of REGISTERED_MAP_ANALYTIC_IDS) {
       expect(isRegisteredMapAnalytic(analyticId)).toBe(true)
@@ -48,7 +48,7 @@ describe('map analytic registry', () => {
       stellarCartographyMapAnalytic
     )
     expect(mapAnalyticRegistrationFor(FLEET_ANALYTIC_ID)).toBe(fleetMapAnalytic)
-    expect(mapAnalyticRegistrationFor(MAP_REGION_DEMO_ANALYTIC_ID)).toBe(mapRegionDemoMapAnalytic)
+    expect(mapAnalyticRegistrationFor(VISIBILITY_ANALYTIC_ID)).toBe(visibilityMapAnalytic)
   })
 
   it('throws for unregistered map analytics', () => {

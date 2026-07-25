@@ -189,32 +189,32 @@ describe('combineMapData', () => {
     expect(combined.overlayCircles).toHaveLength(2)
   })
 
-  it('merges region overlays from the map-region-demo analytic', () => {
-    const demo: MapDataResponse = {
-      analyticId: 'map-region-demo',
+  it('merges region overlays from the visibility analytic', () => {
+    const visibility: MapDataResponse = {
+      analyticId: 'visibility',
       nodes: [],
       edges: [],
       regionOverlays: [
         {
-          kind: 'demo',
-          id: 'demo-coverage',
-          fillColor: '#22c55e',
-          fillOpacity: 0.25,
-          disks: [{ x: 10, y: 20, radius: 150 }],
+          kind: 'ship-scan',
+          id: 'visibility-ship-scan',
+          fillColor: '#38bdf8',
+          fillOpacity: 0.28,
+          disks: [{ x: 10, y: 20, radius: 300 }],
           patches: [],
         },
       ],
     }
 
-    const combined = combineMapData(['map-region-demo'], [demo], {
+    const combined = combineMapData(['visibility'], [visibility], {
       liveConnectionsParams: null,
     })
 
     expect(combined.regionOverlays).toHaveLength(1)
     expect(combined.regionOverlays[0]).toMatchObject({
-      kind: 'demo',
-      fillColor: '#22c55e',
-      disks: [{ x: 10, y: 20, radius: 150 }],
+      kind: 'ship-scan',
+      fillColor: '#38bdf8',
+      disks: [{ x: 10, y: 20, radius: 300 }],
     })
   })
 
