@@ -1,0 +1,306 @@
+"""Tests for homeworld locator Phase 2 Core wire-up."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+from api.analytics.export_types import ExportScope
+from api.analytics.homeworld_locator.baseline_ensure import (
+    ensure_homeworld_baseline,
+    materialize_homeworld_candidate_view,
+    resolve_baseline_turn,
+)
+from api.analytics.homeworld_locator.compute import get_homeworld_locator
+from api.analytics.homeworld_locator.compute_services import build_ephemeral_homeworld_services
+from api.analytics.homeworld_locator.constants import ANALYTIC_ID, ATTRIBUTION_INFERRED
+from api.analytics.homeworld_locator.exports import (
+    EXPORT_CATALOG,
+    ensure_homeworld_export,
+    is_homeworld_export_ensure_satisfied,
+)
+from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
+from api.analytics.homeworld_locator.types import (
+    HomeworldCandidateRecord,
+    HomeworldEvidenceAggregate,
+    HomeworldLocatorGameState,
+)
+from api.analytics.persistence_paths import (
+    game_global_analytic_document_key,
+    turn_scoped_analytic_document_key,
+)
+from api.concepts.homeworld_layout import (
+    INACTIVE_REASON_NO_HOMEWORLD,
+    INACTIVE_REASON_WANDERING_TRIBES,
+    homeworld_locator_inactive_reason,
+    is_homeworld_locator_available,
+)
+from api.models.game import TurnInfo
+from api.serialization.turn import turn_info_from_json
+from api.storage.file import FileStorageBackend
+from api.storage.memory_asset import MemoryAssetBackend
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+
+
+@pytest.fixture
+def sample_turn() -> TurnInfo:
+    raw = json.loads((ASSETS_DIR / "turn_sample.json").read_text(encoding="utf-8"))
+    return turn_info_from_json(raw, settings_defaults=raw["settings"])
+
+
+@pytest.fixture
+def memory_backend():
+    return MemoryAssetBackend(initial={})
+
+
+@pytest.fixture
+def persistence(memory_backend):
+    return HomeworldLocatorPersistenceService(memory_backend)
+
+
+def _services(
+    persistence: HomeworldLocatorPersistenceService,
+    turns: dict[int, TurnInfo],
+    *,
+    game_id: int = 628580,
+    perspective: int = 1,
+    ensure_turn=None,
+):
+    return build_ephemeral_homeworld_services(
+        persistence=persistence,
+        game_id=game_id,
+        perspective=perspective,
+        load_turn=lambda n: turns.get(n),
+        list_stored_turns=lambda: sorted(turns),
+        ensure_turn=ensure_turn,
+    )
+
+
+def test_path_helpers() -> None:
+    assert game_global_analytic_document_key(628580, ANALYTIC_ID) == (
+        "games/628580/analytics/homeworld-locator"
+    )
+    assert turn_scoped_analytic_document_key(628580, 1, 111, ANALYTIC_ID) == (
+        "games/628580/1/turns/111/analytics/homeworld-locator"
+    )
+
+
+def test_availability_nohomeworld_and_wandering_tribes(sample_turn) -> None:
+    assert is_homeworld_locator_available(sample_turn.settings) is True
+    assert homeworld_locator_inactive_reason(sample_turn.settings) is None
+
+    no_hw = replace(sample_turn.settings, nohomeworld=True)
+    assert is_homeworld_locator_available(no_hw) is False
+    assert homeworld_locator_inactive_reason(no_hw) == INACTIVE_REASON_NO_HOMEWORLD
+
+    wt = replace(sample_turn.settings, wanderingtribescount=3)
+    assert is_homeworld_locator_available(wt) is False
+    assert homeworld_locator_inactive_reason(wt) == INACTIVE_REASON_WANDERING_TRIBES
+
+
+def test_persistence_round_trip_ephemeral(persistence) -> None:
+    state = HomeworldLocatorGameState(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=42,
+                perspective=1,
+                confidence_tier="definite",
+                attribution=ATTRIBUTION_INFERRED,
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=False,
+        settings_fingerprint=(1, 2, 3),
+    )
+    floor = HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_hits=())
+    persistence.put_baseline(628580, 1, state, floor)
+
+    loaded_state = persistence.get_game_state(628580)
+    loaded_floor = persistence.get_evidence_aggregate(628580, 1, 1)
+    assert loaded_state == state
+    assert loaded_floor == floor
+    assert persistence.has_baseline_floor(628580, 1) is True
+
+
+def test_persistence_round_trip_file(tmp_path, sample_turn) -> None:
+    backend = FileStorageBackend(tmp_path)
+    persistence = HomeworldLocatorPersistenceService(backend)
+    state = HomeworldLocatorGameState(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=7,
+                perspective=None,
+                confidence_tier="possible",
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=True,
+        settings_fingerprint=(),
+    )
+    floor = HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
+    persistence.put_baseline(628580, 1, state, floor)
+
+    reloaded = HomeworldLocatorPersistenceService(FileStorageBackend(tmp_path))
+    assert reloaded.get_game_state(628580) == state
+    assert reloaded.get_evidence_aggregate(628580, 1, 1) == floor
+
+
+def test_invalidate_evidence_from_turn(persistence) -> None:
+    for turn_number in (1, 2, 3):
+        persistence.put_evidence_aggregate(
+            628580,
+            1,
+            HomeworldEvidenceAggregate(turn=turn_number, baseline_turn=1),
+        )
+    cleared = persistence.invalidate_evidence_from_turn(628580, 1, 2)
+    assert cleared == [2, 3]
+    assert persistence.get_evidence_aggregate(628580, 1, 1) is not None
+    assert persistence.get_evidence_aggregate(628580, 1, 2) is None
+
+
+def test_baseline_ensure_writes_floor_not_shell_aggregate(persistence, sample_turn) -> None:
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    # Pretend settings.turn is 1 for baseline identity; use as only stored turn.
+    services = _services(persistence, {1: turn_one})
+    result = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    assert result.recomputed is True
+    assert result.game_state.baseline_turn == 1
+    assert result.game_state.baseline_degraded is False
+    assert persistence.has_baseline_floor(628580, 1) is True
+    # No copy-forward: shell turn 111 aggregate absent when only floor at 1 exists.
+    assert persistence.get_evidence_aggregate(628580, 1, 111) is None
+
+
+def test_baseline_degraded_when_turn_one_missing(persistence, sample_turn) -> None:
+    late = replace(sample_turn, settings=replace(sample_turn.settings, turn=111))
+    services = _services(persistence, {111: late})
+    turn_info, baseline_turn, degraded = resolve_baseline_turn(services)
+    assert turn_info is late
+    assert baseline_turn == 111
+    assert degraded is True
+
+    result = ensure_homeworld_baseline(services, shell_turn=late)
+    assert result.game_state.baseline_degraded is True
+    assert result.game_state.baseline_turn == 111
+
+
+def test_baseline_auto_ensure_turn_one(persistence, sample_turn) -> None:
+    late = replace(sample_turn, settings=replace(sample_turn.settings, turn=111))
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    ensure_calls: list[int] = []
+
+    def ensure_turn(turn_number: int) -> TurnInfo | None:
+        ensure_calls.append(turn_number)
+        return turn_one if turn_number == 1 else None
+
+    services = _services(persistence, {111: late}, ensure_turn=ensure_turn)
+    result = ensure_homeworld_baseline(services, shell_turn=late)
+    assert ensure_calls == [1]
+    assert result.game_state.baseline_turn == 1
+    assert result.game_state.baseline_degraded is False
+
+
+def test_recompute_when_turn_one_appears_after_degraded(persistence, sample_turn) -> None:
+    late = replace(sample_turn, settings=replace(sample_turn.settings, turn=111))
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    turns = {111: late}
+    services = _services(persistence, turns)
+    first = ensure_homeworld_baseline(services, shell_turn=late)
+    assert first.game_state.baseline_degraded is True
+
+    turns[1] = turn_one
+    second = ensure_homeworld_baseline(services, shell_turn=late)
+    assert second.recomputed is True
+    assert second.game_state.baseline_turn == 1
+    assert second.game_state.baseline_degraded is False
+
+
+def test_export_ensure_satisfied_without_shell_aggregate(persistence, sample_turn) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    services = _services(persistence, {1: turn_one, 111: sample_turn})
+    ensure_homeworld_baseline(services, shell_turn=sample_turn)
+
+    ctx = make_analytic_compute_context(
+        sample_turn,
+        load_turn=lambda n: {1: turn_one, 111: sample_turn}.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    scope = ExportScope(game_id=628580, perspective=1, turn=111)
+    assert is_homeworld_export_ensure_satisfied(ctx, scope) is True
+    assert ensure_homeworld_export(ctx, scope) is True
+    assert persistence.get_evidence_aggregate(628580, 1, 111) is None
+
+
+def test_map_table_payload_smoke(persistence, sample_turn) -> None:
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    services = _services(persistence, {1: turn_one, 111: sample_turn})
+    payload = get_homeworld_locator(
+        sample_turn,
+        export_services={ANALYTIC_ID: services},
+    )
+    assert payload["analyticId"] == ANALYTIC_ID
+    assert payload["available"] is True
+    assert payload["baselineTurn"] == 1
+    assert payload["baselineDegraded"] is False
+    assert isinstance(payload["markers"], list)
+    assert isinstance(payload["rows"], list)
+    assert payload["markers"] == [
+        {
+            "planetId": row["planetId"],
+            "perspective": row["perspective"],
+            "confidenceTier": row["confidenceTier"],
+            "attribution": row["attribution"],
+        }
+        for row in payload["rows"]
+    ]
+
+
+def test_inactive_map_table_payload(persistence, sample_turn) -> None:
+    inactive_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, nohomeworld=True),
+    )
+    services = _services(persistence, {111: inactive_turn})
+    payload = get_homeworld_locator(
+        inactive_turn,
+        export_services={ANALYTIC_ID: services},
+    )
+    assert payload["available"] is False
+    assert payload["inactiveReason"] == INACTIVE_REASON_NO_HOMEWORLD
+    assert payload["markers"] == []
+    assert payload["rows"] == []
+    assert persistence.get_game_state(628580) is None
+
+
+def test_candidate_view_materialize(persistence, sample_turn) -> None:
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    services = _services(persistence, {1: turn_one, 111: sample_turn})
+    view = materialize_homeworld_candidate_view(services, shell_turn=sample_turn)
+    assert view.available is True
+    assert view.baseline_turn == 1
+
+
+def test_export_catalog_self_chain() -> None:
+    assert EXPORT_CATALOG.analytic_id == ANALYTIC_ID
+    assert len(EXPORT_CATALOG.ensure_dependencies) == 1
+    dep = EXPORT_CATALOG.ensure_dependencies[0]
+    assert dep.analytic_id == ANALYTIC_ID
+    assert dep.turn_delta == -1
+    assert dep.player_id is None
+
+
+def test_registration_in_catalog() -> None:
+    from api.analytics.catalog import catalog_entry
+    from api.analytics.registry import TURN_ANALYTICS
+    from api.compute.registry import COMPUTE_REGISTRY
+
+    entry = catalog_entry(ANALYTIC_ID)
+    assert entry.supports_map is True
+    assert entry.supports_table is True
+    assert ANALYTIC_ID in TURN_ANALYTICS
+    assert ANALYTIC_ID in COMPUTE_REGISTRY

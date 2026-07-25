@@ -1,4 +1,4 @@
-"""Homeworld locator pure-domain inference (no HTTP, no persistence)."""
+"""Homeworld locator pure-domain inference and Core wire-up exports."""
 
 from api.analytics.homeworld_locator.baseline import infer_homeworld_baseline_candidates
 from api.analytics.homeworld_locator.baseline_profile import (
@@ -10,6 +10,7 @@ from api.analytics.homeworld_locator.cluster import (
     count_cluster_neighbors,
     meets_homeworld_cluster_constraint,
 )
+from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.geometry import (
     find_circular_ring_homeworld_sites,
     planet_cloud_center,
@@ -23,6 +24,7 @@ from api.analytics.homeworld_locator.models import (
 )
 
 __all__ = [
+    "ANALYTIC_ID",
     "CONFIDENCE_DEFINITE",
     "CONFIDENCE_POSSIBLE",
     "ClusterNeighborCounts",

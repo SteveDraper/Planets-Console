@@ -13,7 +13,7 @@ class HomeworldLocatorConfig:
     """Floor for homeworld baseline profile clan matching."""
 
     evidence_promotion_threshold: int = 2
-    """Independent evidence hits required for possible -> definite (unused until evidence refine)."""
+    """Independent evidence hits for possible -> definite (unused until evidence refine)."""
 
 
 @dataclass(frozen=True)

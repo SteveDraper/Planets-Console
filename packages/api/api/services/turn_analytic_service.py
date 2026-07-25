@@ -10,6 +10,9 @@ from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
+from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
+from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
@@ -39,6 +42,7 @@ class TurnAnalyticService:
         inference_invalidation: InferenceInvalidationService | None = None,
         inference_scheduler: InferenceRowScheduler | None = None,
         fleet_persistence: FleetSnapshotPersistenceService | None = None,
+        homeworld_persistence: HomeworldLocatorPersistenceService | None = None,
     ) -> None:
         self._turns = turns
         if storage is None:
@@ -57,6 +61,10 @@ class TurnAnalyticService:
             self._fleet_persistence = fleet_persistence
         else:
             self._fleet_persistence = FleetSnapshotPersistenceService(storage)
+        if homeworld_persistence is not None:
+            self._homeworld_persistence = homeworld_persistence
+        else:
+            self._homeworld_persistence = HomeworldLocatorPersistenceService(storage)
         if inference_invalidation is not None:
             self._inference_invalidation = inference_invalidation
         else:
@@ -128,7 +136,27 @@ class TurnAnalyticService:
                 perspective,
                 scores_services=scores_services,
             ),
+            HOMEWORLD_ANALYTIC_ID: self._homeworld_compute_services(game_id, perspective),
         }
+
+    def _homeworld_compute_services(
+        self,
+        game_id: int,
+        perspective: int,
+    ) -> HomeworldLocatorComputeServices:
+        load_turn = self._load_scoreboard_turn(game_id, perspective)
+
+        def list_stored_turns() -> list[int]:
+            return self._turns.list_stored_turn_numbers(game_id, perspective)
+
+        return HomeworldLocatorComputeServices(
+            persistence=self._homeworld_persistence,
+            game_id=game_id,
+            perspective=perspective,
+            load_turn=load_turn,
+            list_stored_turns=list_stored_turns,
+            ensure_turn=None,
+        )
 
     def _fleet_compute_services(
         self,

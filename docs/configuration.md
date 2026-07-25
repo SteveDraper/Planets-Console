@@ -36,6 +36,9 @@ The amalgamated config has three top-level keys:
 | `storage_asset_path` | string or null | null | **Ephemeral only:** path to a JSON file used to initialise the in-memory store. If null, the store starts empty. If set, the path must exist and be a file (otherwise startup fails). |
 | `include_dummy_data` | bool | false | When true, seed sample game data (game 628580, turn 111) on startup **only for paths that are not already present** (idempotent skip-if-present). For development and testing only. |
 | `credentials_obfuscation_secret` | string or null | null | Optional secret mixed into HKDF when wrapping **account API keys** at rest. When null, derivation uses the OS native machine id only. See [ADR 0007](adr/0007-account-api-key-and-silent-login.md) and [design-account-api-key-and-silent-login.md](design-account-api-key-and-silent-login.md). |
+| `homeworld_locator` | object | see below | Server-side **homeworld locator config** (YAML, not SPA UI). Nested fields below. |
+| `homeworld_locator.min_baseline_clans` | integer | `10000` | Floor clan count for **homeworld baseline profile** matching (below default `homeworldclans`, above casual colonies). |
+| `homeworld_locator.evidence_promotion_threshold` | integer | `2` | Independent evidence hits required for **possible → definite** (loaded now; used by evidence refine #36). |
 
 ### `bff` (BFF)
 
@@ -56,6 +59,9 @@ api:
   storage_root: ./.data      # durable store (gitignored); use ephemeral in CI/tests
   storage_asset_path: null   # ephemeral only; ignored for file backend
   include_dummy_data: true   # seed sample paths if missing (set false for production)
+  homeworld_locator:
+    min_baseline_clans: 10000
+    evidence_promotion_threshold: 2
 
 bff:
   cors_origins:

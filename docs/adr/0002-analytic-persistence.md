@@ -34,6 +34,18 @@ Logical path: `games/{gameId}/{perspective}/turns/{hostTurn}/analytics/scores/in
 
 Hull catalog mask overrides remain game-global at `games/{gameId}/analytics/scores/inference_hull_catalog_masks/{playerId}`.
 
+## Homeworld locator persistence (#34)
+
+| Document | Path |
+|----------|------|
+| Game-global state | `games/{gameId}/analytics/homeworld-locator` |
+| Evidence aggregate (turn-scoped) | `games/{gameId}/{perspective}/turns/{turn}/analytics/homeworld-locator` |
+
+- **Model:** durable **homeworld evidence aggregate** at each turn is refined from game-global inputs + aggregate at *T−1* + observations at *T*. The **homeworld candidate view** (tiers for map/table) is materialized on read from game-global state + aggregate at the shell turn -- not the primary durable artifact.
+- **Compute:** linear **compute orchestrator** self-chain (`homeworld-locator@T` depends on `homeworld-locator@(T−1)` via `ENSURE_DEPENDENCIES`). Issue #34 implements **baseline-only** ensure: writes game-global candidates + floor evidence aggregate at the baseline turn (turn 1, or degraded earliest). It does **not** copy-forward empty aggregates through the shell turn -- that is #36.
+- **Invalidation:** **TurnInfo** store/replace at *T* clears evidence aggregates at turns `>= T` (fleet-like); **GameInfo** re-fetch with changed homeworld-relevant settings invalidates inferred game-global candidates (user-asserted rows preserved when present); turn 1 newly available after a **baseline degraded** run triggers baseline recompute; manual refresh is #37.
+- **Ownership:** thin shared path helpers (`api.analytics.persistence_paths`) + homeworld-owned persistence -- not a generic analytic merge service.
+
 ## Fleet ledger persistence (ADR 0004)
 
 Logical path: `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet` with in-document keys `ledgers/{playerId}`.

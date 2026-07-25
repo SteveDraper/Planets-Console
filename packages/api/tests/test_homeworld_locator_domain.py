@@ -96,6 +96,24 @@ def test_supports_circular_round_only(sample_settings) -> None:
     )
 
 
+def test_availability_helpers(sample_settings) -> None:
+    from api.concepts.homeworld_layout import (
+        INACTIVE_REASON_NO_HOMEWORLD,
+        INACTIVE_REASON_WANDERING_TRIBES,
+        homeworld_locator_inactive_reason,
+        is_homeworld_locator_available,
+    )
+
+    assert is_homeworld_locator_available(sample_settings) is True
+    assert homeworld_locator_inactive_reason(replace(sample_settings, nohomeworld=True)) == (
+        INACTIVE_REASON_NO_HOMEWORLD
+    )
+    assert (
+        homeworld_locator_inactive_reason(replace(sample_settings, wanderingtribescount=1))
+        == INACTIVE_REASON_WANDERING_TRIBES
+    )
+
+
 def test_matches_baseline_profile_requires_all_signals(template_planet, sample_settings) -> None:
     settings = replace(sample_settings, homeworldhasstarbase=True)
     planet = _planet(
@@ -184,14 +202,17 @@ def test_unique_baseline_profile_match_requires_exactly_one(
     settings = replace(sample_settings, homeworldhasstarbase=False)
     a = _planet(template_planet, planet_id=1, x=0, y=0, ownerid=1, clans=20_000, temp=50)
     b = _planet(template_planet, planet_id=2, x=10, y=10, ownerid=1, clans=20_000, temp=50)
-    assert unique_baseline_profile_match(
-        [a],
-        owner_id=1,
-        race_id=1,
-        settings=settings,
-        starbase_planet_ids=set(),
-        min_baseline_clans=10_000,
-    ) is a
+    assert (
+        unique_baseline_profile_match(
+            [a],
+            owner_id=1,
+            race_id=1,
+            settings=settings,
+            starbase_planet_ids=set(),
+            min_baseline_clans=10_000,
+        )
+        is a
+    )
     assert (
         unique_baseline_profile_match(
             [a, b],

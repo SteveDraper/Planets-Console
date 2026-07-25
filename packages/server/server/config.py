@@ -128,9 +128,7 @@ def _parse_homeworld_locator_config(raw: object) -> HomeworldLocatorConfig:
             f"{type(min_clans).__name__}: {min_clans!r}"
         )
     if min_clans < 0:
-        raise ValueError(
-            f"api.homeworld_locator.min_baseline_clans must be >= 0, got {min_clans}"
-        )
+        raise ValueError(f"api.homeworld_locator.min_baseline_clans must be >= 0, got {min_clans}")
     threshold = raw.get(
         "evidence_promotion_threshold",
         defaults.evidence_promotion_threshold,
