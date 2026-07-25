@@ -239,7 +239,7 @@ See [ADR 0002](adr/0002-analytic-persistence.md) (homeworld example amended with
 
 **Model:** durable **homeworld evidence aggregate** at each turn is refined from game-global inputs + aggregate at *T−1* + observations at *T*. The **homeworld candidate view** (tiers for map/table) is materialized on read from game-global state + aggregate at the shell turn -- not the primary durable artifact.
 
-**Compute:** linear **compute orchestrator** chain (`homeworld@T` depends on `homeworld@(T−1)` via `ENSURE_DEPENDENCIES`). **Ensure baseline** is turn 1 (or degraded earliest). [#34](https://github.com/SteveDraper/Planets-Console/issues/34) implements baseline only (writes game-global candidates + floor aggregate); does **not** copy-forward empty aggregates through the shell turn. [#36](https://github.com/SteveDraper/Planets-Console/issues/36) implements refine-through-T.
+**Compute:** [#34](https://github.com/SteveDraper/Planets-Console/issues/34) registers baseline ensure with the **compute orchestrator** and an empty `ENSURE_DEPENDENCIES` (game-global floor; no prior-turn walk). A `turn_delta=-1` self-chain would require every intermediate turn to be stored before degraded→T1 baseline upgrade can run. [#36](https://github.com/SteveDraper/Planets-Console/issues/36) adds the linear self-chain (`homeworld@T` depends on `homeworld@(T−1)`) when shell-turn evidence refine/copy-forward is in scope. **Ensure baseline** is turn 1 (or degraded earliest); [#34](https://github.com/SteveDraper/Planets-Console/issues/34) does **not** copy-forward empty aggregates through the shell turn.
 
 **Invalidation (inferred state):**
 
@@ -292,7 +292,7 @@ Origin distances (81 LY pod, warp table) stay in **game concepts**.
 Hybrid phases (each independently reviewable):
 
 1. **Pure domain** -- climate catalog (Crystal default 100°W; settings probe later), YAML config both fields, baseline profile matcher, cluster constraint scoring, circular+round candidate geometry (viewpoint definite + orphan ring sites). Unit tests only; no HTTP.
-2. **Core wire-up** -- thin shared path helpers + homeworld persistence; game-global + floor evidence aggregate; orchestrator registration + self-chain; baseline-only ensure; T1 auto-ensure inside baseline step; invalidation; availability; map/table GET materializing candidate view; amend ADR 0002; `configuration.md`.
+2. **Core wire-up** -- thin shared path helpers + homeworld persistence; game-global + floor evidence aggregate; orchestrator registration (no prior-turn self-chain; #36 adds it); baseline-only ensure; T1 auto-ensure inside baseline step; invalidation; availability; map/table GET materializing candidate view; amend ADR 0002; `configuration.md`.
 3. **BFF + FE** -- descriptor/catalog/proxy, OpenAPI regen, enable toggle, definite vs possible markers, tabular tile + degraded note.
 
 **Persistence ownership:** no generic analytic merge service -- thin shared primitives + homeworld-owned persistence (same pattern as scores/fleet).
@@ -316,3 +316,4 @@ Hybrid phases (each independently reviewable):
 | 2026-06-01 | Initial doc from homeworld locator design review (grill session + Starmap settings handoff) |
 | 2026-07-25 | Grill-with-docs for #34: orchestrator baseline chain; turn-scoped evidence aggregates + on-read candidate view; candidate geometry + cluster orphans in #34; overlays deferred to #35; phased plan §11.1 |
 | 2026-07-25 | Planetoids (`debrisdisk == 1`) excluded from cluster neighbor counts and all homeworld candidacy |
+| 2026-07-25 | #34 baseline: empty `ENSURE_DEPENDENCIES`; #36 adds `turn_delta=-1` self-chain for refine-through-T |

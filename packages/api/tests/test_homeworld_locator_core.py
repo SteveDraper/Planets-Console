@@ -379,6 +379,36 @@ def test_recompute_when_turn_one_appears_after_degraded(persistence, sample_turn
     assert second.game_state.baseline_degraded is False
 
 
+def test_export_ensure_unsatisfied_when_degraded_and_turn_one_present(
+    persistence, sample_turn
+) -> None:
+    """Export/orchestrator is_satisfied must share needs_baseline_recompute."""
+    from api.analytics.compute_context import make_analytic_compute_context
+
+    late = replace(sample_turn, settings=replace(sample_turn.settings, turn=111))
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    turns = {111: late}
+    services = _services(persistence, turns)
+    first = ensure_homeworld_baseline(services, shell_turn=late)
+    assert first.game_state.baseline_degraded is True
+
+    turns[1] = turn_one
+    ctx = make_analytic_compute_context(
+        late,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    scope = ExportScope(game_id=628580, perspective=1, turn=111)
+    assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
+
+    assert ensure_homeworld_export(ctx, scope) is True
+    assert is_homeworld_export_ensure_satisfied(ctx, scope) is True
+    state = persistence.get_game_state(628580)
+    assert state is not None
+    assert state.baseline_turn == 1
+    assert state.baseline_degraded is False
+
+
 def test_export_ensure_satisfied_without_shell_aggregate(persistence, sample_turn) -> None:
     from api.analytics.compute_context import make_analytic_compute_context
 
@@ -526,13 +556,10 @@ def test_candidate_view_materialize(persistence, sample_turn) -> None:
     assert view.baseline_turn == 1
 
 
-def test_export_catalog_self_chain() -> None:
+def test_export_catalog_baseline_only_no_self_chain() -> None:
+    """#34 baseline is game-global; #36 adds the turn_delta=-1 self-chain."""
     assert EXPORT_CATALOG.analytic_id == ANALYTIC_ID
-    assert len(EXPORT_CATALOG.ensure_dependencies) == 1
-    dep = EXPORT_CATALOG.ensure_dependencies[0]
-    assert dep.analytic_id == ANALYTIC_ID
-    assert dep.turn_delta == -1
-    assert dep.player_id is None
+    assert EXPORT_CATALOG.ensure_dependencies == ()
 
 
 def test_registration_in_catalog() -> None:
