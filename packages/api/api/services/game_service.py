@@ -1,5 +1,7 @@
 """Game info reads and Planets.nu refresh."""
 
+from collections.abc import Callable
+
 from dacite.exceptions import DaciteError
 
 from api.errors import NotFoundError, ValidationError
@@ -20,6 +22,9 @@ from api.transport.sector_display import (
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
 
+# (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.
+OnGameInfoRefreshed = Callable[[int, GameInfo | None, GameInfo], None]
+
 
 def clear_sector_title_cache() -> None:
     _sector_title_by_stored_game_id.clear()
@@ -32,9 +37,12 @@ class GameService:
         self,
         storage: StorageBackend,
         credentials: CredentialService | None = None,
+        *,
+        on_game_info_refreshed: OnGameInfoRefreshed | None = None,
     ) -> None:
         self._storage = storage
         self._credentials = credentials or CredentialService(storage)
+        self._on_game_info_refreshed = on_game_info_refreshed
 
     @staticmethod
     def is_game_finished(info: GameInfo) -> bool:
@@ -93,6 +101,12 @@ class GameService:
             raise ValidationError("username is required to refresh game info.")
         self._credentials.ensure_api_key_for_user(params.username, params.password, planets)
 
+        previous: GameInfo | None = None
+        try:
+            previous = self.get_game_info(game_id)
+        except NotFoundError:
+            previous = None
+
         remote = planets.load_game_info(game_id)
         try:
             info = game_info_from_json(require_dict(remote, f"game info {game_id}"))
@@ -111,6 +125,8 @@ class GameService:
         store_key = f"games/{game_id}/info"
         self._storage.put(store_key, remote)
         self.remember_sector_title_for_game(game_id, info)
+        if self._on_game_info_refreshed is not None:
+            self._on_game_info_refreshed(game_id, previous, info)
         return info
 
     def remember_sector_title_for_game(self, game_id: int, info: GameInfo) -> None:

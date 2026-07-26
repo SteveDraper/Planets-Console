@@ -245,3 +245,122 @@ class TestRefreshGameInfo:
         )
         with pytest.raises(ValidationError, match="inconsistent"):
             games.update_game_info(628580, body, planets)
+
+    def test_notifies_on_game_info_refreshed_with_previous_and_updated(self, sample_info):
+        backend = MemoryAssetBackend(initial={})
+        backend.put("games/628580/info", copy.deepcopy(sample_info))
+        notifications: list[tuple[int, GameInfo | None, GameInfo]] = []
+
+        games = GameService(
+            backend,
+            on_game_info_refreshed=lambda game_id, previous, updated: notifications.append(
+                (game_id, previous, updated)
+            ),
+        )
+        planets = FakePlanetsNu(sample_info, login_returns="key")
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1", "password": "secret"},
+        )
+        result = games.update_game_info(628580, body, planets)
+        assert len(notifications) == 1
+        game_id, previous, updated = notifications[0]
+        assert game_id == 628580
+        assert previous is not None
+        assert previous.game.id == 628580
+        assert updated is result
+
+    def test_notifies_on_first_refresh_with_previous_none(self, sample_info):
+        backend = MemoryAssetBackend(initial={})
+        notifications: list[tuple[int, GameInfo | None, GameInfo]] = []
+        games = GameService(
+            backend,
+            on_game_info_refreshed=lambda game_id, previous, updated: notifications.append(
+                (game_id, previous, updated)
+            ),
+        )
+        planets = FakePlanetsNu(sample_info, login_returns="key")
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1", "password": "secret"},
+        )
+        games.update_game_info(628580, body, planets)
+        assert len(notifications) == 1
+        assert notifications[0][1] is None
+
+
+class TestHomeworldSettingsInvalidationViaStack:
+    """Stack owns homeworld fingerprint checks; GameService stays feature-agnostic."""
+
+    @pytest.fixture
+    def sample_info(self):
+        with open(ASSETS_DIR / "game_info_sample.json") as f:
+            return json.load(f)
+
+    def _seed_inferred_homeworld_state(self, backend: MemoryAssetBackend) -> None:
+        from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+        from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
+        from api.analytics.homeworld_locator.types import (
+            HomeworldCandidateRecord,
+            HomeworldLocatorGameState,
+        )
+
+        persistence = HomeworldLocatorPersistenceService(backend)
+        persistence.put_game_state(
+            628580,
+            HomeworldLocatorGameState(
+                candidates=(
+                    HomeworldCandidateRecord(
+                        planet_id=42,
+                        perspective=1,
+                        confidence_tier="definite",
+                        attribution=ATTRIBUTION_INFERRED,
+                    ),
+                ),
+                baseline_turn=1,
+                baseline_degraded=False,
+                settings_fingerprint=(1, 2, 3),
+            ),
+        )
+
+    def test_homeworld_relevant_settings_change_invalidates_inferred_state(self, sample_info):
+        from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
+
+        backend = MemoryAssetBackend(initial={})
+        backend.put("games/628580/info", copy.deepcopy(sample_info))
+        self._seed_inferred_homeworld_state(backend)
+
+        refreshed = copy.deepcopy(sample_info)
+        refreshed["settings"]["mapwidth"] = sample_info["settings"]["mapwidth"] + 50
+        games, _, _, _, _, _ = build_service_stack(backend)
+        planets = FakePlanetsNu(refreshed, login_returns="key")
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1", "password": "secret"},
+        )
+        games.update_game_info(628580, body, planets)
+
+        persistence = HomeworldLocatorPersistenceService(backend)
+        assert persistence.get_game_state(628580) is None
+
+    def test_non_homeworld_settings_change_preserves_inferred_state(self, sample_info):
+        from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
+
+        backend = MemoryAssetBackend(initial={})
+        backend.put("games/628580/info", copy.deepcopy(sample_info))
+        self._seed_inferred_homeworld_state(backend)
+
+        refreshed = copy.deepcopy(sample_info)
+        refreshed["settings"]["shiplimit"] = sample_info["settings"]["shiplimit"] + 1
+        games, _, _, _, _, _ = build_service_stack(backend)
+        planets = FakePlanetsNu(refreshed, login_returns="key")
+        body = GameInfoUpdateRequest(
+            operation=GameInfoUpdateOperation.REFRESH,
+            params={"username": "player1", "password": "secret"},
+        )
+        games.update_game_info(628580, body, planets)
+
+        persistence = HomeworldLocatorPersistenceService(backend)
+        state = persistence.get_game_state(628580)
+        assert state is not None
+        assert state.candidates[0].planet_id == 42

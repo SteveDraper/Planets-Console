@@ -12,6 +12,7 @@ class TurnScope:
     game_id: int
     perspective: int
     turn: int
+    username: str = ""
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ def load_core_analytic(
     diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
     **kwargs: object,
 ) -> dict:
+    if scope.username.strip():
+        kwargs = {**kwargs, "username": scope.username}
     return load_core(
         scope.game_id,
         scope.perspective,

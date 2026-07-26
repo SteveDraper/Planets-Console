@@ -14,6 +14,7 @@ function unfinishedCtx(turn: number): GameInfoShellContext {
     isGameFinished: false,
     sectorDisplayName: null,
     stellarCartographyGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+    homeworldInactiveReason: null,
   }
 }
 
@@ -65,6 +66,7 @@ describe('useShellStore', () => {
         isGameFinished: false,
         sectorDisplayName: 'Test Sector',
         stellarCartographyGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+        homeworldInactiveReason: null,
       },
     })
 

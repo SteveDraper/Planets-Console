@@ -24,6 +24,7 @@ const displayMapData = {
   overlayCircles: [],
   regionOverlays: [],
   wormholeUnknownEntrances: [],
+  homeworldMarkers: [],
 }
 
 describe('MapShellContent', () => {
@@ -44,6 +45,49 @@ describe('MapShellContent', () => {
     )
 
     expect(screen.getByTestId('map-graph')).toBeInTheDocument()
+  })
+
+  it('shows baseline degraded note when combined map data is degraded', () => {
+    render(
+      <MapShellContent
+        mapShellView={{
+          phase: 'showing-map',
+          displayMapData: {
+            ...displayMapData,
+            baselineDegraded: true,
+            baselineTurn: 4,
+          },
+          showDeferredPending: false,
+        }}
+        futureTurnOffset={0}
+        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
+        onPlanetLabelOptionsChange={vi.fn()}
+        onMapZoomChange={vi.fn()}
+        onSetZoomReady={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(/Baseline degraded/)
+    expect(screen.getByRole('status')).toHaveTextContent(/using turn 4/)
+  })
+
+  it('does not show baseline degraded note when not degraded', () => {
+    render(
+      <MapShellContent
+        mapShellView={{
+          phase: 'showing-map',
+          displayMapData,
+          showDeferredPending: false,
+        }}
+        futureTurnOffset={0}
+        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
+        onPlanetLabelOptionsChange={vi.fn()}
+        onMapZoomChange={vi.fn()}
+        onSetZoomReady={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
   it('renders map errors from mapShellView without query objects', () => {

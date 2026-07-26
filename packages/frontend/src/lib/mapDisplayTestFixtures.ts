@@ -7,6 +7,7 @@ export const sampleMap: CombinedMapData = {
   overlayCircles: [],
   regionOverlays: [],
   wormholeUnknownEntrances: [],
+  homeworldMarkers: [],
 }
 
 export const turnTwoMap: CombinedMapData = {

@@ -13,5 +13,8 @@ export const FLEET_ANALYTIC_ID = 'fleet'
 /** Canonical id for the Visibility map overlay analytic. */
 export const VISIBILITY_ANALYTIC_ID = 'visibility'
 
+/** Canonical id for the Homeworld locator map/table analytic. */
+export const HOMEWORLD_LOCATOR_ANALYTIC_ID = 'homeworld-locator'
+
 /** Prefix for merged Stellar Cartography node and edge ids on the combined map. */
 export const STELLAR_CARTOGRAPHY_NODE_ID_PREFIX = `${STELLAR_CARTOGRAPHY_ANALYTIC_ID}:`

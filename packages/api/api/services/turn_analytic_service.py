@@ -10,17 +10,22 @@ from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
+from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
+from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
-from api.errors import NotFoundError
+from api.errors import LoginCredentialsRequiredError, NotFoundError, UpstreamPlanetsError
 from api.models.game import TurnInfo
+from api.planets_nu import PlanetsNuClient
 from api.services.inference_hull_catalog_service import InferenceHullCatalogService
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
 from api.transport.connections_options import FlareConnectionMode
+from api.transport.game_info_update import RefreshGameInfoParams
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -39,8 +44,11 @@ class TurnAnalyticService:
         inference_invalidation: InferenceInvalidationService | None = None,
         inference_scheduler: InferenceRowScheduler | None = None,
         fleet_persistence: FleetSnapshotPersistenceService | None = None,
+        homeworld_persistence: HomeworldLocatorPersistenceService | None = None,
+        planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
     ) -> None:
         self._turns = turns
+        self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
         if storage is None:
             from api.storage import get_storage
 
@@ -57,6 +65,10 @@ class TurnAnalyticService:
             self._fleet_persistence = fleet_persistence
         else:
             self._fleet_persistence = FleetSnapshotPersistenceService(storage)
+        if homeworld_persistence is not None:
+            self._homeworld_persistence = homeworld_persistence
+        else:
+            self._homeworld_persistence = HomeworldLocatorPersistenceService(storage)
         if inference_invalidation is not None:
             self._inference_invalidation = inference_invalidation
         else:
@@ -98,7 +110,13 @@ class TurnAnalyticService:
         connection_flare_depth: int = 1,
         connection_include_illustrative_routes: bool = False,
         diagnostics: Diagnostics = NOOP_DIAGNOSTICS,
+        username: str = "",
     ) -> dict:
+        """Dispatch a registered turn analytic.
+
+        ``username`` is an optional turn-load credential for analytics that may
+        auto-ensure missing turns (stored account API key lookup). Empty skips ensure.
+        """
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
         return get_turn_analytic(
             analytic_id,
@@ -112,15 +130,22 @@ class TurnAnalyticService:
                 diagnostics=diagnostics,
             ),
             load_turn=self._load_scoreboard_turn(game_id, perspective),
-            export_services=self._turn_export_services(game_id, perspective),
+            export_services=self._turn_export_services(
+                game_id,
+                perspective,
+                username=username,
+            ),
         )
 
     def _turn_export_services(
         self,
         game_id: int,
         perspective: int,
+        *,
+        username: str = "",
     ) -> dict[str, object]:
         scores_services = self._scores_export_context(game_id, perspective)
+        ensure_turn = self._ensure_turn_loader(game_id, perspective, username)
         return {
             SCORES_ANALYTIC_ID: scores_services,
             FLEET_ANALYTIC_ID: self._fleet_compute_services(
@@ -128,7 +153,59 @@ class TurnAnalyticService:
                 perspective,
                 scores_services=scores_services,
             ),
+            HOMEWORLD_ANALYTIC_ID: self._homeworld_compute_services(
+                game_id,
+                perspective,
+                ensure_turn=ensure_turn,
+            ),
         }
+
+    def _ensure_turn_loader(
+        self,
+        game_id: int,
+        perspective: int,
+        username: str,
+    ) -> Callable[[int], TurnInfo | None] | None:
+        """Build a turn-ensure hook when a turn-load username credential is present."""
+        trimmed = username.strip()
+        if not trimmed:
+            return None
+
+        def ensure_turn(turn_number: int) -> TurnInfo | None:
+            """Load missing turn via stored account API key; None when credentials/upstream fail."""
+            try:
+                return self._turns.ensure_turn_loaded(
+                    game_id,
+                    perspective,
+                    turn_number,
+                    RefreshGameInfoParams(username=trimmed),
+                    self._planets_client_factory(),
+                )
+            except LoginCredentialsRequiredError, UpstreamPlanetsError, NotFoundError, OSError:
+                return None
+
+        return ensure_turn
+
+    def _homeworld_compute_services(
+        self,
+        game_id: int,
+        perspective: int,
+        *,
+        ensure_turn: Callable[[int], TurnInfo | None] | None = None,
+    ) -> HomeworldLocatorComputeServices:
+        load_turn = self._load_scoreboard_turn(game_id, perspective)
+
+        def list_stored_turns() -> list[int]:
+            return self._turns.list_stored_turn_numbers(game_id, perspective)
+
+        return HomeworldLocatorComputeServices(
+            persistence=self._homeworld_persistence,
+            game_id=game_id,
+            perspective=perspective,
+            load_turn=load_turn,
+            list_stored_turns=list_stored_turns,
+            ensure_turn=ensure_turn,
+        )
 
     def _fleet_compute_services(
         self,

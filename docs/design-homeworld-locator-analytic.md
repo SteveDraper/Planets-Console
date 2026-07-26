@@ -31,7 +31,7 @@ Output: **slot-anchored homeworld candidates**, **orphan homeworld candidates**,
 |-----------|---------|
 | `nohomeworld: true` | Game created without homeworld planets |
 | `wanderingtribescount > 0` | **Wandering Tribes** -- players start in STF fleets, not on HW planets |
-| Scenario overrides | e.g. Disunited Kingdoms, Crazy Intermix, Ashes of the Evil Empire (no normal HW setup) |
+| Scenario overrides | e.g. Disunited Kingdoms, Crazy Intermix, Ashes of the Evil Empire (no normal HW setup). No scenario-name field on **GameSettings** -- detect via recipe heuristics: Ashes `hwdistribution=4`; Crazy Intermix `extraplanets>0` + `extraplanetsrandomloc`; Disunited Kingdoms `extraplanets>0` without random loc. |
 
 Fleet spawn region inference for Wandering Tribes is a future alternate mode, not v1.
 
@@ -65,6 +65,8 @@ There is **no separate API knob** for minimum LY between player homeworlds; spac
 | Other Planets Min Dist | `otherplanetsminhomeworlddist` | 155 LY | Minimum distance for planets outside designated near-HW slots |
 
 Use these to validate cluster structure around candidate planets: a plausible HW should have neighbor counts consistent with settings (within tolerance for map generation variance).
+
+**Planetoids** (`debrisdisk == 1`, colonizable bodies inside debris disks) are **not** counted in either band and are **never** homeworld candidates (baseline profile, ring sites, or cluster orphans).
 
 ### 3.3 Starting conditions on the HW planet
 
@@ -137,20 +139,25 @@ Per **perspective** slot, a planet owned by that slot's **Player** on the baseli
 - Low custom `homeworldclans` games with threshold set too high
 - RGA / combat reduced clans below `min_baseline_clans`
 
-### 4.2 Layout and geometry signals (Circular + round, v1 overlays)
+### 4.2 Layout and geometry signals (Circular + round, plus cluster constraints)
 
-Apply when `hwdistribution=2` and `mapshape=0`:
+**Fog-of-war (common early turns):** full planet details are usually available only for the **viewpoint** slot's own worlds. Rival homeworlds appear as planet positions (and cluster structure) without clans/temp/starbase. **Baseline profile** therefore typically pins at most the viewpoint **homeworld planet** as **definite**; multi-slot inference relies on geometry and cluster constraints.
+
+Apply **homeworld candidate geometry** when `hwdistribution=2` and `mapshape=0`:
 
 | Signal | Use |
 |--------|-----|
 | Ring from center | HW positions lie on a common-radius ring; infer radius from known definites or player count + map size |
-| Angular spacing | ~equal sectors per active **Player**; map slot **perspective** to sector (respect `shuffleteampositions` as unknown permutation) |
-| Single planet in sector | **Definite** when baseline weak but geometry leaves no alternative in that slot's arc |
-| Cluster neighbor counts | Count planets within 81 LY and within 81--162 LY; compare to `verycloseplanets` and `closeplanets` |
+| Angular spacing | ~equal sectors per active **Player**; `shuffleteampositions` permutes slot-to-site assignment |
+| Viewpoint pin | When the viewpoint slot has a unique **homeworld baseline profile** match, treat that planet as **definite** slot-anchored and fix ring rotation |
+| Other ring HW sites | Remaining geometric HW planets are **orphan homeworld candidates** (**possible**) -- do not cross-product bind them to rival slots in v1 baseline |
+| Single planet in sector | **Definite** when baseline weak but geometry leaves no plausible alternative in that slot's arc (stronger once overlays/#35 land) |
 
-When no planet is pinned for a slot, emit **homeworld region overlay** (ring arc + optional cluster envelope).
+**Homeworld cluster constraint** (all map shapes that still have traditional HWs): count planets within 81 LY and within 81--162 LY; compare to `verycloseplanets` and `closeplanets`. Use this to construct **orphan** HW-like sites even when ring/sector math does not apply.
 
-For non-circular or non-round maps: skip overlay math; still use baseline and evidence on planets.
+When no planet is pinned for a slot, later slices may emit **homeworld region overlay** (ring arc + optional cluster envelope) -- paint polish is [#35](https://github.com/SteveDraper/Planets-Console/issues/35); candidate geometry itself is in [#34](https://github.com/SteveDraper/Planets-Console/issues/34).
+
+For non-circular or non-round maps: skip ring/sector math; still use baseline profile + **homeworld cluster constraint** + later evidence.
 
 ### 4.3 Homeworld inference evidence (later turns)
 
@@ -223,20 +230,25 @@ Planet **x/y coordinates** are static; map display can use current shell turn wh
 
 ## 8. Persistence and invalidation
 
-See [ADR 0002](adr/0002-analytic-persistence.md).
+See [ADR 0002](adr/0002-analytic-persistence.md) (homeworld example amended with turn-scoped aggregates).
 
 | Document | Path |
 |----------|------|
 | Game-global state | `games/{gameId}/analytics/homeworld-locator` |
-| Perspective evidence | `games/{gameId}/{perspective}/analytics/homeworld-locator/evidence` |
+| Evidence aggregate (turn-scoped) | `games/{gameId}/{perspective}/turns/{turn}/analytics/homeworld-locator` |
+
+**Model:** durable **homeworld evidence aggregate** at each turn is refined from game-global inputs + aggregate at *T−1* + observations at *T*. The **homeworld candidate view** (tiers for map/table) is materialized on read from game-global state + aggregate at the shell turn -- not the primary durable artifact.
+
+**Compute:** [#34](https://github.com/SteveDraper/Planets-Console/issues/34) registers baseline ensure with the **compute orchestrator** and an empty `ENSURE_DEPENDENCIES` (game-global floor; no prior-turn walk). A `turn_delta=-1` self-chain would require every intermediate turn to be stored before degraded→T1 baseline upgrade can run. [#36](https://github.com/SteveDraper/Planets-Console/issues/36) adds the linear self-chain (`homeworld@T` depends on `homeworld@(T−1)`) when shell-turn evidence refine/copy-forward is in scope. **Ensure baseline** is turn 1 (or degraded earliest); [#34](https://github.com/SteveDraper/Planets-Console/issues/34) does **not** copy-forward empty aggregates through the shell turn.
 
 **Invalidation (inferred state):**
 
-- New **TurnInfo** stored for perspective beyond evidence horizon
-- **GameInfo** re-fetch with changed homeworld-relevant settings
-- Manual **homeworld locator refresh**
+- **TurnInfo** store/replace at *T* clears evidence aggregates at turns `>= T` (fleet-like)
+- **GameInfo** re-fetch with changed homeworld-relevant settings invalidates inferred game-global candidates
+- Turn 1 newly available after a **baseline degraded** run triggers baseline recompute
+- Manual **homeworld locator refresh** (#37)
 
-**User-asserted** records preserved on recompute.
+**User-asserted** records preserved on recompute (#37).
 
 ---
 
@@ -270,10 +282,20 @@ Origin distances (81 LY pod, warp table) stay in **game concepts**.
 
 | Issue | Delivers |
 |-------|----------|
-| [#34](https://github.com/SteveDraper/Planets-Console/issues/34) | Persistence, config, race climate catalog, baseline inference, map markers + table, availability gating |
-| [#35](https://github.com/SteveDraper/Planets-Console/issues/35) | Circular round **homeworld region overlay** geometry |
-| [#36](https://github.com/SteveDraper/Planets-Console/issues/36) | Later-turn evidence, origin-distance signals, promotion |
-| [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | User assertions, refresh, annotation UI |
+| [#34](https://github.com/SteveDraper/Planets-Console/issues/34) | Config, race climate, baseline profile + **candidate geometry** + cluster orphans, orchestrator baseline ensure, persistence, map markers + table, availability; degraded via payload metadata |
+| [#35](https://github.com/SteveDraper/Planets-Console/issues/35) | **Homeworld region overlay** paint/polish (arcs/envelopes) reusing candidate geometry |
+| [#36](https://github.com/SteveDraper/Planets-Console/issues/36) | Evidence aggregate refine through shell turn, origin-distance signals, promotion |
+| [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | User assertions, refresh, **homeworld locator panel**, attribution UX |
+
+### 11.1 Issue #34 phased plan
+
+Hybrid phases (each independently reviewable):
+
+1. **Pure domain** -- climate catalog (Crystal default 100°W; settings probe later), YAML config both fields, baseline profile matcher, cluster constraint scoring, circular+round candidate geometry (viewpoint definite + orphan ring sites). Unit tests only; no HTTP.
+2. **Core wire-up** -- thin shared path helpers + homeworld persistence; game-global + floor evidence aggregate; orchestrator registration (no prior-turn self-chain; #36 adds it); baseline-only ensure; T1 auto-ensure inside baseline step; invalidation; availability; map/table GET materializing candidate view; amend ADR 0002; `configuration.md`.
+3. **BFF + FE** -- descriptor/catalog/proxy, OpenAPI regen, enable toggle, definite vs possible markers, tabular tile + degraded note.
+
+**Persistence ownership:** no generic analytic merge service -- thin shared primitives + homeworld-owned persistence (same pattern as scores/fleet).
 
 ---
 
@@ -292,3 +314,6 @@ Origin distances (81 LY pod, warp table) stay in **game concepts**.
 | Date | Note |
 |------|------|
 | 2026-06-01 | Initial doc from homeworld locator design review (grill session + Starmap settings handoff) |
+| 2026-07-25 | Grill-with-docs for #34: orchestrator baseline chain; turn-scoped evidence aggregates + on-read candidate view; candidate geometry + cluster orphans in #34; overlays deferred to #35; phased plan §11.1 |
+| 2026-07-25 | Planetoids (`debrisdisk == 1`) excluded from cluster neighbor counts and all homeworld candidacy |
+| 2026-07-25 | #34 baseline: empty `ENSURE_DEPENDENCIES`; #36 adds `turn_delta=-1` self-chain for refine-through-T |

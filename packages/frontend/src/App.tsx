@@ -16,6 +16,7 @@ import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
+import { withoutInactiveHomeworldLocator } from './analytics/homeworld-locator/homeworldAvailability'
 import {
   applyShellGameBootstrapResult,
   fetchShellGameBootstrap,
@@ -281,10 +282,16 @@ function ConsoleShell() {
       ? (stellarCartographyTurnSummary?.ionStormCount ?? null)
       : null
 
+  const homeworldInactiveReason = gameInfoContext?.homeworldInactiveReason ?? null
+
   const analytics = analyticsData?.analytics ?? []
   const enabledAnalyticIds = useMemo(
-    () => analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),
-    [analytics, enabledIds]
+    () =>
+      withoutInactiveHomeworldLocator(
+        analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),
+        homeworldInactiveReason
+      ),
+    [analytics, enabledIds, homeworldInactiveReason]
   )
   const globalInferencePauseEnabled =
     viewMode === 'tabular' &&
@@ -353,6 +360,7 @@ function ConsoleShell() {
           onScoresTableParamsChange={setScoresTableParams}
           stellarCartographyGates={stellarCartographyGates}
           ionStormCount={ionStormCount}
+          homeworldInactiveReason={homeworldInactiveReason}
         />
         {isPending ? (
           <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">

@@ -148,5 +148,6 @@ This is deliberate for now (one special case, known location). **Re-examine when
 | `stellar-cartography` | `stellar_cartography.py` | `stellar_cartography.py` | no | yes (overlay + edges) | `src/analytics/stellar-cartography/` |
 | `fleet` | `fleet.py` | `fleet.py` | yes | yes (per-player overlay) | scaffold only (F0.2) |
 | `visibility` | `visibility.py` | `visibility.py` | no | yes (region overlays) | `src/analytics/visibility/` |
+| `homeworld-locator` | `homeworld_locator/` | `homeworld_locator.py` | yes | yes (markers) | `src/analytics/homeworld-locator/` |
 
 `fleet` is the first **selectable** analytic that supports both table and map.

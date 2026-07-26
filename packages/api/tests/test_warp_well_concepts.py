@@ -11,6 +11,7 @@ from api.concepts.warp_well import (
     map_cell_indices_in_warp_well,
     min_distance_to_reachability_well,
     planet_is_in_debris_disk,
+    planet_is_planetoid,
     point_in_reachability_well,
     warp_well_cartesian_distance,
 )
@@ -35,12 +36,21 @@ class TestPlanetIsInDebrisDisk:
     def test_zero_is_false(self, lorthidonia_planet):
         assert lorthidonia_planet.debrisdisk == 0
         assert planet_is_in_debris_disk(lorthidonia_planet) is False
+        assert planet_is_planetoid(lorthidonia_planet) is False
 
     def test_nonzero_is_true(self, lorthidonia_planet):
         from dataclasses import replace
 
         p = replace(lorthidonia_planet, debrisdisk=1)
         assert planet_is_in_debris_disk(p) is True
+        assert planet_is_planetoid(p) is True
+
+    def test_disk_seed_is_not_planetoid(self, lorthidonia_planet):
+        from dataclasses import replace
+
+        p = replace(lorthidonia_planet, debrisdisk=37)
+        assert planet_is_in_debris_disk(p) is True
+        assert planet_is_planetoid(p) is False
 
 
 class TestCoordinateInWarpWell:

@@ -61,6 +61,8 @@ export type {
   CartographyOverlayLayerId,
   CombinedMapData,
   DebrisDiskOverlayCircle,
+  HomeworldMapMarkerDisplay,
+  HomeworldMapMarkerWire,
   IllustrativeRouteStep,
   IonStormOverlayCircle,
   MapCell,
@@ -565,14 +567,21 @@ export type AnalyticShellScope = {
   gameId: string
   turn: number
   perspective: number
+  /** Login identity for upstream turn ensure (e.g. homeworld baseline turn 1). Never a password. */
+  username?: string
 }
 
 function analyticScopeParams(scope: AnalyticShellScope): URLSearchParams {
-  return new URLSearchParams({
+  const params = new URLSearchParams({
     gameId: scope.gameId,
     turn: String(scope.turn),
     perspective: String(scope.perspective),
   })
+  const username = scope.username?.trim()
+  if (username) {
+    params.set('username', username)
+  }
+  return params
 }
 
 function analyticMapQueryString(

@@ -29,6 +29,7 @@ function shellContext(overrides: Partial<GameInfoShellContext> = {}): GameInfoSh
     isGameFinished: true,
     sectorDisplayName: 'Test Sector',
     stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+    homeworldInactiveReason: null,
     ...overrides,
   }
 }
@@ -318,6 +319,7 @@ describe('deriveAnalyticScope', () => {
       gameId: '628580',
       turn: 5,
       perspective: 2,
+      username: 'Alice',
     })
   })
 
@@ -326,6 +328,7 @@ describe('deriveAnalyticScope', () => {
       gameId: '628580',
       turn: 10,
       perspective: 1,
+      username: 'Alice',
     })
   })
 
@@ -339,6 +342,24 @@ describe('deriveAnalyticScope', () => {
       gameId: '628580',
       turn: 5,
       perspective: 0,
+      username: 'Unknown',
+    })
+  })
+
+  it('omits username when login name is empty', () => {
+    expect(
+      deriveAnalyticScope(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: true,
+          storageAvailablePerspectives: [1],
+          perspectiveOverrideOrdinal: 1,
+        })
+      )
+    ).toEqual({
+      gameId: '628580',
+      turn: 5,
+      perspective: 1,
     })
   })
 

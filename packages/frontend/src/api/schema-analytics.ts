@@ -217,6 +217,9 @@ export interface paths {
          *
          *     **visibility** returns hybrid ``regionOverlays`` (ship-scan and Sensor Sweep kinds).
          *
+         *     **homeworld-locator** returns candidate ``markers`` / ``rows`` (empty nodes/edges) plus
+         *     availability and baseline metadata.
+         *
          *     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
          *     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
          */
@@ -684,6 +687,7 @@ export interface operations {
                 gameId: number;
                 turn: number;
                 perspective: number;
+                username?: string;
                 includeBuildInference?: boolean;
                 includeDiagnostics?: boolean;
             };
@@ -721,6 +725,7 @@ export interface operations {
                 gameId: number;
                 turn: number;
                 perspective: number;
+                username?: string;
                 warpSpeed?: number;
                 gravitonicMovement?: boolean;
                 flareMode?: components["schemas"]["FlareConnectionMode"];

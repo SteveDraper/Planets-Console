@@ -3,6 +3,7 @@
  * Wire JSON normalization lives in `normalizeMapDataResponse.ts`.
  */
 
+import type { HomeworldMapMarker } from '../analytics/homeworld-locator/wireSchema'
 import type { components } from './schema-games'
 import type { MapRegionOverlay } from './mapRegionOverlayTypes'
 
@@ -172,6 +173,12 @@ export type PlanetPairRoute = {
   illustrativeRoute?: IllustrativeRouteStep[]
 }
 
+/**
+ * Homeworld locator marker on the map wire (passthrough from Core).
+ * Owned by Zod in `analytics/homeworld-locator/wireSchema`; re-exported here for map types.
+ */
+export type HomeworldMapMarkerWire = HomeworldMapMarker
+
 export type MapDataResponse = {
   analyticId: string
   nodes: MapNode[]
@@ -180,6 +187,12 @@ export type MapDataResponse = {
   overlayCircles?: StellarCartographyOverlayCircle[]
   /** Hybrid shaded regions (disks + nebula-local patches); not cartography circles. */
   regionOverlays?: MapRegionOverlay[]
+  /** Homeworld locator candidate markers (empty nodes/edges for that analytic). */
+  homeworldMarkers?: HomeworldMapMarkerWire[]
+  /** Homeworld locator: baseline used a turn later than 1. */
+  baselineDegraded?: boolean
+  /** Homeworld locator: turn number used when baseline is degraded. */
+  baselineTurn?: number | null
   meta?: {
     nebulae?: number
     ionStorms?: number
@@ -201,6 +214,12 @@ export type RouteMapWaypoint = {
   gy: number
 }
 
+/** Homeworld locator marker with base-map coordinates for overlay paint. */
+export type HomeworldMapMarkerDisplay = HomeworldMapMarkerWire & {
+  x: number
+  y: number
+}
+
 /** Combined nodes/edges from multiple analytics for the single shared map. */
 export type CombinedMapData = {
   nodes: MapDataResponse['nodes']
@@ -213,6 +232,12 @@ export type CombinedMapData = {
   regionOverlays: MapRegionOverlay[]
   /** Wormhole entrances with unknown targets (6px sky dots). */
   wormholeUnknownEntrances: WormholeUnknownEntrance[]
+  /** Homeworld locator markers resolved onto base-map planet coordinates. */
+  homeworldMarkers: HomeworldMapMarkerDisplay[]
+  /** Homeworld locator: baseline used a turn later than 1. */
+  baselineDegraded?: boolean
+  /** Homeworld locator: turn number used when baseline is degraded. */
+  baselineTurn?: number | null
   /** Stellar Cartography ion storm mode from turn settings (`nuionstorms`). */
   nuIonStorms?: boolean
 }

@@ -60,6 +60,13 @@ TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = (
         supports_map=True,
         type="selectable",
     ),
+    TurnAnalyticCatalogEntry(
+        id="homeworld-locator",
+        name="Homeworld locator",
+        supports_table=True,
+        supports_map=True,
+        type="selectable",
+    ),
 )
 
 _CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {

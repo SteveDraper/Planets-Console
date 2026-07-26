@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from api.config import ApiConfig
+from api.config import ApiConfig, HomeworldLocatorConfig
 from bff.config import BffConfig
 from omegaconf import OmegaConf
 
@@ -110,6 +110,42 @@ def _parse_api_storage_root(raw: object) -> str:
         stripped = raw.strip()
         return stripped if stripped else default
     raise TypeError(f"api.storage_root must be a string or null, got {type(raw).__name__}: {raw!r}")
+
+
+def _parse_homeworld_locator_config(raw: object) -> HomeworldLocatorConfig:
+    """Parse api.homeworld_locator nested policy; missing/empty uses defaults."""
+    defaults = HomeworldLocatorConfig()
+    if raw is None:
+        return defaults
+    if not isinstance(raw, dict):
+        raise TypeError(
+            f"api.homeworld_locator must be a mapping or null, got {type(raw).__name__}: {raw!r}"
+        )
+    min_clans = raw.get("min_baseline_clans", defaults.min_baseline_clans)
+    if isinstance(min_clans, bool) or not isinstance(min_clans, int):
+        raise TypeError(
+            f"api.homeworld_locator.min_baseline_clans must be an int, got "
+            f"{type(min_clans).__name__}: {min_clans!r}"
+        )
+    if min_clans < 0:
+        raise ValueError(f"api.homeworld_locator.min_baseline_clans must be >= 0, got {min_clans}")
+    threshold = raw.get(
+        "evidence_promotion_threshold",
+        defaults.evidence_promotion_threshold,
+    )
+    if isinstance(threshold, bool) or not isinstance(threshold, int):
+        raise TypeError(
+            f"api.homeworld_locator.evidence_promotion_threshold must be an int, got "
+            f"{type(threshold).__name__}: {threshold!r}"
+        )
+    if threshold < 1:
+        raise ValueError(
+            f"api.homeworld_locator.evidence_promotion_threshold must be >= 1, got {threshold}"
+        )
+    return HomeworldLocatorConfig(
+        min_baseline_clans=min_clans,
+        evidence_promotion_threshold=threshold,
+    )
 
 
 def load_config(
@@ -231,6 +267,7 @@ def load_config(
         compute_diagnostics_start_frozen=raw_start_frozen,
         compute_diagnostics_timeline_capacity=raw_timeline_capacity,
         credentials_obfuscation_secret=cred_secret,
+        homeworld_locator=_parse_homeworld_locator_config(api_dict.get("homeworld_locator")),
     )
     cors = bff_dict.get("cors_origins")
     if isinstance(cors, list):

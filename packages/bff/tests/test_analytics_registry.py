@@ -68,6 +68,17 @@ def test_registry_metadata_keeps_fleet_selectable_table_and_map():
     }
 
 
+def test_registry_metadata_keeps_homeworld_locator_selectable_table_and_map():
+    homeworld = next(a for a in ANALYTICS_LIST if a["id"] == "homeworld-locator")
+    assert homeworld == {
+        "id": "homeworld-locator",
+        "name": "Homeworld locator",
+        "supportsTable": True,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
 def test_fleet_table_dispatch_forwards_to_core():
     calls = []
 
@@ -113,6 +124,32 @@ def test_fleet_table_dispatch_forwards_to_core():
             111,
             "fleet",
             {"diagnostics": NOOP_DIAGNOSTICS},
+        )
+    ]
+
+
+def test_load_core_analytic_forwards_username_when_set():
+    calls = []
+
+    def load_core(game_id, perspective, turn, analytic_id, **kwargs):
+        calls.append((game_id, perspective, turn, analytic_id, kwargs))
+        return {"analyticId": analytic_id}
+
+    from bff.analytics.models import load_core_analytic
+
+    load_core_analytic(
+        load_core,
+        TurnScope(628580, 1, 111, username="captain"),
+        "homeworld-locator",
+        diagnostics=NOOP_DIAGNOSTICS,
+    )
+    assert calls == [
+        (
+            628580,
+            1,
+            111,
+            "homeworld-locator",
+            {"diagnostics": NOOP_DIAGNOSTICS, "username": "captain"},
         )
     ]
 

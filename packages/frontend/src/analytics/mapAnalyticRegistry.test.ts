@@ -6,6 +6,7 @@ import {
   BASE_MAP_ANALYTIC_ID,
   CONNECTIONS_ANALYTIC_ID,
   FLEET_ANALYTIC_ID,
+  HOMEWORLD_LOCATOR_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
   VISIBILITY_ANALYTIC_ID,
 } from './mapAnalyticIds'
@@ -19,6 +20,7 @@ import {
   isRegisteredMapAnalytic,
 } from './mapAnalyticRegistry'
 import { visibilityMapAnalytic } from './visibility/mapAnalytic'
+import { homeworldLocatorMapAnalytic } from './homeworld-locator/mapAnalytic'
 import {
   defaultConnectionsParams,
   sampleScope,
@@ -38,6 +40,7 @@ describe('map analytic registry', () => {
       STELLAR_CARTOGRAPHY_ANALYTIC_ID,
       FLEET_ANALYTIC_ID,
       VISIBILITY_ANALYTIC_ID,
+      HOMEWORLD_LOCATOR_ANALYTIC_ID,
     ])
     for (const analyticId of REGISTERED_MAP_ANALYTIC_IDS) {
       expect(isRegisteredMapAnalytic(analyticId)).toBe(true)
@@ -49,6 +52,9 @@ describe('map analytic registry', () => {
     )
     expect(mapAnalyticRegistrationFor(FLEET_ANALYTIC_ID)).toBe(fleetMapAnalytic)
     expect(mapAnalyticRegistrationFor(VISIBILITY_ANALYTIC_ID)).toBe(visibilityMapAnalytic)
+    expect(mapAnalyticRegistrationFor(HOMEWORLD_LOCATOR_ANALYTIC_ID)).toBe(
+      homeworldLocatorMapAnalytic
+    )
   })
 
   it('throws for unregistered map analytics', () => {
@@ -118,6 +124,23 @@ describe('map analytic registry', () => {
       'scaffold-v0',
     ])
     expect(spec.enabled).toBe(false)
+  })
+
+  it('wires homeworld locator to a markers query spec and custom merger', () => {
+    const registration = mapAnalyticRegistrationFor(HOMEWORLD_LOCATOR_ANALYTIC_ID)
+    expect(registration).toBe(homeworldLocatorMapAnalytic)
+    expect(registration.buildQuerySpec).toBeDefined()
+    expect(registration.mergeLayer).not.toBe(defaultMapLayerMerger)
+
+    const spec = mapAnalyticQuerySpecFor(HOMEWORLD_LOCATOR_ANALYTIC_ID, queryContext)
+    expect(spec.queryKey).toEqual([
+      'analytic',
+      HOMEWORLD_LOCATOR_ANALYTIC_ID,
+      'map',
+      sampleScope,
+      'markers-v1',
+    ])
+    expect(spec.enabled).toBe(true)
   })
 })
 

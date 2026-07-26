@@ -3,9 +3,12 @@
 from typing import NamedTuple
 
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
 )
+from api.concepts.homeworld_layout import homeworld_settings_fingerprint
+from api.models.game import GameInfo
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -30,8 +33,8 @@ class ServiceStack(NamedTuple):
 
 def build_service_stack(storage: StorageBackend) -> ServiceStack:
     credentials = CredentialService(storage)
-    games = GameService(storage, credentials)
     fleet_persistence = FleetSnapshotPersistenceService(storage)
+    homeworld_persistence = HomeworldLocatorPersistenceService(storage)
     inference_persistence = InferenceRowPersistenceService(storage)
     inference_invalidation = InferenceInvalidationService(
         inference_persistence,
@@ -40,6 +43,25 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
     )
     inference_invalidation.wire_fleet_invalidation_to_persistence()
     inference_invalidation.wire_scores_invalidation_to_fleet_persistence()
+
+    def on_game_info_refreshed(
+        game_id: int,
+        previous: GameInfo | None,
+        updated: GameInfo,
+    ) -> None:
+        if previous is None:
+            return
+        if homeworld_settings_fingerprint(previous.settings) == homeworld_settings_fingerprint(
+            updated.settings
+        ):
+            return
+        homeworld_persistence.invalidate_inferred_game_state(game_id)
+
+    games = GameService(
+        storage,
+        credentials,
+        on_game_info_refreshed=on_game_info_refreshed,
+    )
 
     def on_held_solutions_updated(session) -> None:
         inference_invalidation.on_inference_evidence_updated(
@@ -57,6 +79,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
     def on_turn_stored(game_id: int, perspective: int, turn_number: int) -> None:
         inference_invalidation.on_turn_stored(game_id, perspective, turn_number)
         fleet_persistence.invalidate_for_turn_write(game_id, perspective, turn_number)
+        homeworld_persistence.invalidate_evidence_from_turn(game_id, perspective, turn_number)
 
     turns = TurnLoadService(
         storage,
@@ -73,6 +96,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
         inference_invalidation=inference_invalidation,
         inference_scheduler=inference_scheduler,
         fleet_persistence=fleet_persistence,
+        homeworld_persistence=homeworld_persistence,
     )
     return ServiceStack(
         games=games,
