@@ -185,7 +185,7 @@ describe('mapRegionOverlayHitTest', () => {
         50,
         formatHomeworldSectorHoverLine
       )
-    ).toEqual(['player: alice · 1 candidate'])
+    ).toEqual(['player: alice · 1 candidate homeworld'])
     expect(pointHitsMapRegionOverlay(150, 50, hit)).toBe(true)
     expect(pointHitsMapRegionOverlay(150, 50, miss)).toBe(false)
   })
@@ -219,7 +219,7 @@ describe('mapRegionOverlayHitTest', () => {
         -50,
         formatHomeworldSectorHoverLine
       )
-    ).toEqual(['incomplete scan · 0 candidates'])
+    ).toEqual(['incomplete scan · 0 candidate homeworlds'])
   })
 
   it('hits coverage disks', () => {
