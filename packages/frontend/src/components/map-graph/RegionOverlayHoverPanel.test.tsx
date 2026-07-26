@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, renderHook } from '@testing-library/react'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import {
+  computeRegionOverlayHoverLines,
   RegionOverlayHoverTooltip,
   useMapPaneClientPos,
   useRegionOverlayHoverLines,
@@ -98,6 +99,38 @@ describe('useMapPaneClientPos', () => {
       onLeave()
     })
     expect(result.current.clientPos).toBeNull()
+  })
+})
+
+describe('computeRegionOverlayHoverLines', () => {
+  beforeEach(() => {
+    vi.spyOn(pane, 'addEventListener')
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('derives lines from a shared pointer without attaching listeners', () => {
+    expect(
+      computeRegionOverlayHoverLines(
+        [sampleOverlay],
+        { x: 50, y: 60 },
+        pane,
+        [0, 0, 1],
+        false
+      )
+    ).toEqual(['region line'])
+    expect(
+      computeRegionOverlayHoverLines(
+        [sampleOverlay],
+        { x: 50, y: 60 },
+        pane,
+        [0, 0, 1],
+        true
+      )
+    ).toEqual([])
+    expect(pane.addEventListener).not.toHaveBeenCalled()
   })
 })
 

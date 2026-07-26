@@ -11,9 +11,13 @@ import { formatStellarCartographySampleLine } from './sampleTooltipFormat'
 
 const SAMPLE_DEBOUNCE_MS = 100
 
+type PaneClientPos = { x: number; y: number }
+
 type StellarCartographyHoverPanelProps = {
   cartography: StellarCartographyMapContext
   wormholeHoverLines: string[] | null
+  /** Shared pane pointer from ``useMapPaneClientPos`` (no listener of its own). */
+  clientPos: PaneClientPos | null
   /** When a planet hover/pin label is showing, suppress cartography hover entirely. */
   blockedByPlanetHover?: boolean
   /** Extra stacked lines (e.g. homeworld region hover copy). */
@@ -52,36 +56,16 @@ export function buildStellarCartographyHoverLines(
 export function StellarCartographyHoverPanel({
   cartography,
   wormholeHoverLines,
+  clientPos,
   blockedByPlanetHover = false,
   additionalHoverLines = null,
   clientToFlowPosition,
 }: StellarCartographyHoverPanelProps) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
-  const [clientPos, setClientPos] = useState<{ x: number; y: number } | null>(null)
   const [entries, setEntries] = useState<StellarCartographySampleEntry[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const requestSeqRef = useRef(0)
-
-  useEffect(() => {
-    const el = domNode
-    if (!el) {
-      setClientPos(null)
-      setEntries([])
-      return
-    }
-    const onMove = (e: MouseEvent) => setClientPos({ x: e.clientX, y: e.clientY })
-    const onLeave = () => {
-      setClientPos(null)
-      setEntries([])
-    }
-    el.addEventListener('mousemove', onMove)
-    el.addEventListener('mouseleave', onLeave)
-    return () => {
-      el.removeEventListener('mousemove', onMove)
-      el.removeEventListener('mouseleave', onLeave)
-    }
-  }, [domNode])
 
   useEffect(() => {
     if (debounceRef.current != null) {

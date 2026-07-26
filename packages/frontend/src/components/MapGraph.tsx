@@ -4,7 +4,7 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { ReactFlow } from '@xyflow/react'
+import { ReactFlow, useStore } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { CombinedMapData } from '../api/bff'
 import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
@@ -30,8 +30,9 @@ import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
 import {
+  computeRegionOverlayHoverLines,
   RegionOverlayHoverTooltip,
-  useRegionOverlayHoverLines,
+  useMapPaneClientPos,
 } from './map-graph/RegionOverlayHoverPanel'
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
@@ -165,6 +166,9 @@ type MapHoverStackProps = {
 /**
  * Region + cartography hover must mount under ``ReactFlow`` so xyflow ``useStore``
  * has a provider (React Flow error #001).
+ *
+ * One pane pointer source is shared: region hit-test and cartography sampling both
+ * read ``clientPos``; neither attaches a second mousemove listener.
  */
 function MapHoverStack({
   regionOverlays,
@@ -172,8 +176,13 @@ function MapHoverStack({
   cartography,
   wormholeHoverLines,
 }: MapHoverStackProps) {
-  const { lines: regionHoverLines, clientPos } = useRegionOverlayHoverLines(
+  const transform = useStore((s) => s.transform)
+  const { clientPos, domNode } = useMapPaneClientPos()
+  const regionHoverLines = computeRegionOverlayHoverLines(
     regionOverlays,
+    clientPos,
+    domNode,
+    transform,
     blockedByPlanetHover
   )
   if (cartography != null) {
@@ -181,6 +190,7 @@ function MapHoverStack({
       <StellarCartographyHoverPanel
         cartography={cartography}
         wormholeHoverLines={wormholeHoverLines}
+        clientPos={clientPos}
         blockedByPlanetHover={blockedByPlanetHover}
         additionalHoverLines={regionHoverLines}
         clientToFlowPosition={clientToFlowPosition}

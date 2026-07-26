@@ -68,10 +68,31 @@ export function useMapPaneClientPos(): {
   return { clientPos, domNode }
 }
 
+/** Hover lines for a shared pane pointer (no listener of its own). */
+export function computeRegionOverlayHoverLines(
+  regionOverlays: readonly MapRegionOverlay[],
+  clientPos: MapPaneClientPos | null,
+  domNode: HTMLElement | null,
+  transform: [number, number, number] | undefined,
+  blockedByPlanetHover = false
+): string[] {
+  if (blockedByPlanetHover || clientPos == null || regionOverlays.length === 0) {
+    return []
+  }
+  return regionOverlayHoverLinesAtClient(
+    regionOverlays,
+    clientPos.x,
+    clientPos.y,
+    domNode,
+    transform
+  )
+}
+
 /** Live hover lines under the pointer for the given overlays.
 
 Must be called from a component mounted under ``ReactFlow`` (xyflow store).
-Returns ``clientPos`` so tooltip chrome can share the same pointer source.
+Attaches a pane pointer listener; prefer ``useMapPaneClientPos`` +
+``computeRegionOverlayHoverLines`` when composing with other hover consumers.
 */
 export function useRegionOverlayHoverLines(
   regionOverlays: readonly MapRegionOverlay[],
@@ -79,17 +100,13 @@ export function useRegionOverlayHoverLines(
 ): { lines: string[]; clientPos: MapPaneClientPos | null } {
   const transform = useStore((s) => s.transform)
   const { clientPos, domNode } = useMapPaneClientPos()
-
-  if (blockedByPlanetHover || clientPos == null || regionOverlays.length === 0) {
-    return { lines: [], clientPos }
-  }
   return {
-    lines: regionOverlayHoverLinesAtClient(
+    lines: computeRegionOverlayHoverLines(
       regionOverlays,
-      clientPos.x,
-      clientPos.y,
+      clientPos,
       domNode,
-      transform
+      transform,
+      blockedByPlanetHover
     ),
     clientPos,
   }
