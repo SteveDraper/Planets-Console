@@ -175,6 +175,7 @@ function MapGraphFlow({
     [frame, policy, wormholeLineRevealKey]
   )
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
+  // Visibility prefs only mutate visibility kinds; other regionOverlays pass through.
   const regionOverlays = useMemo(
     () => applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
     [data.regionOverlays, visibilityKinds]

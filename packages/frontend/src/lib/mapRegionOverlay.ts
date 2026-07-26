@@ -1,16 +1,24 @@
 /**
  * Pane shapes for hybrid map region overlays.
  *
- * Disks are SVG (opaque under one group opacity -- no alpha stacking, cheap on
- * pan/zoom). Nebula patches are small map-space PNGs cached by patch identity
- * and only reprojected each frame.
+ * Coverage disks are SVG (opaque under one group opacity -- no alpha stacking,
+ * cheap on pan/zoom). Nebula patches are small map-space PNGs cached by patch
+ * identity and only reprojected each frame. Boundary overlays project to an
+ * SVG path (line + arc edges) plus optional envelope disks.
  */
 
-import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
+import type {
+  MapRegionBoundaryArcEdge,
+  MapRegionOverlay,
+  MapRegionOverlayDisk,
+  MapRegionOverlayPatch,
+} from '../api/mapRegionOverlayTypes'
 import {
   flowToPane,
+  formatPaneCoordinate,
   gameMapCellCenterToFlow,
   mapLyToFlow,
+  mapToPane,
   type CartographyOverlayViewport,
 } from './cartography/cartographyOverlayGeometry'
 import { flowLySpanToPanePixels } from './cartography/stellarCartographyOverlay'
@@ -39,6 +47,8 @@ export type MapRegionOverlayPaneGroup = {
   patches: MapRegionOverlayPatchShape[]
   /** Patch AABBs in pane px; punched from the disk-union mask. */
   patchMaskRects: { x: number; y: number; width: number; height: number }[]
+  /** Closed SVG path for boundary geometry (map space projected to pane). */
+  boundaryPath?: string
 }
 
 export type MapRegionOverlayPaneShapes = {
@@ -96,10 +106,7 @@ export function parseCssColorToRgb(
  * RLE row 0 is map-south; canvas row 0 is image-top (map-north).
  * Returns empty string when fillColor is not a supported hex (fail closed).
  */
-export function patchRasterDataUrl(
-  fillColor: string,
-  patch: MapRegionOverlay['patches'][number]
-): string {
+export function patchRasterDataUrl(fillColor: string, patch: MapRegionOverlayPatch): string {
   const cached = patchRasterCache.get(patch)
   if (cached != null && cached.fillColor === fillColor) return cached.imageDataUrl
 
@@ -132,7 +139,7 @@ export function patchRasterDataUrl(
 }
 
 function patchPaneRect(
-  patch: MapRegionOverlay['patches'][number],
+  patch: MapRegionOverlayPatch,
   viewport: CartographyOverlayViewport
 ): { left: number; top: number; width: number; height: number } {
   const { cx: leftGx, cy: topCy } = mapLyToFlow(
@@ -152,6 +159,147 @@ function patchPaneRect(
   return { left, top, width, height }
 }
 
+function projectDiskShapes(
+  disks: readonly MapRegionOverlayDisk[],
+  overlayId: string,
+  viewport: CartographyOverlayViewport
+): MapRegionOverlayDiskShape[] {
+  const shapes: MapRegionOverlayDiskShape[] = []
+  for (let i = 0; i < disks.length; i++) {
+    const disk = disks[i]!
+    const { cx, cy } = gameMapCellCenterToFlow(disk.x, disk.y)
+    const { px, py } = flowToPane(cx, cy, viewport)
+    const r = flowLySpanToPanePixels(cx, cy, disk.radius * 2, viewport) / 2
+    shapes.push({
+      key: `${overlayId}-disk-${i}`,
+      cx: px,
+      cy: py,
+      r,
+    })
+  }
+  return shapes
+}
+
+/**
+ * SVG arc in pane space. ``clockwiseMap`` is map-space (Y-up); pane SVG is
+ * Y-down so the sweep flag is inverted.
+ */
+function paneArcCommand(
+  start: { px: number; py: number },
+  end: { px: number; py: number },
+  center: { px: number; py: number },
+  radius: number,
+  clockwiseMap: boolean
+): string {
+  const clockwisePane = !clockwiseMap
+  const startAngle = Math.atan2(start.py - center.py, start.px - center.px)
+  const endAngle = Math.atan2(end.py - center.py, end.px - center.px)
+  let delta = endAngle - startAngle
+  if (clockwisePane) {
+    while (delta <= 0) delta += 2 * Math.PI
+  } else {
+    while (delta >= 0) delta -= 2 * Math.PI
+  }
+  const largeArc = Math.abs(delta) > Math.PI ? 1 : 0
+  const sweep = clockwisePane ? 1 : 0
+  return (
+    `A ${formatPaneCoordinate(radius)} ${formatPaneCoordinate(radius)} 0 ${largeArc} ${sweep} ` +
+    `${formatPaneCoordinate(end.px)} ${formatPaneCoordinate(end.py)}`
+  )
+}
+
+function boundaryPathFromGeometry(
+  vertices: readonly { x: number; y: number }[],
+  edges: readonly { type: string; centerX?: number; centerY?: number; clockwise?: boolean }[],
+  viewport: CartographyOverlayViewport
+): string | null {
+  if (vertices.length < 3 || edges.length !== vertices.length) return null
+  const panePoints = vertices.map((v) => mapToPane(v.x, v.y, viewport))
+  const first = panePoints[0]!
+  let d = `M ${formatPaneCoordinate(first.px)} ${formatPaneCoordinate(first.py)}`
+  for (let i = 0; i < edges.length; i++) {
+    const edge = edges[i]!
+    const start = panePoints[i]!
+    const end = panePoints[(i + 1) % panePoints.length]!
+    if (edge.type === 'line') {
+      d += ` L ${formatPaneCoordinate(end.px)} ${formatPaneCoordinate(end.py)}`
+      continue
+    }
+    if (edge.type !== 'arc') return null
+    const arc = edge as MapRegionBoundaryArcEdge
+    const paneCenter = mapToPane(arc.centerX, arc.centerY, viewport)
+    const radius = Math.hypot(start.px - paneCenter.px, start.py - paneCenter.py)
+    if (!(radius > 0)) return null
+    d += paneArcCommand(start, end, paneCenter, radius, arc.clockwise)
+  }
+  return `${d} Z`
+}
+
+function buildCoverageGroup(
+  overlay: MapRegionOverlay,
+  viewport: CartographyOverlayViewport
+): MapRegionOverlayPaneGroup | null {
+  if (overlay.geometry.type !== 'coverage') return null
+  const disks = projectDiskShapes(overlay.geometry.disks, overlay.id, viewport)
+  const patches: MapRegionOverlayPatchShape[] = []
+  const patchMaskRects: MapRegionOverlayPaneGroup['patchMaskRects'] = []
+
+  for (let i = 0; i < overlay.geometry.patches.length; i++) {
+    const patch = overlay.geometry.patches[i]!
+    const imageDataUrl = patchRasterDataUrl(overlay.fillColor, patch)
+    // Fail closed: non-hex fillColor skips punch + raster (no invented color, no holes).
+    if (imageDataUrl === '') continue
+    const rect = patchPaneRect(patch, viewport)
+    patchMaskRects.push({
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    })
+    patches.push({
+      key: `${overlay.id}-patch-${i}`,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      imageDataUrl,
+    })
+  }
+
+  if (disks.length === 0 && patches.length === 0) return null
+  return {
+    key: overlay.id,
+    fillColor: overlay.fillColor,
+    fillOpacity: overlay.fillOpacity,
+    disks,
+    patches,
+    patchMaskRects,
+  }
+}
+
+function buildBoundaryGroup(
+  overlay: MapRegionOverlay,
+  viewport: CartographyOverlayViewport
+): MapRegionOverlayPaneGroup | null {
+  if (overlay.geometry.type !== 'boundary') return null
+  const boundaryPath = boundaryPathFromGeometry(
+    overlay.geometry.vertices,
+    overlay.geometry.edges,
+    viewport
+  )
+  const disks = projectDiskShapes(overlay.geometry.disks ?? [], overlay.id, viewport)
+  if (boundaryPath == null && disks.length === 0) return null
+  return {
+    key: overlay.id,
+    fillColor: overlay.fillColor,
+    fillOpacity: overlay.fillOpacity,
+    disks,
+    patches: [],
+    patchMaskRects: [],
+    boundaryPath: boundaryPath ?? undefined,
+  }
+}
+
 /**
  * Project overlays into pane shapes. Expensive patch PNGs are cached; each call
  * only recomputes pane positions from the viewport.
@@ -163,54 +311,11 @@ export function buildMapRegionOverlayPaneShapes(
   const groups: MapRegionOverlayPaneGroup[] = []
 
   for (const overlay of overlays) {
-    const disks: MapRegionOverlayDiskShape[] = []
-    const patches: MapRegionOverlayPatchShape[] = []
-    const patchMaskRects: MapRegionOverlayPaneGroup['patchMaskRects'] = []
-
-    for (let i = 0; i < overlay.disks.length; i++) {
-      const disk = overlay.disks[i]!
-      const { cx, cy } = gameMapCellCenterToFlow(disk.x, disk.y)
-      const { px, py } = flowToPane(cx, cy, viewport)
-      const r = flowLySpanToPanePixels(cx, cy, disk.radius * 2, viewport) / 2
-      disks.push({
-        key: `${overlay.id}-disk-${i}`,
-        cx: px,
-        cy: py,
-        r,
-      })
-    }
-
-    for (let i = 0; i < overlay.patches.length; i++) {
-      const patch = overlay.patches[i]!
-      const imageDataUrl = patchRasterDataUrl(overlay.fillColor, patch)
-      // Fail closed: non-hex fillColor skips punch + raster (no invented color, no holes).
-      if (imageDataUrl === '') continue
-      const rect = patchPaneRect(patch, viewport)
-      patchMaskRects.push({
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-      })
-      patches.push({
-        key: `${overlay.id}-patch-${i}`,
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-        imageDataUrl,
-      })
-    }
-
-    if (disks.length === 0 && patches.length === 0) continue
-    groups.push({
-      key: overlay.id,
-      fillColor: overlay.fillColor,
-      fillOpacity: overlay.fillOpacity,
-      disks,
-      patches,
-      patchMaskRects,
-    })
+    const group =
+      overlay.geometry.type === 'coverage'
+        ? buildCoverageGroup(overlay, viewport)
+        : buildBoundaryGroup(overlay, viewport)
+    if (group != null) groups.push(group)
   }
 
   return { groups }

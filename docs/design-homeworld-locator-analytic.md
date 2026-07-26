@@ -155,7 +155,18 @@ Apply **homeworld candidate geometry** when `hwdistribution=2` and `mapshape=0`:
 
 **Homeworld cluster constraint** (all map shapes that still have traditional HWs): count planets within 81 LY and within 81--162 LY; compare to `verycloseplanets` and `closeplanets`. Use this to construct **orphan** HW-like sites even when ring/sector math does not apply.
 
-When no planet is pinned for a slot, later slices may emit **homeworld region overlay** (ring arc + optional cluster envelope) -- paint polish is [#35](https://github.com/SteveDraper/Planets-Console/issues/35); candidate geometry itself is in [#34](https://github.com/SteveDraper/Planets-Console/issues/34).
+When no planet is pinned for a slot, [#35](https://github.com/SteveDraper/Planets-Console/issues/35) emits **homeworld region overlay** entries on shared **`regionOverlays`** (boundary geometry for equal angular sectors on the circular ring, plus optional 81/162 LY envelope disks). Grill locks for #35 paint:
+
+| Lock | Rule |
+|------|------|
+| Emission gate | Only when `hwdistribution=2`, `mapshape=0`, game category epic\|standard, and a **viewpoint pin** fixes rotation -- then emit **all** `player_count` sector overlays; otherwise none (markers unchanged) |
+| Wire | Shared **map region overlay** boundary primitive ([ADR 0008](adr/0008-shared-map-region-overlays.md)); not a homeworld-only field; not cartography `overlayCircles` |
+| Band radii | From **homeworld layout distribution asset** smoothed center-distance support extremes |
+| Envelopes | 81 + 162 LY disks when a sector center exists (most-likely candidate closest to map center C; pinned planet when pinned; incomplete observation → point in unobserved band closest to C; fully observed + zero candidates → no disks, error fill + hover) |
+| FE display | **Homeworld region display mode** (`off` \| `un-pinned` \| `pinned` \| `all`, default `un-pinned`) |
+| Labels | No rival slot labels in #35 (assignment stays #37) |
+
+Candidate geometry itself remains [#34](https://github.com/SteveDraper/Planets-Console/issues/34).
 
 For non-circular or non-round maps: skip ring/sector math; still use baseline profile + **homeworld cluster constraint** + later evidence.
 
@@ -271,10 +282,11 @@ Origin distances (81 LY pod, warp table) stay in **game concepts**.
 |---------|----------|
 | **Homeworld map marker** | Decoration on **base map** node -- solid = definite, dashed/light = possible |
 | **User-asserted definite** | Same definite marker + attribution cue (border/badge) |
-| **Homeworld region overlay** | Arc/annulus for unresolved slots (Circular round v1) |
+| **Homeworld region overlay** | Shared **map region overlay** boundary sectors (+ optional envelopes) for Circular round; filtered by **homeworld region display mode** |
 | **Homeworld locator panel** | Sidebar table + refresh + degraded baseline warning |
 | Map context menu | Quick **homeworld assertion** |
 | Tabular tile | Same rows as panel in main **tabular** **view mode** |
+| **Homeworld region display mode** | Sidebar expandable control (Cartography pattern); global preference |
 
 ---
 
@@ -283,7 +295,7 @@ Origin distances (81 LY pod, warp table) stay in **game concepts**.
 | Issue | Delivers |
 |-------|----------|
 | [#34](https://github.com/SteveDraper/Planets-Console/issues/34) | Config, race climate, baseline profile + **candidate geometry** + cluster orphans, orchestrator baseline ensure, persistence, map markers + table, availability; degraded via payload metadata |
-| [#35](https://github.com/SteveDraper/Planets-Console/issues/35) | **Homeworld region overlay** paint/polish (arcs/envelopes) reusing candidate geometry |
+| [#35](https://github.com/SteveDraper/Planets-Console/issues/35) | **Homeworld region overlay** paint: shared boundary `regionOverlays`, layout distribution asset, sector emission, display mode + hover ([ADR 0008](adr/0008-shared-map-region-overlays.md)) |
 | [#36](https://github.com/SteveDraper/Planets-Console/issues/36) | Evidence aggregate refine through shell turn, origin-distance signals, promotion |
 | [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | User assertions, refresh, **homeworld locator panel**, attribution UX |
 
@@ -296,6 +308,13 @@ Hybrid phases (each independently reviewable):
 3. **BFF + FE** -- descriptor/catalog/proxy, OpenAPI regen, enable toggle, definite vs possible markers, tabular tile + degraded note.
 
 **Persistence ownership:** no generic analytic merge service -- thin shared primitives + homeworld-owned persistence (same pattern as scores/fleet).
+
+### 11.2 Issue #35 phased plan
+
+1. **Shared region boundary** -- discriminate `regionOverlays` coverage vs boundary; FE normalize + pane; MapGraph Visibility-pref isolation; ADR 0008; CONTEXT/design grill locks (this section / §4.2).
+2. **Layout distribution asset** -- committed smoothed percentile tables (epic/standard); loader; support extremes for paint band.
+3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes.
+4. **FE display mode + hover** -- preference store, merge/filter, hit-test `hoverSummary`.
 
 ---
 
@@ -317,3 +336,4 @@ Hybrid phases (each independently reviewable):
 | 2026-07-25 | Grill-with-docs for #34: orchestrator baseline chain; turn-scoped evidence aggregates + on-read candidate view; candidate geometry + cluster orphans in #34; overlays deferred to #35; phased plan §11.1 |
 | 2026-07-25 | Planetoids (`debrisdisk == 1`) excluded from cluster neighbor counts and all homeworld candidacy |
 | 2026-07-25 | #34 baseline: empty `ENSURE_DEPENDENCIES`; #36 adds `turn_delta=-1` self-chain for refine-through-T |
+| 2026-07-26 | #35 grill locks: shared `regionOverlays` boundary ([ADR 0008](adr/0008-shared-map-region-overlays.md)); display mode; layout asset; §4.2 / §11.2 |

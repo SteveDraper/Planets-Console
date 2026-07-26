@@ -230,16 +230,18 @@ def test_visibility_map_emits_kinds_for_sample_turn(sample_turn):
 def test_visibility_map_nebula_patches_when_present(stellar_cartography_turn):
     data = get_visibility_map(stellar_cartography_turn, TurnAnalyticsOptions())
     ship_scan = next(o for o in data["regionOverlays"] if o["kind"] == KIND_SHIP_SCAN)
-    assert len(ship_scan["disks"]) >= 1
+    assert ship_scan["geometry"]["type"] == "coverage"
+    assert len(ship_scan["geometry"]["disks"]) >= 1
     # Stellar cartography sample has nebulas; owned origins near them yield patches.
-    assert isinstance(ship_scan["patches"], list)
+    assert isinstance(ship_scan["geometry"]["patches"], list)
 
     mine_potential = next(
         o for o in data["regionOverlays"] if o["kind"] == KIND_POTENTIAL_MINEFIELD_DETECT
     )
     # Minefield detect ignores nebulae: disks only.
-    assert len(mine_potential["disks"]) >= 1
-    assert mine_potential["patches"] == []
+    assert mine_potential["geometry"]["type"] == "coverage"
+    assert len(mine_potential["geometry"]["disks"]) >= 1
+    assert mine_potential["geometry"]["patches"] == []
 
 
 def test_visibility_includes_partner_ship_as_origin(sample_turn):

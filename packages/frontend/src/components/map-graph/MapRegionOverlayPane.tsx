@@ -8,10 +8,10 @@ import { useOverlayPaneSize } from './useOverlayPaneSize'
 /**
  * Blit hybrid map region overlays.
  *
- * Disks: opaque SVG circles under one group opacity (union, no stacked alpha).
- * Patches: cached map-space PNGs, reprojected only. Patch AABBs are a
+ * Coverage disks: opaque SVG circles under one group opacity (union, no stacked
+ * alpha). Patches: cached map-space PNGs, reprojected only. Patch AABBs are a
  * non-overlapping partition punched from the disk mask so disks and patches
- * never double-paint.
+ * never double-paint. Boundary geometry: filled/stroked SVG path (line|arc).
  */
 export function MapRegionOverlayPane({
   regionOverlays,
@@ -83,6 +83,14 @@ export function MapRegionOverlayPane({
           const maskId = `${idPrefix}-disks-${group.key}`
           return (
             <g key={group.key} opacity={group.fillOpacity}>
+              {group.boundaryPath != null ? (
+                <path
+                  d={group.boundaryPath}
+                  fill={group.fillColor}
+                  stroke={group.fillColor}
+                  strokeWidth={1}
+                />
+              ) : null}
               {group.disks.length > 0 ? (
                 <rect
                   x={0}

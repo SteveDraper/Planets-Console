@@ -289,8 +289,8 @@ One analytic's contribution to the combined map graph -- nodes and/or edges merg
 _Avoid_: overlay (acceptable informally; prefer map layer in docs)
 
 **Map region overlay**:
-A shaded designated area on the map used to highlight a region rather than a single planet or ship. v1 wire field is **`regionOverlays`**: a **hybrid coverage** payload of disk unions (centers + radii) where coverage is ideal, plus **nebula-local coverage patches** (1 ly RLE rasters) where \(V(P)\) / **Nebula Scanner** distort the footprint -- so payloads stay small on empty-nebula maps while Core still owns coverage truth. Style metadata (fill color, kind id) travels with the geometry. Shared rendering and merge concern across map analytics; the SPA blits disks and patches. Distinct from cartography hazard circles (`overlayCircles`) and from **homeworld region overlay** arcs.
-_Avoid_: overlay circle (cartography-specific), cartography layer (Stellar Cartography only), homeworld region overlay (that analytic's candidate envelope), client-side reimplementation of coverage policy, full-map 1 ly boolean grids as the default wire
+A shaded designated area on the map used to highlight a region rather than a single planet or ship. Shared wire field **`regionOverlays`** with discriminated geometry: **coverage** (hybrid disk unions plus nebula-local patches where \(V(P)\) / **Nebula Scanner** distort the footprint) or **boundary** (closed path of line and circular-arc edges, optionally with colocated envelope disks). Style metadata (fill color, kind id) and optional annotations (pin flag, status, hover summary) travel with the geometry. Shared rendering and merge concern across map analytics; Core owns coverage/boundary truth and the SPA blits. Distinct from cartography hazard circles (`overlayCircles`). Per-analytic client preferences decide which kinds/modes are shown -- Visibility kind toggles do not own non-Visibility overlays.
+_Avoid_: overlay circle (cartography-specific), cartography layer (Stellar Cartography only), treating all region overlays as Visibility-owned, client-side reimplementation of coverage policy, full-map 1 ly boolean grids as the default wire, homeworld-only parallel wire field
 
 **Visibility analytic**:
 A map-only **turn analytic** (`analytic_id` `visibility`) that draws **map region overlay**s for sensor and minefield-detection coverage from the **viewpoint** (plus **Share Intel** partners as scan origins). Per-**visibility region kind** toggles and **base colors** are **client preferences** persisted globally in localStorage (sticky across sessions and games, same pattern as **Cartography layer** toggles): checkbox + color control; client may override wire defaults. Fresh install defaults: all kinds on with distinct default base colors; overlapping kinds use independent semi-transparent fills (fixed z-order). Distinct from **Fleet player visibility**.
@@ -421,8 +421,16 @@ Map decoration on a **base map** planet node for a **homeworld candidate** at a 
 _Avoid_: HW node (separate graph node), duplicate planet
 
 **Homeworld region overlay**:
-Map geometry for a slot or orphan when no planet is pinned -- e.g. circular `hwdistribution` ring arc, or 81/162 LY cluster envelope from **GameSettings**. Rendered as analytic **overlayCircles** or arc overlays (same pattern as **Stellar Cartography**), slot-labeled where applicable.
-_Avoid_: possible zone (vague), sector blob (informal)
+The **homeworld locator** analytic's use of shared **map region overlay** geometry for circular-ring sectors (and optional cluster envelope disks) when no planet is pinned -- or to show un-pinned / pinned sectors per **homeworld region display mode**. Emitted as `regionOverlays` boundary entries (not cartography `overlayCircles`). Slot binding and rival labels are separate slices.
+_Avoid_: possible zone (vague), sector blob (informal), overlayCircles for homeworld sectors, homeworld-only parallel wire field
+
+**Homeworld region display mode**:
+Global client preference (localStorage) controlling which **homeworld region overlay** sectors appear on the map: off, un-pinned only (default), pinned only, or all. Same sticky preference pattern as **Cartography layer** toggles; independent of **Visibility region kind** enablement.
+_Avoid_: visibility kind toggle (wrong analytic), per-game preference scope for this mode
+
+**Homeworld layout distribution asset**:
+Committed, reloadable percentile tables for homeworld center-distance and neighbor-separation on epic and standard circular layouts. Used to choose paint band radii (support extremes of center-distance) and later likelihood scoring; derived from sampled layout distributions, not recomputed from live TurnInfo each request.
+_Avoid_: raw sample CSV as runtime input, inventing band radii without the asset
 
 **Homeworld locator panel**:
 The **homeworld locator** analytic details UI -- slot and orphan table (assign slot, set race, tier override), plus **homeworld locator refresh**. Map-primary: context menu on **homeworld map marker** or **homeworld region overlay** for quick asserts; table for bulk review with map highlight on row focus.

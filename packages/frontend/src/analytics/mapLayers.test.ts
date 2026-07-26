@@ -200,8 +200,11 @@ describe('combineMapData', () => {
           id: 'visibility-ship-scan',
           fillColor: '#38bdf8',
           fillOpacity: 0.28,
-          disks: [{ x: 10, y: 20, radius: 300 }],
-          patches: [],
+          geometry: {
+            type: 'coverage',
+            disks: [{ x: 10, y: 20, radius: 300 }],
+            patches: [],
+          },
         },
       ],
     }
@@ -214,7 +217,10 @@ describe('combineMapData', () => {
     expect(combined.regionOverlays[0]).toMatchObject({
       kind: 'ship-scan',
       fillColor: '#38bdf8',
-      disks: [{ x: 10, y: 20, radius: 300 }],
+      geometry: {
+        type: 'coverage',
+        disks: [{ x: 10, y: 20, radius: 300 }],
+      },
     })
   })
 
