@@ -25,6 +25,6 @@ export function formatHomeworldSectorHoverLine(
     parts.push('incomplete scan')
   }
   const count = overlay.candidateCount ?? 0
-  parts.push(count === 1 ? '1 candidate' : `${count} candidates`)
+  parts.push(count === 1 ? '1 candidate homeworld' : `${count} candidate homeworlds`)
   return parts.join(' · ')
 }

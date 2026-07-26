@@ -41,7 +41,7 @@ describe('formatHomeworldSectorHoverLine', () => {
           candidateCount: 1,
         })
       )
-    ).toBe('player: koshling (The Lizard Alliance) · 1 candidate')
+    ).toBe('player: koshling (The Lizard Alliance) · 1 candidate homeworld')
   })
 
   it('formats incomplete scan and plural candidates', () => {
@@ -49,7 +49,7 @@ describe('formatHomeworldSectorHoverLine', () => {
       formatHomeworldSectorHoverLine(
         sector({ status: 'incomplete', candidateCount: 2 })
       )
-    ).toBe('incomplete scan · 2 candidates')
+    ).toBe('incomplete scan · 2 candidate homeworlds')
   })
 
   it('formats error as no candidates', () => {
@@ -63,7 +63,7 @@ describe('formatHomeworldSectorHoverLine', () => {
       formatHomeworldSectorHoverLine(
         sector({ isPinned: true, candidateCount: 1, playerLabel: undefined })
       )
-    ).toBe('player known · 1 candidate')
+    ).toBe('player known · 1 candidate homeworld')
   })
 
   it('returns null for non-homeworld kinds', () => {
