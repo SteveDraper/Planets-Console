@@ -106,10 +106,16 @@ describe('buildMapRegionOverlayPaneShapes', () => {
 
   it('projects annular-sector boundary paths with line and arc edges', () => {
     const overlay: MapRegionOverlay = {
-      kind: 'homeworld-sector',
+      kind: 'boundary-demo',
       id: 'sector-0',
       fillColor: '#f97316',
       fillOpacity: 0.2,
+      paint: {
+        fillOpacity: 0,
+        strokeColor: '#fdba74',
+        strokeWidth: 1.5,
+        diskStrokes: [{ strokeColor: '#38bdf8', strokeWidth: 1.75 }],
+      },
       geometry: {
         type: 'boundary',
         vertices: [
@@ -152,7 +158,7 @@ describe('buildMapRegionOverlayPaneShapes', () => {
     expect(group.patches).toEqual([])
   })
 
-  it('keeps eleven-way homeworld sector arcs on the short wedge', () => {
+  it('keeps eleven-way annular sector arcs on the short wedge', () => {
     const centerX = 1980
     const centerY = 2000
     const rOuter = 600
@@ -160,10 +166,11 @@ describe('buildMapRegionOverlayPaneShapes', () => {
     const start = 0
     const end = (2 * Math.PI) / 11
     const overlay: MapRegionOverlay = {
-      kind: 'homeworld-sector',
-      id: 'homeworld-sector-0',
+      kind: 'boundary-demo',
+      id: 'sector-0',
       fillColor: '#f97316',
       fillOpacity: 0,
+      paint: { fillOpacity: 0, strokeColor: '#fdba74', strokeWidth: 1.5 },
       geometry: {
         type: 'boundary',
         vertices: [
@@ -185,12 +192,21 @@ describe('buildMapRegionOverlayPaneShapes', () => {
     expect(largeArcFlags).toEqual(['0', '0'])
   })
 
-  it('uses distinct stroke colors for 81 and 162 LY homeworld envelopes', () => {
+  it('paints boundary disks as stroke outlines when paint.diskStrokes is set', () => {
     const overlay: MapRegionOverlay = {
-      kind: 'homeworld-sector',
+      kind: 'boundary-demo',
       id: 'sector-env',
       fillColor: '#f97316',
-      fillOpacity: 0,
+      fillOpacity: 0.2,
+      paint: {
+        fillOpacity: 0,
+        strokeColor: '#fdba74',
+        strokeWidth: 1.5,
+        diskStrokes: [
+          { strokeColor: '#38bdf8', strokeWidth: 1.75 },
+          { strokeColor: '#c084fc', strokeWidth: 1.75 },
+        ],
+      },
       geometry: {
         type: 'boundary',
         vertices: [
@@ -214,8 +230,33 @@ describe('buildMapRegionOverlayPaneShapes', () => {
     const shapes = buildMapRegionOverlayPaneShapes([overlay], viewport)
     const group = shapes.groups[0]!
     expect(group.fillOpacity).toBe(0)
+    expect(group.disks).toHaveLength(0)
     const strokes = group.strokeDisks
     expect(strokes.map((d) => d.strokeColor)).toEqual(['#38bdf8', '#c084fc'])
+  })
+
+  it('fills boundary disks when paint.diskStrokes is absent', () => {
+    const overlay: MapRegionOverlay = {
+      kind: 'boundary-demo',
+      id: 'filled-disks',
+      fillColor: '#22c55e',
+      fillOpacity: 0.3,
+      geometry: {
+        type: 'boundary',
+        vertices: [
+          { x: 0, y: 0 },
+          { x: 10, y: 0 },
+          { x: 10, y: 10 },
+        ],
+        edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }],
+        disks: [{ x: 5, y: 5, radius: 40 }],
+      },
+    }
+    const group = buildMapRegionOverlayPaneShapes([overlay], viewport).groups[0]!
+    expect(group.fillOpacity).toBe(0.3)
+    expect(group.disks).toHaveLength(1)
+    expect(group.strokeDisks).toEqual([])
+    expect(group.strokeColor).toBeUndefined()
   })
 
   it('keeps patch mask rects non-overlapping for partitioned patch AABBs', () => {

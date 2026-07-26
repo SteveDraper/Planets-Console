@@ -60,6 +60,29 @@ export type MapRegionBoundaryGeometry = {
 
 export type MapRegionOverlayGeometry = MapRegionCoverageGeometry | MapRegionBoundaryGeometry
 
+/** Stroke style for one boundary envelope disk (index-aligned with geometry.disks). */
+export type MapRegionDiskStrokePaint = {
+  strokeColor: string
+  strokeWidth: number
+  strokeDasharray?: string
+}
+
+/**
+ * Client-side paint policy for shared region blit.
+ * Analytic style adapters attach this before ``buildMapRegionOverlayPaneShapes``;
+ * Core wire does not emit ``paint``.
+ */
+export type MapRegionOverlayPaint = {
+  fillOpacity: number
+  strokeColor?: string
+  strokeWidth?: number
+  /**
+   * When set, boundary geometry disks are stroke-outlined with these styles
+   * instead of filled disks.
+   */
+  diskStrokes?: readonly MapRegionDiskStrokePaint[]
+}
+
 export type MapRegionOverlay = {
   kind: string
   id: string
@@ -69,4 +92,6 @@ export type MapRegionOverlay = {
   isPinned?: boolean
   status?: string
   hoverSummary?: string
+  /** Optional client paint policy (analytic adapters; not Core wire). */
+  paint?: MapRegionOverlayPaint
 }

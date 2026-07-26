@@ -36,6 +36,7 @@ import {
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
+import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homeworldRegionStyle'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { useHomeworldRegionDisplayStore } from '../stores/homeworldRegionDisplay'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
@@ -220,12 +221,15 @@ function MapGraphFlow({
   const homeworldRegionDisplayMode = useHomeworldRegionDisplayStore(
     (s) => s.regionDisplayMode
   )
-  // Visibility prefs only mutate visibility kinds; homeworld display mode filters sectors.
+  // Visibility prefs only mutate visibility kinds; homeworld display mode filters
+  // sectors; homeworld style adapter attaches paint metadata for shared blit.
   const regionOverlays = useMemo(
     () =>
-      applyHomeworldRegionDisplayMode(
-        applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
-        homeworldRegionDisplayMode
+      applyHomeworldRegionStyle(
+        applyHomeworldRegionDisplayMode(
+          applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
+          homeworldRegionDisplayMode
+        )
       ),
     [data.regionOverlays, visibilityKinds, homeworldRegionDisplayMode]
   )
