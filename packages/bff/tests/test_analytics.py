@@ -313,8 +313,9 @@ def test_visibility_map_returns_region_overlays():
         "active-minefield-detect",
         "potential-minefield-detect",
     }
-    assert "disks" in overlay
-    assert "patches" in overlay
+    assert overlay.get("geometry", {}).get("type") == "coverage"
+    assert "disks" in overlay["geometry"]
+    assert "patches" in overlay["geometry"]
     assert "fillColor" in overlay
 
 
