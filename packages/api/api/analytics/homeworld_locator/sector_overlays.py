@@ -208,10 +208,16 @@ def build_homeworld_sector_overlays(
     r_outer: float,
     planets: Sequence[Planet],
     candidate_planet_ids: frozenset[int],
+    slot_anchored_planet_ids: frozenset[int],
     scan_origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter] = (),
 ) -> tuple[MapRegionOverlay, ...]:
-    """Build one boundary overlay per equal angular sector."""
+    """Build one boundary overlay per equal angular sector.
+
+    ``is_pinned`` means the homeworld is determined and the owning player is
+    known (a slot-anchored candidate planet lies in the sector). Orphan-only
+    or empty sectors are un-pinned for display-mode filtering.
+    """
     if player_count < 2:
         return ()
     if r_outer < r_inner:
@@ -248,6 +254,12 @@ def build_homeworld_sector_overlays(
         if is_viewpoint_sector and all(planet.id != pin.id for planet in sector_candidates):
             sector_candidates.append(pin)
 
+        slot_anchored = [
+            planet for planet in sector_candidates if planet.id in slot_anchored_planet_ids
+        ]
+        # Display-mode pinned: HW determined and owning player known (slot-anchored).
+        is_pinned = len(slot_anchored) > 0
+
         unobserved = closest_unobserved_band_point(
             center=center,
             angle_start=angle_start,
@@ -264,23 +276,36 @@ def build_homeworld_sector_overlays(
         hover: str
         fill_color = DEFAULT_SECTOR_FILL_COLOR
         fill_opacity = DEFAULT_SECTOR_FILL_OPACITY
-        # Display-mode ``pinned`` / ``un-pinned``: sector has a planet candidate.
-        has_candidate = len(sector_candidates) > 0
 
-        if has_candidate:
-            # Prefer a real candidate (closest to C) even when scan coverage is incomplete.
-            # Viewpoint sector always centers on the pin planet.
+        if is_pinned:
+            # Slot-anchored planet(s): prefer the viewpoint pin in its sector,
+            # else closest slot-anchored site to map center.
             if is_viewpoint_sector:
                 envelope_center = (float(pin.x), float(pin.y))
             else:
                 closest = min(
-                    sector_candidates,
+                    slot_anchored,
                     key=lambda planet: distance_ly(planet.x, planet.y, center_x, center_y),
                 )
                 envelope_center = (float(closest.x), float(closest.y))
             status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
             hover = _hover_summary(
-                is_viewpoint_sector=is_viewpoint_sector,
+                is_pinned=True,
+                candidate_count=len(sector_candidates),
+                is_incomplete=is_incomplete,
+                is_error=False,
+            )
+        elif sector_candidates:
+            # Orphans present: still un-pinned (player unknown), but center envelopes
+            # on the most likely orphan (closest to C) even under incomplete scan.
+            closest = min(
+                sector_candidates,
+                key=lambda planet: distance_ly(planet.x, planet.y, center_x, center_y),
+            )
+            envelope_center = (float(closest.x), float(closest.y))
+            status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
+            hover = _hover_summary(
+                is_pinned=False,
                 candidate_count=len(sector_candidates),
                 is_incomplete=is_incomplete,
                 is_error=False,
@@ -289,7 +314,7 @@ def build_homeworld_sector_overlays(
             envelope_center = unobserved
             status = STATUS_INCOMPLETE
             hover = _hover_summary(
-                is_viewpoint_sector=False,
+                is_pinned=False,
                 candidate_count=0,
                 is_incomplete=True,
                 is_error=False,
@@ -325,7 +350,7 @@ def build_homeworld_sector_overlays(
                 vertices=vertices,
                 edges=edges,
                 disks=disks,
-                is_pinned=has_candidate,
+                is_pinned=is_pinned,
                 status=status,
                 hover_summary=hover,
             )
@@ -363,6 +388,9 @@ def build_homeworld_sector_overlays_for_turn(
         planet_scan_range=float(turn.settings.planetscanrange),
     )
     candidate_ids = frozenset(row.planet_id for row in view.candidates)
+    slot_anchored_ids = frozenset(
+        row.planet_id for row in view.candidates if row.perspective is not None
+    )
 
     return build_homeworld_sector_overlays(
         center=center,
@@ -372,6 +400,7 @@ def build_homeworld_sector_overlays_for_turn(
         r_outer=r_outer,
         planets=turn.planets,
         candidate_planet_ids=candidate_ids,
+        slot_anchored_planet_ids=slot_anchored_ids,
         scan_origins=origins,
         nebulas=turn.nebulas,
     )
@@ -379,7 +408,7 @@ def build_homeworld_sector_overlays_for_turn(
 
 def _hover_summary(
     *,
-    is_viewpoint_sector: bool,
+    is_pinned: bool,
     candidate_count: int,
     is_incomplete: bool,
     is_error: bool,
@@ -387,8 +416,8 @@ def _hover_summary(
     if is_error:
         return HOVER_NO_CANDIDATES
     parts: list[str] = []
-    if is_viewpoint_sector:
-        parts.append("viewpoint pin")
+    if is_pinned:
+        parts.append("player known")
     if is_incomplete:
         parts.append("incomplete scan")
     parts.append("1 candidate" if candidate_count == 1 else f"{candidate_count} candidates")

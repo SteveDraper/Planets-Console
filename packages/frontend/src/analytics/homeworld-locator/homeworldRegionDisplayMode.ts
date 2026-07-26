@@ -42,9 +42,8 @@ export function isHomeworldSectorOverlay(overlay: MapRegionOverlay): boolean {
  * Filter ``regionOverlays`` by homeworld region display mode.
  * Non-homeworld overlays pass through unchanged.
  *
- * ``isPinned`` on a homeworld sector means the sector has at least one
- * homeworld candidate planet (viewpoint pin and/or orphans) -- not merely
- * "this is the viewpoint wedge."
+ * ``isPinned`` means the homeworld is determined and the owning player is known
+ * (slot-anchored candidate). Orphan-only / empty sectors are un-pinned.
  */
 export function applyHomeworldRegionDisplayMode(
   overlays: readonly MapRegionOverlay[],

@@ -187,22 +187,24 @@ def test_build_overlays_sector_count_band_and_pin(template_planet) -> None:
         r_outer=r_outer,
         planets=planets,
         candidate_planet_ids=frozenset(candidate_ids),
+        slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
         nebulas=(),
     )
     assert len(overlays) == player_count
-    # isPinned means the sector has a homeworld candidate (pin and/or orphans).
+    # isPinned = HW determined + owning player known (slot-anchored), not mere orphans.
     pinned = [overlay for overlay in overlays if overlay.is_pinned]
-    assert len(pinned) >= 1
-    assert any(overlay.id == "homeworld-sector-0" for overlay in pinned)
-    viewpoint = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-0")
-    assert viewpoint.is_pinned is True
-    assert viewpoint.status == STATUS_OK
-    assert viewpoint.geometry.type == "boundary"
-    assert len(viewpoint.geometry.disks) == 2
-    assert {disk.radius for disk in viewpoint.geometry.disks} == set(ENVELOPE_RADII_LY)
-    assert viewpoint.geometry.disks[0].x == pin.x
-    assert viewpoint.geometry.disks[0].y == pin.y
+    assert len(pinned) == 1
+    assert pinned[0].id == "homeworld-sector-0"
+    assert pinned[0].status == STATUS_OK
+    assert pinned[0].geometry.type == "boundary"
+    assert len(pinned[0].geometry.disks) == 2
+    assert {disk.radius for disk in pinned[0].geometry.disks} == set(ENVELOPE_RADII_LY)
+    assert pinned[0].geometry.disks[0].x == pin.x
+    assert pinned[0].geometry.disks[0].y == pin.y
+    orphan_sectors = [overlay for overlay in overlays if not overlay.is_pinned]
+    assert len(orphan_sectors) == player_count - 1
+    assert all(overlay.is_pinned is False for overlay in orphan_sectors)
 
     for overlay in overlays:
         verts = overlay.geometry.vertices
@@ -229,6 +231,7 @@ def test_fully_observed_zero_candidates_error_no_disks(template_planet) -> None:
         r_outer=600.0,
         planets=[pin],
         candidate_planet_ids=frozenset({pin.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
         nebulas=(),
     )
@@ -270,10 +273,12 @@ def test_incomplete_observation_uses_unobserved_point(template_planet) -> None:
         r_outer=600.0,
         planets=[pin],
         candidate_planet_ids=frozenset({pin.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
         nebulas=(),
     )
     opposite = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-2")
+    assert opposite.is_pinned is False
     assert opposite.status == STATUS_INCOMPLETE
     assert len(opposite.geometry.disks) == 2
     # Envelope sits on the inner arc (closest unobserved to C).
@@ -284,7 +289,7 @@ def test_incomplete_observation_uses_unobserved_point(template_planet) -> None:
 def test_envelope_center_closest_candidate_to_map_center(template_planet) -> None:
     center = (0.0, 0.0)
     pin = _planet(template_planet, planet_id=1, x=550, y=0)
-    # Two candidates in sector 1 (around +π/2): nearer and farther from C.
+    # Two orphan candidates in sector 1 (around +π/2): nearer and farther from C.
     near = _planet(template_planet, planet_id=2, x=0, y=520)
     far = _planet(template_planet, planet_id=3, x=0, y=580)
     origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
@@ -296,12 +301,13 @@ def test_envelope_center_closest_candidate_to_map_center(template_planet) -> Non
         r_outer=600.0,
         planets=[pin, near, far],
         candidate_planet_ids=frozenset({pin.id, near.id, far.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
         nebulas=(),
     )
     sector_one = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-1")
     assert sector_one.status == STATUS_OK
-    assert sector_one.is_pinned is True
+    assert sector_one.is_pinned is False
     assert sector_one.geometry.disks[0].x == near.x
     assert sector_one.geometry.disks[0].y == near.y
 
@@ -321,11 +327,12 @@ def test_incomplete_with_candidates_prefers_candidate_center(template_planet) ->
         r_outer=600.0,
         planets=[pin, orphan],
         candidate_planet_ids=frozenset({pin.id, orphan.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
         nebulas=(),
     )
     sector_one = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-1")
-    assert sector_one.is_pinned is True
+    assert sector_one.is_pinned is False
     assert sector_one.status == STATUS_INCOMPLETE
     assert sector_one.geometry.disks[0].x == orphan.x
     assert sector_one.geometry.disks[0].y == orphan.y
