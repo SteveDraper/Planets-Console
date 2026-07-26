@@ -1,15 +1,40 @@
 import { describe, expect, it } from 'vitest'
-import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
+import type {
+  MapRegionBoundaryGeometry,
+  MapRegionOverlay,
+} from '../api/mapRegionOverlayTypes'
 import {
-  angleInCounterClockwiseWedge,
+  boundaryGeometryToPolyline,
   collectRegionOverlayHoverSummaries,
-  pointInAnnularSectorBoundary,
+  pointInBoundaryGeometry,
   pointInDisk,
   pointHitsMapRegionOverlay,
 } from './mapRegionOverlayHitTest'
 
+/** Quarter wedge in +X/+Y: angles 0 → π/2, r_inner=100, r_outer=200, center origin. */
+function annularSectorGeometry(
+  overrides: Partial<MapRegionBoundaryGeometry> = {}
+): MapRegionBoundaryGeometry {
+  return {
+    type: 'boundary',
+    vertices: [
+      { x: 200, y: 0 },
+      { x: 0, y: 200 },
+      { x: 0, y: 100 },
+      { x: 100, y: 0 },
+    ],
+    edges: [
+      { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+      { type: 'line' },
+      { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+      { type: 'line' },
+    ],
+    disks: [{ x: 150, y: 50, radius: 81 }],
+    ...overrides,
+  }
+}
+
 function annularSectorOverlay(overrides: Partial<MapRegionOverlay> = {}): MapRegionOverlay {
-  // Quarter wedge in +X/+Y: angles 0 → π/2, r_inner=100, r_outer=200, center origin.
   return {
     kind: 'homeworld-sector',
     id: 'sector-0',
@@ -17,40 +42,99 @@ function annularSectorOverlay(overrides: Partial<MapRegionOverlay> = {}): MapReg
     fillOpacity: 0.2,
     isPinned: false,
     hoverSummary: '3 candidates',
-    geometry: {
-      type: 'boundary',
-      vertices: [
-        { x: 200, y: 0 },
-        { x: 0, y: 200 },
-        { x: 0, y: 100 },
-        { x: 100, y: 0 },
-      ],
-      edges: [
-        { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
-        { type: 'line' },
-        { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
-        { type: 'line' },
-      ],
-      disks: [{ x: 150, y: 50, radius: 81 }],
-    },
+    geometry: annularSectorGeometry(),
     ...overrides,
   }
 }
 
+/** Same annular sector starting at the inner radial (rotated edge order). */
+function annularSectorRotatedGeometry(): MapRegionBoundaryGeometry {
+  return {
+    type: 'boundary',
+    vertices: [
+      { x: 0, y: 100 },
+      { x: 100, y: 0 },
+      { x: 200, y: 0 },
+      { x: 0, y: 200 },
+    ],
+    edges: [
+      { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+      { type: 'line' },
+      { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+      { type: 'line' },
+    ],
+  }
+}
+
 describe('mapRegionOverlayHitTest', () => {
-  it('checks CCW wedge membership', () => {
-    expect(angleInCounterClockwiseWedge(Math.PI / 4, 0, Math.PI / 2)).toBe(true)
-    expect(angleInCounterClockwiseWedge(-Math.PI / 4, 0, Math.PI / 2)).toBe(false)
-    expect(angleInCounterClockwiseWedge(Math.PI, Math.PI / 2, (3 * Math.PI) / 2)).toBe(true)
+  it('hits annular sector interior and misses outside band/wedge', () => {
+    const geometry = annularSectorGeometry()
+    expect(pointInBoundaryGeometry(150, 50, geometry)).toBe(true)
+    expect(pointInBoundaryGeometry(50, 0, geometry)).toBe(false) // inside r_inner
+    expect(pointInBoundaryGeometry(250, 0, geometry)).toBe(false) // outside r_outer
+    expect(pointInBoundaryGeometry(150, -50, geometry)).toBe(false) // wrong wedge
   })
 
-  it('hits annular sector interior and misses outside band/wedge', () => {
-    const geometry = annularSectorOverlay().geometry
-    if (geometry.type !== 'boundary') throw new Error('expected boundary')
-    expect(pointInAnnularSectorBoundary(150, 50, geometry)).toBe(true)
-    expect(pointInAnnularSectorBoundary(50, 0, geometry)).toBe(false) // inside r_inner
-    expect(pointInAnnularSectorBoundary(250, 0, geometry)).toBe(false) // outside r_outer
-    expect(pointInAnnularSectorBoundary(150, -50, geometry)).toBe(false) // wrong wedge
+  it('hits the same annular sector when edge order is rotated', () => {
+    const geometry = annularSectorRotatedGeometry()
+    expect(pointInBoundaryGeometry(150, 50, geometry)).toBe(true)
+    expect(pointInBoundaryGeometry(50, 0, geometry)).toBe(false)
+    expect(pointInBoundaryGeometry(250, 0, geometry)).toBe(false)
+    expect(pointInBoundaryGeometry(150, -50, geometry)).toBe(false)
+  })
+
+  it('hits a line-only closed polygon independent of vertex start', () => {
+    const square: MapRegionBoundaryGeometry = {
+      type: 'boundary',
+      vertices: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ],
+      edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }, { type: 'line' }],
+    }
+    const squareRotated: MapRegionBoundaryGeometry = {
+      type: 'boundary',
+      vertices: [
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+      ],
+      edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }, { type: 'line' }],
+    }
+    expect(pointInBoundaryGeometry(5, 5, square)).toBe(true)
+    expect(pointInBoundaryGeometry(5, 5, squareRotated)).toBe(true)
+    expect(pointInBoundaryGeometry(15, 5, square)).toBe(false)
+    expect(pointInBoundaryGeometry(-1, 5, squareRotated)).toBe(false)
+  })
+
+  it('hits a disk sector (pie slice: two radials + outer arc)', () => {
+    // Quarter disk at origin: 0 → π/2, r=100.
+    const geometry: MapRegionBoundaryGeometry = {
+      type: 'boundary',
+      vertices: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 0, y: 100 },
+      ],
+      edges: [
+        { type: 'line' },
+        { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+        { type: 'line' },
+      ],
+    }
+    expect(pointInBoundaryGeometry(40, 40, geometry)).toBe(true)
+    expect(pointInBoundaryGeometry(40, -40, geometry)).toBe(false)
+    expect(pointInBoundaryGeometry(120, 40, geometry)).toBe(false)
+  })
+
+  it('flattens arcs into a polyline with more than the corner vertices', () => {
+    const ring = boundaryGeometryToPolyline(annularSectorGeometry({ disks: undefined }))
+    expect(ring).not.toBeNull()
+    // Four corners alone would be length 4; quarter arcs need intermediate samples.
+    expect(ring!.length).toBeGreaterThan(4)
   })
 
   it('hits envelope disks', () => {
@@ -113,5 +197,21 @@ describe('mapRegionOverlayHitTest', () => {
     expect(collectRegionOverlayHoverSummaries([overlay], -50, -50)).toEqual([
       'incomplete scan · 0 candidates',
     ])
+  })
+
+  it('hits coverage disks', () => {
+    const overlay: MapRegionOverlay = {
+      kind: 'visibility',
+      id: 'vis-1',
+      fillColor: '#0ea5e9',
+      fillOpacity: 0.15,
+      geometry: {
+        type: 'coverage',
+        disks: [{ x: 10, y: 20, radius: 5 }],
+        patches: [],
+      },
+    }
+    expect(pointHitsMapRegionOverlay(10, 20, overlay)).toBe(true)
+    expect(pointHitsMapRegionOverlay(20, 20, overlay)).toBe(false)
   })
 })
