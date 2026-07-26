@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.geometry import resolve_map_center, sector_index_for_angle
 from api.analytics.homeworld_locator.layout_distributions_asset import (
@@ -218,6 +219,140 @@ def closest_unobserved_band_point(
     return best
 
 
+@dataclass(frozen=True)
+class _SectorOverlayDecision:
+    """Per-sector status, envelope, color, and hover for one overlay emission."""
+
+    is_pinned: bool
+    envelope_center: tuple[float, float] | None
+    status: str
+    fill_color: str
+    hover_summary: str
+
+
+def _planet_closest_to_sector_mid(
+    planets: Sequence[Planet],
+    *,
+    center: tuple[float, float],
+    angle_start: float,
+    angle_end: float,
+    r_inner: float,
+    r_outer: float,
+) -> Planet:
+    """Candidate nearest the annular sector geometric center (mid-angle, mid-radius)."""
+    sector_mid = sector_band_geometric_center(
+        center=center,
+        angle_start=angle_start,
+        angle_end=angle_end,
+        r_inner=r_inner,
+        r_outer=r_outer,
+    )
+    return min(
+        planets,
+        key=lambda planet: distance_ly(planet.x, planet.y, sector_mid[0], sector_mid[1]),
+    )
+
+
+def _decide_sector_overlay(
+    *,
+    pin: Planet,
+    is_viewpoint_sector: bool,
+    sector_candidates: Sequence[Planet],
+    slot_anchored: Sequence[Planet],
+    is_incomplete: bool,
+    center: tuple[float, float],
+    angle_start: float,
+    angle_end: float,
+    r_inner: float,
+    r_outer: float,
+    label_by_planet: Mapping[int, str],
+) -> _SectorOverlayDecision:
+    """Pinned / orphan / incomplete / error → one decision for overlay emission."""
+    is_pinned = len(slot_anchored) > 0
+    candidate_count = len(sector_candidates)
+
+    if is_pinned:
+        # Slot-anchored: viewpoint pin in its sector, else closest to sector mid.
+        if is_viewpoint_sector:
+            anchor = pin
+        else:
+            anchor = _planet_closest_to_sector_mid(
+                slot_anchored,
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            )
+        status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
+        return _SectorOverlayDecision(
+            is_pinned=True,
+            envelope_center=(float(anchor.x), float(anchor.y)),
+            status=status,
+            fill_color=SECTOR_COLOR,
+            hover_summary=_hover_summary(
+                is_pinned=True,
+                candidate_count=candidate_count,
+                is_incomplete=is_incomplete,
+                is_error=False,
+                pinned_player_label=label_by_planet.get(anchor.id),
+            ),
+        )
+
+    if sector_candidates:
+        # Orphans: envelope on candidate closest to sector mid (not map center C).
+        closest = _planet_closest_to_sector_mid(
+            sector_candidates,
+            center=center,
+            angle_start=angle_start,
+            angle_end=angle_end,
+            r_inner=r_inner,
+            r_outer=r_outer,
+        )
+        status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
+        return _SectorOverlayDecision(
+            is_pinned=False,
+            envelope_center=(float(closest.x), float(closest.y)),
+            status=status,
+            fill_color=SECTOR_COLOR,
+            hover_summary=_hover_summary(
+                is_pinned=False,
+                candidate_count=candidate_count,
+                is_incomplete=is_incomplete,
+                is_error=False,
+            ),
+        )
+
+    if is_incomplete:
+        # Fog placeholder: geometric band center (not closest-to-C sample).
+        return _SectorOverlayDecision(
+            is_pinned=False,
+            envelope_center=sector_band_geometric_center(
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            ),
+            status=STATUS_INCOMPLETE,
+            fill_color=SECTOR_COLOR,
+            hover_summary=_hover_summary(
+                is_pinned=False,
+                candidate_count=0,
+                is_incomplete=True,
+                is_error=False,
+            ),
+        )
+
+    return _SectorOverlayDecision(
+        is_pinned=False,
+        envelope_center=None,
+        status=STATUS_ERROR,
+        fill_color=ERROR_SECTOR_COLOR,
+        hover_summary=HOVER_NO_CANDIDATES,
+    )
+
+
 def build_homeworld_sector_overlays(
     *,
     center: tuple[float, float],
@@ -281,105 +416,35 @@ def build_homeworld_sector_overlays(
         slot_anchored = [
             planet for planet in sector_candidates if planet.id in slot_anchored_planet_ids
         ]
-        # Display-mode pinned: HW determined and owning player known (slot-anchored).
-        is_pinned = len(slot_anchored) > 0
-
-        unobserved = closest_unobserved_band_point(
+        is_incomplete = (
+            closest_unobserved_band_point(
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+                origins=scan_origins,
+                nebulas=nebulas,
+            )
+            is not None
+        )
+        decision = _decide_sector_overlay(
+            pin=pin,
+            is_viewpoint_sector=is_viewpoint_sector,
+            sector_candidates=sector_candidates,
+            slot_anchored=slot_anchored,
+            is_incomplete=is_incomplete,
             center=center,
             angle_start=angle_start,
             angle_end=angle_end,
             r_inner=r_inner,
             r_outer=r_outer,
-            origins=scan_origins,
-            nebulas=nebulas,
+            label_by_planet=label_by_planet,
         )
-        is_incomplete = unobserved is not None
-
-        envelope_center: tuple[float, float] | None
-        status: str
-        hover: str
-        sector_color = SECTOR_COLOR
-        pinned_label: str | None = None
-
-        if is_pinned:
-            # Slot-anchored planet(s): prefer the viewpoint pin in its sector,
-            # else the slot-anchored site closest to the sector geometric center.
-            if is_viewpoint_sector:
-                anchor = pin
-                envelope_center = (float(pin.x), float(pin.y))
-            else:
-                sector_mid = sector_band_geometric_center(
-                    center=center,
-                    angle_start=angle_start,
-                    angle_end=angle_end,
-                    r_inner=r_inner,
-                    r_outer=r_outer,
-                )
-                anchor = min(
-                    slot_anchored,
-                    key=lambda planet: distance_ly(
-                        planet.x, planet.y, sector_mid[0], sector_mid[1]
-                    ),
-                )
-                envelope_center = (float(anchor.x), float(anchor.y))
-            pinned_label = label_by_planet.get(anchor.id)
-            status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
-            hover = _hover_summary(
-                is_pinned=True,
-                candidate_count=len(sector_candidates),
-                is_incomplete=is_incomplete,
-                is_error=False,
-                pinned_player_label=pinned_label,
-            )
-        elif sector_candidates:
-            # Orphans: center envelopes on the candidate closest to the sector
-            # geometric center (mid-angle at mid-radius), not closest to map
-            # center C (which biases to the inner arc / sector edge).
-            sector_mid = sector_band_geometric_center(
-                center=center,
-                angle_start=angle_start,
-                angle_end=angle_end,
-                r_inner=r_inner,
-                r_outer=r_outer,
-            )
-            closest = min(
-                sector_candidates,
-                key=lambda planet: distance_ly(planet.x, planet.y, sector_mid[0], sector_mid[1]),
-            )
-            envelope_center = (float(closest.x), float(closest.y))
-            status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
-            hover = _hover_summary(
-                is_pinned=False,
-                candidate_count=len(sector_candidates),
-                is_incomplete=is_incomplete,
-                is_error=False,
-            )
-        elif is_incomplete:
-            # Fog placeholder: geometric center of the band (not closest-to-C
-            # sample, which collapses to an inner-arc corner on full-sector fog).
-            envelope_center = sector_band_geometric_center(
-                center=center,
-                angle_start=angle_start,
-                angle_end=angle_end,
-                r_inner=r_inner,
-                r_outer=r_outer,
-            )
-            status = STATUS_INCOMPLETE
-            hover = _hover_summary(
-                is_pinned=False,
-                candidate_count=0,
-                is_incomplete=True,
-                is_error=False,
-            )
-        else:
-            envelope_center = None
-            status = STATUS_ERROR
-            sector_color = ERROR_SECTOR_COLOR
-            hover = HOVER_NO_CANDIDATES
 
         disks: tuple[MapRegionOverlayDisk, ...] = ()
-        if envelope_center is not None:
-            ex, ey = envelope_center
+        if decision.envelope_center is not None:
+            ex, ey = decision.envelope_center
             disks = tuple(
                 MapRegionOverlayDisk(x=int(round(ex)), y=int(round(ey)), radius=radius)
                 for radius in ENVELOPE_RADII_LY
@@ -396,14 +461,14 @@ def build_homeworld_sector_overlays(
             boundary_to_overlay(
                 kind=KIND_HOMEWORLD_SECTOR,
                 overlay_id=f"homeworld-sector-{index}",
-                fill_color=sector_color,
+                fill_color=decision.fill_color,
                 fill_opacity=0.0,
                 vertices=vertices,
                 edges=edges,
                 disks=disks,
-                is_pinned=is_pinned,
-                status=status,
-                hover_summary=hover,
+                is_pinned=decision.is_pinned,
+                status=decision.status,
+                hover_summary=decision.hover_summary,
             )
         )
 
