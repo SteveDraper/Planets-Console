@@ -1,6 +1,6 @@
 /**
  * Hit-test map region overlays (closed boundary paths + optional disks)
- * and collect ``hoverSummary`` strings for map tooltips.
+ * and collect hover tooltip lines via a client formatter.
  *
  * Boundary hit-test is geometry-complete for shared line|arc closed paths:
  * arcs are flattened to polylines, then even-odd ray casting decides interior.
@@ -177,7 +177,7 @@ export function pointHitsMapRegionOverlay(
     }
     return false
   }
-  // Coverage overlays: hit disks only (no homeworld hoverSummary today).
+  // Coverage overlays: hit disks only (no homeworld hover facts today).
   for (const disk of geometry.disks) {
     if (pointInDisk(mapX, mapY, disk)) return true
   }
@@ -185,19 +185,21 @@ export function pointHitsMapRegionOverlay(
 }
 
 /**
- * Collect hoverSummary lines for overlays under ``(mapX, mapY)``.
- * Overlays without hoverSummary are skipped even if hit.
+ * Collect hover tooltip lines for overlays under ``(mapX, mapY)``.
+ * ``formatLine`` builds display copy from structured overlay facts (FE-owned).
+ * Overlays that format to null/empty are skipped even if hit.
  */
 export function collectRegionOverlayHoverSummaries(
   overlays: readonly MapRegionOverlay[],
   mapX: number,
-  mapY: number
+  mapY: number,
+  formatLine: (overlay: MapRegionOverlay) => string | null
 ): string[] {
   const lines: string[] = []
   for (const overlay of overlays) {
-    const summary = overlay.hoverSummary?.trim()
-    if (summary == null || summary === '') continue
     if (!pointHitsMapRegionOverlay(mapX, mapY, overlay)) continue
+    const summary = formatLine(overlay)?.trim()
+    if (summary == null || summary === '') continue
     lines.push(summary)
   }
   return lines

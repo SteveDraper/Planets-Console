@@ -16,7 +16,7 @@ type StellarCartographyHoverPanelProps = {
   wormholeHoverLines: string[] | null
   /** When a planet hover/pin label is showing, suppress cartography hover entirely. */
   blockedByPlanetHover?: boolean
-  /** Extra stacked lines (e.g. homeworld region ``hoverSummary``). */
+  /** Extra stacked lines (e.g. homeworld region hover copy). */
   additionalHoverLines?: readonly string[] | null
   clientToFlowPosition: (
     clientX: number,

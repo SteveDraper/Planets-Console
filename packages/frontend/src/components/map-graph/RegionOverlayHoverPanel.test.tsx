@@ -50,7 +50,9 @@ const sampleOverlay: MapRegionOverlay = {
   id: 's1',
   fillColor: '#fff',
   fillOpacity: 0.2,
-  hoverSummary: 'pinned',
+  isPinned: true,
+  candidateCount: 1,
+  playerLabel: 'alice',
   geometry: { type: 'coverage', disks: [], patches: [] },
 }
 

@@ -17,7 +17,6 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
 from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
 from api.analytics.homeworld_locator.sector_overlays import (
     ENVELOPE_RADII_LY,
-    HOVER_NO_CANDIDATES,
     KIND_HOMEWORLD_SECTOR,
     STATUS_ERROR,
     STATUS_INCOMPLETE,
@@ -198,7 +197,8 @@ def test_build_overlays_sector_count_band_and_pin(template_planet) -> None:
     assert len(pinned) == 1
     assert pinned[0].id == "homeworld-sector-0"
     assert pinned[0].status == STATUS_OK
-    assert pinned[0].hover_summary == ("player: koshling (The Lizard Alliance) · 1 candidate")
+    assert pinned[0].candidate_count == 1
+    assert pinned[0].player_label == "koshling (The Lizard Alliance)"
     assert pinned[0].geometry.type == "boundary"
     assert len(pinned[0].geometry.disks) == 2
     assert {disk.radius for disk in pinned[0].geometry.disks} == set(ENVELOPE_RADII_LY)
@@ -213,11 +213,13 @@ def test_build_overlays_sector_count_band_and_pin(template_planet) -> None:
         assert abs(math.hypot(verts[0].x - center[0], verts[0].y - center[1]) - r_outer) < 1e-6
         assert abs(math.hypot(verts[2].x - center[0], verts[2].y - center[1]) - r_inner) < 1e-6
         assert overlay.kind == KIND_HOMEWORLD_SECTOR
+        assert overlay.candidate_count is not None
         wire = map_region_overlay_to_wire(overlay)
         assert wire["geometry"]["type"] == "boundary"
         assert "isPinned" in wire
         assert "status" in wire
-        assert "hoverSummary" in wire
+        assert "candidateCount" in wire
+        assert "hoverSummary" not in wire
 
 
 def test_fully_observed_zero_candidates_error_no_disks(template_planet) -> None:
@@ -246,7 +248,8 @@ def test_fully_observed_zero_candidates_error_no_disks(template_planet) -> None:
     assert len(errors) == 3
     for overlay in errors:
         assert overlay.geometry.disks == ()
-        assert overlay.hover_summary == HOVER_NO_CANDIDATES
+        assert overlay.candidate_count == 0
+        assert overlay.player_label is None
         assert overlay.fill_color.startswith("#ef")
         assert overlay.fill_opacity == 0.0
     assert all(overlay.fill_opacity == 0.0 for overlay in overlays)
@@ -448,7 +451,9 @@ def test_for_turn_emits_when_gate_passes_and_empty_without_pin(
     )
     assert len(overlays) == 11
     pinned = next(overlay for overlay in overlays if overlay.is_pinned)
-    assert f"player: {turn.player.username}" in pinned.hover_summary
+    assert pinned.player_label is not None
+    assert turn.player.username in pinned.player_label
+    assert pinned.candidate_count == 1
     assert sum(1 for overlay in overlays if overlay.is_pinned) == 1
 
     no_pin_view = HomeworldCandidateView(

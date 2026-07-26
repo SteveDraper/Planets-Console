@@ -138,7 +138,7 @@ describe('map analytic registry', () => {
       HOMEWORLD_LOCATOR_ANALYTIC_ID,
       'map',
       sampleScope,
-      'sectors-v2',
+      'sectors-v3',
     ])
     expect(spec.enabled).toBe(true)
   })

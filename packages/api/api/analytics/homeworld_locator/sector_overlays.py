@@ -51,8 +51,6 @@ STATUS_OK = "ok"
 STATUS_INCOMPLETE = "incomplete"
 STATUS_ERROR = "error"
 
-HOVER_NO_CANDIDATES = "no candidates"
-
 # Wire ``fillColor`` / ``fillOpacity`` are required on shared overlays; sectors are
 # stroke-only on the map (``fillOpacity`` always 0). Color marks ok vs error.
 SECTOR_COLOR = "#f97316"
@@ -221,13 +219,14 @@ def closest_unobserved_band_point(
 
 @dataclass(frozen=True)
 class _SectorOverlayDecision:
-    """Per-sector status, envelope, color, and hover for one overlay emission."""
+    """Per-sector status, envelope, color, and hover facts for one overlay emission."""
 
     is_pinned: bool
     envelope_center: tuple[float, float] | None
     status: str
     fill_color: str
-    hover_summary: str
+    candidate_count: int
+    player_label: str | None = None
 
 
 def _planet_closest_to_sector_mid(
@@ -290,13 +289,8 @@ def _decide_sector_overlay(
             envelope_center=(float(anchor.x), float(anchor.y)),
             status=status,
             fill_color=SECTOR_COLOR,
-            hover_summary=_hover_summary(
-                is_pinned=True,
-                candidate_count=candidate_count,
-                is_incomplete=is_incomplete,
-                is_error=False,
-                pinned_player_label=label_by_planet.get(anchor.id),
-            ),
+            candidate_count=candidate_count,
+            player_label=label_by_planet.get(anchor.id),
         )
 
     if sector_candidates:
@@ -315,12 +309,7 @@ def _decide_sector_overlay(
             envelope_center=(float(closest.x), float(closest.y)),
             status=status,
             fill_color=SECTOR_COLOR,
-            hover_summary=_hover_summary(
-                is_pinned=False,
-                candidate_count=candidate_count,
-                is_incomplete=is_incomplete,
-                is_error=False,
-            ),
+            candidate_count=candidate_count,
         )
 
     if is_incomplete:
@@ -336,12 +325,7 @@ def _decide_sector_overlay(
             ),
             status=STATUS_INCOMPLETE,
             fill_color=SECTOR_COLOR,
-            hover_summary=_hover_summary(
-                is_pinned=False,
-                candidate_count=0,
-                is_incomplete=True,
-                is_error=False,
-            ),
+            candidate_count=0,
         )
 
     return _SectorOverlayDecision(
@@ -349,7 +333,7 @@ def _decide_sector_overlay(
         envelope_center=None,
         status=STATUS_ERROR,
         fill_color=ERROR_SECTOR_COLOR,
-        hover_summary=HOVER_NO_CANDIDATES,
+        candidate_count=0,
     )
 
 
@@ -374,7 +358,7 @@ def build_homeworld_sector_overlays(
     or empty sectors are un-pinned for display-mode filtering.
 
     ``pinned_player_label_by_planet_id`` maps slot-anchored planet ids to
-    ``username (race)`` strings for hover text.
+    roster identity strings (``username (race)``) for wire ``playerLabel``.
     """
     if player_count < 2:
         return ()
@@ -468,7 +452,8 @@ def build_homeworld_sector_overlays(
                 disks=disks,
                 is_pinned=decision.is_pinned,
                 status=decision.status,
-                hover_summary=decision.hover_summary,
+                candidate_count=decision.candidate_count,
+                player_label=decision.player_label,
             )
         )
 
@@ -535,7 +520,7 @@ def build_homeworld_sector_overlays_for_turn(
 
 
 def format_pinned_player_label(player: Player, races_by_id: Mapping[int, Race]) -> str:
-    """``username (race name)`` for pinned-sector hover."""
+    """Roster identity ``username (race name)`` for pinned-sector ``playerLabel``."""
     race = races_by_id.get(player.raceid)
     if race is not None and race.name:
         return f"{player.username} ({race.name})"
@@ -574,7 +559,7 @@ def pinned_player_labels_for_view(
     game_info: GameInfo | None = None,
     game_id: int | None = None,
 ) -> dict[int, str]:
-    """Map slot-anchored candidate planet ids to ``username (race)`` hover labels."""
+    """Map slot-anchored candidate planet ids to roster identity labels."""
     races_by_id = {race.id: race for race in turn.races}
     labels: dict[int, str] = {}
     for row in view.candidates:
@@ -591,25 +576,3 @@ def pinned_player_labels_for_view(
             continue
         labels[row.planet_id] = format_pinned_player_label(player, races_by_id)
     return labels
-
-
-def _hover_summary(
-    *,
-    is_pinned: bool,
-    candidate_count: int,
-    is_incomplete: bool,
-    is_error: bool,
-    pinned_player_label: str | None = None,
-) -> str:
-    if is_error:
-        return HOVER_NO_CANDIDATES
-    parts: list[str] = []
-    if is_pinned:
-        if pinned_player_label:
-            parts.append(f"player: {pinned_player_label}")
-        else:
-            parts.append("player known")
-    if is_incomplete:
-        parts.append("incomplete scan")
-    parts.append("1 candidate" if candidate_count == 1 else f"{candidate_count} candidates")
-    return " · ".join(parts)

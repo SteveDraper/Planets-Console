@@ -177,6 +177,13 @@ function normalizeOptionalString(raw: unknown): string | undefined {
   return raw
 }
 
+function normalizeOptionalNonNegativeInt(raw: unknown): number | undefined {
+  if (raw === undefined) return undefined
+  const n = parseJsonInteger(raw)
+  if (n == null || n < 0) return undefined
+  return n
+}
+
 export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null {
   if (raw == null || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
@@ -211,11 +218,24 @@ export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null
   const status = normalizeOptionalString(o.status)
   if (o.status !== undefined && status === undefined) return null
   if (status !== undefined) overlay.status = status
-  const hoverSummary = normalizeOptionalString(o.hoverSummary ?? o.hover_summary)
-  if ((o.hoverSummary !== undefined || o.hover_summary !== undefined) && hoverSummary === undefined) {
+  const candidateCount = normalizeOptionalNonNegativeInt(
+    o.candidateCount ?? o.candidate_count
+  )
+  if (
+    (o.candidateCount !== undefined || o.candidate_count !== undefined) &&
+    candidateCount === undefined
+  ) {
     return null
   }
-  if (hoverSummary !== undefined) overlay.hoverSummary = hoverSummary
+  if (candidateCount !== undefined) overlay.candidateCount = candidateCount
+  const playerLabel = normalizeOptionalString(o.playerLabel ?? o.player_label)
+  if (
+    (o.playerLabel !== undefined || o.player_label !== undefined) &&
+    playerLabel === undefined
+  ) {
+    return null
+  }
+  if (playerLabel !== undefined) overlay.playerLabel = playerLabel
   return overlay
 }
 

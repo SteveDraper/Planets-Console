@@ -1,5 +1,5 @@
 /**
- * Debounced map tooltip for ``regionOverlays`` with ``hoverSummary``.
+ * Debounced map tooltip for ``regionOverlays`` with structured hover facts.
  * Hit-tests filtered overlays in continuous map coordinates.
  */
 
@@ -8,6 +8,7 @@ import { useStore } from '@xyflow/react'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { flowCenterToPlanet } from '../../lib/planetSpatialGrid'
 import { collectRegionOverlayHoverSummaries } from '../../lib/mapRegionOverlayHitTest'
+import { formatRegionOverlayHoverLine } from './formatRegionOverlayHover'
 import { clientToFlowPosition } from './geometry'
 
 type RegionOverlayHoverPanelProps = {
@@ -28,7 +29,12 @@ export function regionOverlayHoverLinesAtClient(
   const flow = clientToFlowPosition(clientX, clientY, domNode, transform)
   if (flow == null) return []
   const { px, py } = flowCenterToPlanet(flow.x, flow.y)
-  return collectRegionOverlayHoverSummaries(regionOverlays, px, py)
+  return collectRegionOverlayHoverSummaries(
+    regionOverlays,
+    px,
+    py,
+    formatRegionOverlayHoverLine
+  )
 }
 
 /**
@@ -62,7 +68,7 @@ export function useMapPaneClientPos(): {
   return { clientPos, domNode }
 }
 
-/** Live ``hoverSummary`` lines under the pointer for the given overlays.
+/** Live hover lines under the pointer for the given overlays.
 
 Must be called from a component mounted under ``ReactFlow`` (xyflow store).
 Returns ``clientPos`` so tooltip chrome can share the same pointer source.

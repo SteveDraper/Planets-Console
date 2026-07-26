@@ -91,7 +91,10 @@ export type MapRegionOverlay = {
   geometry: MapRegionOverlayGeometry
   isPinned?: boolean
   status?: string
-  hoverSummary?: string
+  /** Domain hover fact: candidate planets in this region (homeworld sectors). */
+  candidateCount?: number
+  /** Roster identity for a pinned owner (e.g. ``username (race)``), not UI prose. */
+  playerLabel?: string
   /** Optional client paint policy (analytic adapters; not Core wire). */
   paint?: MapRegionOverlayPaint
 }

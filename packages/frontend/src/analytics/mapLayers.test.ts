@@ -249,7 +249,8 @@ describe('combineMapData', () => {
           fillColor: '#f97316',
           fillOpacity: 0.2,
           isPinned: true,
-          hoverSummary: 'pinned · 1 candidate',
+          candidateCount: 1,
+          playerLabel: 'alice',
           geometry: {
             type: 'boundary',
             vertices: [
@@ -272,7 +273,7 @@ describe('combineMapData', () => {
           fillColor: '#f97316',
           fillOpacity: 0.2,
           isPinned: false,
-          hoverSummary: '2 candidates',
+          candidateCount: 2,
           geometry: {
             type: 'boundary',
             vertices: [
@@ -307,7 +308,8 @@ describe('combineMapData', () => {
     expect(combined.regionOverlays[0]).toMatchObject({
       kind: 'homeworld-sector',
       isPinned: true,
-      hoverSummary: 'pinned · 1 candidate',
+      candidateCount: 1,
+      playerLabel: 'alice',
     })
   })
 

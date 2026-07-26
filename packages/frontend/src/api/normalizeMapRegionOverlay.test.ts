@@ -49,7 +49,8 @@ describe('normalizeMapRegionOverlay', () => {
     },
     isPinned: true,
     status: 'ok',
-    hoverSummary: 'pinned sector',
+    candidateCount: 1,
+    playerLabel: 'koshling (The Lizard Alliance)',
   }
 
   it('accepts a well-formed coverage overlay', () => {
@@ -153,6 +154,19 @@ describe('normalizeMapRegionOverlay', () => {
 
   it('rejects non-boolean isPinned when present', () => {
     expect(normalizeMapRegionOverlay({ ...validBoundary, isPinned: 'yes' })).toBeNull()
+  })
+
+  it('rejects non-integer candidateCount when present', () => {
+    expect(
+      normalizeMapRegionOverlay({ ...validBoundary, candidateCount: 'many' })
+    ).toBeNull()
+  })
+
+  it('ignores legacy hoverSummary without requiring it', () => {
+    const withLegacy = { ...validBoundary, hoverSummary: 'pinned sector' }
+    const out = normalizeMapRegionOverlay(withLegacy)
+    expect(out).toEqual(validBoundary)
+    expect(out).not.toHaveProperty('hoverSummary')
   })
 
   it('normalizes regionOverlays on map data responses', () => {

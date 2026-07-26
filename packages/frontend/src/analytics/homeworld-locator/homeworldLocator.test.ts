@@ -153,7 +153,7 @@ describe('parseHomeworldLocatorPayload', () => {
           fillColor: '#f97316',
           fillOpacity: 0.2,
           isPinned: false,
-          hoverSummary: '2 candidates',
+          candidateCount: 2,
           geometry: {
             type: 'boundary',
             vertices: [

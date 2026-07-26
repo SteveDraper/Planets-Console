@@ -10,6 +10,7 @@ import {
   pointInDisk,
   pointHitsMapRegionOverlay,
 } from './mapRegionOverlayHitTest'
+import { formatHomeworldSectorHoverLine } from '../analytics/homeworld-locator/formatHomeworldSectorHover'
 
 /** Quarter wedge in +X/+Y: angles 0 → π/2, r_inner=100, r_outer=200, center origin. */
 function annularSectorGeometry(
@@ -41,7 +42,8 @@ function annularSectorOverlay(overrides: Partial<MapRegionOverlay> = {}): MapReg
     fillColor: '#f97316',
     fillOpacity: 0.2,
     isPinned: false,
-    hoverSummary: '3 candidates',
+    status: 'ok',
+    candidateCount: 3,
     geometry: annularSectorGeometry(),
     ...overrides,
   }
@@ -142,11 +144,17 @@ describe('mapRegionOverlayHitTest', () => {
     expect(pointInDisk(150, 50 + 82, { x: 150, y: 50, radius: 81 })).toBe(false)
   })
 
-  it('collects hoverSummary for hit overlays only', () => {
-    const hit = annularSectorOverlay({ id: 'hit', hoverSummary: 'pinned · 1 candidate' })
+  it('collects formatted hover lines for hit overlays only', () => {
+    const hit = annularSectorOverlay({
+      id: 'hit',
+      isPinned: true,
+      candidateCount: 1,
+      playerLabel: 'alice',
+    })
     const miss = annularSectorOverlay({
       id: 'miss',
-      hoverSummary: 'no candidates',
+      status: 'error',
+      candidateCount: 0,
       geometry: {
         type: 'boundary',
         vertices: [
@@ -163,19 +171,29 @@ describe('mapRegionOverlayHitTest', () => {
         ],
       },
     })
-    const noSummary = annularSectorOverlay({ id: 'bare' })
-    delete noSummary.hoverSummary
+    const noHover = annularSectorOverlay({
+      id: 'bare',
+      kind: 'visibility-ship-scan',
+      candidateCount: undefined,
+      status: undefined,
+    })
 
-    expect(collectRegionOverlayHoverSummaries([hit, miss, noSummary], 150, 50)).toEqual([
-      'pinned · 1 candidate',
-    ])
+    expect(
+      collectRegionOverlayHoverSummaries(
+        [hit, miss, noHover],
+        150,
+        50,
+        formatHomeworldSectorHoverLine
+      )
+    ).toEqual(['player: alice · 1 candidate'])
     expect(pointHitsMapRegionOverlay(150, 50, hit)).toBe(true)
     expect(pointHitsMapRegionOverlay(150, 50, miss)).toBe(false)
   })
 
   it('hits via envelope disk even outside the annular wedge', () => {
     const overlay = annularSectorOverlay({
-      hoverSummary: 'incomplete scan · 0 candidates',
+      status: 'incomplete',
+      candidateCount: 0,
       geometry: {
         type: 'boundary',
         vertices: [
@@ -194,9 +212,14 @@ describe('mapRegionOverlayHitTest', () => {
         disks: [{ x: -50, y: -50, radius: 20 }],
       },
     })
-    expect(collectRegionOverlayHoverSummaries([overlay], -50, -50)).toEqual([
-      'incomplete scan · 0 candidates',
-    ])
+    expect(
+      collectRegionOverlayHoverSummaries(
+        [overlay],
+        -50,
+        -50,
+        formatHomeworldSectorHoverLine
+      )
+    ).toEqual(['incomplete scan · 0 candidates'])
   })
 
   it('hits coverage disks', () => {

@@ -132,8 +132,9 @@ class MapRegionOverlay:
 
     Geometry is discriminated: ``coverage`` (disks+patches) or ``boundary``
     (ordered vertices + line|arc edges, optional envelope disks). Optional
-    annotations (``is_pinned``, ``status``, ``hover_summary``) are shared and
-    ignored by analytics that do not use them.
+    annotations are shared domain/machine facts (``is_pinned``, ``status``,
+    ``candidate_count``, ``player_label``) -- not UI copy. Clients format
+    hover/display strings. Analytics that do not use annotations omit them.
     """
 
     kind: str
@@ -143,7 +144,8 @@ class MapRegionOverlay:
     geometry: MapRegionOverlayGeometry
     is_pinned: bool | None = None
     status: str | None = None
-    hover_summary: str | None = None
+    candidate_count: int | None = None
+    player_label: str | None = None
 
 
 def default_effective_range(base_range: float, density: float) -> float:
@@ -437,8 +439,10 @@ def map_region_overlay_to_wire(overlay: MapRegionOverlay) -> dict:
         wire["isPinned"] = overlay.is_pinned
     if overlay.status is not None:
         wire["status"] = overlay.status
-    if overlay.hover_summary is not None:
-        wire["hoverSummary"] = overlay.hover_summary
+    if overlay.candidate_count is not None:
+        wire["candidateCount"] = overlay.candidate_count
+    if overlay.player_label is not None:
+        wire["playerLabel"] = overlay.player_label
     return wire
 
 
@@ -474,7 +478,8 @@ def boundary_to_overlay(
     disks: Sequence[MapRegionOverlayDisk] = (),
     is_pinned: bool | None = None,
     status: str | None = None,
-    hover_summary: str | None = None,
+    candidate_count: int | None = None,
+    player_label: str | None = None,
 ) -> MapRegionOverlay:
     """Wrap a closed boundary path (and optional envelope disks) for the wire.
 
@@ -501,7 +506,8 @@ def boundary_to_overlay(
         ),
         is_pinned=is_pinned,
         status=status,
-        hover_summary=hover_summary,
+        candidate_count=candidate_count,
+        player_label=player_label,
     )
 
 

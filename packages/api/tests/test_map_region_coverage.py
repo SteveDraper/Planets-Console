@@ -130,6 +130,8 @@ def test_wire_round_trip_shape():
     assert patch["coverageRle"][0].keys() >= {"length", "covered"}
     assert "isPinned" not in wire
     assert "status" not in wire
+    assert "candidateCount" not in wire
+    assert "playerLabel" not in wire
     assert "hoverSummary" not in wire
 
 
@@ -154,7 +156,8 @@ def test_boundary_wire_round_trip_with_annotations():
         disks=(MapRegionOverlayDisk(x=150, y=50, radius=81),),
         is_pinned=True,
         status="ok",
-        hover_summary="pinned sector",
+        candidate_count=1,
+        player_label="koshling (The Lizard Alliance)",
     )
     wire = map_region_overlay_to_wire(overlay)
     assert wire["geometry"]["type"] == "boundary"
@@ -169,7 +172,9 @@ def test_boundary_wire_round_trip_with_annotations():
     assert wire["geometry"]["disks"] == [{"x": 150, "y": 50, "radius": 81}]
     assert wire["isPinned"] is True
     assert wire["status"] == "ok"
-    assert wire["hoverSummary"] == "pinned sector"
+    assert wire["candidateCount"] == 1
+    assert wire["playerLabel"] == "koshling (The Lizard Alliance)"
+    assert "hoverSummary" not in wire
 
 
 def test_boundary_rejects_mismatched_edge_count():
