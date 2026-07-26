@@ -146,11 +146,37 @@ describe('parseHomeworldLocatorPayload', () => {
       ],
       nodes: [],
       edges: [],
+      regionOverlays: [
+        {
+          kind: 'homeworld-sector',
+          id: 'homeworld-sector-0',
+          fillColor: '#f97316',
+          fillOpacity: 0.2,
+          isPinned: false,
+          hoverSummary: '2 candidates',
+          geometry: {
+            type: 'boundary',
+            vertices: [
+              { x: 1, y: 0 },
+              { x: 0, y: 1 },
+              { x: 0, y: 0.5 },
+              { x: 0.5, y: 0 },
+            ],
+            edges: [
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+              { type: 'line' },
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+              { type: 'line' },
+            ],
+          },
+        },
+      ],
     })
     expect(parsed).not.toBeNull()
     expect(parsed?.baselineDegraded).toBe(true)
     expect(parsed?.markers).toHaveLength(1)
     expect(parsed?.markers?.[0]?.confidenceTier).toBe('definite')
+    expect(parsed?.regionOverlays).toHaveLength(1)
   })
 
   it('rejects invalid confidence tiers', () => {

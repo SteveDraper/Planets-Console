@@ -29,8 +29,14 @@ import { nodeTypes, toFlowNodes } from './map-graph/nodes'
 import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
+import {
+  RegionOverlayHoverTooltip,
+  useRegionOverlayHoverLines,
+} from './map-graph/RegionOverlayHoverPanel'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
+import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
+import { useHomeworldRegionDisplayStore } from '../stores/homeworldRegionDisplay'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import {
   WormholeInteractionProvider,
@@ -175,10 +181,21 @@ function MapGraphFlow({
     [frame, policy, wormholeLineRevealKey]
   )
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
-  // Visibility prefs only mutate visibility kinds; other regionOverlays pass through.
+  const homeworldRegionDisplayMode = useHomeworldRegionDisplayStore(
+    (s) => s.regionDisplayMode
+  )
+  // Visibility prefs only mutate visibility kinds; homeworld display mode filters sectors.
   const regionOverlays = useMemo(
-    () => applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
-    [data.regionOverlays, visibilityKinds]
+    () =>
+      applyHomeworldRegionDisplayMode(
+        applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
+        homeworldRegionDisplayMode
+      ),
+    [data.regionOverlays, visibilityKinds, homeworldRegionDisplayMode]
+  )
+  const regionHoverLines = useRegionOverlayHoverLines(
+    regionOverlays,
+    blockedByPlanetHover
   )
 
   return (
@@ -237,9 +254,12 @@ function MapGraphFlow({
           cartography={cartography}
           wormholeHoverLines={wormholeHoverLines}
           blockedByPlanetHover={blockedByPlanetHover}
+          additionalHoverLines={regionHoverLines}
           clientToFlowPosition={clientToFlowPosition}
         />
-      ) : null}
+      ) : (
+        <RegionOverlayHoverTooltip lines={regionHoverLines} />
+      )}
     </ReactFlow>
   )
 }

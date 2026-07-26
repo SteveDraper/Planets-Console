@@ -1,6 +1,6 @@
-import { cn } from '../../lib/utils'
+import { cn } from '../lib/utils'
 
-type CartographyDisplayModeControlProps<T extends string> = {
+type DisplayModeControlProps<T extends string> = {
   label: string
   ariaLabel: string
   modes: readonly T[]
@@ -9,14 +9,15 @@ type CartographyDisplayModeControlProps<T extends string> = {
   onChange: (mode: T) => void
 }
 
-export function CartographyDisplayModeControl<T extends string>({
+/** Segmented display-mode control shared by expandable analytic sidebar tiles. */
+export function DisplayModeControl<T extends string>({
   label,
   ariaLabel,
   modes,
   modeLabels,
   value,
   onChange,
-}: CartographyDisplayModeControlProps<T>) {
+}: DisplayModeControlProps<T>) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <span>{label}</span>

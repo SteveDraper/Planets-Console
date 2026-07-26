@@ -8,7 +8,7 @@ import {
   type CartographyLayerId,
   type StellarCartographySettingsGates,
 } from './layers'
-import { CartographyDisplayModeControl } from './CartographyDisplayModeControl'
+import { DisplayModeControl } from '../DisplayModeControl'
 import {
   CLUSTER_OUTLINE_DISPLAY_MODE_LABELS,
   CLUSTER_OUTLINE_DISPLAY_MODES,
@@ -43,7 +43,7 @@ function WormholeDisplayModeControl({
   onChange: (mode: WormholeDisplayMode) => void
 }) {
   return (
-    <CartographyDisplayModeControl
+    <DisplayModeControl
       label="Wormholes"
       ariaLabel="Wormhole display mode"
       modes={WORMHOLE_DISPLAY_MODES}
@@ -64,7 +64,7 @@ function ClusterOutlineDisplayModeControl({
   onChange: (mode: ClusterOutlineDisplayMode) => void
 }) {
   return (
-    <CartographyDisplayModeControl
+    <DisplayModeControl
       label={label}
       ariaLabel={`${label} display mode`}
       modes={CLUSTER_OUTLINE_DISPLAY_MODES}

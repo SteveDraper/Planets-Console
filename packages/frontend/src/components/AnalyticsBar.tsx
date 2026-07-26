@@ -144,15 +144,16 @@ export function AnalyticsBar({
 
           if (isHomeworldLocator) {
             return (
-              <HomeworldLocatorTile
-                key={a.id}
-                name={a.name}
-                enabled={enabled}
-                supportsMode={supportsMode}
-                depressed={depressed}
-                onToggle={() => onToggle(a.id)}
-                inactiveReason={homeworldInactiveReason}
-              />
+              <li key={a.id} className="min-w-0">
+                <HomeworldLocatorTile
+                  name={a.name}
+                  enabled={enabled}
+                  supportsMode={supportsMode}
+                  depressed={depressed}
+                  onToggle={() => onToggle(a.id)}
+                  inactiveReason={homeworldInactiveReason}
+                />
+              </li>
             )
           }
 

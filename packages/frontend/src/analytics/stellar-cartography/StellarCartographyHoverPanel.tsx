@@ -16,6 +16,8 @@ type StellarCartographyHoverPanelProps = {
   wormholeHoverLines: string[] | null
   /** When a planet hover/pin label is showing, suppress cartography hover entirely. */
   blockedByPlanetHover?: boolean
+  /** Extra stacked lines (e.g. homeworld region ``hoverSummary``). */
+  additionalHoverLines?: readonly string[] | null
   clientToFlowPosition: (
     clientX: number,
     clientY: number,
@@ -29,7 +31,8 @@ type StellarCartographyHoverPanelProps = {
 export function buildStellarCartographyHoverLines(
   entries: StellarCartographySampleEntry[],
   wormholeHoverLines: string[] | null,
-  policy: CartographyVisibilityPolicy
+  policy: CartographyVisibilityPolicy,
+  additionalHoverLines: readonly string[] | null = null
 ): string[] {
   const lines = policy.sampleEntries(entries).map(formatStellarCartographySampleLine)
   if (
@@ -39,6 +42,9 @@ export function buildStellarCartographyHoverLines(
   ) {
     lines.push(...wormholeHoverLines)
   }
+  if (additionalHoverLines != null && additionalHoverLines.length > 0) {
+    lines.push(...additionalHoverLines)
+  }
   return lines
 }
 
@@ -47,6 +53,7 @@ export function StellarCartographyHoverPanel({
   cartography,
   wormholeHoverLines,
   blockedByPlanetHover = false,
+  additionalHoverLines = null,
   clientToFlowPosition,
 }: StellarCartographyHoverPanelProps) {
   const domNode = useStore((s) => s.domNode ?? null)
@@ -126,7 +133,8 @@ export function StellarCartographyHoverPanel({
   const lines = buildStellarCartographyHoverLines(
     entries,
     wormholeHoverLines,
-    cartography.policy
+    cartography.policy,
+    additionalHoverLines
   )
   if (
     blockedByPlanetHover ||

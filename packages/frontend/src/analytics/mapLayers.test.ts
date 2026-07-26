@@ -224,6 +224,93 @@ describe('combineMapData', () => {
     })
   })
 
+  it('merges homeworld sector region overlays with markers', () => {
+    const baseWithPlanets: MapDataResponse = {
+      analyticId: 'base-map',
+      nodes: [{ id: 'p1', label: 'p1', x: 10, y: 20, planet: { id: 1 } }],
+      edges: [],
+    }
+    const homeworld: MapDataResponse = {
+      analyticId: 'homeworld-locator',
+      nodes: [],
+      edges: [],
+      homeworldMarkers: [
+        {
+          planetId: 1,
+          perspective: 1,
+          confidenceTier: 'definite',
+          attribution: 'inferred',
+        },
+      ],
+      regionOverlays: [
+        {
+          kind: 'homeworld-sector',
+          id: 'homeworld-sector-0',
+          fillColor: '#f97316',
+          fillOpacity: 0.2,
+          isPinned: true,
+          hoverSummary: 'pinned · 1 candidate',
+          geometry: {
+            type: 'boundary',
+            vertices: [
+              { x: 200, y: 0 },
+              { x: 0, y: 200 },
+              { x: 0, y: 100 },
+              { x: 100, y: 0 },
+            ],
+            edges: [
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+              { type: 'line' },
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+              { type: 'line' },
+            ],
+          },
+        },
+        {
+          kind: 'homeworld-sector',
+          id: 'homeworld-sector-1',
+          fillColor: '#f97316',
+          fillOpacity: 0.2,
+          isPinned: false,
+          hoverSummary: '2 candidates',
+          geometry: {
+            type: 'boundary',
+            vertices: [
+              { x: 0, y: 200 },
+              { x: -200, y: 0 },
+              { x: -100, y: 0 },
+              { x: 0, y: 100 },
+            ],
+            edges: [
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+              { type: 'line' },
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+              { type: 'line' },
+            ],
+          },
+        },
+      ],
+    }
+
+    const combined = combineMapData(
+      ['base-map', 'homeworld-locator'],
+      [baseWithPlanets, homeworld],
+      { liveConnectionsParams: null }
+    )
+
+    expect(combined.homeworldMarkers).toHaveLength(1)
+    expect(combined.regionOverlays).toHaveLength(2)
+    expect(combined.regionOverlays.map((o) => o.id)).toEqual([
+      'homeworld-sector-0',
+      'homeworld-sector-1',
+    ])
+    expect(combined.regionOverlays[0]).toMatchObject({
+      kind: 'homeworld-sector',
+      isPinned: true,
+      hoverSummary: 'pinned · 1 candidate',
+    })
+  })
+
   it('records unknown-target wormhole entrances when no edge is emitted', () => {
     const sc: MapDataResponse = {
       analyticId: 'stellar-cartography',
