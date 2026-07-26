@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""Compute homeworld distance distributions from sampled_homeworlds.csv."""
+"""Compute and distill homeworld distance distributions from sampled_homeworlds.csv.
+
+Report mode (default) writes histogram JSON under ``local/`` (gitignored). Distill
+mode Laplace-smooths those histograms into the committed layout distribution asset
+used by homeworld region overlay paint and later likelihood scoring.
+
+Regenerate the shipped asset (from repo root)::
+
+    # 1) Optional: rebuild the gitignored histogram report from CSV + sampler store
+    PYTHONPATH=scripts:packages/api uv run python scripts/visualize_homeworld_distributions.py \\
+      --csv local/sampled_homeworlds.csv --storage-root .sampler_data \\
+      -o local/homeworld_distributions.json
+
+    # 2) Distill report → assets/analytics/homeworld-locator/layout_distributions.json
+    PYTHONPATH=scripts:packages/api uv run python scripts/visualize_homeworld_distributions.py \\
+      distill --report local/homeworld_distributions.json
+"""
 
 from __future__ import annotations
 
@@ -11,6 +27,12 @@ from collections import defaultdict
 from pathlib import Path
 
 import typer
+from api.analytics.homeworld_locator.layout_distributions_asset import (
+    DEFAULT_LAPLACE_ALPHA,
+    default_layout_distributions_path,
+    distill_layout_distributions_from_report,
+    write_layout_distributions_asset,
+)
 from api.concepts.game_category import STANDARD_EPIC_PLAYER_COUNT, GameCategory
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
@@ -18,11 +40,15 @@ from hull_catalog_analysis import perspective_slots_for_game
 
 app = typer.Typer(
     add_completion=False,
-    help="Compute clockwise-neighbor and map-center distance distributions per game type.",
+    help=(
+        "Compute clockwise-neighbor and map-center distance distributions per game type, "
+        "or distill them into the committed homeworld layout distribution asset."
+    ),
 )
 
 DEFAULT_CSV = Path("local/sampled_homeworlds.csv")
 DEFAULT_STORAGE_ROOT = Path(".sampler_data")
+DEFAULT_REPORT = Path("local/homeworld_distributions.json")
 DEFAULT_UNIVERSE_CENTER = (2000.0, 2000.0)
 BASELINE_TURN = 1
 NEIGHBOR_BIN_WIDTH_LY = 10
@@ -333,6 +359,63 @@ def run_command(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(payload if payload.endswith("\n") else payload + "\n")
     typer.echo(f"wrote distribution report to {output}")
+
+
+@app.command("distill")
+def distill_command(
+    report_path: Path = typer.Option(
+        DEFAULT_REPORT,
+        "--report",
+        help=(
+            "Histogram report from the default command "
+            "(typically local/homeworld_distributions.json)."
+        ),
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Write the committed layout distribution asset here "
+            f"(default: {default_layout_distributions_path()})."
+        ),
+    ),
+    alpha: float = typer.Option(
+        DEFAULT_LAPLACE_ALPHA,
+        "--alpha",
+        help="Laplace smoothing pseudo-count applied to each trimmed histogram bin.",
+    ),
+) -> None:
+    """Distill a histogram report into the shipped layout distribution asset.
+
+    Requires ``local/homeworld_distributions.json`` (or ``--report``). Rebuild that
+    report from ``local/sampled_homeworlds.csv`` + ``.sampler_data`` via the default
+    command when regenerating from raw samples. Raw CSV remains gitignored; only
+    the distilled asset is committed.
+    """
+    if not report_path.is_file():
+        typer.echo(f"Report not found: {report_path}", err=True)
+        typer.echo(
+            "Build it first with the default command, or pass an existing report via --report.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    report = json.loads(report_path.read_text())
+    if not isinstance(report, dict):
+        typer.echo(f"Report must be a JSON object: {report_path}", err=True)
+        raise typer.Exit(code=2)
+
+    asset = distill_layout_distributions_from_report(
+        report,
+        alpha=alpha,
+        source={"reportPath": str(report_path)},
+    )
+    written = write_layout_distributions_asset(asset, path=output)
+    typer.echo(f"wrote layout distribution asset to {written}")
+    for category in ("epic", "standard"):
+        inner, outer = asset.center_distance_band(category)
+        typer.echo(f"  {category} center-distance band: [{inner}, {outer}] LY")
 
 
 def main() -> None:

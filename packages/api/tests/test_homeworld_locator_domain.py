@@ -463,6 +463,136 @@ def test_infer_baseline_viewpoint_definite_and_ring_orphans(
         assert by_id[planet_id].perspective is None
 
 
+def test_cull_co_sector_candidates_drops_possibles_near_definite(
+    template_planet,
+) -> None:
+    from api.analytics.homeworld_locator.baseline import (
+        cull_co_sector_candidates_after_definites,
+    )
+    from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+    from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
+
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=500, y=0)
+    co_sector = _planet(template_planet, planet_id=2, x=550, y=20)
+    other_sector = _planet(template_planet, planet_id=3, x=0, y=500)
+    planets_by_id = {1: pin, 2: co_sector, 3: other_sector}
+    rows = (
+        HomeworldCandidateRecord(
+            planet_id=1,
+            perspective=1,
+            confidence_tier=CONFIDENCE_DEFINITE,
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=2,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=3,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+    )
+    culled = cull_co_sector_candidates_after_definites(
+        rows,
+        planets_by_id,
+        center=center,
+        player_count=4,
+        pin_angle=0.0,
+    )
+    assert {row.planet_id for row in culled} == {1, 3}
+
+
+def test_cull_preserves_user_asserted_co_sector_possible(template_planet) -> None:
+    from api.analytics.homeworld_locator.baseline import (
+        cull_co_sector_candidates_after_definites,
+    )
+    from api.analytics.homeworld_locator.constants import (
+        ATTRIBUTION_INFERRED,
+        ATTRIBUTION_USER_ASSERTED,
+    )
+    from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
+
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=500, y=0)
+    asserted = _planet(template_planet, planet_id=2, x=550, y=20)
+    rows = (
+        HomeworldCandidateRecord(
+            planet_id=1,
+            perspective=1,
+            confidence_tier=CONFIDENCE_DEFINITE,
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=2,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            attribution=ATTRIBUTION_USER_ASSERTED,
+        ),
+    )
+    culled = cull_co_sector_candidates_after_definites(
+        rows,
+        {1: pin, 2: asserted},
+        center=center,
+        player_count=4,
+        pin_angle=0.0,
+    )
+    assert {row.planet_id for row in culled} == {1, 2}
+
+
+def test_infer_baseline_culls_co_sector_cluster_orphans(template_planet, sample_settings) -> None:
+    """Cluster orphans in the definite pin's sector are removed; other sectors kept."""
+    settings = replace(
+        sample_settings,
+        hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+        mapshape=MAP_SHAPE_ROUND,
+        homeworldhasstarbase=False,
+        verycloseplanets=1,
+        closeplanets=1,
+    )
+    center = (0.0, 0.0)
+    pin = _planet(
+        template_planet,
+        planet_id=1,
+        x=500,
+        y=0,
+        ownerid=1,
+        clans=20_000,
+        temp=50,
+    )
+    # Neighbors that make ``co_sector`` satisfy the cluster constraint, all in sector 0.
+    co_sector = _planet(template_planet, planet_id=2, x=500, y=40)
+    band_near = _planet(template_planet, planet_id=3, x=520, y=0)  # ~20 LY from co_sector
+    band_close = _planet(template_planet, planet_id=4, x=500, y=140)  # ~100 LY from co_sector
+    # Opposite sector cluster orphan.
+    opposite = _planet(template_planet, planet_id=5, x=-500, y=0)
+    opp_near = _planet(template_planet, planet_id=6, x=-520, y=0)
+    opp_close = _planet(template_planet, planet_id=7, x=-500, y=140)
+
+    candidates = infer_homeworld_baseline_candidates(
+        [pin, co_sector, band_near, band_close, opposite, opp_near, opp_close],
+        settings=settings,
+        viewpoint_player_id=1,
+        viewpoint_perspective=1,
+        viewpoint_race_id=1,
+        player_count=2,
+        starbase_planet_ids=set(),
+        min_baseline_clans=10_000,
+        map_center=center,
+    )
+    ids = {row.planet_id for row in candidates}
+    assert 1 in ids
+    assert 2 not in ids  # co-sector orphan culled
+    assert 5 in ids  # opposite-sector orphan kept
+    assert next(row for row in candidates if row.planet_id == 1).confidence_tier == (
+        CONFIDENCE_DEFINITE
+    )
+
+
 def test_infer_baseline_non_circular_uses_cluster_orphans_only(
     template_planet, sample_settings
 ) -> None:

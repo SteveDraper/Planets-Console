@@ -100,6 +100,28 @@ def test_ship_scan_origins_planets_and_ships_only(sample_turn):
     assert all(o.base_range == 300 for o in origins)
 
 
+def test_planet_scan_origins_uses_planetscanrange(sample_turn):
+    from api.concepts.visibility_coverage import planet_scan_origins
+
+    owners = frozenset({sample_turn.player.id})
+    origins = planet_scan_origins(
+        sample_turn.planets,
+        sample_turn.ships,
+        sample_turn.hulls,
+        owners,
+        planet_scan_range=400,
+    )
+    ship_origins = ship_scan_origins(
+        sample_turn.planets,
+        sample_turn.ships,
+        sample_turn.hulls,
+        owners,
+        ship_scan_range=300,
+    )
+    assert len(origins) == len(ship_origins)
+    assert all(o.base_range == 400 for o in origins)
+
+
 def _ship(
     *,
     ship_id: int,
@@ -230,16 +252,18 @@ def test_visibility_map_emits_kinds_for_sample_turn(sample_turn):
 def test_visibility_map_nebula_patches_when_present(stellar_cartography_turn):
     data = get_visibility_map(stellar_cartography_turn, TurnAnalyticsOptions())
     ship_scan = next(o for o in data["regionOverlays"] if o["kind"] == KIND_SHIP_SCAN)
-    assert len(ship_scan["disks"]) >= 1
+    assert ship_scan["geometry"]["type"] == "coverage"
+    assert len(ship_scan["geometry"]["disks"]) >= 1
     # Stellar cartography sample has nebulas; owned origins near them yield patches.
-    assert isinstance(ship_scan["patches"], list)
+    assert isinstance(ship_scan["geometry"]["patches"], list)
 
     mine_potential = next(
         o for o in data["regionOverlays"] if o["kind"] == KIND_POTENTIAL_MINEFIELD_DETECT
     )
     # Minefield detect ignores nebulae: disks only.
-    assert len(mine_potential["disks"]) >= 1
-    assert mine_potential["patches"] == []
+    assert mine_potential["geometry"]["type"] == "coverage"
+    assert len(mine_potential["geometry"]["disks"]) >= 1
+    assert mine_potential["geometry"]["patches"] == []
 
 
 def test_visibility_includes_partner_ship_as_origin(sample_turn):

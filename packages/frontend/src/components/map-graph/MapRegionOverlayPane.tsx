@@ -8,10 +8,10 @@ import { useOverlayPaneSize } from './useOverlayPaneSize'
 /**
  * Blit hybrid map region overlays.
  *
- * Disks: opaque SVG circles under one group opacity (union, no stacked alpha).
- * Patches: cached map-space PNGs, reprojected only. Patch AABBs are a
+ * Coverage disks: opaque SVG circles under one group opacity (union, no stacked
+ * alpha). Patches: cached map-space PNGs, reprojected only. Patch AABBs are a
  * non-overlapping partition punched from the disk mask so disks and patches
- * never double-paint.
+ * never double-paint. Boundary geometry: filled/stroked SVG path (line|arc).
  */
 export function MapRegionOverlayPane({
   regionOverlays,
@@ -82,17 +82,42 @@ export function MapRegionOverlayPane({
         {groups.map((group) => {
           const maskId = `${idPrefix}-disks-${group.key}`
           return (
-            <g key={group.key} opacity={group.fillOpacity}>
-              {group.disks.length > 0 ? (
-                <rect
-                  x={0}
-                  y={0}
-                  width={width}
-                  height={height}
-                  fill={group.fillColor}
-                  mask={`url(#${maskId})`}
+            <g key={group.key}>
+              {group.boundaryPath != null ? (
+                <path
+                  d={group.boundaryPath}
+                  fill={group.fillOpacity > 0 ? group.fillColor : 'none'}
+                  fillOpacity={group.fillOpacity > 0 ? group.fillOpacity : undefined}
+                  stroke={group.strokeColor ?? group.fillColor}
+                  strokeOpacity={group.strokeColor != null ? 0.85 : group.fillOpacity}
+                  strokeWidth={group.strokeWidth ?? 1}
                 />
               ) : null}
+              {group.disks.length > 0 ? (
+                <g opacity={group.fillOpacity}>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={width}
+                    height={height}
+                    fill={group.fillColor}
+                    mask={`url(#${maskId})`}
+                  />
+                </g>
+              ) : null}
+              {group.strokeDisks.map((disk) => (
+                <circle
+                  key={disk.key}
+                  cx={disk.cx}
+                  cy={disk.cy}
+                  r={disk.r}
+                  fill="none"
+                  stroke={disk.strokeColor}
+                  strokeWidth={disk.strokeWidth}
+                  strokeDasharray={disk.strokeDasharray}
+                  opacity={0.95}
+                />
+              ))}
               {group.patches.map((patch) => (
                 <image
                   key={patch.key}
@@ -102,6 +127,7 @@ export function MapRegionOverlayPane({
                   width={patch.width}
                   height={patch.height}
                   preserveAspectRatio="none"
+                  opacity={group.fillOpacity}
                 />
               ))}
             </g>

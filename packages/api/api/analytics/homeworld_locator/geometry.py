@@ -32,6 +32,20 @@ def resolve_map_center(
     return planet_cloud_center(planets) or fallback
 
 
+def sector_index_for_angle(
+    angle: float,
+    *,
+    pin_angle: float,
+    player_count: int,
+) -> int:
+    """Sector index whose wedge is centered on ``pin_angle + k * 2π/n``."""
+    half = math.pi / player_count
+    delta = (angle - pin_angle) % (2.0 * math.pi)
+    shifted = (delta + half) % (2.0 * math.pi)
+    width = (2.0 * math.pi) / player_count
+    return int(shifted / width) % player_count
+
+
 def find_circular_ring_homeworld_sites(
     planets: Sequence[Planet],
     *,

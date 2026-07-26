@@ -71,4 +71,15 @@ describe('buildStellarCartographyHoverLines', () => {
     )
     expect(lines).toEqual([])
   })
+
+  it('appends additional region hover lines after cartography and wormholes', () => {
+    const lines = buildStellarCartographyHoverLines(
+      [{ layer: 'nebulae', lines: ['Zoie', '72 ly'] }],
+      ['goes to (1, 2)'],
+      policyFor(),
+      ['pinned · 1 candidate']
+    )
+    expect(lines.at(-1)).toBe('pinned · 1 candidate')
+    expect(lines).toContain('goes to (1, 2)')
+  })
 })

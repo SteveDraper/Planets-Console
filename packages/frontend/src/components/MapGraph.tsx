@@ -4,7 +4,7 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { ReactFlow } from '@xyflow/react'
+import { ReactFlow, useStore } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { CombinedMapData } from '../api/bff'
 import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
@@ -29,8 +29,17 @@ import { nodeTypes, toFlowNodes } from './map-graph/nodes'
 import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
+import {
+  computeRegionOverlayHoverLines,
+  RegionOverlayHoverTooltip,
+  useMapPaneClientPos,
+} from './map-graph/RegionOverlayHoverPanel'
+import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
+import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
+import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homeworldRegionStyle'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
+import { useHomeworldRegionDisplayStore } from '../stores/homeworldRegionDisplay'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import {
   WormholeInteractionProvider,
@@ -147,6 +156,52 @@ type MapGraphFlowProps = {
   onInitialFitDone: () => void
 }
 
+type MapHoverStackProps = {
+  regionOverlays: readonly MapRegionOverlay[]
+  blockedByPlanetHover: boolean
+  cartography?: StellarCartographyMapContext
+  wormholeHoverLines: string[] | null
+}
+
+/**
+ * Region + cartography hover must mount under ``ReactFlow`` so xyflow ``useStore``
+ * has a provider (React Flow error #001).
+ *
+ * One pane pointer source is shared: region hit-test and cartography sampling both
+ * read ``clientPos``; neither attaches a second mousemove listener.
+ */
+function MapHoverStack({
+  regionOverlays,
+  blockedByPlanetHover,
+  cartography,
+  wormholeHoverLines,
+}: MapHoverStackProps) {
+  const transform = useStore((s) => s.transform)
+  const { clientPos, domNode } = useMapPaneClientPos()
+  const regionHoverLines = computeRegionOverlayHoverLines(
+    regionOverlays,
+    clientPos,
+    domNode,
+    transform,
+    blockedByPlanetHover
+  )
+  if (cartography != null) {
+    return (
+      <StellarCartographyHoverPanel
+        cartography={cartography}
+        wormholeHoverLines={wormholeHoverLines}
+        clientPos={clientPos}
+        blockedByPlanetHover={blockedByPlanetHover}
+        additionalHoverLines={regionHoverLines}
+        clientToFlowPosition={clientToFlowPosition}
+      />
+    )
+  }
+  return (
+    <RegionOverlayHoverTooltip lines={regionHoverLines} clientPos={clientPos} />
+  )
+}
+
 function MapGraphFlow({
   data,
   frame,
@@ -175,9 +230,20 @@ function MapGraphFlow({
     [frame, policy, wormholeLineRevealKey]
   )
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
+  const homeworldRegionDisplayMode = useHomeworldRegionDisplayStore(
+    (s) => s.regionDisplayMode
+  )
+  // Visibility prefs only mutate visibility kinds; homeworld display mode filters
+  // sectors; homeworld style adapter attaches paint metadata for shared blit.
   const regionOverlays = useMemo(
-    () => applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
-    [data.regionOverlays, visibilityKinds]
+    () =>
+      applyHomeworldRegionStyle(
+        applyHomeworldRegionDisplayMode(
+          applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
+          homeworldRegionDisplayMode
+        )
+      ),
+    [data.regionOverlays, visibilityKinds, homeworldRegionDisplayMode]
   )
 
   return (
@@ -231,14 +297,12 @@ function MapGraphFlow({
         onPlanetLabelHoverActiveChange={onPlanetLabelHoverActiveChange}
       />
       <FlowCoordinateReadout />
-      {cartography != null ? (
-        <StellarCartographyHoverPanel
-          cartography={cartography}
-          wormholeHoverLines={wormholeHoverLines}
-          blockedByPlanetHover={blockedByPlanetHover}
-          clientToFlowPosition={clientToFlowPosition}
-        />
-      ) : null}
+      <MapHoverStack
+        regionOverlays={regionOverlays}
+        blockedByPlanetHover={blockedByPlanetHover}
+        cartography={cartography}
+        wormholeHoverLines={wormholeHoverLines}
+      />
     </ReactFlow>
   )
 }

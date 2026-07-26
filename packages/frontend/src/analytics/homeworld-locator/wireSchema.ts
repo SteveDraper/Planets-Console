@@ -30,6 +30,8 @@ export const homeworldLocatorPayloadSchema = z.object({
   rows: z.array(homeworldCandidateRecordSchema).optional(),
   nodes: z.array(z.unknown()).optional(),
   edges: z.array(z.unknown()).optional(),
+  /** Normalized via ``normalizeMapRegionOverlays`` after Zod accepts the array. */
+  regionOverlays: z.array(z.unknown()).optional(),
 })
 
 export type HomeworldConfidenceTier = z.infer<typeof homeworldConfidenceTierSchema>

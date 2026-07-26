@@ -2,14 +2,26 @@
 
 from api.concepts.map_region_coverage import (
     CoverageOrigin,
+    MapRegionBoundaryArcEdge,
+    MapRegionBoundaryLineEdge,
+    MapRegionOverlayDisk,
+    MapRegionOverlayVertex,
+    boundary_to_overlay,
     build_hybrid_coverage,
     decode_patch_coverage,
     hybrid_coverage_to_overlay,
     map_region_overlay_to_wire,
     patch_cell_covered,
+    point_covered_by_origins,
 )
 from api.concepts.stellar_cartography.nebula_visibility import nebula_visibility_ly
 from api.models.space import Nebula
+
+
+def test_point_covered_by_origins_matches_disk():
+    origins = [CoverageOrigin(x=0, y=0, base_range=100)]
+    assert point_covered_by_origins(50, 0, origins, []) is True
+    assert point_covered_by_origins(150, 0, origins, []) is False
 
 
 def test_empty_origins_yield_empty_coverage():
@@ -107,14 +119,82 @@ def test_wire_round_trip_shape():
     assert wire["id"] == "demo-1"
     assert wire["fillColor"] == "#22c55e"
     assert wire["fillOpacity"] == 0.25
-    assert wire["disks"] == [{"x": 10, "y": 20, "radius": 50}]
-    assert len(wire["patches"]) == 1
-    patch = wire["patches"][0]
+    assert wire["geometry"]["type"] == "coverage"
+    assert wire["geometry"]["disks"] == [{"x": 10, "y": 20, "radius": 50}]
+    assert len(wire["geometry"]["patches"]) == 1
+    patch = wire["geometry"]["patches"][0]
     assert patch["originX"] == 15
     assert patch["width"] == 31
     assert patch["height"] == 31
     assert isinstance(patch["coverageRle"], list)
     assert patch["coverageRle"][0].keys() >= {"length", "covered"}
+    assert "isPinned" not in wire
+    assert "status" not in wire
+    assert "candidateCount" not in wire
+    assert "playerLabel" not in wire
+    assert "hoverSummary" not in wire
+
+
+def test_boundary_wire_round_trip_with_annotations():
+    overlay = boundary_to_overlay(
+        kind="homeworld-sector",
+        overlay_id="sector-0",
+        fill_color="#f97316",
+        fill_opacity=0.2,
+        vertices=(
+            MapRegionOverlayVertex(x=200.0, y=0.0),
+            MapRegionOverlayVertex(x=0.0, y=200.0),
+            MapRegionOverlayVertex(x=0.0, y=100.0),
+            MapRegionOverlayVertex(x=100.0, y=0.0),
+        ),
+        edges=(
+            MapRegionBoundaryArcEdge(center_x=0.0, center_y=0.0, clockwise=False),
+            MapRegionBoundaryLineEdge(),
+            MapRegionBoundaryArcEdge(center_x=0.0, center_y=0.0, clockwise=True),
+            MapRegionBoundaryLineEdge(),
+        ),
+        disks=(MapRegionOverlayDisk(x=150, y=50, radius=81),),
+        is_pinned=True,
+        status="ok",
+        candidate_count=1,
+        player_label="koshling (The Lizard Alliance)",
+    )
+    wire = map_region_overlay_to_wire(overlay)
+    assert wire["geometry"]["type"] == "boundary"
+    assert len(wire["geometry"]["vertices"]) == 4
+    assert wire["geometry"]["edges"][0] == {
+        "type": "arc",
+        "centerX": 0.0,
+        "centerY": 0.0,
+        "clockwise": False,
+    }
+    assert wire["geometry"]["edges"][1] == {"type": "line"}
+    assert wire["geometry"]["disks"] == [{"x": 150, "y": 50, "radius": 81}]
+    assert wire["isPinned"] is True
+    assert wire["status"] == "ok"
+    assert wire["candidateCount"] == 1
+    assert wire["playerLabel"] == "koshling (The Lizard Alliance)"
+    assert "hoverSummary" not in wire
+
+
+def test_boundary_rejects_mismatched_edge_count():
+    try:
+        boundary_to_overlay(
+            kind="bad",
+            overlay_id="bad-1",
+            fill_color="#000000",
+            fill_opacity=0.1,
+            vertices=(
+                MapRegionOverlayVertex(x=0, y=0),
+                MapRegionOverlayVertex(x=1, y=0),
+                MapRegionOverlayVertex(x=0, y=1),
+            ),
+            edges=(MapRegionBoundaryLineEdge(), MapRegionBoundaryLineEdge()),
+        )
+    except ValueError as exc:
+        assert "edge count" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def _patch_aabb(patch) -> tuple[int, int, int, int]:

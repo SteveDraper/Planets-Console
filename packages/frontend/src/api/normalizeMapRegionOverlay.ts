@@ -3,10 +3,17 @@
  */
 
 import type {
+  MapRegionBoundaryArcEdge,
+  MapRegionBoundaryEdge,
+  MapRegionBoundaryGeometry,
+  MapRegionBoundaryLineEdge,
+  MapRegionCoverageGeometry,
   MapRegionCoverageRleRun,
   MapRegionOverlay,
   MapRegionOverlayDisk,
+  MapRegionOverlayGeometry,
   MapRegionOverlayPatch,
+  MapRegionOverlayVertex,
 } from './mapRegionOverlayTypes'
 import { parseJsonFiniteNumber, parseJsonInteger } from './normalizeMapWireParsing'
 
@@ -49,6 +56,134 @@ function normalizePatch(raw: unknown): MapRegionOverlayPatch | null {
   return { originX, originY, width, height, coverageRle }
 }
 
+function normalizeVertex(raw: unknown): MapRegionOverlayVertex | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const x = parseJsonFiniteNumber(o.x)
+  const y = parseJsonFiniteNumber(o.y)
+  if (x == null || y == null) return null
+  return { x, y }
+}
+
+function normalizeBoundaryEdge(raw: unknown): MapRegionBoundaryEdge | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const type = typeof o.type === 'string' ? o.type : null
+  if (type === 'line') {
+    const edge: MapRegionBoundaryLineEdge = { type: 'line' }
+    return edge
+  }
+  if (type === 'arc') {
+    const centerX = parseJsonFiniteNumber(o.centerX ?? o.center_x)
+    const centerY = parseJsonFiniteNumber(o.centerY ?? o.center_y)
+    if (centerX == null || centerY == null) return null
+    if (typeof o.clockwise !== 'boolean') return null
+    const edge: MapRegionBoundaryArcEdge = {
+      type: 'arc',
+      centerX,
+      centerY,
+      clockwise: o.clockwise,
+    }
+    return edge
+  }
+  return null
+}
+
+function normalizeDisks(raw: unknown): MapRegionOverlayDisk[] | null {
+  if (!Array.isArray(raw)) return null
+  const disks: MapRegionOverlayDisk[] = []
+  for (const item of raw) {
+    const disk = normalizeDisk(item)
+    if (disk == null) return null
+    disks.push(disk)
+  }
+  return disks
+}
+
+function normalizePatches(raw: unknown): MapRegionOverlayPatch[] | null {
+  if (!Array.isArray(raw)) return null
+  const patches: MapRegionOverlayPatch[] = []
+  for (const item of raw) {
+    const patch = normalizePatch(item)
+    if (patch == null) return null
+    patches.push(patch)
+  }
+  return patches
+}
+
+function normalizeCoverageGeometry(raw: Record<string, unknown>): MapRegionCoverageGeometry | null {
+  const disks = normalizeDisks(raw.disks)
+  const patches = normalizePatches(raw.patches)
+  if (disks == null || patches == null) return null
+  return { type: 'coverage', disks, patches }
+}
+
+function normalizeBoundaryGeometry(raw: Record<string, unknown>): MapRegionBoundaryGeometry | null {
+  const verticesRaw = raw.vertices
+  const edgesRaw = raw.edges
+  if (!Array.isArray(verticesRaw) || !Array.isArray(edgesRaw)) return null
+  if (verticesRaw.length < 3) return null
+  if (edgesRaw.length !== verticesRaw.length) return null
+
+  const vertices: MapRegionOverlayVertex[] = []
+  for (const item of verticesRaw) {
+    const vertex = normalizeVertex(item)
+    if (vertex == null) return null
+    vertices.push(vertex)
+  }
+  const edges: MapRegionBoundaryEdge[] = []
+  for (const item of edgesRaw) {
+    const edge = normalizeBoundaryEdge(item)
+    if (edge == null) return null
+    edges.push(edge)
+  }
+
+  const geometry: MapRegionBoundaryGeometry = { type: 'boundary', vertices, edges }
+  if (raw.disks !== undefined) {
+    const disks = normalizeDisks(raw.disks)
+    if (disks == null) return null
+    if (disks.length > 0) geometry.disks = disks
+  }
+  return geometry
+}
+
+function normalizeGeometry(raw: unknown): MapRegionOverlayGeometry | null {
+  if (raw == null || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const type = typeof o.type === 'string' ? o.type : null
+  if (type === 'coverage') return normalizeCoverageGeometry(o)
+  if (type === 'boundary') return normalizeBoundaryGeometry(o)
+  return null
+}
+
+/**
+ * Legacy flat disks+patches without a geometry discriminant parse as coverage
+ * so older fixtures and in-flight payloads still normalize.
+ */
+function normalizeLegacyCoverage(raw: Record<string, unknown>): MapRegionOverlayGeometry | null {
+  if (!Array.isArray(raw.disks) || !Array.isArray(raw.patches)) return null
+  return normalizeCoverageGeometry(raw)
+}
+
+function normalizeOptionalBoolean(raw: unknown): boolean | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw !== 'boolean') return undefined
+  return raw
+}
+
+function normalizeOptionalString(raw: unknown): string | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw !== 'string' || raw === '') return undefined
+  return raw
+}
+
+function normalizeOptionalNonNegativeInt(raw: unknown): number | undefined {
+  if (raw === undefined) return undefined
+  const n = parseJsonInteger(raw)
+  if (n == null || n < 0) return undefined
+  return n
+}
+
 export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null {
   if (raw == null || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
@@ -64,22 +199,44 @@ export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null
   const fillOpacity = parseJsonFiniteNumber(o.fillOpacity ?? o.fill_opacity)
   if (fillColor == null || fillOpacity == null) return null
   if (fillOpacity < 0 || fillOpacity > 1) return null
-  const disksRaw = o.disks
-  const patchesRaw = o.patches
-  if (!Array.isArray(disksRaw) || !Array.isArray(patchesRaw)) return null
-  const disks: MapRegionOverlayDisk[] = []
-  for (const raw of disksRaw) {
-    const disk = normalizeDisk(raw)
-    if (disk == null) return null
-    disks.push(disk)
+
+  let geometry: MapRegionOverlayGeometry | null = null
+  if (o.geometry !== undefined) {
+    geometry = normalizeGeometry(o.geometry)
+  } else {
+    geometry = normalizeLegacyCoverage(o)
   }
-  const patches: MapRegionOverlayPatch[] = []
-  for (const raw of patchesRaw) {
-    const patch = normalizePatch(raw)
-    if (patch == null) return null
-    patches.push(patch)
+  if (geometry == null) return null
+
+  const overlay: MapRegionOverlay = { kind, id, fillColor, fillOpacity, geometry }
+  const isPinned = normalizeOptionalBoolean(o.isPinned ?? o.is_pinned)
+  if (isPinned !== undefined) overlay.isPinned = isPinned
+  // Reject non-boolean isPinned when the key is present
+  if ((o.isPinned !== undefined || o.is_pinned !== undefined) && isPinned === undefined) {
+    return null
   }
-  return { kind, id, fillColor, fillOpacity, disks, patches }
+  const status = normalizeOptionalString(o.status)
+  if (o.status !== undefined && status === undefined) return null
+  if (status !== undefined) overlay.status = status
+  const candidateCount = normalizeOptionalNonNegativeInt(
+    o.candidateCount ?? o.candidate_count
+  )
+  if (
+    (o.candidateCount !== undefined || o.candidate_count !== undefined) &&
+    candidateCount === undefined
+  ) {
+    return null
+  }
+  if (candidateCount !== undefined) overlay.candidateCount = candidateCount
+  const playerLabel = normalizeOptionalString(o.playerLabel ?? o.player_label)
+  if (
+    (o.playerLabel !== undefined || o.player_label !== undefined) &&
+    playerLabel === undefined
+  ) {
+    return null
+  }
+  if (playerLabel !== undefined) overlay.playerLabel = playerLabel
+  return overlay
 }
 
 export function normalizeMapRegionOverlays(raw: unknown): MapRegionOverlay[] {

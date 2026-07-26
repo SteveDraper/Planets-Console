@@ -49,22 +49,25 @@ describe('buildMapRegionOverlayPaneShapes', () => {
       id: 'demo-1',
       fillColor: '#22c55e',
       fillOpacity: 0.25,
-      disks: [
-        { x: 10, y: 20, radius: 50 },
-        { x: 40, y: 20, radius: 50 },
-      ],
-      patches: [
-        {
-          originX: 0,
-          originY: 0,
-          width: 2,
-          height: 2,
-          coverageRle: [
-            { length: 2, covered: true },
-            { length: 2, covered: false },
-          ],
-        },
-      ],
+      geometry: {
+        type: 'coverage',
+        disks: [
+          { x: 10, y: 20, radius: 50 },
+          { x: 40, y: 20, radius: 50 },
+        ],
+        patches: [
+          {
+            originX: 0,
+            originY: 0,
+            width: 2,
+            height: 2,
+            coverageRle: [
+              { length: 2, covered: true },
+              { length: 2, covered: false },
+            ],
+          },
+        ],
+      },
     }
 
     const first = buildMapRegionOverlayPaneShapes([overlay], viewport)
@@ -90,12 +93,170 @@ describe('buildMapRegionOverlayPaneShapes', () => {
       id: 'demo-2',
       fillColor: '#22c55e',
       fillOpacity: 0.25,
-      disks: [{ x: 0, y: 0, radius: 100 }],
-      patches: [],
+      geometry: {
+        type: 'coverage',
+        disks: [{ x: 0, y: 0, radius: 100 }],
+        patches: [],
+      },
     }
     const shapes = buildMapRegionOverlayPaneShapes([overlay], viewport)
     expect(shapes.groups[0]!.disks).toHaveLength(1)
     expect(shapes.groups[0]!.patches).toEqual([])
+  })
+
+  it('projects annular-sector boundary paths with line and arc edges', () => {
+    const overlay: MapRegionOverlay = {
+      kind: 'boundary-demo',
+      id: 'sector-0',
+      fillColor: '#f97316',
+      fillOpacity: 0.2,
+      paint: {
+        fillOpacity: 0,
+        strokeColor: '#fdba74',
+        strokeWidth: 1.5,
+        diskStrokes: [{ strokeColor: '#38bdf8', strokeWidth: 1.75 }],
+      },
+      geometry: {
+        type: 'boundary',
+        vertices: [
+          { x: 200, y: 0 },
+          { x: 0, y: 200 },
+          { x: 0, y: 100 },
+          { x: 100, y: 0 },
+        ],
+        edges: [
+          { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+          { type: 'line' },
+          { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+          { type: 'line' },
+        ],
+        disks: [{ x: 150, y: 50, radius: 81 }],
+      },
+    }
+    const shapes = buildMapRegionOverlayPaneShapes([overlay], viewport)
+    expect(shapes.groups).toHaveLength(1)
+    const group = shapes.groups[0]!
+    expect(group.boundaryPath).toBeDefined()
+    expect(group.boundaryPath).toContain('M ')
+    expect(group.boundaryPath).toContain('A ')
+    expect(group.boundaryPath).toContain('L ')
+    expect(group.boundaryPath!.endsWith(' Z')).toBe(true)
+    expect(group.fillOpacity).toBe(0)
+    // Quarter-circle wedges must use the short arc (large-arc-flag 0), not the
+    // complementary ~270° path that would fill almost the whole annulus.
+    const arcFlags = [...group.boundaryPath!.matchAll(/A [^A]+? 0 ([01]) ([01]) /g)].map(
+      (match) => ({ largeArc: match[1], sweep: match[2] })
+    )
+    expect(arcFlags).toEqual([
+      { largeArc: '0', sweep: '0' },
+      { largeArc: '0', sweep: '1' },
+    ])
+    expect(group.disks).toHaveLength(0)
+    expect(group.strokeDisks).toHaveLength(1)
+    expect(group.strokeDisks[0]!.strokeColor).toBe('#38bdf8')
+    expect(group.strokeColor).toBe('#fdba74')
+    expect(group.patches).toEqual([])
+  })
+
+  it('keeps eleven-way annular sector arcs on the short wedge', () => {
+    const centerX = 1980
+    const centerY = 2000
+    const rOuter = 600
+    const rInner = 200
+    const start = 0
+    const end = (2 * Math.PI) / 11
+    const overlay: MapRegionOverlay = {
+      kind: 'boundary-demo',
+      id: 'sector-0',
+      fillColor: '#f97316',
+      fillOpacity: 0,
+      paint: { fillOpacity: 0, strokeColor: '#fdba74', strokeWidth: 1.5 },
+      geometry: {
+        type: 'boundary',
+        vertices: [
+          { x: centerX + rOuter * Math.cos(start), y: centerY + rOuter * Math.sin(start) },
+          { x: centerX + rOuter * Math.cos(end), y: centerY + rOuter * Math.sin(end) },
+          { x: centerX + rInner * Math.cos(end), y: centerY + rInner * Math.sin(end) },
+          { x: centerX + rInner * Math.cos(start), y: centerY + rInner * Math.sin(start) },
+        ],
+        edges: [
+          { type: 'arc', centerX, centerY, clockwise: false },
+          { type: 'line' },
+          { type: 'arc', centerX, centerY, clockwise: true },
+          { type: 'line' },
+        ],
+      },
+    }
+    const path = buildMapRegionOverlayPaneShapes([overlay], viewport).groups[0]!.boundaryPath!
+    const largeArcFlags = [...path.matchAll(/A [^A]+? 0 ([01]) [01] /g)].map((m) => m[1])
+    expect(largeArcFlags).toEqual(['0', '0'])
+  })
+
+  it('paints boundary disks as stroke outlines when paint.diskStrokes is set', () => {
+    const overlay: MapRegionOverlay = {
+      kind: 'boundary-demo',
+      id: 'sector-env',
+      fillColor: '#f97316',
+      fillOpacity: 0.2,
+      paint: {
+        fillOpacity: 0,
+        strokeColor: '#fdba74',
+        strokeWidth: 1.5,
+        diskStrokes: [
+          { strokeColor: '#38bdf8', strokeWidth: 1.75 },
+          { strokeColor: '#c084fc', strokeWidth: 1.75 },
+        ],
+      },
+      geometry: {
+        type: 'boundary',
+        vertices: [
+          { x: 200, y: 0 },
+          { x: 0, y: 200 },
+          { x: 0, y: 100 },
+          { x: 100, y: 0 },
+        ],
+        edges: [
+          { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+          { type: 'line' },
+          { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+          { type: 'line' },
+        ],
+        disks: [
+          { x: 150, y: 50, radius: 81 },
+          { x: 150, y: 50, radius: 162 },
+        ],
+      },
+    }
+    const shapes = buildMapRegionOverlayPaneShapes([overlay], viewport)
+    const group = shapes.groups[0]!
+    expect(group.fillOpacity).toBe(0)
+    expect(group.disks).toHaveLength(0)
+    const strokes = group.strokeDisks
+    expect(strokes.map((d) => d.strokeColor)).toEqual(['#38bdf8', '#c084fc'])
+  })
+
+  it('fills boundary disks when paint.diskStrokes is absent', () => {
+    const overlay: MapRegionOverlay = {
+      kind: 'boundary-demo',
+      id: 'filled-disks',
+      fillColor: '#22c55e',
+      fillOpacity: 0.3,
+      geometry: {
+        type: 'boundary',
+        vertices: [
+          { x: 0, y: 0 },
+          { x: 10, y: 0 },
+          { x: 10, y: 10 },
+        ],
+        edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }],
+        disks: [{ x: 5, y: 5, radius: 40 }],
+      },
+    }
+    const group = buildMapRegionOverlayPaneShapes([overlay], viewport).groups[0]!
+    expect(group.fillOpacity).toBe(0.3)
+    expect(group.disks).toHaveLength(1)
+    expect(group.strokeDisks).toEqual([])
+    expect(group.strokeColor).toBeUndefined()
   })
 
   it('keeps patch mask rects non-overlapping for partitioned patch AABBs', () => {
@@ -120,8 +281,11 @@ describe('buildMapRegionOverlayPaneShapes', () => {
       id: 'demo-partition',
       fillColor: '#22c55e',
       fillOpacity: 0.25,
-      disks: [{ x: 0, y: 0, radius: 100 }],
-      patches: [west, east],
+      geometry: {
+        type: 'coverage',
+        disks: [{ x: 0, y: 0, radius: 100 }],
+        patches: [west, east],
+      },
     }
     const shapes = buildMapRegionOverlayPaneShapes([overlay], viewport)
     const rects = shapes.groups[0]!.patchMaskRects
@@ -144,16 +308,19 @@ describe('buildMapRegionOverlayPaneShapes', () => {
       id: 'demo-bad-color',
       fillColor: 'rgb(34, 197, 94)',
       fillOpacity: 0.25,
-      disks: [{ x: 0, y: 0, radius: 50 }],
-      patches: [
-        {
-          originX: 0,
-          originY: 0,
-          width: 1,
-          height: 1,
-          coverageRle: [{ length: 1, covered: true }],
-        },
-      ],
+      geometry: {
+        type: 'coverage',
+        disks: [{ x: 0, y: 0, radius: 50 }],
+        patches: [
+          {
+            originX: 0,
+            originY: 0,
+            width: 1,
+            height: 1,
+            coverageRle: [{ length: 1, covered: true }],
+          },
+        ],
+      },
     }
     const shapes = buildMapRegionOverlayPaneShapes([overlay], viewport)
     expect(shapes.groups[0]!.disks).toHaveLength(1)

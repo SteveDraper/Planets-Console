@@ -136,8 +136,8 @@ def get_analytic_map(
 
     **visibility** returns hybrid ``regionOverlays`` (ship-scan and Sensor Sweep kinds).
 
-    **homeworld-locator** returns candidate ``markers`` / ``rows`` (empty nodes/edges) plus
-    availability and baseline metadata.
+    **homeworld-locator** returns candidate ``markers`` / ``rows`` (empty nodes/edges), optional
+    boundary ``regionOverlays`` for circular sector paint, plus availability and baseline metadata.
 
     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).

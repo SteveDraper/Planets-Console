@@ -77,15 +77,75 @@ class HybridCoverage:
 
 
 @dataclass(frozen=True)
+class MapRegionOverlayVertex:
+    """Map-space point (ly) for a boundary path."""
+
+    x: float
+    y: float
+
+
+@dataclass(frozen=True)
+class MapRegionBoundaryLineEdge:
+    """Straight segment between consecutive boundary vertices."""
+
+    type: str = "line"
+
+
+@dataclass(frozen=True)
+class MapRegionBoundaryArcEdge:
+    """Circular arc between consecutive boundary vertices (map-space clockwise)."""
+
+    center_x: float
+    center_y: float
+    clockwise: bool
+    type: str = "arc"
+
+
+MapRegionBoundaryEdge = MapRegionBoundaryLineEdge | MapRegionBoundaryArcEdge
+
+
+@dataclass(frozen=True)
+class MapRegionCoverageGeometry:
+    """Hybrid coverage footprint: ideal disks plus nebula-local patches."""
+
+    disks: tuple[MapRegionOverlayDisk, ...]
+    patches: tuple[MapRegionOverlayPatch, ...]
+    type: str = "coverage"
+
+
+@dataclass(frozen=True)
+class MapRegionBoundaryGeometry:
+    """Closed path boundary (line/arc edges) with optional envelope disks."""
+
+    vertices: tuple[MapRegionOverlayVertex, ...]
+    edges: tuple[MapRegionBoundaryEdge, ...]
+    disks: tuple[MapRegionOverlayDisk, ...] = ()
+    type: str = "boundary"
+
+
+MapRegionOverlayGeometry = MapRegionCoverageGeometry | MapRegionBoundaryGeometry
+
+
+@dataclass(frozen=True)
 class MapRegionOverlay:
-    """Analytic-agnostic shaded region overlay for the combined map."""
+    """Analytic-agnostic shaded region overlay for the combined map.
+
+    Geometry is discriminated: ``coverage`` (disks+patches) or ``boundary``
+    (ordered vertices + line|arc edges, optional envelope disks). Optional
+    annotations are shared domain/machine facts (``is_pinned``, ``status``,
+    ``candidate_count``, ``player_label``) -- not UI copy. Clients format
+    hover/display strings. Analytics that do not use annotations omit them.
+    """
 
     kind: str
     id: str
     fill_color: str
     fill_opacity: float
-    disks: tuple[MapRegionOverlayDisk, ...]
-    patches: tuple[MapRegionOverlayPatch, ...]
+    geometry: MapRegionOverlayGeometry
+    is_pinned: bool | None = None
+    status: str | None = None
+    candidate_count: int | None = None
+    player_label: str | None = None
 
 
 def default_effective_range(base_range: float, density: float) -> float:
@@ -230,6 +290,27 @@ def _cell_covered(
     return False
 
 
+def point_covered_by_origins(
+    x: float,
+    y: float,
+    origins: Sequence[CoverageOrigin],
+    nebulas: Sequence[NebulaCenter],
+    *,
+    effective_range: EffectiveRangeFn | None = None,
+) -> bool:
+    """True when map point ``(x, y)`` is inside any origin's effective reach.
+
+    Coordinates are rounded to integer map cells (same grid as hybrid patches).
+    """
+    return _cell_covered(
+        int(round(x)),
+        int(round(y)),
+        origins,
+        nebulas,
+        effective_range=effective_range,
+    )
+
+
 def _build_patch_for_aabb(
     aabb: CellAabb,
     origins: Sequence[CoverageOrigin],
@@ -298,27 +379,71 @@ def build_hybrid_coverage(
     return HybridCoverage(disks=disks, patches=tuple(patches))
 
 
+def _disks_to_wire(disks: tuple[MapRegionOverlayDisk, ...]) -> list[dict]:
+    return [{"x": d.x, "y": d.y, "radius": d.radius} for d in disks]
+
+
+def _patches_to_wire(patches: tuple[MapRegionOverlayPatch, ...]) -> list[dict]:
+    return [
+        {
+            "originX": p.origin_x,
+            "originY": p.origin_y,
+            "width": p.width,
+            "height": p.height,
+            "coverageRle": [
+                {"length": run.length, "covered": run.covered} for run in p.coverage_rle
+            ],
+        }
+        for p in patches
+    ]
+
+
+def _boundary_edge_to_wire(edge: MapRegionBoundaryEdge) -> dict:
+    if isinstance(edge, MapRegionBoundaryLineEdge):
+        return {"type": "line"}
+    return {
+        "type": "arc",
+        "centerX": edge.center_x,
+        "centerY": edge.center_y,
+        "clockwise": edge.clockwise,
+    }
+
+
+def _geometry_to_wire(geometry: MapRegionOverlayGeometry) -> dict:
+    if isinstance(geometry, MapRegionCoverageGeometry):
+        return {
+            "type": "coverage",
+            "disks": _disks_to_wire(geometry.disks),
+            "patches": _patches_to_wire(geometry.patches),
+        }
+    payload: dict = {
+        "type": "boundary",
+        "vertices": [{"x": v.x, "y": v.y} for v in geometry.vertices],
+        "edges": [_boundary_edge_to_wire(e) for e in geometry.edges],
+    }
+    if geometry.disks:
+        payload["disks"] = _disks_to_wire(geometry.disks)
+    return payload
+
+
 def map_region_overlay_to_wire(overlay: MapRegionOverlay) -> dict:
     """Serialize a map region overlay to camelCase JSON for map payloads."""
-    return {
+    wire: dict = {
         "kind": overlay.kind,
         "id": overlay.id,
         "fillColor": overlay.fill_color,
         "fillOpacity": overlay.fill_opacity,
-        "disks": [{"x": d.x, "y": d.y, "radius": d.radius} for d in overlay.disks],
-        "patches": [
-            {
-                "originX": p.origin_x,
-                "originY": p.origin_y,
-                "width": p.width,
-                "height": p.height,
-                "coverageRle": [
-                    {"length": run.length, "covered": run.covered} for run in p.coverage_rle
-                ],
-            }
-            for p in overlay.patches
-        ],
+        "geometry": _geometry_to_wire(overlay.geometry),
     }
+    if overlay.is_pinned is not None:
+        wire["isPinned"] = overlay.is_pinned
+    if overlay.status is not None:
+        wire["status"] = overlay.status
+    if overlay.candidate_count is not None:
+        wire["candidateCount"] = overlay.candidate_count
+    if overlay.player_label is not None:
+        wire["playerLabel"] = overlay.player_label
+    return wire
 
 
 def hybrid_coverage_to_overlay(
@@ -335,8 +460,54 @@ def hybrid_coverage_to_overlay(
         id=overlay_id,
         fill_color=fill_color,
         fill_opacity=fill_opacity,
-        disks=coverage.disks,
-        patches=coverage.patches,
+        geometry=MapRegionCoverageGeometry(
+            disks=coverage.disks,
+            patches=coverage.patches,
+        ),
+    )
+
+
+def boundary_to_overlay(
+    *,
+    kind: str,
+    overlay_id: str,
+    fill_color: str,
+    fill_opacity: float,
+    vertices: Sequence[MapRegionOverlayVertex],
+    edges: Sequence[MapRegionBoundaryEdge],
+    disks: Sequence[MapRegionOverlayDisk] = (),
+    is_pinned: bool | None = None,
+    status: str | None = None,
+    candidate_count: int | None = None,
+    player_label: str | None = None,
+) -> MapRegionOverlay:
+    """Wrap a closed boundary path (and optional envelope disks) for the wire.
+
+    ``len(edges)`` must equal ``len(vertices)``: edge ``i`` connects vertex
+    ``i`` to vertex ``(i + 1) % n`` (closed ring).
+    """
+    verts = tuple(vertices)
+    edge_tuple = tuple(edges)
+    if len(verts) < 3:
+        raise ValueError("boundary requires at least 3 vertices")
+    if len(edge_tuple) != len(verts):
+        raise ValueError(
+            f"boundary edge count {len(edge_tuple)} must equal vertex count {len(verts)}"
+        )
+    return MapRegionOverlay(
+        kind=kind,
+        id=overlay_id,
+        fill_color=fill_color,
+        fill_opacity=fill_opacity,
+        geometry=MapRegionBoundaryGeometry(
+            vertices=verts,
+            edges=edge_tuple,
+            disks=tuple(disks),
+        ),
+        is_pinned=is_pinned,
+        status=status,
+        candidate_count=candidate_count,
+        player_label=player_label,
     )
 
 

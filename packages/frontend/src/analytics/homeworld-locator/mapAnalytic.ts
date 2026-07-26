@@ -3,10 +3,12 @@ import type {
   MapDataResponse,
   MapNode,
 } from '../../api/bff'
+import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
+import { normalizeMapRegionOverlays } from '../../api/normalizeMapRegionOverlay'
 import type { MapAnalyticQueryContext, MapAnalyticRegistration } from '../mapAnalyticRegistry'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from './constants'
 import { fetchHomeworldLocatorMap } from './api'
-import type { HomeworldMapMarker } from './wireSchema'
+import type { HomeworldLocatorPayload, HomeworldMapMarker } from './wireSchema'
 
 export type { HomeworldMapMarkerDisplay }
 
@@ -59,16 +61,22 @@ export function resolveHomeworldMarkerDisplays(
 }
 
 export function homeworldLocatorMapQueryKey(analyticScope: MapAnalyticQueryContext['analyticScope']) {
-  return ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'map', analyticScope, 'markers-v1'] as const
+  // Bump when overlay wire annotations change (e.g. structured hover facts) so
+  // cached map payloads without those fields cannot keep hover/display broken.
+  return ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'map', analyticScope, 'sectors-v3'] as const
 }
 
 function markersFromMapResponse(data: MapDataResponse): HomeworldMapMarker[] {
   return data.homeworldMarkers ?? []
 }
 
+function regionOverlaysFromPayload(payload: HomeworldLocatorPayload): MapRegionOverlay[] {
+  return normalizeMapRegionOverlays(payload.regionOverlays ?? [])
+}
+
 /**
- * Homeworld locator: fetch candidate markers and attach them to combined map data.
- * Region overlays land in #35; this registration only paints planet decorations.
+ * Homeworld locator: fetch candidate markers and sector ``regionOverlays``,
+ * then merge into combined map data. Display-mode filtering is render-time.
  */
 export const homeworldLocatorMapAnalytic: MapAnalyticRegistration = {
   buildQuerySpec(context: MapAnalyticQueryContext) {
@@ -85,6 +93,7 @@ export const homeworldLocatorMapAnalytic: MapAnalyticRegistration = {
           nodes: [],
           edges: [],
           homeworldMarkers: available ? (payload.markers ?? []) : [],
+          regionOverlays: available ? regionOverlaysFromPayload(payload) : [],
           // Only surface degraded metadata when the analytic is active (matches table tile).
           baselineDegraded: available ? payload.baselineDegraded : false,
           baselineTurn: available ? (payload.baselineTurn ?? null) : null,
@@ -99,6 +108,10 @@ export const homeworldLocatorMapAnalytic: MapAnalyticRegistration = {
     }
     if (data.baselineTurn !== undefined) {
       context.baselineTurn = data.baselineTurn
+    }
+    const overlays = data.regionOverlays
+    if (overlays != null && overlays.length > 0) {
+      context.regionOverlays.push(...overlays)
     }
     const markers = markersFromMapResponse(data)
     if (markers.length === 0) return

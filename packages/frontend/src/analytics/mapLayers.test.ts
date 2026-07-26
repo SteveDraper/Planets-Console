@@ -200,8 +200,11 @@ describe('combineMapData', () => {
           id: 'visibility-ship-scan',
           fillColor: '#38bdf8',
           fillOpacity: 0.28,
-          disks: [{ x: 10, y: 20, radius: 300 }],
-          patches: [],
+          geometry: {
+            type: 'coverage',
+            disks: [{ x: 10, y: 20, radius: 300 }],
+            patches: [],
+          },
         },
       ],
     }
@@ -214,7 +217,99 @@ describe('combineMapData', () => {
     expect(combined.regionOverlays[0]).toMatchObject({
       kind: 'ship-scan',
       fillColor: '#38bdf8',
-      disks: [{ x: 10, y: 20, radius: 300 }],
+      geometry: {
+        type: 'coverage',
+        disks: [{ x: 10, y: 20, radius: 300 }],
+      },
+    })
+  })
+
+  it('merges homeworld sector region overlays with markers', () => {
+    const baseWithPlanets: MapDataResponse = {
+      analyticId: 'base-map',
+      nodes: [{ id: 'p1', label: 'p1', x: 10, y: 20, planet: { id: 1 } }],
+      edges: [],
+    }
+    const homeworld: MapDataResponse = {
+      analyticId: 'homeworld-locator',
+      nodes: [],
+      edges: [],
+      homeworldMarkers: [
+        {
+          planetId: 1,
+          perspective: 1,
+          confidenceTier: 'definite',
+          attribution: 'inferred',
+        },
+      ],
+      regionOverlays: [
+        {
+          kind: 'homeworld-sector',
+          id: 'homeworld-sector-0',
+          fillColor: '#f97316',
+          fillOpacity: 0.2,
+          isPinned: true,
+          candidateCount: 1,
+          playerLabel: 'alice',
+          geometry: {
+            type: 'boundary',
+            vertices: [
+              { x: 200, y: 0 },
+              { x: 0, y: 200 },
+              { x: 0, y: 100 },
+              { x: 100, y: 0 },
+            ],
+            edges: [
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+              { type: 'line' },
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+              { type: 'line' },
+            ],
+          },
+        },
+        {
+          kind: 'homeworld-sector',
+          id: 'homeworld-sector-1',
+          fillColor: '#f97316',
+          fillOpacity: 0.2,
+          isPinned: false,
+          candidateCount: 2,
+          geometry: {
+            type: 'boundary',
+            vertices: [
+              { x: 0, y: 200 },
+              { x: -200, y: 0 },
+              { x: -100, y: 0 },
+              { x: 0, y: 100 },
+            ],
+            edges: [
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+              { type: 'line' },
+              { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+              { type: 'line' },
+            ],
+          },
+        },
+      ],
+    }
+
+    const combined = combineMapData(
+      ['base-map', 'homeworld-locator'],
+      [baseWithPlanets, homeworld],
+      { liveConnectionsParams: null }
+    )
+
+    expect(combined.homeworldMarkers).toHaveLength(1)
+    expect(combined.regionOverlays).toHaveLength(2)
+    expect(combined.regionOverlays.map((o) => o.id)).toEqual([
+      'homeworld-sector-0',
+      'homeworld-sector-1',
+    ])
+    expect(combined.regionOverlays[0]).toMatchObject({
+      kind: 'homeworld-sector',
+      isPinned: true,
+      candidateCount: 1,
+      playerLabel: 'alice',
     })
   })
 
