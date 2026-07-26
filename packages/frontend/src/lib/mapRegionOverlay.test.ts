@@ -135,6 +135,16 @@ describe('buildMapRegionOverlayPaneShapes', () => {
     expect(group.boundaryPath).toContain('A ')
     expect(group.boundaryPath).toContain('L ')
     expect(group.boundaryPath!.endsWith(' Z')).toBe(true)
+    expect(group.fillOpacity).toBe(0)
+    // Quarter-circle wedges must use the short arc (large-arc-flag 0), not the
+    // complementary ~270° path that would fill almost the whole annulus.
+    const arcFlags = [...group.boundaryPath!.matchAll(/A [^A]+? 0 ([01]) ([01]) /g)].map(
+      (match) => ({ largeArc: match[1], sweep: match[2] })
+    )
+    expect(arcFlags).toEqual([
+      { largeArc: '0', sweep: '0' },
+      { largeArc: '0', sweep: '1' },
+    ])
     expect(group.disks).toHaveLength(0)
     expect(group.strokeDisks).toHaveLength(1)
     expect(group.strokeDisks[0]!.strokeColor).toBe('#38bdf8')
@@ -142,12 +152,45 @@ describe('buildMapRegionOverlayPaneShapes', () => {
     expect(group.patches).toEqual([])
   })
 
+  it('keeps eleven-way homeworld sector arcs on the short wedge', () => {
+    const centerX = 1980
+    const centerY = 2000
+    const rOuter = 600
+    const rInner = 200
+    const start = 0
+    const end = (2 * Math.PI) / 11
+    const overlay: MapRegionOverlay = {
+      kind: 'homeworld-sector',
+      id: 'homeworld-sector-0',
+      fillColor: '#f97316',
+      fillOpacity: 0,
+      geometry: {
+        type: 'boundary',
+        vertices: [
+          { x: centerX + rOuter * Math.cos(start), y: centerY + rOuter * Math.sin(start) },
+          { x: centerX + rOuter * Math.cos(end), y: centerY + rOuter * Math.sin(end) },
+          { x: centerX + rInner * Math.cos(end), y: centerY + rInner * Math.sin(end) },
+          { x: centerX + rInner * Math.cos(start), y: centerY + rInner * Math.sin(start) },
+        ],
+        edges: [
+          { type: 'arc', centerX, centerY, clockwise: false },
+          { type: 'line' },
+          { type: 'arc', centerX, centerY, clockwise: true },
+          { type: 'line' },
+        ],
+      },
+    }
+    const path = buildMapRegionOverlayPaneShapes([overlay], viewport).groups[0]!.boundaryPath!
+    const largeArcFlags = [...path.matchAll(/A [^A]+? 0 ([01]) [01] /g)].map((m) => m[1])
+    expect(largeArcFlags).toEqual(['0', '0'])
+  })
+
   it('uses distinct stroke colors for 81 and 162 LY homeworld envelopes', () => {
     const overlay: MapRegionOverlay = {
       kind: 'homeworld-sector',
       id: 'sector-env',
       fillColor: '#f97316',
-      fillOpacity: 0.08,
+      fillOpacity: 0,
       geometry: {
         type: 'boundary',
         vertices: [
@@ -169,7 +212,9 @@ describe('buildMapRegionOverlayPaneShapes', () => {
       },
     }
     const shapes = buildMapRegionOverlayPaneShapes([overlay], viewport)
-    const strokes = shapes.groups[0]!.strokeDisks
+    const group = shapes.groups[0]!
+    expect(group.fillOpacity).toBe(0)
+    const strokes = group.strokeDisks
     expect(strokes.map((d) => d.strokeColor)).toEqual(['#38bdf8', '#c084fc'])
   })
 

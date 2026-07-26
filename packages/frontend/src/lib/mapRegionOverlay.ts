@@ -193,27 +193,30 @@ function projectDiskShapes(
 }
 
 /**
- * SVG arc in pane space. ``clockwiseMap`` is map-space (Y-up); pane SVG is
- * Y-down so the sweep flag is inverted.
+ * SVG arc in pane space.
+ *
+ * ``clockwise`` is the wire/map winding (Y-up). Endpoints are already projected
+ * through ``mapToPane`` (Y-flip), so screen orientation matches that winding --
+ * do not invert the sweep flag or short annular wedges become the long way
+ * around (~360° - span) and fill almost the entire annulus.
  */
 function paneArcCommand(
   start: { px: number; py: number },
   end: { px: number; py: number },
   center: { px: number; py: number },
   radius: number,
-  clockwiseMap: boolean
+  clockwise: boolean
 ): string {
-  const clockwisePane = !clockwiseMap
   const startAngle = Math.atan2(start.py - center.py, start.px - center.px)
   const endAngle = Math.atan2(end.py - center.py, end.px - center.px)
   let delta = endAngle - startAngle
-  if (clockwisePane) {
+  if (clockwise) {
     while (delta <= 0) delta += 2 * Math.PI
   } else {
     while (delta >= 0) delta -= 2 * Math.PI
   }
   const largeArc = Math.abs(delta) > Math.PI ? 1 : 0
-  const sweep = clockwisePane ? 1 : 0
+  const sweep = clockwise ? 1 : 0
   return (
     `A ${formatPaneCoordinate(radius)} ${formatPaneCoordinate(radius)} 0 ${largeArc} ${sweep} ` +
     `${formatPaneCoordinate(end.px)} ${formatPaneCoordinate(end.py)}`
@@ -338,8 +341,9 @@ function buildBoundaryGroup(
     : undefined
   return {
     key: overlay.id,
+    // Homeworld sectors are outline-only; wire fill fields stay for shared shape.
     fillColor: overlay.fillColor,
-    fillOpacity: overlay.fillOpacity,
+    fillOpacity: isHomeworldSector ? 0 : overlay.fillOpacity,
     strokeColor,
     strokeWidth: isHomeworldSector ? 1.5 : undefined,
     disks,

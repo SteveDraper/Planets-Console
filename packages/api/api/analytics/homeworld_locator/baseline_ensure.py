@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from api.analytics.homeworld_locator.baseline import infer_homeworld_baseline_candidates
+from api.analytics.homeworld_locator.baseline import (
+    apply_co_sector_candidate_cull,
+    infer_homeworld_baseline_candidates,
+)
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
@@ -226,8 +229,14 @@ def materialize_homeworld_candidate_view(
 
     result = ensure_homeworld_baseline(services, shell_turn=shell_turn)
     state = result.game_state
+    candidates = apply_co_sector_candidate_cull(
+        state.candidates,
+        shell_turn.planets,
+        settings=shell_turn.settings,
+        player_count=_player_count(shell_turn),
+    )
     return HomeworldCandidateView(
-        candidates=state.candidates,
+        candidates=candidates,
         baseline_turn=state.baseline_turn,
         baseline_degraded=state.baseline_degraded,
         available=True,

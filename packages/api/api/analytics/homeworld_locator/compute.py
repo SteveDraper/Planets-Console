@@ -62,7 +62,13 @@ def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
 
     services = resolve_homeworld_services(ctx.exports)
     view = materialize_homeworld_candidate_view(services, shell_turn=ctx.turn)
-    overlays = build_homeworld_sector_overlays_for_turn(ctx.turn, view)
+    overlays = build_homeworld_sector_overlays_for_turn(
+        ctx.turn,
+        view,
+        shell_perspective=services.perspective,
+        game_info=services.game_info,
+        game_id=services.game_id,
+    )
     return _view_to_wire(
         view,
         region_overlays=[map_region_overlay_to_wire(overlay) for overlay in overlays],

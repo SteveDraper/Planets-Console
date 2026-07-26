@@ -86,10 +86,10 @@ export function MapRegionOverlayPane({
               {group.boundaryPath != null ? (
                 <path
                   d={group.boundaryPath}
-                  fill={group.fillColor}
-                  fillOpacity={group.fillOpacity}
+                  fill={group.fillOpacity > 0 ? group.fillColor : 'none'}
+                  fillOpacity={group.fillOpacity > 0 ? group.fillOpacity : undefined}
                   stroke={group.strokeColor ?? group.fillColor}
-                  strokeOpacity={group.strokeColor != null ? 0.9 : group.fillOpacity}
+                  strokeOpacity={group.strokeColor != null ? 0.85 : group.fillOpacity}
                   strokeWidth={group.strokeWidth ?? 1}
                 />
               ) : null}

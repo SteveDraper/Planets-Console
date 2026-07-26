@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from api.analytics.homeworld_locator.geometry import sector_index_for_angle
 from api.analytics.homeworld_locator.layout_distributions_asset import (
     CategoryLayoutDistributions,
     LayoutDistributionsAsset,
@@ -27,7 +28,6 @@ from api.analytics.homeworld_locator.sector_overlays import (
     closest_unobserved_band_point,
     homeworld_sector_emission_eligible,
     resolve_viewpoint_pin_planet,
-    sector_index_for_angle,
 )
 from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
@@ -190,6 +190,7 @@ def test_build_overlays_sector_count_band_and_pin(template_planet) -> None:
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
         nebulas=(),
+        pinned_player_label_by_planet_id={pin.id: "koshling (The Lizard Alliance)"},
     )
     assert len(overlays) == player_count
     # isPinned = HW determined + owning player known (slot-anchored), not mere orphans.
@@ -197,6 +198,7 @@ def test_build_overlays_sector_count_band_and_pin(template_planet) -> None:
     assert len(pinned) == 1
     assert pinned[0].id == "homeworld-sector-0"
     assert pinned[0].status == STATUS_OK
+    assert pinned[0].hover_summary == ("player: koshling (The Lizard Alliance) · 1 candidate")
     assert pinned[0].geometry.type == "boundary"
     assert len(pinned[0].geometry.disks) == 2
     assert {disk.radius for disk in pinned[0].geometry.disks} == set(ENVELOPE_RADII_LY)
@@ -246,6 +248,8 @@ def test_fully_observed_zero_candidates_error_no_disks(template_planet) -> None:
         assert overlay.geometry.disks == ()
         assert overlay.hover_summary == HOVER_NO_CANDIDATES
         assert overlay.fill_color.startswith("#ef")
+        assert overlay.fill_opacity == 0.0
+    assert all(overlay.fill_opacity == 0.0 for overlay in overlays)
 
 
 def test_incomplete_observation_uses_unobserved_point(template_planet) -> None:
@@ -263,7 +267,10 @@ def test_incomplete_observation_uses_unobserved_point(template_planet) -> None:
         nebulas=(),
     )
     assert unobserved is not None
+    # Fully unobserved samples: closest-to-C stays on the inner arc, but at mid-angle
+    # (not angle_start), so incompleteness detection does not pin a corner.
     assert abs(math.hypot(unobserved[0], unobserved[1]) - 500.0) < 1.0
+    assert abs(math.atan2(unobserved[1], unobserved[0]) - math.pi) < 1e-6
 
     overlays = build_homeworld_sector_overlays(
         center=center,
@@ -281,17 +288,41 @@ def test_incomplete_observation_uses_unobserved_point(template_planet) -> None:
     assert opposite.is_pinned is False
     assert opposite.status == STATUS_INCOMPLETE
     assert len(opposite.geometry.disks) == 2
-    # Envelope sits on the inner arc (closest unobserved to C).
+    # Fog envelope placeholder: mid-angle at mid-radius of the band.
     disk = opposite.geometry.disks[0]
-    assert abs(math.hypot(disk.x, disk.y) - 500.0) < 2.0
+    assert abs(math.hypot(disk.x, disk.y) - 550.0) < 2.0
+    assert abs(math.atan2(disk.y, disk.x) - math.pi) < 0.05
 
 
-def test_envelope_center_closest_candidate_to_map_center(template_planet) -> None:
+def test_closest_unobserved_prefers_mid_angle_on_inner_arc_tie(template_planet) -> None:
+    """When the whole inner arc is unobserved, do not pick angle_start (a corner)."""
+    center = (0.0, 0.0)
+    angle_start = -math.pi / 11
+    angle_end = math.pi / 11
+    point = closest_unobserved_band_point(
+        center=center,
+        angle_start=angle_start,
+        angle_end=angle_end,
+        r_inner=500.0,
+        r_outer=600.0,
+        origins=[CoverageOrigin(x=10_000, y=0, base_range=1)],
+        nebulas=(),
+    )
+    assert point is not None
+    assert abs(math.hypot(point[0], point[1]) - 500.0) < 1.0
+    assert abs(math.atan2(point[1], point[0])) < 1e-3
+    # Must not sit on the clockwise/start radial (inner corner).
+    assert abs(math.atan2(point[1], point[0]) - angle_start) > 0.05
+
+
+def test_envelope_center_closest_candidate_to_sector_mid(template_planet) -> None:
+    """Orphan envelopes prefer the candidate nearest the sector geometric center."""
     center = (0.0, 0.0)
     pin = _planet(template_planet, planet_id=1, x=550, y=0)
-    # Two orphan candidates in sector 1 (around +π/2): nearer and farther from C.
-    near = _planet(template_planet, planet_id=2, x=0, y=520)
-    far = _planet(template_planet, planet_id=3, x=0, y=580)
+    # Sector 1 (~+π/2): inner (closer to C), mid-band, and outer.
+    inner = _planet(template_planet, planet_id=2, x=0, y=510)
+    mid = _planet(template_planet, planet_id=3, x=0, y=550)
+    outer = _planet(template_planet, planet_id=4, x=0, y=590)
     origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
     overlays = build_homeworld_sector_overlays(
         center=center,
@@ -299,8 +330,8 @@ def test_envelope_center_closest_candidate_to_map_center(template_planet) -> Non
         player_count=4,
         r_inner=500.0,
         r_outer=600.0,
-        planets=[pin, near, far],
-        candidate_planet_ids=frozenset({pin.id, near.id, far.id}),
+        planets=[pin, inner, mid, outer],
+        candidate_planet_ids=frozenset({pin.id, inner.id, mid.id, outer.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
         nebulas=(),
@@ -308,8 +339,10 @@ def test_envelope_center_closest_candidate_to_map_center(template_planet) -> Non
     sector_one = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-1")
     assert sector_one.status == STATUS_OK
     assert sector_one.is_pinned is False
-    assert sector_one.geometry.disks[0].x == near.x
-    assert sector_one.geometry.disks[0].y == near.y
+    assert sector_one.geometry.disks[0].x == mid.x
+    assert sector_one.geometry.disks[0].y == mid.y
+    # Must not prefer the inner-arc candidate (closest to C under the old rule).
+    assert sector_one.geometry.disks[0].y != inner.y
 
 
 def test_incomplete_with_candidates_prefers_candidate_center(template_planet) -> None:
@@ -411,8 +444,11 @@ def test_for_turn_emits_when_gate_passes_and_empty_without_pin(
         view,
         layout_asset=asset,
         map_center=center,
+        shell_perspective=1,
     )
     assert len(overlays) == 11
+    pinned = next(overlay for overlay in overlays if overlay.is_pinned)
+    assert f"player: {turn.player.username}" in pinned.hover_summary
     assert sum(1 for overlay in overlays if overlay.is_pinned) == 1
 
     no_pin_view = HomeworldCandidateView(

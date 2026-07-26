@@ -421,7 +421,7 @@ Map decoration on a **base map** planet node for a **homeworld candidate** at a 
 _Avoid_: HW node (separate graph node), duplicate planet
 
 **Homeworld region overlay**:
-The **homeworld locator** analytic's use of shared **map region overlay** geometry for circular-ring sectors (and optional cluster envelope disks) when no planet is pinned -- or to show un-pinned / pinned sectors per **homeworld region display mode**. Emitted as `regionOverlays` boundary entries (not cartography `overlayCircles`). Slot binding and rival labels are separate slices.
+The **homeworld locator** analytic's use of shared **map region overlay** geometry for circular-ring sectors (stroke-only annular boundaries, plus optional cluster envelope disks) when no planet is pinned -- or to show un-pinned / pinned sectors per **homeworld region display mode**. Emitted as `regionOverlays` boundary entries (not cartography `overlayCircles`). Slot binding and rival labels are separate slices.
 _Avoid_: possible zone (vague), sector blob (informal), overlayCircles for homeworld sectors, homeworld-only parallel wire field
 
 **Homeworld region display mode**:

@@ -151,6 +151,7 @@ Apply **homeworld candidate geometry** when `hwdistribution=2` and `mapshape=0`:
 | Angular spacing | ~equal sectors per active **Player**; `shuffleteampositions` permutes slot-to-site assignment |
 | Viewpoint pin | When the viewpoint slot has a unique **homeworld baseline profile** match, treat that planet as **definite** slot-anchored and fix ring rotation |
 | Other ring HW sites | Remaining geometric HW planets are **orphan homeworld candidates** (**possible**) -- do not cross-product bind them to rival slots in v1 baseline |
+| Co-sector cull | Once a sector has a **definite** homeworld, drop other (inferred) possibles in that same angular sector; keep orphans in other sectors; never cull **user-asserted** rows |
 | Single planet in sector | **Definite** when baseline weak but geometry leaves no plausible alternative in that slot's arc (stronger once overlays/#35 land) |
 
 **Homeworld cluster constraint** (all map shapes that still have traditional HWs): count planets within 81 LY and within 81--162 LY; compare to `verycloseplanets` and `closeplanets`. Use this to construct **orphan** HW-like sites even when ring/sector math does not apply.
@@ -162,7 +163,8 @@ When no planet is pinned for a slot, [#35](https://github.com/SteveDraper/Planet
 | Emission gate | Only when `hwdistribution=2`, `mapshape=0`, game category epic\|standard, and a **viewpoint pin** fixes rotation -- then emit **all** `player_count` sector overlays; otherwise none (markers unchanged) |
 | Wire | Shared **map region overlay** boundary primitive ([ADR 0008](adr/0008-shared-map-region-overlays.md)); not a homeworld-only field; not cartography `overlayCircles` |
 | Band radii | From **homeworld layout distribution asset** smoothed center-distance support extremes |
-| Envelopes | 81 + 162 LY disks when a sector center exists (most-likely candidate closest to map center C; pinned planet when pinned; incomplete observation → point in unobserved band closest to C; fully observed + zero candidates → no disks, error fill + hover) |
+| Envelopes | 81 + 162 LY disks when a sector center exists (candidate closest to sector geometric center = mid-angle at mid-radius; pinned planet when pinned; incomplete + no candidates → geometric band center; fully observed + zero candidates → no disks, error stroke + hover) |
+| Sector paint | Stroke-only annular boundaries (no fill); FE display mode filters which sectors show |
 | FE display | **Homeworld region display mode** (`off` \| `un-pinned` \| `pinned` \| `all`, default `un-pinned`) |
 | Labels | No rival slot labels in #35 (assignment stays #37) |
 

@@ -8,9 +8,9 @@ planet-scan coverage from viewpoint + Share Intel origins.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
-from api.analytics.homeworld_locator.geometry import resolve_map_center
+from api.analytics.homeworld_locator.geometry import resolve_map_center, sector_index_for_angle
 from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     load_default_layout_distributions_asset,
@@ -38,8 +38,11 @@ from api.concepts.map_region_coverage import (
 from api.concepts.stellar_cartography.nebula_visibility import NebulaCenter, distance_ly
 from api.concepts.visibility_coverage import planet_scan_origins, visibility_owner_ids
 from api.concepts.warp_well import planet_is_planetoid
-from api.models.game import TurnInfo
+from api.errors import ValidationError
+from api.models.game import GameInfo, TurnInfo
 from api.models.planet import Planet
+from api.models.player import Player, Race
+from api.services.game_service import GameService
 
 KIND_HOMEWORLD_SECTOR = "homeworld-sector"
 
@@ -49,11 +52,10 @@ STATUS_ERROR = "error"
 
 HOVER_NO_CANDIDATES = "no candidates"
 
-DEFAULT_SECTOR_FILL_COLOR = "#f97316"
-# Keep sector fills light so base-map planets stay readable under the band.
-DEFAULT_SECTOR_FILL_OPACITY = 0.08
-ERROR_SECTOR_FILL_COLOR = "#ef4444"
-ERROR_SECTOR_FILL_OPACITY = 0.12
+# Wire ``fillColor`` / ``fillOpacity`` are required on shared overlays; sectors are
+# stroke-only on the map (``fillOpacity`` always 0). Color marks ok vs error.
+SECTOR_COLOR = "#f97316"
+ERROR_SECTOR_COLOR = "#ef4444"
 
 # Observation sampling over the annular sector band.
 _RADIAL_SAMPLE_STEP_LY = 10.0
@@ -103,20 +105,6 @@ def resolve_viewpoint_pin_planet(
     return None
 
 
-def sector_index_for_angle(
-    angle: float,
-    *,
-    pin_angle: float,
-    player_count: int,
-) -> int:
-    """Sector index whose wedge is centered on ``pin_angle + k * 2π/n``."""
-    half = math.pi / player_count
-    delta = (angle - pin_angle) % (2.0 * math.pi)
-    shifted = (delta + half) % (2.0 * math.pi)
-    width = (2.0 * math.pi) / player_count
-    return int(shifted / width) % player_count
-
-
 def annular_sector_boundary(
     *,
     center: tuple[float, float],
@@ -153,6 +141,30 @@ def annular_sector_boundary(
     return vertices, edges
 
 
+def _sector_angle_span(angle_start: float, angle_end: float) -> float:
+    span = angle_end - angle_start
+    if span <= 0:
+        span += 2.0 * math.pi
+    return span
+
+
+def sector_band_geometric_center(
+    *,
+    center: tuple[float, float],
+    angle_start: float,
+    angle_end: float,
+    r_inner: float,
+    r_outer: float,
+) -> tuple[float, float]:
+    """Angular mid-ray at the midpoint radius of the annular sector."""
+    mid_angle = angle_start + 0.5 * _sector_angle_span(angle_start, angle_end)
+    mid_radius = 0.5 * (r_inner + r_outer)
+    return (
+        center[0] + mid_radius * math.cos(mid_angle),
+        center[1] + mid_radius * math.sin(mid_angle),
+    )
+
+
 def closest_unobserved_band_point(
     *,
     center: tuple[float, float],
@@ -165,34 +177,41 @@ def closest_unobserved_band_point(
 ) -> tuple[float, float] | None:
     """Point in the annular sector closest to ``center`` that is not planet-scanned.
 
+    On equal distance-to-C ties, prefer the sample nearest the sector mid-angle.
     Returns ``None`` when the sampled band is fully covered.
     """
     if not origins:
-        # No scan origins → entire band unobserved; closest point is on the inner arc.
-        mid = 0.5 * (angle_start + angle_end)
-        return (
-            center[0] + r_inner * math.cos(mid),
-            center[1] + r_inner * math.sin(mid),
+        # No scan origins → entire band unobserved; use geometric band center.
+        return sector_band_geometric_center(
+            center=center,
+            angle_start=angle_start,
+            angle_end=angle_end,
+            r_inner=r_inner,
+            r_outer=r_outer,
         )
 
-    span = angle_end - angle_start
-    if span <= 0:
-        span += 2.0 * math.pi
+    span = _sector_angle_span(angle_start, angle_end)
+    mid_angle = angle_start + 0.5 * span
     angle_samples = max(_MIN_ANGLE_SAMPLES, int(math.ceil(span / (math.pi / 36.0))))
     radial_steps = max(1, int(math.ceil((r_outer - r_inner) / _RADIAL_SAMPLE_STEP_LY)))
 
     best: tuple[float, float] | None = None
     best_dist = float("inf")
+    best_angle_delta = float("inf")
     for angle_index in range(angle_samples + 1):
         angle = angle_start + span * (angle_index / angle_samples)
+        angle_delta = abs(angle - mid_angle)
         for radial_index in range(radial_steps + 1):
             radius = r_inner + (r_outer - r_inner) * (radial_index / radial_steps)
             x = center[0] + radius * math.cos(angle)
             y = center[1] + radius * math.sin(angle)
             if point_covered_by_origins(x, y, origins, nebulas):
                 continue
-            if radius < best_dist:
+            if radius < best_dist - 1e-9 or (
+                abs(radius - best_dist) <= 1e-9 and angle_delta < best_angle_delta
+            ):
                 best_dist = radius
+                best_angle_delta = angle_delta
                 best = (x, y)
             # Further out on this ray is farther from C.
             break
@@ -211,18 +230,23 @@ def build_homeworld_sector_overlays(
     slot_anchored_planet_ids: frozenset[int],
     scan_origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter] = (),
+    pinned_player_label_by_planet_id: Mapping[int, str] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Build one boundary overlay per equal angular sector.
 
     ``is_pinned`` means the homeworld is determined and the owning player is
     known (a slot-anchored candidate planet lies in the sector). Orphan-only
     or empty sectors are un-pinned for display-mode filtering.
+
+    ``pinned_player_label_by_planet_id`` maps slot-anchored planet ids to
+    ``username (race)`` strings for hover text.
     """
     if player_count < 2:
         return ()
     if r_outer < r_inner:
         raise ValueError("r_outer must be >= r_inner")
 
+    label_by_planet = dict(pinned_player_label_by_planet_id or ())
     center_x, center_y = center
     pin_angle = math.atan2(pin.y - center_y, pin.x - center_x)
     half = math.pi / player_count
@@ -274,33 +298,53 @@ def build_homeworld_sector_overlays(
         envelope_center: tuple[float, float] | None
         status: str
         hover: str
-        fill_color = DEFAULT_SECTOR_FILL_COLOR
-        fill_opacity = DEFAULT_SECTOR_FILL_OPACITY
+        sector_color = SECTOR_COLOR
+        pinned_label: str | None = None
 
         if is_pinned:
             # Slot-anchored planet(s): prefer the viewpoint pin in its sector,
-            # else closest slot-anchored site to map center.
+            # else the slot-anchored site closest to the sector geometric center.
             if is_viewpoint_sector:
+                anchor = pin
                 envelope_center = (float(pin.x), float(pin.y))
             else:
-                closest = min(
-                    slot_anchored,
-                    key=lambda planet: distance_ly(planet.x, planet.y, center_x, center_y),
+                sector_mid = sector_band_geometric_center(
+                    center=center,
+                    angle_start=angle_start,
+                    angle_end=angle_end,
+                    r_inner=r_inner,
+                    r_outer=r_outer,
                 )
-                envelope_center = (float(closest.x), float(closest.y))
+                anchor = min(
+                    slot_anchored,
+                    key=lambda planet: distance_ly(
+                        planet.x, planet.y, sector_mid[0], sector_mid[1]
+                    ),
+                )
+                envelope_center = (float(anchor.x), float(anchor.y))
+            pinned_label = label_by_planet.get(anchor.id)
             status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
             hover = _hover_summary(
                 is_pinned=True,
                 candidate_count=len(sector_candidates),
                 is_incomplete=is_incomplete,
                 is_error=False,
+                pinned_player_label=pinned_label,
             )
         elif sector_candidates:
-            # Orphans present: still un-pinned (player unknown), but center envelopes
-            # on the most likely orphan (closest to C) even under incomplete scan.
+            # Orphans: center envelopes on the candidate closest to the sector
+            # geometric center (mid-angle at mid-radius), not closest to map
+            # center C (which biases to the inner arc / sector edge).
+            sector_mid = sector_band_geometric_center(
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            )
             closest = min(
                 sector_candidates,
-                key=lambda planet: distance_ly(planet.x, planet.y, center_x, center_y),
+                key=lambda planet: distance_ly(planet.x, planet.y, sector_mid[0], sector_mid[1]),
             )
             envelope_center = (float(closest.x), float(closest.y))
             status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
@@ -311,7 +355,15 @@ def build_homeworld_sector_overlays(
                 is_error=False,
             )
         elif is_incomplete:
-            envelope_center = unobserved
+            # Fog placeholder: geometric center of the band (not closest-to-C
+            # sample, which collapses to an inner-arc corner on full-sector fog).
+            envelope_center = sector_band_geometric_center(
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            )
             status = STATUS_INCOMPLETE
             hover = _hover_summary(
                 is_pinned=False,
@@ -322,8 +374,7 @@ def build_homeworld_sector_overlays(
         else:
             envelope_center = None
             status = STATUS_ERROR
-            fill_color = ERROR_SECTOR_FILL_COLOR
-            fill_opacity = ERROR_SECTOR_FILL_OPACITY
+            sector_color = ERROR_SECTOR_COLOR
             hover = HOVER_NO_CANDIDATES
 
         disks: tuple[MapRegionOverlayDisk, ...] = ()
@@ -345,8 +396,8 @@ def build_homeworld_sector_overlays(
             boundary_to_overlay(
                 kind=KIND_HOMEWORLD_SECTOR,
                 overlay_id=f"homeworld-sector-{index}",
-                fill_color=fill_color,
-                fill_opacity=fill_opacity,
+                fill_color=sector_color,
+                fill_opacity=0.0,
                 vertices=vertices,
                 edges=edges,
                 disks=disks,
@@ -365,6 +416,9 @@ def build_homeworld_sector_overlays_for_turn(
     *,
     layout_asset: LayoutDistributionsAsset | None = None,
     map_center: tuple[float, float] | None = None,
+    shell_perspective: int | None = None,
+    game_info: GameInfo | None = None,
+    game_id: int | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Emit sector overlays for a shell turn when the emission gate passes."""
     pin = resolve_viewpoint_pin_planet(view, turn.planets)
@@ -391,6 +445,14 @@ def build_homeworld_sector_overlays_for_turn(
     slot_anchored_ids = frozenset(
         row.planet_id for row in view.candidates if row.perspective is not None
     )
+    resolved_game_id = game_id if game_id is not None else turn.settings.id
+    labels = pinned_player_labels_for_view(
+        turn,
+        view,
+        shell_perspective=shell_perspective,
+        game_info=game_info,
+        game_id=resolved_game_id,
+    )
 
     return build_homeworld_sector_overlays(
         center=center,
@@ -403,7 +465,67 @@ def build_homeworld_sector_overlays_for_turn(
         slot_anchored_planet_ids=slot_anchored_ids,
         scan_origins=origins,
         nebulas=turn.nebulas,
+        pinned_player_label_by_planet_id=labels,
     )
+
+
+def format_pinned_player_label(player: Player, races_by_id: Mapping[int, Race]) -> str:
+    """``username (race name)`` for pinned-sector hover."""
+    race = races_by_id.get(player.raceid)
+    if race is not None and race.name:
+        return f"{player.username} ({race.name})"
+    return player.username
+
+
+def player_for_homeworld_perspective(
+    turn: TurnInfo,
+    perspective: int,
+    *,
+    shell_perspective: int | None = None,
+    game_info: GameInfo | None = None,
+    game_id: int | None = None,
+) -> Player | None:
+    """Resolve a slot-anchored candidate perspective to a turn roster Player."""
+    roster = players_by_id(turn)
+    if game_info is not None and game_id is not None:
+        try:
+            player_id = GameService.player_id_for_perspective(game_info, perspective, game_id)
+        except ValidationError:
+            player_id = None
+        if player_id is not None:
+            player = roster.get(player_id)
+            if player is not None:
+                return player
+    if shell_perspective is not None and perspective == shell_perspective:
+        return turn.player
+    return roster.get(perspective)
+
+
+def pinned_player_labels_for_view(
+    turn: TurnInfo,
+    view: HomeworldCandidateView,
+    *,
+    shell_perspective: int | None = None,
+    game_info: GameInfo | None = None,
+    game_id: int | None = None,
+) -> dict[int, str]:
+    """Map slot-anchored candidate planet ids to ``username (race)`` hover labels."""
+    races_by_id = {race.id: race for race in turn.races}
+    labels: dict[int, str] = {}
+    for row in view.candidates:
+        if row.perspective is None:
+            continue
+        player = player_for_homeworld_perspective(
+            turn,
+            row.perspective,
+            shell_perspective=shell_perspective,
+            game_info=game_info,
+            game_id=game_id,
+        )
+        if player is None:
+            continue
+        labels[row.planet_id] = format_pinned_player_label(player, races_by_id)
+    return labels
 
 
 def _hover_summary(
@@ -412,12 +534,16 @@ def _hover_summary(
     candidate_count: int,
     is_incomplete: bool,
     is_error: bool,
+    pinned_player_label: str | None = None,
 ) -> str:
     if is_error:
         return HOVER_NO_CANDIDATES
     parts: list[str] = []
     if is_pinned:
-        parts.append("player known")
+        if pinned_player_label:
+            parts.append(f"player: {pinned_player_label}")
+        else:
+            parts.append("player known")
     if is_incomplete:
         parts.append("incomplete scan")
     parts.append("1 candidate" if candidate_count == 1 else f"{candidate_count} candidates")
