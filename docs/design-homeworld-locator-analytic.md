@@ -313,7 +313,7 @@ Hybrid phases (each independently reviewable):
 
 1. **Shared region boundary** -- discriminate `regionOverlays` coverage vs boundary; FE normalize + pane; MapGraph Visibility-pref isolation; ADR 0008; CONTEXT/design grill locks (this section / §4.2).
 2. **Layout distribution asset** -- committed smoothed percentile tables (epic/standard); loader; support extremes for paint band. Shipped at `assets/analytics/homeworld-locator/layout_distributions.json`. Regenerate: build gitignored `local/homeworld_distributions.json` from `local/sampled_homeworlds.csv` + `.sampler_data` via `scripts/visualize_homeworld_distributions.py`, then `… distill --report local/homeworld_distributions.json` (Laplace on trimmed 10 LY bins → percentile grid + `supportMin`/`supportMax`).
-3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes.
+3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes (`regionOverlays` boundary entries; FE display-mode filter is phase 4).
 4. **FE display mode + hover** -- preference store, merge/filter, hit-test `hoverSummary`.
 
 ---
@@ -338,3 +338,4 @@ Hybrid phases (each independently reviewable):
 | 2026-07-25 | #34 baseline: empty `ENSURE_DEPENDENCIES`; #36 adds `turn_delta=-1` self-chain for refine-through-T |
 | 2026-07-26 | #35 grill locks: shared `regionOverlays` boundary ([ADR 0008](adr/0008-shared-map-region-overlays.md)); display mode; layout asset; §4.2 / §11.2 |
 | 2026-07-26 | #35 phase 2: layout distribution asset path + regenerate via visualize/distill (§11.2) |
+| 2026-07-26 | #35 phase 3: Core emits pin-oriented sector `regionOverlays` (asset band, planet-scan envelopes/error) on map GET |

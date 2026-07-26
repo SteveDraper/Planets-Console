@@ -288,6 +288,27 @@ def _cell_covered(
     return False
 
 
+def point_covered_by_origins(
+    x: float,
+    y: float,
+    origins: Sequence[CoverageOrigin],
+    nebulas: Sequence[NebulaCenter],
+    *,
+    effective_range: EffectiveRangeFn | None = None,
+) -> bool:
+    """True when map point ``(x, y)`` is inside any origin's effective reach.
+
+    Coordinates are rounded to integer map cells (same grid as hybrid patches).
+    """
+    return _cell_covered(
+        int(round(x)),
+        int(round(y)),
+        origins,
+        nebulas,
+        effective_range=effective_range,
+    )
+
+
 def _build_patch_for_aabb(
     aabb: CellAabb,
     origins: Sequence[CoverageOrigin],

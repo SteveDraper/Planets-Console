@@ -112,6 +112,31 @@ def _ship_origins(
     return origins
 
 
+def _planet_and_ship_scan_origins(
+    planets: Sequence[Planet],
+    ships: Sequence[Ship],
+    hulls: Sequence[Hull],
+    owner_ids: frozenset[int],
+    *,
+    base_range: float,
+) -> list[CoverageOrigin]:
+    """Planet and ship origins at ``base_range`` (no separate starbase origins)."""
+    origins: list[CoverageOrigin] = []
+    for planet in planets:
+        if planet.ownerid in owner_ids:
+            origins.append(CoverageOrigin(x=planet.x, y=planet.y, base_range=base_range))
+    origins.extend(
+        _ship_origins(
+            ships,
+            hulls,
+            owner_ids,
+            base_range=base_range,
+            apply_nebula_scanner=True,
+        )
+    )
+    return origins
+
+
 def ship_scan_origins(
     planets: Sequence[Planet],
     ships: Sequence[Ship],
@@ -121,20 +146,35 @@ def ship_scan_origins(
     ship_scan_range: float,
 ) -> list[CoverageOrigin]:
     """Planet and ship origins at ship-scan range (no separate starbase origins)."""
-    origins: list[CoverageOrigin] = []
-    for planet in planets:
-        if planet.ownerid in owner_ids:
-            origins.append(CoverageOrigin(x=planet.x, y=planet.y, base_range=ship_scan_range))
-    origins.extend(
-        _ship_origins(
-            ships,
-            hulls,
-            owner_ids,
-            base_range=ship_scan_range,
-            apply_nebula_scanner=True,
-        )
+    return _planet_and_ship_scan_origins(
+        planets,
+        ships,
+        hulls,
+        owner_ids,
+        base_range=ship_scan_range,
     )
-    return origins
+
+
+def planet_scan_origins(
+    planets: Sequence[Planet],
+    ships: Sequence[Ship],
+    hulls: Sequence[Hull],
+    owner_ids: frozenset[int],
+    *,
+    planet_scan_range: float,
+) -> list[CoverageOrigin]:
+    """Planet and ship origins at planet-scan range (viewpoint + Share Intel owners).
+
+    Same origin set as ship-scan; used for homeworld sector observation
+    completeness. Nebula Scanner still floors ship reach inside density.
+    """
+    return _planet_and_ship_scan_origins(
+        planets,
+        ships,
+        hulls,
+        owner_ids,
+        base_range=planet_scan_range,
+    )
 
 
 def active_sensor_sweep_origins(

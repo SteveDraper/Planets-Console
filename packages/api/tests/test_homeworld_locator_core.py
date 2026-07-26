@@ -537,6 +537,7 @@ def test_map_table_payload_smoke(persistence, sample_turn) -> None:
     assert payload["baselineDegraded"] is False
     assert isinstance(payload["markers"], list)
     assert isinstance(payload["rows"], list)
+    assert payload["regionOverlays"] == []
     assert payload["markers"] == [
         {
             "planetId": row["planetId"],
@@ -562,6 +563,7 @@ def test_inactive_map_table_payload(persistence, sample_turn) -> None:
     assert payload["inactiveReason"] == INACTIVE_REASON_NO_HOMEWORLD
     assert payload["markers"] == []
     assert payload["rows"] == []
+    assert payload["regionOverlays"] == []
     assert persistence.get_game_state(628580) is None
 
 

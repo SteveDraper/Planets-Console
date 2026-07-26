@@ -100,6 +100,28 @@ def test_ship_scan_origins_planets_and_ships_only(sample_turn):
     assert all(o.base_range == 300 for o in origins)
 
 
+def test_planet_scan_origins_uses_planetscanrange(sample_turn):
+    from api.concepts.visibility_coverage import planet_scan_origins
+
+    owners = frozenset({sample_turn.player.id})
+    origins = planet_scan_origins(
+        sample_turn.planets,
+        sample_turn.ships,
+        sample_turn.hulls,
+        owners,
+        planet_scan_range=400,
+    )
+    ship_origins = ship_scan_origins(
+        sample_turn.planets,
+        sample_turn.ships,
+        sample_turn.hulls,
+        owners,
+        ship_scan_range=300,
+    )
+    assert len(origins) == len(ship_origins)
+    assert all(o.base_range == 400 for o in origins)
+
+
 def _ship(
     *,
     ship_id: int,

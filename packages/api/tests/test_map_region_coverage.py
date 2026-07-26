@@ -12,9 +12,16 @@ from api.concepts.map_region_coverage import (
     hybrid_coverage_to_overlay,
     map_region_overlay_to_wire,
     patch_cell_covered,
+    point_covered_by_origins,
 )
 from api.concepts.stellar_cartography.nebula_visibility import nebula_visibility_ly
 from api.models.space import Nebula
+
+
+def test_point_covered_by_origins_matches_disk():
+    origins = [CoverageOrigin(x=0, y=0, base_range=100)]
+    assert point_covered_by_origins(50, 0, origins, []) is True
+    assert point_covered_by_origins(150, 0, origins, []) is False
 
 
 def test_empty_origins_yield_empty_coverage():
