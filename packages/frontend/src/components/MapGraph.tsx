@@ -33,6 +33,7 @@ import {
   RegionOverlayHoverTooltip,
   useRegionOverlayHoverLines,
 } from './map-graph/RegionOverlayHoverPanel'
+import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
@@ -153,6 +154,41 @@ type MapGraphFlowProps = {
   onInitialFitDone: () => void
 }
 
+type MapHoverStackProps = {
+  regionOverlays: readonly MapRegionOverlay[]
+  blockedByPlanetHover: boolean
+  cartography?: StellarCartographyMapContext
+  wormholeHoverLines: string[] | null
+}
+
+/**
+ * Region + cartography hover must mount under ``ReactFlow`` so xyflow ``useStore``
+ * has a provider (React Flow error #001).
+ */
+function MapHoverStack({
+  regionOverlays,
+  blockedByPlanetHover,
+  cartography,
+  wormholeHoverLines,
+}: MapHoverStackProps) {
+  const regionHoverLines = useRegionOverlayHoverLines(
+    regionOverlays,
+    blockedByPlanetHover
+  )
+  if (cartography != null) {
+    return (
+      <StellarCartographyHoverPanel
+        cartography={cartography}
+        wormholeHoverLines={wormholeHoverLines}
+        blockedByPlanetHover={blockedByPlanetHover}
+        additionalHoverLines={regionHoverLines}
+        clientToFlowPosition={clientToFlowPosition}
+      />
+    )
+  }
+  return <RegionOverlayHoverTooltip lines={regionHoverLines} />
+}
+
 function MapGraphFlow({
   data,
   frame,
@@ -192,10 +228,6 @@ function MapGraphFlow({
         homeworldRegionDisplayMode
       ),
     [data.regionOverlays, visibilityKinds, homeworldRegionDisplayMode]
-  )
-  const regionHoverLines = useRegionOverlayHoverLines(
-    regionOverlays,
-    blockedByPlanetHover
   )
 
   return (
@@ -249,17 +281,12 @@ function MapGraphFlow({
         onPlanetLabelHoverActiveChange={onPlanetLabelHoverActiveChange}
       />
       <FlowCoordinateReadout />
-      {cartography != null ? (
-        <StellarCartographyHoverPanel
-          cartography={cartography}
-          wormholeHoverLines={wormholeHoverLines}
-          blockedByPlanetHover={blockedByPlanetHover}
-          additionalHoverLines={regionHoverLines}
-          clientToFlowPosition={clientToFlowPosition}
-        />
-      ) : (
-        <RegionOverlayHoverTooltip lines={regionHoverLines} />
-      )}
+      <MapHoverStack
+        regionOverlays={regionOverlays}
+        blockedByPlanetHover={blockedByPlanetHover}
+        cartography={cartography}
+        wormholeHoverLines={wormholeHoverLines}
+      />
     </ReactFlow>
   )
 }

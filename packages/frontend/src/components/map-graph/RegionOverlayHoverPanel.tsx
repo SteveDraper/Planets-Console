@@ -29,7 +29,10 @@ export function regionOverlayHoverLinesAtClient(
   return collectRegionOverlayHoverSummaries(regionOverlays, px, py)
 }
 
-/** Live ``hoverSummary`` lines under the pointer for the given overlays. */
+/** Live ``hoverSummary`` lines under the pointer for the given overlays.
+
+Must be called from a component mounted under ``ReactFlow`` (xyflow store).
+*/
 export function useRegionOverlayHoverLines(
   regionOverlays: readonly MapRegionOverlay[],
   blockedByPlanetHover = false
@@ -119,6 +122,9 @@ export function RegionOverlayHoverTooltip({ lines }: RegionOverlayHoverTooltipPr
 /**
  * Standalone region hover tooltip (when Stellar Cartography panel is not mounting
  * the stacked tooltip). Prefer feeding lines into cartography when it is enabled.
+ *
+ * Must render as a descendant of ``ReactFlow`` -- ``useStore`` requires the
+ * xyflow provider (https://reactflow.dev/error#001).
  */
 export function RegionOverlayHoverPanel({
   regionOverlays,
