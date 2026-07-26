@@ -30,6 +30,13 @@ export type MapRegionOverlayDiskShape = {
   r: number
 }
 
+/** Stroke-only disk (e.g. homeworld 81/162 envelopes). */
+export type MapRegionOverlayStrokeDiskShape = MapRegionOverlayDiskShape & {
+  strokeColor: string
+  strokeWidth: number
+  strokeDasharray?: string
+}
+
 export type MapRegionOverlayPatchShape = {
   key: string
   left: number
@@ -43,7 +50,12 @@ export type MapRegionOverlayPaneGroup = {
   key: string
   fillColor: string
   fillOpacity: number
+  /** Optional path stroke (defaults to fillColor when omitted). */
+  strokeColor?: string
+  strokeWidth?: number
   disks: MapRegionOverlayDiskShape[]
+  /** Outline disks painted above the fill (not alpha-stacked fills). */
+  strokeDisks: MapRegionOverlayStrokeDiskShape[]
   patches: MapRegionOverlayPatchShape[]
   /** Patch AABBs in pane px; punched from the disk-union mask. */
   patchMaskRects: { x: number; y: number; width: number; height: number }[]
@@ -272,9 +284,26 @@ function buildCoverageGroup(
     fillColor: overlay.fillColor,
     fillOpacity: overlay.fillOpacity,
     disks,
+    strokeDisks: [],
     patches,
     patchMaskRects,
   }
+}
+
+/** Homeworld cluster envelopes: distinct outline colors (81 vs 162 LY). */
+const HOMEWORLD_ENVELOPE_STROKE_BY_RADIUS_LY: Record<number, string> = {
+  81: '#38bdf8',
+  162: '#c084fc',
+}
+
+const HOMEWORLD_SECTOR_KIND = 'homeworld-sector'
+const HOMEWORLD_SECTOR_STROKE = '#fdba74'
+const HOMEWORLD_ERROR_SECTOR_STROKE = '#fca5a5'
+const HOMEWORLD_ENVELOPE_STROKE_WIDTH = 1.75
+
+function homeworldEnvelopeStrokeColor(radiusLy: number): string {
+  const rounded = Math.round(radiusLy)
+  return HOMEWORLD_ENVELOPE_STROKE_BY_RADIUS_LY[rounded] ?? '#e2e8f0'
 }
 
 function buildBoundaryGroup(
@@ -287,13 +316,34 @@ function buildBoundaryGroup(
     overlay.geometry.edges,
     viewport
   )
-  const disks = projectDiskShapes(overlay.geometry.disks ?? [], overlay.id, viewport)
-  if (boundaryPath == null && disks.length === 0) return null
+  const rawDisks = overlay.geometry.disks ?? []
+  const isHomeworldSector = overlay.kind === HOMEWORLD_SECTOR_KIND
+  // Homeworld envelopes are stroke outlines with per-radius colors; other
+  // boundary disks keep the legacy filled-disk path.
+  const disks = isHomeworldSector
+    ? []
+    : projectDiskShapes(rawDisks, overlay.id, viewport)
+  const strokeDisks: MapRegionOverlayStrokeDiskShape[] = isHomeworldSector
+    ? projectDiskShapes(rawDisks, overlay.id, viewport).map((disk, i) => ({
+        ...disk,
+        strokeColor: homeworldEnvelopeStrokeColor(rawDisks[i]!.radius),
+        strokeWidth: HOMEWORLD_ENVELOPE_STROKE_WIDTH,
+      }))
+    : []
+  if (boundaryPath == null && disks.length === 0 && strokeDisks.length === 0) return null
+  const strokeColor = isHomeworldSector
+    ? overlay.status === 'error'
+      ? HOMEWORLD_ERROR_SECTOR_STROKE
+      : HOMEWORLD_SECTOR_STROKE
+    : undefined
   return {
     key: overlay.id,
     fillColor: overlay.fillColor,
     fillOpacity: overlay.fillOpacity,
+    strokeColor,
+    strokeWidth: isHomeworldSector ? 1.5 : undefined,
     disks,
+    strokeDisks,
     patches: [],
     patchMaskRects: [],
     boundaryPath: boundaryPath ?? undefined,

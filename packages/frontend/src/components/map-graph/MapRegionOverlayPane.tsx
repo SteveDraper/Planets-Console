@@ -82,25 +82,42 @@ export function MapRegionOverlayPane({
         {groups.map((group) => {
           const maskId = `${idPrefix}-disks-${group.key}`
           return (
-            <g key={group.key} opacity={group.fillOpacity}>
+            <g key={group.key}>
               {group.boundaryPath != null ? (
                 <path
                   d={group.boundaryPath}
                   fill={group.fillColor}
-                  stroke={group.fillColor}
-                  strokeWidth={1}
+                  fillOpacity={group.fillOpacity}
+                  stroke={group.strokeColor ?? group.fillColor}
+                  strokeOpacity={group.strokeColor != null ? 0.9 : group.fillOpacity}
+                  strokeWidth={group.strokeWidth ?? 1}
                 />
               ) : null}
               {group.disks.length > 0 ? (
-                <rect
-                  x={0}
-                  y={0}
-                  width={width}
-                  height={height}
-                  fill={group.fillColor}
-                  mask={`url(#${maskId})`}
-                />
+                <g opacity={group.fillOpacity}>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={width}
+                    height={height}
+                    fill={group.fillColor}
+                    mask={`url(#${maskId})`}
+                  />
+                </g>
               ) : null}
+              {group.strokeDisks.map((disk) => (
+                <circle
+                  key={disk.key}
+                  cx={disk.cx}
+                  cy={disk.cy}
+                  r={disk.r}
+                  fill="none"
+                  stroke={disk.strokeColor}
+                  strokeWidth={disk.strokeWidth}
+                  strokeDasharray={disk.strokeDasharray}
+                  opacity={0.95}
+                />
+              ))}
               {group.patches.map((patch) => (
                 <image
                   key={patch.key}
@@ -110,6 +127,7 @@ export function MapRegionOverlayPane({
                   width={patch.width}
                   height={patch.height}
                   preserveAspectRatio="none"
+                  opacity={group.fillOpacity}
                 />
               ))}
             </g>

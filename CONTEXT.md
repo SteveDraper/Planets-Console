@@ -425,7 +425,7 @@ The **homeworld locator** analytic's use of shared **map region overlay** geomet
 _Avoid_: possible zone (vague), sector blob (informal), overlayCircles for homeworld sectors, homeworld-only parallel wire field
 
 **Homeworld region display mode**:
-Global client preference (localStorage) controlling which **homeworld region overlay** sectors appear on the map: off, un-pinned only (default), pinned only, or all. Same sticky preference pattern as **Cartography layer** toggles; independent of **Visibility region kind** enablement.
+Global client preference (localStorage) controlling which **homeworld region overlay** sectors appear on the map: off, un-pinned only (default -- sectors with no candidate planet yet), pinned only (sectors that already have a candidate planet), or all. ``isPinned`` on the wire means "has candidate," not "viewpoint wedge only." Same sticky preference pattern as **Cartography layer** toggles; independent of **Visibility region kind** enablement.
 _Avoid_: visibility kind toggle (wrong analytic), per-game preference scope for this mode
 
 **Homeworld layout distribution asset**:

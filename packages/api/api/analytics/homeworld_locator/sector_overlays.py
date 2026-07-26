@@ -50,9 +50,10 @@ STATUS_ERROR = "error"
 HOVER_NO_CANDIDATES = "no candidates"
 
 DEFAULT_SECTOR_FILL_COLOR = "#f97316"
-DEFAULT_SECTOR_FILL_OPACITY = 0.2
+# Keep sector fills light so base-map planets stay readable under the band.
+DEFAULT_SECTOR_FILL_OPACITY = 0.08
 ERROR_SECTOR_FILL_COLOR = "#ef4444"
-ERROR_SECTOR_FILL_OPACITY = 0.15
+ERROR_SECTOR_FILL_OPACITY = 0.12
 
 # Observation sampling over the annular sector band.
 _RADIAL_SAMPLE_STEP_LY = 10.0
@@ -241,8 +242,11 @@ def build_homeworld_sector_overlays(
     for index in range(player_count):
         angle_start = pin_angle + index * width - half
         angle_end = pin_angle + index * width + half
-        is_pinned = index == pin_sector
-        sector_candidates = candidates_by_sector[index]
+        is_viewpoint_sector = index == pin_sector
+        sector_candidates = list(candidates_by_sector[index])
+        # Viewpoint pin is always a candidate for its sector (may already be listed).
+        if is_viewpoint_sector and all(planet.id != pin.id for planet in sector_candidates):
+            sector_candidates.append(pin)
 
         unobserved = closest_unobserved_band_point(
             center=center,
@@ -260,12 +264,23 @@ def build_homeworld_sector_overlays(
         hover: str
         fill_color = DEFAULT_SECTOR_FILL_COLOR
         fill_opacity = DEFAULT_SECTOR_FILL_OPACITY
+        # Display-mode ``pinned`` / ``un-pinned``: sector has a planet candidate.
+        has_candidate = len(sector_candidates) > 0
 
-        if is_pinned:
-            envelope_center = (float(pin.x), float(pin.y))
+        if has_candidate:
+            # Prefer a real candidate (closest to C) even when scan coverage is incomplete.
+            # Viewpoint sector always centers on the pin planet.
+            if is_viewpoint_sector:
+                envelope_center = (float(pin.x), float(pin.y))
+            else:
+                closest = min(
+                    sector_candidates,
+                    key=lambda planet: distance_ly(planet.x, planet.y, center_x, center_y),
+                )
+                envelope_center = (float(closest.x), float(closest.y))
             status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
             hover = _hover_summary(
-                is_pinned=True,
+                is_viewpoint_sector=is_viewpoint_sector,
                 candidate_count=len(sector_candidates),
                 is_incomplete=is_incomplete,
                 is_error=False,
@@ -274,22 +289,9 @@ def build_homeworld_sector_overlays(
             envelope_center = unobserved
             status = STATUS_INCOMPLETE
             hover = _hover_summary(
-                is_pinned=False,
-                candidate_count=len(sector_candidates),
+                is_viewpoint_sector=False,
+                candidate_count=0,
                 is_incomplete=True,
-                is_error=False,
-            )
-        elif sector_candidates:
-            closest = min(
-                sector_candidates,
-                key=lambda planet: distance_ly(planet.x, planet.y, center_x, center_y),
-            )
-            envelope_center = (float(closest.x), float(closest.y))
-            status = STATUS_OK
-            hover = _hover_summary(
-                is_pinned=False,
-                candidate_count=len(sector_candidates),
-                is_incomplete=False,
                 is_error=False,
             )
         else:
@@ -323,7 +325,7 @@ def build_homeworld_sector_overlays(
                 vertices=vertices,
                 edges=edges,
                 disks=disks,
-                is_pinned=is_pinned,
+                is_pinned=has_candidate,
                 status=status,
                 hover_summary=hover,
             )
@@ -377,7 +379,7 @@ def build_homeworld_sector_overlays_for_turn(
 
 def _hover_summary(
     *,
-    is_pinned: bool,
+    is_viewpoint_sector: bool,
     candidate_count: int,
     is_incomplete: bool,
     is_error: bool,
@@ -385,8 +387,8 @@ def _hover_summary(
     if is_error:
         return HOVER_NO_CANDIDATES
     parts: list[str] = []
-    if is_pinned:
-        parts.append("pinned")
+    if is_viewpoint_sector:
+        parts.append("viewpoint pin")
     if is_incomplete:
         parts.append("incomplete scan")
     parts.append("1 candidate" if candidate_count == 1 else f"{candidate_count} candidates")
