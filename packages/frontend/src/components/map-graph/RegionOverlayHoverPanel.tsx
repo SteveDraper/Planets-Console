@@ -16,6 +16,8 @@ type RegionOverlayHoverPanelProps = {
   blockedByPlanetHover?: boolean
 }
 
+export type MapPaneClientPos = { x: number; y: number }
+
 export function regionOverlayHoverLinesAtClient(
   regionOverlays: readonly MapRegionOverlay[],
   clientX: number,
@@ -29,70 +31,76 @@ export function regionOverlayHoverLinesAtClient(
   return collectRegionOverlayHoverSummaries(regionOverlays, px, py)
 }
 
+/**
+ * Tracks client pointer over the React Flow pane.
+ *
+ * Must be called from a component mounted under ``ReactFlow`` (xyflow store).
+ */
+export function useMapPaneClientPos(): {
+  clientPos: MapPaneClientPos | null
+  domNode: HTMLElement | null
+} {
+  const domNode = useStore((s) => s.domNode ?? null)
+  const [clientPos, setClientPos] = useState<MapPaneClientPos | null>(null)
+
+  useEffect(() => {
+    const el = domNode
+    if (!el) {
+      setClientPos(null)
+      return
+    }
+    const onMove = (e: MouseEvent) => setClientPos({ x: e.clientX, y: e.clientY })
+    const onLeave = () => setClientPos(null)
+    el.addEventListener('mousemove', onMove)
+    el.addEventListener('mouseleave', onLeave)
+    return () => {
+      el.removeEventListener('mousemove', onMove)
+      el.removeEventListener('mouseleave', onLeave)
+    }
+  }, [domNode])
+
+  return { clientPos, domNode }
+}
+
 /** Live ``hoverSummary`` lines under the pointer for the given overlays.
 
 Must be called from a component mounted under ``ReactFlow`` (xyflow store).
+Returns ``clientPos`` so tooltip chrome can share the same pointer source.
 */
 export function useRegionOverlayHoverLines(
   regionOverlays: readonly MapRegionOverlay[],
   blockedByPlanetHover = false
-): string[] {
-  const domNode = useStore((s) => s.domNode ?? null)
+): { lines: string[]; clientPos: MapPaneClientPos | null } {
   const transform = useStore((s) => s.transform)
-  const [clientPos, setClientPos] = useState<{ x: number; y: number } | null>(null)
-
-  useEffect(() => {
-    const el = domNode
-    if (!el) {
-      setClientPos(null)
-      return
-    }
-    const onMove = (e: MouseEvent) => setClientPos({ x: e.clientX, y: e.clientY })
-    const onLeave = () => setClientPos(null)
-    el.addEventListener('mousemove', onMove)
-    el.addEventListener('mouseleave', onLeave)
-    return () => {
-      el.removeEventListener('mousemove', onMove)
-      el.removeEventListener('mouseleave', onLeave)
-    }
-  }, [domNode])
+  const { clientPos, domNode } = useMapPaneClientPos()
 
   if (blockedByPlanetHover || clientPos == null || regionOverlays.length === 0) {
-    return []
+    return { lines: [], clientPos }
   }
-  return regionOverlayHoverLinesAtClient(
-    regionOverlays,
-    clientPos.x,
-    clientPos.y,
-    domNode,
-    transform
-  )
+  return {
+    lines: regionOverlayHoverLinesAtClient(
+      regionOverlays,
+      clientPos.x,
+      clientPos.y,
+      domNode,
+      transform
+    ),
+    clientPos,
+  }
 }
 
 type RegionOverlayHoverTooltipProps = {
   lines: readonly string[]
+  /** Shared pointer from ``useRegionOverlayHoverLines`` / ``useMapPaneClientPos``. */
+  clientPos: MapPaneClientPos | null
 }
 
 /** Shared stacked tooltip chrome for region overlay hover lines. */
-export function RegionOverlayHoverTooltip({ lines }: RegionOverlayHoverTooltipProps) {
+export function RegionOverlayHoverTooltip({
+  lines,
+  clientPos,
+}: RegionOverlayHoverTooltipProps) {
   const domNode = useStore((s) => s.domNode ?? null)
-  const [clientPos, setClientPos] = useState<{ x: number; y: number } | null>(null)
-
-  useEffect(() => {
-    const el = domNode
-    if (!el) {
-      setClientPos(null)
-      return
-    }
-    const onMove = (e: MouseEvent) => setClientPos({ x: e.clientX, y: e.clientY })
-    const onLeave = () => setClientPos(null)
-    el.addEventListener('mousemove', onMove)
-    el.addEventListener('mouseleave', onLeave)
-    return () => {
-      el.removeEventListener('mousemove', onMove)
-      el.removeEventListener('mouseleave', onLeave)
-    }
-  }, [domNode])
 
   if (lines.length === 0 || clientPos == null || domNode == null) return null
 
@@ -130,6 +138,9 @@ export function RegionOverlayHoverPanel({
   regionOverlays,
   blockedByPlanetHover = false,
 }: RegionOverlayHoverPanelProps) {
-  const lines = useRegionOverlayHoverLines(regionOverlays, blockedByPlanetHover)
-  return <RegionOverlayHoverTooltip lines={lines} />
+  const { lines, clientPos } = useRegionOverlayHoverLines(
+    regionOverlays,
+    blockedByPlanetHover
+  )
+  return <RegionOverlayHoverTooltip lines={lines} clientPos={clientPos} />
 }

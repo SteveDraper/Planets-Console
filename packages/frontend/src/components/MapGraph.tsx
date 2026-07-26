@@ -172,7 +172,7 @@ function MapHoverStack({
   cartography,
   wormholeHoverLines,
 }: MapHoverStackProps) {
-  const regionHoverLines = useRegionOverlayHoverLines(
+  const { lines: regionHoverLines, clientPos } = useRegionOverlayHoverLines(
     regionOverlays,
     blockedByPlanetHover
   )
@@ -187,7 +187,9 @@ function MapHoverStack({
       />
     )
   }
-  return <RegionOverlayHoverTooltip lines={regionHoverLines} />
+  return (
+    <RegionOverlayHoverTooltip lines={regionHoverLines} clientPos={clientPos} />
+  )
 }
 
 function MapGraphFlow({
