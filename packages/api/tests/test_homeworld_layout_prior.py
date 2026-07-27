@@ -122,6 +122,7 @@ def _eligible_turn(sample_turn, template_planet, *, players: list | None = None)
         ]
     settings = replace(
         sample_turn.settings,
+        turn=1,
         hwdistribution=HW_DISTRIBUTION_CIRCULAR,
         mapshape=MAP_SHAPE_ROUND,
         shiplimit=500,
@@ -139,6 +140,17 @@ def _eligible_turn(sample_turn, template_planet, *, players: list | None = None)
         ships=[],
         relations=[],
     ), pin
+
+
+def _materialize_ctx(services, turn, turns: dict[int, object] | None = None):
+    from api.analytics.compute_context import make_analytic_compute_context
+
+    stored = turns if turns is not None else {turn.settings.turn: turn}
+    return make_analytic_compute_context(
+        turn,
+        load_turn=lambda n: stored.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
 
 
 def _view(*candidates: HomeworldCandidateRecord) -> HomeworldCandidateView:
@@ -426,7 +438,7 @@ def test_empty_nebular_sector_stand_in_does_not_block_most_probable(
         planets=[pin_planet, orphan],
         ships=[ship],
     )
-    services = core_services(persistence, {1: turn, 5: turn})
+    services = core_services(persistence, {1: turn})
     persistence.put_baseline(
         628580,
         1,
@@ -450,13 +462,15 @@ def test_empty_nebular_sector_stand_in_does_not_block_most_probable(
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
     )
 
-    view = materialize_homeworld_candidate_view(services, shell_turn=turn)
+    ctx = _materialize_ctx(services, turn, {1: turn})
+    view = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
     by_id = {row.planet_id: row for row in view.candidates}
     assert by_id[pin_planet.id].is_most_probable is False
     assert by_id[orphan.id].is_most_probable is True
 
     payload = get_homeworld_locator(
         turn,
+        load_turn=lambda n: {1: turn}.get(n),
         export_services={ANALYTIC_ID: services},
     )
     orphan_row = next(row for row in payload["rows"] if row["planetId"] == orphan.id)
@@ -522,7 +536,7 @@ def test_shell_layout_prior_persisted_and_reused(
         y=int(center[1] + radius * math.sin(orphan_angle)),
     )
     turn = replace(turn, planets=[pin_planet, orphan], ships=())
-    services = core_services(persistence, {1: turn, 5: turn})
+    services = core_services(persistence, {1: turn})
     persistence.put_baseline(
         628580,
         1,
@@ -555,14 +569,15 @@ def test_shell_layout_prior_persisted_and_reused(
 
     monkeypatch.setattr(baseline_mod, "apply_layout_prior_most_probable", counting_apply)
 
-    first = materialize_homeworld_candidate_view(services, shell_turn=turn)
+    ctx = _materialize_ctx(services, turn, {1: turn})
+    first = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
     stored = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
     assert stored is not None
     assert stored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
     assert orphan.id in stored.most_probable_planet_ids
     assert calls["n"] == 1
 
-    second = materialize_homeworld_candidate_view(services, shell_turn=turn)
+    second = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
     assert calls["n"] == 1
     assert {row.planet_id for row in first.candidates if row.is_most_probable} == {
         row.planet_id for row in second.candidates if row.is_most_probable
@@ -580,7 +595,7 @@ def test_shell_layout_prior_persisted_and_reused(
             most_probable_planet_ids=(pin_planet.id,),
         ),
     )
-    third = materialize_homeworld_candidate_view(services, shell_turn=turn)
+    third = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
     assert calls["n"] == 2
     assert {row.planet_id for row in third.candidates if row.is_most_probable} == {
         row.planet_id for row in first.candidates if row.is_most_probable

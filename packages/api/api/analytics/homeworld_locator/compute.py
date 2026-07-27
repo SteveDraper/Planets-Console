@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.homeworld_locator.baseline_ensure import materialize_homeworld_candidate_view
 from api.analytics.homeworld_locator.compute_services import resolve_homeworld_services
@@ -68,7 +70,7 @@ def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
         )
 
     services = resolve_homeworld_services(ctx.exports)
-    view = materialize_homeworld_candidate_view(services, shell_turn=ctx.turn)
+    view = materialize_homeworld_candidate_view(ctx.exports, shell_turn=ctx.turn)
     overlays = build_homeworld_sector_overlays_for_turn(
         ctx.turn,
         view,
@@ -86,6 +88,7 @@ def get_homeworld_locator(
     turn: TurnInfo,
     options: TurnAnalyticsOptions | None = None,
     *,
+    load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: dict[str, object] | None = None,
 ) -> dict:
     """Convenience entry for tests and direct callers."""
@@ -93,5 +96,6 @@ def get_homeworld_locator(
         compute_homeworld_locator,
         turn,
         options,
+        load_turn=load_turn,
         export_services=export_services,
     )

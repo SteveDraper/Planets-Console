@@ -540,9 +540,11 @@ def test_baseline_ensure_durable_perspective_uses_slot_not_player_id(
 
 def test_map_table_payload_smoke(persistence, sample_turn) -> None:
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
-    services = _services(persistence, {1: turn_one, 111: sample_turn})
+    turns = _turn_ladder(turn_one, sample_turn)
+    services = _services(persistence, turns)
     payload = get_homeworld_locator(
         sample_turn,
+        load_turn=lambda n: turns.get(n),
         export_services={ANALYTIC_ID: services},
     )
     assert payload["analyticId"] == ANALYTIC_ID
@@ -583,9 +585,17 @@ def test_inactive_map_table_payload(persistence, sample_turn) -> None:
 
 
 def test_candidate_view_materialize(persistence, sample_turn) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
-    services = _services(persistence, {1: turn_one, 111: sample_turn})
-    view = materialize_homeworld_candidate_view(services, shell_turn=sample_turn)
+    turns = _turn_ladder(turn_one, sample_turn)
+    services = _services(persistence, turns)
+    ctx = make_analytic_compute_context(
+        sample_turn,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    view = materialize_homeworld_candidate_view(ctx, shell_turn=sample_turn)
     assert view.available is True
     assert view.baseline_turn == 1
 
@@ -645,6 +655,7 @@ def test_run_homeworld_baseline_persist_round_trip(persistence, sample_turn) -> 
     result = run_homeworld_baseline(job_wire)
 
     assert result.outcome == "persist"
+    assert result.persist_then_continue is True
     assert isinstance(result.payload, dict)
     assert result.payload.get("available") is True
     assert isinstance(result.payload.get("gameState"), dict)

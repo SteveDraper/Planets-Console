@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.export_types import ExportScope
 from api.analytics.homeworld_locator.baseline import infer_homeworld_baseline_candidates
-from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
+from api.analytics.homeworld_locator.compute_services import (
+    HomeworldLocatorComputeServices,
+    resolve_homeworld_services,
+)
 from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
 from api.analytics.homeworld_locator.evidence_ensure import (
-    ensure_homeworld_evidence_refined,
+    evidence_aggregate_at_shell_turn,
     promotion_threshold,
 )
 from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
@@ -227,22 +232,41 @@ def ensure_homeworld_baseline(
 
 
 def materialize_homeworld_candidate_view(
-    services: HomeworldLocatorComputeServices,
+    ctx: AnalyticQueryContext,
     *,
     shell_turn: TurnInfo,
 ) -> HomeworldCandidateView:
-    """Materialize map/table candidate view from baseline candidates + shell evidence."""
+    """Materialize map/table candidate view after export/DAG evidence ensure."""
     inactive = homeworld_locator_inactive_reason(shell_turn.settings)
     if inactive is not None:
         return empty_candidate_view(inactive_reason=inactive)
 
-    result = ensure_homeworld_baseline(services, shell_turn=shell_turn)
-    state = result.game_state
-    aggregate = ensure_homeworld_evidence_refined(
-        services,
-        shell_turn=shell_turn,
-        game_state_baseline_turn=state.baseline_turn,
+    services = resolve_homeworld_services(ctx)
+    scope = ExportScope(
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn=shell_turn.settings.turn,
     )
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    if not ensure_homeworld_export(ctx, scope):
+        raise ValidationError(
+            "homeworld locator evidence ensure did not satisfy shell scope "
+            f"(game {services.game_id}, perspective {services.perspective}, "
+            f"turn {scope.turn})"
+        )
+
+    state = services.persistence.get_game_state(services.game_id)
+    if state is None:
+        raise ValidationError("homeworld locator game-global state missing after ensure")
+    aggregate = evidence_aggregate_at_shell_turn(
+        services,
+        baseline_turn=state.baseline_turn,
+        shell_turn=scope.turn,
+    )
+    if aggregate is None:
+        raise ValidationError("homeworld locator shell evidence missing after ensure")
+
     candidates = materialize_evidence_adjusted_candidates(
         state.candidates,
         aggregate,

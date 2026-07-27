@@ -11,10 +11,9 @@ from api.analytics.homeworld_locator.compute_services import (
     resolve_homeworld_services,
 )
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
-from api.analytics.homeworld_locator.evidence_ensure import evidence_refined_through_shell
-from api.analytics.homeworld_locator.evidence_refine import (
-    candidate_planet_ids_from_records,
-    refine_homeworld_evidence_aggregate,
+from api.analytics.homeworld_locator.evidence_ensure import (
+    compute_homeworld_evidence_refine_step,
+    evidence_refined_through_shell,
 )
 from api.analytics.homeworld_locator.serialization import (
     homeworld_evidence_aggregate_from_json,
@@ -82,8 +81,8 @@ def build_homeworld_baseline_job_wire(
 def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
     """Compute baseline inference; durable write via PersistencePolicy.persist.
 
-    Produces ``gameState`` + ``floorAggregate`` wires. Map/table/export still call
-    ``ensure_homeworld_baseline`` directly (compute + write) as the interim path.
+    Produces ``gameState`` + ``floorAggregate`` wires, then continues into the
+    refine profile step (``persist_then_continue``) so refine is not decorative.
     """
     from api.serialization.turn import turn_info_from_json
 
@@ -108,6 +107,7 @@ def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
     result = compute_homeworld_baseline(services, shell_turn=turn)
     return StepResult(
         outcome="persist",
+        persist_then_continue=True,
         payload={
             "available": True,
             "gameState": homeworld_locator_game_state_to_json(result.game_state),
@@ -147,7 +147,10 @@ def build_homeworld_refine_job_wire(
 
 
 def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
-    """Refine one turn of homeworld location evidence; persist via PersistencePolicy."""
+    """Refine one turn of homeworld location evidence; persist via PersistencePolicy.
+
+    Assumes prior-turn evidence exists via ``ENSURE_DEPENDENCIES`` DAG unwind.
+    """
     from api.serialization.turn import turn_info_from_json
 
     turn_wire = job_wire.get("turnWire")
@@ -173,66 +176,19 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         raise ValidationError("homeworld refine requires game-global state")
 
     shell_turn = turn.settings.turn
-    if shell_turn <= state.baseline_turn:
-        floor = services.persistence.get_evidence_aggregate(
-            services.game_id,
-            services.perspective,
-            state.baseline_turn,
-        )
-        if floor is None:
-            raise ValidationError("homeworld refine requires baseline floor aggregate")
-        return StepResult(
-            outcome="complete",
-            payload={
-                "available": True,
-                "evidenceAggregate": homeworld_evidence_aggregate_to_json(floor),
-            },
-        )
-
-    if evidence_refined_through_shell(
+    already_durable = shell_turn <= state.baseline_turn or evidence_refined_through_shell(
         services,
         baseline_turn=state.baseline_turn,
         shell_turn=shell_turn,
-    ):
-        aggregate = services.persistence.get_evidence_aggregate(
-            services.game_id,
-            services.perspective,
-            shell_turn,
-        )
-        if aggregate is None:
-            raise ValidationError("homeworld refine satisfaction probe missing aggregate")
-        return StepResult(
-            outcome="complete",
-            payload={
-                "available": True,
-                "evidenceAggregate": homeworld_evidence_aggregate_to_json(aggregate),
-            },
-        )
-
-    prior_turn = shell_turn - 1
-    prior = services.persistence.get_evidence_aggregate(
-        services.game_id,
-        services.perspective,
-        prior_turn,
     )
-    if prior is None:
-        raise ValidationError(f"homeworld refine requires evidence aggregate at turn {prior_turn}")
-
-    candidate_ids = candidate_planet_ids_from_records(state.candidates)
-    planets_by_id = {planet.id: planet for planet in turn.planets}
-    refined = refine_homeworld_evidence_aggregate(
-        prior,
-        turn=turn,
-        candidate_planet_ids_set=candidate_ids,
-        planets_by_id=planets_by_id,
-    )
-    return StepResult(
-        outcome="persist",
-        payload={
-            "available": True,
-            "evidenceAggregate": homeworld_evidence_aggregate_to_json(refined),
-        },
-    )
+    refined = compute_homeworld_evidence_refine_step(services, turn=turn)
+    payload = {
+        "available": True,
+        "evidenceAggregate": homeworld_evidence_aggregate_to_json(refined),
+    }
+    if already_durable:
+        return StepResult(outcome="complete", payload=payload)
+    return StepResult(outcome="persist", payload=payload)
 
 
 class HomeworldLocatorPersistencePolicy:
