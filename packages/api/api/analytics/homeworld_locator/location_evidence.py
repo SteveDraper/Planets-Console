@@ -203,7 +203,7 @@ def single_starbase_new_build_implicated_planet_id(
     return implicated[0]
 
 
-def apply_single_starbase_promotion(
+def promote_candidate_to_definite(
     candidates: Sequence[HomeworldCandidateRecord],
     *,
     planet_id: int,

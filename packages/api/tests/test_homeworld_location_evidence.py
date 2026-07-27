@@ -9,7 +9,7 @@ from pathlib import Path
 from api.analytics.homeworld_locator.location_evidence import (
     ORIGIN_DISTANCE_MATCH_TOLERANCE_LY,
     append_independent_origin_distance_hits,
-    apply_single_starbase_promotion,
+    promote_candidate_to_definite,
     candidate_planet_ids,
     independent_hit_count_for_planet,
     origin_distance_candidate_planet_ids,
@@ -220,7 +220,7 @@ def test_single_starbase_new_build_promotes_possible_to_definite() -> None:
             confidence_tier=CONFIDENCE_DEFINITE,
         ),
     )
-    promoted = apply_single_starbase_promotion(candidates, planet_id=10)
+    promoted = promote_candidate_to_definite(candidates, planet_id=10)
     assert promoted[0].confidence_tier == CONFIDENCE_DEFINITE
     assert promoted[0].perspective is None
     assert promoted[1] == candidates[1]
@@ -312,7 +312,7 @@ def test_single_starbase_promotion_does_not_assign_homeworld_owner_from_ship_own
         planets_by_id={10: hw_planet},
     )
     assert planet_id == 10
-    promoted = apply_single_starbase_promotion((orphan,), planet_id=planet_id)
+    promoted = promote_candidate_to_definite((orphan,), planet_id=planet_id)
     assert promoted[0].perspective is None
 
 

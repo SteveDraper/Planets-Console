@@ -12,7 +12,7 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
 )
 from api.analytics.homeworld_locator.location_evidence import (
     append_independent_origin_distance_hits,
-    apply_single_starbase_promotion,
+    promote_candidate_to_definite,
     candidate_planet_ids,
     independent_hit_count_for_planet,
     origin_distance_candidate_planet_ids,
@@ -98,7 +98,7 @@ def apply_threshold_evidence_promotions(
         if row.confidence_tier != CONFIDENCE_POSSIBLE:
             continue
         if independent_hit_count_for_planet(hits, row.planet_id) >= threshold:
-            promoted = apply_single_starbase_promotion(promoted, planet_id=row.planet_id)
+            promoted = promote_candidate_to_definite(promoted, planet_id=row.planet_id)
     return promoted
 
 
@@ -109,7 +109,7 @@ def apply_recorded_single_starbase_promotions(
     """Apply immediate single-starbase promotions recorded in the evidence aggregate."""
     promoted: tuple[HomeworldCandidateRecord, ...] = tuple(candidates)
     for promotion in promotions:
-        promoted = apply_single_starbase_promotion(promoted, planet_id=promotion.planet_id)
+        promoted = promote_candidate_to_definite(promoted, planet_id=promotion.planet_id)
     return promoted
 
 
