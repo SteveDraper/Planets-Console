@@ -15,8 +15,10 @@ type HomeworldLocatorTableTileProps = {
   fetchEnabled: boolean
 }
 
-function confidenceLabel(tier: HomeworldCandidateRecord['confidenceTier']): string {
-  return tier === CONFIDENCE_DEFINITE ? 'Definite' : 'Possible'
+function confidenceLabel(row: HomeworldCandidateRecord): string {
+  if (row.confidenceTier === CONFIDENCE_DEFINITE) return 'Definite'
+  if (row.isMostProbable) return 'Possible (most probable)'
+  return 'Possible'
 }
 
 function slotLabel(perspective: number | null): string {
@@ -91,7 +93,7 @@ export function HomeworldLocatorTableTile({
                 >
                   <td className="px-3 py-2 text-slate-200 tabular-nums">{row.planetId}</td>
                   <td className="px-3 py-2 text-slate-300">{slotLabel(row.perspective)}</td>
-                  <td className="px-3 py-2 text-slate-300">{confidenceLabel(row.confidenceTier)}</td>
+                  <td className="px-3 py-2 text-slate-300">{confidenceLabel(row)}</td>
                   <td className="px-3 py-2 text-slate-400">{row.attribution}</td>
                 </tr>
               ))}
