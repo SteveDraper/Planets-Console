@@ -112,8 +112,7 @@ def apply_layout_prior_most_probable(
         distributions=distributions,
     )
     return tuple(
-        replace(row, is_most_probable=row.planet_id in most_probable_ids)
-        for row in candidates
+        replace(row, is_most_probable=row.planet_id in most_probable_ids) for row in candidates
     )
 
 
@@ -297,9 +296,7 @@ def _select_most_probable_planet_ids(
             distributions=distributions,
         )
         tie_key = tuple(sorted(chosen_by_sector.items()))
-        if cost < best_cost - 1e-12 or (
-            abs(cost - best_cost) <= 1e-12 and tie_key < best_tie_key
-        ):
+        if cost < best_cost - 1e-12 or (abs(cost - best_cost) <= 1e-12 and tie_key < best_tie_key):
             best_cost = cost
             best_tie_key = tie_key
             best_choices = chosen_by_sector
@@ -330,9 +327,7 @@ def _positions_for_selection(
         return positions
 
     stand_in_indices = [state.sector_index for state in stand_in_sectors]
-    samples_by_sector = {
-        state.sector_index: state.stand_in_samples for state in stand_in_sectors
-    }
+    samples_by_sector = {state.sector_index: state.stand_in_samples for state in stand_in_sectors}
     current = {
         sector: samples_by_sector[sector][0]
         for sector in stand_in_indices
@@ -350,9 +345,7 @@ def _positions_for_selection(
                 {**positions, **current, sector: best_point},
                 center=center,
                 slot_anchored_sectors=frozenset(
-                    index
-                    for index, state in fixed_by_sector.items()
-                    if state.is_slot_anchored
+                    index for index, state in fixed_by_sector.items() if state.is_slot_anchored
                 ),
                 distributions=distributions,
             )
@@ -362,9 +355,7 @@ def _positions_for_selection(
                     trial,
                     center=center,
                     slot_anchored_sectors=frozenset(
-                        index
-                        for index, state in fixed_by_sector.items()
-                        if state.is_slot_anchored
+                        index for index, state in fixed_by_sector.items() if state.is_slot_anchored
                     ),
                     distributions=distributions,
                 )
@@ -415,7 +406,5 @@ def _layout_prior_cost(
         center_distance = distance_ly(position[0], position[1], center_x, center_y)
         percentile = distributions.center_distance.percentile_for_value(center_distance)
         center_deviations.append(abs(percentile - 50.0))
-    center_mean = (
-        sum(center_deviations) / len(center_deviations) if center_deviations else 0.0
-    )
+    center_mean = sum(center_deviations) / len(center_deviations) if center_deviations else 0.0
     return neighbor_mean + center_mean

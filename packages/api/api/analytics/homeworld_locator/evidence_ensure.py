@@ -69,9 +69,7 @@ def ensure_homeworld_evidence_refined(
             shell_turn=shell,
         )
         if aggregate is None:
-            raise ValidationError(
-                "homeworld evidence aggregate missing after satisfaction probe"
-            )
+            raise ValidationError("homeworld evidence aggregate missing after satisfaction probe")
         return aggregate
 
     if shell <= game_state_baseline_turn:
@@ -124,8 +122,7 @@ def ensure_homeworld_evidence_refined(
         prior = last_aggregate
         if prior is None or prior.baseline_turn != game_state_baseline_turn:
             raise ValidationError(
-                f"homeworld evidence aggregate before turn {turn_number} is required "
-                "before refine"
+                f"homeworld evidence aggregate before turn {turn_number} is required before refine"
             )
 
         turn_info = services.load_turn(turn_number)

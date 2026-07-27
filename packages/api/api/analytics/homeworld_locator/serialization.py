@@ -171,11 +171,7 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         raise ValidationError(
             "homeworld evidence aggregate singleStarbasePromotions must be a JSON array"
         )
-    hits = tuple(
-        _evidence_hit_from_json(hit)
-        for hit in hits_raw
-        if isinstance(hit, dict)
-    )
+    hits = tuple(_evidence_hit_from_json(hit) for hit in hits_raw if isinstance(hit, dict))
     if len(hits) != len(hits_raw):
         raise ValidationError("homeworld evidence aggregate evidenceHits entries must be objects")
     promotions = tuple(

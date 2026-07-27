@@ -216,9 +216,7 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         prior_turn,
     )
     if prior is None:
-        raise ValidationError(
-            f"homeworld refine requires evidence aggregate at turn {prior_turn}"
-        )
+        raise ValidationError(f"homeworld refine requires evidence aggregate at turn {prior_turn}")
 
     candidate_ids = candidate_planet_ids_from_records(state.candidates)
     planets_by_id = {planet.id: planet for planet in turn.planets}

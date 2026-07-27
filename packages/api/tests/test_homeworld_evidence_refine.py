@@ -134,9 +134,7 @@ def test_refine_records_origin_distance_hit_on_shell_turn(persistence) -> None:
         game_state_baseline_turn=1,
     )
     assert aggregate.turn == 2
-    assert aggregate.evidence_hits == (
-        HomeworldIndependentEvidenceHit(planet_id=10, turn=2),
-    )
+    assert aggregate.evidence_hits == (HomeworldIndependentEvidenceHit(planet_id=10, turn=2),)
 
 
 def test_threshold_promotion_materializes_definite(persistence) -> None:
@@ -186,9 +184,7 @@ def test_definite_neighborhood_cull_uses_support_min(template_planet) -> None:
     far_enough = _planet(template_planet, planet_id=3, x=500, y=0)
     planets_by_id = {1: definite, 2: too_close, 3: far_enough}
     candidates = (
-        HomeworldCandidateRecord(
-            planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE
-        ),
+        HomeworldCandidateRecord(planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE),
         HomeworldCandidateRecord(
             planet_id=2, perspective=None, confidence_tier=CONFIDENCE_POSSIBLE
         ),
@@ -204,9 +200,7 @@ def test_definite_neighborhood_cull_uses_support_min(template_planet) -> None:
     assert [row.planet_id for row in culled] == [1, 3]
 
 
-def test_neighborhood_cull_skipped_when_layout_ineligible(
-    template_planet, sample_settings
-) -> None:
+def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sample_settings) -> None:
     from api.concepts.homeworld_layout import HW_DISTRIBUTION_RANDOM_SPACED
 
     turn = replace(
