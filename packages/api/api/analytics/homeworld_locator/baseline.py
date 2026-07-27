@@ -73,15 +73,11 @@ def cull_co_sector_candidates_after_definites(
 
     kept_definite_ids: set[int] = set()
     for sector_rows in definites_by_sector.values():
-        user_asserted = [
-            row for row in sector_rows if row.attribution == ATTRIBUTION_USER_ASSERTED
-        ]
+        user_asserted = [row for row in sector_rows if row.attribution == ATTRIBUTION_USER_ASSERTED]
         if user_asserted:
             kept_definite_ids.update(row.planet_id for row in user_asserted)
             continue
-        inferred = [
-            row for row in sector_rows if row.attribution != ATTRIBUTION_USER_ASSERTED
-        ]
+        inferred = [row for row in sector_rows if row.attribution != ATTRIBUTION_USER_ASSERTED]
         if not inferred:
             continue
         winner = min(
