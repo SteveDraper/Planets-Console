@@ -11,6 +11,10 @@ from api.analytics.homeworld_locator.compute_services import (
     resolve_homeworld_services,
 )
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
+from api.analytics.homeworld_locator.evidence_ensure import (
+    compute_homeworld_evidence_refine_step,
+    evidence_refined_through_shell,
+)
 from api.analytics.homeworld_locator.serialization import (
     homeworld_evidence_aggregate_from_json,
     homeworld_evidence_aggregate_to_json,
@@ -21,14 +25,19 @@ from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
 from api.concepts.homeworld_layout import is_homeworld_locator_available
+from api.errors import ValidationError
 from api.serialization.turn import turn_info_to_json
 
 HOMEWORLD_BASELINE_STEP = "baseline"
+HOMEWORLD_REFINE_STEP = "refine"
 
 HOMEWORLD_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn"))
 
 HOMEWORLD_COMPUTE_PROFILE = AnalyticComputeProfile(
-    steps=(ComputeStepSpec(step_kind=HOMEWORLD_BASELINE_STEP, backend="inline"),),
+    steps=(
+        ComputeStepSpec(step_kind=HOMEWORLD_BASELINE_STEP, backend="inline"),
+        ComputeStepSpec(step_kind=HOMEWORLD_REFINE_STEP, backend="inline"),
+    ),
 )
 
 # Inline-only job-wire key: HomeworldLocatorComputeServices (not JSON-serializable).
@@ -72,8 +81,8 @@ def build_homeworld_baseline_job_wire(
 def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
     """Compute baseline inference; durable write via PersistencePolicy.persist.
 
-    Produces ``gameState`` + ``floorAggregate`` wires. Map/table/export still call
-    ``ensure_homeworld_baseline`` directly (compute + write) as the interim path.
+    Produces ``gameState`` + ``floorAggregate`` wires, then continues into the
+    refine profile step (``persist_then_continue``) so refine is not decorative.
     """
     from api.serialization.turn import turn_info_from_json
 
@@ -98,12 +107,89 @@ def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
     result = compute_homeworld_baseline(services, shell_turn=turn)
     return StepResult(
         outcome="persist",
+        persist_then_continue=True,
         payload={
             "available": True,
+            "recomputed": result.recomputed,
             "gameState": homeworld_locator_game_state_to_json(result.game_state),
             "floorAggregate": homeworld_evidence_aggregate_to_json(result.floor_aggregate),
         },
     )
+
+
+def build_homeworld_refine_job_wire(
+    scope: ComputeScope,
+    *,
+    dependency_outputs: DependencyOutputs,
+    ctx: AnalyticQueryContext | None = None,
+    **_kwargs: object,
+) -> dict[str, Any]:
+    del dependency_outputs
+    if ctx is None:
+        raise RuntimeError("homeworld refine job wire requires AnalyticQueryContext")
+    if scope.turn == WILDCARD or not isinstance(scope.turn, int):
+        raise ValueError("homeworld refine requires concrete turn")
+    if scope.perspective == WILDCARD or not isinstance(scope.perspective, int):
+        raise ValueError("homeworld refine requires concrete perspective")
+
+    export_scope = compute_scope_to_export_scope(scope)
+    turn = ctx.load_turn(export_scope.turn)
+    if turn is None:
+        raise ValueError(f"stored turn {export_scope.turn} is required for homeworld refine")
+
+    return {
+        "gameId": scope.game_id,
+        "perspective": scope.perspective,
+        "shellTurn": scope.turn,
+        "turnWire": turn_info_to_json(turn),
+        "analyticId": ANALYTIC_ID,
+        _COMPUTE_SERVICES_KEY: resolve_homeworld_services(ctx),
+    }
+
+
+def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
+    """Refine one turn of homeworld location evidence; persist via PersistencePolicy.
+
+    Assumes prior-turn evidence exists via ``ENSURE_DEPENDENCIES`` DAG unwind.
+    """
+    from api.serialization.turn import turn_info_from_json
+
+    turn_wire = job_wire.get("turnWire")
+    if not isinstance(turn_wire, dict):
+        raise TypeError("homeworld refine job wire requires turnWire object")
+    settings_defaults = turn_wire.get("settings")
+    if not isinstance(settings_defaults, dict):
+        raise TypeError("homeworld refine turnWire.settings must be an object")
+    turn = turn_info_from_json(turn_wire, settings_defaults=settings_defaults)
+
+    if not is_homeworld_locator_available(turn.settings):
+        return StepResult(outcome="complete", payload={"available": False})
+
+    services = job_wire.get(_COMPUTE_SERVICES_KEY)
+    if not isinstance(services, HomeworldLocatorComputeServices):
+        raise TypeError(
+            "homeworld refine job wire requires computeServices "
+            f"(HomeworldLocatorComputeServices), got {type(services).__name__}"
+        )
+
+    state = services.persistence.get_game_state(services.game_id)
+    if state is None:
+        raise ValidationError("homeworld refine requires game-global state")
+
+    shell_turn = turn.settings.turn
+    already_durable = shell_turn <= state.baseline_turn or evidence_refined_through_shell(
+        services,
+        baseline_turn=state.baseline_turn,
+        shell_turn=shell_turn,
+    )
+    refined = compute_homeworld_evidence_refine_step(services, turn=turn)
+    payload = {
+        "available": True,
+        "evidenceAggregate": homeworld_evidence_aggregate_to_json(refined),
+    }
+    if already_durable:
+        return StepResult(outcome="complete", payload=payload)
+    return StepResult(outcome="persist", payload=payload)
 
 
 class HomeworldLocatorPersistencePolicy:
@@ -140,6 +226,18 @@ class HomeworldLocatorPersistencePolicy:
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None:
             return
+
+        evidence_wire = result_wire.get("evidenceAggregate")
+        if isinstance(evidence_wire, dict) and "gameState" not in result_wire:
+            aggregate = homeworld_evidence_aggregate_from_json(evidence_wire)
+            services = resolve_homeworld_services(ctx)
+            services.persistence.put_evidence_aggregate(
+                export_scope.game_id,
+                export_scope.perspective,
+                aggregate,
+            )
+            return
+
         game_state_wire = result_wire.get("gameState")
         floor_wire = result_wire.get("floorAggregate")
         if not isinstance(game_state_wire, dict):
@@ -147,9 +245,21 @@ class HomeworldLocatorPersistencePolicy:
         if not isinstance(floor_wire, dict):
             raise TypeError("homeworld persist result wire missing floorAggregate object")
 
+        recomputed = result_wire.get("recomputed")
+        if not isinstance(recomputed, bool):
+            raise TypeError("homeworld baseline persist result wire requires recomputed bool")
+
         services = resolve_homeworld_services(ctx)
         state = homeworld_locator_game_state_from_json(game_state_wire)
         floor = homeworld_evidence_aggregate_from_json(floor_wire)
+        # Match ensure_homeworld_baseline: clear stale shell evidence only on recompute.
+        # Evidence-only gaps re-enter at baseline with recomputed=False and must keep the chain.
+        if recomputed:
+            services.persistence.invalidate_evidence_from_turn(
+                export_scope.game_id,
+                export_scope.perspective,
+                state.baseline_turn,
+            )
         services.persistence.put_baseline(
             export_scope.game_id,
             export_scope.perspective,

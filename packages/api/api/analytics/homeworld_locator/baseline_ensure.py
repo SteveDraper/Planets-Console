@@ -2,13 +2,28 @@
 
 from __future__ import annotations
 
-from api.analytics.homeworld_locator.baseline import (
-    apply_co_sector_candidate_cull,
-    infer_homeworld_baseline_candidates,
+from dataclasses import replace
+
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.export_types import ExportScope
+from api.analytics.homeworld_locator.baseline import infer_homeworld_baseline_candidates
+from api.analytics.homeworld_locator.compute_services import (
+    HomeworldLocatorComputeServices,
+    resolve_homeworld_services,
 )
-from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
+from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
+from api.analytics.homeworld_locator.evidence_ensure import (
+    evidence_aggregate_at_shell_turn,
+    promotion_threshold,
+)
+from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
+from api.analytics.homeworld_locator.layout_prior import (
+    apply_layout_prior_most_probable,
+    layout_prior_input_fingerprint,
+)
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
+    HomeworldCandidateRecord,
     HomeworldCandidateView,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
@@ -205,6 +220,11 @@ def ensure_homeworld_baseline(
     result = compute_homeworld_baseline(services, shell_turn=shell_turn)
     if not result.recomputed:
         return result
+    services.persistence.invalidate_evidence_from_turn(
+        services.game_id,
+        services.perspective,
+        result.game_state.baseline_turn,
+    )
     services.persistence.put_baseline(
         services.game_id,
         services.perspective,
@@ -214,26 +234,107 @@ def ensure_homeworld_baseline(
     return result
 
 
-def materialize_homeworld_candidate_view(
+def materialize_homeworld_candidates(
     services: HomeworldLocatorComputeServices,
+    *,
+    candidates: tuple[HomeworldCandidateRecord, ...],
+    aggregate: HomeworldEvidenceAggregate,
+    shell_turn: TurnInfo,
+    baseline_turn: int,
+    baseline_degraded: bool,
+) -> tuple[HomeworldCandidateRecord, ...]:
+    """Ordered shell materialize: promote → co-sector → neighborhood → layout prior.
+
+    Design lock: docs/design-homeworld-locator-analytic.md §4.3.1.
+    """
+    threshold = promotion_threshold()
+    adjusted = materialize_evidence_adjusted_candidates(
+        candidates,
+        aggregate,
+        planets=shell_turn.planets,
+        settings_turn=shell_turn,
+        player_count=_player_count(shell_turn),
+        promotion_threshold=threshold,
+    )
+    input_fingerprint = layout_prior_input_fingerprint(adjusted)
+    if (
+        aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
+        and aggregate.layout_prior_promotion_threshold == threshold
+        and aggregate.layout_prior_input_fingerprint == input_fingerprint
+    ):
+        selected = frozenset(aggregate.most_probable_planet_ids)
+        return tuple(replace(row, is_most_probable=row.planet_id in selected) for row in adjusted)
+
+    interim_view = HomeworldCandidateView(
+        candidates=adjusted,
+        baseline_turn=baseline_turn,
+        baseline_degraded=baseline_degraded,
+        available=True,
+    )
+    annotated = apply_layout_prior_most_probable(
+        adjusted,
+        turn=shell_turn,
+        view=interim_view,
+        player_count=_player_count(shell_turn),
+    )
+    most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
+    services.persistence.put_evidence_aggregate(
+        services.game_id,
+        services.perspective,
+        replace(
+            aggregate,
+            layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
+            layout_prior_promotion_threshold=threshold,
+            layout_prior_input_fingerprint=input_fingerprint,
+            most_probable_planet_ids=most_probable_ids,
+        ),
+    )
+    return annotated
+
+
+def materialize_homeworld_candidate_view(
+    ctx: AnalyticQueryContext,
     *,
     shell_turn: TurnInfo,
 ) -> HomeworldCandidateView:
-    """Materialize map/table candidate view from game-global baseline candidates.
-
-    Shell-turn evidence aggregates are not merged here (no copy-forward in baseline).
-    """
+    """Materialize map/table candidate view after export/DAG evidence ensure."""
     inactive = homeworld_locator_inactive_reason(shell_turn.settings)
     if inactive is not None:
         return empty_candidate_view(inactive_reason=inactive)
 
-    result = ensure_homeworld_baseline(services, shell_turn=shell_turn)
-    state = result.game_state
-    candidates = apply_co_sector_candidate_cull(
-        state.candidates,
-        shell_turn.planets,
-        settings=shell_turn.settings,
-        player_count=_player_count(shell_turn),
+    services = resolve_homeworld_services(ctx)
+    scope = ExportScope(
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn=shell_turn.settings.turn,
+    )
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    if not ensure_homeworld_export(ctx, scope):
+        raise ValidationError(
+            "homeworld locator evidence ensure did not satisfy shell scope "
+            f"(game {services.game_id}, perspective {services.perspective}, "
+            f"turn {scope.turn})"
+        )
+
+    state = services.persistence.get_game_state(services.game_id)
+    if state is None:
+        raise ValidationError("homeworld locator game-global state missing after ensure")
+    aggregate = evidence_aggregate_at_shell_turn(
+        services,
+        baseline_turn=state.baseline_turn,
+        shell_turn=scope.turn,
+    )
+    if aggregate is None:
+        raise ValidationError("homeworld locator shell evidence missing after ensure")
+
+    candidates = materialize_homeworld_candidates(
+        services,
+        candidates=state.candidates,
+        aggregate=aggregate,
+        shell_turn=shell_turn,
+        baseline_turn=state.baseline_turn,
+        baseline_degraded=state.baseline_degraded,
     )
     return HomeworldCandidateView(
         candidates=candidates,

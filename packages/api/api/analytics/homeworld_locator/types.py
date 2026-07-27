@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
-from api.analytics.homeworld_locator.models import InferredHomeworldCandidate
+from api.analytics.homeworld_locator.models import (
+    HomeworldIndependentEvidenceHit,
+    HomeworldSingleStarbasePromotion,
+    InferredHomeworldCandidate,
+)
 
 
 @dataclass(frozen=True)
@@ -16,6 +20,7 @@ class HomeworldCandidateRecord:
     perspective: int | None
     confidence_tier: str
     attribution: str = ATTRIBUTION_INFERRED
+    is_most_probable: bool = False
 
 
 @dataclass(frozen=True)
@@ -30,19 +35,24 @@ class HomeworldLocatorGameState:
 
 @dataclass(frozen=True)
 class HomeworldEvidenceAggregate:
-    """Turn-scoped durable evidence aggregate (floor at baseline for #34)."""
+    """Turn-scoped durable evidence aggregate refined through the shell turn."""
 
     turn: int
     baseline_turn: int
     """Turn that supplied the homeworld inference baseline for this chain."""
 
-    evidence_hits: tuple[object, ...] = ()
-    """Independent evidence records; empty for #34 floor aggregates (#36 fills)."""
+    evidence_hits: tuple[HomeworldIndependentEvidenceHit, ...] = ()
+    single_starbase_promotions: tuple[HomeworldSingleStarbasePromotion, ...] = ()
+    # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
+    layout_prior_algorithm_version: int | None = None
+    layout_prior_promotion_threshold: int | None = None
+    layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
+    most_probable_planet_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
 class HomeworldCandidateView:
-    """On-read candidate view for map/table (not the primary durable artifact)."""
+    """Shell candidate view for map/table (selection may be reused from shell aggregate)."""
 
     candidates: tuple[HomeworldCandidateRecord, ...]
     baseline_turn: int
@@ -68,7 +78,7 @@ def candidate_records_from_inferred(
             planet_id=row.planet_id,
             perspective=row.perspective,
             confidence_tier=row.confidence_tier,
-            attribution=ATTRIBUTION_INFERRED,
+            attribution=row.attribution,
         )
         for row in inferred
     )

@@ -88,6 +88,18 @@ def _services(
     )
 
 
+def _turn_ladder(turn_one: TurnInfo, shell_turn: TurnInfo) -> dict[int, TurnInfo]:
+    """Stored turns from 1 through shell for self-chain export ensure tests."""
+    shell_number = shell_turn.settings.turn
+    turns = {1: turn_one}
+    for turn_number in range(2, shell_number + 1):
+        turns[turn_number] = replace(
+            shell_turn,
+            settings=replace(shell_turn.settings, turn=turn_number),
+        )
+    return turns
+
+
 def test_path_helpers() -> None:
     assert game_global_analytic_document_key(628580, ANALYTIC_ID) == (
         "games/628580/analytics/homeworld-locator"
@@ -410,10 +422,11 @@ def test_export_ensure_unsatisfied_when_degraded_and_turn_one_present(
     assert first.game_state.baseline_degraded is True
 
     turns[1] = turn_one
+    turns = _turn_ladder(turn_one, late)
     ctx = make_analytic_compute_context(
         late,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services={ANALYTIC_ID: _services(persistence, turns)},
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -426,22 +439,23 @@ def test_export_ensure_unsatisfied_when_degraded_and_turn_one_present(
     assert state.baseline_degraded is False
 
 
-def test_export_ensure_satisfied_without_shell_aggregate(persistence, sample_turn) -> None:
+def test_export_ensure_requires_shell_evidence_aggregate(persistence, sample_turn) -> None:
     from api.analytics.compute_context import make_analytic_compute_context
 
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
-    services = _services(persistence, {1: turn_one, 111: sample_turn})
+    turns = _turn_ladder(turn_one, sample_turn)
+    services = _services(persistence, turns)
     ensure_homeworld_baseline(services, shell_turn=sample_turn)
 
     ctx = make_analytic_compute_context(
         sample_turn,
-        load_turn=lambda n: {1: turn_one, 111: sample_turn}.get(n),
+        load_turn=lambda n: turns.get(n),
         export_services={ANALYTIC_ID: services},
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
-    assert is_homeworld_export_ensure_satisfied(ctx, scope) is True
+    assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
     assert ensure_homeworld_export(ctx, scope) is True
-    assert persistence.get_evidence_aggregate(628580, 1, 111) is None
+    assert persistence.get_evidence_aggregate(628580, 1, 111) is not None
 
 
 def test_baseline_ensure_durable_perspective_uses_slot_not_player_id(
@@ -526,9 +540,11 @@ def test_baseline_ensure_durable_perspective_uses_slot_not_player_id(
 
 def test_map_table_payload_smoke(persistence, sample_turn) -> None:
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
-    services = _services(persistence, {1: turn_one, 111: sample_turn})
+    turns = _turn_ladder(turn_one, sample_turn)
+    services = _services(persistence, turns)
     payload = get_homeworld_locator(
         sample_turn,
+        load_turn=lambda n: turns.get(n),
         export_services={ANALYTIC_ID: services},
     )
     assert payload["analyticId"] == ANALYTIC_ID
@@ -544,6 +560,7 @@ def test_map_table_payload_smoke(persistence, sample_turn) -> None:
             "perspective": row["perspective"],
             "confidenceTier": row["confidenceTier"],
             "attribution": row["attribution"],
+            "isMostProbable": row["isMostProbable"],
         }
         for row in payload["rows"]
     ]
@@ -568,17 +585,28 @@ def test_inactive_map_table_payload(persistence, sample_turn) -> None:
 
 
 def test_candidate_view_materialize(persistence, sample_turn) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
-    services = _services(persistence, {1: turn_one, 111: sample_turn})
-    view = materialize_homeworld_candidate_view(services, shell_turn=sample_turn)
+    turns = _turn_ladder(turn_one, sample_turn)
+    services = _services(persistence, turns)
+    ctx = make_analytic_compute_context(
+        sample_turn,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    view = materialize_homeworld_candidate_view(ctx, shell_turn=sample_turn)
     assert view.available is True
     assert view.baseline_turn == 1
 
 
-def test_export_catalog_baseline_only_no_self_chain() -> None:
-    """#34 baseline is game-global; #36 adds the turn_delta=-1 self-chain."""
+def test_export_catalog_declares_self_chain() -> None:
+    from api.analytics.export_types import EnsureDependency
+
     assert EXPORT_CATALOG.analytic_id == ANALYTIC_ID
-    assert EXPORT_CATALOG.ensure_dependencies == ()
+    assert EXPORT_CATALOG.ensure_dependencies == (
+        EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
+    )
 
 
 def test_registration_in_catalog() -> None:
@@ -627,8 +655,10 @@ def test_run_homeworld_baseline_persist_round_trip(persistence, sample_turn) -> 
     result = run_homeworld_baseline(job_wire)
 
     assert result.outcome == "persist"
+    assert result.persist_then_continue is True
     assert isinstance(result.payload, dict)
     assert result.payload.get("available") is True
+    assert result.payload.get("recomputed") is True
     assert isinstance(result.payload.get("gameState"), dict)
     assert isinstance(result.payload.get("floorAggregate"), dict)
     assert "runBaselineEnsure" not in result.payload
@@ -643,6 +673,127 @@ def test_run_homeworld_baseline_persist_round_trip(persistence, sample_turn) -> 
     assert stored is not None
     assert stored.baseline_turn == 1
     assert stored.baseline_degraded is False
+
+
+def test_baseline_persist_recompute_clears_shell_evidence(persistence, sample_turn) -> None:
+    """Orchestrator baseline recompute must invalidate like ensure_homeworld_baseline."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.homeworld_locator.compute_orchestration import (
+        HomeworldLocatorPersistencePolicy,
+        build_homeworld_baseline_job_wire,
+        build_homeworld_refine_job_wire,
+        run_homeworld_baseline,
+        run_homeworld_refine,
+    )
+    from api.compute.scope import ComputeScope
+    from api.compute.wire import DependencyOutputs
+
+    late = replace(sample_turn, settings=replace(sample_turn.settings, turn=2))
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    turns = {2: late}
+    services = _services(persistence, turns)
+    first = ensure_homeworld_baseline(services, shell_turn=late)
+    assert first.game_state.baseline_degraded is True
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(
+            turn=2,
+            baseline_turn=2,
+            evidence_hits=(),
+        ),
+    )
+    assert persistence.get_evidence_aggregate(628580, 1, 2) is not None
+
+    turns[1] = turn_one
+    services = _services(persistence, turns)
+    ctx = make_analytic_compute_context(
+        late,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    scope = ComputeScope(
+        analytic_id=ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=2,
+    )
+    job_wire = build_homeworld_baseline_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    result = run_homeworld_baseline(job_wire)
+    assert result.payload.get("recomputed") is True
+
+    HomeworldLocatorPersistencePolicy().persist(ctx, scope, result.payload)
+
+    state = persistence.get_game_state(628580)
+    assert state is not None
+    assert state.baseline_turn == 1
+    assert state.baseline_degraded is False
+    assert persistence.get_evidence_aggregate(628580, 1, 2) is None
+    assert persistence.has_baseline_floor(628580, 1) is True
+
+    # Floor at T1 is the prior; single-step refine at T2 can continue cleanly.
+    refine_wire = build_homeworld_refine_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    refine_result = run_homeworld_refine(refine_wire)
+    assert refine_result.outcome == "persist"
+    HomeworldLocatorPersistencePolicy().persist(ctx, scope, refine_result.payload)
+    shell = persistence.get_evidence_aggregate(628580, 1, 2)
+    assert shell is not None
+    assert shell.baseline_turn == 1
+    assert shell.turn == 2
+
+
+def test_baseline_persist_without_recompute_keeps_shell_evidence(persistence, sample_turn) -> None:
+    """Evidence-only orchestrator entry must not wipe the refine chain."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.homeworld_locator.compute_orchestration import (
+        HomeworldLocatorPersistencePolicy,
+        build_homeworld_baseline_job_wire,
+        run_homeworld_baseline,
+    )
+    from api.compute.scope import ComputeScope
+    from api.compute.wire import DependencyOutputs
+
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    turns = _turn_ladder(turn_one, sample_turn)
+    services = _services(persistence, turns)
+    ensure_homeworld_baseline(services, shell_turn=sample_turn)
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(turn=111, baseline_turn=1, evidence_hits=()),
+    )
+
+    ctx = make_analytic_compute_context(
+        sample_turn,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    scope = ComputeScope(
+        analytic_id=ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=111,
+    )
+    job_wire = build_homeworld_baseline_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    result = run_homeworld_baseline(job_wire)
+    assert result.payload.get("recomputed") is False
+
+    HomeworldLocatorPersistencePolicy().persist(ctx, scope, result.payload)
+
+    assert persistence.get_evidence_aggregate(628580, 1, 111) is not None
+    assert persistence.has_baseline_floor(628580, 1) is True
 
 
 def test_run_homeworld_baseline_inactive_completes_without_persist(

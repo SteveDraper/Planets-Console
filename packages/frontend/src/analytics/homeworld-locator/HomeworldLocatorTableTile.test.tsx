@@ -41,12 +41,14 @@ describe('HomeworldLocatorTableTile', () => {
           perspective: 1,
           confidenceTier: 'definite',
           attribution: 'inferred',
+          isMostProbable: false,
         },
         {
           planetId: 44,
           perspective: null,
           confidenceTier: 'possible',
           attribution: 'inferred',
+          isMostProbable: true,
         },
       ],
     })
@@ -56,7 +58,7 @@ describe('HomeworldLocatorTableTile', () => {
     expect(screen.getByText('Slot 1')).toBeInTheDocument()
     expect(screen.getByText('Orphan')).toBeInTheDocument()
     expect(screen.getByText('Definite')).toBeInTheDocument()
-    expect(screen.getByText('Possible')).toBeInTheDocument()
+    expect(screen.getByText('Possible (most probable)')).toBeInTheDocument()
   })
 
   it('shows inactive hint when the analytic is unavailable', async () => {

@@ -16,6 +16,7 @@ export const homeworldCandidateRecordSchema = z.object({
   perspective: z.number().int().nullable(),
   confidenceTier: homeworldConfidenceTierSchema,
   attribution: z.string().min(1),
+  isMostProbable: z.boolean().default(false),
 })
 
 export const homeworldMapMarkerSchema = homeworldCandidateRecordSchema

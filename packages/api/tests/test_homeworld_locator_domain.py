@@ -507,6 +507,58 @@ def test_cull_co_sector_candidates_drops_possibles_near_definite(
     assert {row.planet_id for row in culled} == {1, 3}
 
 
+def test_cull_co_sector_drops_extra_inferred_definites(template_planet) -> None:
+    """Evidence-promoted orphan definites must not coexist with the sector pin."""
+    from api.analytics.homeworld_locator.baseline import (
+        cull_co_sector_candidates_after_definites,
+    )
+    from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+    from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
+
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=182, x=500, y=0)
+    orphan_a = _planet(template_planet, planet_id=10, x=520, y=15)
+    orphan_b = _planet(template_planet, planet_id=74, x=480, y=30)
+    neighbor = _planet(template_planet, planet_id=54, x=400, y=350)
+    planets_by_id = {182: pin, 10: orphan_a, 74: orphan_b, 54: neighbor}
+    rows = (
+        HomeworldCandidateRecord(
+            planet_id=182,
+            perspective=2,
+            confidence_tier=CONFIDENCE_DEFINITE,
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=10,
+            perspective=None,
+            confidence_tier=CONFIDENCE_DEFINITE,
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=74,
+            perspective=None,
+            confidence_tier=CONFIDENCE_DEFINITE,
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=54,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            attribution=ATTRIBUTION_INFERRED,
+        ),
+    )
+    culled = cull_co_sector_candidates_after_definites(
+        rows,
+        planets_by_id,
+        center=center,
+        player_count=11,
+        pin_angle=0.0,
+    )
+    assert {row.planet_id for row in culled} == {182, 54}
+    pin_row = next(row for row in culled if row.planet_id == 182)
+    assert pin_row.confidence_tier == CONFIDENCE_DEFINITE
+
+
 def test_cull_preserves_user_asserted_co_sector_possible(template_planet) -> None:
     from api.analytics.homeworld_locator.baseline import (
         cull_co_sector_candidates_after_definites,

@@ -176,7 +176,53 @@ describe('parseHomeworldLocatorPayload', () => {
     expect(parsed?.baselineDegraded).toBe(true)
     expect(parsed?.markers).toHaveLength(1)
     expect(parsed?.markers?.[0]?.confidenceTier).toBe('definite')
+    expect(parsed?.markers?.[0]?.isMostProbable).toBe(false)
     expect(parsed?.regionOverlays).toHaveLength(1)
+  })
+
+  it('defaults isMostProbable to false when omitted', () => {
+    const parsed = parseHomeworldLocatorPayload({
+      analyticId: 'homeworld-locator',
+      available: true,
+      baselineDegraded: false,
+      rows: [
+        {
+          planetId: 10,
+          perspective: null,
+          confidenceTier: 'possible',
+          attribution: 'inferred',
+        },
+      ],
+    })
+    expect(parsed?.rows?.[0]?.isMostProbable).toBe(false)
+  })
+
+  it('accepts isMostProbable on candidate rows and markers', () => {
+    const parsed = parseHomeworldLocatorPayload({
+      analyticId: 'homeworld-locator',
+      available: true,
+      baselineDegraded: false,
+      markers: [
+        {
+          planetId: 22,
+          perspective: 3,
+          confidenceTier: 'possible',
+          attribution: 'inferred',
+          isMostProbable: true,
+        },
+      ],
+      rows: [
+        {
+          planetId: 22,
+          perspective: 3,
+          confidenceTier: 'possible',
+          attribution: 'inferred',
+          isMostProbable: true,
+        },
+      ],
+    })
+    expect(parsed?.markers?.[0]?.isMostProbable).toBe(true)
+    expect(parsed?.rows?.[0]?.isMostProbable).toBe(true)
   })
 
   it('rejects invalid confidence tiers', () => {
@@ -207,12 +253,14 @@ describe('resolveHomeworldMarkerDisplays', () => {
           perspective: null,
           confidenceTier: 'possible',
           attribution: 'inferred',
+          isMostProbable: false,
         },
         {
           planetId: 99,
           perspective: 2,
           confidenceTier: 'definite',
           attribution: 'inferred',
+          isMostProbable: false,
         },
       ],
       [
@@ -229,7 +277,25 @@ describe('resolveHomeworldMarkerDisplays', () => {
         confidenceTier: 'possible',
         perspective: null,
         attribution: 'inferred',
+        isMostProbable: false,
       },
     ])
+  })
+
+  it('passes through isMostProbable when set on the wire marker', () => {
+    const displays = resolveHomeworldMarkerDisplays(
+      [
+        {
+          planetId: 7,
+          perspective: 2,
+          confidenceTier: 'possible',
+          attribution: 'inferred',
+          isMostProbable: true,
+        },
+      ],
+      [{ id: 'base-map:p7', label: 'p7', x: 50, y: 60, planet: { id: 7 } }],
+      'base-map'
+    )
+    expect(displays[0]?.isMostProbable).toBe(true)
   })
 })

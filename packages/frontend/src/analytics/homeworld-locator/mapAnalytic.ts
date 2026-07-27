@@ -55,6 +55,7 @@ export function resolveHomeworldMarkerDisplays(
       confidenceTier: marker.confidenceTier,
       perspective: marker.perspective,
       attribution: marker.attribution,
+      isMostProbable: marker.isMostProbable ?? false,
     })
   }
   return out
