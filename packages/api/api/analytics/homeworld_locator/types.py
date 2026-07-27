@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
-from api.analytics.homeworld_locator.models import InferredHomeworldCandidate
+from api.analytics.homeworld_locator.models import (
+    HomeworldIndependentEvidenceHit,
+    HomeworldSingleStarbasePromotion,
+    InferredHomeworldCandidate,
+)
 
 
 @dataclass(frozen=True)
@@ -30,14 +34,14 @@ class HomeworldLocatorGameState:
 
 @dataclass(frozen=True)
 class HomeworldEvidenceAggregate:
-    """Turn-scoped durable evidence aggregate (floor at baseline for #34)."""
+    """Turn-scoped durable evidence aggregate refined through the shell turn."""
 
     turn: int
     baseline_turn: int
     """Turn that supplied the homeworld inference baseline for this chain."""
 
-    evidence_hits: tuple[object, ...] = ()
-    """Independent evidence records; empty for #34 floor aggregates (#36 fills)."""
+    evidence_hits: tuple[HomeworldIndependentEvidenceHit, ...] = ()
+    single_starbase_promotions: tuple[HomeworldSingleStarbasePromotion, ...] = ()
 
 
 @dataclass(frozen=True)

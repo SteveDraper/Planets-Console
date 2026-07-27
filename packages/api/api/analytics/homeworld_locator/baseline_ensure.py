@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from api.analytics.homeworld_locator.baseline import (
-    apply_co_sector_candidate_cull,
-    infer_homeworld_baseline_candidates,
-)
+from api.analytics.homeworld_locator.baseline import infer_homeworld_baseline_candidates
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
+from api.analytics.homeworld_locator.evidence_ensure import (
+    ensure_homeworld_evidence_refined,
+    promotion_threshold,
+)
+from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
     HomeworldCandidateView,
@@ -205,6 +207,11 @@ def ensure_homeworld_baseline(
     result = compute_homeworld_baseline(services, shell_turn=shell_turn)
     if not result.recomputed:
         return result
+    services.persistence.invalidate_evidence_from_turn(
+        services.game_id,
+        services.perspective,
+        result.game_state.baseline_turn,
+    )
     services.persistence.put_baseline(
         services.game_id,
         services.perspective,
@@ -219,21 +226,25 @@ def materialize_homeworld_candidate_view(
     *,
     shell_turn: TurnInfo,
 ) -> HomeworldCandidateView:
-    """Materialize map/table candidate view from game-global baseline candidates.
-
-    Shell-turn evidence aggregates are not merged here (no copy-forward in baseline).
-    """
+    """Materialize map/table candidate view from baseline candidates + shell evidence."""
     inactive = homeworld_locator_inactive_reason(shell_turn.settings)
     if inactive is not None:
         return empty_candidate_view(inactive_reason=inactive)
 
     result = ensure_homeworld_baseline(services, shell_turn=shell_turn)
     state = result.game_state
-    candidates = apply_co_sector_candidate_cull(
+    aggregate = ensure_homeworld_evidence_refined(
+        services,
+        shell_turn=shell_turn,
+        game_state_baseline_turn=state.baseline_turn,
+    )
+    candidates = materialize_evidence_adjusted_candidates(
         state.candidates,
-        shell_turn.planets,
-        settings=shell_turn.settings,
+        aggregate,
+        planets=shell_turn.planets,
+        settings_turn=shell_turn,
         player_count=_player_count(shell_turn),
+        promotion_threshold=promotion_threshold(),
     )
     return HomeworldCandidateView(
         candidates=candidates,

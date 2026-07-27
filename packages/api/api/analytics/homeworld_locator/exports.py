@@ -14,6 +14,10 @@ from api.analytics.homeworld_locator.baseline_ensure import (
 )
 from api.analytics.homeworld_locator.compute_services import resolve_homeworld_services
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
+from api.analytics.homeworld_locator.evidence_ensure import (
+    ensure_homeworld_evidence_refined,
+    evidence_refined_through_shell,
+)
 from api.analytics.homeworld_locator.serialization import (
     homeworld_candidate_record_to_json,
     homeworld_evidence_aggregate_to_json,
@@ -27,11 +31,11 @@ from api.errors import ValidationError
 
 PATH_PREFIX_SCOPE_RULES: tuple[PathPrefixScopeRule, ...] = ()
 
-# Phase 2 (#34) is baseline-only and game-global: no prior-turn self-chain.
-# A turn_delta=-1 edge would require every intermediate turn to be stored
-# before baseline upgrade (degraded→T1) can run. #36 refine-through-T adds
-# the self-chain when shell-turn evidence copy-forward is in scope.
-ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = ()
+# Baseline floor at turn 1 (or degraded earliest) plus linear self-chain for
+# shell-turn evidence refine (#36).
+ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
+    EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
+)
 
 EXPORT_VALUE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -72,6 +76,10 @@ EXPORT_VALUE_SCHEMA: dict[str, Any] = {
             "type": "object",
             "description": "Floor evidence aggregate persisted at the baseline turn.",
         },
+        "shellAggregate": {
+            "type": "object",
+            "description": "Evidence aggregate refined through the shell turn.",
+        },
     },
 }
 
@@ -95,7 +103,16 @@ def is_homeworld_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: Expor
         fingerprint = state.settings_fingerprint
     else:
         fingerprint = homeworld_settings_fingerprint(turn.settings)
-    return not needs_baseline_recompute(services, settings_fingerprint=fingerprint)
+    if needs_baseline_recompute(services, settings_fingerprint=fingerprint):
+        return False
+    state = services.persistence.get_game_state(services.game_id)
+    if state is None:
+        return False
+    return evidence_refined_through_shell(
+        services,
+        baseline_turn=state.baseline_turn,
+        shell_turn=scope.turn,
+    )
 
 
 def is_homeworld_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
@@ -116,7 +133,12 @@ def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bo
         return is_homeworld_export_ensure_satisfied(ctx, scope)
 
     services = resolve_homeworld_services(ctx)
-    ensure_homeworld_baseline(services, shell_turn=turn)
+    baseline_result = ensure_homeworld_baseline(services, shell_turn=turn)
+    ensure_homeworld_evidence_refined(
+        services,
+        shell_turn=turn,
+        game_state_baseline_turn=baseline_result.game_state.baseline_turn,
+    )
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
     return is_homeworld_export_ensure_satisfied(ctx, scope)
 
@@ -139,6 +161,11 @@ def materialize_homeworld_export_tree(
 
     services = resolve_homeworld_services(ctx)
     result = ensure_homeworld_baseline(services, shell_turn=turn)
+    shell_aggregate = ensure_homeworld_evidence_refined(
+        services,
+        shell_turn=turn,
+        game_state_baseline_turn=result.game_state.baseline_turn,
+    )
     return {
         "meta": build_export_meta_branch(host_turn=scope.turn),
         "baseline": {
@@ -149,6 +176,7 @@ def materialize_homeworld_export_tree(
             homeworld_candidate_record_to_json(row) for row in result.game_state.candidates
         ],
         "floorAggregate": homeworld_evidence_aggregate_to_json(result.floor_aggregate),
+        "shellAggregate": homeworld_evidence_aggregate_to_json(shell_aggregate),
         "gameState": homeworld_locator_game_state_to_json(result.game_state),
         "available": True,
     }

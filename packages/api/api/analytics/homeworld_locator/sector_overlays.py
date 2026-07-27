@@ -66,6 +66,24 @@ ENVELOPE_RADII_LY: tuple[float, float] = (
 )
 
 
+def homeworld_layout_asset_category(
+    turn: TurnInfo,
+    *,
+    player_count: int | None = None,
+) -> GameCategory | None:
+    """Return epic|standard when layout distribution asset tables apply; else None."""
+    if not supports_circular_round_candidate_geometry(turn.settings):
+        return None
+    resolved_count = player_count if player_count is not None else len(players_by_id(turn))
+    category = GameCategory.from_game_settings(
+        turn.settings,
+        player_count=resolved_count,
+    )
+    if category in (GameCategory.EPIC, GameCategory.STANDARD):
+        return category
+    return None
+
+
 def homeworld_sector_emission_eligible(
     turn: TurnInfo,
     *,
@@ -78,13 +96,7 @@ def homeworld_sector_emission_eligible(
     resolved_count = player_count if player_count is not None else len(players_by_id(turn))
     if resolved_count < 2:
         return False
-    if not supports_circular_round_candidate_geometry(turn.settings):
-        return False
-    category = GameCategory.from_game_settings(
-        turn.settings,
-        player_count=resolved_count,
-    )
-    return category in (GameCategory.EPIC, GameCategory.STANDARD)
+    return homeworld_layout_asset_category(turn, player_count=resolved_count) is not None
 
 
 def resolve_viewpoint_pin_planet(

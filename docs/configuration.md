@@ -38,7 +38,7 @@ The amalgamated config has three top-level keys:
 | `credentials_obfuscation_secret` | string or null | null | Optional secret mixed into HKDF when wrapping **account API keys** at rest. When null, derivation uses the OS native machine id only. See [ADR 0007](adr/0007-account-api-key-and-silent-login.md) and [design-account-api-key-and-silent-login.md](design-account-api-key-and-silent-login.md). |
 | `homeworld_locator` | object | see below | Server-side **homeworld locator config** (YAML, not SPA UI). Nested fields below. |
 | `homeworld_locator.min_baseline_clans` | integer | `10000` | Floor clan count for **homeworld baseline profile** matching (below default `homeworldclans`, above casual colonies). |
-| `homeworld_locator.evidence_promotion_threshold` | integer | `2` | Independent evidence hits required for **possible → definite** (loaded now; used by evidence refine #36). |
+| `homeworld_locator.evidence_promotion_threshold` | integer | `2` | Independent evidence hits required for **possible → definite** during evidence refine materialize. |
 
 ### `bff` (BFF)
 
