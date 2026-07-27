@@ -78,7 +78,7 @@ def candidate_records_from_inferred(
             planet_id=row.planet_id,
             perspective=row.perspective,
             confidence_tier=row.confidence_tier,
-            attribution=ATTRIBUTION_INFERRED,
+            attribution=row.attribution,
         )
         for row in inferred
     )

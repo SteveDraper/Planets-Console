@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+
 CONFIDENCE_DEFINITE = "definite"
 CONFIDENCE_POSSIBLE = "possible"
 
@@ -29,6 +31,9 @@ class InferredHomeworldCandidate:
 
     confidence_tier: str
     """``definite`` or ``possible``."""
+
+    attribution: str = ATTRIBUTION_INFERRED
+    """``inferred`` for baseline-emitted candidates."""
 
 
 EVIDENCE_KIND_ORIGIN_DISTANCE = "origin_distance"

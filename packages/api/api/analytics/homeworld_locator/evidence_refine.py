@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol, TypeVar
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
+from api.analytics.homeworld_locator.cull_candidates import TCullable
 from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     load_default_layout_distributions_asset,
@@ -36,21 +36,6 @@ from api.analytics.homeworld_locator.types import (
 from api.concepts.stellar_cartography.nebula_visibility import distance_ly
 from api.models.game import TurnInfo
 from api.models.planet import Planet
-
-
-class _CullableCandidate(Protocol):
-    @property
-    def planet_id(self) -> int: ...
-
-    @property
-    def confidence_tier(self) -> str: ...
-
-
-TCullable = TypeVar("TCullable", bound=_CullableCandidate)
-
-
-def _candidate_attribution(row: object) -> str | None:
-    return getattr(row, "attribution", None)
 
 
 def refine_homeworld_evidence_aggregate(
@@ -150,7 +135,7 @@ def cull_definite_neighborhood_candidates(
 
     kept: list[TCullable] = []
     for row in candidates:
-        if _candidate_attribution(row) == ATTRIBUTION_USER_ASSERTED:
+        if row.attribution == ATTRIBUTION_USER_ASSERTED:
             kept.append(row)
             continue
         if row.confidence_tier == CONFIDENCE_DEFINITE:
