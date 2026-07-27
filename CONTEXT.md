@@ -333,16 +333,20 @@ The starting planet assigned to a **Player** slot at map creation. Distinct from
 _Avoid_: Officer Homeworld, home planet (without "homeworld" qualifier)
 
 **Homeworld candidate**:
-One inferred or confirmed **homeworld planet** position (or constrained region) with a confidence tier. Either **slot-anchored** (tied to a **perspective** / **Player** slot) or an **orphan homeworld candidate** (location-first when slot assignment is ambiguous).
+One inferred or confirmed **homeworld planet** position (or constrained region) with a confidence tier. Either **slot-anchored** (tied to a **homeworld owner**) or an **orphan homeworld candidate** (location-first when owner assignment is ambiguous).
 _Avoid_: HW guess, probable start
 
 **Slot-anchored homeworld candidate**:
-A **homeworld candidate** tied to a specific **perspective** slot from **GameInfo**. Primary output mode when player count and map settings support one homeworld per slot.
-_Avoid_: player HW, slot HW (in docs without "candidate")
+A **homeworld candidate** tied to a specific **homeworld owner** (the **Player** / slot whose starting HW this is believed to be). Primary output mode when player count and map settings support one homeworld per slot. Wire may still carry the owner slot under the field name `perspective` (same 1-based slot id space as storage **perspective**) -- that field means owner attribution, not shell viewpoint.
+_Avoid_: player HW, slot HW (in docs without "candidate"), calling owner attribution "perspective" in prose
 
 **Orphan homeworld candidate**:
-A **homeworld candidate** not yet tied to a **perspective** slot -- a planet or region that looks like a homeworld under heuristics or geometry, pending slot assignment or manual race annotation.
+A **homeworld candidate** not yet tied to a **homeworld owner** -- a planet or region that looks like a homeworld under heuristics or geometry, pending owner assignment or manual race annotation.
 _Avoid_: unassigned HW, floating candidate
+
+**Homeworld owner**:
+Which **Player** (by 1-based slot) a **homeworld candidate** or **homeworld sector** is attributed to -- "whose homeworld this is." Distinct from shell **perspective** / **viewpoint** (whose TurnInfo and sensor picture the analytic is reading), even though both use the same slot-number id space. Ownership evidence assigns or strengthens **homeworld owner**; location evidence does not.
+_Avoid_: perspective (for this concept in prose), viewpoint, conflating sensor picture slot with HW attribution
 
 **Homeworld inference baseline**:
 The earliest available **TurnInfo** (typically turn 1) used as the primary source for planet ownership, population, climate, and map-gen geometry signals in the **homeworld locator**. When turn 1 is not stored, the locator **auto-ensures** turn 1 when credentials allow; if ensure fails, falls back to the earliest stored turn with **baseline degraded** warning in the **homeworld locator panel**. Baseline facts are not recomputed from the shell turn alone.
@@ -353,12 +357,52 @@ _Avoid_: inference turn, T1-only mode
 _Avoid_: weak baseline flag, stale T1 warning
 
 **Homeworld inference evidence**:
-A later-turn signal that increases or decreases confidence in a **homeworld candidate** without replacing the **homeworld inference baseline**. Examples: first sighting of a player's ships, ships at characteristic distances from a planet (81 LY pod hop, warp-8 range), or cluster geometry matching `verycloseplanets` / `closeplanets` settings.
-_Avoid_: secondary heuristic, turn N guess
+A later-turn signal that increases or decreases confidence in a **homeworld candidate** without replacing the **homeworld inference baseline**. For the location slice (#36): **ship origin distance signal** and **single-starbase new-build evidence** accumulate toward promoting existing candidates' **homeworld confidence tier** (location). Ordinary hits: at most one independent hit per (**planet**, turn). Ownership / slot-binding evidence (ship proximity envelopes, sector ownership from max travel, direct planetary ownership sightings) is a separate analytic concern -- not #36.
+_Avoid_: secondary heuristic, turn N guess, folding ownership inference into location evidence refine
+
+**Homeworld location evidence** *(#36)*:
+Later-turn signals that strengthen **where** a **homeworld planet** is (candidate planet confidence), not **who** owns which **homeworld sector**. v1: **ship origin distance signal** + **single-starbase new-build evidence** on existing candidates only.
+_Avoid_: sector ownership from ship age envelopes, proximity-as-ownership, planetary ownerid sightings as this slice
+
+**Homeworld ownership evidence** *(follow-on)*:
+Later-turn signals that strengthen **homeworld owner** attribution for a sector or candidate -- ship proximity with max-travel envelopes from ship-age bounds, sector pinning when only one sector remains reachable, and direct sensor sightings that reveal planetary ownership. Distinct from **homeworld location evidence** (which must not assign **homeworld owner** from `ship.ownerid`).
+_Avoid_: treating origin-distance tier promotion as sufficient ownership assignment, calling ownership "perspective" in prose
+
+**Ship origin distance signal**:
+A **homeworld inference evidence** cue: a ship observed near a characteristic travel distance from an **existing** **homeworld candidate** planet (slot-anchored or orphan already in locator state) -- never used alone to invent new orphan candidates. Uses host-aligned `max_travel_distance` in **game concepts** (not YAML). v1 match bands by movement class: **non-gravitonic** -- warp-8 (64 LY) and 81 LY (pod hop / non-gravitonic warp-9); **gravitonic** -- gravitonic warp-8 (128 LY) and gravitonic warp-9 (162 LY), applied only when the sighted ship is gravitonic. Match within a small LY tolerance band (implementation constant, ~±1 LY). Other warp speeds are out of v1 scope.
+_Avoid_: YAML distance lists, exact-only float equality with no tolerance, applying gravitonic bands to non-gravitonic ships, creating orphans from distance matches alone, all-warp tables in v1
+
+**Independent homeworld evidence hit**:
+One countable unit toward `evidence_promotion_threshold` for a candidate planet: at most one per (**planet**, turn) from ordinary origin-distance / sighting signals, regardless of how many ships or signal kinds matched that turn. Distinct from **single-starbase new-build evidence**, which bypasses the threshold.
+_Avoid_: per-ship hit counting, per-kind-per-turn splitting as the v1 default
+
+**Single-starbase new-build evidence**:
+A strong **homeworld inference evidence** rule: when a sighted ship is treated as built on the previous turn (v1: first appeared in this **viewpoint** **perspective**'s stored turns on *T−1*, or fleet `built_turn == T−1` when available) and that owner's scoreboard starbase count is exactly 1, a single implicating sighting (origin-distance or at-planet) **immediately promotes** the implicated candidate **possible → definite**, bypassing `evidence_promotion_threshold`. Skip when starbase count is unknown or hidden (**Stealth Mode**). Rationale: with one yard, the new ship spawned at that starbase planet.
+_Avoid_: treating multi-starbase new builds as HW-certain, requiring a host ship-age field that TurnInfo does not provide
 
 **Homeworld confidence tier**:
-How strongly the locator treats a candidate as the **homeworld planet** for a slot or orphan location. **Definite** when a baseline profile matches, geometry leaves no plausible alternative, cumulative **homeworld inference evidence** promotes the candidate, or the user manually confirms. **Possible** when consistent with settings and spacing but not unique. Orphans default to **possible** until anchored or confirmed.
-_Avoid_: probability score (until a scoring model is defined)
+How strongly the locator treats a candidate as the **homeworld planet** for a slot or orphan location. **Definite** when a baseline profile matches, geometry leaves no plausible alternative, cumulative **homeworld inference evidence** promotes the candidate, or the user manually confirms. **Possible** when consistent with settings and spacing but not unique. Orphans default to **possible** until anchored or confirmed. Orthogonal to **homeworld selection status** -- layout-prior ranking does not create a third confidence tier.
+_Avoid_: most probable as a confidence tier, probability score as the tier enum
+
+**Homeworld selection status**:
+View-time annotation on a **homeworld candidate** in the **homeworld candidate view** indicating whether it is the **most probable homeworld candidate** for its **homeworld sector** under **homeworld layout prior selection**. Distinct from **homeworld confidence tier** and from **homeworld attribution**. Surfaced on the shared map/table candidate wire as **`isMostProbable`** (boolean; false when ineligible or not selected). Not persisted in the evidence aggregate; recomputed whenever the candidate view is materialized.
+_Avoid_: confidence tier (for this concept), probability score as a stored field, baking selection into the durable aggregate, third confidenceTier enum value
+
+**Most probable homeworld candidate**:
+The single **possible** **homeworld candidate** in an unpinned **homeworld sector** chosen by **homeworld layout prior selection** as that sector's contribution to the selected set. At most one per sector; none when the sector already has a **definite** (the definite is the set member for that sector instead). Wire: **`isMostProbable: true`**. Map styling is distinct from ordinary **possible** markers (e.g. double-layer dotted ring); tabular tile shows a matching cue.
+_Avoid_: most probable confidence tier, treating definite as most-probable labeled
+
+**Homeworld layout prior selection**:
+The set of one position per participating **homeworld sector** that minimizes an equal-family-weighted layout-prior cost using the **homeworld layout distribution asset** for the game category. Cost = mean over ring edges of |percentile(clockwise-neighbor separation) − 50| plus mean over unpinned set members of |percentile(map-center distance) − 50|. Clockwise-neighbor means angle-sorted around map center with Euclidean distance to the next on the ring (asset `neighbor_separation` tables). Per sector the set member is: the **definite** planet when pinned; else a real **possible** planet (**most probable homeworld candidate** when chosen); else a **homeworld layout stand-in** when the sector has planet-scan-unobserved band area; else the sector does not participate. Pinned **definite** members are fixed in the set and omitted from the center-distance family. On exact cost ties, prefer the lexicographically smaller tuple of selected planet ids (stand-in-only sectors sort after real planets). Opinionated layout prior -- not evidence promotion. Eligible only under the same gate as **homeworld region overlay** emission: **homeworld region geometry (v1)** (`hwdistribution=2`, `mapshape=0`), game category epic|standard, and a viewpoint pin fixing ring rotation; otherwise no **most probable homeworld candidate** annotations.
+_Avoid_: evidence promotion, independent scoring per candidate without a joint set, inventing sectors without a viewpoint pin, true nearest-Euclidean neighbor as the separation metric (asset is clockwise-neighbor), dropping empty-but-unobserved sectors from the ring when a stand-in can close it, raw unnormalized double-sum of the two families, non-deterministic tie-breaking
+
+**Homeworld layout stand-in**:
+A synthetic map position used only inside **homeworld layout prior selection** for an unpinned **homeworld sector** that has no planet **homeworld candidate** but does have planet-scan-unobserved area in the sector annular band (same planet-scan + nebula model as sector-overlay incompleteness). Its coordinates are continuously optimized within that unobserved region to minimize the joint layout-prior cost given the fixed real picks in other sectors. Contributes to both clockwise-neighbor edges and the unpinned center-distance term so empty nebular wedges still close the ring under the layout prior. Not a **homeworld candidate**, not shown as a map marker, and never labeled **most probable**. If the sector band is fully planet-scan covered and has no candidates, the sector does not participate.
+_Avoid_: phantom planet candidate, nebula-only invisibility predicate (scan-range gaps count), treating stand-ins as assertable candidates, fixed unobserved representative in place of continuous optimization, neighbor-only stand-in scoring
+
+**Homeworld definite-neighborhood cull**:
+Materialize-time removal of remaining **possible** (inferred) **homeworld candidates** that lie closer than the **homeworld layout distribution asset** neighbor-separation lower support (`supportMin` for the game category) to any **definite** homeworld. Runs after evidence promotion and alongside **co-sector cull**; does not remove **user-asserted** rows. When layout-prior eligibility fails (no asset category / non-circular gate), this distance cull does not apply -- co-sector cull may still run when sectors are defined. Distinct from `otherplanetsminhomeworlddist` (map-gen “other planets” spacing -- not this cull radius).
+_Avoid_: silently reusing otherplanetsminhomeworlddist, culling user-asserted rows, treating co-sector cull as sufficient distance policy
 
 **Homeworld baseline profile**:
 Turn-1 planet signals used for **definite** rule matching: owned by the slot's **Player**, clan count at or above a configured minimum (below default `homeworldclans` to allow RGA and population loss), starbase present when `homeworldhasstarbase`, and climate matching the slot's race **preferred temperature** from the race climate catalog (50 deg W default; 100 deg W for Crystals when desert advantage applies -- adjusted per game from **GameSettings** / race flags when available).
@@ -385,15 +429,15 @@ Turn-scoped durable accumulation of **homeworld inference evidence** through tur
 _Avoid_: homeworld locator evidence (perspective) as a single non-turn document, posterior-as-sole-persistence, omniscient cross-perspective aggregate
 
 **Homeworld candidate view**:
-Materialized slot/orphan **homeworld candidate records** with **homeworld confidence tiers** for map and table -- derived from **homeworld locator state (game-global)** plus the **homeworld evidence aggregate** at the shell turn. Computed on read (optional cache allowed); never a substitute for persisting the evidence aggregate.
-_Avoid_: posterior document (as the primary store), baking display tiers into the aggregate as the only durable form
+Materialized slot/orphan **homeworld candidate records** with **homeworld confidence tiers** and **homeworld selection status** for map and table -- derived from **homeworld locator state (game-global)** plus the **homeworld evidence aggregate** at the shell turn. Computed on read (optional cache allowed); never a substitute for persisting the evidence aggregate. Materialize order: evidence promotion (**possible → definite**), then **co-sector cull** and **homeworld definite-neighborhood cull**, then **homeworld layout prior selection** (selection status).
+_Avoid_: posterior document (as the primary store), baking display tiers or selection status into the aggregate as the only durable form
 
 **Homeworld locator refresh**:
 Explicit user action (sidebar control in the **homeworld locator** analytic) that forces recomputation of inferred state regardless of invalidation triggers. **User-asserted** records are preserved and re-merged.
 _Avoid_: reload button (generic), force recompute
 
 **Homeworld candidate record**:
-One entry in **homeworld locator state** -- a **homeworld candidate** with the same shape whether **inferred** or **user-asserted**. Includes planet id or region, **perspective** slot (when slot-anchored), confidence tier, and **homeworld attribution**.
+One entry in **homeworld locator state** -- a **homeworld candidate** with the same shape whether **inferred** or **user-asserted**. Includes planet id or region, optional **homeworld owner** slot (wire field often named `perspective`), confidence tier, and **homeworld attribution**.
 _Avoid_: override object, manual tag DTO
 
 **Homeworld attribution**:
@@ -417,7 +461,7 @@ Older name for a single per-**perspective** evidence document. Replaced by turn-
 _Avoid_: as current architecture -- use **homeworld evidence aggregate**
 
 **Homeworld map marker**:
-Map decoration on a **base map** planet node for a **homeworld candidate** at a known planet id. **Definite** tiers use a solid marker; **possible** tiers use a lighter or dashed marker. **User-asserted** **definite** uses the same definite marker with a distinct attribution cue (border or badge).
+Map decoration on a **base map** planet node for a **homeworld candidate** at a known planet id. **Definite** tiers use a solid marker; ordinary **possible** tiers use a lighter or dashed ring; **most probable homeworld candidates** (`isMostProbable`) use a visually stronger possible treatment (e.g. double-layer dotted ring). **User-asserted** **definite** uses the same definite marker with a distinct attribution cue (border or badge).
 _Avoid_: HW node (separate graph node), duplicate planet
 
 **Homeworld region overlay**:
@@ -429,8 +473,12 @@ Global client preference (localStorage) controlling which **homeworld region ove
 _Avoid_: visibility kind toggle (wrong analytic), per-game preference scope for this mode
 
 **Homeworld layout distribution asset**:
-Committed, reloadable percentile tables for homeworld center-distance and neighbor-separation on epic and standard circular layouts. Used to choose paint band radii (support extremes of center-distance) and later likelihood scoring; derived from sampled layout distributions, not recomputed from live TurnInfo each request.
+Committed, reloadable percentile tables for homeworld center-distance and neighbor-separation on epic and standard circular layouts. Used to choose paint band radii (support extremes of center-distance) and to score **homeworld layout prior selection**; derived from sampled layout distributions, not recomputed from live TurnInfo each request.
 _Avoid_: raw sample CSV as runtime input, inventing band radii without the asset
+
+**Homeworld sector**:
+One equal-angular wedge of the circular homeworld ring under **homeworld region geometry (v1)** -- the unit that owns at most one true **homeworld planet**, may hold multiple **possible** candidates until pinned, and is the grouping key for **most probable homeworld candidate** selection and co-sector cull. Well-defined only when layout-prior / sector-emission eligibility holds.
+_Avoid_: sector blob, treating map display name "Sector" (game title) as this concept
 
 **Homeworld locator panel**:
 The **homeworld locator** analytic details UI -- slot and orphan table (assign slot, set race, tier override), plus **homeworld locator refresh**. Map-primary: context menu on **homeworld map marker** or **homeworld region overlay** for quick asserts; table for bulk review with map highlight on row focus.
@@ -972,12 +1020,13 @@ _Avoid_: force seed, reset on boot
 
 Use **homeworld planet** in Console prose and UI for map inference. Do not say "homeworld" alone when Officer Homeworld could be misread.
 
-**Player vs perspective vs viewpoint**:
+**Player vs perspective vs viewpoint vs homeworld owner**:
 - **Player** -- the domain entity (name, race, scores) inside **GameInfo** / **TurnInfo**.
-- **Perspective** -- the 1-based **slot number** used in paths and Core routes (`…/3/turns/111`).
+- **Perspective** -- the 1-based **slot number** used in paths and Core routes (`…/3/turns/111`) for whose **TurnInfo** is stored/read.
 - **Viewpoint** -- which **Player** the shell is showing, resolved to a perspective.
+- **Homeworld owner** -- which **Player**/slot a **homeworld candidate** or **homeworld sector** is attributed to (whose HW it is). Same slot id space as **perspective**, different meaning.
 
-Use **perspective** in storage paths and API path segments; use **viewpoint** in UI copy; use **Player** when referring to model fields or upstream payload entities. Do not say "player 3" when you mean perspective slot 3 unless the prose explicitly ties slot to the `Player` record.
+Use **perspective** in storage paths and API path segments; use **viewpoint** in UI copy for shell context; use **homeworld owner** (not "perspective") in homeworld-locator prose for attribution; use **Player** when referring to model fields or upstream payload entities. Do not say "player 3" when you mean perspective slot 3 unless the prose explicitly ties slot to the `Player` record.
 
 **Visibility analytic vs Fleet player visibility**:
 - **Visibility analytic** -- map **map region overlay**s for sensor / ship-detection coverage from the **viewpoint**.

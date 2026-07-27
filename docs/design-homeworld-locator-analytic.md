@@ -174,35 +174,60 @@ For non-circular or non-round maps: skip ring/sector math; still use baseline pr
 
 ### 4.3 Homeworld inference evidence (later turns)
 
-**Source:** **TurnInfo** stored at shell **viewpoint** **perspective** only -- not a union across all slots (**homeworld evidence scope**).
+Split into **location** vs **ownership** (different tickets).
 
-Append incrementally when new turns are stored beyond cached evidence horizon.
+**Source (both):** **TurnInfo** stored at shell **viewpoint** **perspective** only -- not a union across all slots (**homeworld evidence scope**).
+
+#### 4.3.1 Homeworld location evidence ([#36](https://github.com/SteveDraper/Planets-Console/issues/36))
+
+Strengthens **where** a HW is (confidence on existing candidates). Does **not** assign **homeworld owner** from `ship.ownerid`.
 
 | Signal | Rule |
 |--------|------|
-| First ship sighting | Player's ships first seen near a cluster implicates that region as their HW area |
-| Origin distance -- pod hop | Ship position **~81 LY** from a planet (standard pod range) suggests recent departure from that planet or an adjacent hop point |
-| Origin distance -- warp | Ship **~warp 8 travel range** from planet (host-aligned; ~64 LY) -- same "just left home" intuition |
-| Repeated independent hits | Multiple distinct evidence events promote **possible -> definite** when count >= YAML promotion threshold |
+| Origin distance -- non-gravitonic | Ship near **64 LY** (warp 8) or **81 LY** (pod / warp 9) from an **existing** candidate planet |
+| Origin distance -- gravitonic | Gravitonic ships only: **128 LY** (grav warp 8) or **162 LY** (grav warp 9) |
+| Match tolerance | Small LY band (~+/-1); reuse `max_travel_distance` in **game concepts**, not YAML lists |
+| Independent hits | At most one countable hit per (**planet**, turn) toward `evidence_promotion_threshold` |
+| Single-starbase new-build | Ship first seen at *T-1* (or fleet `built_turn == T-1`) and owner scoreboard `starbases == 1` -> **immediate** possible->definite on implicated candidate; skip if SB count unknown / Stealth |
+| Candidate creation | Distance matches **never** invent new orphans -- only existing candidates |
 
-**Origin distances:** implement as **game concepts** (host physics), not YAML lists. Reuse movement geometry constants where they already exist in Core.
+**Materialize (shared, after refine):** promote by threshold / fast-path -> **co-sector cull** -> **homeworld definite-neighborhood cull** (asset `neighbor_separation.supportMin`) -> **homeworld layout prior selection** (`isMostProbable`).
+
+#### 4.3.2 Homeworld ownership evidence ([#269](https://github.com/SteveDraper/Planets-Console/issues/269))
+
+Strengthens **homeworld owner** (whose HW / sector). Signals: ship proximity + ship-age max-travel envelopes (sector set reduction / unique sector pin); direct sensor sightings revealing planetary ownership. Out of scope for #36.
+
+#### 4.3.3 Homeworld layout prior selection ([#36](https://github.com/SteveDraper/Planets-Console/issues/36))
+
+Opinionated joint set over **homeworld sectors** (same eligibility gate as sector overlay emission: circular + round + epic|standard + viewpoint pin). Not a third confidence tier.
+
+| Lock | Rule |
+|------|------|
+| Status | **`isMostProbable`** on possible candidates only; orthogonal to `confidence_tier` |
+| Cost | Equal family weight: mean of abs(pct(clockwise-neighbor) - 50) plus mean of abs(pct(center-distance) - 50) over unpinned members; asset tables |
+| Neighbor metric | Clockwise-neighbor (angle-sorted ring), matching asset sampling -- not true nearest-Euclidean |
+| Pinned sectors | Definite is the fixed set member; no most-probable label |
+| Empty sectors | **Homeworld layout stand-in**: continuously optimize a point in planet-scan-unobserved band area (same model as sector incompleteness); contributes to both cost families; not a candidate / not drawn. Fully scanned empty sector -> does not participate |
+| Ties | Lexicographically smaller selected planet-id tuple |
+| Wire / UI | Shared map+table field; double-layer dotted ring on map; table cue |
 
 **Evidence does not replace baseline;** it adjusts confidence on candidates already hypothesized from baseline + geometry.
 
 ### 4.4 User assertion
 
-**User-asserted** records use the same **homeworld candidate record** shape as inferred rows. Promotion to **definite**, slot assignment, or race tag with **user-asserted** attribution always wins over inference until revoked.
+**User-asserted** records use the same **homeworld candidate record** shape as inferred rows. Promotion to **definite**, **homeworld owner** assignment, or race tag with **user-asserted** attribution always wins over inference until revoked (#37).
 
 ---
 
-## 5. Confidence tiers
+## 5. Confidence tiers and selection status
 
-| Tier | When |
+| Kind | When |
 |------|------|
-| **Definite** | Baseline profile match; OR geometry leaves no plausible alternative in allowed region; OR evidence promotion threshold met; OR **user-asserted** |
-| **Possible** | Consistent with settings/spacing/evidence but not unique; default for **orphan homeworld candidates** |
+| **Definite** | Baseline profile match; OR geometry leaves no plausible alternative; OR location-evidence promotion; OR **user-asserted** |
+| **Possible** | Consistent with settings/spacing/evidence but not unique; default for orphans |
+| **Most probable** (`isMostProbable`) | Selection status on one **possible** per unpinned sector under layout prior -- **not** a confidence tier |
 
-Orphans: location-first candidates not yet tied to a **perspective** slot -- remain **possible** until anchored or confirmed.
+Orphans: location-first candidates not yet tied to a **homeworld owner** -- remain **possible** until anchored or confirmed.
 
 ---
 
@@ -210,18 +235,19 @@ Orphans: location-first candidates not yet tied to a **perspective** slot -- rem
 
 Two parallel output modes (**C** from design review):
 
-1. **Slot-anchored** -- one candidate (planet and/or region) per **perspective** slot from **GameInfo**
-2. **Orphan** -- planet or region that looks like a HW under heuristics but slot assignment is ambiguous
+1. **Slot-anchored** -- tied to a **homeworld owner** (Player / slot whose HW this is)
+2. **Orphan** -- planet or region that looks like a HW; owner not yet assigned
 
 **Homeworld candidate record** (persisted and on the wire):
 
 ```
 record_id
-perspective?          # slot when slot-anchored
+perspective?          # wire name: homeworld owner slot when slot-anchored (not shell viewpoint)
 planet_id?            # when pinned to a planet
 region?               # when only sector/envelope known
 race_id?              # override or annotation
 confidence_tier       # definite | possible
+is_most_probable      # view-time selection status (#36); not durable evidence
 attribution           # inferred | user-asserted
 evidence_summary?     # counts for UI
 ```
@@ -282,12 +308,12 @@ Origin distances (81 LY pod, warp table) stay in **game concepts**.
 
 | Element | Behavior |
 |---------|----------|
-| **Homeworld map marker** | Decoration on **base map** node -- solid = definite, dashed/light = possible |
+| **Homeworld map marker** | Decoration on **base map** node -- solid = definite; dashed/light = possible; **most probable** = stronger possible (double-layer dotted ring) via `isMostProbable` |
 | **User-asserted definite** | Same definite marker + attribution cue (border/badge) |
 | **Homeworld region overlay** | Shared **map region overlay** boundary sectors (+ optional envelopes) for Circular round; filtered by **homeworld region display mode** |
 | **Homeworld locator panel** | Sidebar table + refresh + degraded baseline warning |
 | Map context menu | Quick **homeworld assertion** |
-| Tabular tile | Same rows as panel in main **tabular** **view mode** |
+| Tabular tile | Same rows as panel in main **tabular** **view mode**; show most-probable cue |
 | **Homeworld region display mode** | Sidebar expandable control (Cartography pattern); global preference |
 
 ---
@@ -298,7 +324,8 @@ Origin distances (81 LY pod, warp table) stay in **game concepts**.
 |-------|----------|
 | [#34](https://github.com/SteveDraper/Planets-Console/issues/34) | Config, race climate, baseline profile + **candidate geometry** + cluster orphans, orchestrator baseline ensure, persistence, map markers + table, availability; degraded via payload metadata |
 | [#35](https://github.com/SteveDraper/Planets-Console/issues/35) | **Homeworld region overlay** paint: shared boundary `regionOverlays`, layout distribution asset, sector emission, display mode + hover ([ADR 0008](adr/0008-shared-map-region-overlays.md)) |
-| [#36](https://github.com/SteveDraper/Planets-Console/issues/36) | Evidence aggregate refine through shell turn, origin-distance signals, promotion |
+| [#36](https://github.com/SteveDraper/Planets-Console/issues/36) | Location evidence refine through shell turn; origin-distance + single-SB new-build; promotion; definite-neighborhood cull; layout prior **most probable**; FE markers/table cue |
+| [#269](https://github.com/SteveDraper/Planets-Console/issues/269) | **Homeworld ownership evidence** (proximity envelopes, sector owner pin, planetary ownership sightings) -- not location promotion |
 | [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | User assertions, refresh, **homeworld locator panel**, attribution UX |
 
 ### 11.1 Issue #34 phased plan
@@ -317,6 +344,13 @@ Hybrid phases (each independently reviewable):
 2. **Layout distribution asset** -- committed smoothed percentile tables (epic/standard); loader; support extremes for paint band. Shipped at `assets/analytics/homeworld-locator/layout_distributions.json`. Regenerate: build gitignored `local/homeworld_distributions.json` from `local/sampled_homeworlds.csv` + `.sampler_data` via `scripts/visualize_homeworld_distributions.py`, then `… distill --report local/homeworld_distributions.json` (Laplace on trimmed 10 LY bins → percentile grid + `supportMin`/`supportMax`).
 3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes (`regionOverlays` boundary entries; FE display-mode filter is phase 4).
 4. **FE display mode + hover** -- preference store, merge/filter, hit-test structured overlay facts; FE formats hover lines.
+
+### 11.3 Issue #36 phased plan
+
+1. **Location evidence domain** -- origin-distance matchers (non-grav 64/81; grav 128/162), independent-hit accounting, single-SB new-build immediate promote; unit tests only.
+2. **Evidence refine + orchestrator** -- `turn_delta=-1` self-chain; refine aggregate through shell turn; materialize promotion + co-sector cull + definite-neighborhood cull (`neighbor_separation.supportMin`); docs.
+3. **Layout prior + most-probable** -- joint selection, stand-ins, `isMostProbable` on candidate view wire; Core tests (incl. game 680224-style empty nebular sector).
+4. **FE markers + table cue** -- Zod `isMostProbable`; double dotted ring; tabular cue.
 
 ---
 
@@ -342,3 +376,4 @@ Hybrid phases (each independently reviewable):
 | 2026-07-26 | #35 phase 2: layout distribution asset path + regenerate via visualize/distill (§11.2) |
 | 2026-07-26 | #35 phase 3: Core emits pin-oriented sector `regionOverlays` (asset band, planet-scan envelopes/error) on map GET |
 | 2026-07-26 | #35: region overlay hover facts on wire (`candidateCount`, `playerLabel`); FE formats tooltip copy (ADR 0008) |
+| 2026-07-26 | #36 grill: location vs ownership evidence split; layout prior most-probable + stand-ins; definite-neighborhood cull; phased plan §11.3; **homeworld owner** terminology |
