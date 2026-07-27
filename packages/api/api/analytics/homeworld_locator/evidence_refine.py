@@ -12,10 +12,10 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
 )
 from api.analytics.homeworld_locator.location_evidence import (
     append_independent_origin_distance_hits,
-    promote_candidate_to_definite,
     candidate_planet_ids,
     independent_hit_count_for_planet,
     origin_distance_candidate_planet_ids,
+    promote_candidate_to_definite,
     record_single_starbase_promotion,
     ship_gravitonic_movement,
     single_starbase_new_build_implicated_planet_id,
@@ -179,7 +179,12 @@ def materialize_evidence_adjusted_candidates(
     promotion_threshold: int,
     layout_asset: LayoutDistributionsAsset | None = None,
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Promotion then co-sector cull then definite-neighborhood cull."""
+    """Promotion then co-sector cull then definite-neighborhood cull.
+
+    These are the pre-layout-prior steps of the §4.3.1 materialize ladder.
+    Shell map/table serving uses ``materialize_homeworld_candidates``, which
+    owns the full order through layout-prior annotation.
+    """
     from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
 
     adjusted = apply_threshold_evidence_promotions(

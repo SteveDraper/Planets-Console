@@ -234,6 +234,64 @@ def ensure_homeworld_baseline(
     return result
 
 
+def materialize_homeworld_candidates(
+    services: HomeworldLocatorComputeServices,
+    *,
+    candidates: tuple[HomeworldCandidateRecord, ...],
+    aggregate: HomeworldEvidenceAggregate,
+    shell_turn: TurnInfo,
+    baseline_turn: int,
+    baseline_degraded: bool,
+) -> tuple[HomeworldCandidateRecord, ...]:
+    """Ordered shell materialize: promote → co-sector → neighborhood → layout prior.
+
+    Design lock: docs/design-homeworld-locator-analytic.md §4.3.1.
+    """
+    threshold = promotion_threshold()
+    adjusted = materialize_evidence_adjusted_candidates(
+        candidates,
+        aggregate,
+        planets=shell_turn.planets,
+        settings_turn=shell_turn,
+        player_count=_player_count(shell_turn),
+        promotion_threshold=threshold,
+    )
+    input_fingerprint = layout_prior_input_fingerprint(adjusted)
+    if (
+        aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
+        and aggregate.layout_prior_promotion_threshold == threshold
+        and aggregate.layout_prior_input_fingerprint == input_fingerprint
+    ):
+        selected = frozenset(aggregate.most_probable_planet_ids)
+        return tuple(replace(row, is_most_probable=row.planet_id in selected) for row in adjusted)
+
+    interim_view = HomeworldCandidateView(
+        candidates=adjusted,
+        baseline_turn=baseline_turn,
+        baseline_degraded=baseline_degraded,
+        available=True,
+    )
+    annotated = apply_layout_prior_most_probable(
+        adjusted,
+        turn=shell_turn,
+        view=interim_view,
+        player_count=_player_count(shell_turn),
+    )
+    most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
+    services.persistence.put_evidence_aggregate(
+        services.game_id,
+        services.perspective,
+        replace(
+            aggregate,
+            layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
+            layout_prior_promotion_threshold=threshold,
+            layout_prior_input_fingerprint=input_fingerprint,
+            most_probable_planet_ids=most_probable_ids,
+        ),
+    )
+    return annotated
+
+
 def materialize_homeworld_candidate_view(
     ctx: AnalyticQueryContext,
     *,
@@ -270,17 +328,9 @@ def materialize_homeworld_candidate_view(
     if aggregate is None:
         raise ValidationError("homeworld locator shell evidence missing after ensure")
 
-    candidates = materialize_evidence_adjusted_candidates(
-        state.candidates,
-        aggregate,
-        planets=shell_turn.planets,
-        settings_turn=shell_turn,
-        player_count=_player_count(shell_turn),
-        promotion_threshold=promotion_threshold(),
-    )
-    candidates = _annotate_shell_layout_prior(
+    candidates = materialize_homeworld_candidates(
         services,
-        candidates=candidates,
+        candidates=state.candidates,
         aggregate=aggregate,
         shell_turn=shell_turn,
         baseline_turn=state.baseline_turn,
@@ -293,50 +343,3 @@ def materialize_homeworld_candidate_view(
         available=True,
         inactive_reason=None,
     )
-
-
-def _annotate_shell_layout_prior(
-    services: HomeworldLocatorComputeServices,
-    *,
-    candidates: tuple[HomeworldCandidateRecord, ...],
-    aggregate: HomeworldEvidenceAggregate,
-    shell_turn: TurnInfo,
-    baseline_turn: int,
-    baseline_degraded: bool,
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Reuse persisted shell layout-prior selection, or compute and persist it."""
-    threshold = promotion_threshold()
-    input_fingerprint = layout_prior_input_fingerprint(candidates)
-    if (
-        aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-        and aggregate.layout_prior_promotion_threshold == threshold
-        and aggregate.layout_prior_input_fingerprint == input_fingerprint
-    ):
-        selected = frozenset(aggregate.most_probable_planet_ids)
-        return tuple(replace(row, is_most_probable=row.planet_id in selected) for row in candidates)
-
-    interim_view = HomeworldCandidateView(
-        candidates=candidates,
-        baseline_turn=baseline_turn,
-        baseline_degraded=baseline_degraded,
-        available=True,
-    )
-    annotated = apply_layout_prior_most_probable(
-        candidates,
-        turn=shell_turn,
-        view=interim_view,
-        player_count=_player_count(shell_turn),
-    )
-    most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
-    services.persistence.put_evidence_aggregate(
-        services.game_id,
-        services.perspective,
-        replace(
-            aggregate,
-            layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
-            layout_prior_promotion_threshold=threshold,
-            layout_prior_input_fingerprint=input_fingerprint,
-            most_probable_planet_ids=most_probable_ids,
-        ),
-    )
-    return annotated
