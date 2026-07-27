@@ -211,7 +211,7 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 | Choice bound | At most four possibles per sector (nearest sector mid) enter the joint product |
 | Ties | Lexicographically smaller selected planet-id tuple |
 | Wire / UI | Shared map+table field; double-layer dotted ring on map; table cue |
-| Persistence | Shell turn only: `layoutPriorSelection` on that turn's evidence aggregate (`algorithmVersion` + `mostProbablePlanetIds`). Reuse when version matches `LAYOUT_PRIOR_ALGORITHM_VERSION`; recompute+rewrite on mismatch. Intermediate refine turns do not compute or store selection. Evidence rewrite/invalidation clears it. |
+| Persistence | Shell turn only: `layoutPriorSelection` on that turn's evidence aggregate (`algorithmVersion` + `promotionThreshold` + `inputFingerprint` of post-promote/cull candidates + `mostProbablePlanetIds`). Reuse when algorithm version, threshold, and fingerprint all match current inputs; recompute+rewrite on any mismatch. `LAYOUT_PRIOR_ALGORITHM_VERSION` covers cost/stand-in/tie-break policy only. Intermediate refine turns do not compute or store selection. Evidence rewrite/invalidation clears it. |
 
 **Evidence does not replace baseline;** it adjusts confidence on candidates already hypothesized from baseline + geometry.
 

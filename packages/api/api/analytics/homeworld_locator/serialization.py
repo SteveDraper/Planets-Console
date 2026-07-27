@@ -152,9 +152,21 @@ def homeworld_evidence_aggregate_to_json(
             for promotion in aggregate.single_starbase_promotions
         ],
     }
-    if aggregate.layout_prior_algorithm_version is not None:
+    if (
+        aggregate.layout_prior_algorithm_version is not None
+        and aggregate.layout_prior_promotion_threshold is not None
+    ):
         payload["layoutPriorSelection"] = {
             "algorithmVersion": aggregate.layout_prior_algorithm_version,
+            "promotionThreshold": aggregate.layout_prior_promotion_threshold,
+            "inputFingerprint": [
+                {
+                    "planetId": planet_id,
+                    "confidenceTier": tier,
+                    "perspective": perspective,
+                }
+                for planet_id, tier, perspective in aggregate.layout_prior_input_fingerprint
+            ],
             "mostProbablePlanetIds": list(aggregate.most_probable_planet_ids),
         }
     return payload
@@ -190,6 +202,8 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             "homeworld evidence aggregate singleStarbasePromotions entries must be objects"
         )
     selection_version: int | None = None
+    selection_threshold: int | None = None
+    selection_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
     most_probable_ids: tuple[int, ...] = ()
     selection_raw = data.get("layoutPriorSelection")
     if selection_raw is not None:
@@ -202,18 +216,58 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             raise ValidationError(
                 "homeworld layoutPriorSelection.algorithmVersion must be an int >= 1"
             )
-        ids_raw = selection_raw.get("mostProbablePlanetIds", [])
-        if not isinstance(ids_raw, list) or not all(isinstance(item, int) for item in ids_raw):
-            raise ValidationError(
-                "homeworld layoutPriorSelection.mostProbablePlanetIds must be an int array"
-            )
-        selection_version = version
-        most_probable_ids = tuple(ids_raw)
+        # Legacy payloads omit reuse-key fields; treat as absent so materialize recomputes.
+        if "promotionThreshold" in selection_raw and "inputFingerprint" in selection_raw:
+            threshold = selection_raw.get("promotionThreshold")
+            if not isinstance(threshold, int) or threshold < 1:
+                raise ValidationError(
+                    "homeworld layoutPriorSelection.promotionThreshold must be an int >= 1"
+                )
+            fingerprint_raw = selection_raw.get("inputFingerprint")
+            if not isinstance(fingerprint_raw, list):
+                raise ValidationError(
+                    "homeworld layoutPriorSelection.inputFingerprint must be a JSON array"
+                )
+            fingerprint_entries: list[tuple[int, str, int | None]] = []
+            for entry in fingerprint_raw:
+                if not isinstance(entry, dict):
+                    raise ValidationError(
+                        "homeworld layoutPriorSelection.inputFingerprint entries must be objects"
+                    )
+                planet_id = entry.get("planetId")
+                if not isinstance(planet_id, int):
+                    raise ValidationError(
+                        "homeworld layoutPriorSelection.inputFingerprint.planetId must be an int"
+                    )
+                tier = entry.get("confidenceTier")
+                if tier not in _VALID_TIERS:
+                    raise ValidationError(
+                        "homeworld layoutPriorSelection.inputFingerprint.confidenceTier "
+                        f"must be one of {sorted(_VALID_TIERS)!r}"
+                    )
+                perspective = entry.get("perspective")
+                if perspective is not None and not isinstance(perspective, int):
+                    raise ValidationError(
+                        "homeworld layoutPriorSelection.inputFingerprint.perspective "
+                        "must be an int or null"
+                    )
+                fingerprint_entries.append((planet_id, tier, perspective))
+            ids_raw = selection_raw.get("mostProbablePlanetIds", [])
+            if not isinstance(ids_raw, list) or not all(isinstance(item, int) for item in ids_raw):
+                raise ValidationError(
+                    "homeworld layoutPriorSelection.mostProbablePlanetIds must be an int array"
+                )
+            selection_version = version
+            selection_threshold = threshold
+            selection_fingerprint = tuple(fingerprint_entries)
+            most_probable_ids = tuple(ids_raw)
     return HomeworldEvidenceAggregate(
         turn=turn,
         baseline_turn=baseline_turn,
         evidence_hits=hits,
         single_starbase_promotions=promotions,
         layout_prior_algorithm_version=selection_version,
+        layout_prior_promotion_threshold=selection_threshold,
+        layout_prior_input_fingerprint=selection_fingerprint,
         most_probable_planet_ids=most_probable_ids,
     )

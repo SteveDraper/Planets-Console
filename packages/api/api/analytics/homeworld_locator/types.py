@@ -45,6 +45,8 @@ class HomeworldEvidenceAggregate:
     single_starbase_promotions: tuple[HomeworldSingleStarbasePromotion, ...] = ()
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
+    layout_prior_promotion_threshold: int | None = None
+    layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
     most_probable_planet_ids: tuple[int, ...] = ()
 
 

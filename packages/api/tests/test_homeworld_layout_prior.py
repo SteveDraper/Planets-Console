@@ -490,23 +490,48 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
         homeworld_evidence_aggregate_to_json,
     )
 
+    fingerprint = ((12, CONFIDENCE_DEFINITE, 1), (34, CONFIDENCE_POSSIBLE, None))
     aggregate = HomeworldEvidenceAggregate(
         turn=13,
         baseline_turn=1,
         layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
+        layout_prior_promotion_threshold=2,
+        layout_prior_input_fingerprint=fingerprint,
         most_probable_planet_ids=(12, 34),
     )
     wire = homeworld_evidence_aggregate_to_json(aggregate)
     assert wire["layoutPriorSelection"] == {
         "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+        "promotionThreshold": 2,
+        "inputFingerprint": [
+            {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
+            {"planetId": 34, "confidenceTier": CONFIDENCE_POSSIBLE, "perspective": None},
+        ],
         "mostProbablePlanetIds": [12, 34],
     }
     restored = homeworld_evidence_aggregate_from_json(wire)
     assert restored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
+    assert restored.layout_prior_promotion_threshold == 2
+    assert restored.layout_prior_input_fingerprint == fingerprint
     assert restored.most_probable_planet_ids == (12, 34)
     assert "layoutPriorSelection" not in homeworld_evidence_aggregate_to_json(
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
     )
+    # Legacy selection without reuse-key fields is dropped (forces recompute).
+    legacy = homeworld_evidence_aggregate_from_json(
+        {
+            "turn": 13,
+            "baselineTurn": 1,
+            "evidenceHits": [],
+            "singleStarbasePromotions": [],
+            "layoutPriorSelection": {
+                "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+                "mostProbablePlanetIds": [12],
+            },
+        }
+    )
+    assert legacy.layout_prior_algorithm_version is None
+    assert legacy.most_probable_planet_ids == ()
 
 
 def test_shell_layout_prior_persisted_and_reused(
@@ -515,6 +540,8 @@ def test_shell_layout_prior_persisted_and_reused(
     """First shell materialize persists selection; second call reuses without recomputing."""
     from api.analytics.homeworld_locator import baseline_ensure as baseline_mod
     from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
+    from api.analytics.homeworld_locator.layout_prior import layout_prior_input_fingerprint
+    from api.config import get_config, set_config
 
     turn, _pin = _eligible_turn(sample_turn, template_planet)
     center = (2000.0, 2000.0)
@@ -574,6 +601,11 @@ def test_shell_layout_prior_persisted_and_reused(
     stored = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
     assert stored is not None
     assert stored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
+    assert (
+        stored.layout_prior_promotion_threshold
+        == get_config().homeworld_locator.evidence_promotion_threshold
+    )
+    assert stored.layout_prior_input_fingerprint == layout_prior_input_fingerprint(first.candidates)
     assert orphan.id in stored.most_probable_planet_ids
     assert calls["n"] == 1
 
@@ -605,3 +637,65 @@ def test_shell_layout_prior_persisted_and_reused(
     assert rewritten.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
     assert orphan.id in rewritten.most_probable_planet_ids
     assert pin_planet.id not in rewritten.most_probable_planet_ids
+
+    # Threshold change alone forces recompute even when candidate fingerprint matches.
+    prior_calls = calls["n"]
+    cfg = get_config()
+    elevated_threshold = cfg.homeworld_locator.evidence_promotion_threshold + 1
+    set_config(
+        replace(
+            cfg,
+            homeworld_locator=replace(
+                cfg.homeworld_locator,
+                evidence_promotion_threshold=elevated_threshold,
+            ),
+        )
+    )
+    try:
+        fourth = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
+        assert calls["n"] == prior_calls + 1
+        after_threshold = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+        assert after_threshold is not None
+        assert after_threshold.layout_prior_promotion_threshold == elevated_threshold
+        assert {row.planet_id for row in fourth.candidates if row.is_most_probable} == {
+            row.planet_id for row in first.candidates if row.is_most_probable
+        }
+    finally:
+        set_config(cfg)
+
+    # Restoring config invalidates the elevated-threshold lock; sync once.
+    prior_calls = calls["n"]
+    synced_view = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
+    assert calls["n"] == prior_calls + 1
+    synced = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+    assert synced is not None
+    assert (
+        synced.layout_prior_promotion_threshold
+        == get_config().homeworld_locator.evidence_promotion_threshold
+    )
+    assert {row.planet_id for row in synced_view.candidates if row.is_most_probable} == {
+        row.planet_id for row in first.candidates if row.is_most_probable
+    }
+
+    # Fingerprint mismatch (post-cull candidate set) forces recompute.
+    prior_calls = calls["n"]
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        replace(
+            synced,
+            layout_prior_input_fingerprint=((pin_planet.id, CONFIDENCE_DEFINITE, 1),),
+            most_probable_planet_ids=(pin_planet.id,),
+        ),
+    )
+    fifth = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
+    assert calls["n"] == prior_calls + 1
+    assert {row.planet_id for row in fifth.candidates if row.is_most_probable} == {
+        row.planet_id for row in first.candidates if row.is_most_probable
+    }
+    after_fingerprint = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+    assert after_fingerprint is not None
+    assert after_fingerprint.layout_prior_input_fingerprint == layout_prior_input_fingerprint(
+        fifth.candidates
+    )
+    assert orphan.id in after_fingerprint.most_probable_planet_ids

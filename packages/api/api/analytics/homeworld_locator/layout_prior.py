@@ -37,6 +37,15 @@ _SectorKind = Literal["fixed", "choice", "stand_in", "skip"]
 MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR = 4
 
 
+def layout_prior_input_fingerprint(
+    candidates: Sequence[HomeworldCandidateRecord],
+) -> tuple[tuple[int, str, int | None], ...]:
+    """Stable fingerprint of the post-promote/cull set that feeds selection."""
+    return tuple(
+        sorted((row.planet_id, row.confidence_tier, row.perspective) for row in candidates)
+    )
+
+
 @dataclass(frozen=True)
 class _SectorLayoutState:
     sector_index: int
