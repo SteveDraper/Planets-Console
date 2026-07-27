@@ -558,6 +558,7 @@ def test_map_table_payload_smoke(persistence, sample_turn) -> None:
             "perspective": row["perspective"],
             "confidenceTier": row["confidenceTier"],
             "attribution": row["attribution"],
+            "isMostProbable": row["isMostProbable"],
         }
         for row in payload["rows"]
     ]

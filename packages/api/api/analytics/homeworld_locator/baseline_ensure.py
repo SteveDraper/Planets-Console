@@ -9,6 +9,7 @@ from api.analytics.homeworld_locator.evidence_ensure import (
     promotion_threshold,
 )
 from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
+from api.analytics.homeworld_locator.layout_prior import apply_layout_prior_most_probable
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
     HomeworldCandidateView,
@@ -245,6 +246,18 @@ def materialize_homeworld_candidate_view(
         settings_turn=shell_turn,
         player_count=_player_count(shell_turn),
         promotion_threshold=promotion_threshold(),
+    )
+    interim_view = HomeworldCandidateView(
+        candidates=candidates,
+        baseline_turn=state.baseline_turn,
+        baseline_degraded=state.baseline_degraded,
+        available=True,
+    )
+    candidates = apply_layout_prior_most_probable(
+        candidates,
+        turn=shell_turn,
+        view=interim_view,
+        player_count=_player_count(shell_turn),
     )
     return HomeworldCandidateView(
         candidates=candidates,

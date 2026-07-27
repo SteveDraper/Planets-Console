@@ -20,6 +20,7 @@ class HomeworldCandidateRecord:
     perspective: int | None
     confidence_tier: str
     attribution: str = ATTRIBUTION_INFERRED
+    is_most_probable: bool = False
 
 
 @dataclass(frozen=True)

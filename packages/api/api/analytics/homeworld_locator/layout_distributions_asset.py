@@ -57,6 +57,27 @@ class SmoothedMetricDistribution:
         upper = self.percentiles[upper_index]
         return lower + fraction * (upper - lower)
 
+    def percentile_for_value(self, value: float) -> float:
+        """Inverse of :meth:`value_at_percentile` on the stored grid."""
+        if not self.percentiles:
+            raise ValueError("percentiles table is empty")
+        if value <= self.percentiles[0]:
+            return 0.0
+        if value >= self.percentiles[-1]:
+            return 100.0
+        for index in range(1, len(self.percentiles)):
+            upper_value = self.percentiles[index]
+            if value > upper_value:
+                continue
+            lower_value = self.percentiles[index - 1]
+            lower_percentile = (index - 1) * self.percentile_step
+            upper_percentile = index * self.percentile_step
+            if upper_value <= lower_value:
+                return float(upper_percentile)
+            fraction = (value - lower_value) / (upper_value - lower_value)
+            return lower_percentile + fraction * self.percentile_step
+        return 100.0
+
 
 @dataclass(frozen=True)
 class CategoryLayoutDistributions:

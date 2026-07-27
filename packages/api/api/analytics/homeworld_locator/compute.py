@@ -28,10 +28,17 @@ def _view_to_wire(
             "perspective": row.perspective,
             "confidenceTier": row.confidence_tier,
             "attribution": row.attribution,
+            "isMostProbable": row.is_most_probable,
         }
         for row in view.candidates
     ]
-    rows = [homeworld_candidate_record_to_json(row) for row in view.candidates]
+    rows = [
+        {
+            **homeworld_candidate_record_to_json(row),
+            "isMostProbable": row.is_most_probable,
+        }
+        for row in view.candidates
+    ]
     return {
         "analyticId": ANALYTIC_ID,
         "available": view.available,

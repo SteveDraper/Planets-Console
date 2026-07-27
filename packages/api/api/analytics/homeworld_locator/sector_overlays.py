@@ -176,6 +176,45 @@ def sector_band_geometric_center(
     )
 
 
+def unobserved_band_sample_points(
+    *,
+    center: tuple[float, float],
+    angle_start: float,
+    angle_end: float,
+    r_inner: float,
+    r_outer: float,
+    origins: Sequence[CoverageOrigin],
+    nebulas: Sequence[NebulaCenter],
+) -> tuple[tuple[float, float], ...]:
+    """All grid samples in the annular sector that are not planet-scanned."""
+    if not origins:
+        return (
+            sector_band_geometric_center(
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            ),
+        )
+
+    span = _sector_angle_span(angle_start, angle_end)
+    angle_samples = max(_MIN_ANGLE_SAMPLES, int(math.ceil(span / (math.pi / 36.0))))
+    radial_steps = max(1, int(math.ceil((r_outer - r_inner) / _RADIAL_SAMPLE_STEP_LY)))
+
+    points: list[tuple[float, float]] = []
+    for angle_index in range(angle_samples + 1):
+        angle = angle_start + span * (angle_index / angle_samples)
+        for radial_index in range(radial_steps + 1):
+            radius = r_inner + (r_outer - r_inner) * (radial_index / radial_steps)
+            x = center[0] + radius * math.cos(angle)
+            y = center[1] + radius * math.sin(angle)
+            if point_covered_by_origins(x, y, origins, nebulas):
+                continue
+            points.append((x, y))
+    return tuple(points)
+
+
 def closest_unobserved_band_point(
     *,
     center: tuple[float, float],
