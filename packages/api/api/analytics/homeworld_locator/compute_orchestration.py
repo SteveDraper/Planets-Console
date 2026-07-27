@@ -110,6 +110,7 @@ def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
         persist_then_continue=True,
         payload={
             "available": True,
+            "recomputed": result.recomputed,
             "gameState": homeworld_locator_game_state_to_json(result.game_state),
             "floorAggregate": homeworld_evidence_aggregate_to_json(result.floor_aggregate),
         },
@@ -244,9 +245,21 @@ class HomeworldLocatorPersistencePolicy:
         if not isinstance(floor_wire, dict):
             raise TypeError("homeworld persist result wire missing floorAggregate object")
 
+        recomputed = result_wire.get("recomputed")
+        if not isinstance(recomputed, bool):
+            raise TypeError("homeworld baseline persist result wire requires recomputed bool")
+
         services = resolve_homeworld_services(ctx)
         state = homeworld_locator_game_state_from_json(game_state_wire)
         floor = homeworld_evidence_aggregate_from_json(floor_wire)
+        # Match ensure_homeworld_baseline: clear stale shell evidence only on recompute.
+        # Evidence-only gaps re-enter at baseline with recomputed=False and must keep the chain.
+        if recomputed:
+            services.persistence.invalidate_evidence_from_turn(
+                export_scope.game_id,
+                export_scope.perspective,
+                state.baseline_turn,
+            )
         services.persistence.put_baseline(
             export_scope.game_id,
             export_scope.perspective,
