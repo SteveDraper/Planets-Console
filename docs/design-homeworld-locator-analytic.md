@@ -151,7 +151,7 @@ Apply **homeworld candidate geometry** when `hwdistribution=2` and `mapshape=0`:
 | Angular spacing | ~equal sectors per active **Player**; `shuffleteampositions` permutes slot-to-site assignment |
 | Viewpoint pin | When the viewpoint slot has a unique **homeworld baseline profile** match, treat that planet as **definite** slot-anchored and fix ring rotation |
 | Other ring HW sites | Remaining geometric HW planets are **orphan homeworld candidates** (**possible**) -- do not cross-product bind them to rival slots in v1 baseline |
-| Co-sector cull | Once a sector has a **definite** homeworld, drop other (inferred) possibles in that same angular sector; keep orphans in other sectors; never cull **user-asserted** rows |
+| Co-sector cull | Once a sector has a **definite** homeworld, drop other inferred candidates in that same angular sector (possibles and evidence-promoted orphan definites). Prefer slot-anchored over orphan when choosing which inferred definite to keep; never cull **user-asserted** rows |
 | Single planet in sector | **Definite** when baseline weak but geometry leaves no plausible alternative in that slot's arc (stronger once overlays/#35 land) |
 
 **Homeworld cluster constraint** (all map shapes that still have traditional HWs): count planets within 81 LY and within 81--162 LY; compare to `verycloseplanets` and `closeplanets`. Use this to construct **orphan** HW-like sites even when ring/sector math does not apply.

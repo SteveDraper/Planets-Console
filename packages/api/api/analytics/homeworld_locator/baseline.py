@@ -51,45 +51,75 @@ def cull_co_sector_candidates_after_definites(
     player_count: int,
     pin_angle: float,
 ) -> tuple[TCullable, ...]:
-    """Drop non-definite candidates that share a sector with a definite homeworld.
+    """Enforce one inferred homeworld per Circular sector after definites exist.
 
-    Circular layout has one HW per sector. Once a sector has a definite, other
-    possibles in that wedge are not competing HW sites. User-asserted rows are
-    never culled. Applies only when ``player_count >= 2``.
+    Once a sector has a definite, other inferred possibles in that wedge are not
+    competing HW sites. Evidence promotion can create additional inferred definites
+    in the same sector; those are also dropped so neighborhood cull does not treat
+    them as true HWs. User-asserted rows are never culled. Applies only when
+    ``player_count >= 2``.
+
+    Inferred definite precedence within a sector: slot-anchored (``perspective`` set)
+    over orphans; ties by lower planet id. Any user-asserted definite in the sector
+    suppresses all inferred definites there.
     """
     if player_count < 2 or not candidates:
         return tuple(candidates)
 
     center_x, center_y = center
-    definite_sectors: set[int] = set()
+
+    def _sector_for(row: TCullable) -> int | None:
+        planet = planets_by_id.get(row.planet_id)
+        if planet is None:
+            return None
+        angle = math.atan2(planet.y - center_y, planet.x - center_x)
+        return sector_index_for_angle(angle, pin_angle=pin_angle, player_count=player_count)
+
+    definites_by_sector: dict[int, list[TCullable]] = {}
     for row in candidates:
         if row.confidence_tier != CONFIDENCE_DEFINITE:
             continue
-        planet = planets_by_id.get(row.planet_id)
-        if planet is None:
+        sector = _sector_for(row)
+        if sector is None:
             continue
-        angle = math.atan2(planet.y - center_y, planet.x - center_x)
-        definite_sectors.add(
-            sector_index_for_angle(angle, pin_angle=pin_angle, player_count=player_count)
-        )
-    if not definite_sectors:
+        definites_by_sector.setdefault(sector, []).append(row)
+    if not definites_by_sector:
         return tuple(candidates)
 
+    kept_definite_ids: set[int] = set()
+    for sector_rows in definites_by_sector.values():
+        user_asserted = [
+            row for row in sector_rows if _candidate_attribution(row) == ATTRIBUTION_USER_ASSERTED
+        ]
+        if user_asserted:
+            kept_definite_ids.update(row.planet_id for row in user_asserted)
+            continue
+        inferred = [
+            row for row in sector_rows if _candidate_attribution(row) != ATTRIBUTION_USER_ASSERTED
+        ]
+        if not inferred:
+            continue
+        winner = min(
+            inferred,
+            key=lambda row: (
+                0 if getattr(row, "perspective", None) is not None else 1,
+                row.planet_id,
+            ),
+        )
+        kept_definite_ids.add(winner.planet_id)
+
+    definite_sectors = set(definites_by_sector)
     kept: list[TCullable] = []
     for row in candidates:
         if _candidate_attribution(row) == ATTRIBUTION_USER_ASSERTED:
             kept.append(row)
             continue
         if row.confidence_tier == CONFIDENCE_DEFINITE:
-            kept.append(row)
+            if row.planet_id in kept_definite_ids:
+                kept.append(row)
             continue
-        planet = planets_by_id.get(row.planet_id)
-        if planet is None:
-            kept.append(row)
-            continue
-        angle = math.atan2(planet.y - center_y, planet.x - center_x)
-        sector = sector_index_for_angle(angle, pin_angle=pin_angle, player_count=player_count)
-        if sector in definite_sectors:
+        sector = _sector_for(row)
+        if sector is not None and sector in definite_sectors:
             continue
         kept.append(row)
     return tuple(kept)
