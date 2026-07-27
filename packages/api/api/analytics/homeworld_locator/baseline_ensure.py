@@ -280,9 +280,7 @@ def _annotate_shell_layout_prior(
     """Reuse persisted shell layout-prior selection, or compute and persist it."""
     if aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION:
         selected = frozenset(aggregate.most_probable_planet_ids)
-        return tuple(
-            replace(row, is_most_probable=row.planet_id in selected) for row in candidates
-        )
+        return tuple(replace(row, is_most_probable=row.planet_id in selected) for row in candidates)
 
     interim_view = HomeworldCandidateView(
         candidates=candidates,
