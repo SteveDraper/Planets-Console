@@ -207,9 +207,11 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 | Cost | Equal family weight: mean of abs(pct(clockwise-neighbor) - 50) plus mean of abs(pct(center-distance) - 50) over unpinned members; asset tables |
 | Neighbor metric | Clockwise-neighbor (angle-sorted ring), matching asset sampling -- not true nearest-Euclidean |
 | Pinned sectors | Definite is the fixed set member; no most-probable label |
-| Empty sectors | **Homeworld layout stand-in**: continuously optimize a point in planet-scan-unobserved band area (same model as sector incompleteness); contributes to both cost families; not a candidate / not drawn. Fully scanned empty sector -> does not participate |
+| Empty sectors | **Homeworld layout stand-in**: one fixed unobserved band sample (nearest sector mid among planet-scan-unobserved samples) closes the ring during joint selection; contributes to both cost families; not a candidate / not drawn. Fully scanned empty sector -> does not participate. Per-combo continuous stand-in search is not used (hangs map GETs on dense sectors). |
+| Choice bound | At most four possibles per sector (nearest sector mid) enter the joint product |
 | Ties | Lexicographically smaller selected planet-id tuple |
 | Wire / UI | Shared map+table field; double-layer dotted ring on map; table cue |
+| Persistence | Shell turn only: `layoutPriorSelection` on that turn's evidence aggregate (`algorithmVersion` + `mostProbablePlanetIds`). Reuse when version matches `LAYOUT_PRIOR_ALGORITHM_VERSION`; recompute+rewrite on mismatch. Intermediate refine turns do not compute or store selection. Evidence rewrite/invalidation clears it. |
 
 **Evidence does not replace baseline;** it adjusts confidence on candidates already hypothesized from baseline + geometry.
 
@@ -276,7 +278,7 @@ See [ADR 0002](adr/0002-analytic-persistence.md) (homeworld example amended with
 | Game-global state | `games/{gameId}/analytics/homeworld-locator` |
 | Evidence aggregate (turn-scoped) | `games/{gameId}/{perspective}/turns/{turn}/analytics/homeworld-locator` |
 
-**Model:** durable **homeworld evidence aggregate** at each turn is refined from game-global inputs + aggregate at *T−1* + observations at *T*. The **homeworld candidate view** (tiers for map/table) is materialized on read from game-global state + aggregate at the shell turn -- not the primary durable artifact.
+**Model:** durable **homeworld evidence aggregate** at each turn is refined from game-global inputs + aggregate at *T−1* + observations at *T*. The **homeworld candidate view** (tiers for map/table) is materialized on read from game-global state + aggregate at the shell turn. Shell-turn **layout prior** selection is versioned-persisted on that aggregate (`layoutPriorSelection`); intermediate refine turns do not store it.
 
 **Compute:** [#34](https://github.com/SteveDraper/Planets-Console/issues/34) registers baseline ensure with the **compute orchestrator** and an empty `ENSURE_DEPENDENCIES` (game-global floor; no prior-turn walk). A `turn_delta=-1` self-chain would require every intermediate turn to be stored before degraded→T1 baseline upgrade can run. [#36](https://github.com/SteveDraper/Planets-Console/issues/36) adds the linear self-chain (`homeworld@T` depends on `homeworld@(T−1)`) for shell-turn evidence refine. **Ensure baseline** is turn 1 (or degraded earliest); evidence aggregates refine from the floor through the shell turn (no empty copy-forward).
 
@@ -377,3 +379,4 @@ Hybrid phases (each independently reviewable):
 | 2026-07-26 | #35 phase 3: Core emits pin-oriented sector `regionOverlays` (asset band, planet-scan envelopes/error) on map GET |
 | 2026-07-26 | #35: region overlay hover facts on wire (`candidateCount`, `playerLabel`); FE formats tooltip copy (ADR 0008) |
 | 2026-07-26 | #36 grill: location vs ownership evidence split; layout prior most-probable + stand-ins; definite-neighborhood cull; phased plan §11.3; **homeworld owner** terminology |
+| 2026-07-27 | Layout prior: fixed stand-in + ≤4 choices/sector (map GET hang on dense games); shell-turn versioned `layoutPriorSelection` persistence |

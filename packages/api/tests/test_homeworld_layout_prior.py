@@ -300,6 +300,94 @@ def test_tie_break_prefers_lex_smaller_planet_id(template_planet, sample_turn) -
     assert by_id[high_id.id].is_most_probable is False
 
 
+def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> None:
+    """Dense possibles must not explode the joint product (map hang regression)."""
+    from api.analytics.homeworld_locator.layout_prior import (
+        MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR,
+        _build_sector_states,
+    )
+
+    turn, pin = _eligible_turn(sample_turn, template_planet)
+    center = (2000.0, 2000.0)
+    player_count = 11
+    radius = 550
+    pin_angle = 0.0
+    width = 2.0 * math.pi / player_count
+    # Pack many possibles into one non-pin sector.
+    sector_index = 3
+    mid = pin_angle + sector_index * width
+    planets = [
+        _planet(
+            template_planet,
+            planet_id=1,
+            x=int(center[0] + radius * math.cos(pin_angle)),
+            y=int(center[1] + radius * math.sin(pin_angle)),
+            ownerid=1,
+        )
+    ]
+    candidates = [
+        HomeworldCandidateRecord(
+            planet_id=1,
+            perspective=1,
+            confidence_tier=CONFIDENCE_DEFINITE,
+        )
+    ]
+    for offset in range(8):
+        planet_id = 100 + offset
+        angle = mid + (offset - 3.5) * (width / 20.0)
+        planets.append(
+            _planet(
+                template_planet,
+                planet_id=planet_id,
+                x=int(center[0] + radius * math.cos(angle)),
+                y=int(center[1] + radius * math.sin(angle)),
+            )
+        )
+        candidates.append(
+            HomeworldCandidateRecord(
+                planet_id=planet_id,
+                perspective=None,
+                confidence_tier=CONFIDENCE_POSSIBLE,
+            )
+        )
+    turn = replace(turn, planets=planets)
+    view = HomeworldCandidateView(
+        candidates=tuple(candidates),
+        baseline_turn=1,
+        baseline_degraded=False,
+        available=True,
+    )
+    asset = _stub_layout_asset()
+    r_inner, r_outer = asset.center_distance_band("standard")
+    half = math.pi / player_count
+    states = _build_sector_states(
+        candidates=tuple(candidates),
+        planets_by_id={planet.id: planet for planet in planets},
+        pin=planets[0],
+        pin_angle=pin_angle,
+        player_count=player_count,
+        center=center,
+        r_inner=r_inner,
+        r_outer=r_outer,
+        half=half,
+        width=width,
+        scan_origins=(),
+        nebulas=(),
+    )
+    choice = next(state for state in states if state.kind == "choice")
+    assert len(choice.choice_planet_ids) == MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR
+    # Selection still completes and marks one most-probable.
+    annotated = apply_layout_prior_most_probable(
+        tuple(candidates),
+        turn=turn,
+        view=view,
+        player_count=player_count,
+        layout_asset=asset,
+        map_center=center,
+    )
+    assert sum(1 for row in annotated if row.is_most_probable) == 1
+
+
 def test_empty_nebular_sector_stand_in_does_not_block_most_probable(
     template_planet, sample_turn, persistence
 ) -> None:
@@ -379,3 +467,126 @@ def test_empty_nebular_sector_stand_in_does_not_block_most_probable(
     )
     # Stand-in is internal only: no extra candidates or markers.
     assert len(payload["markers"]) == 2
+
+
+def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
+    from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
+    from api.analytics.homeworld_locator.serialization import (
+        homeworld_evidence_aggregate_from_json,
+        homeworld_evidence_aggregate_to_json,
+    )
+
+    aggregate = HomeworldEvidenceAggregate(
+        turn=13,
+        baseline_turn=1,
+        layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
+        most_probable_planet_ids=(12, 34),
+    )
+    wire = homeworld_evidence_aggregate_to_json(aggregate)
+    assert wire["layoutPriorSelection"] == {
+        "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+        "mostProbablePlanetIds": [12, 34],
+    }
+    restored = homeworld_evidence_aggregate_from_json(wire)
+    assert restored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
+    assert restored.most_probable_planet_ids == (12, 34)
+    assert "layoutPriorSelection" not in homeworld_evidence_aggregate_to_json(
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
+    )
+
+
+def test_shell_layout_prior_persisted_and_reused(
+    template_planet, sample_turn, persistence, monkeypatch
+) -> None:
+    """First shell materialize persists selection; second call reuses without recomputing."""
+    from api.analytics.homeworld_locator import baseline_ensure as baseline_mod
+    from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
+
+    turn, _pin = _eligible_turn(sample_turn, template_planet)
+    center = (2000.0, 2000.0)
+    player_count = 11
+    radius = 550
+    pin_angle = 0.0
+    orphan_angle = 5.0 * 2.0 * math.pi / player_count
+    pin_planet = _planet(
+        template_planet,
+        planet_id=1,
+        x=int(center[0] + radius * math.cos(pin_angle)),
+        y=int(center[1] + radius * math.sin(pin_angle)),
+        ownerid=1,
+    )
+    orphan = _planet(
+        template_planet,
+        planet_id=2,
+        x=int(center[0] + radius * math.cos(orphan_angle)),
+        y=int(center[1] + radius * math.sin(orphan_angle)),
+    )
+    turn = replace(turn, planets=[pin_planet, orphan], ships=())
+    services = core_services(persistence, {1: turn, 5: turn})
+    persistence.put_baseline(
+        628580,
+        1,
+        HomeworldLocatorGameState(
+            candidates=(
+                HomeworldCandidateRecord(
+                    planet_id=pin_planet.id,
+                    perspective=1,
+                    confidence_tier=CONFIDENCE_DEFINITE,
+                ),
+                HomeworldCandidateRecord(
+                    planet_id=orphan.id,
+                    perspective=None,
+                    confidence_tier=CONFIDENCE_POSSIBLE,
+                ),
+            ),
+            baseline_turn=1,
+            baseline_degraded=False,
+            settings_fingerprint=homeworld_settings_fingerprint(turn.settings),
+        ),
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
+    )
+
+    calls = {"n": 0}
+    real = baseline_mod.apply_layout_prior_most_probable
+
+    def counting_apply(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(baseline_mod, "apply_layout_prior_most_probable", counting_apply)
+
+    first = materialize_homeworld_candidate_view(services, shell_turn=turn)
+    stored = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+    assert stored is not None
+    assert stored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
+    assert orphan.id in stored.most_probable_planet_ids
+    assert calls["n"] == 1
+
+    second = materialize_homeworld_candidate_view(services, shell_turn=turn)
+    assert calls["n"] == 1
+    assert {row.planet_id for row in first.candidates if row.is_most_probable} == {
+        row.planet_id for row in second.candidates if row.is_most_probable
+    }
+
+    # Stale algorithm version forces recompute + rewrite.
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        replace(
+            stored,
+            layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION - 1
+            if LAYOUT_PRIOR_ALGORITHM_VERSION > 1
+            else 999,
+            most_probable_planet_ids=(pin_planet.id,),
+        ),
+    )
+    third = materialize_homeworld_candidate_view(services, shell_turn=turn)
+    assert calls["n"] == 2
+    assert {row.planet_id for row in third.candidates if row.is_most_probable} == {
+        row.planet_id for row in first.candidates if row.is_most_probable
+    }
+    rewritten = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+    assert rewritten is not None
+    assert rewritten.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
+    assert orphan.id in rewritten.most_probable_planet_ids
+    assert pin_planet.id not in rewritten.most_probable_planet_ids

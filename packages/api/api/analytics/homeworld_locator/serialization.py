@@ -143,7 +143,7 @@ def _single_starbase_promotion_from_json(
 def homeworld_evidence_aggregate_to_json(
     aggregate: HomeworldEvidenceAggregate,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "turn": aggregate.turn,
         "baselineTurn": aggregate.baseline_turn,
         "evidenceHits": [_evidence_hit_to_json(hit) for hit in aggregate.evidence_hits],
@@ -152,6 +152,12 @@ def homeworld_evidence_aggregate_to_json(
             for promotion in aggregate.single_starbase_promotions
         ],
     }
+    if aggregate.layout_prior_algorithm_version is not None:
+        payload["layoutPriorSelection"] = {
+            "algorithmVersion": aggregate.layout_prior_algorithm_version,
+            "mostProbablePlanetIds": list(aggregate.most_probable_planet_ids),
+        }
+    return payload
 
 
 def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvidenceAggregate:
@@ -183,9 +189,31 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         raise ValidationError(
             "homeworld evidence aggregate singleStarbasePromotions entries must be objects"
         )
+    selection_version: int | None = None
+    most_probable_ids: tuple[int, ...] = ()
+    selection_raw = data.get("layoutPriorSelection")
+    if selection_raw is not None:
+        if not isinstance(selection_raw, dict):
+            raise ValidationError(
+                "homeworld evidence aggregate layoutPriorSelection must be an object"
+            )
+        version = selection_raw.get("algorithmVersion")
+        if not isinstance(version, int) or version < 1:
+            raise ValidationError(
+                "homeworld layoutPriorSelection.algorithmVersion must be an int >= 1"
+            )
+        ids_raw = selection_raw.get("mostProbablePlanetIds", [])
+        if not isinstance(ids_raw, list) or not all(isinstance(item, int) for item in ids_raw):
+            raise ValidationError(
+                "homeworld layoutPriorSelection.mostProbablePlanetIds must be an int array"
+            )
+        selection_version = version
+        most_probable_ids = tuple(ids_raw)
     return HomeworldEvidenceAggregate(
         turn=turn,
         baseline_turn=baseline_turn,
         evidence_hits=hits,
         single_starbase_promotions=promotions,
+        layout_prior_algorithm_version=selection_version,
+        most_probable_planet_ids=most_probable_ids,
     )

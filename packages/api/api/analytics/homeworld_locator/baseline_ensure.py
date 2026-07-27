@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from api.analytics.homeworld_locator.baseline import infer_homeworld_baseline_candidates
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
+from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
 from api.analytics.homeworld_locator.evidence_ensure import (
     ensure_homeworld_evidence_refined,
     promotion_threshold,
@@ -12,6 +15,7 @@ from api.analytics.homeworld_locator.evidence_refine import materialize_evidence
 from api.analytics.homeworld_locator.layout_prior import apply_layout_prior_most_probable
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
+    HomeworldCandidateRecord,
     HomeworldCandidateView,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
@@ -247,17 +251,13 @@ def materialize_homeworld_candidate_view(
         player_count=_player_count(shell_turn),
         promotion_threshold=promotion_threshold(),
     )
-    interim_view = HomeworldCandidateView(
+    candidates = _annotate_shell_layout_prior(
+        services,
         candidates=candidates,
+        aggregate=aggregate,
+        shell_turn=shell_turn,
         baseline_turn=state.baseline_turn,
         baseline_degraded=state.baseline_degraded,
-        available=True,
-    )
-    candidates = apply_layout_prior_most_probable(
-        candidates,
-        turn=shell_turn,
-        view=interim_view,
-        player_count=_player_count(shell_turn),
     )
     return HomeworldCandidateView(
         candidates=candidates,
@@ -266,3 +266,44 @@ def materialize_homeworld_candidate_view(
         available=True,
         inactive_reason=None,
     )
+
+
+def _annotate_shell_layout_prior(
+    services: HomeworldLocatorComputeServices,
+    *,
+    candidates: tuple[HomeworldCandidateRecord, ...],
+    aggregate: HomeworldEvidenceAggregate,
+    shell_turn: TurnInfo,
+    baseline_turn: int,
+    baseline_degraded: bool,
+) -> tuple[HomeworldCandidateRecord, ...]:
+    """Reuse persisted shell layout-prior selection, or compute and persist it."""
+    if aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION:
+        selected = frozenset(aggregate.most_probable_planet_ids)
+        return tuple(
+            replace(row, is_most_probable=row.planet_id in selected) for row in candidates
+        )
+
+    interim_view = HomeworldCandidateView(
+        candidates=candidates,
+        baseline_turn=baseline_turn,
+        baseline_degraded=baseline_degraded,
+        available=True,
+    )
+    annotated = apply_layout_prior_most_probable(
+        candidates,
+        turn=shell_turn,
+        view=interim_view,
+        player_count=_player_count(shell_turn),
+    )
+    most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
+    services.persistence.put_evidence_aggregate(
+        services.game_id,
+        services.perspective,
+        replace(
+            aggregate,
+            layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
+            most_probable_planet_ids=most_probable_ids,
+        ),
+    )
+    return annotated

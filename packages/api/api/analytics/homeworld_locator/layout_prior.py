@@ -19,6 +19,7 @@ from api.analytics.homeworld_locator.sector_overlays import (
     homeworld_layout_asset_category,
     homeworld_sector_emission_eligible,
     resolve_viewpoint_pin_planet,
+    sector_band_geometric_center,
     unobserved_band_sample_points,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord, HomeworldCandidateView
@@ -32,6 +33,9 @@ from api.models.planet import Planet
 
 _SectorKind = Literal["fixed", "choice", "stand_in", "skip"]
 
+# Bound joint enumeration: keep the nearest candidates to each sector mid.
+MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR = 4
+
 
 @dataclass(frozen=True)
 class _SectorLayoutState:
@@ -43,7 +47,8 @@ class _SectorLayoutState:
     fixed_planet_id: int | None = None
     is_slot_anchored: bool = False
     choice_planet_ids: tuple[int, ...] = ()
-    stand_in_samples: tuple[tuple[float, float], ...] = ()
+    # Single ring-closing point for empty unobserved sectors (not re-optimized per combo).
+    stand_in_position: tuple[float, float] | None = None
 
 
 def apply_layout_prior_most_probable(
@@ -205,7 +210,26 @@ def _build_sector_states(
             continue
 
         if possibles:
-            choice_ids = tuple(sorted({row.planet_id for row, _ in possibles}))
+            sector_mid = sector_band_geometric_center(
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            )
+            by_planet_id: dict[int, Planet] = {}
+            for row, planet in possibles:
+                by_planet_id.setdefault(row.planet_id, planet)
+            ranked = sorted(
+                by_planet_id.items(),
+                key=lambda item: (
+                    distance_ly(item[1].x, item[1].y, sector_mid[0], sector_mid[1]),
+                    item[0],
+                ),
+            )
+            choice_ids = tuple(
+                planet_id for planet_id, _ in ranked[:MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR]
+            )
             states.append(
                 _SectorLayoutState(
                     sector_index=index,
@@ -227,13 +251,24 @@ def _build_sector_states(
             nebulas=nebulas,
         )
         if samples:
+            sector_mid = sector_band_geometric_center(
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            )
+            stand_in = min(
+                samples,
+                key=lambda point: distance_ly(point[0], point[1], sector_mid[0], sector_mid[1]),
+            )
             states.append(
                 _SectorLayoutState(
                     sector_index=index,
                     kind="stand_in",
                     angle_start=angle_start,
                     angle_end=angle_end,
-                    stand_in_samples=samples,
+                    stand_in_position=stand_in,
                 )
             )
         else:
@@ -282,8 +317,6 @@ def _select_most_probable_planet_ids(
             fixed_by_sector=fixed_by_sector,
             stand_in_sectors=stand_in_sectors,
             planets_by_id=planets_by_id,
-            center=center,
-            distributions=distributions,
         )
         if positions is None:
             continue
@@ -310,8 +343,6 @@ def _positions_for_selection(
     fixed_by_sector: Mapping[int, _SectorLayoutState],
     stand_in_sectors: Sequence[_SectorLayoutState],
     planets_by_id: Mapping[int, Planet],
-    center: tuple[float, float],
-    distributions: CategoryLayoutDistributions,
 ) -> dict[int, tuple[float, float]] | None:
     positions: dict[int, tuple[float, float]] = {}
     for sector_index, state in fixed_by_sector.items():
@@ -323,49 +354,10 @@ def _positions_for_selection(
             return None
         positions[sector_index] = (float(planet.x), float(planet.y))
 
-    if not stand_in_sectors:
-        return positions
-
-    stand_in_indices = [state.sector_index for state in stand_in_sectors]
-    samples_by_sector = {state.sector_index: state.stand_in_samples for state in stand_in_sectors}
-    current = {
-        sector: samples_by_sector[sector][0]
-        for sector in stand_in_indices
-        if samples_by_sector[sector]
-    }
-    if len(current) != len(stand_in_indices):
-        return None
-
-    improved = True
-    while improved:
-        improved = False
-        for sector in stand_in_indices:
-            best_point = current[sector]
-            best_cost = _layout_prior_cost(
-                {**positions, **current, sector: best_point},
-                center=center,
-                slot_anchored_sectors=frozenset(
-                    index for index, state in fixed_by_sector.items() if state.is_slot_anchored
-                ),
-                distributions=distributions,
-            )
-            for point in samples_by_sector[sector]:
-                trial = {**positions, **current, sector: point}
-                cost = _layout_prior_cost(
-                    trial,
-                    center=center,
-                    slot_anchored_sectors=frozenset(
-                        index for index, state in fixed_by_sector.items() if state.is_slot_anchored
-                    ),
-                    distributions=distributions,
-                )
-                if cost < best_cost - 1e-12:
-                    best_cost = cost
-                    best_point = point
-                    improved = True
-            current[sector] = best_point
-
-    positions.update(current)
+    for state in stand_in_sectors:
+        if state.stand_in_position is None:
+            return None
+        positions[state.sector_index] = state.stand_in_position
     return positions
 
 

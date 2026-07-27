@@ -43,11 +43,14 @@ class HomeworldEvidenceAggregate:
 
     evidence_hits: tuple[HomeworldIndependentEvidenceHit, ...] = ()
     single_starbase_promotions: tuple[HomeworldSingleStarbasePromotion, ...] = ()
+    # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
+    layout_prior_algorithm_version: int | None = None
+    most_probable_planet_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
 class HomeworldCandidateView:
-    """On-read candidate view for map/table (not the primary durable artifact)."""
+    """Shell candidate view for map/table (selection may be reused from shell aggregate)."""
 
     candidates: tuple[HomeworldCandidateRecord, ...]
     baseline_turn: int
