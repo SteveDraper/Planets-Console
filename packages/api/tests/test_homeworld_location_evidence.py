@@ -9,11 +9,11 @@ from pathlib import Path
 from api.analytics.homeworld_locator.location_evidence import (
     ORIGIN_DISTANCE_MATCH_TOLERANCE_LY,
     append_independent_origin_distance_hits,
-    promote_candidate_to_definite,
     candidate_planet_ids,
     independent_hit_count_for_planet,
     origin_distance_candidate_planet_ids,
     origin_distance_targets,
+    promote_candidate_to_definite,
     record_single_starbase_promotion,
     scoreboard_starbase_count_for_owner,
     ship_at_planet,
