@@ -29,3 +29,25 @@ class InferredHomeworldCandidate:
 
     confidence_tier: str
     """``definite`` or ``possible``."""
+
+
+EVIDENCE_KIND_ORIGIN_DISTANCE = "origin_distance"
+EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD = "single_starbase_new_build"
+
+
+@dataclass(frozen=True)
+class HomeworldIndependentEvidenceHit:
+    """One countable hit toward ``evidence_promotion_threshold`` for a candidate planet."""
+
+    planet_id: int
+    turn: int
+    kind: str = EVIDENCE_KIND_ORIGIN_DISTANCE
+
+
+@dataclass(frozen=True)
+class HomeworldSingleStarbasePromotion:
+    """Immediate possible->definite promotion from the single-starbase new-build rule."""
+
+    planet_id: int
+    turn: int
+    kind: str = EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD

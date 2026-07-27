@@ -17,3 +17,8 @@ def hull_has_bioscan(hull: Hull) -> bool:
 def hull_has_nebula_scanner(hull: Hull) -> bool:
     """True when the hull has the Nebula Scanner ability (100 ly floor)."""
     return "nebula scanner" in hull.special.lower()
+
+
+def hull_has_gravitonic_movement(hull: Hull) -> bool:
+    """True when the hull uses gravitonic accelerators (2x travel range)."""
+    return "gravitonic" in hull.special.lower()

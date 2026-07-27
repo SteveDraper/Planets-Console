@@ -1,6 +1,10 @@
 """Tests for ship mission and hull ability helpers."""
 
-from api.concepts.hull_abilities import hull_has_bioscan, hull_has_nebula_scanner
+from api.concepts.hull_abilities import (
+    hull_has_bioscan,
+    hull_has_gravitonic_movement,
+    hull_has_nebula_scanner,
+)
 from api.concepts.ship_missions import (
     MINE_SWEEP_MISSION,
     SENSOR_SWEEP_MISSION,
@@ -60,6 +64,12 @@ def test_hull_has_bioscan_from_special():
     advanced = "Advanced Bioscan - Will detect 100% of all native life when Sensor Sweeping."
     assert hull_has_bioscan(_hull(special=advanced))
     assert not hull_has_bioscan(_hull(special="Gravitonic"))
+
+
+def test_hull_has_gravitonic_movement_from_special():
+    gravitonic = "Gravitonic - This ship moves twice as far as normal ships."
+    assert hull_has_gravitonic_movement(_hull(special=gravitonic))
+    assert not hull_has_gravitonic_movement(_hull(special="Bioscan - Will detect"))
 
 
 def test_hull_has_nebula_scanner_from_special():
