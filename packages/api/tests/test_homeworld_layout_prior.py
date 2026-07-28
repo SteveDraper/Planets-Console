@@ -419,6 +419,7 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         player_count=player_count,
         layout_asset=asset,
         map_center=center,
+        solver=EnumeratingLayoutPriorSolver(),
     )
     assert sum(1 for row in annotated if row.is_most_probable) == 1
     assert {row.planet_id for row in annotated if row.is_most_probable} == set(

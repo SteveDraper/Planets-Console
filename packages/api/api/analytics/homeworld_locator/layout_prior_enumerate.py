@@ -5,9 +5,8 @@ from __future__ import annotations
 from itertools import product
 
 from api.analytics.homeworld_locator.layout_prior_cost import (
-    layout_prior_cost,
-    layout_prior_tie_key,
-    positions_for_layout_prior_selection,
+    evaluate_layout_prior_selection,
+    mid_stand_in_positions,
 )
 from api.analytics.homeworld_locator.layout_prior_problem import (
     LayoutPriorProblem,
@@ -39,11 +38,7 @@ class EnumeratingLayoutPriorSolver:
         sector_states = problem.sector_states
         choice_sectors = [state for state in sector_states if state.kind == "choice"]
         stand_in_sectors = [state for state in sector_states if state.kind == "stand_in"]
-        stand_in_positions = {
-            state.sector_index: state.stand_in_position
-            for state in stand_in_sectors
-            if state.stand_in_position is not None
-        }
+        stand_in_positions = mid_stand_in_positions(stand_in_sectors)
         if not choice_sectors:
             return LayoutPriorSolution(
                 chosen_planet_ids_by_sector={},
@@ -52,14 +47,6 @@ class EnumeratingLayoutPriorSolver:
                 tie_key=(),
             )
 
-        fixed_by_sector = {
-            state.sector_index: state
-            for state in sector_states
-            if state.kind == "fixed" and state.fixed_position is not None
-        }
-        slot_anchored = frozenset(
-            state.sector_index for state in fixed_by_sector.values() if state.is_slot_anchored
-        )
         choice_options = [nearest_mid_choice_ids(sector, problem) for sector in choice_sectors]
 
         best_cost = float("inf")
@@ -71,21 +58,14 @@ class EnumeratingLayoutPriorSolver:
                 sector.sector_index: planet_id
                 for sector, planet_id in zip(choice_sectors, combo, strict=True)
             }
-            positions = positions_for_layout_prior_selection(
-                chosen_by_sector=chosen_by_sector,
-                fixed_by_sector=fixed_by_sector,
-                stand_in_sectors=stand_in_sectors,
-                planets_by_id=problem.planets_by_id,
+            scored = evaluate_layout_prior_selection(
+                problem,
+                chosen_by_sector,
+                stand_in_positions=stand_in_positions,
             )
-            if positions is None:
+            if scored is None:
                 continue
-            cost = layout_prior_cost(
-                positions,
-                center=problem.center,
-                slot_anchored_sectors=slot_anchored,
-                distributions=problem.distributions,
-            )
-            tie_key = layout_prior_tie_key(chosen_by_sector)
+            cost, tie_key = scored
             if cost < best_cost - 1e-12 or (
                 abs(cost - best_cost) <= 1e-12 and tie_key < best_tie_key
             ):

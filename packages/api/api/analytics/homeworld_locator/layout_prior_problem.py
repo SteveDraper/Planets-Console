@@ -38,6 +38,8 @@ class SectorLayoutState:
     choice_planet_ids: tuple[int, ...] = ()
     # Fixed mid stand-in placeholder for empty unobserved sectors.
     stand_in_position: tuple[float, float] | None = None
+    # Full unobserved sample grid (stand-in sectors only; used by refine).
+    stand_in_samples: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,11 @@ class LayoutPriorProblem:
     r_inner: float
     r_outer: float
     distributions: CategoryLayoutDistributions
+    # Seed materials for deterministic anneal (shell scope + input fingerprint).
+    seed_game_id: int = 0
+    seed_turn: int = 0
+    seed_perspective: int = 0
+    seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
 
 
 def build_sector_layout_states(
@@ -185,6 +192,7 @@ def build_sector_layout_states(
                     angle_start=angle_start,
                     angle_end=angle_end,
                     stand_in_position=stand_in,
+                    stand_in_samples=samples,
                 )
             )
         else:
@@ -215,6 +223,10 @@ def build_layout_prior_problem(
     scan_origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter],
     distributions: CategoryLayoutDistributions,
+    seed_game_id: int = 0,
+    seed_turn: int = 0,
+    seed_perspective: int = 0,
+    seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = (),
 ) -> LayoutPriorProblem:
     """Build the solver-facing problem from candidates and map geometry."""
     return LayoutPriorProblem(
@@ -237,4 +249,8 @@ def build_layout_prior_problem(
         r_inner=r_inner,
         r_outer=r_outer,
         distributions=distributions,
+        seed_game_id=seed_game_id,
+        seed_turn=seed_turn,
+        seed_perspective=seed_perspective,
+        seed_input_fingerprint=seed_input_fingerprint,
     )

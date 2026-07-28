@@ -15,8 +15,14 @@ class HomeworldLocatorConfig:
     evidence_promotion_threshold: int = 2
     """Independent evidence hits required for possible -> definite."""
 
-    layout_prior_solver: str = "enumerate"
-    """Layout-prior discrete solver: ``enumerate`` (#36 capped product)."""
+    layout_prior_solver: str = "anneal"
+    """Layout-prior discrete solver: ``anneal`` (default) or ``enumerate``."""
+
+    layout_prior_budget_ms: int = 150
+    """Wall-clock SA budget for ``anneal`` (DeadlineStopGate). Conservative
+    interactive default for dense circular maps (~680224-class); enumerate
+    ignores this. Tune up if materialize has spare latency headroom.
+    """
 
 
 @dataclass(frozen=True)
@@ -51,7 +57,7 @@ class ApiConfig:
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
 
     homeworld_locator: HomeworldLocatorConfig = field(default_factory=HomeworldLocatorConfig)
-    """Homeworld locator policy (baseline clans, evidence threshold, layout-prior solver)."""
+    """Homeworld locator policy (baseline clans, evidence threshold, layout-prior knobs)."""
 
 
 def get_config() -> ApiConfig:

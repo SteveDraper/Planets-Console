@@ -9,15 +9,19 @@ Homeworld layout prior selection must stay interactive on dense circular maps wh
 - Beam search as the primary discrete strategy — deferred; SA preferred for anytime behavior and simpler partial-bound story.
 - Exposing SA cooling knobs in YAML — rejected; budget ms + solver selector only; cooling may be problem-size adaptive in code.
 
-## Modules (Phase 1)
+## Modules
 
 Under `packages/api/api/analytics/homeworld_locator/`:
 
 | Module | Role |
 |--------|------|
 | `layout_prior.py` | Facade: eligibility → build → `solver.solve` → annotate |
-| `layout_prior_problem.py` | `LayoutPriorProblem` / `SectorLayoutState` + sector build |
+| `layout_prior_problem.py` | `LayoutPriorProblem` / `SectorLayoutState` + sector build + seed materials |
 | `layout_prior_cost.py` | Shared cost + position assembly (outside solvers) |
 | `layout_prior_solver.py` | `LayoutPriorSolver` protocol, `LayoutPriorSolution`, factory |
-| `layout_prior_stop_gate.py` | `StopGate` / `NeverStopGate` |
+| `layout_prior_stop_gate.py` | `StopGate` / `NeverStopGate` / `DeadlineStopGate` / `MaxStepsStopGate` |
 | `layout_prior_enumerate.py` | `EnumeratingLayoutPriorSolver` (≤4 nearest-mid product) |
+| `layout_prior_anneal.py` | `AnnealingLayoutPriorSolver` (greedy frontier + seeded SA) |
+| `layout_prior_refine.py` | Sample-grid stand-in refine + #273 scored-sample hook |
+
+Production default: `layout_prior_solver: anneal` with `layout_prior_budget_ms: 150` (`DeadlineStopGate`). Enumerate remains selectable.

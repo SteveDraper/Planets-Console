@@ -25,13 +25,18 @@ from api.analytics.homeworld_locator.layout_prior_problem import (
     build_sector_layout_states,
 )
 from api.analytics.homeworld_locator.layout_prior_solver import (
+    LAYOUT_PRIOR_SOLVER_ANNEAL,
     LAYOUT_PRIOR_SOLVER_ENUMERATE,
     LayoutPriorSolution,
     LayoutPriorSolver,
     layout_prior_solver_from_config,
     layout_prior_solver_from_name,
+    layout_prior_stop_gate_from_config,
 )
-from api.analytics.homeworld_locator.layout_prior_stop_gate import NeverStopGate
+from api.analytics.homeworld_locator.layout_prior_stop_gate import (
+    NeverStopGate,
+    StopGate,
+)
 from api.analytics.homeworld_locator.sector_overlays import (
     homeworld_layout_asset_category,
     homeworld_sector_emission_eligible,
@@ -43,6 +48,7 @@ from api.concepts.visibility_coverage import planet_scan_origins, visibility_own
 from api.models.game import TurnInfo
 
 __all__ = [
+    "LAYOUT_PRIOR_SOLVER_ANNEAL",
     "LAYOUT_PRIOR_SOLVER_ENUMERATE",
     "MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR",
     "LayoutPriorProblem",
@@ -54,6 +60,7 @@ __all__ = [
     "layout_prior_input_fingerprint",
     "layout_prior_solver_from_config",
     "layout_prior_solver_from_name",
+    "layout_prior_stop_gate_from_config",
 ]
 
 
@@ -75,6 +82,7 @@ def apply_layout_prior_most_probable(
     layout_asset: LayoutDistributionsAsset | None = None,
     map_center: tuple[float, float] | None = None,
     solver: LayoutPriorSolver | None = None,
+    stop_gate: StopGate | None = None,
 ) -> tuple[HomeworldCandidateRecord, ...]:
     """Annotate ``is_most_probable`` after evidence culls when the emission gate passes."""
     resolved_count = player_count if player_count is not None else len(players_by_id(turn))
@@ -125,10 +133,21 @@ def apply_layout_prior_most_probable(
         scan_origins=scan_origins,
         nebulas=turn.nebulas,
         distributions=distributions,
+        seed_game_id=int(turn.game.id),
+        seed_turn=int(turn.settings.turn),
+        seed_perspective=int(turn.player.id),
+        seed_input_fingerprint=layout_prior_input_fingerprint(candidates),
     )
 
     resolved_solver = solver if solver is not None else layout_prior_solver_from_config()
-    solution = resolved_solver.solve(problem, stop_gate=NeverStopGate())
+    if stop_gate is not None:
+        resolved_gate = stop_gate
+    elif solver is not None:
+        # Injected solvers (tests / fakes) default to never-stop unless given a gate.
+        resolved_gate = NeverStopGate()
+    else:
+        resolved_gate = layout_prior_stop_gate_from_config()
+    solution = resolved_solver.solve(problem, stop_gate=resolved_gate)
     most_probable_ids = frozenset(solution.chosen_planet_ids_by_sector.values())
     return tuple(
         replace(row, is_most_probable=row.planet_id in most_probable_ids) for row in candidates
