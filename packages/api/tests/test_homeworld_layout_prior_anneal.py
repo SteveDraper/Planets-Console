@@ -32,12 +32,14 @@ from api.analytics.homeworld_locator.layout_prior_solver import (
     layout_prior_solver_from_name,
 )
 from api.analytics.homeworld_locator.layout_prior_stop_gate import (
+    DeadlineStopGate,
     MaxStepsStopGate,
     NeverStopGate,
 )
 from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
 from api.concepts.visibility_coverage import planet_scan_origins, visibility_owner_ids
+from api.errors import ValidationError
 from api.serialization.turn import turn_info_from_json
 
 from tests.test_homeworld_layout_prior import (
@@ -281,6 +283,16 @@ def test_anneal_empty_neighborhood_exits_promptly(template_planet, sample_turn) 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     assert solution.chosen_planet_ids_by_sector.get(choice.sector_index) == 40
     assert elapsed_ms < 500.0
+
+
+def test_deadline_stop_gate_rejects_negative_budget() -> None:
+    with pytest.raises(ValidationError, match="budget_ms must be >= 0"):
+        DeadlineStopGate(-1)
+
+
+def test_max_steps_stop_gate_rejects_negative_steps() -> None:
+    with pytest.raises(ValidationError, match="max_steps must be >= 0"):
+        MaxStepsStopGate(-1)
 
 
 def test_injected_anneal_without_stop_gate_terminates(template_planet, sample_turn) -> None:

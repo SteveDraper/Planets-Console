@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from typing import Protocol
 
+from api.errors import ValidationError
+
 
 class StopGate(Protocol):
     """Polled by discrete solvers to decide whether to stop searching."""
@@ -25,7 +27,7 @@ class DeadlineStopGate:
 
     def __init__(self, budget_ms: int) -> None:
         if budget_ms < 0:
-            raise ValueError(f"budget_ms must be >= 0, got {budget_ms}")
+            raise ValidationError(f"budget_ms must be >= 0, got {budget_ms}")
         self._deadline = time.perf_counter() + (budget_ms / 1000.0)
 
     def should_stop(self) -> bool:
@@ -41,7 +43,7 @@ class MaxStepsStopGate:
 
     def __init__(self, max_steps: int) -> None:
         if max_steps < 0:
-            raise ValueError(f"max_steps must be >= 0, got {max_steps}")
+            raise ValidationError(f"max_steps must be >= 0, got {max_steps}")
         self._max_steps = max_steps
         self._steps_started = 0
 
