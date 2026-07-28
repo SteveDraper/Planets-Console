@@ -133,9 +133,7 @@ def layout_prior_cost_breakdown(
                 abs_deviation_from_50=abs(percentile - 50.0),
             )
         )
-    neighbor_mean = sum(edge.abs_deviation_from_50 for edge in neighbor_edges) / len(
-        neighbor_edges
-    )
+    neighbor_mean = sum(edge.abs_deviation_from_50 for edge in neighbor_edges) / len(neighbor_edges)
 
     center_terms: list[CenterDistanceContribution] = []
     for sector_index, position in positions_by_sector.items():
