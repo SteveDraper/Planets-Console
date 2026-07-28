@@ -33,7 +33,7 @@ flowchart LR
 | Need | Action |
 |------|--------|
 | Sector participation / mid stand-in / choice ranking | **Extract** from `layout_prior.py` into shared builders used by all solvers; do not duplicate in SA |
-| `_layout_prior_cost` / percentile tables | **Keep outside** solvers as the single cost owner (ADR 0009) |
+| `_layout_prior_cost` / Normal density tables | **Keep outside** solvers as the single cost owner (ADR 0009) |
 | `unobserved_band_sample_points` | **Reuse** for sample-grid refine (#273 hook scores samples, does not replace the grid) |
 | `layout_prior_input_fingerprint` + shell persist | **Reuse** unchanged in `baseline_ensure` |
 | `MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR` | **Keep** on enumerator only; SA must not hard-cap the legal set |

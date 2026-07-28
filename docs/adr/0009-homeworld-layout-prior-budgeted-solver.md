@@ -7,7 +7,7 @@ Homeworld layout prior selection must stay interactive on dense circular maps wh
 - Nested per-combo continuous stand-in search — rejected (hung map GETs on dense games).
 - Hard-capped full product as the permanent production solver — rejected (blocks richer discrete choice).
 - Beam search as the primary discrete strategy — deferred; SA preferred for anytime behavior and simpler partial-bound story.
-- Exposing SA cooling knobs in YAML — rejected; budget ms + solver selector only; cooling may be problem-size adaptive in code.
+- Exposing SA cooling knobs in YAML — rejected; budget ms + solver selector only; temperature follows a budget-progress schedule in code (`T0` may be problem-size adaptive).
 
 ## Modules
 
@@ -24,4 +24,4 @@ Under `packages/api/api/analytics/homeworld_locator/`:
 | `layout_prior_anneal.py` | `AnnealingLayoutPriorSolver` (greedy frontier + seeded SA) |
 | `layout_prior_refine.py` | Sample-grid stand-in refine + #273 scored-sample hook |
 
-Production default: `layout_prior_solver: anneal` with `layout_prior_budget_ms: 150` (`DeadlineStopGate`). Enumerate remains selectable.
+Production default: `layout_prior_solver: anneal` with `layout_prior_budget_ms: 1000` (`DeadlineStopGate`). Enumerate remains selectable.

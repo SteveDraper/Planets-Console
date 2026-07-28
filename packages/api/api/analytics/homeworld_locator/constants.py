@@ -9,4 +9,4 @@ ATTRIBUTION_USER_ASSERTED = "user_asserted"
 # solver identity changes (e.g. #270 anneal default). Promote/cull input
 # changes invalidate via persisted promotionThreshold + inputFingerprint on
 # layoutPriorSelection -- do not rely on this alone for those.
-LAYOUT_PRIOR_ALGORITHM_VERSION = 3
+LAYOUT_PRIOR_ALGORITHM_VERSION = 5

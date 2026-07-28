@@ -18,7 +18,7 @@ class HomeworldLocatorConfig:
     layout_prior_solver: str = "anneal"
     """Layout-prior discrete solver: ``anneal`` (default) or ``enumerate``."""
 
-    layout_prior_budget_ms: int = 150
+    layout_prior_budget_ms: int = 1000
     """Wall-clock SA budget for ``anneal`` (DeadlineStopGate). Conservative
     interactive default for dense circular maps (~680224-class); enumerate
     ignores this. Tune up if materialize has spare latency headroom.

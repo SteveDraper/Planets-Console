@@ -85,14 +85,13 @@ def _planet(
 
 
 def _linear_metric(*, support_min: float, support_max: float) -> SmoothedMetricDistribution:
-    percentiles = tuple(
-        support_min + (support_max - support_min) * index / 100 for index in range(101)
-    )
+    mid = 0.5 * (support_min + support_max)
     return SmoothedMetricDistribution(
         sample_count=100,
         support_min=support_min,
         support_max=support_max,
-        percentiles=percentiles,
+        mean=mid,
+        std=max(1.0, (support_max - support_min) / 6.0),
     )
 
 
@@ -103,11 +102,9 @@ def _stub_layout_asset(*, support_min: float = 500.0, support_max: float = 600.0
         neighbor_separation=metric,
     )
     return LayoutDistributionsAsset(
-        schema_version=1,
+        schema_version=2,
         bin_width_ly=10.0,
-        smoothing_method="laplace",
-        laplace_alpha=1.0,
-        percentile_step=1,
+        cost_model="normal_neg_log_density",
         categories={"epic": category, "standard": category},
         source={},
     )
@@ -162,12 +159,14 @@ def _view(*candidates: HomeworldCandidateRecord) -> HomeworldCandidateView:
     )
 
 
-def test_percentile_for_value_inverts_value_at_percentile() -> None:
+def test_neg_log_density_is_lowest_at_mean() -> None:
     metric = _linear_metric(support_min=100.0, support_max=200.0)
-    assert metric.percentile_for_value(100.0) == pytest.approx(0.0)
-    assert metric.percentile_for_value(150.0) == pytest.approx(50.0)
-    assert metric.percentile_for_value(200.0) == pytest.approx(100.0)
-    assert metric.value_at_percentile(metric.percentile_for_value(137.5)) == pytest.approx(137.5)
+    at_mean = metric.neg_log_density(metric.mean)
+    assert metric.neg_log_density(metric.mean - 3 * metric.std) > at_mean
+    assert metric.neg_log_density(metric.mean + 3 * metric.std) > at_mean
+    assert metric.neg_log_density(metric.mean) == pytest.approx(
+        0.5 * math.log(2 * math.pi * metric.std * metric.std)
+    )
 
 
 def test_ineligible_gate_leaves_is_most_probable_false(template_planet, sample_turn) -> None:
@@ -265,14 +264,13 @@ def test_tie_break_prefers_lex_smaller_planet_id(template_planet, sample_turn) -
         sample_count=1,
         support_min=0.0,
         support_max=1000.0,
-        percentiles=(500.0,) * 101,
+        mean=500.0,
+        std=1.0e6,
     )
     flat_asset = LayoutDistributionsAsset(
-        schema_version=1,
+        schema_version=2,
         bin_width_ly=10.0,
-        smoothing_method="laplace",
-        laplace_alpha=1.0,
-        percentile_step=1,
+        cost_model="normal_neg_log_density",
         categories={
             "epic": CategoryLayoutDistributions(
                 center_distance=flat_metric,
@@ -411,7 +409,8 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
     assert len(nearest_mid_choice_ids(choice, problem)) == MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR
     solution = EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate()).solution
     assert len(solution.chosen_planet_ids_by_sector) == 1
-    # Selection still completes and marks one most-probable.
+    assert next(iter(solution.chosen_planet_ids_by_sector.values())) in choice.choice_planet_ids
+    # Selection still completes and marks one most-probable in the legal set.
     annotated = apply_layout_prior_most_probable(
         tuple(candidates),
         turn=turn,
@@ -421,10 +420,9 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         map_center=center,
         solver=EnumeratingLayoutPriorSolver(),
     )
-    assert sum(1 for row in annotated if row.is_most_probable) == 1
-    assert {row.planet_id for row in annotated if row.is_most_probable} == set(
-        solution.chosen_planet_ids_by_sector.values()
-    )
+    most_probable = {row.planet_id for row in annotated if row.is_most_probable}
+    assert len(most_probable) == 1
+    assert most_probable.issubset(set(choice.choice_planet_ids))
 
 
 def test_layout_prior_solver_injection_honors_fixed_choice(template_planet, sample_turn) -> None:

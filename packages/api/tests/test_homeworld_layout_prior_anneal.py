@@ -147,6 +147,36 @@ def _build_choice_problem(
     return problem, turn, planets, candidates, asset, center
 
 
+def test_temperature_at_progress_mid_budget_above_final() -> None:
+    from api.analytics.homeworld_locator.layout_prior_anneal import (
+        _TEMPERATURE_FINAL_RATIO,
+        temperature_at_progress,
+    )
+
+    t0 = 20.0
+    mid = temperature_at_progress(t0, 0.5)
+    final = temperature_at_progress(t0, 1.0)
+    assert final == pytest.approx(t0 * _TEMPERATURE_FINAL_RATIO)
+    assert mid > final * 10.0
+    assert mid == pytest.approx(t0 * math.sqrt(_TEMPERATURE_FINAL_RATIO))
+    assert temperature_at_progress(t0, 0.0) == pytest.approx(t0)
+
+
+def test_max_steps_budget_progress_starts_at_zero() -> None:
+    gate = MaxStepsStopGate(100)
+    assert not gate.should_stop()
+    assert gate.budget_progress() == pytest.approx(0.0)
+    assert not gate.should_stop()
+    assert gate.budget_progress() == pytest.approx(0.01)
+
+
+def test_deadline_budget_progress_advances() -> None:
+    gate = DeadlineStopGate(50)
+    assert gate.budget_progress() < 0.5
+    time.sleep(0.03)
+    assert gate.budget_progress() > 0.4
+
+
 def test_anneal_deterministic_under_max_steps(template_planet, sample_turn) -> None:
     player_count = 11
     sector_angle = 2.0 * math.pi / player_count
@@ -220,13 +250,15 @@ def test_anneal_selects_outside_enumerator_top4(template_planet, sample_turn) ->
         sample_count=100,
         support_min=400.0,
         support_max=600.0,
-        percentiles=tuple(400.0 + 2.0 * index for index in range(101)),
+        mean=500.0,
+        std=40.0,
     )
     flat = SmoothedMetricDistribution(
         sample_count=1,
         support_min=0.0,
         support_max=2000.0,
-        percentiles=(800.0,) * 101,
+        mean=800.0,
+        std=1.0e6,
     )
     problem = dc_replace(
         problem,
@@ -328,8 +360,8 @@ def test_injected_anneal_without_stop_gate_terminates(template_planet, sample_tu
     )
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     assert {row.planet_id for row in annotated if row.is_most_probable} == {orphan.id}
-    # Config deadline is 150ms; allow refine overhead but fail hard on hang.
-    assert elapsed_ms < 2000.0
+    # Config deadline is 1000ms; allow refine overhead but fail hard on hang.
+    assert elapsed_ms < 5000.0
 
 
 def test_stand_in_refine_improves_or_equals_mid(template_planet, sample_turn) -> None:

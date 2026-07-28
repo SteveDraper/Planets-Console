@@ -316,6 +316,7 @@ def _decide_sector_overlay(
     r_inner: float,
     r_outer: float,
     label_by_planet: Mapping[int, str],
+    most_probable_planet_ids: frozenset[int] = frozenset(),
 ) -> _SectorOverlayDecision:
     """Pinned / orphan / incomplete / error → one decision for overlay emission."""
     is_pinned = len(slot_anchored) > 0
@@ -345,19 +346,37 @@ def _decide_sector_overlay(
         )
 
     if sector_candidates:
-        # Orphans: envelope on candidate closest to sector mid (not map center C).
-        closest = _planet_closest_to_sector_mid(
-            sector_candidates,
-            center=center,
-            angle_start=angle_start,
-            angle_end=angle_end,
-            r_inner=r_inner,
-            r_outer=r_outer,
-        )
+        # Orphans: prefer layout-prior most-probable so envelopes match markers;
+        # else candidate closest to sector mid (not map center C).
+        most_probable = [
+            planet for planet in sector_candidates if planet.id in most_probable_planet_ids
+        ]
+        if most_probable:
+            anchor = (
+                most_probable[0]
+                if len(most_probable) == 1
+                else _planet_closest_to_sector_mid(
+                    most_probable,
+                    center=center,
+                    angle_start=angle_start,
+                    angle_end=angle_end,
+                    r_inner=r_inner,
+                    r_outer=r_outer,
+                )
+            )
+        else:
+            anchor = _planet_closest_to_sector_mid(
+                sector_candidates,
+                center=center,
+                angle_start=angle_start,
+                angle_end=angle_end,
+                r_inner=r_inner,
+                r_outer=r_outer,
+            )
         status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
         return _SectorOverlayDecision(
             is_pinned=False,
-            envelope_center=(float(closest.x), float(closest.y)),
+            envelope_center=(float(anchor.x), float(anchor.y)),
             status=status,
             fill_color=SECTOR_COLOR,
             candidate_count=candidate_count,
@@ -401,6 +420,7 @@ def build_homeworld_sector_overlays(
     scan_origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter] = (),
     pinned_player_label_by_planet_id: Mapping[int, str] | None = None,
+    most_probable_planet_ids: frozenset[int] = frozenset(),
 ) -> tuple[MapRegionOverlay, ...]:
     """Build one boundary overlay per equal angular sector.
 
@@ -410,6 +430,9 @@ def build_homeworld_sector_overlays(
 
     ``pinned_player_label_by_planet_id`` maps slot-anchored planet ids to
     roster identity strings (``username (race)``) for wire ``playerLabel``.
+
+    ``most_probable_planet_ids`` are layout-prior selections; orphan envelopes
+    center on those when present so disks align with most-probable markers.
     """
     if player_count < 2:
         return ()
@@ -475,6 +498,7 @@ def build_homeworld_sector_overlays(
             r_inner=r_inner,
             r_outer=r_outer,
             label_by_planet=label_by_planet,
+            most_probable_planet_ids=most_probable_planet_ids,
         )
 
         disks: tuple[MapRegionOverlayDisk, ...] = ()
@@ -546,6 +570,7 @@ def build_homeworld_sector_overlays_for_turn(
     slot_anchored_ids = frozenset(
         row.planet_id for row in view.candidates if row.perspective is not None
     )
+    most_probable_ids = frozenset(row.planet_id for row in view.candidates if row.is_most_probable)
     resolved_game_id = game_id if game_id is not None else turn.settings.id
     labels = pinned_player_labels_for_view(
         turn,
@@ -567,6 +592,7 @@ def build_homeworld_sector_overlays_for_turn(
         scan_origins=origins,
         nebulas=turn.nebulas,
         pinned_player_label_by_planet_id=labels,
+        most_probable_planet_ids=most_probable_ids,
     )
 
 

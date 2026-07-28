@@ -39,6 +39,7 @@ from api.analytics.homeworld_locator.layout_prior_stop_gate import (
     DeadlineStopGate,
     MaxStepsStopGate,
     StopGate,
+    stop_gate_budget_progress,
     stop_gate_info,
 )
 from api.analytics.homeworld_locator.sector_overlays import sector_band_geometric_center
@@ -47,6 +48,8 @@ from api.concepts.stellar_cartography.nebula_visibility import distance_ly
 # Proposal bias: weight ~ 1 / (eps + distance_to_mid)^power
 _PROPOSAL_DISTANCE_EPS = 1.0
 _PROPOSAL_DISTANCE_POWER = 1.5
+# Final / initial temperature ratio for budget-progress geometric schedule.
+_TEMPERATURE_FINAL_RATIO = 1.0e-3
 
 
 class AnnealingLayoutPriorSolver:
@@ -162,8 +165,7 @@ class AnnealingLayoutPriorSolver:
         incumbent_samples: list[tuple[int, float]] = [(0, best_cost)]
 
         rng = random.Random(layout_prior_rng_seed(problem))
-        temperature = initial_temperature(problem, choice_sectors)
-        cooling = cooling_rate(problem, choice_sectors)
+        t0 = initial_temperature(problem, choice_sectors)
         sector_mids = {
             state.sector_index: sector_band_geometric_center(
                 center=problem.center,
@@ -180,6 +182,7 @@ class AnnealingLayoutPriorSolver:
         sa_steps_accepted = 0
         neighborhood_exhausted = False
         while not stop_gate.should_stop():
+            temperature = temperature_at_progress(t0, stop_gate_budget_progress(stop_gate))
             proposal = propose_neighbor(
                 current_chosen,
                 choice_sectors,
@@ -197,7 +200,6 @@ class AnnealingLayoutPriorSolver:
                 problem, proposed_chosen, stand_in_positions=mid_stand_ins
             )
             if proposed_scored is None:
-                temperature *= cooling
                 continue
             proposed_cost, proposed_tie = proposed_scored
             delta = proposed_cost - current_cost
@@ -215,7 +217,6 @@ class AnnealingLayoutPriorSolver:
                     best_tie = proposed_tie
                     best_chosen = dict(proposed_chosen)
                     incumbent_samples.append((sa_steps_attempted, best_cost))
-            temperature *= cooling
         sa_ms = (time.perf_counter() - sa_t0) * 1000.0
         pre_refine_cost = best_cost
         stop_reason = _anneal_stop_reason(stop_gate, neighborhood_exhausted=neighborhood_exhausted)
@@ -305,16 +306,18 @@ def initial_temperature(
     return 8.0 + 4.0 * math.log1p(n_possibles) + 0.5 * math.log1p(n_choice * n_planets)
 
 
-def cooling_rate(
-    problem: LayoutPriorProblem,
-    choice_sectors: Sequence[SectorLayoutState],
-) -> float:
-    """Geometric cooling factor; larger problems cool slightly slower."""
-    del problem
-    n_choice = max(1, len(choice_sectors))
-    n_possibles = max(1, sum(len(state.choice_planet_ids) for state in choice_sectors))
-    # Closer to 1.0 => slower cool => more exploration under a step budget.
-    return min(0.999, 0.97 + 0.025 * (1.0 - 1.0 / (1.0 + math.log1p(n_possibles / n_choice))))
+def temperature_at_progress(t0: float, progress: float) -> float:
+    """Budget-progress geometric cool: ``T = T0 * (T_final/T0)^progress``.
+
+    Progress is the fraction of wall-clock or step budget consumed (0..1).
+    ``T_final = T0 * _TEMPERATURE_FINAL_RATIO`` so uphill moves stay viable
+    through most of the budget instead of collapsing after a few thousand
+    per-step multiplies.
+    """
+    clamped = min(1.0, max(0.0, progress))
+    if t0 <= 0.0:
+        return 0.0
+    return t0 * (_TEMPERATURE_FINAL_RATIO**clamped)
 
 
 def greedy_frontier_init(

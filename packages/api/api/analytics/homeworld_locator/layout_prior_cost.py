@@ -17,13 +17,12 @@ from api.models.planet import Planet
 
 @dataclass(frozen=True)
 class NeighborEdgeContribution:
-    """One clockwise-neighbor ring edge and its |pct − 50| deviation."""
+    """One clockwise-neighbor ring edge and its Normal ``-log`` density term."""
 
     from_sector: int
     to_sector: int
     separation_ly: float
-    percentile: float
-    abs_deviation_from_50: float
+    neg_log_density: float
 
 
 @dataclass(frozen=True)
@@ -32,8 +31,7 @@ class CenterDistanceContribution:
 
     sector_index: int
     center_distance_ly: float
-    percentile: float
-    abs_deviation_from_50: float
+    neg_log_density: float
 
 
 @dataclass(frozen=True)
@@ -96,7 +94,11 @@ def layout_prior_cost_breakdown(
     slot_anchored_sectors: frozenset[int],
     distributions: CategoryLayoutDistributions,
 ) -> LayoutPriorCostBreakdown:
-    """Decompose equal-family layout-prior cost into per-edge and per-member terms."""
+    """Decompose equal-family layout-prior cost into per-edge and per-member terms.
+
+    Each family mean is the mean of Normal ``-log`` densities under the category
+    asset tables (neighbor separation and center distance).
+    """
     if len(positions_by_sector) < 2:
         return LayoutPriorCostBreakdown(
             ring_sector_order=tuple(sorted(positions_by_sector)),
@@ -123,34 +125,30 @@ def layout_prior_cost_breakdown(
             next_position[0],
             next_position[1],
         )
-        percentile = distributions.neighbor_separation.percentile_for_value(separation)
         neighbor_edges.append(
             NeighborEdgeContribution(
                 from_sector=sector_index,
                 to_sector=next_sector,
                 separation_ly=separation,
-                percentile=percentile,
-                abs_deviation_from_50=abs(percentile - 50.0),
+                neg_log_density=distributions.neighbor_separation.neg_log_density(separation),
             )
         )
-    neighbor_mean = sum(edge.abs_deviation_from_50 for edge in neighbor_edges) / len(neighbor_edges)
+    neighbor_mean = sum(edge.neg_log_density for edge in neighbor_edges) / len(neighbor_edges)
 
     center_terms: list[CenterDistanceContribution] = []
     for sector_index, position in positions_by_sector.items():
         if sector_index in slot_anchored_sectors:
             continue
         center_distance = distance_ly(position[0], position[1], center_x, center_y)
-        percentile = distributions.center_distance.percentile_for_value(center_distance)
         center_terms.append(
             CenterDistanceContribution(
                 sector_index=sector_index,
                 center_distance_ly=center_distance,
-                percentile=percentile,
-                abs_deviation_from_50=abs(percentile - 50.0),
+                neg_log_density=distributions.center_distance.neg_log_density(center_distance),
             )
         )
     center_mean = (
-        sum(term.abs_deviation_from_50 for term in center_terms) / len(center_terms)
+        sum(term.neg_log_density for term in center_terms) / len(center_terms)
         if center_terms
         else 0.0
     )

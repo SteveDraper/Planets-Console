@@ -292,7 +292,7 @@ def test_load_config_homeworld_locator_defaults():
     assert root.api.homeworld_locator.min_baseline_clans == 10_000
     assert root.api.homeworld_locator.evidence_promotion_threshold == 2
     assert root.api.homeworld_locator.layout_prior_solver == "anneal"
-    assert root.api.homeworld_locator.layout_prior_budget_ms == 150
+    assert root.api.homeworld_locator.layout_prior_budget_ms == 1000
 
 
 def test_load_config_homeworld_locator_overrides(tmp_path):

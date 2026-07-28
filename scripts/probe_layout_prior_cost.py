@@ -243,8 +243,7 @@ def _print_focus_planet_terms(
     else:
         typer.echo(
             f"    center-distance: {center_term.center_distance_ly:.3f} LY "
-            f"→ pct {center_term.percentile:.2f} "
-            f"(|pct-50|={center_term.abs_deviation_from_50:.4f})"
+            f"→ -log dens={center_term.neg_log_density:.4f}"
         )
     incoming = next((e for e in bd.neighbor_edges if e.to_sector == sector), None)
     outgoing = next((e for e in bd.neighbor_edges if e.from_sector == sector), None)
@@ -255,8 +254,7 @@ def _print_focus_planet_terms(
         typer.echo(
             f"    {label}: {_sector_label(edge.from_sector, selection.chosen_by_sector, problem)}"
             f" → {_sector_label(edge.to_sector, selection.chosen_by_sector, problem)}: "
-            f"{edge.separation_ly:.3f} LY → pct {edge.percentile:.2f} "
-            f"(|pct-50|={edge.abs_deviation_from_50:.4f})"
+            f"{edge.separation_ly:.3f} LY → -log dens={edge.neg_log_density:.4f}"
         )
 
 
@@ -356,7 +354,8 @@ def main(
 
     problem = _build_problem(turn=shell_turn, view=view)
     solver = AnnealingLayoutPriorSolver()
-    solution: LayoutPriorSolution = solver.solve(problem, stop_gate=DeadlineStopGate(budget_ms))
+    solve_result = solver.solve(problem, stop_gate=DeadlineStopGate(budget_ms))
+    solution: LayoutPriorSolution = solve_result.solution
 
     preferred = _score(
         "preferred (anneal + sample-grid refine)",
@@ -416,9 +415,9 @@ def main(
         delta = swapped.cost - preferred.cost
         typer.echo(f"\ndelta (swap - preferred): {delta:+.6f}")
         typer.echo(
-            "note: total cost is mean(|pct-50|) over all ring edges plus "
-            "mean(|pct-50|) over all unpinned members; focus lines show raw "
-            "term deviations, not how much the means move."
+            "note: total cost is mean(-log Normal dens) over all ring edges plus "
+            "mean(-log Normal dens) over all unpinned center distances; focus lines "
+            "show per-term -log densities, not how much the means move."
         )
 
 
