@@ -39,6 +39,8 @@ The amalgamated config has three top-level keys:
 | `homeworld_locator` | object | see below | Server-side **homeworld locator config** (YAML, not SPA UI). Nested fields below. |
 | `homeworld_locator.min_baseline_clans` | integer | `10000` | Floor clan count for **homeworld baseline profile** matching (below default `homeworldclans`, above casual colonies). |
 | `homeworld_locator.evidence_promotion_threshold` | integer | `2` | Independent evidence hits required for **possible → definite** during evidence refine materialize. |
+| `homeworld_locator.layout_prior_solver` | string | `anneal` | Layout-prior discrete solver: `anneal` (greedy + seeded SA + sample-grid refine, production default) or `enumerate` (`EnumeratingLayoutPriorSolver`, ≤4 nearest-mid product; emergency / regression). Switching solver is an ops concern and typically pairs with understanding `LAYOUT_PRIOR_ALGORITHM_VERSION` cache invalidation. |
+| `homeworld_locator.layout_prior_budget_ms` | integer | `150` | Wall-clock SA budget (ms) for `anneal` via `DeadlineStopGate`. Enumerate ignores this. **Default rationale:** conservative interactive headroom for dense circular maps (680224-class materialize); not a CI wall-clock assert. Raise if materialize has spare latency; lower only after measuring anneal step throughput on target hardware. |
 
 ### `bff` (BFF)
 
@@ -62,6 +64,8 @@ api:
   homeworld_locator:
     min_baseline_clans: 10000
     evidence_promotion_threshold: 2
+    layout_prior_solver: anneal
+    layout_prior_budget_ms: 150
 
 bff:
   cors_origins:

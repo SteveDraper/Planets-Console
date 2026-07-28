@@ -121,12 +121,13 @@ def infer_homeworld_baseline_candidates(
     """Infer slot-anchored and orphan homeworld candidates from a baseline turn.
 
     Viewpoint unique baseline-profile match -> definite slot-anchored. On circular +
-    round maps, remaining ring sites become orphan possibles. Cluster-constraint
-    matches also yield orphan possibles (including when ring math does not apply).
-    After emission, possibles that share a sector with a definite are culled (one HW
-    per Circular sector). Rival slots are not cross-product bound in v1 baseline.
-    Debris-disk planetoids are never candidates and never count toward cluster
-    neighborhood minima.
+    round maps, remaining ring sites become orphan possibles only when they also
+    meet the **homeworld cluster constraint** (geometry AND cluster -- not OR).
+    Cluster-constraint matches also yield orphan possibles when ring math does not
+    apply (or for off-ring planets). After emission, possibles that share a sector
+    with a definite are culled (one HW per Circular sector). Rival slots are not
+    cross-product bound in v1 baseline. Debris-disk planetoids are never candidates
+    and never count toward cluster neighborhood minima.
 
     ``viewpoint_player_id`` matches planet ``ownerid`` (Player.id).
     ``viewpoint_perspective`` is the 1-based shell storage slot written on
@@ -164,6 +165,9 @@ def infer_homeworld_baseline_candidates(
                 pin=pin,
             ):
                 if site.id == pin.id:
+                    continue
+                counts = count_cluster_neighbors(site, planets)
+                if not meets_homeworld_cluster_constraint(counts, settings):
                     continue
                 emitted.setdefault(
                     site.id,

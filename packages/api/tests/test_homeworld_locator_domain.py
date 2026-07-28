@@ -420,8 +420,74 @@ def test_infer_baseline_viewpoint_definite_and_ring_orphans(
         hwdistribution=HW_DISTRIBUTION_CIRCULAR,
         mapshape=MAP_SHAPE_ROUND,
         homeworldhasstarbase=False,
-        verycloseplanets=99,  # prevent cluster orphans from noise planets
-        closeplanets=99,
+        # Ring sites must also meet cluster (AND). Keep thresholds low and give
+        # each ring planet a private very-close satellite so they qualify.
+        verycloseplanets=1,
+        closeplanets=0,
+    )
+    center = (2000.0, 2000.0)
+    radius = 500.0
+    player_count = 4
+    ring = []
+    satellites = []
+    for index in range(player_count):
+        angle = index * (2.0 * math.pi / player_count)
+        owner = 1 if index == 0 else 0
+        clans = 20_000 if index == 0 else 0
+        temp = 50 if index == 0 else 0
+        x = int(round(center[0] + radius * math.cos(angle)))
+        y = int(round(center[1] + radius * math.sin(angle)))
+        ring.append(
+            _planet(
+                template_planet,
+                planet_id=index + 1,
+                x=x,
+                y=y,
+                ownerid=owner,
+                clans=clans,
+                temp=temp,
+            )
+        )
+        # ~40 LY radially outward -- very-close to this ring site only.
+        satellites.append(
+            _planet(
+                template_planet,
+                planet_id=100 + index,
+                x=int(round(center[0] + (radius + 40.0) * math.cos(angle))),
+                y=int(round(center[1] + (radius + 40.0) * math.sin(angle))),
+            )
+        )
+
+    candidates = infer_homeworld_baseline_candidates(
+        [*ring, *satellites],
+        settings=settings,
+        viewpoint_player_id=1,
+        viewpoint_perspective=1,
+        viewpoint_race_id=1,
+        player_count=player_count,
+        starbase_planet_ids=set(),
+        min_baseline_clans=10_000,
+        map_center=center,
+    )
+    by_id = {row.planet_id: row for row in candidates}
+    assert by_id[1].confidence_tier == CONFIDENCE_DEFINITE
+    assert by_id[1].perspective == 1
+    for planet_id in (2, 3, 4):
+        assert by_id[planet_id].confidence_tier == CONFIDENCE_POSSIBLE
+        assert by_id[planet_id].perspective is None
+
+
+def test_infer_baseline_ring_site_requires_cluster_constraint(
+    template_planet, sample_settings
+) -> None:
+    """Ring geometry alone is not enough -- cluster minima must also hold (AND)."""
+    settings = replace(
+        sample_settings,
+        hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+        mapshape=MAP_SHAPE_ROUND,
+        homeworldhasstarbase=False,
+        verycloseplanets=2,
+        closeplanets=0,
     )
     center = (2000.0, 2000.0)
     radius = 500.0
@@ -443,9 +509,25 @@ def test_infer_baseline_viewpoint_definite_and_ring_orphans(
                 temp=temp,
             )
         )
+    # Only ring site 2 (planet id 2) gets enough very-close neighbors.
+    angle_1 = 1 * (2.0 * math.pi / player_count)
+    cluster_support = [
+        _planet(
+            template_planet,
+            planet_id=20,
+            x=int(round(center[0] + (radius + 30.0) * math.cos(angle_1))),
+            y=int(round(center[1] + (radius + 30.0) * math.sin(angle_1))),
+        ),
+        _planet(
+            template_planet,
+            planet_id=21,
+            x=int(round(center[0] + (radius + 50.0) * math.cos(angle_1))),
+            y=int(round(center[1] + (radius + 50.0) * math.sin(angle_1))),
+        ),
+    ]
 
     candidates = infer_homeworld_baseline_candidates(
-        ring,
+        [*ring, *cluster_support],
         settings=settings,
         viewpoint_player_id=1,
         viewpoint_perspective=1,
@@ -457,10 +539,10 @@ def test_infer_baseline_viewpoint_definite_and_ring_orphans(
     )
     by_id = {row.planet_id: row for row in candidates}
     assert by_id[1].confidence_tier == CONFIDENCE_DEFINITE
-    assert by_id[1].perspective == 1
-    for planet_id in (2, 3, 4):
-        assert by_id[planet_id].confidence_tier == CONFIDENCE_POSSIBLE
-        assert by_id[planet_id].perspective is None
+    assert 2 in by_id and by_id[2].confidence_tier == CONFIDENCE_POSSIBLE
+    # Ring-nearest planets 3 and 4 fail verycloseplanets=2 -- must not emit.
+    assert 3 not in by_id
+    assert 4 not in by_id
 
 
 def test_cull_co_sector_candidates_drops_possibles_near_definite(

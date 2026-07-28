@@ -150,11 +150,11 @@ Apply **homeworld candidate geometry** when `hwdistribution=2` and `mapshape=0`:
 | Ring from center | HW positions lie on a common-radius ring; infer radius from known definites or player count + map size |
 | Angular spacing | ~equal sectors per active **Player**; `shuffleteampositions` permutes slot-to-site assignment |
 | Viewpoint pin | When the viewpoint slot has a unique **homeworld baseline profile** match, treat that planet as **definite** slot-anchored and fix ring rotation |
-| Other ring HW sites | Remaining geometric HW planets are **orphan homeworld candidates** (**possible**) -- do not cross-product bind them to rival slots in v1 baseline |
+| Other ring HW sites | Remaining geometric HW planets are **orphan homeworld candidates** (**possible**) only when they also meet the **homeworld cluster constraint** (ring geometry AND cluster -- not OR). Do not cross-product bind them to rival slots in v1 baseline |
 | Co-sector cull | Once a sector has a **definite** homeworld, drop other inferred candidates in that same angular sector (possibles and evidence-promoted orphan definites). Prefer slot-anchored over orphan when choosing which inferred definite to keep; never cull **user-asserted** rows |
 | Single planet in sector | **Definite** when baseline weak but geometry leaves no plausible alternative in that slot's arc (stronger once overlays/#35 land) |
 
-**Homeworld cluster constraint** (all map shapes that still have traditional HWs): count planets within 81 LY and within 81--162 LY; compare to `verycloseplanets` and `closeplanets`. Use this to construct **orphan** HW-like sites even when ring/sector math does not apply.
+**Homeworld cluster constraint** (all map shapes that still have traditional HWs): count planets within 81 LY and within 81--162 LY; compare to `verycloseplanets` and `closeplanets`. Required for circular **ring-site** orphans as well as off-ring / non-circular orphan construction -- geometry alone does not waive the cluster minima.
 
 When no planet is pinned for a slot, [#35](https://github.com/SteveDraper/Planets-Console/issues/35) emits **homeworld region overlay** entries on shared **`regionOverlays`** (boundary geometry for equal angular sectors on the circular ring, plus optional 81/162 LY envelope disks). Grill locks for #35 paint:
 
@@ -197,21 +197,26 @@ Strengthens **where** a HW is (confidence on existing candidates). Does **not** 
 
 Strengthens **homeworld owner** (whose HW / sector). Signals: ship proximity + ship-age max-travel envelopes (sector set reduction / unique sector pin); direct sensor sightings revealing planetary ownership. Out of scope for #36.
 
-#### 4.3.3 Homeworld layout prior selection ([#36](https://github.com/SteveDraper/Planets-Console/issues/36))
+#### 4.3.3 Homeworld layout prior selection ([#36](https://github.com/SteveDraper/Planets-Console/issues/36), upgraded by [#270](https://github.com/SteveDraper/Planets-Console/issues/270))
 
 Opinionated joint set over **homeworld sectors** (same eligibility gate as sector overlay emission: circular + round + epic|standard + viewpoint pin). Not a third confidence tier.
 
 | Lock | Rule |
 |------|------|
 | Status | **`isMostProbable`** on possible candidates only; orthogonal to `confidence_tier` |
-| Cost | Equal family weight: mean of abs(pct(clockwise-neighbor) - 50) plus mean of abs(pct(center-distance) - 50) over unpinned members; asset tables |
+| Cost | Equal family weight: mean of abs(pct(clockwise-neighbor) - 50) plus mean of abs(pct(center-distance) - 50) over unpinned members; asset tables. Cost evaluation lives outside the replaceable solver. |
 | Neighbor metric | Clockwise-neighbor (angle-sorted ring), matching asset sampling -- not true nearest-Euclidean |
 | Pinned sectors | Definite is the fixed set member; no most-probable label |
-| Empty sectors | **Homeworld layout stand-in**: one fixed unobserved band sample (nearest sector mid among planet-scan-unobserved samples) closes the ring during joint selection; contributes to both cost families; not a candidate / not drawn. Fully scanned empty sector -> does not participate. Per-combo continuous stand-in search is not used (hangs map GETs on dense sectors). |
-| Choice bound | At most four possibles per sector (nearest sector mid) enter the joint product |
+| Empty sectors | **Homeworld layout stand-in**: synthetic position in planet-scan-unobserved band area closes the ring; contributes to both cost families; not a candidate / not drawn. Fully scanned empty sector -> does not participate. After discrete SA, place stand-ins by alternating coordinate descent over unobserved **sample-grid** points (deterministic sector-index sweep order; layout-prior cost; replaceable scored-sample hook for a later launch-consistency term -- not #270; hard iteration safety cap). |
+| Solver boundary | Replaceable pure solver: given sector participation + search space + budget, returns chosen planet ids, stand-in positions, and cost/tie metadata. Sector build, eligibility, cost, fingerprint, persist, and annotate stay outside. |
+| Search shape (#270) | Discrete-first: greedy init from pinned definites, then seeded time-budgeted simulated annealing over choice-sector planets (cheap/fixed stand-ins during anneal); then sample-grid stand-in refine on the incumbent (outside stop-gate; small hard iter safety cap). **Greedy init:** grow from the assigned set (pins + already chosen); when multiple frontier choice sectors are eligible to extend next, prefer the sector with fewest possibles; within that sector pick the planet minimizing full-ring layout-prior cost given the current partial assignment and fixed mid stand-ins. SA legal set = all possibles in the sector; proposal distribution biased toward nearer sector mid (and/or better local cost delta) -- not a hard top-K product cap. Exact global optimum when budget allows is a goal, not mandatory every request. |
+| Solver implementations | `#36` capped product + fixed mid stand-in remains as `EnumeratingLayoutPriorSolver` (regression / fixtures / emergency config). Production default is `AnnealingLayoutPriorSolver` (`layout_prior_solver: anneal`). YAML exposes `layout_prior_budget_ms` (default **150**) + solver selector only. SA cooling, moves, and proposal bias live in code and may be **problem-size adaptive** (e.g. function of choice-sector count, possibles, planet count, and/or layout category); coefficients are chosen via fixtures, not YAML tables. Modules: `layout_prior.py` (facade), `layout_prior_problem.py`, `layout_prior_cost.py`, `layout_prior_solver.py`, `layout_prior_stop_gate.py`, `layout_prior_enumerate.py`, `layout_prior_anneal.py`, `layout_prior_refine.py`. |
+| Implementation phases | **Phase 1:** extract pure `LayoutPriorSolver` boundary; move current enumerator behind it; behavior and `LAYOUT_PRIOR_ALGORITHM_VERSION` unchanged (fixture parity). **Phase 2:** add SA + sample-grid refine solver; switch default; bump `LAYOUT_PRIOR_ALGORITHM_VERSION`. Later material changes to solver/cost/stand-in policy (including cooling formulas that change selections) bump again. |
+| Anytime / determinism | Configurable computation budget via a pluggable **stop-gate** polled each discrete SA step (production: wall-clock deadline; tests: step count). Continuous/sample stand-in refine runs after SA and is outside the gate (small hard iteration safety cap only). Incumbent cost must not worsen as budget increases under a comparable gate. SA RNG seeded from shell scope + input fingerprint + algorithm version (`game_id`, turn, perspective, fingerprint, `LAYOUT_PRIOR_ALGORITHM_VERSION`) so same inputs + version + step gate => same selected planet-id set. Production default **`layout_prior_budget_ms`** is **150** (conservative interactive default for dense circular maps; not a CI wall-clock lock). |
+| Follow-on (not #270) | **Stand-in launch consistency** ([#273](https://github.com/SteveDraper/Planets-Console/issues/273)): bias stand-in sample scores using one-turn / warp² (Grav) ship geometry and optional heading/waypoint back-track -- distinct from **ship origin distance signal** (which only strengthens existing candidate planets). |
 | Ties | Lexicographically smaller selected planet-id tuple |
 | Wire / UI | Shared map+table field; double-layer dotted ring on map; table cue |
-| Persistence | Shell turn only: `layoutPriorSelection` on that turn's evidence aggregate (`algorithmVersion` + `promotionThreshold` + `inputFingerprint` of post-promote/cull candidates + `mostProbablePlanetIds`). Reuse when algorithm version, threshold, and fingerprint all match current inputs; recompute+rewrite on any mismatch. `LAYOUT_PRIOR_ALGORITHM_VERSION` covers cost/stand-in/tie-break policy only. Intermediate refine turns do not compute or store selection. Evidence rewrite/invalidation clears it. |
+| Persistence | Shell turn only: `layoutPriorSelection` on that turn's evidence aggregate (`algorithmVersion` + `promotionThreshold` + `inputFingerprint` of post-promote/cull candidates + `mostProbablePlanetIds`). Reuse when algorithm version, threshold, and fingerprint all match current inputs; recompute+rewrite on any mismatch. `LAYOUT_PRIOR_ALGORITHM_VERSION` covers solver identity + cost/stand-in/tie-break policy. Intermediate refine turns do not compute or store selection. Evidence rewrite/invalidation clears it. ADR: [0009](../adr/0009-homeworld-layout-prior-budgeted-solver.md). |
 
 **Evidence does not replace baseline;** it adjusts confidence on candidates already hypothesized from baseline + geometry.
 
@@ -354,6 +359,13 @@ Hybrid phases (each independently reviewable):
 3. **Layout prior + most-probable** -- joint selection, stand-ins, `isMostProbable` on candidate view wire; Core tests (incl. game 680224-style empty nebular sector).
 4. **FE markers + table cue** -- Zod `isMostProbable`; double dotted ring; tabular cue.
 
+### 11.4 Issue #270 phased plan
+
+Full plan: [plan-issue-270-layout-prior-budgeted-solver.md](plan-issue-270-layout-prior-budgeted-solver.md). ADR: [0009](adr/0009-homeworld-layout-prior-budgeted-solver.md). Follow-on launch consistency: [#273](https://github.com/SteveDraper/Planets-Console/issues/273).
+
+1. **Encapsulate enumerator** -- `LayoutPriorSolver` boundary; shared cost outside solvers; `EnumeratingLayoutPriorSolver` (#36 behavior); no algorithm version bump; fixture selection parity.
+2. **SA + sample-grid refine** -- greedy frontier init; seeded size-aware SA under pluggable stop-gate; alternating sample-grid stand-in refine + #273 scored-sample hook; default switch; bump `LAYOUT_PRIOR_ALGORITHM_VERSION`; tune `layout_prior_budget_ms` on dense maps.
+
 ---
 
 ## 12. Known gaps and edge cases
@@ -380,3 +392,4 @@ Hybrid phases (each independently reviewable):
 | 2026-07-26 | #35: region overlay hover facts on wire (`candidateCount`, `playerLabel`); FE formats tooltip copy (ADR 0008) |
 | 2026-07-26 | #36 grill: location vs ownership evidence split; layout prior most-probable + stand-ins; definite-neighborhood cull; phased plan §11.3; **homeworld owner** terminology |
 | 2026-07-27 | Layout prior: fixed stand-in + ≤4 choices/sector (map GET hang on dense games); shell-turn versioned `layoutPriorSelection` persistence |
+| 2026-07-28 | #270 grill: budgeted anytime layout prior; pure solver boundary; discrete greedy+seeded SA then sample-grid stand-in refine; keep enumerator as alternate impl; phase 1 encapsulate then phase 2 SA; ADR 0009; CONTEXT stand-in/selection updated |
