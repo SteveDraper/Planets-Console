@@ -226,6 +226,8 @@ def test_definite_sectors_never_most_probable(template_planet, sample_turn) -> N
     by_id = {row.planet_id: row for row in annotated}
     assert by_id[pin.id].is_most_probable is False
     assert by_id[orphan.id].is_most_probable is True
+    # Golden parity: definite sectors never contribute most-probable ids.
+    assert {row.planet_id for row in annotated if row.is_most_probable} == {orphan.id}
 
 
 def test_tie_break_prefers_lex_smaller_planet_id(template_planet, sample_turn) -> None:
@@ -310,14 +312,22 @@ def test_tie_break_prefers_lex_smaller_planet_id(template_planet, sample_turn) -
     by_id = {row.planet_id: row for row in annotated}
     assert by_id[low_id.id].is_most_probable is True
     assert by_id[high_id.id].is_most_probable is False
+    # Golden parity: lex-smaller planet id wins flat-cost ties.
+    assert {row.planet_id for row in annotated if row.is_most_probable} == {low_id.id}
 
 
 def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> None:
     """Dense possibles must not explode the joint product (map hang regression)."""
     from api.analytics.homeworld_locator.layout_prior import (
         MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR,
-        _build_sector_states,
+        build_sector_layout_states,
     )
+    from api.analytics.homeworld_locator.layout_prior_enumerate import (
+        EnumeratingLayoutPriorSolver,
+        nearest_mid_choice_ids,
+    )
+    from api.analytics.homeworld_locator.layout_prior_problem import LayoutPriorProblem
+    from api.analytics.homeworld_locator.layout_prior_stop_gate import NeverStopGate
 
     turn, pin = _eligible_turn(sample_turn, template_planet)
     center = (2000.0, 2000.0)
@@ -372,9 +382,10 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
     asset = _stub_layout_asset()
     r_inner, r_outer = asset.center_distance_band("standard")
     half = math.pi / player_count
-    states = _build_sector_states(
+    planets_by_id = {planet.id: planet for planet in planets}
+    states = build_sector_layout_states(
         candidates=tuple(candidates),
-        planets_by_id={planet.id: planet for planet in planets},
+        planets_by_id=planets_by_id,
         pin=planets[0],
         pin_angle=pin_angle,
         player_count=player_count,
@@ -387,7 +398,19 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         nebulas=(),
     )
     choice = next(state for state in states if state.kind == "choice")
-    assert len(choice.choice_planet_ids) == MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR
+    # Problem keeps the full legal set; enumerator alone applies the hard cap.
+    assert len(choice.choice_planet_ids) == 8
+    problem = LayoutPriorProblem(
+        sector_states=states,
+        planets_by_id=planets_by_id,
+        center=center,
+        r_inner=r_inner,
+        r_outer=r_outer,
+        distributions=asset.for_category("standard"),
+    )
+    assert len(nearest_mid_choice_ids(choice, problem)) == MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR
+    solution = EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate())
+    assert len(solution.chosen_planet_ids_by_sector) == 1
     # Selection still completes and marks one most-probable.
     annotated = apply_layout_prior_most_probable(
         tuple(candidates),
@@ -398,6 +421,99 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         map_center=center,
     )
     assert sum(1 for row in annotated if row.is_most_probable) == 1
+    assert {row.planet_id for row in annotated if row.is_most_probable} == set(
+        solution.chosen_planet_ids_by_sector.values()
+    )
+
+
+def test_layout_prior_solver_injection_honors_fixed_choice(template_planet, sample_turn) -> None:
+    """Injectable LayoutPriorSolver proves annotate path is solver-replaceable."""
+    from api.analytics.homeworld_locator.layout_prior_solver import LayoutPriorSolution
+
+    turn, pin = _eligible_turn(sample_turn, template_planet)
+    center = (2000.0, 2000.0)
+    radius = 550
+    player_count = 11
+    pin_angle = 0.0
+    sector_angle = pin_angle + (2.0 * math.pi / player_count)
+    other_angle = pin_angle + 2.0 * (2.0 * math.pi / player_count)
+    pin_planet = _planet(
+        template_planet,
+        planet_id=1,
+        x=int(center[0] + radius * math.cos(pin_angle)),
+        y=int(center[1] + radius * math.sin(pin_angle)),
+        ownerid=1,
+    )
+    preferred = _planet(
+        template_planet,
+        planet_id=20,
+        x=int(center[0] + radius * math.cos(sector_angle)),
+        y=int(center[1] + radius * math.sin(sector_angle)),
+    )
+    ignored = _planet(
+        template_planet,
+        planet_id=21,
+        x=int(center[0] + (radius + 20) * math.cos(sector_angle)),
+        y=int(center[1] + (radius + 20) * math.sin(sector_angle)),
+    )
+    other_sector = _planet(
+        template_planet,
+        planet_id=30,
+        x=int(center[0] + radius * math.cos(other_angle)),
+        y=int(center[1] + radius * math.sin(other_angle)),
+    )
+    turn = replace(turn, planets=[pin_planet, preferred, ignored, other_sector])
+    definite = HomeworldCandidateRecord(
+        planet_id=pin_planet.id,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    preferred_row = HomeworldCandidateRecord(
+        planet_id=preferred.id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    ignored_row = HomeworldCandidateRecord(
+        planet_id=ignored.id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    other_row = HomeworldCandidateRecord(
+        planet_id=other_sector.id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    view = _view(definite, preferred_row, ignored_row, other_row)
+
+    class _FixedSolver:
+        def solve(self, problem, *, stop_gate):
+            del stop_gate
+            choice_sectors = [s for s in problem.sector_states if s.kind == "choice"]
+            assert choice_sectors
+            # Force a specific planet regardless of cost ranking.
+            chosen = {choice_sectors[0].sector_index: preferred.id}
+            return LayoutPriorSolution(
+                chosen_planet_ids_by_sector=chosen,
+                stand_in_positions_by_sector={},
+                cost=0.0,
+                tie_key=tuple(sorted(chosen.items())),
+            )
+
+    annotated = apply_layout_prior_most_probable(
+        (definite, preferred_row, ignored_row, other_row),
+        turn=turn,
+        view=view,
+        player_count=player_count,
+        layout_asset=_stub_layout_asset(),
+        map_center=center,
+        solver=_FixedSolver(),
+    )
+    by_id = {row.planet_id: row for row in annotated}
+    assert by_id[preferred.id].is_most_probable is True
+    assert by_id[ignored.id].is_most_probable is False
+    assert by_id[other_sector.id].is_most_probable is False
+    assert by_id[pin_planet.id].is_most_probable is False
+    assert {row.planet_id for row in annotated if row.is_most_probable} == {preferred.id}
 
 
 def test_empty_nebular_sector_stand_in_does_not_block_most_probable(

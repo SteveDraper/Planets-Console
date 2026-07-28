@@ -39,6 +39,7 @@ The amalgamated config has three top-level keys:
 | `homeworld_locator` | object | see below | Server-side **homeworld locator config** (YAML, not SPA UI). Nested fields below. |
 | `homeworld_locator.min_baseline_clans` | integer | `10000` | Floor clan count for **homeworld baseline profile** matching (below default `homeworldclans`, above casual colonies). |
 | `homeworld_locator.evidence_promotion_threshold` | integer | `2` | Independent evidence hits required for **possible → definite** during evidence refine materialize. |
+| `homeworld_locator.layout_prior_solver` | string | `enumerate` | Layout-prior discrete solver. Phase 1: `enumerate` only (`EnumeratingLayoutPriorSolver`, capped product). Additional names land with #270 Phase 2. |
 
 ### `bff` (BFF)
 
@@ -62,6 +63,7 @@ api:
   homeworld_locator:
     min_baseline_clans: 10000
     evidence_promotion_threshold: 2
+    layout_prior_solver: enumerate
 
 bff:
   cors_origins:

@@ -15,6 +15,9 @@ class HomeworldLocatorConfig:
     evidence_promotion_threshold: int = 2
     """Independent evidence hits required for possible -> definite."""
 
+    layout_prior_solver: str = "enumerate"
+    """Layout-prior discrete solver: ``enumerate`` (#36 capped product)."""
+
 
 @dataclass(frozen=True)
 class ApiConfig:
@@ -48,7 +51,7 @@ class ApiConfig:
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
 
     homeworld_locator: HomeworldLocatorConfig = field(default_factory=HomeworldLocatorConfig)
-    """Homeworld locator analytic policy (min baseline clans, evidence promotion threshold)."""
+    """Homeworld locator policy (baseline clans, evidence threshold, layout-prior solver)."""
 
 
 def get_config() -> ApiConfig:
