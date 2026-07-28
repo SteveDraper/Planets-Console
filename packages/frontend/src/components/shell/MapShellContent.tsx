@@ -123,7 +123,7 @@ function MapLayerErrorBanner({ error }: { error: unknown }) {
       className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-black/90 px-4 py-1 text-xs text-red-300/90"
       role="alert"
     >
-      Some map analytics failed. {detail}
+      {detail}
     </p>
   )
 }
