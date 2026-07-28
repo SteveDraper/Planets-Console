@@ -54,6 +54,16 @@ class _FleetPlayerOrchestratorRun:
     root_scope: ComputeScope
 
 
+@dataclass(frozen=True)
+class _EnqueueAdmissionEarlyReturn:
+    """Early return from ``enqueue_player_run`` admission checks under the lock.
+
+    ``session`` is an existing run to reuse, or ``None`` to reject.
+    """
+
+    session: FleetPlayerStreamSession | None
+
+
 class FleetTableStreamScheduler:
     """Table-stream adapter: one orchestrator submission per player (fair submit).
 
@@ -109,49 +119,65 @@ class FleetTableStreamScheduler:
         persistence: FleetSnapshotPersistenceService,
         stream_token: str | None = None,
     ) -> FleetPlayerStreamSession | None:
+        """Admit one fleet player run and submit ``force_fresh``.
+
+        Persistence reads (``get_ledger`` / chain-anchor walk / deep-copy) and
+        ``orchestrator.submit`` must run **outside** ``self._lock``. Scores
+        ``tier_solve`` admits call ``reschedule_fleet_table_player`` on the pool
+        worker; holding this lock across storage deep-copy wedged all workers and
+        the fleet multiplex ``owns_table_stream`` poll (game 680224 turn 13→14).
+        """
         submit_binding: _FleetStreamOrchestratorBinding | None = None
         submit_scope: ComputeScope | None = None
+        host_turn = session.turn
+        host_turn_number = host_turn.settings.turn
+        player_id = session.player_id
+        game_id = fleet_services.game_id
+        perspective = fleet_services.perspective
+
         with self._lock:
-            if (
-                stream_token is not None
-                and self._scope_guard.active_table_stream_token != stream_token
-            ):
-                return None
-            for existing in self._runs.values():
-                if existing.session.player_id == session.player_id:
-                    return existing.session
+            early = self._enqueue_admission_early_return_locked(
+                player_id, stream_token=stream_token
+            )
+            if early is not None:
+                return early.session
 
-            if stream_token is None:
-                return None
+        # Ledger load deep-copies the fleet document -- never under ``self._lock``.
+        before_persisted = persistence.get_ledger(
+            game_id,
+            perspective,
+            host_turn_number,
+            player_id,
+        )
+        wire_before = _initial_wire_before_ledger(
+            persistence=persistence,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            host_turn=host_turn,
+            before_persisted=before_persisted,
+        )
 
+        with self._lock:
+            early = self._enqueue_admission_early_return_locked(
+                player_id, stream_token=stream_token
+            )
+            if early is not None:
+                return early.session
+            assert stream_token is not None
             binding = self._binding_for_stream_locked(
                 stream_token,
-                host_turn=session.turn,
+                host_turn=host_turn,
                 fleet_services=fleet_services,
             )
-            host_turn_number = session.turn.settings.turn
-            player_id = session.player_id
-            before_persisted = persistence.get_ledger(
-                fleet_services.game_id,
-                fleet_services.perspective,
-                host_turn_number,
-                player_id,
-            )
             progress_tracker = FleetLedgerWireProgressTracker(
-                host_turn=session.turn,
-                wire_before=_initial_wire_before_ledger(
-                    persistence=persistence,
-                    game_id=fleet_services.game_id,
-                    perspective=fleet_services.perspective,
-                    player_id=player_id,
-                    host_turn=session.turn,
-                    before_persisted=before_persisted,
-                ),
+                host_turn=host_turn,
+                wire_before=wire_before,
             )
             root_scope = ComputeScope(
                 analytic_id=ANALYTIC_ID,
-                game_id=fleet_services.game_id,
-                perspective=fleet_services.perspective,
+                game_id=game_id,
+                perspective=perspective,
                 turn=host_turn_number,
                 player_id=player_id,
             )
@@ -181,6 +207,25 @@ class FleetTableStreamScheduler:
                 )
             )
         return session
+
+    def _enqueue_admission_early_return_locked(
+        self,
+        player_id: int,
+        *,
+        stream_token: str | None,
+    ) -> _EnqueueAdmissionEarlyReturn | None:
+        """Return an early outcome, or ``None`` when admission may proceed.
+
+        ``session`` is the existing run to reuse, or ``None`` to reject.
+        """
+        if stream_token is not None and self._scope_guard.active_table_stream_token != stream_token:
+            return _EnqueueAdmissionEarlyReturn(session=None)
+        for existing in self._runs.values():
+            if existing.session.player_id == player_id:
+                return _EnqueueAdmissionEarlyReturn(session=existing.session)
+        if stream_token is None:
+            return _EnqueueAdmissionEarlyReturn(session=None)
+        return None
 
     def cancel_player_run(self, run_id: str) -> None:
         """Token-only cancel -- no scores-style shell admission or abort_scope.

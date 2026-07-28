@@ -31,7 +31,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 from api.transport.fleet_table_stream import fleet_complete_event
 
-from tests.table_stream_lock_helpers import assert_stream_lock_not_held
+from tests.table_stream_lock_helpers import assert_lock_not_held, assert_stream_lock_not_held
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -698,3 +698,106 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
     assert controller.reschedule_player(player_id) is True
     assert nest_depth["n"] >= 2
     assert player_id in controller.scheduled_rows
+
+
+def test_enqueue_player_run_does_not_hold_scheduler_lock_across_get_ledger(
+    sample_turn,
+    monkeypatch,
+    memory_backend,
+    request,
+) -> None:
+    """Persistence deep-copy must not run under fleet scheduler ``_lock``.
+
+    Production hang (game 680224, turn 13→14): scores ``tier_solve`` admitted a
+    solution on each pool worker → ``on_inference_evidence_updated`` →
+    ``reschedule_fleet_table_player`` → ``enqueue_player_run`` held ``_lock``
+    across ``get_ledger`` / ``deep_copy_value``. Sibling workers blocked in
+    ``cancel_player_run`` and the fleet multiplex poll blocked in
+    ``owns_table_stream`` (timeline frozen; ~0% CPU; multi-GB RSS).
+    """
+    import concurrent.futures
+
+    from api.analytics.fleet.compute_services import (
+        FleetComputeServices,
+        build_ephemeral_fleet_compute_services,
+    )
+    from api.analytics.fleet.fleet_table_player_run import FleetPlayerStreamSession
+    from api.compute.orchestrator import ComputeOrchestrator
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_fleet_table_stream_registry_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    scheduler = FleetTableStreamScheduler()
+    persistence = FleetSnapshotPersistenceService(memory_backend)
+    ephemeral = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    fleet_services = FleetComputeServices(
+        persistence=persistence,
+        game_id=628580,
+        perspective=1,
+        load_turn=ephemeral.load_turn,
+        inference_materialization=ephemeral.inference_materialization,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    scope = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope)
+
+    def cleanup() -> None:
+        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+        reset_fleet_table_stream_registry_for_tests()
+        reset_orchestrators_for_tests()
+        reset_compute_worker_pool_for_tests(worker_count=1)
+        reset_fleet_table_stream_scheduler_for_tests()
+
+    request.addfinalizer(cleanup)
+
+    real_get_ledger = persistence.get_ledger
+    saw_get_ledger = {"n": 0}
+
+    def get_ledger_asserts_lock_free(*args, **kwargs):
+        saw_get_ledger["n"] += 1
+        assert_lock_not_held(
+            scheduler._lock,
+            message=(
+                "enqueue_player_run held scheduler _lock across get_ledger "
+                "(680224 turn-14 hang fingerprint)"
+            ),
+        )
+        # Concurrent cancel and multiplex ownership polls must take the lock
+        # during persistence I/O (both blocked in the production hang).
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            cancel_future = pool.submit(scheduler.cancel_player_run, "nonexistent-run")
+            owns_future = pool.submit(scheduler.owns_table_stream, stream_token)
+            try:
+                cancel_future.result(timeout=2.0)
+                assert owns_future.result(timeout=2.0) is True
+            except concurrent.futures.TimeoutError as exc:
+                raise AssertionError(
+                    "cancel_player_run or owns_table_stream blocked on scheduler "
+                    "_lock during get_ledger (680224 turn-14 hang fingerprint)"
+                ) from exc
+        return real_get_ledger(*args, **kwargs)
+
+    monkeypatch.setattr(persistence, "get_ledger", get_ledger_asserts_lock_free)
+    monkeypatch.setattr(ComputeOrchestrator, "submit", lambda self, request: None)
+
+    session = FleetPlayerStreamSession(
+        player_id=player_id,
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    result = scheduler.enqueue_player_run(
+        session,
+        fleet_services=fleet_services,
+        persistence=persistence,
+        stream_token=stream_token,
+    )
+    assert result is session
+    assert saw_get_ledger["n"] >= 1
+    assert player_id in {run.session.player_id for run in scheduler._runs.values()}
