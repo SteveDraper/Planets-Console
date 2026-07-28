@@ -349,8 +349,8 @@ Which **Player** (by 1-based slot) a **homeworld candidate** or **homeworld sect
 _Avoid_: perspective (for this concept in prose), viewpoint, conflating sensor picture slot with HW attribution
 
 **Homeworld inference baseline**:
-The earliest available **TurnInfo** (typically turn 1) used as the primary source for planet ownership, population, climate, and map-gen geometry signals in the **homeworld locator**. When turn 1 is not stored, the locator **auto-ensures** turn 1 when credentials allow; if ensure fails, falls back to the earliest stored turn with **baseline degraded** warning in the **homeworld locator panel**. Baseline facts are not recomputed from the shell turn alone.
-_Avoid_: inference turn, T1-only mode
+The earliest available **TurnInfo** (typically turn 1) used as the primary source for planet ownership, population, climate, and map-gen geometry signals in the **homeworld locator**. When turn 1 is not stored, the locator **auto-ensures** turn 1 when credentials allow; if ensure fails, falls back to the earliest stored turn with **baseline degraded** warning in the **homeworld locator panel**. Baseline facts are not recomputed from the shell turn alone. The same login-backed auto-ensure fills **missing intermediate turns** on the evidence refine self-chain when a sparse local store would otherwise block contiguous refine through the shell turn.
+_Avoid_: treating shell turn as baseline, silent fallback without UI signal, inference turn, T1-only mode, requiring every historical turn to already be on disk when credentials can fetch them
 
 **Baseline degraded**:
 **Homeworld locator** state computed from a baseline turn other than turn 1 (or before turn 1 ensure completes). Baseline-profile **definite** matches are treated cautiously; the panel shows which turn was used and prompts loading turn 1 when possible.

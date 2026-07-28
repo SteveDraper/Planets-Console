@@ -212,7 +212,7 @@ def test_export_ensure_raises_on_missing_intermediate_turn(persistence) -> None:
         load_turn=lambda n: turns.get(n),
         export_services={ANALYTIC_ID: services},
     ).exports
-    with pytest.raises(ValidationError, match="turn 2 is not stored"):
+    with pytest.raises(ValidationError, match="sign in to auto-fetch"):
         ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
 
     failures = recent_ensure_failure_reports(game_id=628580, perspective=1)
@@ -221,6 +221,90 @@ def test_export_ensure_raises_on_missing_intermediate_turn(persistence) -> None:
     assert failures[0].shell_turn == 3
     wire = get_layout_prior_reports_wire(game_id=628580, perspective=1, turn=3)
     assert wire["ensureFailures"][0]["missingTurn"] == 2
+
+
+def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> None:
+    """Login-backed ensure_turn fills holes so the evidence chain can continue."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    turn_three = replace(turn_one, settings=replace(turn_one.settings, turn=3))
+    turns = {1: turn_one, 3: turn_three}
+    ensure_calls: list[int] = []
+
+    def ensure_turn(turn_number: int):
+        ensure_calls.append(turn_number)
+        if turn_number == 2:
+            turns[2] = turn_two
+            return turn_two
+        return None
+
+    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+
+    ctx = make_analytic_compute_context(
+        turn_three,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
+    assert ensure_calls == [2]
+    assert persistence.get_evidence_aggregate(628580, 1, 3) is not None
+
+
+def test_export_ensure_reports_fetch_failure_after_partial_autofetch(persistence) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+        clear_ensure_failure_reports,
+        recent_ensure_failure_reports,
+    )
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+    from api.errors import ValidationError
+
+    clear_ensure_failure_reports()
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    turn_four = replace(turn_one, settings=replace(turn_one.settings, turn=4))
+    turns = {1: turn_one, 4: turn_four}
+
+    def ensure_turn(turn_number: int):
+        if turn_number == 2:
+            turns[2] = turn_two
+            return turn_two
+        return None  # turn 3 fetch fails
+
+    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+    ctx = make_analytic_compute_context(
+        turn_four,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    with pytest.raises(ValidationError, match="could not load turn 3"):
+        ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
+    failures = recent_ensure_failure_reports(game_id=628580, perspective=1)
+    assert failures[0].reason == "turn_fetch_failed"
+    assert failures[0].missing_turn == 3
 
 
 def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
