@@ -24,6 +24,7 @@ from api.analytics.homeworld_locator.layout_prior_problem import (
     build_layout_prior_problem,
     build_sector_layout_states,
 )
+from api.analytics.homeworld_locator.layout_prior_run_history import record_layout_prior_report
 from api.analytics.homeworld_locator.layout_prior_solver import (
     LAYOUT_PRIOR_SOLVER_ANNEAL,
     LAYOUT_PRIOR_SOLVER_ENUMERATE,
@@ -137,6 +138,7 @@ def try_layout_prior_problem(
         seed_turn=int(turn.settings.turn),
         seed_perspective=int(turn.player.id),
         seed_input_fingerprint=layout_prior_input_fingerprint(candidates),
+        layout_category=category,
     )
 
 
@@ -175,8 +177,9 @@ def apply_layout_prior_most_probable(
         resolved_gate = _default_stop_gate_for_injected_solver(resolved_solver)
     else:
         resolved_gate = layout_prior_stop_gate_from_config()
-    solution = resolved_solver.solve(problem, stop_gate=resolved_gate)
-    most_probable_ids = frozenset(solution.chosen_planet_ids_by_sector.values())
+    result = resolved_solver.solve(problem, stop_gate=resolved_gate)
+    record_layout_prior_report(result.report)
+    most_probable_ids = frozenset(result.solution.chosen_planet_ids_by_sector.values())
     return tuple(
         replace(row, is_most_probable=row.planet_id in most_probable_ids) for row in candidates
     )

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from api.analytics.homeworld_locator.layout_prior_problem import LayoutPriorProblem
+from api.analytics.homeworld_locator.layout_prior_report import LayoutPriorSolverRunReport
 from api.analytics.homeworld_locator.layout_prior_stop_gate import (
     DeadlineStopGate,
     NeverStopGate,
@@ -35,17 +36,24 @@ class LayoutPriorSolution:
     tie_key: tuple[tuple[int, int], ...]
 
 
+@dataclass(frozen=True)
+class LayoutPriorSolveResult:
+    """Selection plus homeworld-owned solver run telemetry (#274)."""
+
+    solution: LayoutPriorSolution
+    report: LayoutPriorSolverRunReport
+
+
 class LayoutPriorSolver(Protocol):
-    """Pure solver: sector participation + stop-gate -> discrete selection."""
+    """Pure solver: sector participation + stop-gate -> selection + run report."""
 
     def solve(
         self,
         problem: LayoutPriorProblem,
         *,
         stop_gate: StopGate,
-    ) -> LayoutPriorSolution:
-        """Return the best incumbent selection found under ``stop_gate``."""
-
+    ) -> LayoutPriorSolveResult:
+        """Return the best incumbent selection and a structured run report."""
 
 def layout_prior_solver_from_name(name: str) -> LayoutPriorSolver:
     """Construct a named layout-prior solver implementation."""

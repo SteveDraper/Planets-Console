@@ -217,6 +217,7 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 | Ties | Lexicographically smaller selected planet-id tuple |
 | Wire / UI | Shared map+table field; double-layer dotted ring on map; table cue |
 | Persistence | Shell turn only: `layoutPriorSelection` on that turn's evidence aggregate (`algorithmVersion` + `promotionThreshold` + `inputFingerprint` of post-promote/cull candidates + `mostProbablePlanetIds`). Reuse when algorithm version, threshold, and fingerprint all match current inputs; recompute+rewrite on any mismatch. `LAYOUT_PRIOR_ALGORITHM_VERSION` covers solver identity + cost/stand-in/tie-break policy. Intermediate refine turns do not compute or store selection. Evidence rewrite/invalidation clears it. ADR: [0009](../adr/0009-homeworld-layout-prior-budgeted-solver.md). |
+| Solver telemetry (#274) | Each materialize-path solver run (not cache-hit reuse) records a structured **homeworld layout prior solver run report**: stop-gate + stop reason, timing splits, step/accept counts, greedy/pre-refine/final costs, problem-size hints, bounded incumbent-vs-step series. Process last-N ring; BFF Diagnostics **Homeworlds** tab. Homeworld-owned -- never mixed into **compute diagnostics**. |
 
 **Evidence does not replace baseline;** it adjusts confidence on candidates already hypothesized from baseline + geometry.
 
@@ -393,3 +394,4 @@ Full plan: [plan-issue-270-layout-prior-budgeted-solver.md](plan-issue-270-layou
 | 2026-07-26 | #36 grill: location vs ownership evidence split; layout prior most-probable + stand-ins; definite-neighborhood cull; phased plan §11.3; **homeworld owner** terminology |
 | 2026-07-27 | Layout prior: fixed stand-in + ≤4 choices/sector (map GET hang on dense games); shell-turn versioned `layoutPriorSelection` persistence |
 | 2026-07-28 | #270 grill: budgeted anytime layout prior; pure solver boundary; discrete greedy+seeded SA then sample-grid stand-in refine; keep enumerator as alternate impl; phase 1 encapsulate then phase 2 SA; ADR 0009; CONTEXT stand-in/selection updated |
+| 2026-07-28 | #274: layout-prior solver run telemetry (homeworld-owned report ring + Diagnostics Homeworlds tab); distinct from compute diagnostics |

@@ -160,8 +160,8 @@ def test_anneal_deterministic_under_max_steps(template_planet, sample_turn) -> N
         player_count=player_count,
     )
     solver = AnnealingLayoutPriorSolver()
-    first = solver.solve(problem, stop_gate=MaxStepsStopGate(25))
-    second = solver.solve(problem, stop_gate=MaxStepsStopGate(25))
+    first = solver.solve(problem, stop_gate=MaxStepsStopGate(25)).solution
+    second = solver.solve(problem, stop_gate=MaxStepsStopGate(25)).solution
     assert first.chosen_planet_ids_by_sector == second.chosen_planet_ids_by_sector
     assert first.tie_key == second.tie_key
     assert first.cost == pytest.approx(second.cost)
@@ -181,8 +181,8 @@ def test_anneal_improve_or_equal_with_more_steps(template_planet, sample_turn) -
         player_count=player_count,
     )
     solver = AnnealingLayoutPriorSolver()
-    few = solver.solve(problem, stop_gate=MaxStepsStopGate(5))
-    many = solver.solve(problem, stop_gate=MaxStepsStopGate(80))
+    few = solver.solve(problem, stop_gate=MaxStepsStopGate(5)).solution
+    many = solver.solve(problem, stop_gate=MaxStepsStopGate(80)).solution
     # Compare discrete mid-stand-in costs (refine is outside the gate).
     few_mid = evaluate_layout_prior_selection(problem, few.chosen_planet_ids_by_sector)
     many_mid = evaluate_layout_prior_selection(problem, many.chosen_planet_ids_by_sector)
@@ -211,7 +211,9 @@ def test_anneal_selects_outside_enumerator_top4(template_planet, sample_turn) ->
     assert 999 not in capped
     assert 999 in choice.choice_planet_ids
 
-    enum_solution = EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate())
+    enum_solution = EnumeratingLayoutPriorSolver().solve(
+        problem, stop_gate=NeverStopGate()
+    ).solution
     assert 999 not in enum_solution.chosen_planet_ids_by_sector.values()
 
     center_metric = SmoothedMetricDistribution(
@@ -241,7 +243,9 @@ def test_anneal_selects_outside_enumerator_top4(template_planet, sample_turn) ->
     assert far_score is not None and near_score is not None
     assert far_score[0] < near_score[0] - 1e-9
 
-    anneal = AnnealingLayoutPriorSolver().solve(problem, stop_gate=MaxStepsStopGate(400))
+    anneal = AnnealingLayoutPriorSolver().solve(
+        problem, stop_gate=MaxStepsStopGate(400)
+    ).solution
     assert anneal.chosen_planet_ids_by_sector.get(choice.sector_index) == 999
 
 
@@ -258,7 +262,9 @@ def test_anneal_max_steps_zero_returns_promptly(template_planet, sample_turn) ->
         player_count=player_count,
     )
     started = time.perf_counter()
-    solution = AnnealingLayoutPriorSolver().solve(problem, stop_gate=MaxStepsStopGate(0))
+    solution = AnnealingLayoutPriorSolver().solve(
+        problem, stop_gate=MaxStepsStopGate(0)
+    ).solution
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     assert solution.chosen_planet_ids_by_sector
     assert elapsed_ms < 500.0
@@ -279,9 +285,10 @@ def test_anneal_empty_neighborhood_exits_promptly(template_planet, sample_turn) 
     assert len(choice.choice_planet_ids) == 1
 
     started = time.perf_counter()
-    solution = AnnealingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate())
+    result = AnnealingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate())
     elapsed_ms = (time.perf_counter() - started) * 1000.0
-    assert solution.chosen_planet_ids_by_sector.get(choice.sector_index) == 40
+    assert result.solution.chosen_planet_ids_by_sector.get(choice.sector_index) == 40
+    assert result.report.stop_reason == "exhausted"
     assert elapsed_ms < 500.0
 
 

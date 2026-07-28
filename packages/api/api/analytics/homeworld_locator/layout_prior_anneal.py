@@ -6,6 +6,7 @@ import hashlib
 import math
 import random
 import struct
+import time
 from collections.abc import Mapping, Sequence
 
 from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
@@ -21,8 +22,25 @@ from api.analytics.homeworld_locator.layout_prior_problem import (
     SectorLayoutState,
 )
 from api.analytics.homeworld_locator.layout_prior_refine import refine_stand_in_positions
-from api.analytics.homeworld_locator.layout_prior_solver import LayoutPriorSolution
-from api.analytics.homeworld_locator.layout_prior_stop_gate import StopGate
+from api.analytics.homeworld_locator.layout_prior_report import (
+    LayoutPriorSearchStats,
+    LayoutPriorStopReason,
+    LayoutPriorTimingMs,
+    build_run_report,
+    downsample_incumbent_series,
+    problem_size_hints,
+)
+from api.analytics.homeworld_locator.layout_prior_solver import (
+    LAYOUT_PRIOR_SOLVER_ANNEAL,
+    LayoutPriorSolution,
+    LayoutPriorSolveResult,
+)
+from api.analytics.homeworld_locator.layout_prior_stop_gate import (
+    DeadlineStopGate,
+    MaxStepsStopGate,
+    StopGate,
+    stop_gate_info,
+)
 from api.analytics.homeworld_locator.sector_overlays import sector_band_geometric_center
 from api.concepts.stellar_cartography.nebula_visibility import distance_ly
 
@@ -43,42 +61,105 @@ class AnnealingLayoutPriorSolver:
         problem: LayoutPriorProblem,
         *,
         stop_gate: StopGate,
-    ) -> LayoutPriorSolution:
+    ) -> LayoutPriorSolveResult:
+        total_t0 = time.perf_counter()
         sector_states = problem.sector_states
         choice_sectors = [state for state in sector_states if state.kind == "choice"]
         stand_in_sectors = [state for state in sector_states if state.kind == "stand_in"]
         mid_stand_ins = mid_stand_in_positions(stand_in_sectors)
+        size = problem_size_hints(
+            choice_sector_count=len(choice_sectors),
+            total_possibles=sum(len(state.choice_planet_ids) for state in choice_sectors),
+            stand_in_sector_count=len(stand_in_sectors),
+            planet_count=len(problem.planets_by_id),
+            category=problem.layout_category,
+        )
+        gate_info = stop_gate_info(stop_gate)
 
         if not choice_sectors:
+            refine_t0 = time.perf_counter()
             refined = refine_stand_in_positions(
                 problem,
                 {},
                 initial_stand_in_positions=mid_stand_ins,
             )
+            refine_ms = (time.perf_counter() - refine_t0) * 1000.0
             scored = evaluate_layout_prior_selection(
                 problem, {}, stand_in_positions=refined or mid_stand_ins
             )
             cost = 0.0 if scored is None else scored[0]
-            return LayoutPriorSolution(
+            tie_key = () if scored is None else scored[1]
+            solution = LayoutPriorSolution(
                 chosen_planet_ids_by_sector={},
                 stand_in_positions_by_sector=refined or mid_stand_ins,
                 cost=cost,
-                tie_key=(),
+                tie_key=tie_key,
             )
+            total_ms = (time.perf_counter() - total_t0) * 1000.0
+            report = build_run_report(
+                game_id=problem.seed_game_id,
+                turn=problem.seed_turn,
+                perspective=problem.seed_perspective,
+                solver=LAYOUT_PRIOR_SOLVER_ANNEAL,
+                stop_gate=gate_info,
+                stop_reason="no_choices",
+                timing=LayoutPriorTimingMs(
+                    greedy_ms=0.0, sa_ms=0.0, refine_ms=refine_ms, total_ms=total_ms
+                ),
+                search=LayoutPriorSearchStats(
+                    sa_steps_attempted=0,
+                    sa_steps_accepted=0,
+                    greedy_cost=cost,
+                    pre_refine_cost=cost,
+                    final_cost=cost,
+                    tie_key=tie_key,
+                ),
+                problem_size=size,
+                incumbent_cost_series=(),
+            )
+            return LayoutPriorSolveResult(solution=solution, report=report)
 
+        greedy_t0 = time.perf_counter()
         chosen = greedy_frontier_init(problem, choice_sectors, mid_stand_ins)
+        greedy_ms = (time.perf_counter() - greedy_t0) * 1000.0
         scored = evaluate_layout_prior_selection(problem, chosen, stand_in_positions=mid_stand_ins)
         if scored is None:
-            return LayoutPriorSolution(
+            total_ms = (time.perf_counter() - total_t0) * 1000.0
+            solution = LayoutPriorSolution(
                 chosen_planet_ids_by_sector={},
                 stand_in_positions_by_sector=mid_stand_ins,
                 cost=0.0,
                 tie_key=(),
             )
+            report = build_run_report(
+                game_id=problem.seed_game_id,
+                turn=problem.seed_turn,
+                perspective=problem.seed_perspective,
+                solver=LAYOUT_PRIOR_SOLVER_ANNEAL,
+                stop_gate=gate_info,
+                stop_reason="no_choices",
+                timing=LayoutPriorTimingMs(
+                    greedy_ms=greedy_ms, sa_ms=0.0, refine_ms=0.0, total_ms=total_ms
+                ),
+                search=LayoutPriorSearchStats(
+                    sa_steps_attempted=0,
+                    sa_steps_accepted=0,
+                    greedy_cost=0.0,
+                    pre_refine_cost=0.0,
+                    final_cost=0.0,
+                    tie_key=(),
+                ),
+                problem_size=size,
+                incumbent_cost_series=(),
+            )
+            return LayoutPriorSolveResult(solution=solution, report=report)
+
         best_cost, best_tie = scored
         best_chosen = dict(chosen)
         current_cost = best_cost
         current_chosen = dict(chosen)
+        greedy_cost = best_cost
+        incumbent_samples: list[tuple[int, float]] = [(0, best_cost)]
 
         rng = random.Random(layout_prior_rng_seed(problem))
         temperature = initial_temperature(problem, choice_sectors)
@@ -94,6 +175,10 @@ class AnnealingLayoutPriorSolver:
             for state in choice_sectors
         }
 
+        sa_t0 = time.perf_counter()
+        sa_steps_attempted = 0
+        sa_steps_accepted = 0
+        neighborhood_exhausted = False
         while not stop_gate.should_stop():
             proposal = propose_neighbor(
                 current_chosen,
@@ -104,7 +189,9 @@ class AnnealingLayoutPriorSolver:
             )
             if proposal is None:
                 # No movable multi-planet choice sectors: discrete neighborhood is empty.
+                neighborhood_exhausted = True
                 break
+            sa_steps_attempted += 1
             proposed_chosen, _sector_index, _planet_id = proposal
             proposed_scored = evaluate_layout_prior_selection(
                 problem, proposed_chosen, stand_in_positions=mid_stand_ins
@@ -118,6 +205,7 @@ class AnnealingLayoutPriorSolver:
                 temperature > 1e-15 and rng.random() < math.exp(-delta / temperature)
             )
             if accept:
+                sa_steps_accepted += 1
                 current_chosen = proposed_chosen
                 current_cost = proposed_cost
                 if proposed_cost < best_cost - 1e-12 or (
@@ -126,24 +214,69 @@ class AnnealingLayoutPriorSolver:
                     best_cost = proposed_cost
                     best_tie = proposed_tie
                     best_chosen = dict(proposed_chosen)
+                    incumbent_samples.append((sa_steps_attempted, best_cost))
             temperature *= cooling
+        sa_ms = (time.perf_counter() - sa_t0) * 1000.0
+        pre_refine_cost = best_cost
+        stop_reason = _anneal_stop_reason(
+            stop_gate, neighborhood_exhausted=neighborhood_exhausted
+        )
 
+        refine_t0 = time.perf_counter()
         refined = refine_stand_in_positions(
             problem,
             best_chosen,
             initial_stand_in_positions=mid_stand_ins,
         )
+        refine_ms = (time.perf_counter() - refine_t0) * 1000.0
         final_scored = evaluate_layout_prior_selection(
             problem, best_chosen, stand_in_positions=refined or mid_stand_ins
         )
         final_cost = best_cost if final_scored is None else final_scored[0]
         final_tie = best_tie if final_scored is None else final_scored[1]
-        return LayoutPriorSolution(
+        solution = LayoutPriorSolution(
             chosen_planet_ids_by_sector=best_chosen,
             stand_in_positions_by_sector=refined or mid_stand_ins,
             cost=final_cost,
             tie_key=final_tie,
         )
+        total_ms = (time.perf_counter() - total_t0) * 1000.0
+        report = build_run_report(
+            game_id=problem.seed_game_id,
+            turn=problem.seed_turn,
+            perspective=problem.seed_perspective,
+            solver=LAYOUT_PRIOR_SOLVER_ANNEAL,
+            stop_gate=gate_info,
+            stop_reason=stop_reason,
+            timing=LayoutPriorTimingMs(
+                greedy_ms=greedy_ms, sa_ms=sa_ms, refine_ms=refine_ms, total_ms=total_ms
+            ),
+            search=LayoutPriorSearchStats(
+                sa_steps_attempted=sa_steps_attempted,
+                sa_steps_accepted=sa_steps_accepted,
+                greedy_cost=greedy_cost,
+                pre_refine_cost=pre_refine_cost,
+                final_cost=final_cost,
+                tie_key=final_tie,
+            ),
+            problem_size=size,
+            incumbent_cost_series=downsample_incumbent_series(incumbent_samples),
+        )
+        return LayoutPriorSolveResult(solution=solution, report=report)
+
+
+def _anneal_stop_reason(
+    stop_gate: StopGate,
+    *,
+    neighborhood_exhausted: bool,
+) -> LayoutPriorStopReason:
+    if neighborhood_exhausted:
+        return "exhausted"
+    if isinstance(stop_gate, DeadlineStopGate) and stop_gate.has_fired():
+        return "deadline"
+    if isinstance(stop_gate, MaxStepsStopGate) and stop_gate.has_fired():
+        return "max_steps"
+    return "exhausted"
 
 
 def layout_prior_rng_seed(problem: LayoutPriorProblem) -> int:

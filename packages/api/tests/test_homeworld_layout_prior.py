@@ -409,7 +409,9 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         distributions=asset.for_category("standard"),
     )
     assert len(nearest_mid_choice_ids(choice, problem)) == MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR
-    solution = EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate())
+    solution = EnumeratingLayoutPriorSolver().solve(
+        problem, stop_gate=NeverStopGate()
+    ).solution
     assert len(solution.chosen_planet_ids_by_sector) == 1
     # Selection still completes and marks one most-probable.
     annotated = apply_layout_prior_most_probable(
@@ -429,7 +431,18 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
 
 def test_layout_prior_solver_injection_honors_fixed_choice(template_planet, sample_turn) -> None:
     """Injectable LayoutPriorSolver proves annotate path is solver-replaceable."""
-    from api.analytics.homeworld_locator.layout_prior_solver import LayoutPriorSolution
+    from api.analytics.homeworld_locator.layout_prior_report import (
+        LayoutPriorSearchStats,
+        LayoutPriorStopGateInfo,
+        LayoutPriorTimingMs,
+        build_run_report,
+        problem_size_hints,
+    )
+    from api.analytics.homeworld_locator.layout_prior_solver import (
+        LAYOUT_PRIOR_SOLVER_ENUMERATE,
+        LayoutPriorSolution,
+        LayoutPriorSolveResult,
+    )
 
     turn, pin = _eligible_turn(sample_turn, template_planet)
     center = (2000.0, 2000.0)
@@ -493,12 +506,40 @@ def test_layout_prior_solver_injection_honors_fixed_choice(template_planet, samp
             assert choice_sectors
             # Force a specific planet regardless of cost ranking.
             chosen = {choice_sectors[0].sector_index: preferred.id}
-            return LayoutPriorSolution(
+            solution = LayoutPriorSolution(
                 chosen_planet_ids_by_sector=chosen,
                 stand_in_positions_by_sector={},
                 cost=0.0,
                 tie_key=tuple(sorted(chosen.items())),
             )
+            report = build_run_report(
+                game_id=problem.seed_game_id,
+                turn=problem.seed_turn,
+                perspective=problem.seed_perspective,
+                solver=LAYOUT_PRIOR_SOLVER_ENUMERATE,
+                stop_gate=LayoutPriorStopGateInfo(kind="never"),
+                stop_reason="exhausted",
+                timing=LayoutPriorTimingMs(
+                    greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=0.0
+                ),
+                search=LayoutPriorSearchStats(
+                    sa_steps_attempted=0,
+                    sa_steps_accepted=0,
+                    greedy_cost=0.0,
+                    pre_refine_cost=0.0,
+                    final_cost=0.0,
+                    tie_key=solution.tie_key,
+                ),
+                problem_size=problem_size_hints(
+                    choice_sector_count=len(choice_sectors),
+                    total_possibles=len(choice_sectors),
+                    stand_in_sector_count=0,
+                    planet_count=len(problem.planets_by_id),
+                    category=problem.layout_category,
+                ),
+                incumbent_cost_series=(),
+            )
+            return LayoutPriorSolveResult(solution=solution, report=report)
 
     annotated = apply_layout_prior_most_probable(
         (definite, preferred_row, ignored_row, other_row),

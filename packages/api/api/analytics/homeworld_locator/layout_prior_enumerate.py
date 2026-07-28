@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from itertools import product
 
 from api.analytics.homeworld_locator.layout_prior_cost import (
@@ -12,8 +13,18 @@ from api.analytics.homeworld_locator.layout_prior_problem import (
     LayoutPriorProblem,
     SectorLayoutState,
 )
-from api.analytics.homeworld_locator.layout_prior_solver import LayoutPriorSolution
-from api.analytics.homeworld_locator.layout_prior_stop_gate import StopGate
+from api.analytics.homeworld_locator.layout_prior_report import (
+    LayoutPriorSearchStats,
+    LayoutPriorTimingMs,
+    build_run_report,
+    problem_size_hints,
+)
+from api.analytics.homeworld_locator.layout_prior_solver import (
+    LAYOUT_PRIOR_SOLVER_ENUMERATE,
+    LayoutPriorSolution,
+    LayoutPriorSolveResult,
+)
+from api.analytics.homeworld_locator.layout_prior_stop_gate import StopGate, stop_gate_info
 from api.analytics.homeworld_locator.sector_overlays import sector_band_geometric_center
 from api.concepts.stellar_cartography.nebula_visibility import distance_ly
 
@@ -33,27 +44,61 @@ class EnumeratingLayoutPriorSolver:
         problem: LayoutPriorProblem,
         *,
         stop_gate: StopGate,
-    ) -> LayoutPriorSolution:
-        del stop_gate  # Enumerator does not poll; retained for protocol parity.
+    ) -> LayoutPriorSolveResult:
+        total_t0 = time.perf_counter()
+        gate_info = stop_gate_info(stop_gate)
         sector_states = problem.sector_states
         choice_sectors = [state for state in sector_states if state.kind == "choice"]
         stand_in_sectors = [state for state in sector_states if state.kind == "stand_in"]
         stand_in_positions = mid_stand_in_positions(stand_in_sectors)
+        size = problem_size_hints(
+            choice_sector_count=len(choice_sectors),
+            total_possibles=sum(len(state.choice_planet_ids) for state in choice_sectors),
+            stand_in_sector_count=len(stand_in_sectors),
+            planet_count=len(problem.planets_by_id),
+            category=problem.layout_category,
+        )
+
         if not choice_sectors:
-            return LayoutPriorSolution(
+            solution = LayoutPriorSolution(
                 chosen_planet_ids_by_sector={},
                 stand_in_positions_by_sector=stand_in_positions,
                 cost=0.0,
                 tie_key=(),
             )
+            total_ms = (time.perf_counter() - total_t0) * 1000.0
+            report = build_run_report(
+                game_id=problem.seed_game_id,
+                turn=problem.seed_turn,
+                perspective=problem.seed_perspective,
+                solver=LAYOUT_PRIOR_SOLVER_ENUMERATE,
+                stop_gate=gate_info,
+                stop_reason="no_choices",
+                timing=LayoutPriorTimingMs(
+                    greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=total_ms
+                ),
+                search=LayoutPriorSearchStats(
+                    sa_steps_attempted=0,
+                    sa_steps_accepted=0,
+                    greedy_cost=0.0,
+                    pre_refine_cost=0.0,
+                    final_cost=0.0,
+                    tie_key=(),
+                ),
+                problem_size=size,
+                incumbent_cost_series=(),
+            )
+            return LayoutPriorSolveResult(solution=solution, report=report)
 
         choice_options = [nearest_mid_choice_ids(sector, problem) for sector in choice_sectors]
 
         best_cost = float("inf")
         best_tie_key: tuple[tuple[int, int], ...] = ()
         best_choices: dict[int, int] = {}
+        steps = 0
 
         for combo in product(*choice_options):
+            steps += 1
             chosen_by_sector = {
                 sector.sector_index: planet_id
                 for sector, planet_id in zip(choice_sectors, combo, strict=True)
@@ -73,12 +118,36 @@ class EnumeratingLayoutPriorSolver:
                 best_tie_key = tie_key
                 best_choices = chosen_by_sector
 
-        return LayoutPriorSolution(
+        final_cost = best_cost if best_choices else 0.0
+        solution = LayoutPriorSolution(
             chosen_planet_ids_by_sector=best_choices,
             stand_in_positions_by_sector=stand_in_positions,
-            cost=best_cost if best_choices else 0.0,
+            cost=final_cost,
             tie_key=best_tie_key,
         )
+        total_ms = (time.perf_counter() - total_t0) * 1000.0
+        report = build_run_report(
+            game_id=problem.seed_game_id,
+            turn=problem.seed_turn,
+            perspective=problem.seed_perspective,
+            solver=LAYOUT_PRIOR_SOLVER_ENUMERATE,
+            stop_gate=gate_info,
+            stop_reason="exhausted",
+            timing=LayoutPriorTimingMs(
+                greedy_ms=0.0, sa_ms=total_ms, refine_ms=0.0, total_ms=total_ms
+            ),
+            search=LayoutPriorSearchStats(
+                sa_steps_attempted=steps,
+                sa_steps_accepted=0,
+                greedy_cost=final_cost,
+                pre_refine_cost=final_cost,
+                final_cost=final_cost,
+                tie_key=best_tie_key,
+            ),
+            problem_size=size,
+            incumbent_cost_series=(),
+        )
+        return LayoutPriorSolveResult(solution=solution, report=report)
 
 
 def nearest_mid_choice_ids(

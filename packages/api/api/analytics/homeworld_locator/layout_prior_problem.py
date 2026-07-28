@@ -57,6 +57,8 @@ class LayoutPriorProblem:
     seed_turn: int = 0
     seed_perspective: int = 0
     seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
+    # Layout distribution category key (epic|standard) for telemetry / cooling analysis.
+    layout_category: str | None = None
 
 
 def build_sector_layout_states(
@@ -227,6 +229,7 @@ def build_layout_prior_problem(
     seed_turn: int = 0,
     seed_perspective: int = 0,
     seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = (),
+    layout_category: str | None = None,
 ) -> LayoutPriorProblem:
     """Build the solver-facing problem from candidates and map geometry."""
     return LayoutPriorProblem(
@@ -253,4 +256,5 @@ def build_layout_prior_problem(
         seed_turn=seed_turn,
         seed_perspective=seed_perspective,
         seed_input_fingerprint=seed_input_fingerprint,
+        layout_category=layout_category,
     )
