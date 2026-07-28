@@ -41,6 +41,10 @@ def test_layout_prior_reports_empty_for_shell() -> None:
     body = response.json()
     assert body["shell"] == {"gameId": 680224, "perspective": 1, "turn": 40}
     assert body["reports"] == []
+    assert body["evidenceRefineReports"] == []
+    assert body["baselineReports"] == []
+    assert body["ensureFailures"] == []
+    assert body["evidenceRefineSummary"]["reportCount"] == 0
 
 
 def test_layout_prior_reports_returns_shell_scoped_wire() -> None:

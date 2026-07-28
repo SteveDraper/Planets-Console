@@ -256,6 +256,7 @@ class AnnealingLayoutPriorSolver:
                 pre_refine_cost=pre_refine_cost,
                 final_cost=final_cost,
                 tie_key=final_tie,
+                last_incumbent_improvement_step=incumbent_samples[-1][0],
             ),
             problem_size=size,
             incumbent_cost_series=downsample_incumbent_series(incumbent_samples),

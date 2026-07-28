@@ -291,6 +291,8 @@ def test_load_config_homeworld_locator_defaults():
     root = load_config(default_config_path=base)
     assert root.api.homeworld_locator.min_baseline_clans == 10_000
     assert root.api.homeworld_locator.evidence_promotion_threshold == 2
+    assert root.api.homeworld_locator.layout_prior_solver == "anneal"
+    assert root.api.homeworld_locator.layout_prior_budget_ms == 150
 
 
 def test_load_config_homeworld_locator_overrides(tmp_path):
@@ -301,22 +303,30 @@ def test_load_config_homeworld_locator_overrides(tmp_path):
         "  homeworld_locator:\n"
         "    min_baseline_clans: 8000\n"
         "    evidence_promotion_threshold: 3\n"
+        "    layout_prior_solver: enumerate\n"
+        "    layout_prior_budget_ms: 1500\n"
         "bff: {}\n",
         encoding="utf-8",
     )
     root = load_config(default_config_path=cfg)
     assert root.api.homeworld_locator.min_baseline_clans == 8000
     assert root.api.homeworld_locator.evidence_promotion_threshold == 3
+    assert root.api.homeworld_locator.layout_prior_solver == "enumerate"
+    assert root.api.homeworld_locator.layout_prior_budget_ms == 1500
 
 
 def test_load_config_homeworld_locator_leaf_override():
     base = FIXTURES_DIR / "base.yaml"
     root = load_config(
-        override_specs=["api.homeworld_locator.min_baseline_clans=12000"],
+        override_specs=[
+            "api.homeworld_locator.min_baseline_clans=12000",
+            "api.homeworld_locator.layout_prior_budget_ms=1500",
+        ],
         default_config_path=base,
     )
     assert root.api.homeworld_locator.min_baseline_clans == 12000
     assert root.api.homeworld_locator.evidence_promotion_threshold == 2
+    assert root.api.homeworld_locator.layout_prior_budget_ms == 1500
 
 
 def test_load_config_homeworld_locator_invalid_type_raises(tmp_path):

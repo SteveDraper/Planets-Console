@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -134,6 +135,12 @@ def compute_homeworld_baseline(
     owns the write after epoch checks. Map/table/export call
     :func:`ensure_homeworld_baseline`, which computes then persists.
     """
+    from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
+    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+        record_baseline_report,
+    )
+
+    total_t0 = time.perf_counter()
     settings_source = shell_turn if shell_turn is not None else None
     if settings_source is None:
         # Fingerprint from any stored turn; prefer earliest for stability.
@@ -161,6 +168,17 @@ def compute_homeworld_baseline(
             raise ValidationError(
                 "homeworld locator floor aggregate missing after satisfaction probe"
             )
+        record_baseline_report(
+            build_baseline_report(
+                game_id=services.game_id,
+                perspective=services.perspective,
+                baseline_turn=state.baseline_turn,
+                recomputed=False,
+                candidate_count=len(state.candidates),
+                infer_ms=0.0,
+                total_ms=(time.perf_counter() - total_t0) * 1000.0,
+            )
+        )
         return HomeworldBaselineEnsureResult(
             game_state=state,
             floor_aggregate=floor,
@@ -176,6 +194,7 @@ def compute_homeworld_baseline(
         services,
         viewpoint_player_id=viewpoint_player.id,
     )
+    infer_t0 = time.perf_counter()
     inferred = infer_homeworld_baseline_candidates(
         baseline_turn_info.planets,
         settings=baseline_turn_info.settings,
@@ -186,6 +205,7 @@ def compute_homeworld_baseline(
         starbase_planet_ids=_starbase_planet_ids(baseline_turn_info),
         min_baseline_clans=min_clans,
     )
+    infer_ms = (time.perf_counter() - infer_t0) * 1000.0
     candidates = merge_candidates_preserving_user_asserted(
         inferred=candidate_records_from_inferred(inferred),
         existing=existing.candidates if existing is not None else None,
@@ -200,6 +220,17 @@ def compute_homeworld_baseline(
         turn=baseline_turn,
         baseline_turn=baseline_turn,
         evidence_hits=(),
+    )
+    record_baseline_report(
+        build_baseline_report(
+            game_id=services.game_id,
+            perspective=services.perspective,
+            baseline_turn=baseline_turn,
+            recomputed=True,
+            candidate_count=len(candidates),
+            infer_ms=infer_ms,
+            total_ms=(time.perf_counter() - total_t0) * 1000.0,
+        )
     )
     return HomeworldBaselineEnsureResult(
         game_state=state,

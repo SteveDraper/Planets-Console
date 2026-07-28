@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
 from api.analytics.homeworld_locator.cull_candidates import TCullable
+from api.analytics.homeworld_locator.evidence_refine_report import (
+    EvidenceRefineCounts,
+    EvidenceRefineInnerTimingMs,
+)
 from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     load_default_layout_distributions_asset,
@@ -38,32 +44,57 @@ from api.models.game import TurnInfo
 from api.models.planet import Planet
 
 
+@dataclass(frozen=True)
+class EvidenceRefineComputeResult:
+    """Aggregate plus inner timing/counts for one refine step."""
+
+    aggregate: HomeworldEvidenceAggregate
+    timing: EvidenceRefineInnerTimingMs
+    counts: EvidenceRefineCounts
+
+
 def refine_homeworld_evidence_aggregate(
     prior: HomeworldEvidenceAggregate,
     *,
     turn: TurnInfo,
     candidate_planet_ids_set: frozenset[int],
     planets_by_id: Mapping[int, Planet],
-) -> HomeworldEvidenceAggregate:
+) -> EvidenceRefineComputeResult:
     """Advance the durable evidence aggregate by one turn of observations."""
+    total_t0 = time.perf_counter()
     turn_number = turn.settings.turn
     hits: tuple[HomeworldIndependentEvidenceHit, ...] = prior.evidence_hits
+    prior_hit_count = len(hits)
     promotions: tuple[HomeworldSingleStarbasePromotion, ...] = prior.single_starbase_promotions
+    prior_promo_count = len(promotions)
     hulls_by_id = {hull.id: hull for hull in turn.hulls}
+
+    origin_distance_ms = 0.0
+    single_starbase_ms = 0.0
+    hit_append_ms = 0.0
+    origin_distance_matches = 0
 
     for ship in turn.ships:
         gravitonic = ship_gravitonic_movement(ship, hulls_by_id=hulls_by_id)
+        od_t0 = time.perf_counter()
         matched = origin_distance_candidate_planet_ids(
             ship,
             candidate_planet_ids=candidate_planet_ids_set,
             planets_by_id=planets_by_id,
             gravitonic_movement=gravitonic,
         )
+        origin_distance_ms += (time.perf_counter() - od_t0) * 1000.0
+        origin_distance_matches += len(matched)
+
+        hit_t0 = time.perf_counter()
         hits = append_independent_origin_distance_hits(
             hits,
             turn=turn_number,
             matched_planet_ids=matched,
         )
+        hit_append_ms += (time.perf_counter() - hit_t0) * 1000.0
+
+        sb_t0 = time.perf_counter()
         promo_planet_id = single_starbase_new_build_implicated_planet_id(
             ship,
             turn,
@@ -77,12 +108,31 @@ def refine_homeworld_evidence_aggregate(
                 turn=turn_number,
                 planet_id=promo_planet_id,
             )
+        single_starbase_ms += (time.perf_counter() - sb_t0) * 1000.0
 
-    return HomeworldEvidenceAggregate(
+    aggregate = HomeworldEvidenceAggregate(
         turn=turn_number,
         baseline_turn=prior.baseline_turn,
         evidence_hits=hits,
         single_starbase_promotions=promotions,
+    )
+    total_ms = (time.perf_counter() - total_t0) * 1000.0
+    return EvidenceRefineComputeResult(
+        aggregate=aggregate,
+        timing=EvidenceRefineInnerTimingMs(
+            origin_distance_ms=origin_distance_ms,
+            single_starbase_ms=single_starbase_ms,
+            hit_append_ms=hit_append_ms,
+            total_ms=total_ms,
+        ),
+        counts=EvidenceRefineCounts(
+            ship_count=len(turn.ships),
+            candidate_count=len(candidate_planet_ids_set),
+            prior_hit_count=prior_hit_count,
+            origin_distance_matches=origin_distance_matches,
+            new_hits_appended=len(hits) - prior_hit_count,
+            single_starbase_promotions=len(promotions) - prior_promo_count,
+        ),
     )
 
 

@@ -54,6 +54,8 @@ def ensure_dependency_turn_floor(
 @dataclass
 class DependencyWalkResult:
     turn_unavailable: UnavailableReason | None = None
+    """When ``turn_unavailable`` is ``turn_not_stored``, the missing turn number if known."""
+    unavailable_turn: int | None = None
     missing_steps: list[EnsureMissingStep] = field(default_factory=list)
     pending_ensure: list[tuple[str, ExportScope, AnalyticExportCatalog]] = field(
         default_factory=list,
@@ -94,6 +96,7 @@ def walk_dependency_tree(
 
             if ctx.load_turn(dependency_scope.turn) is None:
                 result.turn_unavailable = "turn_not_stored"
+                result.unavailable_turn = dependency_scope.turn
                 return result
 
             validate_ensure_dependency_target(
@@ -111,6 +114,7 @@ def walk_dependency_tree(
             )
             if nested.turn_unavailable is not None:
                 result.turn_unavailable = nested.turn_unavailable
+                result.unavailable_turn = nested.unavailable_turn
                 return result
 
             _extend_unique(

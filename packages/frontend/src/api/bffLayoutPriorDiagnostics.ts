@@ -1,5 +1,5 @@
 /**
- * Homeworld layout-prior solver telemetry BFF client (#274).
+ * Homeworld diagnostics BFF client (#274): layout-prior + evidence-refine timing.
  */
 
 import {
@@ -11,6 +11,10 @@ import {
 export type LayoutPriorReportsResponse = {
   shell: AnalyticShellScope
   reports: Record<string, unknown>[]
+  evidenceRefineReports: Record<string, unknown>[]
+  evidenceRefineSummary: Record<string, unknown>
+  baselineReports: Record<string, unknown>[]
+  ensureFailures: Record<string, unknown>[]
 }
 
 function layoutPriorReportsQuery(scope: AnalyticShellScope): string {
@@ -46,9 +50,17 @@ export async function fetchLayoutPriorReports(
   const body = (await r.json()) as {
     shell: { gameId: number | string; perspective: number; turn: number }
     reports: Record<string, unknown>[]
+    evidenceRefineReports?: Record<string, unknown>[]
+    evidenceRefineSummary?: Record<string, unknown>
+    baselineReports?: Record<string, unknown>[]
+    ensureFailures?: Record<string, unknown>[]
   }
   return {
     shell: normalizeShell(body.shell),
-    reports: body.reports,
+    reports: body.reports ?? [],
+    evidenceRefineReports: body.evidenceRefineReports ?? [],
+    evidenceRefineSummary: body.evidenceRefineSummary ?? {},
+    baselineReports: body.baselineReports ?? [],
+    ensureFailures: body.ensureFailures ?? [],
   }
 }

@@ -49,8 +49,11 @@ def plan_compute_dag(
         force_root=force_root,
     )
     if walk_result.turn_unavailable is not None:
+        missing = walk_result.unavailable_turn
+        missing_suffix = f", missing turn {missing}" if missing is not None else ""
         raise ValueError(
-            f"cannot plan compute DAG: turn unavailable ({walk_result.turn_unavailable})"
+            f"cannot plan compute DAG: turn unavailable ({walk_result.turn_unavailable}"
+            f"{missing_suffix})"
         )
 
     pending_by_key: dict[tuple[str, ExportScope], tuple[str, ExportScope, object]] = {}

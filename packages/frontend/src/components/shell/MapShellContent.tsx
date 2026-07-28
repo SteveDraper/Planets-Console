@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { homeworldBaselineDegradedMessage } from '../../analytics/homeworld-locator/constants'
 import type { StellarCartographyMapContext } from '../../analytics/stellar-cartography/mapUiConfig'
+import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
 import { PlanetMapInfoControls } from '../PlanetMapInfoControls'
@@ -88,6 +89,7 @@ function MapShellShowingMap({
         baselineDegraded={mapShellView.displayMapData.baselineDegraded === true}
         baselineTurn={mapShellView.displayMapData.baselineTurn}
       />
+      <MapLayerErrorBanner error={mapShellView.layerError} />
       <DeferredPendingMessage pending={mapShellView.showDeferredPending} />
     </main>
   )
@@ -108,6 +110,20 @@ function HomeworldBaselineDegradedBanner({
       role="status"
     >
       {homeworldBaselineDegradedMessage(baselineTurn)}
+    </p>
+  )
+}
+
+/** Partial map-analytic failure while other layers still render (e.g. homeworld gap). */
+function MapLayerErrorBanner({ error }: { error: unknown }) {
+  if (error == null) return null
+  const detail = errorDetailFromUnknown(error)
+  return (
+    <p
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-black/90 px-4 py-1 text-xs text-red-300/90"
+      role="alert"
+    >
+      Some map analytics failed. {detail}
     </p>
   )
 }

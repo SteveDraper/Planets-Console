@@ -6,10 +6,21 @@ Multi-turn gap-fill is owned by export/orchestrator DAG unwind
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
+
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.evidence_refine import (
+    EvidenceRefineComputeResult,
     candidate_planet_ids_from_records,
     refine_homeworld_evidence_aggregate,
+)
+from api.analytics.homeworld_locator.evidence_refine_report import (
+    EvidenceRefineOuterTimingMs,
+    build_evidence_refine_report,
+)
+from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+    record_evidence_refine_report,
 )
 from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -55,6 +66,19 @@ def evidence_refined_through_shell(
     return aggregate.turn == target_turn
 
 
+@dataclass(frozen=True)
+class EvidenceRefineStepResult:
+    """Outcome of ``compute_homeworld_evidence_refine_step``."""
+
+    aggregate: HomeworldEvidenceAggregate
+    """True when refine work ran (report should be recorded after optional persist)."""
+    computed: bool
+    compute: EvidenceRefineComputeResult | None = None
+    load_game_state_ms: float = 0.0
+    load_prior_ms: float = 0.0
+    step_elapsed_ms: float = 0.0
+
+
 def compute_homeworld_evidence_refine_step(
     services: HomeworldLocatorComputeServices,
     *,
@@ -67,8 +91,23 @@ def compute_homeworld_evidence_refine_step(
     intermediate turns (accelerated start), the prior is the baseline floor.
     Returns the floor or an already-refined shell aggregate when no advance is
     needed.
+
+    Prefer :func:`compute_homeworld_evidence_refine_step_detailed` when the
+    caller will record timing telemetry.
     """
+    return compute_homeworld_evidence_refine_step_detailed(services, turn=turn).aggregate
+
+
+def compute_homeworld_evidence_refine_step_detailed(
+    services: HomeworldLocatorComputeServices,
+    *,
+    turn: TurnInfo,
+) -> EvidenceRefineStepResult:
+    """Like :func:`compute_homeworld_evidence_refine_step`` with timing payload."""
+    step_t0 = time.perf_counter()
+    state_t0 = time.perf_counter()
     state = services.persistence.get_game_state(services.game_id)
+    load_game_state_ms = (time.perf_counter() - state_t0) * 1000.0
     if state is None:
         raise ValidationError("homeworld game-global state missing before evidence refine")
 
@@ -87,7 +126,11 @@ def compute_homeworld_evidence_refine_step(
         )
         if aggregate is None:
             raise ValidationError("homeworld evidence aggregate missing after satisfaction probe")
-        return aggregate
+        return EvidenceRefineStepResult(
+            aggregate=aggregate,
+            computed=False,
+            step_elapsed_ms=(time.perf_counter() - step_t0) * 1000.0,
+        )
 
     if shell <= baseline_turn:
         floor = services.persistence.get_evidence_aggregate(
@@ -97,18 +140,24 @@ def compute_homeworld_evidence_refine_step(
         )
         if floor is None:
             raise ValidationError("homeworld floor evidence aggregate missing before refine")
-        return floor
+        return EvidenceRefineStepResult(
+            aggregate=floor,
+            computed=False,
+            step_elapsed_ms=(time.perf_counter() - step_t0) * 1000.0,
+        )
 
     ensure_floor = accelerated_ensure_floor(turn.settings, shell)
     prior_turn = shell - 1
     if prior_turn < ensure_floor or prior_turn < baseline_turn:
         prior_turn = baseline_turn
 
+    prior_t0 = time.perf_counter()
     prior = services.persistence.get_evidence_aggregate(
         services.game_id,
         services.perspective,
         prior_turn,
     )
+    load_prior_ms = (time.perf_counter() - prior_t0) * 1000.0
     if prior is None or prior.baseline_turn != baseline_turn:
         raise ValidationError(
             f"homeworld evidence aggregate before turn {shell} is required before refine"
@@ -116,11 +165,48 @@ def compute_homeworld_evidence_refine_step(
 
     candidate_ids = candidate_planet_ids_from_records(state.candidates)
     planets_by_id = {planet.id: planet for planet in turn.planets}
-    return refine_homeworld_evidence_aggregate(
+    computed = refine_homeworld_evidence_aggregate(
         prior,
         turn=turn,
         candidate_planet_ids_set=candidate_ids,
         planets_by_id=planets_by_id,
+    )
+    return EvidenceRefineStepResult(
+        aggregate=computed.aggregate,
+        computed=True,
+        compute=computed,
+        load_game_state_ms=load_game_state_ms,
+        load_prior_ms=load_prior_ms,
+        step_elapsed_ms=(time.perf_counter() - step_t0) * 1000.0,
+    )
+
+
+def record_evidence_refine_step_report(
+    services: HomeworldLocatorComputeServices,
+    *,
+    turn: TurnInfo,
+    step: EvidenceRefineStepResult,
+    persist_ms: float = 0.0,
+) -> None:
+    """Record timing for a computed refine step (no-op when ``step.computed`` is false)."""
+    if not step.computed or step.compute is None:
+        return
+    record_evidence_refine_report(
+        build_evidence_refine_report(
+            game_id=services.game_id,
+            turn=turn.settings.turn,
+            perspective=services.perspective,
+            baseline_turn=step.aggregate.baseline_turn,
+            timing_inner=step.compute.timing,
+            timing_outer=EvidenceRefineOuterTimingMs(
+                load_game_state_ms=step.load_game_state_ms,
+                load_prior_ms=step.load_prior_ms,
+                refine_inner_ms=step.compute.timing.total_ms,
+                persist_ms=persist_ms,
+                total_ms=step.step_elapsed_ms + persist_ms,
+            ),
+            counts=step.compute.counts,
+        )
     )
 
 
@@ -158,14 +244,18 @@ def ensure_homeworld_evidence_refined(
             raise ValidationError("homeworld evidence aggregate missing after satisfaction probe")
         return aggregate
 
-    refined = compute_homeworld_evidence_refine_step(services, turn=shell_turn)
+    step = compute_homeworld_evidence_refine_step_detailed(services, turn=shell_turn)
+    persist_ms = 0.0
     if shell > game_state_baseline_turn:
+        persist_t0 = time.perf_counter()
         services.persistence.put_evidence_aggregate(
             services.game_id,
             services.perspective,
-            refined,
+            step.aggregate,
         )
-    return refined
+        persist_ms = (time.perf_counter() - persist_t0) * 1000.0
+    record_evidence_refine_step_report(services, turn=shell_turn, step=step, persist_ms=persist_ms)
+    return step.aggregate
 
 
 def promotion_threshold() -> int:

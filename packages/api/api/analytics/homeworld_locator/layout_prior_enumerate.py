@@ -96,6 +96,7 @@ class EnumeratingLayoutPriorSolver:
         best_tie_key: tuple[tuple[int, int], ...] = ()
         best_choices: dict[int, int] = {}
         steps = 0
+        last_improvement_step = 0
 
         for combo in product(*choice_options):
             steps += 1
@@ -117,6 +118,7 @@ class EnumeratingLayoutPriorSolver:
                 best_cost = cost
                 best_tie_key = tie_key
                 best_choices = chosen_by_sector
+                last_improvement_step = steps
 
         final_cost = best_cost if best_choices else 0.0
         solution = LayoutPriorSolution(
@@ -143,6 +145,7 @@ class EnumeratingLayoutPriorSolver:
                 pre_refine_cost=final_cost,
                 final_cost=final_cost,
                 tie_key=best_tie_key,
+                last_incumbent_improvement_step=last_improvement_step,
             ),
             problem_size=size,
             incumbent_cost_series=(),

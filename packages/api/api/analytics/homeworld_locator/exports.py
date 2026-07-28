@@ -129,8 +129,48 @@ def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bo
     if not is_homeworld_locator_available(turn.settings):
         return True
 
-    if ctx.ensure_declared_dependencies(ANALYTIC_ID, scope) is not None:
-        return is_homeworld_export_ensure_satisfied(ctx, scope)
+    from api.analytics.export_dependency_walk import walk_dependency_tree
+    from api.analytics.homeworld_locator.evidence_refine_report import (
+        build_ensure_failure_report,
+    )
+    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+        record_ensure_failure_report,
+    )
+
+    # Walk once so a missing intermediate turn becomes an explicit ValidationError
+    # (and Homeworlds diagnostics record) instead of a silent unsatisfied ensure.
+    walk = walk_dependency_tree(ctx, ANALYTIC_ID, scope, visiting=set())
+    if walk.turn_unavailable == "turn_not_stored":
+        missing_turn = walk.unavailable_turn
+        if missing_turn is not None:
+            message = (
+                f"homeworld locator cannot refine turn {scope.turn}: "
+                f"turn {missing_turn} is not stored "
+                f"(evidence chain requires contiguous turns)"
+            )
+        else:
+            message = (
+                f"homeworld locator cannot refine turn {scope.turn}: "
+                f"an intermediate turn in the evidence chain is not stored"
+            )
+        record_ensure_failure_report(
+            build_ensure_failure_report(
+                game_id=scope.game_id,
+                perspective=scope.perspective,
+                shell_turn=scope.turn,
+                reason="turn_not_stored",
+                message=message,
+                missing_turn=missing_turn,
+            )
+        )
+        raise ValidationError(message)
+
+    for dependency_id, dependency_scope, catalog in walk.pending_ensure:
+        if dependency_id == ANALYTIC_ID and dependency_scope == scope:
+            break
+        if catalog.ensure_export is None:
+            continue
+        catalog.ensure_export(ctx, dependency_scope)
 
     services = resolve_homeworld_services(ctx)
     baseline_result = ensure_homeworld_baseline(services, shell_turn=turn)

@@ -16,6 +16,15 @@ type DiagnosticsHomeworldsTabProps = {
   onSnapshotChange?: (snapshot: LayoutPriorReportsResponse | null) => void
 }
 
+function hasAnyHomeworldDiagnostics(snapshot: LayoutPriorReportsResponse): boolean {
+  return (
+    snapshot.reports.length > 0 ||
+    snapshot.evidenceRefineReports.length > 0 ||
+    snapshot.baselineReports.length > 0 ||
+    snapshot.ensureFailures.length > 0
+  )
+}
+
 export function DiagnosticsHomeworldsTab({
   scope,
   onCopy,
@@ -60,7 +69,7 @@ export function DiagnosticsHomeworldsTab({
   if (scope == null) {
     return (
       <p className="text-sm text-slate-400">
-        Select a game, turn, and perspective to load homeworld layout-prior solver reports.
+        Select a game, turn, and perspective to load homeworld diagnostics.
       </p>
     )
   }
@@ -74,18 +83,21 @@ export function DiagnosticsHomeworldsTab({
   }
 
   if (isLoading && snapshot == null) {
-    return <p className="text-sm text-slate-400">Loading layout-prior reports…</p>
+    return <p className="text-sm text-slate-400">Loading homeworld diagnostics…</p>
   }
 
-  if (snapshot == null || snapshot.reports.length === 0) {
+  if (snapshot == null || !hasAnyHomeworldDiagnostics(snapshot)) {
     return (
       <p className="text-sm text-slate-400">
-        No layout-prior solver reports for this shell yet. Enable{' '}
+        No homeworld diagnostics for this shell yet. Enable{' '}
         <span className="font-medium text-slate-300">Homeworld locator</span> and load the map
-        or table so materialize runs the solver (cache hits do not record a report).
+        or table. Evidence-refine timings appear as the ensure DAG advances; layout-prior
+        reports appear after the shell solver runs (cache hits skip the solver report).
       </p>
     )
   }
+
+  const refineSummary = snapshot.evidenceRefineSummary
 
   return (
     <div className="flex flex-col gap-3">
@@ -101,8 +113,10 @@ export function DiagnosticsHomeworldsTab({
               <span className="font-medium text-slate-200">{snapshot.shell.perspective}</span>
             </p>
             <p className="mt-1 text-slate-500">
-              {snapshot.reports.length} report{snapshot.reports.length === 1 ? '' : 's'} (newest
-              first)
+              Layout-prior {snapshot.reports.length} · Evidence-refine{' '}
+              {snapshot.evidenceRefineReports.length} · Baseline {snapshot.baselineReports.length}
+              {' · '}
+              Ensure failures {snapshot.ensureFailures.length}
             </p>
           </div>
           <button
@@ -112,13 +126,133 @@ export function DiagnosticsHomeworldsTab({
               'inline-flex shrink-0 items-center gap-1 rounded p-1 text-slate-300',
               'hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-slate-400'
             )}
-            title="Copy homeworld layout-prior reports"
-            aria-label="Copy homeworld layout-prior reports"
+            title="Copy homeworld diagnostics"
+            aria-label="Copy homeworld diagnostics"
           >
             <ClipboardCopy className="h-3.5 w-3.5" aria-hidden />
           </button>
         </div>
       </div>
+
+      {snapshot.ensureFailures.length > 0 ? (
+        <section className="rounded border border-red-900/60 bg-[#40454a] p-3">
+          <h3 className="mb-2 text-xs font-medium text-red-200">Ensure failures</h3>
+          {snapshot.ensureFailures.map((report, index) => {
+            const key = `ensure-fail-${String(report.capturedAt ?? index)}-${index}`
+            return (
+              <div key={key} className="mb-2 last:mb-0">
+                <div className="mb-1 flex items-start justify-between gap-2">
+                  <p className="text-xs text-red-300/90">
+                    {String(report.message ?? report.reason ?? 'ensure failure')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(JSON.stringify(report, null, 2))}
+                    className={cn(
+                      'inline-flex shrink-0 items-center gap-1 rounded p-1 text-slate-300',
+                      'hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-slate-400'
+                    )}
+                    aria-label={`Copy ensure failure ${index + 1}`}
+                  >
+                    <ClipboardCopy className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                </div>
+                <DiagnosticsJsonBlock value={report} emptyLabel="Empty ensure failure" />
+              </div>
+            )
+          })}
+        </section>
+      ) : null}
+
+      {Object.keys(refineSummary).length > 0 ? (
+        <section className="rounded border border-[#52575d] bg-[#40454a] p-3">
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <h3 className="text-xs font-medium text-slate-200">Evidence-refine summary</h3>
+            <button
+              type="button"
+              onClick={() => onCopy(JSON.stringify(refineSummary, null, 2))}
+              className={cn(
+                'inline-flex shrink-0 items-center gap-1 rounded p-1 text-slate-300',
+                'hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-slate-400'
+              )}
+              title="Copy evidence-refine summary"
+              aria-label="Copy evidence-refine summary"
+            >
+              <ClipboardCopy className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </div>
+          <DiagnosticsJsonBlock value={refineSummary} emptyLabel="Empty summary" />
+        </section>
+      ) : null}
+
+      {snapshot.baselineReports.length > 0 ? (
+        <section className="rounded border border-[#52575d] bg-[#40454a] p-3">
+          <h3 className="mb-2 text-xs font-medium text-slate-200">Baseline reports</h3>
+          {snapshot.baselineReports.map((report, index) => {
+            const key = `baseline-${String(report.capturedAt ?? index)}-${index}`
+            return (
+              <div key={key} className="mb-2 last:mb-0">
+                <div className="mb-1 flex items-start justify-between gap-2">
+                  <p className="text-xs text-slate-400">
+                    recomputed={String(report.recomputed)} · candidates=
+                    {String(report.candidateCount)} · inferMs={String(report.inferMs)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(JSON.stringify(report, null, 2))}
+                    className={cn(
+                      'inline-flex shrink-0 items-center gap-1 rounded p-1 text-slate-300',
+                      'hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-slate-400'
+                    )}
+                    aria-label={`Copy baseline report ${index + 1}`}
+                  >
+                    <ClipboardCopy className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                </div>
+                <DiagnosticsJsonBlock value={report} emptyLabel="Empty baseline report" />
+              </div>
+            )
+          })}
+        </section>
+      ) : null}
+
+      {snapshot.evidenceRefineReports.length > 0 ? (
+        <section className="rounded border border-[#52575d] bg-[#40454a] p-3">
+          <h3 className="mb-2 text-xs font-medium text-slate-200">
+            Evidence-refine reports (newest first, all turns)
+          </h3>
+          {snapshot.evidenceRefineReports.map((report, index) => {
+            const key = `refine-${String(report.turn)}-${String(report.capturedAt ?? index)}`
+            const outer = report.timingOuter as Record<string, unknown> | undefined
+            const inner = report.timingInner as Record<string, unknown> | undefined
+            return (
+              <div key={key} className="mb-2 last:mb-0">
+                <div className="mb-1 flex items-start justify-between gap-2">
+                  <p className="text-xs text-slate-400">
+                    turn {String(report.turn)} · outer=
+                    {String(outer?.totalMs ?? '?')}ms · od=
+                    {String(inner?.originDistanceMs ?? '?')}ms · hitAppend=
+                    {String(inner?.hitAppendMs ?? '?')}ms · sb=
+                    {String(inner?.singleStarbaseMs ?? '?')}ms
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(JSON.stringify(report, null, 2))}
+                    className={cn(
+                      'inline-flex shrink-0 items-center gap-1 rounded p-1 text-slate-300',
+                      'hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-slate-400'
+                    )}
+                    aria-label={`Copy evidence-refine report turn ${String(report.turn)}`}
+                  >
+                    <ClipboardCopy className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                </div>
+                <DiagnosticsJsonBlock value={report} emptyLabel="Empty refine report" />
+              </div>
+            )
+          })}
+        </section>
+      ) : null}
 
       {snapshot.reports.map((report, index) => {
         const key = `${String(report.capturedAt ?? index)}-${String(report.solver ?? '')}-${index}`
@@ -132,7 +266,7 @@ export function DiagnosticsHomeworldsTab({
         return (
           <section key={key} className="rounded border border-[#52575d] bg-[#40454a] p-3">
             <div className="mb-2 flex items-start justify-between gap-2">
-              <h3 className="text-xs font-medium text-slate-200">{heading}</h3>
+              <h3 className="text-xs font-medium text-slate-200">Layout prior · {heading}</h3>
               <button
                 type="button"
                 onClick={() => onCopy(JSON.stringify(report, null, 2))}

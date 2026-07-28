@@ -124,6 +124,24 @@ describe('deriveMapShellView', () => {
     ).toEqual({ phase: 'error', error: err })
   })
 
+  it('keeps showing-map with layerError when some analytics fail but others have data', () => {
+    const err = new Error('turn 59 is not stored')
+    expect(
+      deriveMapShellView({
+        ...baseInput,
+        frame: { source: 'live', data: sampleMap },
+        mapHasError: true,
+        mapHasAnyData: true,
+        mapError: err,
+      })
+    ).toEqual({
+      phase: 'showing-map',
+      displayMapData: sampleMap,
+      showDeferredPending: false,
+      layerError: err,
+    })
+  })
+
   it('returns showing-map (not turn-loading) during turn ensure when a prior frame is kept', () => {
     expect(
       deriveMapShellView({

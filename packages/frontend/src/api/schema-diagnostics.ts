@@ -287,12 +287,28 @@ export interface components {
         };
         /**
          * LayoutPriorReportsResponse
-         * @description Newest-first layout-prior solver run reports for one shell context.
+         * @description Homeworld diagnostics: layout-prior reports plus refine/baseline timing.
          */
         LayoutPriorReportsResponse: {
             shell: components["schemas"]["LayoutPriorDiagnosticsShellContext"];
             /** Reports */
             reports: {
+                [key: string]: unknown;
+            }[];
+            /** Evidencerefinereports */
+            evidenceRefineReports?: {
+                [key: string]: unknown;
+            }[];
+            /** Evidencerefinesummary */
+            evidenceRefineSummary?: {
+                [key: string]: unknown;
+            };
+            /** Baselinereports */
+            baselineReports?: {
+                [key: string]: unknown;
+            }[];
+            /** Ensurefailures */
+            ensureFailures?: {
                 [key: string]: unknown;
             }[];
         };

@@ -18,6 +18,8 @@ export type MapShellView =
       phase: 'showing-map'
       displayMapData: CombinedMapData
       showDeferredPending: boolean
+      /** Present when at least one map analytic failed while others still display. */
+      layerError?: unknown
     }
   | { phase: 'error'; error: unknown }
 
@@ -62,12 +64,14 @@ export function hasDisplayableMapData(data: CombinedMapData | null | undefined):
 
 function showingMapView(
   displayMapData: CombinedMapData,
-  showDeferredPending: boolean
+  showDeferredPending: boolean,
+  layerError?: unknown
 ): MapShellView {
   return {
     phase: 'showing-map',
     displayMapData,
     showDeferredPending,
+    ...(layerError !== undefined ? { layerError } : {}),
   }
 }
 
@@ -114,5 +118,9 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
     return { phase: 'full-loading', loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE }
   }
 
-  return showingMapView(frame.data, mapPending)
+  return showingMapView(
+    frame.data,
+    mapPending,
+    mapHasError ? mapError : undefined
+  )
 }

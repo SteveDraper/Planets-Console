@@ -99,6 +99,7 @@ def test_anneal_run_report_has_timing_costs_stop_reason_and_series(
     assert report.search.final_cost == pytest.approx(result.solution.cost)
     assert report.search.greedy_cost >= 0.0
     assert report.search.pre_refine_cost >= 0.0
+    assert 0 <= report.search.last_incumbent_improvement_step <= report.search.sa_steps_attempted
     assert report.problem_size.choice_sector_count >= 1
     assert report.problem_size.total_possibles >= 1
     assert len(report.incumbent_cost_series) >= 1
@@ -106,6 +107,10 @@ def test_anneal_run_report_has_timing_costs_stop_reason_and_series(
     wire = layout_prior_report_to_wire(report)
     assert wire["stopReason"] == "max_steps"
     assert wire["search"]["saStepsAttempted"] == report.search.sa_steps_attempted
+    assert (
+        wire["search"]["lastIncumbentImprovementStep"]
+        == report.search.last_incumbent_improvement_step
+    )
     assert isinstance(wire["incumbentCostSeries"], list)
 
 

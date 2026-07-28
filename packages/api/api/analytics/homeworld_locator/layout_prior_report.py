@@ -44,6 +44,8 @@ class LayoutPriorSearchStats:
     pre_refine_cost: float
     final_cost: float
     tie_key: tuple[tuple[int, int], ...]
+    # SA step index of the last new incumbent (0 = greedy only / no SA improvement).
+    last_incumbent_improvement_step: int = 0
 
 
 @dataclass(frozen=True)
@@ -184,6 +186,7 @@ def layout_prior_report_to_wire(report: LayoutPriorSolverRunReport) -> dict[str,
             "greedyCost": report.search.greedy_cost,
             "preRefineCost": report.search.pre_refine_cost,
             "finalCost": report.search.final_cost,
+            "lastIncumbentImprovementStep": report.search.last_incumbent_improvement_step,
             "tieKey": [list(pair) for pair in report.search.tie_key],
         },
         "problemSize": {

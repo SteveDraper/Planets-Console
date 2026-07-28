@@ -179,6 +179,50 @@ def test_single_step_refine_requires_prior_when_above_ensure_floor(persistence) 
         )
 
 
+def test_export_ensure_raises_on_missing_intermediate_turn(persistence) -> None:
+    """Sparse stores must fail with an explicit missing-turn ValidationError."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+        clear_ensure_failure_reports,
+        recent_ensure_failure_reports,
+    )
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+    from api.errors import ValidationError
+    from api.services.layout_prior_diagnostics_service import get_layout_prior_reports_wire
+
+    clear_ensure_failure_reports()
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turn_three = replace(turn_one, settings=replace(turn_one.settings, turn=3))
+    # Hole at turn 2 -- same shape as 663307 missing 59 with 58 and 60 present.
+    turns = {1: turn_one, 3: turn_three}
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+
+    ctx = make_analytic_compute_context(
+        turn_three,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    with pytest.raises(ValidationError, match="turn 2 is not stored"):
+        ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
+
+    failures = recent_ensure_failure_reports(game_id=628580, perspective=1)
+    assert len(failures) == 1
+    assert failures[0].missing_turn == 2
+    assert failures[0].shell_turn == 3
+    wire = get_layout_prior_reports_wire(game_id=628580, perspective=1, turn=3)
+    assert wire["ensureFailures"][0]["missingTurn"] == 2
+
+
 def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     """Gap-fill creates intermediate aggregates via ENSURE_DEPENDENCIES, not a private loop."""
     from api.analytics.compute_context import make_analytic_compute_context

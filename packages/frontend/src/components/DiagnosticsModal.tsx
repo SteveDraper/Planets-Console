@@ -181,7 +181,11 @@ export function DiagnosticsModal({
       : activeTab === 'scores'
         ? scoresSnapshot != null
         : activeTab === 'homeworlds'
-          ? homeworldsSnapshot != null && homeworldsSnapshot.reports.length > 0
+          ? homeworldsSnapshot != null &&
+            (homeworldsSnapshot.reports.length > 0 ||
+              homeworldsSnapshot.evidenceRefineReports.length > 0 ||
+              homeworldsSnapshot.baselineReports.length > 0 ||
+              homeworldsSnapshot.ensureFailures.length > 0)
           : computeSnapshot != null
 
   return (

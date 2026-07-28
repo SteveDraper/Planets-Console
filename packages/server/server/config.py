@@ -142,9 +142,33 @@ def _parse_homeworld_locator_config(raw: object) -> HomeworldLocatorConfig:
         raise ValueError(
             f"api.homeworld_locator.evidence_promotion_threshold must be >= 1, got {threshold}"
         )
+    solver = raw.get("layout_prior_solver", defaults.layout_prior_solver)
+    if not isinstance(solver, str):
+        raise TypeError(
+            f"api.homeworld_locator.layout_prior_solver must be a string, got "
+            f"{type(solver).__name__}: {solver!r}"
+        )
+    known_solvers = frozenset({"anneal", "enumerate"})
+    if solver not in known_solvers:
+        known = ", ".join(sorted(known_solvers))
+        raise ValueError(
+            f"api.homeworld_locator.layout_prior_solver must be one of: {known}, got {solver!r}"
+        )
+    budget_ms = raw.get("layout_prior_budget_ms", defaults.layout_prior_budget_ms)
+    if isinstance(budget_ms, bool) or not isinstance(budget_ms, int):
+        raise TypeError(
+            f"api.homeworld_locator.layout_prior_budget_ms must be an int, got "
+            f"{type(budget_ms).__name__}: {budget_ms!r}"
+        )
+    if budget_ms < 0:
+        raise ValueError(
+            f"api.homeworld_locator.layout_prior_budget_ms must be >= 0, got {budget_ms}"
+        )
     return HomeworldLocatorConfig(
         min_baseline_clans=min_clans,
         evidence_promotion_threshold=threshold,
+        layout_prior_solver=solver,
+        layout_prior_budget_ms=budget_ms,
     )
 
 

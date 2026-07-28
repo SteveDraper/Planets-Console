@@ -1,4 +1,4 @@
-"""BFF transport models for homeworld layout-prior solver telemetry (#274)."""
+"""BFF transport models for homeworld layout-prior / refine diagnostics (#274)."""
 
 from __future__ import annotations
 
@@ -16,9 +16,25 @@ class LayoutPriorDiagnosticsShellContext(BaseModel):
 
 
 class LayoutPriorReportsResponse(BaseModel):
-    """Newest-first layout-prior solver run reports for one shell context."""
+    """Homeworld diagnostics: layout-prior reports plus refine/baseline timing."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     shell: LayoutPriorDiagnosticsShellContext
     reports: list[dict[str, Any]]
+    evidence_refine_reports: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="evidenceRefineReports",
+    )
+    evidence_refine_summary: dict[str, Any] = Field(
+        default_factory=dict,
+        alias="evidenceRefineSummary",
+    )
+    baseline_reports: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="baselineReports",
+    )
+    ensure_failures: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="ensureFailures",
+    )
