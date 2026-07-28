@@ -103,8 +103,8 @@ class AnnealingLayoutPriorSolver:
                 rng,
             )
             if proposal is None:
-                temperature *= cooling
-                continue
+                # No movable multi-planet choice sectors: discrete neighborhood is empty.
+                break
             proposed_chosen, _sector_index, _planet_id = proposal
             proposed_scored = evaluate_layout_prior_selection(
                 problem, proposed_chosen, stand_in_positions=mid_stand_ins

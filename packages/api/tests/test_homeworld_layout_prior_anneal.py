@@ -262,6 +262,61 @@ def test_anneal_max_steps_zero_returns_promptly(template_planet, sample_turn) ->
     assert elapsed_ms < 500.0
 
 
+def test_anneal_empty_neighborhood_exits_promptly(template_planet, sample_turn) -> None:
+    """When every choice sector has a single planet, SA must not spin forever."""
+    player_count = 11
+    sector_angle = 2.0 * math.pi / player_count
+    # One planet in one non-pin sector => choice set size 1 => empty SA neighborhood.
+    problem, *_ = _build_choice_problem(
+        template_planet=template_planet,
+        sample_turn=sample_turn,
+        choice_planets=[(40, sector_angle, 550.0)],
+        player_count=player_count,
+    )
+    choice = next(state for state in problem.sector_states if state.kind == "choice")
+    assert len(choice.choice_planet_ids) == 1
+
+    started = time.perf_counter()
+    solution = AnnealingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate())
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    assert solution.chosen_planet_ids_by_sector.get(choice.sector_index) == 40
+    assert elapsed_ms < 500.0
+
+
+def test_injected_anneal_without_stop_gate_terminates(template_planet, sample_turn) -> None:
+    """Facade must not leave injected anneal on NeverStopGate forever."""
+    turn, pin = _eligible_turn(sample_turn, template_planet)
+    center = (2000.0, 2000.0)
+    radius = 550
+    orphan = _planet(template_planet, planet_id=2, x=int(center[0]), y=int(center[1] + radius))
+    turn = replace(turn, planets=[pin, orphan])
+    definite = HomeworldCandidateRecord(
+        planet_id=pin.id,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    possible = HomeworldCandidateRecord(
+        planet_id=orphan.id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    view = _view(definite, possible)
+    started = time.perf_counter()
+    annotated = apply_layout_prior_most_probable(
+        (definite, possible),
+        turn=turn,
+        view=view,
+        player_count=11,
+        layout_asset=_stub_layout_asset(),
+        map_center=center,
+        solver=AnnealingLayoutPriorSolver(),
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    assert {row.planet_id for row in annotated if row.is_most_probable} == {orphan.id}
+    # Config deadline is 150ms; allow refine overhead but fail hard on hang.
+    assert elapsed_ms < 2000.0
+
+
 def test_stand_in_refine_improves_or_equals_mid(template_planet, sample_turn) -> None:
     turn, _pin = _eligible_turn(sample_turn, template_planet)
     center = (2000.0, 2000.0)

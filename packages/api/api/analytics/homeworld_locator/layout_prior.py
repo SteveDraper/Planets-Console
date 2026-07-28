@@ -34,6 +34,7 @@ from api.analytics.homeworld_locator.layout_prior_solver import (
     layout_prior_stop_gate_from_config,
 )
 from api.analytics.homeworld_locator.layout_prior_stop_gate import (
+    DeadlineStopGate,
     NeverStopGate,
     StopGate,
 )
@@ -143,8 +144,9 @@ def apply_layout_prior_most_probable(
     if stop_gate is not None:
         resolved_gate = stop_gate
     elif solver is not None:
-        # Injected solvers (tests / fakes) default to never-stop unless given a gate.
-        resolved_gate = NeverStopGate()
+        # Injected solvers (tests / fakes): enumerate/fakes may use never-stop.
+        # Anneal must terminate -- use the configured wall-clock budget.
+        resolved_gate = _default_stop_gate_for_injected_solver(resolved_solver)
     else:
         resolved_gate = layout_prior_stop_gate_from_config()
     solution = resolved_solver.solve(problem, stop_gate=resolved_gate)
@@ -152,3 +154,17 @@ def apply_layout_prior_most_probable(
     return tuple(
         replace(row, is_most_probable=row.planet_id in most_probable_ids) for row in candidates
     )
+
+
+def _default_stop_gate_for_injected_solver(solver: LayoutPriorSolver) -> StopGate:
+    """Safe default gate when a caller injects a solver without ``stop_gate``.
+
+    ``NeverStopGate`` is correct for the exhaustive enumerator (and most fakes).
+    Anneal would hang forever on that gate, so use the configured deadline budget.
+    """
+    from api.analytics.homeworld_locator.layout_prior_anneal import AnnealingLayoutPriorSolver
+    from api.config import get_config
+
+    if isinstance(solver, AnnealingLayoutPriorSolver):
+        return DeadlineStopGate(get_config().homeworld_locator.layout_prior_budget_ms)
+    return NeverStopGate()
