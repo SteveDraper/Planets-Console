@@ -62,6 +62,7 @@ __all__ = [
     "layout_prior_solver_from_config",
     "layout_prior_solver_from_name",
     "layout_prior_stop_gate_from_config",
+    "try_layout_prior_problem",
 ]
 
 
@@ -74,7 +75,7 @@ def layout_prior_input_fingerprint(
     )
 
 
-def apply_layout_prior_most_probable(
+def try_layout_prior_problem(
     candidates: Sequence[HomeworldCandidateRecord],
     *,
     turn: TurnInfo,
@@ -82,23 +83,23 @@ def apply_layout_prior_most_probable(
     player_count: int | None = None,
     layout_asset: LayoutDistributionsAsset | None = None,
     map_center: tuple[float, float] | None = None,
-    solver: LayoutPriorSolver | None = None,
-    stop_gate: StopGate | None = None,
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Annotate ``is_most_probable`` after evidence culls when the emission gate passes."""
+) -> LayoutPriorProblem | None:
+    """Build a solver problem from turn + view, or ``None`` when the emission gate fails.
+
+    Gate failures include missing pin, ineligible map geometry, or no layout
+    distribution category. Callers that annotate (facade) clear
+    ``is_most_probable`` on ``None``; callers that probe may raise.
+    """
     resolved_count = player_count if player_count is not None else len(players_by_id(turn))
     pin = resolve_viewpoint_pin_planet(view, turn.planets)
     if pin is None or not homeworld_sector_emission_eligible(
         turn, pin=pin, player_count=resolved_count
     ):
-        return tuple(
-            replace(row, is_most_probable=False) if row.is_most_probable else row
-            for row in candidates
-        )
+        return None
 
     category = homeworld_layout_asset_category(turn, player_count=resolved_count)
     if category is None:
-        return tuple(candidates)
+        return None
 
     asset = layout_asset if layout_asset is not None else load_default_layout_distributions_asset()
     distributions = asset.for_category(category)
@@ -110,7 +111,6 @@ def apply_layout_prior_most_probable(
     width = (2.0 * math.pi) / resolved_count
 
     planets_by_id = {planet.id: planet for planet in turn.planets}
-
     owner_ids = visibility_owner_ids(turn.player.id, turn.relations)
     scan_origins = planet_scan_origins(
         turn.planets,
@@ -119,8 +119,7 @@ def apply_layout_prior_most_probable(
         owner_ids,
         planet_scan_range=float(turn.settings.planetscanrange),
     )
-
-    problem = build_layout_prior_problem(
+    return build_layout_prior_problem(
         candidates=candidates,
         planets_by_id=planets_by_id,
         pin=pin,
@@ -139,6 +138,33 @@ def apply_layout_prior_most_probable(
         seed_perspective=int(turn.player.id),
         seed_input_fingerprint=layout_prior_input_fingerprint(candidates),
     )
+
+
+def apply_layout_prior_most_probable(
+    candidates: Sequence[HomeworldCandidateRecord],
+    *,
+    turn: TurnInfo,
+    view: HomeworldCandidateView,
+    player_count: int | None = None,
+    layout_asset: LayoutDistributionsAsset | None = None,
+    map_center: tuple[float, float] | None = None,
+    solver: LayoutPriorSolver | None = None,
+    stop_gate: StopGate | None = None,
+) -> tuple[HomeworldCandidateRecord, ...]:
+    """Annotate ``is_most_probable`` after evidence culls when the emission gate passes."""
+    problem = try_layout_prior_problem(
+        candidates,
+        turn=turn,
+        view=view,
+        player_count=player_count,
+        layout_asset=layout_asset,
+        map_center=map_center,
+    )
+    if problem is None:
+        return tuple(
+            replace(row, is_most_probable=False) if row.is_most_probable else row
+            for row in candidates
+        )
 
     resolved_solver = solver if solver is not None else layout_prior_solver_from_config()
     if stop_gate is not None:

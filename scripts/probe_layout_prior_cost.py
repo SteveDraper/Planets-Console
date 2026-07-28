@@ -17,7 +17,6 @@ Examples::
 
 from __future__ import annotations
 
-import math
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -38,12 +37,8 @@ from api.analytics.homeworld_locator.compute_services import (  # noqa: E402
     build_ephemeral_homeworld_services,
 )
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID  # noqa: E402
-from api.analytics.homeworld_locator.geometry import resolve_map_center  # noqa: E402
-from api.analytics.homeworld_locator.layout_distributions_asset import (  # noqa: E402
-    load_default_layout_distributions_asset,
-)
 from api.analytics.homeworld_locator.layout_prior import (  # noqa: E402
-    layout_prior_input_fingerprint,
+    try_layout_prior_problem,
 )
 from api.analytics.homeworld_locator.layout_prior_anneal import (  # noqa: E402
     AnnealingLayoutPriorSolver,
@@ -54,7 +49,6 @@ from api.analytics.homeworld_locator.layout_prior_cost import (  # noqa: E402
 )
 from api.analytics.homeworld_locator.layout_prior_problem import (  # noqa: E402
     LayoutPriorProblem,
-    build_layout_prior_problem,
 )
 from api.analytics.homeworld_locator.layout_prior_solver import LayoutPriorSolution  # noqa: E402
 from api.analytics.homeworld_locator.layout_prior_stop_gate import (  # noqa: E402
@@ -63,24 +57,14 @@ from api.analytics.homeworld_locator.layout_prior_stop_gate import (  # noqa: E4
 from api.analytics.homeworld_locator.persistence import (  # noqa: E402
     HomeworldLocatorPersistenceService,
 )
-from api.analytics.homeworld_locator.sector_overlays import (  # noqa: E402
-    homeworld_layout_asset_category,
-    homeworld_sector_emission_eligible,
-    resolve_viewpoint_pin_planet,
-)
 from api.analytics.homeworld_locator.types import HomeworldCandidateView  # noqa: E402
-from api.analytics.turn_roster import players_by_id  # noqa: E402
-from api.concepts.visibility_coverage import (  # noqa: E402
-    planet_scan_origins,
-    visibility_owner_ids,
+from api.analytics.military_score_inference.prior_mining.storage_bootstrap import (  # noqa: E402
+    make_mining_services_for_storage_root,
 )
 from api.errors import NotFoundError, ValidationError  # noqa: E402
 from api.models.game import TurnInfo  # noqa: E402
 from api.models.planet import Planet  # noqa: E402
 from api.services.game_service import GameService  # noqa: E402
-from api.analytics.military_score_inference.prior_mining.storage_bootstrap import (  # noqa: E402
-    make_mining_services_for_storage_root,
-)
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
@@ -127,51 +111,12 @@ def _build_problem(
     turn: TurnInfo,
     view: HomeworldCandidateView,
 ) -> LayoutPriorProblem:
-    player_count = len(players_by_id(turn))
-    pin = resolve_viewpoint_pin_planet(view, turn.planets)
-    if pin is None or not homeworld_sector_emission_eligible(
-        turn, pin=pin, player_count=player_count
-    ):
-        raise ValidationError("layout prior emission gate failed (no pin or ineligible map)")
-    category = homeworld_layout_asset_category(turn, player_count=player_count)
-    if category is None:
-        raise ValidationError("no layout distribution category for this turn")
-    asset = load_default_layout_distributions_asset()
-    distributions = asset.for_category(category)
-    center = resolve_map_center(turn.planets)
-    r_inner, r_outer = asset.center_distance_band(category)
-    center_x, center_y = center
-    pin_angle = math.atan2(pin.y - center_y, pin.x - center_x)
-    half = math.pi / player_count
-    width = (2.0 * math.pi) / player_count
-    planets_by_id = {planet.id: planet for planet in turn.planets}
-    owner_ids = visibility_owner_ids(turn.player.id, turn.relations)
-    scan_origins = planet_scan_origins(
-        turn.planets,
-        turn.ships,
-        turn.hulls,
-        owner_ids,
-        planet_scan_range=float(turn.settings.planetscanrange),
-    )
-    return build_layout_prior_problem(
-        candidates=view.candidates,
-        planets_by_id=planets_by_id,
-        pin=pin,
-        pin_angle=pin_angle,
-        player_count=player_count,
-        center=center,
-        r_inner=r_inner,
-        r_outer=r_outer,
-        half=half,
-        width=width,
-        scan_origins=scan_origins,
-        nebulas=turn.nebulas,
-        distributions=distributions,
-        seed_game_id=int(turn.game.id),
-        seed_turn=int(turn.settings.turn),
-        seed_perspective=int(turn.player.id),
-        seed_input_fingerprint=layout_prior_input_fingerprint(view.candidates),
-    )
+    problem = try_layout_prior_problem(view.candidates, turn=turn, view=view)
+    if problem is None:
+        raise ValidationError(
+            "layout prior emission gate failed (no pin, ineligible map, or no category)"
+        )
+    return problem
 
 
 def _format_planet(planet: Planet | None, planet_id: int) -> str:
@@ -197,10 +142,7 @@ def _print_sector_map(
         elif state.kind == "choice":
             chosen_id = chosen.get(state.sector_index)
             options = ", ".join(f"p{pid}" for pid in state.choice_planet_ids)
-            typer.echo(
-                f"  sector {state.sector_index}: choice p{chosen_id} "
-                f"(legal: {options})"
-            )
+            typer.echo(f"  sector {state.sector_index}: choice p{chosen_id} (legal: {options})")
         elif state.kind == "stand_in":
             pos = stand_ins.get(state.sector_index) or state.stand_in_position
             typer.echo(f"  sector {state.sector_index}: stand-in {pos}")
@@ -227,9 +169,7 @@ def _swap_choice(
             f"{sorted(chosen.values())}"
         )
     if add_planet_id in chosen.values():
-        raise ValidationError(
-            f"planet {add_planet_id} is already selected in another sector"
-        )
+        raise ValidationError(f"planet {add_planet_id} is already selected in another sector")
     choice_state = next(
         state
         for state in problem.sector_states
@@ -353,7 +293,10 @@ def main(
     race_id: int | None = typer.Option(
         None,
         "--race-id",
-        help="Resolve perspective from GameInfo raceid (e.g. 2=Lizard). Mutually exclusive with --perspective.",
+        help=(
+            "Resolve perspective from GameInfo raceid (e.g. 2=Lizard). "
+            "Mutually exclusive with --perspective."
+        ),
     ),
     storage_root: Path = typer.Option(
         Path("./.data"),
@@ -413,9 +356,7 @@ def main(
 
     problem = _build_problem(turn=shell_turn, view=view)
     solver = AnnealingLayoutPriorSolver()
-    solution: LayoutPriorSolution = solver.solve(
-        problem, stop_gate=DeadlineStopGate(budget_ms)
-    )
+    solution: LayoutPriorSolution = solver.solve(problem, stop_gate=DeadlineStopGate(budget_ms))
 
     preferred = _score(
         "preferred (anneal + sample-grid refine)",
@@ -425,8 +366,7 @@ def main(
     )
 
     typer.echo(
-        f"game={game_id} perspective={resolved_perspective} turn={turn} "
-        f"budget_ms={budget_ms}"
+        f"game={game_id} perspective={resolved_perspective} turn={turn} budget_ms={budget_ms}"
     )
     typer.echo(
         f"viewpoint player id={shell_turn.player.id} "
@@ -443,9 +383,7 @@ def main(
         focus_ids = [swap_from, swap_to]
     _print_scored(preferred, planets_by_id, problem=problem, focus_planet_ids=focus_ids)
 
-    wire_most_probable = sorted(
-        row.planet_id for row in view.candidates if row.is_most_probable
-    )
+    wire_most_probable = sorted(row.planet_id for row in view.candidates if row.is_most_probable)
     solver_ids = sorted(preferred.chosen_by_sector.values())
     if wire_most_probable and wire_most_probable != solver_ids:
         typer.echo(
