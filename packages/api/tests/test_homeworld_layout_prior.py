@@ -409,9 +409,7 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         distributions=asset.for_category("standard"),
     )
     assert len(nearest_mid_choice_ids(choice, problem)) == MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR
-    solution = EnumeratingLayoutPriorSolver().solve(
-        problem, stop_gate=NeverStopGate()
-    ).solution
+    solution = EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate()).solution
     assert len(solution.chosen_planet_ids_by_sector) == 1
     # Selection still completes and marks one most-probable.
     annotated = apply_layout_prior_most_probable(
@@ -519,9 +517,7 @@ def test_layout_prior_solver_injection_honors_fixed_choice(template_planet, samp
                 solver=LAYOUT_PRIOR_SOLVER_ENUMERATE,
                 stop_gate=LayoutPriorStopGateInfo(kind="never"),
                 stop_reason="exhausted",
-                timing=LayoutPriorTimingMs(
-                    greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=0.0
-                ),
+                timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=0.0),
                 search=LayoutPriorSearchStats(
                     sa_steps_attempted=0,
                     sa_steps_accepted=0,

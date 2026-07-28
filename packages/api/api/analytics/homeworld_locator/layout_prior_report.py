@@ -106,9 +106,7 @@ def downsample_incumbent_series(
             continue
         seen.add(index)
         chosen.append(index)
-    return tuple(
-        LayoutPriorIncumbentSample(step=samples[i][0], cost=samples[i][1]) for i in chosen
-    )
+    return tuple(LayoutPriorIncumbentSample(step=samples[i][0], cost=samples[i][1]) for i in chosen)
 
 
 def problem_size_hints(
@@ -196,7 +194,6 @@ def layout_prior_report_to_wire(report: LayoutPriorSolverRunReport) -> dict[str,
             "category": report.problem_size.category,
         },
         "incumbentCostSeries": [
-            {"step": sample.step, "cost": sample.cost}
-            for sample in report.incumbent_cost_series
+            {"step": sample.step, "cost": sample.cost} for sample in report.incumbent_cost_series
         ],
     }

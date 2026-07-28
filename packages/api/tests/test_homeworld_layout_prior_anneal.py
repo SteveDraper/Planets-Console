@@ -211,9 +211,9 @@ def test_anneal_selects_outside_enumerator_top4(template_planet, sample_turn) ->
     assert 999 not in capped
     assert 999 in choice.choice_planet_ids
 
-    enum_solution = EnumeratingLayoutPriorSolver().solve(
-        problem, stop_gate=NeverStopGate()
-    ).solution
+    enum_solution = (
+        EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate()).solution
+    )
     assert 999 not in enum_solution.chosen_planet_ids_by_sector.values()
 
     center_metric = SmoothedMetricDistribution(
@@ -243,9 +243,7 @@ def test_anneal_selects_outside_enumerator_top4(template_planet, sample_turn) ->
     assert far_score is not None and near_score is not None
     assert far_score[0] < near_score[0] - 1e-9
 
-    anneal = AnnealingLayoutPriorSolver().solve(
-        problem, stop_gate=MaxStepsStopGate(400)
-    ).solution
+    anneal = AnnealingLayoutPriorSolver().solve(problem, stop_gate=MaxStepsStopGate(400)).solution
     assert anneal.chosen_planet_ids_by_sector.get(choice.sector_index) == 999
 
 
@@ -262,9 +260,7 @@ def test_anneal_max_steps_zero_returns_promptly(template_planet, sample_turn) ->
         player_count=player_count,
     )
     started = time.perf_counter()
-    solution = AnnealingLayoutPriorSolver().solve(
-        problem, stop_gate=MaxStepsStopGate(0)
-    ).solution
+    solution = AnnealingLayoutPriorSolver().solve(problem, stop_gate=MaxStepsStopGate(0)).solution
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     assert solution.chosen_planet_ids_by_sector
     assert elapsed_ms < 500.0

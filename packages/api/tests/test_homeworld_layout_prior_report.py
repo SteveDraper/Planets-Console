@@ -167,8 +167,6 @@ def test_report_ring_retains_last_n(template_planet, sample_turn) -> None:
     )
     solver = AnnealingLayoutPriorSolver()
     for _ in range(LAYOUT_PRIOR_REPORT_RING_CAPACITY + 5):
-        record_layout_prior_report(
-            solver.solve(problem, stop_gate=MaxStepsStopGate(2)).report
-        )
+        record_layout_prior_report(solver.solve(problem, stop_gate=MaxStepsStopGate(2)).report)
     all_reports = recent_layout_prior_reports()
     assert len(all_reports) == LAYOUT_PRIOR_REPORT_RING_CAPACITY

@@ -218,9 +218,7 @@ class AnnealingLayoutPriorSolver:
             temperature *= cooling
         sa_ms = (time.perf_counter() - sa_t0) * 1000.0
         pre_refine_cost = best_cost
-        stop_reason = _anneal_stop_reason(
-            stop_gate, neighborhood_exhausted=neighborhood_exhausted
-        )
+        stop_reason = _anneal_stop_reason(stop_gate, neighborhood_exhausted=neighborhood_exhausted)
 
         refine_t0 = time.perf_counter()
         refined = refine_stand_in_positions(

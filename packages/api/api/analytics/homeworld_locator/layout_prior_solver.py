@@ -55,6 +55,7 @@ class LayoutPriorSolver(Protocol):
     ) -> LayoutPriorSolveResult:
         """Return the best incumbent selection and a structured run report."""
 
+
 def layout_prior_solver_from_name(name: str) -> LayoutPriorSolver:
     """Construct a named layout-prior solver implementation."""
     if name == LAYOUT_PRIOR_SOLVER_ENUMERATE:

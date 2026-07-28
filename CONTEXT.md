@@ -93,7 +93,7 @@ Full-width strip below the **shell** header that stacks user-visible BFF failure
 _Avoid_: toast, snackbar, error banner (without "shell")
 
 **Diagnostics modal**:
-Developer UI (opened from the header) that lists recent **request diagnostics** from the BFF buffer and can enable session-wide `includeDiagnostics=true` on BFF calls so later requests populate that buffer.
+Developer UI (opened from the header) with tabs for **request diagnostics** (BFF timing buffer + session `includeDiagnostics`), **Scores** solver detail, **Homeworlds** (**homeworld layout prior solver telemetry**), and optional **Compute** (orchestrator control plane when enabled).
 _Avoid_: debug panel (generic), profiler
 
 **Compute diagnostics**:
