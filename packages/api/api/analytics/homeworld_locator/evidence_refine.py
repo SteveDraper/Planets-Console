@@ -17,18 +17,18 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
     load_default_layout_distributions_asset,
 )
 from api.analytics.homeworld_locator.location_evidence import (
-    append_independent_origin_distance_hits,
     candidate_planet_ids,
     origin_distance_candidate_planet_ids,
     promote_candidate_to_definite,
     record_single_starbase_promotion,
     ship_gravitonic_movement,
     single_starbase_new_build_implicated_planet_id,
+    upsert_origin_distance_observation,
 )
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
-    HomeworldIndependentEvidenceHit,
     HomeworldSingleStarbasePromotion,
+    OriginDistanceObservation,
 )
 from api.analytics.homeworld_locator.sector_overlays import (
     homeworld_layout_asset_category,
@@ -61,15 +61,15 @@ def refine_homeworld_evidence_aggregate(
     """Advance the durable evidence aggregate by one turn of observations."""
     total_t0 = time.perf_counter()
     turn_number = turn.settings.turn
-    hits: tuple[HomeworldIndependentEvidenceHit, ...] = prior.evidence_hits
-    prior_hit_count = len(hits)
+    observations: tuple[OriginDistanceObservation, ...] = prior.origin_distance_observations
+    prior_observation_count = len(observations)
     promotions: tuple[HomeworldSingleStarbasePromotion, ...] = prior.single_starbase_promotions
     prior_promo_count = len(promotions)
     hulls_by_id = {hull.id: hull for hull in turn.hulls}
 
     origin_distance_ms = 0.0
     single_starbase_ms = 0.0
-    hit_append_ms = 0.0
+    observation_upsert_ms = 0.0
     origin_distance_matches = 0
 
     for ship in turn.ships:
@@ -84,13 +84,16 @@ def refine_homeworld_evidence_aggregate(
         origin_distance_ms += (time.perf_counter() - od_t0) * 1000.0
         origin_distance_matches += len(matched)
 
-        hit_t0 = time.perf_counter()
-        hits = append_independent_origin_distance_hits(
-            hits,
-            turn=turn_number,
-            matched_planet_ids=matched,
-        )
-        hit_append_ms += (time.perf_counter() - hit_t0) * 1000.0
+        if matched:
+            upsert_t0 = time.perf_counter()
+            observations = upsert_origin_distance_observation(
+                observations,
+                turn=turn_number,
+                x=ship.x,
+                y=ship.y,
+                matched_planet_ids=matched,
+            )
+            observation_upsert_ms += (time.perf_counter() - upsert_t0) * 1000.0
 
         sb_t0 = time.perf_counter()
         promo_planet_id = single_starbase_new_build_implicated_planet_id(
@@ -111,7 +114,7 @@ def refine_homeworld_evidence_aggregate(
     aggregate = HomeworldEvidenceAggregate(
         turn=turn_number,
         baseline_turn=prior.baseline_turn,
-        evidence_hits=hits,
+        origin_distance_observations=observations,
         single_starbase_promotions=promotions,
     )
     total_ms = (time.perf_counter() - total_t0) * 1000.0
@@ -120,15 +123,15 @@ def refine_homeworld_evidence_aggregate(
         timing=EvidenceRefineInnerTimingMs(
             origin_distance_ms=origin_distance_ms,
             single_starbase_ms=single_starbase_ms,
-            hit_append_ms=hit_append_ms,
+            observation_upsert_ms=observation_upsert_ms,
             total_ms=total_ms,
         ),
         counts=EvidenceRefineCounts(
             ship_count=len(turn.ships),
             candidate_count=len(candidate_planet_ids_set),
-            prior_hit_count=prior_hit_count,
+            prior_observation_count=prior_observation_count,
             origin_distance_matches=origin_distance_matches,
-            new_hits_appended=len(hits) - prior_hit_count,
+            new_observations_appended=len(observations) - prior_observation_count,
             single_starbase_promotions=len(promotions) - prior_promo_count,
         ),
     )

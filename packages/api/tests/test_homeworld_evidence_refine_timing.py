@@ -38,7 +38,7 @@ def test_evidence_refine_report_wire_and_summary() -> None:
         timing_inner=EvidenceRefineInnerTimingMs(
             origin_distance_ms=80.0,
             single_starbase_ms=5.0,
-            hit_append_ms=15.0,
+            observation_upsert_ms=15.0,
             total_ms=100.0,
         ),
         timing_outer=EvidenceRefineOuterTimingMs(
@@ -51,17 +51,19 @@ def test_evidence_refine_report_wire_and_summary() -> None:
         counts=EvidenceRefineCounts(
             ship_count=200,
             candidate_count=400,
-            prior_hit_count=1000,
+            prior_observation_count=1000,
             origin_distance_matches=12,
-            new_hits_appended=3,
+            new_observations_appended=3,
             single_starbase_promotions=0,
         ),
     )
     record_evidence_refine_report(report)
     wire = evidence_refine_report_to_wire(report)
     assert wire["timingInner"]["originDistanceMs"] == 80.0
-    assert wire["timingInner"]["hitAppendMs"] == 15.0
+    assert wire["timingInner"]["observationUpsertMs"] == 15.0
     assert wire["counts"]["candidateCount"] == 400
+    assert wire["counts"]["priorObservationCount"] == 1000
+    assert wire["counts"]["newObservationsAppended"] == 3
 
     payload = get_layout_prior_reports_wire(game_id=663307, perspective=2, turn=60)
     assert len(payload["evidenceRefineReports"]) == 1

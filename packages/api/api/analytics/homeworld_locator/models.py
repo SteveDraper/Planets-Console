@@ -36,17 +36,21 @@ class InferredHomeworldCandidate:
     """``inferred`` for baseline-emitted candidates."""
 
 
-EVIDENCE_KIND_ORIGIN_DISTANCE = "origin_distance"
 EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD = "single_starbase_new_build"
 
 
 @dataclass(frozen=True)
-class HomeworldIndependentEvidenceHit:
-    """One origin-distance hit for a candidate planet (at most one per planet, turn)."""
+class OriginDistanceObservation:
+    """One location-deduped origin-distance observation with match set M.
 
-    planet_id: int
+    Keyed by (turn, x, y): co-located ships on the same turn merge by unioning M.
+    ``matched_planet_ids`` is the sorted candidate planet ids in the origin-distance band.
+    """
+
     turn: int
-    kind: str = EVIDENCE_KIND_ORIGIN_DISTANCE
+    x: int
+    y: int
+    matched_planet_ids: tuple[int, ...]
 
 
 @dataclass(frozen=True)

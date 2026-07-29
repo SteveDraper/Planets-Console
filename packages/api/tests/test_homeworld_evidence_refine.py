@@ -23,8 +23,8 @@ from api.analytics.homeworld_locator.exports import EXPORT_CATALOG
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
-    HomeworldIndependentEvidenceHit,
     HomeworldSingleStarbasePromotion,
+    OriginDistanceObservation,
 )
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.types import (
@@ -88,7 +88,7 @@ def test_export_catalog_declares_self_chain() -> None:
     )
 
 
-def test_refine_accumulates_independent_hits_across_turns(persistence) -> None:
+def test_refine_accumulates_empty_observations_across_turns(persistence) -> None:
     from api.analytics.compute_context import make_analytic_compute_context
     from api.analytics.export_types import ExportScope
     from api.analytics.homeworld_locator.exports import ensure_homeworld_export
@@ -115,10 +115,10 @@ def test_refine_accumulates_independent_hits_across_turns(persistence) -> None:
     aggregate = persistence.get_evidence_aggregate(628580, 1, 3)
     assert aggregate is not None
     assert aggregate.turn == 3
-    assert aggregate.evidence_hits == ()
+    assert aggregate.origin_distance_observations == ()
 
 
-def test_refine_records_origin_distance_hit_on_shell_turn(persistence) -> None:
+def test_refine_records_origin_distance_observation_on_shell_turn(persistence) -> None:
     from api.analytics.compute_context import make_analytic_compute_context
     from api.analytics.export_types import ExportScope
     from api.analytics.homeworld_locator.exports import ensure_homeworld_export
@@ -149,7 +149,111 @@ def test_refine_records_origin_distance_hit_on_shell_turn(persistence) -> None:
     aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
     assert aggregate is not None
     assert aggregate.turn == 2
-    assert aggregate.evidence_hits == (HomeworldIndependentEvidenceHit(planet_id=10, turn=2),)
+    assert aggregate.origin_distance_observations == (
+        OriginDistanceObservation(
+            turn=2,
+            x=ship.x,
+            y=ship.y,
+            matched_planet_ids=(10,),
+        ),
+    )
+
+
+def test_refine_dedupes_colocated_ships_and_keeps_distinct_locations(persistence) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    ship_template = turn_two.ships[0]
+    planet_a = _planet(turn_two.planets[0], planet_id=10, x=500, y=500)
+    warp8 = max_travel_distance(8, False)
+    loc1_x = 500 + int(warp8)
+    loc1_y = 500
+    loc2_x = 500
+    loc2_y = 500 + int(warp8)
+    ships = [
+        _ship(ship_template, ship_id=1, x=loc1_x, y=loc1_y),
+        _ship(ship_template, ship_id=2, x=loc1_x, y=loc1_y),
+        _ship(ship_template, ship_id=3, x=loc2_x, y=loc2_y),
+    ]
+    turn_two = replace(turn_two, planets=[planet_a], ships=ships)
+    turns = {1: turn_one, 2: turn_two}
+
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+
+    ctx = make_analytic_compute_context(
+        turn_two,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
+    aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
+    assert aggregate is not None
+    assert aggregate.origin_distance_observations == (
+        OriginDistanceObservation(
+            turn=2,
+            x=loc1_x,
+            y=loc1_y,
+            matched_planet_ids=(10,),
+        ),
+        OriginDistanceObservation(
+            turn=2,
+            x=loc2_x,
+            y=loc2_y,
+            matched_planet_ids=(10,),
+        ),
+    )
+
+
+def test_refine_records_ambiguous_match_set(persistence) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    ship_template = turn_two.ships[0]
+    # Two candidates at the same origin-distance band from one ship location.
+    planet_a = _planet(turn_two.planets[0], planet_id=435, x=500, y=500)
+    planet_b = _planet(turn_two.planets[0], planet_id=483, x=500, y=500)
+    warp8 = max_travel_distance(8, False)
+    ship = _ship(ship_template, ship_id=99, x=500 + int(warp8), y=500)
+    turn_two = replace(turn_two, planets=[planet_a, planet_b], ships=[ship])
+    turns = {1: turn_one, 2: turn_two}
+
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(435), _candidate(483)),
+        _floor_aggregate(),
+    )
+
+    ctx = make_analytic_compute_context(
+        turn_two,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
+    aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
+    assert aggregate is not None
+    assert aggregate.origin_distance_observations == (
+        OriginDistanceObservation(
+            turn=2,
+            x=ship.x,
+            y=ship.y,
+            matched_planet_ids=(435, 483),
+        ),
+    )
+    assert len(aggregate.origin_distance_observations[0].matched_planet_ids) == 2
 
 
 def test_single_step_refine_requires_prior_when_above_ensure_floor(persistence) -> None:
@@ -342,14 +446,14 @@ def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     assert persistence.get_evidence_aggregate(628580, 1, 4) is not None
 
 
-def test_origin_distance_hits_do_not_promote_to_definite() -> None:
+def test_origin_distance_observations_do_not_promote_to_definite() -> None:
     turn = _load_turn()
     aggregate = HomeworldEvidenceAggregate(
         turn=5,
         baseline_turn=1,
-        evidence_hits=(
-            HomeworldIndependentEvidenceHit(planet_id=10, turn=2),
-            HomeworldIndependentEvidenceHit(planet_id=10, turn=3),
+        origin_distance_observations=(
+            OriginDistanceObservation(turn=2, x=100, y=200, matched_planet_ids=(10,)),
+            OriginDistanceObservation(turn=3, x=110, y=210, matched_planet_ids=(10,)),
         ),
     )
     candidates = materialize_evidence_adjusted_candidates(

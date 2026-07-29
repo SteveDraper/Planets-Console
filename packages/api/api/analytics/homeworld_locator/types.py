@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
 from api.analytics.homeworld_locator.models import (
-    HomeworldIndependentEvidenceHit,
     HomeworldSingleStarbasePromotion,
     InferredHomeworldCandidate,
+    OriginDistanceObservation,
 )
 
 
@@ -41,7 +41,7 @@ class HomeworldEvidenceAggregate:
     baseline_turn: int
     """Turn that supplied the homeworld inference baseline for this chain."""
 
-    evidence_hits: tuple[HomeworldIndependentEvidenceHit, ...] = ()
+    origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
     single_starbase_promotions: tuple[HomeworldSingleStarbasePromotion, ...] = ()
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None

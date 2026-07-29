@@ -27,7 +27,7 @@ class EvidenceRefineInnerTimingMs:
 
     origin_distance_ms: float
     single_starbase_ms: float
-    hit_append_ms: float
+    observation_upsert_ms: float
     total_ms: float
 
 
@@ -46,9 +46,9 @@ class EvidenceRefineOuterTimingMs:
 class EvidenceRefineCounts:
     ship_count: int
     candidate_count: int
-    prior_hit_count: int
+    prior_observation_count: int
     origin_distance_matches: int
-    new_hits_appended: int
+    new_observations_appended: int
     single_starbase_promotions: int
 
 
@@ -103,7 +103,7 @@ def evidence_refine_report_to_wire(report: EvidenceRefineRunReport) -> dict[str,
         "timingInner": {
             "originDistanceMs": report.timing_inner.origin_distance_ms,
             "singleStarbaseMs": report.timing_inner.single_starbase_ms,
-            "hitAppendMs": report.timing_inner.hit_append_ms,
+            "observationUpsertMs": report.timing_inner.observation_upsert_ms,
             "totalMs": report.timing_inner.total_ms,
         },
         "timingOuter": {
@@ -116,9 +116,9 @@ def evidence_refine_report_to_wire(report: EvidenceRefineRunReport) -> dict[str,
         "counts": {
             "shipCount": report.counts.ship_count,
             "candidateCount": report.counts.candidate_count,
-            "priorHitCount": report.counts.prior_hit_count,
+            "priorObservationCount": report.counts.prior_observation_count,
             "originDistanceMatches": report.counts.origin_distance_matches,
-            "newHitsAppended": report.counts.new_hits_appended,
+            "newObservationsAppended": report.counts.new_observations_appended,
             "singleStarbasePromotions": report.counts.single_starbase_promotions,
         },
     }
@@ -227,7 +227,7 @@ def summarize_evidence_refine_reports(
             "sumOuterTotalMs": 0.0,
             "sumOriginDistanceMs": 0.0,
             "sumSingleStarbaseMs": 0.0,
-            "sumHitAppendMs": 0.0,
+            "sumObservationUpsertMs": 0.0,
             "sumPersistMs": 0.0,
             "sumLoadPriorMs": 0.0,
             "maxOuterTotalMs": 0.0,
@@ -237,7 +237,7 @@ def summarize_evidence_refine_reports(
     sum_outer = sum(report.timing_outer.total_ms for report in reports)
     sum_od = sum(report.timing_inner.origin_distance_ms for report in reports)
     sum_sb = sum(report.timing_inner.single_starbase_ms for report in reports)
-    sum_hit = sum(report.timing_inner.hit_append_ms for report in reports)
+    sum_upsert = sum(report.timing_inner.observation_upsert_ms for report in reports)
     sum_persist = sum(report.timing_outer.persist_ms for report in reports)
     sum_prior = sum(report.timing_outer.load_prior_ms for report in reports)
     heaviest = max(reports, key=lambda report: report.timing_outer.total_ms)
@@ -247,7 +247,7 @@ def summarize_evidence_refine_reports(
         "sumOuterTotalMs": sum_outer,
         "sumOriginDistanceMs": sum_od,
         "sumSingleStarbaseMs": sum_sb,
-        "sumHitAppendMs": sum_hit,
+        "sumObservationUpsertMs": sum_upsert,
         "sumPersistMs": sum_persist,
         "sumLoadPriorMs": sum_prior,
         "maxOuterTotalMs": heaviest.timing_outer.total_ms,

@@ -188,11 +188,11 @@ Strengthens **where** a HW is (confidence on existing candidates). Does **not** 
 | Origin distance -- non-gravitonic | Ship near **64 LY** (warp 8) or **81 LY** (pod / warp 9) from an **existing** candidate planet |
 | Origin distance -- gravitonic | Gravitonic ships only: **128 LY** (grav warp 8) or **162 LY** (grav warp 9) |
 | Match tolerance | Small LY band (~+/-1); reuse `max_travel_distance` in **game concepts**, not YAML lists |
-| Independent hits | At most one countable hit per (**planet**, turn); hits do **not** flip confidence tier |
+| Origin-distance observations | One durable observation per (**turn**, ship **x**, ship **y**). Match set `M` = candidate planet ids in the origin-distance band. Co-located ships merge by unioning `M`. Observations do **not** flip confidence tier (soft scoring in a later phase). Persisted as `originDistanceObservations` on the evidence aggregate (replaces per-planet-turn hit rows). |
 | Single-starbase new-build | Ship first seen at *T-1* (or fleet `built_turn == T-1`) and owner scoreboard `starbases == 1` -> **immediate** possible->definite on implicated candidate; skip if SB count unknown / Stealth. **Only** automatic hard definite from location evidence. |
 | Candidate creation | Distance matches **never** invent new orphans -- only existing candidates |
 
-**Materialize (shared, after refine):** single-SB promote (if recorded) -> **co-sector cull** -> **homeworld definite-neighborhood cull** (asset `neighbor_separation.supportMin`) -> **homeworld layout prior selection** (`isMostProbable`). Origin-distance hits never promote.
+**Materialize (shared, after refine):** single-SB promote (if recorded) -> **co-sector cull** -> **homeworld definite-neighborhood cull** (asset `neighbor_separation.supportMin`) -> **homeworld layout prior selection** (`isMostProbable`). Origin-distance observations never promote.
 
 #### 4.3.2 Homeworld ownership evidence ([#269](https://github.com/SteveDraper/Planets-Console/issues/269))
 
@@ -356,7 +356,7 @@ Hybrid phases (each independently reviewable):
 
 ### 11.3 Issue #36 phased plan
 
-1. **Location evidence domain** -- origin-distance matchers (non-grav 64/81; grav 128/162), independent-hit accounting, single-SB new-build immediate promote; unit tests only.
+1. **Location evidence domain** -- origin-distance matchers (non-grav 64/81; grav 128/162), location-deduped observations with match sets, single-SB new-build immediate promote; unit tests only.
 2. **Evidence refine + orchestrator** -- `turn_delta=-1` self-chain; refine aggregate through shell turn; materialize promotion + co-sector cull + definite-neighborhood cull (`neighbor_separation.supportMin`); docs.
 3. **Layout prior + most-probable** -- joint selection, stand-ins, `isMostProbable` on candidate view wire; Core tests (incl. game 680224-style empty nebular sector).
 4. **FE markers + table cue** -- Zod `isMostProbable`; double dotted ring; tabular cue.

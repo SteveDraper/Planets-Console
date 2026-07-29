@@ -153,7 +153,7 @@ def test_persistence_round_trip_ephemeral(persistence) -> None:
         baseline_degraded=False,
         settings_fingerprint=(1, 2, 3),
     )
-    floor = HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_hits=())
+    floor = HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
     persistence.put_baseline(628580, 1, state, floor)
 
     loaded_state = persistence.get_game_state(628580)
@@ -700,7 +700,6 @@ def test_baseline_persist_recompute_clears_shell_evidence(persistence, sample_tu
         HomeworldEvidenceAggregate(
             turn=2,
             baseline_turn=2,
-            evidence_hits=(),
         ),
     )
     assert persistence.get_evidence_aggregate(628580, 1, 2) is not None
@@ -768,7 +767,7 @@ def test_baseline_persist_without_recompute_keeps_shell_evidence(persistence, sa
     persistence.put_evidence_aggregate(
         628580,
         1,
-        HomeworldEvidenceAggregate(turn=111, baseline_turn=1, evidence_hits=()),
+        HomeworldEvidenceAggregate(turn=111, baseline_turn=1),
     )
 
     ctx = make_analytic_compute_context(

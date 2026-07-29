@@ -231,8 +231,8 @@ export function DiagnosticsHomeworldsTab({
                   <p className="text-xs text-slate-400">
                     turn {String(report.turn)} · outer=
                     {String(outer?.totalMs ?? '?')}ms · od=
-                    {String(inner?.originDistanceMs ?? '?')}ms · hitAppend=
-                    {String(inner?.hitAppendMs ?? '?')}ms · sb=
+                    {String(inner?.originDistanceMs ?? '?')}ms · obsUpsert=
+                    {String(inner?.observationUpsertMs ?? '?')}ms · sb=
                     {String(inner?.singleStarbaseMs ?? '?')}ms
                   </p>
                   <button

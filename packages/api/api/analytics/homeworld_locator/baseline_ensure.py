@@ -216,7 +216,6 @@ def compute_homeworld_baseline(
     floor = HomeworldEvidenceAggregate(
         turn=baseline_turn,
         baseline_turn=baseline_turn,
-        evidence_hits=(),
     )
     record_baseline_report(
         build_baseline_report(

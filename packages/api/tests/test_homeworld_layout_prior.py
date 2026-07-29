@@ -17,7 +17,11 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
     SmoothedMetricDistribution,
 )
 from api.analytics.homeworld_locator.layout_prior import apply_layout_prior_most_probable
-from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
+from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_DEFINITE,
+    CONFIDENCE_POSSIBLE,
+    OriginDistanceObservation,
+)
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
@@ -643,14 +647,24 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
     )
 
     fingerprint = ((12, CONFIDENCE_DEFINITE, 1), (34, CONFIDENCE_POSSIBLE, None))
+    observations = (
+        OriginDistanceObservation(turn=12, x=100, y=200, matched_planet_ids=(12, 34)),
+        OriginDistanceObservation(turn=13, x=300, y=400, matched_planet_ids=(12,)),
+    )
     aggregate = HomeworldEvidenceAggregate(
         turn=13,
         baseline_turn=1,
+        origin_distance_observations=observations,
         layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
         layout_prior_input_fingerprint=fingerprint,
         most_probable_planet_ids=(12, 34),
     )
     wire = homeworld_evidence_aggregate_to_json(aggregate)
+    assert wire["originDistanceObservations"] == [
+        {"turn": 12, "x": 100, "y": 200, "matchedPlanetIds": [12, 34]},
+        {"turn": 13, "x": 300, "y": 400, "matchedPlanetIds": [12]},
+    ]
+    assert "evidenceHits" not in wire
     assert wire["layoutPriorSelection"] == {
         "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
         "inputFingerprint": [
@@ -661,16 +675,27 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
     }
     assert "promotionThreshold" not in wire["layoutPriorSelection"]
     restored = homeworld_evidence_aggregate_from_json(wire)
+    assert restored.origin_distance_observations == observations
     assert restored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
     assert restored.layout_prior_promotion_threshold is None
     assert restored.layout_prior_input_fingerprint == fingerprint
     assert restored.most_probable_planet_ids == (12, 34)
+    # Legacy evidenceHits-only payloads load with empty observations (re-refine expected).
+    legacy_hits_only = homeworld_evidence_aggregate_from_json(
+        {
+            "turn": 13,
+            "baselineTurn": 1,
+            "evidenceHits": [{"planetId": 12, "turn": 12, "kind": "origin_distance"}],
+            "singleStarbasePromotions": [],
+        }
+    )
+    assert legacy_hits_only.origin_distance_observations == ()
     # Legacy wire that still carries promotionThreshold remains readable.
     legacy_with_threshold = homeworld_evidence_aggregate_from_json(
         {
             "turn": 13,
             "baselineTurn": 1,
-            "evidenceHits": [],
+            "originDistanceObservations": [],
             "singleStarbasePromotions": [],
             "layoutPriorSelection": {
                 "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
@@ -693,7 +718,7 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
         {
             "turn": 13,
             "baselineTurn": 1,
-            "evidenceHits": [],
+            "originDistanceObservations": [],
             "singleStarbasePromotions": [],
             "layoutPriorSelection": {
                 "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,

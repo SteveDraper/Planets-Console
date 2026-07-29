@@ -8,10 +8,9 @@ from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
-    EVIDENCE_KIND_ORIGIN_DISTANCE,
     EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD,
-    HomeworldIndependentEvidenceHit,
     HomeworldSingleStarbasePromotion,
+    OriginDistanceObservation,
 )
 from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
@@ -89,27 +88,40 @@ def homeworld_locator_game_state_from_json(data: dict[str, Any]) -> HomeworldLoc
     )
 
 
-def _evidence_hit_to_json(hit: HomeworldIndependentEvidenceHit) -> dict[str, Any]:
+def _origin_distance_observation_to_json(observation: OriginDistanceObservation) -> dict[str, Any]:
     return {
-        "planetId": hit.planet_id,
-        "turn": hit.turn,
-        "kind": hit.kind,
+        "turn": observation.turn,
+        "x": observation.x,
+        "y": observation.y,
+        "matchedPlanetIds": list(observation.matched_planet_ids),
     }
 
 
-def _evidence_hit_from_json(data: dict[str, Any]) -> HomeworldIndependentEvidenceHit:
-    planet_id = data.get("planetId")
-    if not isinstance(planet_id, int):
-        raise ValidationError("homeworld evidence hit planetId must be an int")
+def _origin_distance_observation_from_json(data: dict[str, Any]) -> OriginDistanceObservation:
     turn = data.get("turn")
     if not isinstance(turn, int) or turn < 1:
-        raise ValidationError("homeworld evidence hit turn must be an int >= 1")
-    kind = data.get("kind", EVIDENCE_KIND_ORIGIN_DISTANCE)
-    if kind != EVIDENCE_KIND_ORIGIN_DISTANCE:
+        raise ValidationError("homeworld origin-distance observation turn must be an int >= 1")
+    x = data.get("x")
+    if not isinstance(x, int):
+        raise ValidationError("homeworld origin-distance observation x must be an int")
+    y = data.get("y")
+    if not isinstance(y, int):
+        raise ValidationError("homeworld origin-distance observation y must be an int")
+    matched_raw = data.get("matchedPlanetIds")
+    if not isinstance(matched_raw, list) or not all(isinstance(item, int) for item in matched_raw):
         raise ValidationError(
-            f"homeworld evidence hit kind must be {EVIDENCE_KIND_ORIGIN_DISTANCE!r}"
+            "homeworld origin-distance observation matchedPlanetIds must be an int array"
         )
-    return HomeworldIndependentEvidenceHit(planet_id=planet_id, turn=turn, kind=kind)
+    if not matched_raw:
+        raise ValidationError(
+            "homeworld origin-distance observation matchedPlanetIds must be non-empty"
+        )
+    return OriginDistanceObservation(
+        turn=turn,
+        x=x,
+        y=y,
+        matched_planet_ids=tuple(matched_raw),
+    )
 
 
 def _single_starbase_promotion_to_json(
@@ -146,7 +158,10 @@ def homeworld_evidence_aggregate_to_json(
     payload: dict[str, Any] = {
         "turn": aggregate.turn,
         "baselineTurn": aggregate.baseline_turn,
-        "evidenceHits": [_evidence_hit_to_json(hit) for hit in aggregate.evidence_hits],
+        "originDistanceObservations": [
+            _origin_distance_observation_to_json(observation)
+            for observation in aggregate.origin_distance_observations
+        ],
         "singleStarbasePromotions": [
             _single_starbase_promotion_to_json(promotion)
             for promotion in aggregate.single_starbase_promotions
@@ -180,17 +195,25 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
     baseline_turn = data.get("baselineTurn")
     if not isinstance(baseline_turn, int) or baseline_turn < 1:
         raise ValidationError("homeworld evidence aggregate baselineTurn must be an int >= 1")
-    hits_raw = data.get("evidenceHits", [])
-    if not isinstance(hits_raw, list):
-        raise ValidationError("homeworld evidence aggregate evidenceHits must be a JSON array")
+    observations_raw = data.get("originDistanceObservations", [])
+    if not isinstance(observations_raw, list):
+        raise ValidationError(
+            "homeworld evidence aggregate originDistanceObservations must be a JSON array"
+        )
     promotions_raw = data.get("singleStarbasePromotions", [])
     if not isinstance(promotions_raw, list):
         raise ValidationError(
             "homeworld evidence aggregate singleStarbasePromotions must be a JSON array"
         )
-    hits = tuple(_evidence_hit_from_json(hit) for hit in hits_raw if isinstance(hit, dict))
-    if len(hits) != len(hits_raw):
-        raise ValidationError("homeworld evidence aggregate evidenceHits entries must be objects")
+    observations = tuple(
+        _origin_distance_observation_from_json(observation)
+        for observation in observations_raw
+        if isinstance(observation, dict)
+    )
+    if len(observations) != len(observations_raw):
+        raise ValidationError(
+            "homeworld evidence aggregate originDistanceObservations entries must be objects"
+        )
     promotions = tuple(
         _single_starbase_promotion_from_json(promotion)
         for promotion in promotions_raw
@@ -264,7 +287,7 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
     return HomeworldEvidenceAggregate(
         turn=turn,
         baseline_turn=baseline_turn,
-        evidence_hits=hits,
+        origin_distance_observations=observations,
         single_starbase_promotions=promotions,
         layout_prior_algorithm_version=selection_version,
         layout_prior_promotion_threshold=selection_threshold,

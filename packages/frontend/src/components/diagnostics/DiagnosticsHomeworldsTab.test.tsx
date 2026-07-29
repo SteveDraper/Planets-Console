@@ -53,7 +53,7 @@ describe('DiagnosticsHomeworldsTab', () => {
           timingOuter: { totalMs: 12.5 },
           timingInner: {
             originDistanceMs: 10,
-            hitAppendMs: 1.5,
+            observationUpsertMs: 1.5,
             singleStarbaseMs: 0.5,
           },
         },
