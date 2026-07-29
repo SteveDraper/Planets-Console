@@ -164,11 +164,30 @@ def compute_homeworld_evidence_refine_step_detailed(
 
     candidate_ids = candidate_planet_ids_from_records(state.candidates)
     planets_by_id = {planet.id: planet for planet in turn.planets}
+
+    from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
+        load_scoreboard_history_for_ship_limit_freeze,
+    )
+    from api.concepts.ship_limit import is_at_or_over_shared_ship_limit
+
+    needs_ship_limit_history = (
+        prior.origin_distance_evidence_through_turn is None
+        and is_at_or_over_shared_ship_limit(turn.settings, turn.scores)
+    )
+    scoreboard_history = (
+        load_scoreboard_history_for_ship_limit_freeze(
+            shell_turn=turn,
+            load_turn=services.load_turn,
+        )
+        if needs_ship_limit_history
+        else None
+    )
     computed = refine_homeworld_evidence_aggregate(
         prior,
         turn=turn,
         candidate_planet_ids_set=candidate_ids,
         planets_by_id=planets_by_id,
+        scoreboard_history=scoreboard_history,
     )
     return EvidenceRefineStepResult(
         aggregate=computed.aggregate,
