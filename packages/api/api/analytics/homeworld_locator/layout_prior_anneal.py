@@ -13,9 +13,7 @@ from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VER
 from api.analytics.homeworld_locator.layout_prior_cost import (
     evaluate_layout_prior_selection,
     fixed_and_slot_anchored,
-    layout_prior_cost,
     mid_stand_in_positions,
-    positions_for_layout_prior_selection,
 )
 from api.analytics.homeworld_locator.layout_prior_problem import (
     LayoutPriorProblem,
@@ -327,7 +325,7 @@ def greedy_frontier_init(
 ) -> dict[int, int]:
     """Grow from pinned/fixed sectors: fewest-possibles frontier, min-cost planet."""
     player_count = len(problem.sector_states)
-    fixed_by_sector, slot_anchored = fixed_and_slot_anchored(problem.sector_states)
+    fixed_by_sector, _slot_anchored = fixed_and_slot_anchored(problem.sector_states)
     assigned: set[int] = set(fixed_by_sector)
     chosen: dict[int, int] = {}
     choice_by_index = {state.sector_index: state for state in choice_sectors}
@@ -353,10 +351,7 @@ def greedy_frontier_init(
             cost = _partial_ring_cost(
                 problem,
                 trial,
-                fixed_by_sector=fixed_by_sector,
-                stand_in_sectors=[s for s in problem.sector_states if s.kind == "stand_in"],
                 mid_stand_ins=mid_stand_ins,
-                slot_anchored=slot_anchored,
             )
             if cost < best_cost - 1e-12 or (
                 abs(cost - best_cost) <= 1e-12 and (best_planet is None or planet_id < best_planet)
@@ -447,24 +442,12 @@ def _partial_ring_cost(
     problem: LayoutPriorProblem,
     chosen_by_sector: Mapping[int, int],
     *,
-    fixed_by_sector: Mapping[int, SectorLayoutState],
-    stand_in_sectors: Sequence[SectorLayoutState],
     mid_stand_ins: Mapping[int, tuple[float, float]],
-    slot_anchored: frozenset[int],
 ) -> float:
     """Layout-prior cost over fixed + assigned choices + mid stand-ins only."""
-    positions = positions_for_layout_prior_selection(
-        chosen_by_sector=chosen_by_sector,
-        fixed_by_sector=fixed_by_sector,
-        stand_in_sectors=stand_in_sectors,
-        planets_by_id=problem.planets_by_id,
+    scored = evaluate_layout_prior_selection(
+        problem,
+        chosen_by_sector,
         stand_in_positions=mid_stand_ins,
     )
-    if positions is None:
-        return float("inf")
-    return layout_prior_cost(
-        positions,
-        center=problem.center,
-        slot_anchored_sectors=slot_anchored,
-        distributions=problem.distributions,
-    )
+    return float("inf") if scored is None else scored[0]

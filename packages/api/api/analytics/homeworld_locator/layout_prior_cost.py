@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -11,8 +12,12 @@ from api.analytics.homeworld_locator.layout_prior_problem import (
     LayoutPriorProblem,
     SectorLayoutState,
 )
+from api.analytics.homeworld_locator.models import OriginDistanceObservation
 from api.concepts.stellar_cartography.nebula_visibility import distance_ly
 from api.models.planet import Planet
+
+# Floor for empty |S ∩ M| / |M| so -log stays finite.
+ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS = 1e-12
 
 
 @dataclass(frozen=True)
@@ -43,12 +48,76 @@ class LayoutPriorCostBreakdown:
     center_terms: tuple[CenterDistanceContribution, ...]
     neighbor_mean: float
     center_mean: float
+    evidence_mean: float
     total: float
 
 
 def layout_prior_tie_key(chosen_by_sector: Mapping[int, int]) -> tuple[tuple[int, int], ...]:
     """Lexicographic tie-break key: sorted ``(sector_index, planet_id)`` pairs."""
     return tuple(sorted(chosen_by_sector.items()))
+
+
+def selection_planet_ids_for_layout_prior(
+    *,
+    fixed_by_sector: Mapping[int, SectorLayoutState],
+    chosen_by_sector: Mapping[int, int],
+) -> frozenset[int]:
+    """Planet ids in selection S: fixed definites + choice assignments (not stand-ins)."""
+    selected: set[int] = set()
+    for state in fixed_by_sector.values():
+        if state.fixed_planet_id is not None:
+            selected.add(state.fixed_planet_id)
+    selected.update(chosen_by_sector.values())
+    return frozenset(selected)
+
+
+def origin_distance_observation_neg_log(
+    observation: OriginDistanceObservation,
+    selection_planet_ids: frozenset[int],
+    *,
+    empty_intersection_eps: float = ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS,
+) -> float:
+    """``-log P(o|S)`` with ``P = |S ∩ M| / |M|`` (ε floor when empty)."""
+    match_set = observation.matched_planet_ids
+    if not match_set:
+        return -math.log(empty_intersection_eps)
+    overlap = sum(1 for planet_id in match_set if planet_id in selection_planet_ids)
+    probability = max(empty_intersection_eps, overlap / len(match_set))
+    return -math.log(probability)
+
+
+def origin_distance_evidence_mean(
+    observations: Sequence[OriginDistanceObservation],
+    selection_planet_ids: frozenset[int],
+    *,
+    evidence_lambda: float,
+    empty_intersection_eps: float = ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS,
+) -> float:
+    """λ-blended turn-ordered soft evidence cost E(S).
+
+    Per turn with ≥1 observation: ``e_t = mean(-log P)``. Skip empty turns.
+    Running ``E = (E + λ e) / (1 + λ)``. No observations → ``0``.
+    """
+    if not observations:
+        return 0.0
+
+    by_turn: dict[int, list[OriginDistanceObservation]] = defaultdict(list)
+    for observation in observations:
+        by_turn[observation.turn].append(observation)
+
+    evidence = 0.0
+    for turn in sorted(by_turn):
+        turn_obs = by_turn[turn]
+        turn_mean = sum(
+            origin_distance_observation_neg_log(
+                observation,
+                selection_planet_ids,
+                empty_intersection_eps=empty_intersection_eps,
+            )
+            for observation in turn_obs
+        ) / len(turn_obs)
+        evidence = (evidence + evidence_lambda * turn_mean) / (1.0 + evidence_lambda)
+    return evidence
 
 
 def positions_for_layout_prior_selection(
@@ -93,11 +162,13 @@ def layout_prior_cost_breakdown(
     center: tuple[float, float],
     slot_anchored_sectors: frozenset[int],
     distributions: CategoryLayoutDistributions,
+    evidence_mean: float = 0.0,
 ) -> LayoutPriorCostBreakdown:
     """Decompose equal-family layout-prior cost into per-edge and per-member terms.
 
-    Each family mean is the mean of Normal ``-log`` densities under the category
-    asset tables (neighbor separation and center distance).
+    Geometric families are means of Normal ``-log`` densities under the category
+    asset tables (neighbor separation and center distance). Soft origin-distance
+    evidence is an equal third family mean (``0`` when absent).
     """
     if len(positions_by_sector) < 2:
         return LayoutPriorCostBreakdown(
@@ -106,7 +177,8 @@ def layout_prior_cost_breakdown(
             center_terms=(),
             neighbor_mean=0.0,
             center_mean=0.0,
-            total=0.0,
+            evidence_mean=evidence_mean,
+            total=evidence_mean,
         )
 
     center_x, center_y = center
@@ -158,7 +230,8 @@ def layout_prior_cost_breakdown(
         center_terms=tuple(center_terms),
         neighbor_mean=neighbor_mean,
         center_mean=center_mean,
-        total=neighbor_mean + center_mean,
+        evidence_mean=evidence_mean,
+        total=neighbor_mean + center_mean + evidence_mean,
     )
 
 
@@ -168,6 +241,7 @@ def layout_prior_cost(
     center: tuple[float, float],
     slot_anchored_sectors: frozenset[int],
     distributions: CategoryLayoutDistributions,
+    evidence_mean: float = 0.0,
 ) -> float:
     """Equal-family layout-prior cost for a closed (or partial) ring of positions."""
     return layout_prior_cost_breakdown(
@@ -175,6 +249,7 @@ def layout_prior_cost(
         center=center,
         slot_anchored_sectors=slot_anchored_sectors,
         distributions=distributions,
+        evidence_mean=evidence_mean,
     ).total
 
 
@@ -237,10 +312,20 @@ def evaluate_layout_prior_selection_breakdown(
     )
     if positions is None:
         return None
+    selection_ids = selection_planet_ids_for_layout_prior(
+        fixed_by_sector=fixed_by_sector,
+        chosen_by_sector=chosen_by_sector,
+    )
+    evidence_mean = origin_distance_evidence_mean(
+        problem.origin_distance_observations,
+        selection_ids,
+        evidence_lambda=problem.origin_distance_evidence_lambda,
+    )
     breakdown = layout_prior_cost_breakdown(
         positions,
         center=problem.center,
         slot_anchored_sectors=slot_anchored,
         distributions=problem.distributions,
+        evidence_mean=evidence_mean,
     )
     return breakdown, layout_prior_tie_key(chosen_by_sector)

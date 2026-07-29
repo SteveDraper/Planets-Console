@@ -12,8 +12,12 @@ class HomeworldLocatorConfig:
     min_baseline_clans: int = 10_000
     """Floor for homeworld baseline profile clan matching."""
 
-    evidence_promotion_threshold: int = 2
-    """Unused for promotion (SB-only hard definite). Kept for YAML compat until replaced."""
+    origin_distance_evidence_lambda: float = 0.8
+    """Temporal blend weight for soft origin-distance evidence in layout-prior cost.
+
+    Running ``E = (E + λ e) / (1 + λ)`` over turn-ordered observation means.
+    Valid range ``(0, 1]``.
+    """
 
     layout_prior_solver: str = "anneal"
     """Layout-prior discrete solver: ``anneal`` (default) or ``enumerate``."""
@@ -57,7 +61,7 @@ class ApiConfig:
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
 
     homeworld_locator: HomeworldLocatorConfig = field(default_factory=HomeworldLocatorConfig)
-    """Homeworld locator policy (baseline clans, evidence threshold, layout-prior knobs)."""
+    """Homeworld locator policy (baseline clans, soft evidence λ, layout-prior knobs)."""
 
 
 def get_config() -> ApiConfig:

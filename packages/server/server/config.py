@@ -129,18 +129,20 @@ def _parse_homeworld_locator_config(raw: object) -> HomeworldLocatorConfig:
         )
     if min_clans < 0:
         raise ValueError(f"api.homeworld_locator.min_baseline_clans must be >= 0, got {min_clans}")
-    threshold = raw.get(
-        "evidence_promotion_threshold",
-        defaults.evidence_promotion_threshold,
+    lambda_raw = raw.get(
+        "origin_distance_evidence_lambda",
+        defaults.origin_distance_evidence_lambda,
     )
-    if isinstance(threshold, bool) or not isinstance(threshold, int):
+    if isinstance(lambda_raw, bool) or not isinstance(lambda_raw, (int, float)):
         raise TypeError(
-            f"api.homeworld_locator.evidence_promotion_threshold must be an int, got "
-            f"{type(threshold).__name__}: {threshold!r}"
+            f"api.homeworld_locator.origin_distance_evidence_lambda must be a number, got "
+            f"{type(lambda_raw).__name__}: {lambda_raw!r}"
         )
-    if threshold < 1:
+    evidence_lambda = float(lambda_raw)
+    if not (0.0 < evidence_lambda <= 1.0):
         raise ValueError(
-            f"api.homeworld_locator.evidence_promotion_threshold must be >= 1, got {threshold}"
+            "api.homeworld_locator.origin_distance_evidence_lambda must be in (0, 1], "
+            f"got {evidence_lambda}"
         )
     solver = raw.get("layout_prior_solver", defaults.layout_prior_solver)
     if not isinstance(solver, str):
@@ -166,7 +168,7 @@ def _parse_homeworld_locator_config(raw: object) -> HomeworldLocatorConfig:
         )
     return HomeworldLocatorConfig(
         min_baseline_clans=min_clans,
-        evidence_promotion_threshold=threshold,
+        origin_distance_evidence_lambda=evidence_lambda,
         layout_prior_solver=solver,
         layout_prior_budget_ms=budget_ms,
     )

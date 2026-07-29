@@ -101,7 +101,7 @@ def _stub_layout_asset(*, support_min: float = 500.0, support_max: float = 600.0
 def test_homeworld_locator_config_defaults() -> None:
     cfg = HomeworldLocatorConfig()
     assert cfg.min_baseline_clans == 10_000
-    assert cfg.evidence_promotion_threshold == 2
+    assert cfg.origin_distance_evidence_lambda == 0.8
 
 
 def test_supports_circular_round_only(sample_settings) -> None:

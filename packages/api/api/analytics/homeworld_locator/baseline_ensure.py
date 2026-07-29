@@ -300,6 +300,7 @@ def materialize_homeworld_candidates(
         turn=shell_turn,
         view=interim_view,
         player_count=_player_count(shell_turn),
+        origin_distance_observations=aggregate.origin_distance_observations,
     )
     most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
     services.persistence.put_evidence_aggregate(

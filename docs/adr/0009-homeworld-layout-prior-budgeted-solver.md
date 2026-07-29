@@ -17,7 +17,7 @@ Under `packages/api/api/analytics/homeworld_locator/`:
 |--------|------|
 | `layout_prior.py` | Facade: eligibility → build → `solver.solve` → annotate |
 | `layout_prior_problem.py` | `LayoutPriorProblem` / `SectorLayoutState` + sector build + seed materials |
-| `layout_prior_cost.py` | Shared cost + position assembly (outside solvers) |
+| `layout_prior_cost.py` | Shared cost + position assembly (outside solvers): neighbor + center Normal ``-log`` families plus soft origin-distance evidence ``E(S)`` |
 | `layout_prior_solver.py` | `LayoutPriorSolver` protocol, `LayoutPriorSolution`, factory |
 | `layout_prior_stop_gate.py` | `StopGate` / `NeverStopGate` / `DeadlineStopGate` / `MaxStepsStopGate` |
 | `layout_prior_enumerate.py` | `EnumeratingLayoutPriorSolver` (≤4 nearest-mid product) |

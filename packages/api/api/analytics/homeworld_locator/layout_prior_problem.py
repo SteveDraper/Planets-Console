@@ -9,7 +9,11 @@ from typing import Literal
 
 from api.analytics.homeworld_locator.geometry import sector_index_for_angle
 from api.analytics.homeworld_locator.layout_distributions_asset import CategoryLayoutDistributions
-from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
+from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_DEFINITE,
+    CONFIDENCE_POSSIBLE,
+    OriginDistanceObservation,
+)
 from api.analytics.homeworld_locator.sector_overlays import (
     sector_band_geometric_center,
     unobserved_band_sample_points,
@@ -21,6 +25,9 @@ from api.concepts.warp_well import planet_is_planetoid
 from api.models.planet import Planet
 
 SectorKind = Literal["fixed", "choice", "stand_in", "skip"]
+
+# Default soft-evidence blend weight (matches HomeworldLocatorConfig).
+DEFAULT_ORIGIN_DISTANCE_EVIDENCE_LAMBDA = 0.8
 
 
 @dataclass(frozen=True)
@@ -59,6 +66,9 @@ class LayoutPriorProblem:
     seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
     # Layout distribution category key (epic|standard) for telemetry / cooling analysis.
     layout_category: str | None = None
+    # Soft origin-distance evidence (equal third cost family).
+    origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
+    origin_distance_evidence_lambda: float = DEFAULT_ORIGIN_DISTANCE_EVIDENCE_LAMBDA
 
 
 def build_sector_layout_states(
@@ -230,6 +240,8 @@ def build_layout_prior_problem(
     seed_perspective: int = 0,
     seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = (),
     layout_category: str | None = None,
+    origin_distance_observations: Sequence[OriginDistanceObservation] = (),
+    origin_distance_evidence_lambda: float = DEFAULT_ORIGIN_DISTANCE_EVIDENCE_LAMBDA,
 ) -> LayoutPriorProblem:
     """Build the solver-facing problem from candidates and map geometry."""
     return LayoutPriorProblem(
@@ -257,4 +269,6 @@ def build_layout_prior_problem(
         seed_perspective=seed_perspective,
         seed_input_fingerprint=seed_input_fingerprint,
         layout_category=layout_category,
+        origin_distance_observations=tuple(origin_distance_observations),
+        origin_distance_evidence_lambda=origin_distance_evidence_lambda,
     )

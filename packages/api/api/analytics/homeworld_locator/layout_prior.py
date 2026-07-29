@@ -39,6 +39,7 @@ from api.analytics.homeworld_locator.layout_prior_stop_gate import (
     NeverStopGate,
     StopGate,
 )
+from api.analytics.homeworld_locator.models import OriginDistanceObservation
 from api.analytics.homeworld_locator.sector_overlays import (
     homeworld_layout_asset_category,
     homeworld_sector_emission_eligible,
@@ -84,13 +85,19 @@ def try_layout_prior_problem(
     player_count: int | None = None,
     layout_asset: LayoutDistributionsAsset | None = None,
     map_center: tuple[float, float] | None = None,
+    origin_distance_observations: Sequence[OriginDistanceObservation] | None = None,
+    origin_distance_evidence_lambda: float | None = None,
 ) -> LayoutPriorProblem | None:
     """Build a solver problem from turn + view, or ``None`` when the emission gate fails.
 
     Gate failures include missing pin, ineligible map geometry, or no layout
     distribution category. Callers that annotate (facade) clear
     ``is_most_probable`` on ``None``; callers that probe may raise.
+    Soft evidence observations/λ come from the shell aggregate + config when
+    omitted.
     """
+    from api.config import get_config
+
     resolved_count = player_count if player_count is not None else len(players_by_id(turn))
     pin = resolve_viewpoint_pin_planet(view, turn.planets)
     if pin is None or not homeworld_sector_emission_eligible(
@@ -120,6 +127,14 @@ def try_layout_prior_problem(
         owner_ids,
         planet_scan_range=float(turn.settings.planetscanrange),
     )
+    observations = (
+        () if origin_distance_observations is None else tuple(origin_distance_observations)
+    )
+    evidence_lambda = (
+        get_config().homeworld_locator.origin_distance_evidence_lambda
+        if origin_distance_evidence_lambda is None
+        else origin_distance_evidence_lambda
+    )
     return build_layout_prior_problem(
         candidates=candidates,
         planets_by_id=planets_by_id,
@@ -139,6 +154,8 @@ def try_layout_prior_problem(
         seed_perspective=int(turn.player.id),
         seed_input_fingerprint=layout_prior_input_fingerprint(candidates),
         layout_category=category,
+        origin_distance_observations=observations,
+        origin_distance_evidence_lambda=evidence_lambda,
     )
 
 
@@ -152,6 +169,8 @@ def apply_layout_prior_most_probable(
     map_center: tuple[float, float] | None = None,
     solver: LayoutPriorSolver | None = None,
     stop_gate: StopGate | None = None,
+    origin_distance_observations: Sequence[OriginDistanceObservation] | None = None,
+    origin_distance_evidence_lambda: float | None = None,
 ) -> tuple[HomeworldCandidateRecord, ...]:
     """Annotate ``is_most_probable`` after evidence culls when the emission gate passes."""
     problem = try_layout_prior_problem(
@@ -161,6 +180,8 @@ def apply_layout_prior_most_probable(
         player_count=player_count,
         layout_asset=layout_asset,
         map_center=map_center,
+        origin_distance_observations=origin_distance_observations,
+        origin_distance_evidence_lambda=origin_distance_evidence_lambda,
     )
     if problem is None:
         return tuple(

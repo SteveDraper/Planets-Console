@@ -831,25 +831,25 @@ def test_shell_layout_prior_persisted_and_reused(
     assert orphan.id in rewritten.most_probable_planet_ids
     assert pin_planet.id not in rewritten.most_probable_planet_ids
 
-    # Threshold config change alone does not force recompute (no longer a reuse key).
+    # Soft-evidence λ config change alone does not force recompute (reuse keys
+    # are algorithm version + input fingerprint; clear persistence when retuning λ).
     prior_calls = calls["n"]
     cfg = get_config()
-    elevated_threshold = cfg.homeworld_locator.evidence_promotion_threshold + 1
     set_config(
         replace(
             cfg,
             homeworld_locator=replace(
                 cfg.homeworld_locator,
-                evidence_promotion_threshold=elevated_threshold,
+                origin_distance_evidence_lambda=0.5,
             ),
         )
     )
     try:
         fourth = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
         assert calls["n"] == prior_calls
-        after_threshold = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
-        assert after_threshold is not None
-        assert after_threshold.layout_prior_promotion_threshold is None
+        after_lambda = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+        assert after_lambda is not None
+        assert after_lambda.layout_prior_promotion_threshold is None
         assert {row.planet_id for row in fourth.candidates if row.is_most_probable} == {
             row.planet_id for row in first.candidates if row.is_most_probable
         }

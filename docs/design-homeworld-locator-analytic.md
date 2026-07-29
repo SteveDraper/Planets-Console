@@ -188,7 +188,7 @@ Strengthens **where** a HW is (confidence on existing candidates). Does **not** 
 | Origin distance -- non-gravitonic | Ship near **64 LY** (warp 8) or **81 LY** (pod / warp 9) from an **existing** candidate planet |
 | Origin distance -- gravitonic | Gravitonic ships only: **128 LY** (grav warp 8) or **162 LY** (grav warp 9) |
 | Match tolerance | Small LY band (~+/-1); reuse `max_travel_distance` in **game concepts**, not YAML lists |
-| Origin-distance observations | One durable observation per (**turn**, ship **x**, ship **y**). Match set `M` = candidate planet ids in the origin-distance band. Co-located ships merge by unioning `M`. Observations do **not** flip confidence tier (soft scoring in a later phase). Persisted as `originDistanceObservations` on the evidence aggregate (replaces per-planet-turn hit rows). |
+| Origin-distance observations | One durable observation per (**turn**, ship **x**, ship **y**). Match set `M` = candidate planet ids in the origin-distance band. Co-located ships merge by unioning `M`. Observations do **not** flip confidence tier; they feed the soft evidence cost family in layout-prior selection. Persisted as `originDistanceObservations` on the evidence aggregate (replaces per-planet-turn hit rows). |
 | Single-starbase new-build | Ship first seen at *T-1* (or fleet `built_turn == T-1`) and owner scoreboard `starbases == 1` -> **immediate** possible->definite on implicated candidate; skip if SB count unknown / Stealth. **Only** automatic hard definite from location evidence. |
 | Candidate creation | Distance matches **never** invent new orphans -- only existing candidates |
 
@@ -205,7 +205,7 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 | Lock | Rule |
 |------|------|
 | Status | **`isMostProbable`** on possible candidates only; orthogonal to `confidence_tier` |
-| Cost | Equal family weight: mean of Normal ``-log`` density of clockwise-neighbor separation plus mean of Normal ``-log`` density of center-distance over unpinned members; fitted ``mean``/``std`` from the layout distribution asset (epic\|standard). Cost evaluation lives outside the replaceable solver. |
+| Cost | Equal family weight over three means: (1) Normal ``-log`` density of clockwise-neighbor separation, (2) Normal ``-log`` density of center-distance over unpinned members (fitted ``mean``/``std`` from the layout distribution asset), (3) soft origin-distance evidence ``E(S)``. For selection planet set ``S`` (fixed definites + chosen possibles; stand-ins do not absorb credit): per observation ``P(o\|S)=|S∩M|/|M|`` (ε floor if empty); per turn ``e_t=mean(-log P)``; running ``E=(E+λ e)/(1+λ)`` with config ``origin_distance_evidence_lambda`` (default **0.8**); skip turns with no observations; ``E=0`` when the observation list is empty. Cost evaluation lives outside the replaceable solver. |
 | Neighbor metric | Clockwise-neighbor (angle-sorted ring), matching asset sampling -- not true nearest-Euclidean |
 | Pinned sectors | Definite is the fixed set member; no most-probable label |
 | Empty sectors | **Homeworld layout stand-in**: synthetic position in planet-scan-unobserved band area closes the ring; contributes to both cost families; not a candidate / not drawn. Fully scanned empty sector -> does not participate. After discrete SA, place stand-ins by alternating coordinate descent over unobserved **sample-grid** points (deterministic sector-index sweep order; layout-prior cost; replaceable scored-sample hook for a later launch-consistency term -- not #270; hard iteration safety cap). |
@@ -403,3 +403,4 @@ Full plan: [plan-issue-270-layout-prior-budgeted-solver.md](plan-issue-270-layou
 | 2026-07-28 | Layout-prior SA: budget-progress temperature schedule (replace per-step geometric cool); bump `LAYOUT_PRIOR_ALGORITHM_VERSION` to 5 |
 | 2026-07-28 | Default `layout_prior_budget_ms` raised to **1000** (dense-map basin escape under budget-progress cooling) |
 | 2026-07-28 | SB-only hard definite: remove threshold `possible→definite`; layoutPriorSelection reuse ignores promotion threshold |
+| 2026-07-28 | Soft origin-distance evidence: third layout-prior cost family ``E(S)`` with λ=0.8; `origin_distance_evidence_lambda` replaces `evidence_promotion_threshold`; bump `LAYOUT_PRIOR_ALGORITHM_VERSION` to 6 |
