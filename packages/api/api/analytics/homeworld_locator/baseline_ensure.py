@@ -13,10 +13,7 @@ from api.analytics.homeworld_locator.compute_services import (
     resolve_homeworld_services,
 )
 from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
-from api.analytics.homeworld_locator.evidence_ensure import (
-    evidence_aggregate_at_shell_turn,
-    promotion_threshold,
-)
+from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
 from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
 from api.analytics.homeworld_locator.layout_prior import (
     apply_layout_prior_most_probable,
@@ -274,23 +271,20 @@ def materialize_homeworld_candidates(
     baseline_turn: int,
     baseline_degraded: bool,
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Ordered shell materialize: promote → co-sector → neighborhood → layout prior.
+    """Ordered shell materialize: SB promote → co-sector → neighborhood → layout prior.
 
     Design lock: docs/design-homeworld-locator-analytic.md §4.3.1.
     """
-    threshold = promotion_threshold()
     adjusted = materialize_evidence_adjusted_candidates(
         candidates,
         aggregate,
         planets=shell_turn.planets,
         settings_turn=shell_turn,
         player_count=_player_count(shell_turn),
-        promotion_threshold=threshold,
     )
     input_fingerprint = layout_prior_input_fingerprint(adjusted)
     if (
         aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-        and aggregate.layout_prior_promotion_threshold == threshold
         and aggregate.layout_prior_input_fingerprint == input_fingerprint
     ):
         selected = frozenset(aggregate.most_probable_planet_ids)
@@ -315,7 +309,7 @@ def materialize_homeworld_candidates(
         replace(
             aggregate,
             layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
-            layout_prior_promotion_threshold=threshold,
+            layout_prior_promotion_threshold=None,
             layout_prior_input_fingerprint=input_fingerprint,
             most_probable_planet_ids=most_probable_ids,
         ),

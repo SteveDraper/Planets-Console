@@ -42,7 +42,7 @@ EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD = "single_starbase_new_build"
 
 @dataclass(frozen=True)
 class HomeworldIndependentEvidenceHit:
-    """One countable hit toward ``evidence_promotion_threshold`` for a candidate planet."""
+    """One origin-distance hit for a candidate planet (at most one per planet, turn)."""
 
     planet_id: int
     turn: int

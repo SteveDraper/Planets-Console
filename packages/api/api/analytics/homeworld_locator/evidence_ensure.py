@@ -24,7 +24,6 @@ from api.analytics.homeworld_locator.evidence_refine_timing_history import (
 )
 from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-from api.config import get_config
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 
@@ -256,7 +255,3 @@ def ensure_homeworld_evidence_refined(
         persist_ms = (time.perf_counter() - persist_t0) * 1000.0
     record_evidence_refine_step_report(services, turn=shell_turn, step=step, persist_ms=persist_ms)
     return step.aggregate
-
-
-def promotion_threshold() -> int:
-    return get_config().homeworld_locator.evidence_promotion_threshold

@@ -13,7 +13,7 @@ class HomeworldLocatorConfig:
     """Floor for homeworld baseline profile clan matching."""
 
     evidence_promotion_threshold: int = 2
-    """Independent evidence hits required for possible -> definite."""
+    """Unused for promotion (SB-only hard definite). Kept for YAML compat until replaced."""
 
     layout_prior_solver: str = "anneal"
     """Layout-prior discrete solver: ``anneal`` (default) or ``enumerate``."""

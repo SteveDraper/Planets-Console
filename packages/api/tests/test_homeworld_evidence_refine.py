@@ -342,7 +342,7 @@ def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     assert persistence.get_evidence_aggregate(628580, 1, 4) is not None
 
 
-def test_threshold_promotion_materializes_definite(persistence) -> None:
+def test_origin_distance_hits_do_not_promote_to_definite() -> None:
     turn = _load_turn()
     aggregate = HomeworldEvidenceAggregate(
         turn=5,
@@ -358,9 +358,8 @@ def test_threshold_promotion_materializes_definite(persistence) -> None:
         planets=turn.planets,
         settings_turn=turn,
         player_count=11,
-        promotion_threshold=2,
     )
-    assert candidates[0].confidence_tier == CONFIDENCE_DEFINITE
+    assert candidates[0].confidence_tier == CONFIDENCE_POSSIBLE
 
 
 def test_single_starbase_promotion_materializes_without_owner_assignment() -> None:
@@ -377,7 +376,6 @@ def test_single_starbase_promotion_materializes_without_owner_assignment() -> No
         planets=turn.planets,
         settings_turn=turn,
         player_count=11,
-        promotion_threshold=2,
     )
     assert candidates[0].confidence_tier == CONFIDENCE_DEFINITE
     assert candidates[0].perspective is None
@@ -432,7 +430,6 @@ def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sampl
         planets=[definite, nearby],
         settings_turn=turn,
         player_count=11,
-        promotion_threshold=2,
     )
     assert [row.planet_id for row in candidates] == [1, 2]
 

@@ -188,11 +188,11 @@ Strengthens **where** a HW is (confidence on existing candidates). Does **not** 
 | Origin distance -- non-gravitonic | Ship near **64 LY** (warp 8) or **81 LY** (pod / warp 9) from an **existing** candidate planet |
 | Origin distance -- gravitonic | Gravitonic ships only: **128 LY** (grav warp 8) or **162 LY** (grav warp 9) |
 | Match tolerance | Small LY band (~+/-1); reuse `max_travel_distance` in **game concepts**, not YAML lists |
-| Independent hits | At most one countable hit per (**planet**, turn) toward `evidence_promotion_threshold` |
-| Single-starbase new-build | Ship first seen at *T-1* (or fleet `built_turn == T-1`) and owner scoreboard `starbases == 1` -> **immediate** possible->definite on implicated candidate; skip if SB count unknown / Stealth |
+| Independent hits | At most one countable hit per (**planet**, turn); hits do **not** flip confidence tier |
+| Single-starbase new-build | Ship first seen at *T-1* (or fleet `built_turn == T-1`) and owner scoreboard `starbases == 1` -> **immediate** possible->definite on implicated candidate; skip if SB count unknown / Stealth. **Only** automatic hard definite from location evidence. |
 | Candidate creation | Distance matches **never** invent new orphans -- only existing candidates |
 
-**Materialize (shared, after refine):** promote by threshold / fast-path -> **co-sector cull** -> **homeworld definite-neighborhood cull** (asset `neighbor_separation.supportMin`) -> **homeworld layout prior selection** (`isMostProbable`).
+**Materialize (shared, after refine):** single-SB promote (if recorded) -> **co-sector cull** -> **homeworld definite-neighborhood cull** (asset `neighbor_separation.supportMin`) -> **homeworld layout prior selection** (`isMostProbable`). Origin-distance hits never promote.
 
 #### 4.3.2 Homeworld ownership evidence ([#269](https://github.com/SteveDraper/Planets-Console/issues/269))
 
@@ -217,7 +217,7 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 | Follow-on (not #270) | **Stand-in launch consistency** ([#273](https://github.com/SteveDraper/Planets-Console/issues/273)): bias stand-in sample scores using one-turn / warp² (Grav) ship geometry and optional heading/waypoint back-track -- distinct from **ship origin distance signal** (which only strengthens existing candidate planets). |
 | Ties | Lexicographically smaller selected planet-id tuple |
 | Wire / UI | Shared map+table field; double-layer dotted ring on map; table cue |
-| Persistence | Shell turn only: `layoutPriorSelection` on that turn's evidence aggregate (`algorithmVersion` + `promotionThreshold` + `inputFingerprint` of post-promote/cull candidates + `mostProbablePlanetIds`). Reuse when algorithm version, threshold, and fingerprint all match current inputs; recompute+rewrite on any mismatch. `LAYOUT_PRIOR_ALGORITHM_VERSION` covers solver identity + cost/stand-in/tie-break policy. Intermediate refine turns do not compute or store selection. Evidence rewrite/invalidation clears it. ADR: [0009](../adr/0009-homeworld-layout-prior-budgeted-solver.md). |
+| Persistence | Shell turn only: `layoutPriorSelection` on that turn's evidence aggregate (`algorithmVersion` + `inputFingerprint` of post-promote/cull candidates + `mostProbablePlanetIds`). Reuse when algorithm version and fingerprint both match current inputs; recompute+rewrite on any mismatch. `LAYOUT_PRIOR_ALGORITHM_VERSION` covers solver identity + cost/stand-in/tie-break policy. Intermediate refine turns do not compute or store selection. Evidence rewrite/invalidation clears it. ADR: [0009](../adr/0009-homeworld-layout-prior-budgeted-solver.md). |
 | Solver telemetry (#274) | Each materialize-path solver run (not cache-hit reuse) records a structured **homeworld layout prior solver run report**: stop-gate + stop reason, timing splits, step/accept counts, greedy/pre-refine/final costs, problem-size hints, bounded incumbent-vs-step series. Process last-N ring; BFF Diagnostics **Homeworlds** tab. Homeworld-owned -- never mixed into **compute diagnostics**. |
 
 **Evidence does not replace baseline;** it adjusts confidence on candidates already hypothesized from baseline + geometry.
@@ -232,7 +232,7 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 
 | Kind | When |
 |------|------|
-| **Definite** | Baseline profile match; OR geometry leaves no plausible alternative; OR location-evidence promotion; OR **user-asserted** |
+| **Definite** | Baseline profile match; OR geometry leaves no plausible alternative; OR **single-starbase new-build** promotion; OR **user-asserted** |
 | **Possible** | Consistent with settings/spacing/evidence but not unique; default for orphans |
 | **Most probable** (`isMostProbable`) | Selection status on one **possible** per unpinned sector under layout prior -- **not** a confidence tier |
 
@@ -402,3 +402,4 @@ Full plan: [plan-issue-270-layout-prior-budgeted-solver.md](plan-issue-270-layou
 | 2026-07-28 | Layout-prior cost: Normal ``-log`` density (asset schema v2 mean/std) for neighbor + center; bump `LAYOUT_PRIOR_ALGORITHM_VERSION` to 4 |
 | 2026-07-28 | Layout-prior SA: budget-progress temperature schedule (replace per-step geometric cool); bump `LAYOUT_PRIOR_ALGORITHM_VERSION` to 5 |
 | 2026-07-28 | Default `layout_prior_budget_ms` raised to **1000** (dense-map basin escape under budget-progress cooling) |
+| 2026-07-28 | SB-only hard definite: remove threshold `possible→definite`; layoutPriorSelection reuse ignores promotion threshold |

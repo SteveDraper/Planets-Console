@@ -152,13 +152,9 @@ def homeworld_evidence_aggregate_to_json(
             for promotion in aggregate.single_starbase_promotions
         ],
     }
-    if (
-        aggregate.layout_prior_algorithm_version is not None
-        and aggregate.layout_prior_promotion_threshold is not None
-    ):
-        payload["layoutPriorSelection"] = {
+    if aggregate.layout_prior_algorithm_version is not None:
+        selection: dict[str, Any] = {
             "algorithmVersion": aggregate.layout_prior_algorithm_version,
-            "promotionThreshold": aggregate.layout_prior_promotion_threshold,
             "inputFingerprint": [
                 {
                     "planetId": planet_id,
@@ -169,6 +165,9 @@ def homeworld_evidence_aggregate_to_json(
             ],
             "mostProbablePlanetIds": list(aggregate.most_probable_planet_ids),
         }
+        if aggregate.layout_prior_promotion_threshold is not None:
+            selection["promotionThreshold"] = aggregate.layout_prior_promotion_threshold
+        payload["layoutPriorSelection"] = selection
     return payload
 
 
@@ -216,13 +215,15 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             raise ValidationError(
                 "homeworld layoutPriorSelection.algorithmVersion must be an int >= 1"
             )
-        # Legacy payloads omit reuse-key fields; treat as absent so materialize recomputes.
-        if "promotionThreshold" in selection_raw and "inputFingerprint" in selection_raw:
-            threshold = selection_raw.get("promotionThreshold")
-            if not isinstance(threshold, int) or threshold < 1:
-                raise ValidationError(
-                    "homeworld layoutPriorSelection.promotionThreshold must be an int >= 1"
-                )
+        # Legacy payloads omit inputFingerprint; treat as absent so materialize recomputes.
+        if "inputFingerprint" in selection_raw:
+            if "promotionThreshold" in selection_raw:
+                threshold = selection_raw.get("promotionThreshold")
+                if not isinstance(threshold, int) or threshold < 1:
+                    raise ValidationError(
+                        "homeworld layoutPriorSelection.promotionThreshold must be an int >= 1"
+                    )
+                selection_threshold = threshold
             fingerprint_raw = selection_raw.get("inputFingerprint")
             if not isinstance(fingerprint_raw, list):
                 raise ValidationError(
@@ -258,7 +259,6 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
                     "homeworld layoutPriorSelection.mostProbablePlanetIds must be an int array"
                 )
             selection_version = version
-            selection_threshold = threshold
             selection_fingerprint = tuple(fingerprint_entries)
             most_probable_ids = tuple(ids_raw)
     return HomeworldEvidenceAggregate(

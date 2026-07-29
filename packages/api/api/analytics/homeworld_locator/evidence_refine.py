@@ -19,7 +19,6 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
 from api.analytics.homeworld_locator.location_evidence import (
     append_independent_origin_distance_hits,
     candidate_planet_ids,
-    independent_hit_count_for_planet,
     origin_distance_candidate_planet_ids,
     promote_candidate_to_definite,
     record_single_starbase_promotion,
@@ -28,7 +27,6 @@ from api.analytics.homeworld_locator.location_evidence import (
 )
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
-    CONFIDENCE_POSSIBLE,
     HomeworldIndependentEvidenceHit,
     HomeworldSingleStarbasePromotion,
 )
@@ -136,22 +134,6 @@ def refine_homeworld_evidence_aggregate(
     )
 
 
-def apply_threshold_evidence_promotions(
-    candidates: Sequence[HomeworldCandidateRecord],
-    hits: Sequence[HomeworldIndependentEvidenceHit],
-    *,
-    threshold: int,
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Promote possibles that reached the independent-hit threshold."""
-    promoted: tuple[HomeworldCandidateRecord, ...] = tuple(candidates)
-    for row in candidates:
-        if row.confidence_tier != CONFIDENCE_POSSIBLE:
-            continue
-        if independent_hit_count_for_planet(hits, row.planet_id) >= threshold:
-            promoted = promote_candidate_to_definite(promoted, planet_id=row.planet_id)
-    return promoted
-
-
 def apply_recorded_single_starbase_promotions(
     candidates: Sequence[HomeworldCandidateRecord],
     promotions: Sequence[HomeworldSingleStarbasePromotion],
@@ -226,24 +208,20 @@ def materialize_evidence_adjusted_candidates(
     planets: Sequence[Planet],
     settings_turn: TurnInfo,
     player_count: int,
-    promotion_threshold: int,
     layout_asset: LayoutDistributionsAsset | None = None,
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Promotion then co-sector cull then definite-neighborhood cull.
+    """Single-SB promote then co-sector cull then definite-neighborhood cull.
 
+    Origin-distance hits do not change confidence tier. The only automatic
+    possible→definite path here is recorded single-starbase new-build.
     These are the pre-layout-prior steps of the §4.3.1 materialize ladder.
     Shell map/table serving uses ``materialize_homeworld_candidates``, which
     owns the full order through layout-prior annotation.
     """
     from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
 
-    adjusted = apply_threshold_evidence_promotions(
-        candidates,
-        aggregate.evidence_hits,
-        threshold=promotion_threshold,
-    )
     adjusted = apply_recorded_single_starbase_promotions(
-        adjusted,
+        candidates,
         aggregate.single_starbase_promotions,
     )
     adjusted = apply_co_sector_candidate_cull(
