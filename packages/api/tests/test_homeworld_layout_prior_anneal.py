@@ -776,3 +776,181 @@ def test_facade_prefers_admissible_previous_selection_over_worse_anneal(
     )
     assert result.solution.chosen_planet_ids_by_sector == {choice.sector_index: 70}
     assert result.solution.cost < 100.0
+    assert result.report.stop_reason == "projected"
+    assert result.report.search.final_cost == pytest.approx(result.solution.cost)
+    assert result.report.search.tie_key == result.solution.tie_key
+    assert result.report.search.sa_steps_attempted == 0
+    assert result.report.search.final_cost != pytest.approx(100.0)
+
+
+def test_facade_projection_win_report_not_anneal_reuse(
+    template_planet, sample_turn, monkeypatch
+) -> None:
+    """Projection win must not return the competing anneal report object."""
+    from api.analytics.homeworld_locator.layout_prior import _solve_layout_prior_for_annotation
+    from api.analytics.homeworld_locator.layout_prior_report import (
+        LayoutPriorSearchStats,
+        LayoutPriorStopGateInfo,
+        LayoutPriorTimingMs,
+        build_run_report,
+        problem_size_hints,
+    )
+    from api.analytics.homeworld_locator.layout_prior_solver import (
+        LayoutPriorSolution,
+        LayoutPriorSolveResult,
+    )
+
+    player_count = 11
+    sector_angle = 2.0 * math.pi / player_count
+    problem, *_ = _build_choice_problem(
+        template_planet=template_planet,
+        sample_turn=sample_turn,
+        choice_planets=[
+            (70, sector_angle, 550.0),
+            (71, sector_angle + 0.01, 560.0),
+        ],
+        player_count=player_count,
+        seed_turn=57,
+    )
+    choice = next(state for state in problem.sector_states if state.kind == "choice")
+    anneal_reports: list[object] = []
+
+    def fake_solve(self, problem, *, stop_gate):
+        solution = LayoutPriorSolution(
+            chosen_planet_ids_by_sector={choice.sector_index: 71},
+            stand_in_positions_by_sector={},
+            cost=100.0,
+            tie_key=((choice.sector_index, 71),),
+        )
+        report = build_run_report(
+            game_id=problem.seed_game_id,
+            turn=problem.seed_turn,
+            perspective=problem.seed_perspective,
+            solver=LAYOUT_PRIOR_SOLVER_ANNEAL,
+            stop_gate=LayoutPriorStopGateInfo(kind="max_steps", max_steps=1),
+            stop_reason="max_steps",
+            timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=1.0, refine_ms=0.0, total_ms=1.0),
+            search=LayoutPriorSearchStats(
+                sa_steps_attempted=1,
+                sa_steps_accepted=0,
+                greedy_cost=100.0,
+                pre_refine_cost=100.0,
+                final_cost=100.0,
+                tie_key=solution.tie_key,
+            ),
+            problem_size=problem_size_hints(
+                choice_sector_count=1,
+                total_possibles=2,
+                stand_in_sector_count=0,
+                planet_count=3,
+                category="standard",
+            ),
+            incumbent_cost_series=(),
+        )
+        anneal_reports.append(report)
+        return LayoutPriorSolveResult(solution=solution, report=report)
+
+    monkeypatch.setattr(AnnealingLayoutPriorSolver, "solve", fake_solve)
+
+    result = _solve_layout_prior_for_annotation(
+        AnnealingLayoutPriorSolver(),
+        problem,
+        template_gate=MaxStepsStopGate(1),
+        previous_most_probable_planet_ids=(70,),
+    )
+    assert result.report.stop_reason == "projected"
+    assert result.report is not anneal_reports[0]
+    assert all(result.report is not report for report in anneal_reports)
+
+
+def test_facade_anneal_win_keeps_anneal_report(
+    template_planet, sample_turn, monkeypatch
+) -> None:
+    """When anneal beats the projection, return that anneal's report unchanged."""
+    from api.analytics.homeworld_locator import layout_prior as layout_prior_mod
+    from api.analytics.homeworld_locator.layout_prior import _solve_layout_prior_for_annotation
+    from api.analytics.homeworld_locator.layout_prior_report import (
+        LayoutPriorSearchStats,
+        LayoutPriorStopGateInfo,
+        LayoutPriorTimingMs,
+        build_run_report,
+        problem_size_hints,
+    )
+    from api.analytics.homeworld_locator.layout_prior_solver import (
+        LayoutPriorSolution,
+        LayoutPriorSolveResult,
+    )
+
+    player_count = 11
+    sector_angle = 2.0 * math.pi / player_count
+    problem, *_ = _build_choice_problem(
+        template_planet=template_planet,
+        sample_turn=sample_turn,
+        choice_planets=[
+            (70, sector_angle, 550.0),
+            (71, sector_angle + 0.01, 560.0),
+        ],
+        player_count=player_count,
+        seed_turn=57,
+    )
+    choice = next(state for state in problem.sector_states if state.kind == "choice")
+    anneal_report_holder: list[object] = []
+
+    def fake_solve(self, problem, *, stop_gate):
+        solution = LayoutPriorSolution(
+            chosen_planet_ids_by_sector={choice.sector_index: 71},
+            stand_in_positions_by_sector={},
+            cost=0.01,
+            tie_key=((choice.sector_index, 71),),
+        )
+        report = build_run_report(
+            game_id=problem.seed_game_id,
+            turn=problem.seed_turn,
+            perspective=problem.seed_perspective,
+            solver=LAYOUT_PRIOR_SOLVER_ANNEAL,
+            stop_gate=LayoutPriorStopGateInfo(kind="max_steps", max_steps=1),
+            stop_reason="max_steps",
+            timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=1.0, refine_ms=0.0, total_ms=1.0),
+            search=LayoutPriorSearchStats(
+                sa_steps_attempted=1,
+                sa_steps_accepted=1,
+                greedy_cost=0.01,
+                pre_refine_cost=0.01,
+                final_cost=0.01,
+                tie_key=solution.tie_key,
+            ),
+            problem_size=problem_size_hints(
+                choice_sector_count=1,
+                total_possibles=2,
+                stand_in_sector_count=0,
+                planet_count=3,
+                category="standard",
+            ),
+            incumbent_cost_series=(),
+        )
+        anneal_report_holder.append(report)
+        return LayoutPriorSolveResult(solution=solution, report=report)
+
+    def worse_projection(problem, chosen_by_sector):
+        return LayoutPriorSolution(
+            chosen_planet_ids_by_sector=dict(chosen_by_sector),
+            stand_in_positions_by_sector={},
+            cost=50.0,
+            tie_key=tuple(sorted((s, p) for s, p in chosen_by_sector.items())),
+        )
+
+    monkeypatch.setattr(AnnealingLayoutPriorSolver, "solve", fake_solve)
+    monkeypatch.setattr(layout_prior_mod, "score_projected_layout_selection", worse_projection)
+
+    result = _solve_layout_prior_for_annotation(
+        AnnealingLayoutPriorSolver(),
+        problem,
+        template_gate=MaxStepsStopGate(1),
+        previous_most_probable_planet_ids=(70,),
+    )
+    assert result.solution.chosen_planet_ids_by_sector == {choice.sector_index: 71}
+    assert result.report is anneal_report_holder[0]
+    assert result.report.stop_reason == "max_steps"
+    assert result.report.search.final_cost == pytest.approx(0.01)
+    assert result.report.search.tie_key == ((choice.sector_index, 71),)
+    assert result.report.search.sa_steps_attempted == 1

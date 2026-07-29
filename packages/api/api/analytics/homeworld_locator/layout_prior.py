@@ -24,6 +24,7 @@ from api.analytics.homeworld_locator.layout_prior_problem import (
     build_layout_prior_problem,
     build_sector_layout_states,
 )
+from api.analytics.homeworld_locator.layout_prior_report import build_projected_selection_report
 from api.analytics.homeworld_locator.layout_prior_run_history import record_layout_prior_report
 from api.analytics.homeworld_locator.layout_prior_solver import (
     LAYOUT_PRIOR_SOLVER_ANNEAL,
@@ -339,7 +340,13 @@ def _solve_layout_prior_for_annotation(
         return best
     projected = score_projected_layout_selection(problem, projected_chosen)
     if projected is not None and _layout_prior_solution_is_better(projected, best.solution):
-        return LayoutPriorSolveResult(solution=projected, report=best.report)
+        report = build_projected_selection_report(
+            cost=projected.cost,
+            tie_key=projected.tie_key,
+            reference_report=best.report,
+        )
+        record_layout_prior_report(report)
+        return LayoutPriorSolveResult(solution=projected, report=report)
     return best
 
 

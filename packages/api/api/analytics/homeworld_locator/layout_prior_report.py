@@ -16,7 +16,13 @@ from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VER
 LAYOUT_PRIOR_REPORT_RING_CAPACITY = 32
 LAYOUT_PRIOR_INCUMBENT_SERIES_MAX_POINTS = 64
 
-LayoutPriorStopReason = Literal["deadline", "max_steps", "exhausted", "no_choices"]
+LayoutPriorStopReason = Literal[
+    "deadline",
+    "max_steps",
+    "exhausted",
+    "no_choices",
+    "projected",
+]
 LayoutPriorStopGateKind = Literal["deadline", "max_steps", "never"]
 LayoutPriorSolverName = Literal["anneal", "enumerate"]
 
@@ -156,6 +162,42 @@ def build_run_report(
         problem_size=problem_size,
         incumbent_cost_series=tuple(incumbent_cost_series),
         captured_at=captured_at if captured_at is not None else utc_now_iso(),
+    )
+
+
+def build_projected_selection_report(
+    *,
+    cost: float,
+    tie_key: tuple[tuple[int, int], ...],
+    reference_report: LayoutPriorSolverRunReport,
+) -> LayoutPriorSolverRunReport:
+    """Telemetry for a continuity projection win (admissible prior selection).
+
+    Costs and tie-key describe the projected selection. Stop reason is
+    ``projected`` so diagnostics do not reuse an anneal run's SA final /
+    stop reason. Identity and problem-size hints come from the competing
+    anneal report for the same continuity round.
+    """
+    return build_run_report(
+        game_id=reference_report.game_id,
+        turn=reference_report.turn,
+        perspective=reference_report.perspective,
+        solver=reference_report.solver,
+        stop_gate=reference_report.stop_gate,
+        stop_reason="projected",
+        timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=0.0),
+        search=LayoutPriorSearchStats(
+            sa_steps_attempted=0,
+            sa_steps_accepted=0,
+            greedy_cost=cost,
+            pre_refine_cost=cost,
+            final_cost=cost,
+            tie_key=tie_key,
+            last_incumbent_improvement_step=0,
+        ),
+        problem_size=reference_report.problem_size,
+        incumbent_cost_series=(),
+        algorithm_version=reference_report.algorithm_version,
     )
 
 

@@ -13,8 +13,14 @@ from api.analytics.homeworld_locator.layout_prior_anneal import AnnealingLayoutP
 from api.analytics.homeworld_locator.layout_prior_report import (
     LAYOUT_PRIOR_INCUMBENT_SERIES_MAX_POINTS,
     LAYOUT_PRIOR_REPORT_RING_CAPACITY,
+    LayoutPriorSearchStats,
+    LayoutPriorStopGateInfo,
+    LayoutPriorTimingMs,
+    build_projected_selection_report,
+    build_run_report,
     downsample_incumbent_series,
     layout_prior_report_to_wire,
+    problem_size_hints,
 )
 from api.analytics.homeworld_locator.layout_prior_run_history import (
     clear_layout_prior_reports,
@@ -62,6 +68,50 @@ def test_downsample_incumbent_series_bounds_length() -> None:
     assert len(down) <= LAYOUT_PRIOR_INCUMBENT_SERIES_MAX_POINTS
     assert down[0].step == 0
     assert down[-1].step == 199
+
+
+def test_build_projected_selection_report_matches_solution_not_anneal() -> None:
+    anneal = build_run_report(
+        game_id=1,
+        turn=40,
+        perspective=2,
+        solver="anneal",
+        stop_gate=LayoutPriorStopGateInfo(kind="max_steps", max_steps=10),
+        stop_reason="max_steps",
+        timing=LayoutPriorTimingMs(greedy_ms=1.0, sa_ms=2.0, refine_ms=3.0, total_ms=6.0),
+        search=LayoutPriorSearchStats(
+            sa_steps_attempted=10,
+            sa_steps_accepted=4,
+            greedy_cost=9.0,
+            pre_refine_cost=8.0,
+            final_cost=7.5,
+            tie_key=((1, 99),),
+            last_incumbent_improvement_step=7,
+        ),
+        problem_size=problem_size_hints(
+            choice_sector_count=2,
+            total_possibles=5,
+            stand_in_sector_count=1,
+            planet_count=20,
+            category="standard",
+        ),
+        incumbent_cost_series=(),
+    )
+    projected = build_projected_selection_report(
+        cost=3.25,
+        tie_key=((0, 70), (1, 71)),
+        reference_report=anneal,
+    )
+    assert projected.stop_reason == "projected"
+    assert projected.search.final_cost == pytest.approx(3.25)
+    assert projected.search.tie_key == ((0, 70), (1, 71))
+    assert projected.search.sa_steps_attempted == 0
+    assert projected.search.final_cost != pytest.approx(anneal.search.final_cost)
+    assert projected.game_id == anneal.game_id
+    assert projected.problem_size == anneal.problem_size
+    wire = layout_prior_report_to_wire(projected)
+    assert wire["stopReason"] == "projected"
+    assert wire["search"]["finalCost"] == pytest.approx(3.25)
 
 
 def test_anneal_run_report_has_timing_costs_stop_reason_and_series(
