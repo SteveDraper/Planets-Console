@@ -13,9 +13,9 @@ class HomeworldLocatorConfig:
     """Floor for homeworld baseline profile clan matching."""
 
     origin_distance_evidence_lambda: float = 0.95
-    """Temporal blend weight for soft origin-distance evidence in layout-prior cost.
+    """Absolute-turn weight base for soft origin-distance evidence in layout-prior cost.
 
-    Running ``E = (E + λ e) / (1 + λ)`` over turn-ordered observation means.
+    On nonempty turn ``t``, ``E = (E + w(t) e_t) / (1 + w(t))`` with ``w(t) = λ^t``.
     Valid range ``(0, 1]``.
     """
 

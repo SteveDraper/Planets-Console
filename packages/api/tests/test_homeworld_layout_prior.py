@@ -657,6 +657,7 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
         origin_distance_observations=observations,
         layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
         layout_prior_input_fingerprint=fingerprint,
+        layout_prior_evidence_lambda=0.95,
         most_probable_planet_ids=(12, 34),
     )
     wire = homeworld_evidence_aggregate_to_json(aggregate)
@@ -671,6 +672,7 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
             {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
             {"planetId": 34, "confidenceTier": CONFIDENCE_POSSIBLE, "perspective": None},
         ],
+        "evidenceLambda": 0.95,
         "mostProbablePlanetIds": [12, 34],
     }
     assert "promotionThreshold" not in wire["layoutPriorSelection"]
@@ -679,6 +681,7 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
     assert restored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
     assert restored.layout_prior_promotion_threshold is None
     assert restored.layout_prior_input_fingerprint == fingerprint
+    assert restored.layout_prior_evidence_lambda == 0.95
     assert restored.most_probable_planet_ids == (12, 34)
     # Legacy evidenceHits-only payloads load with empty observations (re-refine expected).
     legacy_hits_only = homeworld_evidence_aggregate_from_json(
@@ -709,6 +712,7 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
     )
     assert legacy_with_threshold.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
     assert legacy_with_threshold.layout_prior_promotion_threshold == 2
+    assert legacy_with_threshold.layout_prior_evidence_lambda is None
     assert legacy_with_threshold.most_probable_planet_ids == (12,)
     assert "layoutPriorSelection" not in homeworld_evidence_aggregate_to_json(
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
@@ -799,6 +803,10 @@ def test_shell_layout_prior_persisted_and_reused(
     assert stored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
     assert stored.layout_prior_promotion_threshold is None
     assert stored.layout_prior_input_fingerprint == layout_prior_input_fingerprint(first.candidates)
+    assert (
+        stored.layout_prior_evidence_lambda
+        == get_config().homeworld_locator.origin_distance_evidence_lambda
+    )
     assert orphan.id in stored.most_probable_planet_ids
     assert calls["n"] == 1
 
@@ -831,8 +839,8 @@ def test_shell_layout_prior_persisted_and_reused(
     assert orphan.id in rewritten.most_probable_planet_ids
     assert pin_planet.id not in rewritten.most_probable_planet_ids
 
-    # Soft-evidence λ config change alone does not force recompute (reuse keys
-    # are algorithm version + input fingerprint; clear persistence when retuning λ).
+    # Soft-evidence λ config change alone forces recompute (reuse keys are
+    # algorithm version + candidate fingerprint + evidenceLambda).
     prior_calls = calls["n"]
     cfg = get_config()
     set_config(
@@ -846,10 +854,12 @@ def test_shell_layout_prior_persisted_and_reused(
     )
     try:
         fourth = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
-        assert calls["n"] == prior_calls
+        assert calls["n"] == prior_calls + 1
         after_lambda = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
         assert after_lambda is not None
         assert after_lambda.layout_prior_promotion_threshold is None
+        assert after_lambda.layout_prior_evidence_lambda == 0.5
+        assert orphan.id in after_lambda.most_probable_planet_ids
         assert {row.planet_id for row in fourth.candidates if row.is_most_probable} == {
             row.planet_id for row in first.candidates if row.is_most_probable
         }
@@ -858,11 +868,13 @@ def test_shell_layout_prior_persisted_and_reused(
 
     # Fingerprint mismatch (post-cull candidate set) forces recompute.
     prior_calls = calls["n"]
+    rewritten_after_lambda = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+    assert rewritten_after_lambda is not None
     persistence.put_evidence_aggregate(
         628580,
         1,
         replace(
-            rewritten,
+            rewritten_after_lambda,
             layout_prior_input_fingerprint=((pin_planet.id, CONFIDENCE_DEFINITE, 1),),
             most_probable_planet_ids=(pin_planet.id,),
         ),
@@ -876,5 +888,8 @@ def test_shell_layout_prior_persisted_and_reused(
     assert after_fingerprint is not None
     assert after_fingerprint.layout_prior_input_fingerprint == layout_prior_input_fingerprint(
         fifth.candidates
+    )
+    assert after_fingerprint.layout_prior_evidence_lambda == (
+        get_config().homeworld_locator.origin_distance_evidence_lambda
     )
     assert orphan.id in after_fingerprint.most_probable_planet_ids

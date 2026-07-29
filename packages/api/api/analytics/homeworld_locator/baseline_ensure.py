@@ -285,9 +285,11 @@ def materialize_homeworld_candidates(
         player_count=_player_count(shell_turn),
     )
     input_fingerprint = layout_prior_input_fingerprint(adjusted)
+    evidence_lambda = get_config().homeworld_locator.origin_distance_evidence_lambda
     if (
         aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
         and aggregate.layout_prior_input_fingerprint == input_fingerprint
+        and aggregate.layout_prior_evidence_lambda == evidence_lambda
     ):
         selected = frozenset(aggregate.most_probable_planet_ids)
         return tuple(replace(row, is_most_probable=row.planet_id in selected) for row in adjusted)
@@ -309,6 +311,7 @@ def materialize_homeworld_candidates(
         view=interim_view,
         player_count=_player_count(shell_turn),
         origin_distance_observations=effective_origin_distance_observations(aggregate),
+        origin_distance_evidence_lambda=evidence_lambda,
         previous_most_probable_planet_ids=previous_most_probable,
     )
     most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
@@ -320,6 +323,7 @@ def materialize_homeworld_candidates(
             layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
             layout_prior_promotion_threshold=None,
             layout_prior_input_fingerprint=input_fingerprint,
+            layout_prior_evidence_lambda=evidence_lambda,
             most_probable_planet_ids=most_probable_ids,
         ),
     )

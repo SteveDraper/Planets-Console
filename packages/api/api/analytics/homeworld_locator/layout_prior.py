@@ -79,7 +79,12 @@ __all__ = [
 def layout_prior_input_fingerprint(
     candidates: Sequence[HomeworldCandidateRecord],
 ) -> tuple[tuple[int, str, int | None], ...]:
-    """Stable fingerprint of the post-promote/cull set that feeds selection."""
+    """Stable fingerprint of the post-promote/cull candidate set that feeds selection.
+
+    Soft-evidence λ is a sibling reuse key (``layout_prior_evidence_lambda`` /
+    wire ``evidenceLambda``), not part of this candidate tuple -- both must match
+    for layout-prior selection reuse.
+    """
     return tuple(
         sorted((row.planet_id, row.confidence_tier, row.perspective) for row in candidates)
     )

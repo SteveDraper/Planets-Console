@@ -52,6 +52,9 @@ class HomeworldEvidenceAggregate:
     layout_prior_promotion_threshold: int | None = None
     """Legacy field on older persisted selections; ignored for reuse."""
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
+    """Post-promote/cull candidate triples that fed selection (planet, tier, perspective)."""
+    layout_prior_evidence_lambda: float | None = None
+    """Configured soft-evidence λ used for the stored selection; part of the reuse key."""
     most_probable_planet_ids: tuple[int, ...] = ()
 
 

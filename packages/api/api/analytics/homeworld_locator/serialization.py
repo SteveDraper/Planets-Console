@@ -184,6 +184,8 @@ def homeworld_evidence_aggregate_to_json(
             ],
             "mostProbablePlanetIds": list(aggregate.most_probable_planet_ids),
         }
+        if aggregate.layout_prior_evidence_lambda is not None:
+            selection["evidenceLambda"] = aggregate.layout_prior_evidence_lambda
         if aggregate.layout_prior_promotion_threshold is not None:
             selection["promotionThreshold"] = aggregate.layout_prior_promotion_threshold
         payload["layoutPriorSelection"] = selection
@@ -230,6 +232,7 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
     selection_version: int | None = None
     selection_threshold: int | None = None
     selection_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
+    selection_evidence_lambda: float | None = None
     most_probable_ids: tuple[int, ...] = ()
     selection_raw = data.get("layoutPriorSelection")
     if selection_raw is not None:
@@ -251,6 +254,20 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
                         "homeworld layoutPriorSelection.promotionThreshold must be an int >= 1"
                     )
                 selection_threshold = threshold
+            if "evidenceLambda" in selection_raw:
+                evidence_lambda_raw = selection_raw.get("evidenceLambda")
+                if not isinstance(evidence_lambda_raw, (int, float)) or isinstance(
+                    evidence_lambda_raw, bool
+                ):
+                    raise ValidationError(
+                        "homeworld layoutPriorSelection.evidenceLambda must be a number"
+                    )
+                evidence_lambda_value = float(evidence_lambda_raw)
+                if not (0.0 < evidence_lambda_value <= 1.0):
+                    raise ValidationError(
+                        "homeworld layoutPriorSelection.evidenceLambda must be in (0, 1]"
+                    )
+                selection_evidence_lambda = evidence_lambda_value
             fingerprint_raw = selection_raw.get("inputFingerprint")
             if not isinstance(fingerprint_raw, list):
                 raise ValidationError(
@@ -310,5 +327,6 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         layout_prior_algorithm_version=selection_version,
         layout_prior_promotion_threshold=selection_threshold,
         layout_prior_input_fingerprint=selection_fingerprint,
+        layout_prior_evidence_lambda=selection_evidence_lambda,
         most_probable_planet_ids=most_probable_ids,
     )
