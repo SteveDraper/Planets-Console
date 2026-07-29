@@ -19,6 +19,9 @@ from api.analytics.homeworld_locator.layout_prior import (
     apply_layout_prior_most_probable,
     layout_prior_input_fingerprint,
 )
+from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
+    effective_origin_distance_observations,
+)
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
     HomeworldCandidateRecord,
@@ -294,14 +297,14 @@ def materialize_homeworld_candidates(
         baseline_turn=baseline_turn,
         baseline_degraded=baseline_degraded,
         available=True,
-        origin_distance_observations=aggregate.origin_distance_observations,
+        origin_distance_observations=effective_origin_distance_observations(aggregate),
     )
     annotated = apply_layout_prior_most_probable(
         adjusted,
         turn=shell_turn,
         view=interim_view,
         player_count=_player_count(shell_turn),
-        origin_distance_observations=aggregate.origin_distance_observations,
+        origin_distance_observations=effective_origin_distance_observations(aggregate),
     )
     most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
     services.persistence.put_evidence_aggregate(
@@ -368,5 +371,5 @@ def materialize_homeworld_candidate_view(
         baseline_degraded=state.baseline_degraded,
         available=True,
         inactive_reason=None,
-        origin_distance_observations=aggregate.origin_distance_observations,
+        origin_distance_observations=effective_origin_distance_observations(aggregate),
     )

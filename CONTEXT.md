@@ -417,7 +417,7 @@ Core **game concept** mapping **race id** to preferred planet temperature for **
 _Avoid_: HW temp table, climate lookup (generic)
 
 **Homeworld locator config**:
-Server-side **analytic policy** for the **homeworld locator**, loaded from amalgamated YAML under the Core API config (not exposed in the SPA UI). Includes minimum clan count for **homeworld baseline profile** matching and soft-evidence absolute-turn weight base `origin_distance_evidence_lambda` (default 0.95; update weight `w(t)=λ^t`) for layout-prior cost. Origin-distance match bands use host-aligned constants from **game concepts** (81 LY pod hop, warp-speed range table) -- not ad-hoc YAML distance lists. Hard definite remains SB-only (no promotion-threshold config).
+Server-side **analytic policy** for the **homeworld locator**, loaded from amalgamated YAML under the Core API config (not exposed in the SPA UI). Includes minimum clan count for **homeworld baseline profile** matching and soft-evidence absolute-turn weight base `origin_distance_evidence_lambda` (default 0.95; update weight `w(t)=λ^t`) for layout-prior cost. Soft origin-distance observations freeze once the shared ship limit is reached (scoreboard total ≥ `shiplimit`). Origin-distance match bands use host-aligned constants from **game concepts** (81 LY pod hop, warp-speed range table) -- not ad-hoc YAML distance lists. Hard definite remains SB-only (no promotion-threshold config).
 _Avoid_: HW settings panel, client-side heuristic config
 
 **Homeworld locator state**:

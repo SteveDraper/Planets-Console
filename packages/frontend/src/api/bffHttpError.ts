@@ -32,8 +32,9 @@ export function isGenericServerErrorMessage(message: string): boolean {
   if (t === 'gateway timeout') {
     return true
   }
-  // Response body or fallback was only an HTTP status code
-  if (/^[45]\d\d$/.test(t)) {
+  // Bare 5xx status text is unhelpful without the endpoint; leave 4xx alone
+  // (e.g. 404 is handled as not-found elsewhere).
+  if (/^5\d\d$/.test(t)) {
     return true
   }
   return false

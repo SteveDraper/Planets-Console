@@ -167,6 +167,10 @@ def homeworld_evidence_aggregate_to_json(
             for promotion in aggregate.single_starbase_promotions
         ],
     }
+    if aggregate.origin_distance_evidence_through_turn is not None:
+        payload["originDistanceEvidenceThroughTurn"] = (
+            aggregate.origin_distance_evidence_through_turn
+        )
     if aggregate.layout_prior_algorithm_version is not None:
         selection: dict[str, Any] = {
             "algorithmVersion": aggregate.layout_prior_algorithm_version,
@@ -284,11 +288,25 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             selection_version = version
             selection_fingerprint = tuple(fingerprint_entries)
             most_probable_ids = tuple(ids_raw)
+
+    through_raw = data.get("originDistanceEvidenceThroughTurn")
+    through_turn: int | None
+    if through_raw is None:
+        through_turn = None
+    elif isinstance(through_raw, int) and through_raw >= 0:
+        through_turn = through_raw
+    else:
+        raise ValidationError(
+            "homeworld evidence aggregate originDistanceEvidenceThroughTurn "
+            "must be an int >= 0 when present"
+        )
+
     return HomeworldEvidenceAggregate(
         turn=turn,
         baseline_turn=baseline_turn,
         origin_distance_observations=observations,
         single_starbase_promotions=promotions,
+        origin_distance_evidence_through_turn=through_turn,
         layout_prior_algorithm_version=selection_version,
         layout_prior_promotion_threshold=selection_threshold,
         layout_prior_input_fingerprint=selection_fingerprint,

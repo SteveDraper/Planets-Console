@@ -42,19 +42,21 @@ class AcceleratedBackfillSource:
 
 def is_after_ship_limit(turn: TurnInfo, score: Score) -> bool:
     """Return whether ship-limit queue rules apply for this player on this turn."""
+    from api.concepts.ship_limit import (
+        is_at_or_over_shared_ship_limit,
+        reported_ships_for_score,
+    )
+
     settings = turn.settings
-    player_ships = score.capitalships + score.freighters
     if settings.shiplimittype != 0:
+        player_ships = reported_ships_for_score(score)
         player_limit = (
             settings.plsminships
             + settings.plsextraships
             + settings.plsshipsperplanet * score.planets
         )
         return player_ships >= player_limit
-    total_ships = sum(
-        other_score.capitalships + other_score.freighters for other_score in turn.scores
-    )
-    return total_ships >= settings.shiplimit
+    return is_at_or_over_shared_ship_limit(settings, turn.scores)
 
 
 def prior_scoreboard_row_score(

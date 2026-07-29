@@ -43,6 +43,9 @@ class HomeworldEvidenceAggregate:
 
     origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
     single_starbase_promotions: tuple[HomeworldSingleStarbasePromotion, ...] = ()
+    # Once set (first turn at/over shared ship limit), soft OD evidence freezes:
+    # only observations with turn <= this value participate in layout-prior cost.
+    origin_distance_evidence_through_turn: int | None = None
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
     layout_prior_promotion_threshold: int | None = None
