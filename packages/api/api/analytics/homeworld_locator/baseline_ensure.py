@@ -294,6 +294,7 @@ def materialize_homeworld_candidates(
         baseline_turn=baseline_turn,
         baseline_degraded=baseline_degraded,
         available=True,
+        origin_distance_observations=aggregate.origin_distance_observations,
     )
     annotated = apply_layout_prior_most_probable(
         adjusted,
@@ -367,4 +368,5 @@ def materialize_homeworld_candidate_view(
         baseline_degraded=state.baseline_degraded,
         available=True,
         inactive_reason=None,
+        origin_distance_observations=aggregate.origin_distance_observations,
     )

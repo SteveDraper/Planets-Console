@@ -93,8 +93,9 @@ def try_layout_prior_problem(
     Gate failures include missing pin, ineligible map geometry, or no layout
     distribution category. Callers that annotate (facade) clear
     ``is_most_probable`` on ``None``; callers that probe may raise.
-    Soft evidence observations/λ come from the shell aggregate + config when
-    omitted.
+    Soft evidence observations default from ``view.origin_distance_observations``
+    (populated from the shell evidence aggregate at materialize); λ defaults from
+    config when omitted.
     """
     from api.config import get_config
 
@@ -128,7 +129,9 @@ def try_layout_prior_problem(
         planet_scan_range=float(turn.settings.planetscanrange),
     )
     observations = (
-        () if origin_distance_observations is None else tuple(origin_distance_observations)
+        tuple(view.origin_distance_observations)
+        if origin_distance_observations is None
+        else tuple(origin_distance_observations)
     )
     evidence_lambda = (
         get_config().homeworld_locator.origin_distance_evidence_lambda

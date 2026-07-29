@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 import pytest
 from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
@@ -12,6 +14,32 @@ from api.analytics.homeworld_locator.layout_prior_cost import (
     origin_distance_observation_neg_log,
 )
 from api.analytics.homeworld_locator.models import OriginDistanceObservation
+from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
+from api.serialization.turn import turn_info_from_json
+from api.storage.memory_asset import MemoryAssetBackend
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+
+
+@pytest.fixture
+def memory_backend():
+    return MemoryAssetBackend(initial={})
+
+
+@pytest.fixture
+def persistence(memory_backend):
+    return HomeworldLocatorPersistenceService(memory_backend)
+
+
+@pytest.fixture
+def sample_turn():
+    raw = json.loads((ASSETS_DIR / "turn_sample.json").read_text(encoding="utf-8"))
+    return turn_info_from_json(raw, settings_defaults=raw["settings"])
+
+
+@pytest.fixture
+def template_planet(sample_turn):
+    return sample_turn.planets[0]
 
 
 def test_layout_prior_algorithm_version_is_six() -> None:
@@ -86,3 +114,140 @@ def test_two_location_observations_cheaper_when_both_covered() -> None:
         * ((-math.log(1.0) + -math.log(ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS)) / 2.0)
     ) / 1.8
     assert one == pytest.approx(expected_one)
+
+
+def test_layout_prior_problem_from_materialized_view_retains_soft_evidence_observations(
+    persistence,
+    sample_turn,
+    template_planet,
+) -> None:
+    """Regression: soft evidence must survive view → try_layout_prior_problem.
+
+    Diagnostics for 663307 built a layout-prior problem from the materialized
+    candidate view without re-passing aggregate observations. When omitted,
+    observations were coerced to ``()``, so ``evidence_mean`` was always 0 and
+    soft origin-distance scoring was silently disabled.
+    """
+    from dataclasses import replace
+
+    from api.analytics.homeworld_locator.baseline_ensure import (
+        materialize_homeworld_candidate_view,
+    )
+    from api.analytics.homeworld_locator.layout_prior import try_layout_prior_problem
+    from api.analytics.homeworld_locator.layout_prior_cost import origin_distance_evidence_mean
+    from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
+    from api.analytics.homeworld_locator.types import (
+        HomeworldCandidateRecord,
+        HomeworldEvidenceAggregate,
+        HomeworldLocatorGameState,
+    )
+    from api.concepts.homeworld_layout import homeworld_settings_fingerprint
+
+    from tests.test_homeworld_layout_prior import (
+        _eligible_turn,
+        _materialize_ctx,
+        _planet,
+        _stub_layout_asset,
+        core_services,
+    )
+    from tests.test_homeworld_location_evidence import _ship
+
+    turn, _pin = _eligible_turn(sample_turn, template_planet)
+    center = (2000.0, 2000.0)
+    player_count = 11
+    radius = 550
+    pin_angle = 0.0
+    orphan_angle = 5.0 * 2.0 * math.pi / player_count
+    pin_planet = _planet(
+        template_planet,
+        planet_id=1,
+        x=int(center[0] + radius * math.cos(pin_angle)),
+        y=int(center[1] + radius * math.sin(pin_angle)),
+        ownerid=1,
+    )
+    orphan = _planet(
+        template_planet,
+        planet_id=2,
+        x=int(center[0] + radius * math.cos(orphan_angle)),
+        y=int(center[1] + radius * math.sin(orphan_angle)),
+    )
+    ship = _ship(
+        turn.ships[0] if turn.ships else sample_turn.ships[0],
+        ship_id=99,
+        x=pin_planet.x,
+        y=pin_planet.y,
+        ownerid=turn.player.id,
+    )
+    turn = replace(
+        turn,
+        settings=replace(turn.settings, planetscanrange=80),
+        planets=[pin_planet, orphan],
+        ships=[ship],
+    )
+    observations = (
+        OriginDistanceObservation(
+            turn=1,
+            x=orphan.x + 81,
+            y=orphan.y,
+            matched_planet_ids=(orphan.id,),
+        ),
+    )
+    services = core_services(persistence, {1: turn})
+    persistence.put_baseline(
+        628580,
+        1,
+        HomeworldLocatorGameState(
+            candidates=(
+                HomeworldCandidateRecord(
+                    planet_id=pin_planet.id,
+                    perspective=1,
+                    confidence_tier=CONFIDENCE_DEFINITE,
+                ),
+                HomeworldCandidateRecord(
+                    planet_id=orphan.id,
+                    perspective=None,
+                    confidence_tier=CONFIDENCE_POSSIBLE,
+                ),
+            ),
+            baseline_turn=1,
+            baseline_degraded=False,
+            settings_fingerprint=homeworld_settings_fingerprint(turn.settings),
+        ),
+        HomeworldEvidenceAggregate(
+            turn=1,
+            baseline_turn=1,
+            origin_distance_observations=observations,
+        ),
+    )
+
+    ctx = _materialize_ctx(services, turn)
+    view = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
+    assert view.available
+
+    # Probe/diagnostics path: rebuild problem from the view without re-supplying
+    # observations from the evidence aggregate.
+    problem = try_layout_prior_problem(
+        view.candidates,
+        turn=turn,
+        view=view,
+        layout_asset=_stub_layout_asset(),
+        map_center=center,
+    )
+    assert problem is not None
+    assert problem.origin_distance_observations == observations
+    assert (
+        origin_distance_evidence_mean(
+            problem.origin_distance_observations,
+            frozenset({orphan.id}),
+            evidence_lambda=problem.origin_distance_evidence_lambda,
+        )
+        == 0.0
+    )
+    assert (
+        origin_distance_evidence_mean(
+            problem.origin_distance_observations,
+            frozenset(),
+            evidence_lambda=problem.origin_distance_evidence_lambda,
+        )
+        > 0.0
+    )

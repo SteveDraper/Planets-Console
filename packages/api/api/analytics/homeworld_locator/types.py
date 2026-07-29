@@ -60,6 +60,8 @@ class HomeworldCandidateView:
     baseline_degraded: bool
     available: bool
     inactive_reason: str | None = None
+    # Soft layout-prior evidence from the shell evidence aggregate (may be empty).
+    origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
 
 
 @dataclass(frozen=True)
