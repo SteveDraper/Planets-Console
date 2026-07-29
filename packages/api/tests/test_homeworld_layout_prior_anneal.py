@@ -863,9 +863,7 @@ def test_facade_projection_win_report_not_anneal_reuse(
     assert all(result.report is not report for report in anneal_reports)
 
 
-def test_facade_anneal_win_keeps_anneal_report(
-    template_planet, sample_turn, monkeypatch
-) -> None:
+def test_facade_anneal_win_keeps_anneal_report(template_planet, sample_turn, monkeypatch) -> None:
     """When anneal beats the projection, return that anneal's report unchanged."""
     from api.analytics.homeworld_locator import layout_prior as layout_prior_mod
     from api.analytics.homeworld_locator.layout_prior import _solve_layout_prior_for_annotation
