@@ -332,11 +332,7 @@ def test_load_config_homeworld_locator_leaf_override():
 def test_load_config_homeworld_locator_lambda_out_of_range_raises(tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
-        "server: {}\n"
-        "api:\n"
-        "  homeworld_locator:\n"
-        "    origin_distance_evidence_lambda: 0\n"
-        "bff: {}\n",
+        "server: {}\napi:\n  homeworld_locator:\n    origin_distance_evidence_lambda: 0\nbff: {}\n",
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="origin_distance_evidence_lambda"):
