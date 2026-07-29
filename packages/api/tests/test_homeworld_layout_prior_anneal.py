@@ -28,6 +28,7 @@ from api.analytics.homeworld_locator.layout_prior_enumerate import (
 from api.analytics.homeworld_locator.layout_prior_problem import LayoutPriorProblem
 from api.analytics.homeworld_locator.layout_prior_refine import refine_stand_in_positions
 from api.analytics.homeworld_locator.layout_prior_solver import (
+    LAYOUT_PRIOR_SOLVER_ANNEAL,
     LAYOUT_PRIOR_SOLVER_ENUMERATE,
     layout_prior_solver_from_name,
 )
@@ -493,3 +494,285 @@ def test_enumerate_solver_still_selectable(template_planet, sample_turn) -> None
         solver=solver,
     )
     assert {row.planet_id for row in annotated if row.is_most_probable} == {orphan.id}
+
+
+def test_layout_prior_continuity_rng_seed_turns() -> None:
+    from api.analytics.homeworld_locator.layout_prior import (
+        layout_prior_continuity_rng_seed_turns,
+    )
+
+    assert layout_prior_continuity_rng_seed_turns(1) == (1,)
+    assert layout_prior_continuity_rng_seed_turns(0) == (0,)
+    assert layout_prior_continuity_rng_seed_turns(54) == (53, 54)
+
+
+def test_select_best_layout_prior_solve_result_prefers_lower_cost() -> None:
+    from api.analytics.homeworld_locator.layout_prior import select_best_layout_prior_solve_result
+    from api.analytics.homeworld_locator.layout_prior_report import (
+        LayoutPriorSearchStats,
+        LayoutPriorStopGateInfo,
+        LayoutPriorTimingMs,
+        build_run_report,
+        problem_size_hints,
+    )
+    from api.analytics.homeworld_locator.layout_prior_solver import (
+        LayoutPriorSolution,
+        LayoutPriorSolveResult,
+    )
+
+    def _result(cost: float, planet_id: int) -> LayoutPriorSolveResult:
+        solution = LayoutPriorSolution(
+            chosen_planet_ids_by_sector={1: planet_id},
+            stand_in_positions_by_sector={},
+            cost=cost,
+            tie_key=((1, planet_id),),
+        )
+        report = build_run_report(
+            game_id=1,
+            turn=2,
+            perspective=1,
+            solver=LAYOUT_PRIOR_SOLVER_ANNEAL,
+            stop_gate=LayoutPriorStopGateInfo(kind="max_steps", max_steps=1),
+            stop_reason="max_steps",
+            timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=0.0),
+            search=LayoutPriorSearchStats(
+                sa_steps_attempted=0,
+                sa_steps_accepted=0,
+                greedy_cost=cost,
+                pre_refine_cost=cost,
+                final_cost=cost,
+                tie_key=solution.tie_key,
+            ),
+            problem_size=problem_size_hints(
+                choice_sector_count=1,
+                total_possibles=1,
+                stand_in_sector_count=0,
+                planet_count=1,
+                category="standard",
+            ),
+            incumbent_cost_series=(),
+        )
+        return LayoutPriorSolveResult(solution=solution, report=report)
+
+    worse = _result(24.559, 368)
+    better = _result(24.429, 493)
+    assert select_best_layout_prior_solve_result((worse, better)).solution.cost == pytest.approx(
+        24.429
+    )
+    assert select_best_layout_prior_solve_result((better, worse)).solution.cost == pytest.approx(
+        24.429
+    )
+
+
+def test_anneal_facade_runs_two_continuity_solves_on_turn_gt_one(
+    template_planet, sample_turn, monkeypatch
+) -> None:
+    from api.analytics.homeworld_locator.layout_prior_run_history import (
+        clear_layout_prior_reports,
+        recent_layout_prior_reports,
+        reset_layout_prior_report_history_for_tests,
+    )
+
+    reset_layout_prior_report_history_for_tests()
+    clear_layout_prior_reports()
+    turn, pin = _eligible_turn(sample_turn, template_planet)
+    center = (2000.0, 2000.0)
+    radius = 550
+    orphan = _planet(template_planet, planet_id=2, x=int(center[0]), y=int(center[1] + radius))
+    turn = replace(
+        turn,
+        planets=[pin, orphan],
+        settings=replace(turn.settings, turn=54),
+        game=replace(turn.game, id=663307),
+    )
+    definite = HomeworldCandidateRecord(
+        planet_id=pin.id,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    possible = HomeworldCandidateRecord(
+        planet_id=orphan.id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    view = _view(definite, possible)
+    solve_calls: list[int | None] = []
+    real_solve = AnnealingLayoutPriorSolver.solve
+
+    def tracking_solve(self, problem, *, stop_gate):
+        solve_calls.append(problem.rng_seed_turn)
+        return real_solve(self, problem, stop_gate=stop_gate)
+
+    monkeypatch.setattr(AnnealingLayoutPriorSolver, "solve", tracking_solve)
+
+    annotated = apply_layout_prior_most_probable(
+        (definite, possible),
+        turn=turn,
+        view=view,
+        player_count=11,
+        layout_asset=_stub_layout_asset(),
+        map_center=center,
+        solver=AnnealingLayoutPriorSolver(),
+        stop_gate=MaxStepsStopGate(5),
+    )
+    assert solve_calls == [53, 54]
+    assert {row.planet_id for row in annotated if row.is_most_probable} == {orphan.id}
+    reports = recent_layout_prior_reports(game_id=663307, turn=54)
+    assert len(reports) == 2
+    clear_layout_prior_reports()
+
+
+def test_anneal_facade_single_solve_on_turn_one(template_planet, sample_turn, monkeypatch) -> None:
+    turn, pin = _eligible_turn(sample_turn, template_planet)
+    center = (2000.0, 2000.0)
+    radius = 550
+    orphan = _planet(template_planet, planet_id=2, x=int(center[0]), y=int(center[1] + radius))
+    turn = replace(turn, planets=[pin, orphan])
+    definite = HomeworldCandidateRecord(
+        planet_id=pin.id,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    possible = HomeworldCandidateRecord(
+        planet_id=orphan.id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    view = _view(definite, possible)
+    solve_calls: list[int | None] = []
+    real_solve = AnnealingLayoutPriorSolver.solve
+
+    def tracking_solve(self, problem, *, stop_gate):
+        solve_calls.append(problem.rng_seed_turn)
+        return real_solve(self, problem, stop_gate=stop_gate)
+
+    monkeypatch.setattr(AnnealingLayoutPriorSolver, "solve", tracking_solve)
+
+    apply_layout_prior_most_probable(
+        (definite, possible),
+        turn=turn,
+        view=view,
+        player_count=11,
+        layout_asset=_stub_layout_asset(),
+        map_center=center,
+        solver=AnnealingLayoutPriorSolver(),
+        stop_gate=MaxStepsStopGate(5),
+    )
+    assert solve_calls == [1]
+
+
+def test_rng_seed_respects_rng_seed_turn_override(template_planet, sample_turn) -> None:
+    from api.analytics.homeworld_locator.layout_prior_anneal import layout_prior_rng_seed
+
+    problem, *_ = _build_choice_problem(
+        template_planet=template_planet,
+        sample_turn=sample_turn,
+        choice_planets=[(70, 0.6, 550.0)],
+        seed_turn=54,
+    )
+    base = layout_prior_rng_seed(problem)
+    prev = layout_prior_rng_seed(replace(problem, rng_seed_turn=53))
+    this = layout_prior_rng_seed(replace(problem, rng_seed_turn=54))
+    assert this == base
+    assert prev != this
+    # Report turn stays shell turn; only RNG hash changes.
+    assert replace(problem, rng_seed_turn=53).seed_turn == 54
+
+
+def test_try_project_previous_layout_selection_admissible(template_planet, sample_turn) -> None:
+    from api.analytics.homeworld_locator.layout_prior import try_project_previous_layout_selection
+
+    player_count = 11
+    sector_angle = 2.0 * math.pi / player_count
+    problem, *_ = _build_choice_problem(
+        template_planet=template_planet,
+        sample_turn=sample_turn,
+        choice_planets=[
+            (70, sector_angle, 550.0),
+            (71, sector_angle + 0.01, 560.0),
+        ],
+        player_count=player_count,
+    )
+    choice = next(state for state in problem.sector_states if state.kind == "choice")
+    assert try_project_previous_layout_selection(problem, (70,)) == {choice.sector_index: 70}
+    assert try_project_previous_layout_selection(problem, (71,)) == {choice.sector_index: 71}
+    assert try_project_previous_layout_selection(problem, (70, 71)) is None
+    assert try_project_previous_layout_selection(problem, (999,)) is None
+    assert try_project_previous_layout_selection(problem, ()) is None
+
+
+def test_facade_prefers_admissible_previous_selection_over_worse_anneal(
+    template_planet, sample_turn, monkeypatch
+) -> None:
+    from api.analytics.homeworld_locator.layout_prior import _solve_layout_prior_for_annotation
+    from api.analytics.homeworld_locator.layout_prior_report import (
+        LayoutPriorSearchStats,
+        LayoutPriorStopGateInfo,
+        LayoutPriorTimingMs,
+        build_run_report,
+        problem_size_hints,
+    )
+    from api.analytics.homeworld_locator.layout_prior_solver import (
+        LayoutPriorSolution,
+        LayoutPriorSolveResult,
+    )
+
+    player_count = 11
+    sector_angle = 2.0 * math.pi / player_count
+    problem, *_ = _build_choice_problem(
+        template_planet=template_planet,
+        sample_turn=sample_turn,
+        choice_planets=[
+            (70, sector_angle, 550.0),
+            (71, sector_angle + 0.01, 560.0),
+        ],
+        player_count=player_count,
+        seed_turn=57,
+    )
+    choice = next(state for state in problem.sector_states if state.kind == "choice")
+    assert 70 in choice.choice_planet_ids and 71 in choice.choice_planet_ids
+
+    def fake_solve(self, problem, *, stop_gate):
+        solution = LayoutPriorSolution(
+            chosen_planet_ids_by_sector={choice.sector_index: 71},
+            stand_in_positions_by_sector={},
+            cost=100.0,
+            tie_key=((choice.sector_index, 71),),
+        )
+        report = build_run_report(
+            game_id=problem.seed_game_id,
+            turn=problem.seed_turn,
+            perspective=problem.seed_perspective,
+            solver=LAYOUT_PRIOR_SOLVER_ANNEAL,
+            stop_gate=LayoutPriorStopGateInfo(kind="max_steps", max_steps=1),
+            stop_reason="max_steps",
+            timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=0.0),
+            search=LayoutPriorSearchStats(
+                sa_steps_attempted=0,
+                sa_steps_accepted=0,
+                greedy_cost=100.0,
+                pre_refine_cost=100.0,
+                final_cost=100.0,
+                tie_key=solution.tie_key,
+            ),
+            problem_size=problem_size_hints(
+                choice_sector_count=1,
+                total_possibles=2,
+                stand_in_sector_count=0,
+                planet_count=3,
+                category="standard",
+            ),
+            incumbent_cost_series=(),
+        )
+        return LayoutPriorSolveResult(solution=solution, report=report)
+
+    monkeypatch.setattr(AnnealingLayoutPriorSolver, "solve", fake_solve)
+
+    result = _solve_layout_prior_for_annotation(
+        AnnealingLayoutPriorSolver(),
+        problem,
+        template_gate=MaxStepsStopGate(1),
+        previous_most_probable_planet_ids=(70,),
+    )
+    assert result.solution.chosen_planet_ids_by_sector == {choice.sector_index: 70}
+    assert result.solution.cost < 100.0

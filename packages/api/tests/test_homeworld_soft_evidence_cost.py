@@ -43,8 +43,8 @@ def template_planet(sample_turn):
     return sample_turn.planets[0]
 
 
-def test_layout_prior_algorithm_version_is_eight() -> None:
-    assert LAYOUT_PRIOR_ALGORITHM_VERSION == 8
+def test_layout_prior_algorithm_version_is_ten() -> None:
+    assert LAYOUT_PRIOR_ALGORITHM_VERSION == 10
 
 
 def test_observation_neg_log_covers_match_set() -> None:

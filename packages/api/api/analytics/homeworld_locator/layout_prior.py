@@ -7,7 +7,7 @@ shared modules). Discrete search is delegated to a replaceable ``LayoutPriorSolv
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from api.analytics.homeworld_locator.geometry import resolve_map_center
@@ -30,12 +30,14 @@ from api.analytics.homeworld_locator.layout_prior_solver import (
     LAYOUT_PRIOR_SOLVER_ENUMERATE,
     LayoutPriorSolution,
     LayoutPriorSolver,
+    LayoutPriorSolveResult,
     layout_prior_solver_from_config,
     layout_prior_solver_from_name,
     layout_prior_stop_gate_from_config,
 )
 from api.analytics.homeworld_locator.layout_prior_stop_gate import (
     DeadlineStopGate,
+    MaxStepsStopGate,
     NeverStopGate,
     StopGate,
 )
@@ -60,11 +62,16 @@ __all__ = [
     "SectorLayoutState",
     "apply_layout_prior_most_probable",
     "build_sector_layout_states",
+    "fresh_layout_prior_stop_gate",
+    "layout_prior_continuity_rng_seed_turns",
     "layout_prior_input_fingerprint",
     "layout_prior_solver_from_config",
     "layout_prior_solver_from_name",
     "layout_prior_stop_gate_from_config",
+    "score_projected_layout_selection",
+    "select_best_layout_prior_solve_result",
     "try_layout_prior_problem",
+    "try_project_previous_layout_selection",
 ]
 
 
@@ -174,8 +181,16 @@ def apply_layout_prior_most_probable(
     stop_gate: StopGate | None = None,
     origin_distance_observations: Sequence[OriginDistanceObservation] | None = None,
     origin_distance_evidence_lambda: float | None = None,
+    previous_most_probable_planet_ids: Sequence[int] | None = None,
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Annotate ``is_most_probable`` after evidence culls when the emission gate passes."""
+    """Annotate ``is_most_probable`` after evidence culls when the emission gate passes.
+
+    Anneal runs two inline solves when ``seed_turn > 1``: previous-turn RNG seed
+    and this-turn RNG seed, each with a fresh full-budget stop-gate. When the
+    previous shell selection is still a complete admissible assignment under
+    this turn's choice sectors, it is scored (cheap; no SA) and preferred when
+    strictly better than both anneals. Enumerate stays a single solve.
+    """
     problem = try_layout_prior_problem(
         candidates,
         turn=turn,
@@ -194,19 +209,162 @@ def apply_layout_prior_most_probable(
 
     resolved_solver = solver if solver is not None else layout_prior_solver_from_config()
     if stop_gate is not None:
-        resolved_gate = stop_gate
+        template_gate = stop_gate
     elif solver is not None:
         # Injected solvers (tests / fakes): enumerate/fakes may use never-stop.
         # Anneal must terminate -- use the configured wall-clock budget.
-        resolved_gate = _default_stop_gate_for_injected_solver(resolved_solver)
+        template_gate = _default_stop_gate_for_injected_solver(resolved_solver)
     else:
-        resolved_gate = layout_prior_stop_gate_from_config()
-    result = resolved_solver.solve(problem, stop_gate=resolved_gate)
-    record_layout_prior_report(result.report)
+        template_gate = layout_prior_stop_gate_from_config()
+
+    result = _solve_layout_prior_for_annotation(
+        resolved_solver,
+        problem,
+        template_gate=template_gate,
+        previous_most_probable_planet_ids=previous_most_probable_planet_ids,
+    )
     most_probable_ids = frozenset(result.solution.chosen_planet_ids_by_sector.values())
     return tuple(
         replace(row, is_most_probable=row.planet_id in most_probable_ids) for row in candidates
     )
+
+
+def layout_prior_continuity_rng_seed_turns(shell_turn: int) -> tuple[int, ...]:
+    """RNG seed turns for anneal continuity: prev + this when ``shell_turn > 1``."""
+    if shell_turn <= 1:
+        return (shell_turn,)
+    return (shell_turn - 1, shell_turn)
+
+
+def try_project_previous_layout_selection(
+    problem: LayoutPriorProblem,
+    previous_most_probable_planet_ids: Sequence[int],
+) -> dict[int, int] | None:
+    """Map a prior selection onto this problem's choice sectors, or ``None``.
+
+    Admissible when every previous planet is still a legal choice in exactly one
+    current choice sector, every choice sector gets exactly one such planet, and
+    there are no leftover previous planets.
+    """
+    if not previous_most_probable_planet_ids:
+        return None
+    previous = set(previous_most_probable_planet_ids)
+    chosen: dict[int, int] = {}
+    for state in problem.sector_states:
+        if state.kind != "choice":
+            continue
+        hits = [planet_id for planet_id in state.choice_planet_ids if planet_id in previous]
+        if len(hits) != 1:
+            return None
+        chosen[state.sector_index] = hits[0]
+    if set(chosen.values()) != previous:
+        return None
+    return chosen
+
+
+def score_projected_layout_selection(
+    problem: LayoutPriorProblem,
+    chosen_by_sector: Mapping[int, int],
+) -> LayoutPriorSolution | None:
+    """Score an admissible assignment with the same refine path as anneal finals."""
+    from api.analytics.homeworld_locator.layout_prior_cost import (
+        evaluate_layout_prior_selection,
+        mid_stand_in_positions,
+    )
+    from api.analytics.homeworld_locator.layout_prior_refine import refine_stand_in_positions
+
+    stand_in_sectors = [state for state in problem.sector_states if state.kind == "stand_in"]
+    mid_stand_ins = mid_stand_in_positions(stand_in_sectors)
+    refined = refine_stand_in_positions(
+        problem,
+        chosen_by_sector,
+        initial_stand_in_positions=mid_stand_ins,
+    )
+    stand_ins = refined or mid_stand_ins
+    scored = evaluate_layout_prior_selection(
+        problem, chosen_by_sector, stand_in_positions=stand_ins
+    )
+    if scored is None:
+        return None
+    cost, tie_key = scored
+    return LayoutPriorSolution(
+        chosen_planet_ids_by_sector=dict(chosen_by_sector),
+        stand_in_positions_by_sector=stand_ins,
+        cost=cost,
+        tie_key=tie_key,
+    )
+
+
+def select_best_layout_prior_solve_result(
+    results: Sequence[LayoutPriorSolveResult],
+) -> LayoutPriorSolveResult:
+    """Pick the lowest-cost solve; ties use the existing lexicographic tie-key."""
+    if not results:
+        raise ValueError("select_best_layout_prior_solve_result requires at least one result")
+    best = results[0]
+    for candidate in results[1:]:
+        if _layout_prior_solution_is_better(candidate.solution, best.solution):
+            best = candidate
+    return best
+
+
+def _solve_layout_prior_for_annotation(
+    solver: LayoutPriorSolver,
+    problem: LayoutPriorProblem,
+    *,
+    template_gate: StopGate,
+    previous_most_probable_planet_ids: Sequence[int] | None = None,
+) -> LayoutPriorSolveResult:
+    """Run anneal continuity solves, then prefer an admissible prior selection if better."""
+    from api.analytics.homeworld_locator.layout_prior_anneal import AnnealingLayoutPriorSolver
+
+    if not isinstance(solver, AnnealingLayoutPriorSolver):
+        result = solver.solve(problem, stop_gate=fresh_layout_prior_stop_gate(template_gate))
+        record_layout_prior_report(result.report)
+        return result
+
+    results: list[LayoutPriorSolveResult] = []
+    for rng_turn in layout_prior_continuity_rng_seed_turns(problem.seed_turn):
+        seeded = replace(problem, rng_seed_turn=rng_turn)
+        result = solver.solve(seeded, stop_gate=fresh_layout_prior_stop_gate(template_gate))
+        record_layout_prior_report(result.report)
+        results.append(result)
+    best = select_best_layout_prior_solve_result(results)
+
+    projected_chosen = try_project_previous_layout_selection(
+        problem,
+        () if previous_most_probable_planet_ids is None else previous_most_probable_planet_ids,
+    )
+    if projected_chosen is None:
+        return best
+    projected = score_projected_layout_selection(problem, projected_chosen)
+    if projected is not None and _layout_prior_solution_is_better(projected, best.solution):
+        return LayoutPriorSolveResult(solution=projected, report=best.report)
+    return best
+
+
+def _layout_prior_solution_is_better(
+    candidate: LayoutPriorSolution,
+    incumbent: LayoutPriorSolution,
+) -> bool:
+    if candidate.cost < incumbent.cost - 1e-12:
+        return True
+    if abs(candidate.cost - incumbent.cost) <= 1e-12 and candidate.tie_key < incumbent.tie_key:
+        return True
+    return False
+
+
+def fresh_layout_prior_stop_gate(template: StopGate) -> StopGate:
+    """Unused stop-gate with the same budget/kind as ``template``."""
+    if isinstance(template, DeadlineStopGate):
+        return DeadlineStopGate(template.budget_ms)
+    if isinstance(template, MaxStepsStopGate):
+        return MaxStepsStopGate(template.max_steps)
+    if isinstance(template, NeverStopGate):
+        return NeverStopGate()
+    # Unknown gate types: reuse only when the caller supplied a one-shot gate
+    # and we are not dual-solving; dual anneal always clones known kinds above.
+    return template
 
 
 def _default_stop_gate_for_injected_solver(solver: LayoutPriorSolver) -> StopGate:

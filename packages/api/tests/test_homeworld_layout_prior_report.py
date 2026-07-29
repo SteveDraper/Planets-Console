@@ -149,13 +149,14 @@ def test_apply_layout_prior_records_report_in_ring(template_planet, sample_turn)
         stop_gate=MaxStepsStopGate(10),
     )
     reports = recent_layout_prior_reports(game_id=111, perspective=3, turn=2)
-    assert len(reports) == 1
-    assert reports[0].solver == "anneal"
-    assert reports[0].game_id == 111
+    assert len(reports) == 2
+    assert all(report.solver == "anneal" for report in reports)
+    assert all(report.game_id == 111 for report in reports)
+    assert all(report.turn == 2 for report in reports)
 
     wire = get_layout_prior_reports_wire(game_id=111, perspective=3, turn=2)
     assert wire["shell"] == {"gameId": 111, "perspective": 3, "turn": 2}
-    assert len(wire["reports"]) == 1
+    assert len(wire["reports"]) == 2
     assert wire["reports"][0]["gameId"] == 111
 
     assert recent_layout_prior_reports(game_id=999, perspective=3, turn=2) == ()

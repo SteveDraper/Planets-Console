@@ -299,12 +299,17 @@ def materialize_homeworld_candidates(
         available=True,
         origin_distance_observations=effective_origin_distance_observations(aggregate),
     )
+    previous_most_probable = _previous_turn_most_probable_planet_ids(
+        services,
+        shell_turn=shell_turn,
+    )
     annotated = apply_layout_prior_most_probable(
         adjusted,
         turn=shell_turn,
         view=interim_view,
         player_count=_player_count(shell_turn),
         origin_distance_observations=effective_origin_distance_observations(aggregate),
+        previous_most_probable_planet_ids=previous_most_probable,
     )
     most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
     services.persistence.put_evidence_aggregate(
@@ -319,6 +324,25 @@ def materialize_homeworld_candidates(
         ),
     )
     return annotated
+
+
+def _previous_turn_most_probable_planet_ids(
+    services: HomeworldLocatorComputeServices,
+    *,
+    shell_turn: TurnInfo,
+) -> tuple[int, ...]:
+    """Prior shell-turn selection for continuity scoring, or empty when absent."""
+    turn_number = int(shell_turn.settings.turn)
+    if turn_number <= 1:
+        return ()
+    prior = services.persistence.get_evidence_aggregate(
+        services.game_id,
+        services.perspective,
+        turn_number - 1,
+    )
+    if prior is None:
+        return ()
+    return prior.most_probable_planet_ids
 
 
 def materialize_homeworld_candidate_view(

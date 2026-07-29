@@ -64,6 +64,9 @@ class LayoutPriorProblem:
     seed_turn: int = 0
     seed_perspective: int = 0
     seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
+    # When set, anneal RNG hashes this turn instead of ``seed_turn`` (report turn
+    # stays ``seed_turn``). Used by prev-seed + this-seed continuity solves.
+    rng_seed_turn: int | None = None
     # Layout distribution category key (epic|standard) for telemetry / cooling analysis.
     layout_category: str | None = None
     # Soft origin-distance evidence (equal third cost family).

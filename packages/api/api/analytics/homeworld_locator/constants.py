@@ -9,4 +9,4 @@ ATTRIBUTION_USER_ASSERTED = "user_asserted"
 # solver identity changes (e.g. soft evidence family, anneal default). Post-promote/cull
 # candidate-set changes invalidate via inputFingerprint on layoutPriorSelection;
 # evidence refine rewrites clear the selection block.
-LAYOUT_PRIOR_ALGORITHM_VERSION = 8
+LAYOUT_PRIOR_ALGORITHM_VERSION = 10

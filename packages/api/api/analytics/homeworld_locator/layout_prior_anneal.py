@@ -278,10 +278,15 @@ def _anneal_stop_reason(
 
 
 def layout_prior_rng_seed(problem: LayoutPriorProblem) -> int:
-    """Deterministic 64-bit seed from scope + fingerprint + algorithm version."""
+    """Deterministic 64-bit seed from scope + fingerprint + algorithm version.
+
+    Uses ``rng_seed_turn`` when set so continuity solves can replay the previous
+    turn's RNG dynamics while keeping report ``seed_turn`` as the shell turn.
+    """
+    seed_turn = problem.seed_turn if problem.rng_seed_turn is None else int(problem.rng_seed_turn)
     hasher = hashlib.sha256()
     hasher.update(struct.pack(">q", int(problem.seed_game_id)))
-    hasher.update(struct.pack(">q", int(problem.seed_turn)))
+    hasher.update(struct.pack(">q", int(seed_turn)))
     hasher.update(struct.pack(">q", int(problem.seed_perspective)))
     hasher.update(struct.pack(">q", int(LAYOUT_PRIOR_ALGORITHM_VERSION)))
     for planet_id, tier, perspective in problem.seed_input_fingerprint:
