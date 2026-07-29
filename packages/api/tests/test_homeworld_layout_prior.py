@@ -679,7 +679,6 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
     restored = homeworld_evidence_aggregate_from_json(wire)
     assert restored.origin_distance_observations == observations
     assert restored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-    assert restored.layout_prior_promotion_threshold is None
     assert restored.layout_prior_input_fingerprint == fingerprint
     assert restored.layout_prior_evidence_lambda == 0.95
     assert restored.most_probable_planet_ids == (12, 34)
@@ -693,7 +692,7 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
         }
     )
     assert legacy_hits_only.origin_distance_observations == ()
-    # Legacy wire that still carries promotionThreshold remains readable.
+    # Legacy wire that still carries promotionThreshold remains readable (field ignored).
     legacy_with_threshold = homeworld_evidence_aggregate_from_json(
         {
             "turn": 13,
@@ -711,9 +710,11 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
         }
     )
     assert legacy_with_threshold.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-    assert legacy_with_threshold.layout_prior_promotion_threshold == 2
     assert legacy_with_threshold.layout_prior_evidence_lambda is None
     assert legacy_with_threshold.most_probable_planet_ids == (12,)
+    assert "promotionThreshold" not in homeworld_evidence_aggregate_to_json(
+        legacy_with_threshold
+    ).get("layoutPriorSelection", {})
     assert "layoutPriorSelection" not in homeworld_evidence_aggregate_to_json(
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
     )
@@ -801,7 +802,6 @@ def test_shell_layout_prior_persisted_and_reused(
     stored = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
     assert stored is not None
     assert stored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-    assert stored.layout_prior_promotion_threshold is None
     assert stored.layout_prior_input_fingerprint == layout_prior_input_fingerprint(first.candidates)
     assert (
         stored.layout_prior_evidence_lambda
@@ -857,7 +857,6 @@ def test_shell_layout_prior_persisted_and_reused(
         assert calls["n"] == prior_calls + 1
         after_lambda = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
         assert after_lambda is not None
-        assert after_lambda.layout_prior_promotion_threshold is None
         assert after_lambda.layout_prior_evidence_lambda == 0.5
         assert orphan.id in after_lambda.most_probable_planet_ids
         assert {row.planet_id for row in fourth.candidates if row.is_most_probable} == {

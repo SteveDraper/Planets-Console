@@ -49,8 +49,6 @@ class HomeworldEvidenceAggregate:
     origin_distance_evidence_through_turn: int | None = None
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
-    layout_prior_promotion_threshold: int | None = None
-    """Legacy field on older persisted selections; ignored for reuse."""
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
     """Post-promote/cull candidate triples that fed selection (planet, tier, perspective)."""
     layout_prior_evidence_lambda: float | None = None

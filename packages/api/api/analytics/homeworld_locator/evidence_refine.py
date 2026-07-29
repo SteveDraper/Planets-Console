@@ -28,7 +28,6 @@ from api.analytics.homeworld_locator.location_evidence import (
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     HomeworldSingleStarbasePromotion,
-    OriginDistanceObservation,
 )
 from api.analytics.homeworld_locator.sector_overlays import (
     homeworld_layout_asset_category,
@@ -67,6 +66,7 @@ def refine_homeworld_evidence_aggregate(
     unit tests.
     """
     from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
+        observations_through_turn,
         resolve_origin_distance_evidence_through_turn,
     )
 
@@ -79,11 +79,10 @@ def refine_homeworld_evidence_aggregate(
     )
     soft_evidence_frozen = through_turn is not None
     prior_observation_count = len(prior.origin_distance_observations)
-    observations: tuple[OriginDistanceObservation, ...] = prior.origin_distance_observations
-    if soft_evidence_frozen:
-        observations = tuple(
-            observation for observation in observations if observation.turn <= through_turn
-        )
+    observations = observations_through_turn(
+        prior.origin_distance_observations,
+        through_turn,
+    )
     promotions: tuple[HomeworldSingleStarbasePromotion, ...] = prior.single_starbase_promotions
     prior_promo_count = len(promotions)
     hulls_by_id = {hull.id: hull for hull in turn.hulls}

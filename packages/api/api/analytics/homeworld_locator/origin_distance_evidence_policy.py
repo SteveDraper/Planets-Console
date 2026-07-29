@@ -12,15 +12,24 @@ from api.errors import ValidationError
 from api.models.game import TurnInfo
 
 
+def observations_through_turn(
+    observations: Sequence[OriginDistanceObservation],
+    through: int | None,
+) -> tuple[OriginDistanceObservation, ...]:
+    """Keep observations at or before ``through``; pass all when ``through`` is unset."""
+    if through is None:
+        return tuple(observations)
+    return tuple(observation for observation in observations if observation.turn <= through)
+
+
 def effective_origin_distance_observations(
     aggregate: HomeworldEvidenceAggregate,
 ) -> tuple[OriginDistanceObservation, ...]:
     """Observations that participate in layout-prior soft evidence cost."""
-    through = aggregate.origin_distance_evidence_through_turn
-    observations = aggregate.origin_distance_observations
-    if through is None:
-        return observations
-    return tuple(observation for observation in observations if observation.turn <= through)
+    return observations_through_turn(
+        aggregate.origin_distance_observations,
+        aggregate.origin_distance_evidence_through_turn,
+    )
 
 
 def earliest_shared_ship_limit_turn(history: Sequence[TurnInfo]) -> int | None:

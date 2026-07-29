@@ -186,8 +186,6 @@ def homeworld_evidence_aggregate_to_json(
         }
         if aggregate.layout_prior_evidence_lambda is not None:
             selection["evidenceLambda"] = aggregate.layout_prior_evidence_lambda
-        if aggregate.layout_prior_promotion_threshold is not None:
-            selection["promotionThreshold"] = aggregate.layout_prior_promotion_threshold
         payload["layoutPriorSelection"] = selection
     return payload
 
@@ -230,7 +228,6 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             "homeworld evidence aggregate singleStarbasePromotions entries must be objects"
         )
     selection_version: int | None = None
-    selection_threshold: int | None = None
     selection_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
     selection_evidence_lambda: float | None = None
     most_probable_ids: tuple[int, ...] = ()
@@ -246,14 +243,8 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
                 "homeworld layoutPriorSelection.algorithmVersion must be an int >= 1"
             )
         # Legacy payloads omit inputFingerprint; treat as absent so materialize recomputes.
+        # Legacy promotionThreshold is ignored (threshold promotion removed).
         if "inputFingerprint" in selection_raw:
-            if "promotionThreshold" in selection_raw:
-                threshold = selection_raw.get("promotionThreshold")
-                if not isinstance(threshold, int) or threshold < 1:
-                    raise ValidationError(
-                        "homeworld layoutPriorSelection.promotionThreshold must be an int >= 1"
-                    )
-                selection_threshold = threshold
             if "evidenceLambda" in selection_raw:
                 evidence_lambda_raw = selection_raw.get("evidenceLambda")
                 if not isinstance(evidence_lambda_raw, (int, float)) or isinstance(
@@ -325,7 +316,6 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         single_starbase_promotions=promotions,
         origin_distance_evidence_through_turn=through_turn,
         layout_prior_algorithm_version=selection_version,
-        layout_prior_promotion_threshold=selection_threshold,
         layout_prior_input_fingerprint=selection_fingerprint,
         layout_prior_evidence_lambda=selection_evidence_lambda,
         most_probable_planet_ids=most_probable_ids,

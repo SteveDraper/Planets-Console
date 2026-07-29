@@ -321,7 +321,6 @@ def materialize_homeworld_candidates(
         replace(
             aggregate,
             layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
-            layout_prior_promotion_threshold=None,
             layout_prior_input_fingerprint=input_fingerprint,
             layout_prior_evidence_lambda=evidence_lambda,
             most_probable_planet_ids=most_probable_ids,
