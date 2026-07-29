@@ -236,7 +236,19 @@ def apply_layout_prior_most_probable(
 
 
 def layout_prior_continuity_rng_seed_turns(shell_turn: int) -> tuple[int, ...]:
-    """RNG seed turns for anneal continuity: prev + this when ``shell_turn > 1``."""
+    """RNG seed turns for deliberate dual-seed anneal continuity.
+
+    When ``shell_turn > 1``, return ``(shell_turn - 1, shell_turn)`` so the
+    facade runs two full-budget inline solves -- not a single warm-started
+    anneal. Roles:
+
+    - Previous-turn seed: maintains SA dynamics where local evidence is
+      unchanged (same RNG stream as last turn's this-seed solve).
+    - This-turn seed: variation / exploration under a fresh stream.
+
+    Projection of the previous selection is a separate continuity mechanism
+    (see ``_solve_layout_prior_for_annotation``).
+    """
     if shell_turn <= 1:
         return (shell_turn,)
     return (shell_turn - 1, shell_turn)
@@ -247,6 +259,10 @@ def try_project_previous_layout_selection(
     previous_most_probable_planet_ids: Sequence[int],
 ) -> dict[int, int] | None:
     """Map a prior selection onto this problem's choice sectors, or ``None``.
+
+    Continuity projection (deliberate, not a warm-start substitute for dual SA):
+    when the previous set remains a complete admissible assignment, score it on
+    current criteria for stability against SA noise.
 
     Admissible when every previous planet is still a legal choice in exactly one
     current choice sector, every choice sector gets exactly one such planet, and
@@ -272,7 +288,11 @@ def score_projected_layout_selection(
     problem: LayoutPriorProblem,
     chosen_by_sector: Mapping[int, int],
 ) -> LayoutPriorSolution | None:
-    """Score an admissible assignment with the same refine path as anneal finals."""
+    """Score an admissible prior assignment (refine path; no SA).
+
+    Used so a still-legal previous selection can beat both continuity anneals
+    when it scores better -- stability against SA noise, not a search shortcut.
+    """
     from api.analytics.homeworld_locator.layout_prior_cost import (
         evaluate_layout_prior_selection,
         mid_stand_in_positions,
@@ -321,7 +341,16 @@ def _solve_layout_prior_for_annotation(
     template_gate: StopGate,
     previous_most_probable_planet_ids: Sequence[int] | None = None,
 ) -> LayoutPriorSolveResult:
-    """Run anneal continuity solves, then prefer an admissible prior selection if better."""
+    """Anneal continuity facade: dual-seed SA, then optional prior projection.
+
+    Deliberate three-part design (do not collapse to a single warm-started anneal):
+
+    1. This-turn RNG seed -- variation / exploration.
+    2. Previous-turn RNG seed -- maintains SA dynamics where local evidence is
+       unchanged (replay of last turn's this-seed stream).
+    3. Score admissible previous selection (projection, no SA) -- stability
+       against SA noise; prefer when better than both anneals by cost/tie-key.
+    """
     from api.analytics.homeworld_locator.layout_prior_anneal import AnnealingLayoutPriorSolver
 
     if not isinstance(solver, AnnealingLayoutPriorSolver):
