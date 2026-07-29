@@ -12,7 +12,7 @@ class HomeworldLocatorConfig:
     min_baseline_clans: int = 10_000
     """Floor for homeworld baseline profile clan matching."""
 
-    origin_distance_evidence_lambda: float = 0.8
+    origin_distance_evidence_lambda: float = 0.95
     """Temporal blend weight for soft origin-distance evidence in layout-prior cost.
 
     Running ``E = (E + λ e) / (1 + λ)`` over turn-ordered observation means.

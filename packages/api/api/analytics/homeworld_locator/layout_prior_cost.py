@@ -86,6 +86,17 @@ def origin_distance_observation_neg_log(
     return -math.log(probability)
 
 
+def origin_distance_update_weight(turn: int, evidence_lambda: float) -> float:
+    """Absolute-turn weight ``w(t) = λ^t`` for blending new evidence at turn ``t``.
+
+    Empty turns do not call this: existing ``E`` is carried forward undiminished
+    until a nonempty turn renormalizes with this weight (late turns → small ``w``).
+    """
+    if turn < 0:
+        raise ValueError(f"origin-distance evidence turn must be >= 0, got {turn}")
+    return evidence_lambda**turn
+
+
 def origin_distance_evidence_mean(
     observations: Sequence[OriginDistanceObservation],
     selection_planet_ids: frozenset[int],
@@ -93,10 +104,11 @@ def origin_distance_evidence_mean(
     evidence_lambda: float,
     empty_intersection_eps: float = ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS,
 ) -> float:
-    """λ-blended turn-ordered soft evidence cost E(S).
+    """Soft evidence cost ``E(S)`` with absolute-turn update weights.
 
-    Per turn with ≥1 observation: ``e_t = mean(-log P)``. Skip empty turns.
-    Running ``E = (E + λ e) / (1 + λ)``. No observations → ``0``.
+    Per turn with ≥1 observation: ``e_t = mean(-log P)``. Skip empty turns so
+    ``E`` is unchanged when no new evidence arrives. On nonempty turn ``t``:
+    ``E = (E + w(t) e_t) / (1 + w(t))`` with ``w(t) = λ^t``. No observations → ``0``.
     """
     if not observations:
         return 0.0
@@ -116,7 +128,8 @@ def origin_distance_evidence_mean(
             )
             for observation in turn_obs
         ) / len(turn_obs)
-        evidence = (evidence + evidence_lambda * turn_mean) / (1.0 + evidence_lambda)
+        weight = origin_distance_update_weight(turn, evidence_lambda)
+        evidence = (evidence + weight * turn_mean) / (1.0 + weight)
     return evidence
 
 

@@ -27,7 +27,7 @@ from api.models.planet import Planet
 SectorKind = Literal["fixed", "choice", "stand_in", "skip"]
 
 # Default soft-evidence blend weight (matches HomeworldLocatorConfig).
-DEFAULT_ORIGIN_DISTANCE_EVIDENCE_LAMBDA = 0.8
+DEFAULT_ORIGIN_DISTANCE_EVIDENCE_LAMBDA = 0.95
 
 
 @dataclass(frozen=True)

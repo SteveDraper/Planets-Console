@@ -12,6 +12,7 @@ from api.analytics.homeworld_locator.layout_prior_cost import (
     ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS,
     origin_distance_evidence_mean,
     origin_distance_observation_neg_log,
+    origin_distance_update_weight,
 )
 from api.analytics.homeworld_locator.models import OriginDistanceObservation
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
@@ -42,8 +43,8 @@ def template_planet(sample_turn):
     return sample_turn.planets[0]
 
 
-def test_layout_prior_algorithm_version_is_six() -> None:
-    assert LAYOUT_PRIOR_ALGORITHM_VERSION == 6
+def test_layout_prior_algorithm_version_is_seven() -> None:
+    assert LAYOUT_PRIOR_ALGORITHM_VERSION == 7
 
 
 def test_observation_neg_log_covers_match_set() -> None:
@@ -59,41 +60,77 @@ def test_observation_neg_log_covers_match_set() -> None:
     assert both < covering
 
 
-def test_evidence_blend_math_two_turns() -> None:
-    """E = (E + λ e) / (1 + λ) over turn-ordered means; skip empty turns."""
+def test_update_weight_is_lambda_to_the_turn() -> None:
+    assert origin_distance_update_weight(0, 0.95) == pytest.approx(1.0)
+    assert origin_distance_update_weight(1, 0.95) == pytest.approx(0.95)
+    assert origin_distance_update_weight(20, 0.95) == pytest.approx(0.95**20)
+    assert origin_distance_update_weight(55, 0.95) == pytest.approx(0.95**55)
+    # Late turns are weak relative to early mid-game.
+    assert origin_distance_update_weight(55, 0.95) < origin_distance_update_weight(12, 0.95)
+
+
+def test_evidence_blend_uses_absolute_turn_weights() -> None:
+    """E = (E + w(t) e) / (1 + w(t)) with w(t)=λ^t; skip empty turns."""
     observations = (
         OriginDistanceObservation(turn=12, x=1, y=1, matched_planet_ids=(10, 20)),
         OriginDistanceObservation(turn=13, x=2, y=2, matched_planet_ids=(10,)),
     )
     selection = frozenset({10})
-    lam = 0.8
+    lam = 0.95
 
     e12 = -math.log(0.5)  # |{10}∩{10,20}|/2
     e13 = -math.log(1.0)  # full cover
+    w12 = lam**12
+    w13 = lam**13
     expected = 0.0
-    expected = (expected + lam * e12) / (1.0 + lam)
-    expected = (expected + lam * e13) / (1.0 + lam)
+    expected = (expected + w12 * e12) / (1.0 + w12)
+    expected = (expected + w13 * e13) / (1.0 + w13)
 
     actual = origin_distance_evidence_mean(observations, selection, evidence_lambda=lam)
     assert actual == pytest.approx(expected)
 
 
-def test_evidence_skips_empty_turns_and_zero_when_no_observations() -> None:
-    assert origin_distance_evidence_mean((), frozenset({1}), evidence_lambda=0.8) == 0.0
-    # Only turn 12 has observations; no "empty turn" rows exist in the list.
-    observations = (
+def test_empty_turns_do_not_change_evidence_when_observation_list_unchanged() -> None:
+    """Invariant: no new observations ⇒ same E (barren calendar gaps are no-ops)."""
+    early = (
+        OriginDistanceObservation(turn=12, x=0, y=0, matched_planet_ids=(1,)),
+        OriginDistanceObservation(turn=14, x=1, y=1, matched_planet_ids=(2,)),
+    )
+    # Same nonempty turns; calendar "gaps" are absent rows, not decaying updates.
+    selection = frozenset({1})
+    first = origin_distance_evidence_mean(early, selection, evidence_lambda=0.95)
+    second = origin_distance_evidence_mean(early, selection, evidence_lambda=0.95)
+    assert first == second
+    assert origin_distance_evidence_mean((), frozenset({1}), evidence_lambda=0.95) == 0.0
+    # Full cover both turns → e=0 each → E stays 0.
+    covered = (
         OriginDistanceObservation(turn=12, x=0, y=0, matched_planet_ids=(1,)),
         OriginDistanceObservation(turn=14, x=1, y=1, matched_planet_ids=(1,)),
     )
-    # Full cover both turns → e=0 each → E stays 0.
-    assert origin_distance_evidence_mean(observations, frozenset({1}), evidence_lambda=0.8) == 0.0
+    assert origin_distance_evidence_mean(covered, frozenset({1}), evidence_lambda=0.95) == 0.0
+
+
+def test_late_update_weaker_than_early_for_same_turn_mean() -> None:
+    """Identical e_t moves E less at T55 than at T12 under λ=0.95."""
+    lam = 0.95
+    early = (OriginDistanceObservation(turn=12, x=0, y=0, matched_planet_ids=(99,)),)
+    late = (OriginDistanceObservation(turn=55, x=0, y=0, matched_planet_ids=(99,)),)
+    selection = frozenset()  # miss → e = -log(ε) both
+    e = -math.log(ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS)
+    early_e = origin_distance_evidence_mean(early, selection, evidence_lambda=lam)
+    late_e = origin_distance_evidence_mean(late, selection, evidence_lambda=lam)
+    w12 = lam**12
+    w55 = lam**55
+    assert early_e == pytest.approx((w12 * e) / (1.0 + w12))
+    assert late_e == pytest.approx((w55 * e) / (1.0 + w55))
+    assert late_e < early_e
 
 
 def test_ambiguous_match_set_prefers_covering_selection() -> None:
     """Selecting a planet in M is cheaper than selecting neither."""
     observations = (OriginDistanceObservation(turn=12, x=50, y=60, matched_planet_ids=(435, 483)),)
-    covering = origin_distance_evidence_mean(observations, frozenset({435}), evidence_lambda=0.8)
-    neither = origin_distance_evidence_mean(observations, frozenset({999}), evidence_lambda=0.8)
+    covering = origin_distance_evidence_mean(observations, frozenset({435}), evidence_lambda=0.95)
+    neither = origin_distance_evidence_mean(observations, frozenset({999}), evidence_lambda=0.95)
     assert covering < neither
 
 
@@ -103,16 +140,17 @@ def test_two_location_observations_cheaper_when_both_covered() -> None:
         OriginDistanceObservation(turn=12, x=100, y=200, matched_planet_ids=(10,)),
         OriginDistanceObservation(turn=12, x=300, y=400, matched_planet_ids=(20,)),
     )
-    both = origin_distance_evidence_mean(observations, frozenset({10, 20}), evidence_lambda=0.8)
-    one = origin_distance_evidence_mean(observations, frozenset({10}), evidence_lambda=0.8)
-    neither = origin_distance_evidence_mean(observations, frozenset({99}), evidence_lambda=0.8)
+    both = origin_distance_evidence_mean(observations, frozenset({10, 20}), evidence_lambda=0.95)
+    one = origin_distance_evidence_mean(observations, frozenset({10}), evidence_lambda=0.95)
+    neither = origin_distance_evidence_mean(observations, frozenset({99}), evidence_lambda=0.95)
     assert both < one < neither
     # Same-turn mean: one miss of two obs → mean((-log 1 + -log ε)/2)
+    w12 = 0.95**12
     expected_one = (
         0.0
-        + 0.8
+        + w12
         * ((-math.log(1.0) + -math.log(ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS)) / 2.0)
-    ) / 1.8
+    ) / (1.0 + w12)
     assert one == pytest.approx(expected_one)
 
 

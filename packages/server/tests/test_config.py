@@ -290,7 +290,7 @@ def test_load_config_homeworld_locator_defaults():
     base = FIXTURES_DIR / "base.yaml"
     root = load_config(default_config_path=base)
     assert root.api.homeworld_locator.min_baseline_clans == 10_000
-    assert root.api.homeworld_locator.origin_distance_evidence_lambda == 0.8
+    assert root.api.homeworld_locator.origin_distance_evidence_lambda == 0.95
     assert root.api.homeworld_locator.layout_prior_solver == "anneal"
     assert root.api.homeworld_locator.layout_prior_budget_ms == 1000
 
@@ -325,7 +325,7 @@ def test_load_config_homeworld_locator_leaf_override():
         default_config_path=base,
     )
     assert root.api.homeworld_locator.min_baseline_clans == 12000
-    assert root.api.homeworld_locator.origin_distance_evidence_lambda == 0.8
+    assert root.api.homeworld_locator.origin_distance_evidence_lambda == 0.95
     assert root.api.homeworld_locator.layout_prior_budget_ms == 1500
 
 

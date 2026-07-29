@@ -95,7 +95,7 @@ def try_layout_prior_problem(
     ``is_most_probable`` on ``None``; callers that probe may raise.
     Soft evidence observations default from ``view.origin_distance_observations``
     (populated from the shell evidence aggregate at materialize); λ defaults from
-    config when omitted.
+    config when omitted (absolute-turn update weight ``w(t)=λ^t``).
     """
     from api.config import get_config
 
