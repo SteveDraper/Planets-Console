@@ -33,6 +33,40 @@ describe('DiagnosticsHomeworldsTab', () => {
     })
   })
 
+  it('hides evidence-refine summary when reportCount is 0', async () => {
+    vi.mocked(fetchLayoutPriorReports).mockResolvedValue({
+      ...emptySnapshot,
+      reports: [
+        {
+          gameId: 680224,
+          turn: 40,
+          perspective: 1,
+          solver: 'anneal',
+          stopReason: 'deadline',
+          capturedAt: '2026-07-28T12:00:00Z',
+          search: { finalCost: 9.5 },
+        },
+      ],
+      evidenceRefineSummary: {
+        reportCount: 0,
+        turnCount: 0,
+        sumOuterTotalMs: 0,
+        sumOriginDistanceMs: 0,
+        sumSingleStarbaseMs: 0,
+        sumObservationUpsertMs: 0,
+        sumPersistMs: 0,
+        sumLoadPriorMs: 0,
+        maxOuterTotalMs: 0,
+        maxOuterTotalTurn: null,
+      },
+    })
+    render(<DiagnosticsHomeworldsTab scope={scope} onCopy={vi.fn()} isActive />)
+    await waitFor(() => {
+      expect(screen.getByText(/Layout prior · anneal/i)).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/Evidence-refine summary/i)).not.toBeInTheDocument()
+  })
+
   it('shows evidence-refine summary and layout-prior reports when populated', async () => {
     vi.mocked(fetchLayoutPriorReports).mockResolvedValue({
       ...emptySnapshot,

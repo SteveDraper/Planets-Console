@@ -25,6 +25,10 @@ function hasAnyHomeworldDiagnostics(snapshot: LayoutPriorReportsResponse): boole
   )
 }
 
+function hasMeaningfulRefineSummary(summary: Record<string, unknown>): boolean {
+  return typeof summary.reportCount === 'number' && summary.reportCount > 0
+}
+
 export function DiagnosticsHomeworldsTab({
   scope,
   onCopy,
@@ -164,7 +168,7 @@ export function DiagnosticsHomeworldsTab({
         </section>
       ) : null}
 
-      {Object.keys(refineSummary).length > 0 ? (
+      {hasMeaningfulRefineSummary(refineSummary) ? (
         <section className="rounded border border-[#52575d] bg-[#40454a] p-3">
           <div className="mb-2 flex items-start justify-between gap-2">
             <h3 className="text-xs font-medium text-slate-200">Evidence-refine summary</h3>
