@@ -107,7 +107,10 @@ def test_build_projected_selection_report_matches_solution_not_anneal() -> None:
     assert projected.timing.refine_ms == pytest.approx(0.75)
     assert projected.timing.total_ms == pytest.approx(0.9)
     assert projected.timing.sa_ms == 0.0
+    assert projected.search.projected_cost == pytest.approx(3.25)
     assert projected.search.final_cost == pytest.approx(3.25)
+    assert projected.search.greedy_cost is None
+    assert projected.search.pre_refine_cost is None
     assert projected.search.tie_key == ((0, 70), (1, 71))
     assert projected.search.sa_steps_attempted == 0
     assert projected.search.final_cost != pytest.approx(anneal.search.final_cost)
@@ -115,7 +118,14 @@ def test_build_projected_selection_report_matches_solution_not_anneal() -> None:
     assert projected.problem_size == anneal.problem_size
     wire = layout_prior_report_to_wire(projected)
     assert wire["stopReason"] == "projected"
+    assert wire["search"]["projectedCost"] == pytest.approx(3.25)
     assert wire["search"]["finalCost"] == pytest.approx(3.25)
+    assert wire["search"]["greedyCost"] is None
+    assert wire["search"]["preRefineCost"] is None
+    anneal_wire = layout_prior_report_to_wire(anneal)
+    assert anneal_wire["search"]["projectedCost"] is None
+    assert anneal_wire["search"]["greedyCost"] == pytest.approx(9.0)
+    assert anneal_wire["search"]["preRefineCost"] == pytest.approx(8.0)
 
 
 def test_anneal_run_report_has_timing_costs_stop_reason_and_series(
@@ -153,6 +163,7 @@ def test_anneal_run_report_has_timing_costs_stop_reason_and_series(
     assert report.search.final_cost == pytest.approx(result.solution.cost)
     assert report.search.greedy_cost >= 0.0
     assert report.search.pre_refine_cost >= 0.0
+    assert report.search.projected_cost is None
     assert 0 <= report.search.last_incumbent_improvement_step <= report.search.sa_steps_attempted
     assert report.problem_size.choice_sector_count >= 1
     assert report.problem_size.total_possibles >= 1
@@ -161,6 +172,7 @@ def test_anneal_run_report_has_timing_costs_stop_reason_and_series(
     wire = layout_prior_report_to_wire(report)
     assert wire["stopReason"] == "max_steps"
     assert wire["search"]["saStepsAttempted"] == report.search.sa_steps_attempted
+    assert wire["search"]["projectedCost"] is None
     assert (
         wire["search"]["lastIncumbentImprovementStep"]
         == report.search.last_incumbent_improvement_step

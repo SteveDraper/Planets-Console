@@ -784,7 +784,10 @@ def test_facade_prefers_admissible_previous_selection_over_worse_anneal(
     assert result.solution.chosen_planet_ids_by_sector == {choice.sector_index: 70}
     assert result.solution.cost < 100.0
     assert result.report.stop_reason == "projected"
+    assert result.report.search.projected_cost == pytest.approx(result.solution.cost)
     assert result.report.search.final_cost == pytest.approx(result.solution.cost)
+    assert result.report.search.greedy_cost is None
+    assert result.report.search.pre_refine_cost is None
     assert result.report.search.tie_key == result.solution.tie_key
     assert result.report.search.sa_steps_attempted == 0
     assert result.report.search.final_cost != pytest.approx(100.0)

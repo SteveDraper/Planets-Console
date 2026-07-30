@@ -46,12 +46,15 @@ class LayoutPriorTimingMs:
 class LayoutPriorSearchStats:
     sa_steps_attempted: int
     sa_steps_accepted: int
-    greedy_cost: float
-    pre_refine_cost: float
+    # Anneal-phase costs; None when the run had no greedy/SA path (projection).
+    greedy_cost: float | None
+    pre_refine_cost: float | None
     final_cost: float
     tie_key: tuple[tuple[int, int], ...]
     # SA step index of the last new incumbent (0 = greedy only / no SA improvement).
     last_incumbent_improvement_step: int = 0
+    # Continuity projection scored cost; set only when stop_reason is projected.
+    projected_cost: float | None = None
 
 
 @dataclass(frozen=True)
@@ -177,8 +180,10 @@ def build_projected_selection_report(
     Costs, tie-key, and timing describe the projection itself -- the stand-in
     refine and final evaluation it runs, with no greedy or SA phase. Stop reason
     is ``projected`` so diagnostics do not reuse an anneal run's SA final /
-    stop reason. Identity and problem-size hints come from the competing
-    anneal report for the same continuity round.
+    stop reason. Scored cost lives in ``projected_cost`` and ``final_cost``;
+    anneal-phase ``greedy_cost`` / ``pre_refine_cost`` stay unset. Identity and
+    problem-size hints come from the competing anneal report for the same
+    continuity round.
     """
     return build_run_report(
         game_id=reference_report.game_id,
@@ -191,11 +196,12 @@ def build_projected_selection_report(
         search=LayoutPriorSearchStats(
             sa_steps_attempted=0,
             sa_steps_accepted=0,
-            greedy_cost=cost,
-            pre_refine_cost=cost,
+            greedy_cost=None,
+            pre_refine_cost=None,
             final_cost=cost,
             tie_key=tie_key,
             last_incumbent_improvement_step=0,
+            projected_cost=cost,
         ),
         problem_size=reference_report.problem_size,
         incumbent_cost_series=(),
@@ -229,6 +235,7 @@ def layout_prior_report_to_wire(report: LayoutPriorSolverRunReport) -> dict[str,
             "saStepsAccepted": report.search.sa_steps_accepted,
             "greedyCost": report.search.greedy_cost,
             "preRefineCost": report.search.pre_refine_cost,
+            "projectedCost": report.search.projected_cost,
             "finalCost": report.search.final_cost,
             "lastIncumbentImprovementStep": report.search.last_incumbent_improvement_step,
             "tieKey": [list(pair) for pair in report.search.tie_key],
