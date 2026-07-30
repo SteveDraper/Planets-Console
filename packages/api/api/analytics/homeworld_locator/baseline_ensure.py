@@ -19,6 +19,7 @@ from api.analytics.homeworld_locator.evidence_refine_report import build_baselin
 from api.analytics.homeworld_locator.evidence_refine_timing_history import record_baseline_report
 from api.analytics.homeworld_locator.layout_prior import (
     apply_layout_prior_most_probable,
+    layout_prior_evidence_fingerprint,
     layout_prior_input_fingerprint,
 )
 from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
@@ -283,10 +284,13 @@ def materialize_homeworld_candidates(
     )
     input_fingerprint = layout_prior_input_fingerprint(adjusted)
     evidence_lambda = get_config().homeworld_locator.origin_distance_evidence_lambda
+    effective_observations = effective_origin_distance_observations(aggregate)
+    evidence_fingerprint = layout_prior_evidence_fingerprint(effective_observations)
     if (
         aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
         and aggregate.layout_prior_input_fingerprint == input_fingerprint
         and aggregate.layout_prior_evidence_lambda == evidence_lambda
+        and aggregate.layout_prior_evidence_fingerprint == evidence_fingerprint
     ):
         selected = frozenset(aggregate.most_probable_planet_ids)
         return tuple(replace(row, is_most_probable=row.planet_id in selected) for row in adjusted)
@@ -296,7 +300,7 @@ def materialize_homeworld_candidates(
         baseline_turn=baseline_turn,
         baseline_degraded=baseline_degraded,
         available=True,
-        origin_distance_observations=effective_origin_distance_observations(aggregate),
+        origin_distance_observations=effective_observations,
     )
     previous_most_probable = _previous_turn_most_probable_planet_ids(
         services,
@@ -307,7 +311,7 @@ def materialize_homeworld_candidates(
         turn=shell_turn,
         view=interim_view,
         player_count=_player_count(shell_turn),
-        origin_distance_observations=effective_origin_distance_observations(aggregate),
+        origin_distance_observations=effective_observations,
         origin_distance_evidence_lambda=evidence_lambda,
         previous_most_probable_planet_ids=previous_most_probable,
     )
@@ -320,6 +324,7 @@ def materialize_homeworld_candidates(
             layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
             layout_prior_input_fingerprint=input_fingerprint,
             layout_prior_evidence_lambda=evidence_lambda,
+            layout_prior_evidence_fingerprint=evidence_fingerprint,
             most_probable_planet_ids=most_probable_ids,
         ),
     )

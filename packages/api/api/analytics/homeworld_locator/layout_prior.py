@@ -6,7 +6,9 @@ shared modules). Discrete search is delegated to a replaceable ``LayoutPriorSolv
 
 from __future__ import annotations
 
+import hashlib
 import math
+import struct
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -77,6 +79,7 @@ __all__ = [
     "build_sector_layout_states",
     "fresh_layout_prior_stop_gate",
     "layout_prior_continuity_rng_seed_turns",
+    "layout_prior_evidence_fingerprint",
     "layout_prior_input_fingerprint",
     "layout_prior_solver_from_config",
     "layout_prior_solver_from_name",
@@ -93,13 +96,35 @@ def layout_prior_input_fingerprint(
 ) -> tuple[tuple[int, str, int | None], ...]:
     """Stable fingerprint of the post-promote/cull candidate set that feeds selection.
 
-    Soft-evidence λ is a sibling reuse key (``layout_prior_evidence_lambda`` /
-    wire ``evidenceLambda``), not part of this candidate tuple -- both must match
-    for layout-prior selection reuse.
+    Soft-evidence λ and observation identity are sibling reuse keys
+    (``layout_prior_evidence_lambda`` / ``evidenceLambda``,
+    ``layout_prior_evidence_fingerprint`` / ``evidenceFingerprint``), not part of
+    this candidate tuple -- all must match for layout-prior selection reuse.
     """
     return tuple(
         sorted((row.planet_id, row.confidence_tier, row.perspective) for row in candidates)
     )
+
+
+def layout_prior_evidence_fingerprint(
+    observations: Sequence[OriginDistanceObservation],
+) -> str:
+    """Constant-size SHA-256 hex digest of soft OD observation identity.
+
+    Hash effective observations (after through-turn freeze filtering). Order is
+    canonicalized so callers need not pre-sort. Empty input yields the empty
+    digest (stable miss / no-evidence key).
+    """
+    hasher = hashlib.sha256()
+    for observation in sorted(
+        observations,
+        key=lambda row: (row.turn, row.x, row.y, row.matched_planet_ids),
+    ):
+        hasher.update(struct.pack(">iii", observation.turn, observation.x, observation.y))
+        hasher.update(struct.pack(">I", len(observation.matched_planet_ids)))
+        for planet_id in observation.matched_planet_ids:
+            hasher.update(struct.pack(">i", planet_id))
+    return hasher.hexdigest()
 
 
 def try_layout_prior_problem(

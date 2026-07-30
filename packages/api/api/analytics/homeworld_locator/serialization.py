@@ -186,6 +186,8 @@ def homeworld_evidence_aggregate_to_json(
         }
         if aggregate.layout_prior_evidence_lambda is not None:
             selection["evidenceLambda"] = aggregate.layout_prior_evidence_lambda
+        if aggregate.layout_prior_evidence_fingerprint is not None:
+            selection["evidenceFingerprint"] = aggregate.layout_prior_evidence_fingerprint
         payload["layoutPriorSelection"] = selection
     return payload
 
@@ -230,6 +232,7 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
     selection_version: int | None = None
     selection_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
     selection_evidence_lambda: float | None = None
+    selection_evidence_fingerprint: str | None = None
     most_probable_ids: tuple[int, ...] = ()
     selection_raw = data.get("layoutPriorSelection")
     if selection_raw is not None:
@@ -259,6 +262,14 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
                         "homeworld layoutPriorSelection.evidenceLambda must be in (0, 1]"
                     )
                 selection_evidence_lambda = evidence_lambda_value
+            if "evidenceFingerprint" in selection_raw:
+                evidence_fp_raw = selection_raw.get("evidenceFingerprint")
+                if not isinstance(evidence_fp_raw, str) or not evidence_fp_raw:
+                    raise ValidationError(
+                        "homeworld layoutPriorSelection.evidenceFingerprint "
+                        "must be a non-empty string"
+                    )
+                selection_evidence_fingerprint = evidence_fp_raw
             fingerprint_raw = selection_raw.get("inputFingerprint")
             if not isinstance(fingerprint_raw, list):
                 raise ValidationError(
@@ -318,5 +329,6 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         layout_prior_algorithm_version=selection_version,
         layout_prior_input_fingerprint=selection_fingerprint,
         layout_prior_evidence_lambda=selection_evidence_lambda,
+        layout_prior_evidence_fingerprint=selection_evidence_fingerprint,
         most_probable_planet_ids=most_probable_ids,
     )

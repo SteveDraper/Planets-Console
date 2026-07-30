@@ -7,6 +7,7 @@ ATTRIBUTION_USER_ASSERTED = "user_asserted"
 
 # Bump when layout-prior cost, caps, stand-in policy, tie-break, or default
 # solver identity changes (e.g. soft evidence family, anneal default). Post-promote/cull
-# candidate-set and soft-evidence λ invalidate via inputFingerprint + evidenceLambda on
-# layoutPriorSelection; evidence refine rewrites clear the selection block.
+# candidate-set, soft-evidence λ, and OD observation identity invalidate via
+# inputFingerprint + evidenceLambda + evidenceFingerprint on layoutPriorSelection;
+# evidence refine rewrites clear the selection block (defense in depth).
 LAYOUT_PRIOR_ALGORITHM_VERSION = 10

@@ -53,6 +53,8 @@ class HomeworldEvidenceAggregate:
     """Post-promote/cull candidate triples that fed selection (planet, tier, perspective)."""
     layout_prior_evidence_lambda: float | None = None
     """Configured soft-evidence λ used for the stored selection; part of the reuse key."""
+    layout_prior_evidence_fingerprint: str | None = None
+    """SHA-256 hex of effective soft OD observations; part of the reuse key."""
     most_probable_planet_ids: tuple[int, ...] = ()
 
 
