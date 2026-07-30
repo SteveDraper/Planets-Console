@@ -446,6 +446,100 @@ def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     assert persistence.get_evidence_aggregate(628580, 1, 4) is not None
 
 
+def test_export_ensure_delegates_the_ensure_loop_to_the_framework(persistence) -> None:
+    """Dependency ensure runs through ``ensure_declared_dependencies``, not a local loop."""
+    from unittest.mock import patch
+
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_context import AnalyticQueryContext
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turns = {
+        1: turn_one,
+        2: replace(turn_one, settings=replace(turn_one.settings, turn=2)),
+        3: replace(turn_one, settings=replace(turn_one.settings, turn=3)),
+    }
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+    ctx = make_analytic_compute_context(
+        turns[3],
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+
+    original_ensure_declared = AnalyticQueryContext.ensure_declared_dependencies
+    ensured_scopes: list[tuple[str, int]] = []
+
+    def tracking_ensure_declared_dependencies(self, analytic_id, scope):
+        ensured_scopes.append((analytic_id, scope.turn))
+        return original_ensure_declared(self, analytic_id, scope)
+
+    with patch.object(
+        AnalyticQueryContext,
+        "ensure_declared_dependencies",
+        tracking_ensure_declared_dependencies,
+    ):
+        assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
+
+    assert ensured_scopes == [(ANALYTIC_ID, 3), (ANALYTIC_ID, 2)]
+    assert persistence.get_evidence_aggregate(628580, 1, 3) is not None
+
+
+def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persistence) -> None:
+    """A hole the walk never needs must not fail the shell turn or trigger auto-fetch."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    # Hole at turn 2, but evidence is already refined through turn 3.
+    turns = {
+        1: turn_one,
+        3: replace(turn_one, settings=replace(turn_one.settings, turn=3)),
+        4: replace(turn_one, settings=replace(turn_one.settings, turn=4)),
+    }
+    fetch_calls: list[int] = []
+
+    def ensure_turn(turn_number: int):
+        fetch_calls.append(turn_number)
+        return None
+
+    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(turn=3, baseline_turn=1),
+    )
+    ctx = make_analytic_compute_context(
+        turns[4],
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
+    assert fetch_calls == []
+    assert persistence.get_evidence_aggregate(628580, 1, 4) is not None
+
+
 def test_origin_distance_observations_do_not_promote_to_definite() -> None:
     turn = _load_turn()
     aggregate = HomeworldEvidenceAggregate(

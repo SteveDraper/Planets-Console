@@ -2,21 +2,38 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
+from api.analytics.export_turn_fill import (
+    DependencyChainTurnFill,
+    fill_missing_dependency_chain_turns,
+    missing_dependency_chain_turns,
+)
+from api.analytics.export_types import (
+    EnsureDependency,
+    ExportScope,
+    PathPrefixScopeRule,
+    UnavailableReason,
+)
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.homeworld_locator.baseline_ensure import (
     ensure_homeworld_baseline,
     needs_baseline_recompute,
 )
-from api.analytics.homeworld_locator.compute_services import resolve_homeworld_services
+from api.analytics.homeworld_locator.compute_services import (
+    HomeworldLocatorComputeServices,
+    resolve_homeworld_services,
+)
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.evidence_ensure import (
     ensure_homeworld_evidence_refined,
     evidence_refined_through_shell,
+)
+from api.analytics.homeworld_locator.evidence_refine_report import build_ensure_failure_report
+from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+    record_ensure_failure_report,
 )
 from api.analytics.homeworld_locator.serialization import (
     homeworld_candidate_record_to_json,
@@ -119,6 +136,117 @@ def is_homeworld_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope)
     return is_homeworld_export_ensure_satisfied(ctx, scope)
 
 
+def _record_ensure_failure_and_raise(
+    scope: ExportScope,
+    *,
+    reason: str,
+    message: str,
+    missing_turn: int | None,
+) -> NoReturn:
+    """Record homeworld ensure-failure diagnostics, then surface the failure to the caller."""
+    record_ensure_failure_report(
+        build_ensure_failure_report(
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            shell_turn=scope.turn,
+            reason=reason,
+            message=message,
+            missing_turn=missing_turn,
+        )
+    )
+    raise ValidationError(message)
+
+
+def _raise_chain_fill_failure(scope: ExportScope, fill: DependencyChainTurnFill) -> NoReturn:
+    """Fail the shell turn when a chain hole could not be auto-fetched."""
+    missing_turn = fill.still_missing
+    if fill.auto_fetch_unavailable:
+        reason = "turn_not_stored"
+        message = (
+            f"homeworld locator cannot refine turn {scope.turn}: "
+            f"turn {missing_turn} is not stored "
+            f"(sign in to auto-fetch missing turns for the evidence chain)"
+        )
+    else:
+        reason = "turn_fetch_failed"
+        message = (
+            f"homeworld locator cannot refine turn {scope.turn}: "
+            f"could not load turn {missing_turn} from Planets.nu "
+            f"(required for the evidence chain"
+        )
+        if fill.fetched_turns:
+            fetched = ",".join(str(turn_number) for turn_number in fill.fetched_turns)
+            message += f"; auto-fetched turns {fetched} before failure"
+        message += ")"
+    _record_ensure_failure_and_raise(
+        scope,
+        reason=reason,
+        message=message,
+        missing_turn=missing_turn,
+    )
+
+
+def _raise_dependency_ensure_unavailable(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    reason: UnavailableReason,
+) -> NoReturn:
+    """Fail the shell turn when the framework ensure walk cannot complete."""
+    missing_turn: int | None = None
+    if reason != "turn_not_stored":
+        message = (
+            f"homeworld locator cannot refine turn {scope.turn}: "
+            f"evidence chain dependencies are unavailable ({reason})"
+        )
+    else:
+        missing = missing_dependency_chain_turns(ctx, scope)
+        missing_turn = missing[0] if missing else None
+        message = (
+            f"homeworld locator cannot refine turn {scope.turn}: "
+            f"turn {missing_turn} is not stored "
+            f"(evidence chain requires contiguous turns)"
+            if missing_turn is not None
+            else (
+                f"homeworld locator cannot refine turn {scope.turn}: "
+                f"an intermediate turn in the evidence chain is not stored"
+            )
+        )
+    _record_ensure_failure_and_raise(
+        scope,
+        reason=reason,
+        message=message,
+        missing_turn=missing_turn,
+    )
+
+
+def _ensure_homeworld_chain_dependencies(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    services: HomeworldLocatorComputeServices,
+) -> None:
+    """Run the framework ensure loop, repairing missing chain turns once.
+
+    The evidence self-chain needs contiguous stored TurnInfo. When the declared
+    dependency walk reports a hole, prefer login-backed auto-fetch and retry
+    before failing the shell turn.
+    """
+    unavailable = ctx.ensure_declared_dependencies(ANALYTIC_ID, scope)
+    if unavailable is None:
+        return
+    if unavailable == "turn_not_stored":
+        fill = fill_missing_dependency_chain_turns(
+            ctx,
+            scope,
+            ensure_turn=services.ensure_turn,
+        )
+        if fill.still_missing is not None:
+            _raise_chain_fill_failure(scope, fill)
+        unavailable = ctx.ensure_declared_dependencies(ANALYTIC_ID, scope)
+        if unavailable is None:
+            return
+    _raise_dependency_ensure_unavailable(ctx, scope, unavailable)
+
+
 def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if is_homeworld_export_ensure_satisfied(ctx, scope):
         return True
@@ -129,85 +257,8 @@ def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bo
     if not is_homeworld_locator_available(turn.settings):
         return True
 
-    from api.analytics.export_dependency_walk import walk_dependency_tree
-    from api.analytics.homeworld_locator.chain_turns import fill_missing_homeworld_chain_turns
-    from api.analytics.homeworld_locator.evidence_refine_report import (
-        build_ensure_failure_report,
-    )
-    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
-        record_ensure_failure_report,
-    )
-
     services = resolve_homeworld_services(ctx)
-
-    # Contiguous TurnInfo storage is required for the evidence self-chain. When a
-    # hole is present, prefer login-backed auto-fetch before failing hard.
-    walk = walk_dependency_tree(ctx, ANALYTIC_ID, scope, visiting=set())
-    if walk.turn_unavailable == "turn_not_stored":
-        fill = fill_missing_homeworld_chain_turns(services, ctx, scope)
-        if fill.still_missing is not None:
-            missing_turn = fill.still_missing
-            if fill.auto_fetch_unavailable:
-                message = (
-                    f"homeworld locator cannot refine turn {scope.turn}: "
-                    f"turn {missing_turn} is not stored "
-                    f"(sign in to auto-fetch missing turns for the evidence chain)"
-                )
-                reason = "turn_not_stored"
-            else:
-                message = (
-                    f"homeworld locator cannot refine turn {scope.turn}: "
-                    f"could not load turn {missing_turn} from Planets.nu "
-                    f"(required for the evidence chain"
-                )
-                if fill.fetched_turns:
-                    fetched = ",".join(str(t) for t in fill.fetched_turns)
-                    message += f"; auto-fetched turns {fetched} before failure"
-                message += ")"
-                reason = "turn_fetch_failed"
-            record_ensure_failure_report(
-                build_ensure_failure_report(
-                    game_id=scope.game_id,
-                    perspective=scope.perspective,
-                    shell_turn=scope.turn,
-                    reason=reason,
-                    message=message,
-                    missing_turn=missing_turn,
-                )
-            )
-            raise ValidationError(message)
-
-        walk = walk_dependency_tree(ctx, ANALYTIC_ID, scope, visiting=set())
-        if walk.turn_unavailable == "turn_not_stored":
-            missing_turn = walk.unavailable_turn
-            message = (
-                f"homeworld locator cannot refine turn {scope.turn}: "
-                f"turn {missing_turn} is not stored "
-                f"(evidence chain requires contiguous turns)"
-                if missing_turn is not None
-                else (
-                    f"homeworld locator cannot refine turn {scope.turn}: "
-                    f"an intermediate turn in the evidence chain is not stored"
-                )
-            )
-            record_ensure_failure_report(
-                build_ensure_failure_report(
-                    game_id=scope.game_id,
-                    perspective=scope.perspective,
-                    shell_turn=scope.turn,
-                    reason="turn_not_stored",
-                    message=message,
-                    missing_turn=missing_turn,
-                )
-            )
-            raise ValidationError(message)
-
-    for dependency_id, dependency_scope, catalog in walk.pending_ensure:
-        if dependency_id == ANALYTIC_ID and dependency_scope == scope:
-            break
-        if catalog.ensure_export is None:
-            continue
-        catalog.ensure_export(ctx, dependency_scope)
+    _ensure_homeworld_chain_dependencies(ctx, scope, services)
 
     baseline_result = ensure_homeworld_baseline(services, shell_turn=turn)
     ensure_homeworld_evidence_refined(
