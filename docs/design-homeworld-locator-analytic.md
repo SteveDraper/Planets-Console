@@ -307,9 +307,11 @@ Under Core `api` config (**homeworld locator config**):
 | Field | Purpose |
 |-------|---------|
 | `min_baseline_clans` | Floor for baseline profile (~10,000 default intent) |
-| Evidence promotion threshold | Independent evidence hits required for **possible -> definite** |
+| `origin_distance_evidence_lambda` | Absolute-turn soft OD weight base λ (`w(t)=λ^t`; default **0.95**; range `(0, 1]`) |
+| Soft OD ship-limit freeze | Not a YAML knob: sticky `originDistanceEvidenceThroughTurn = T_limit - 1` at earliest shared scoreboard ship-limit crossing (see §4.3.3) |
+| `layout_prior_solver` / `layout_prior_budget_ms` | Anneal vs enumerate; wall-clock SA budget **per inline solve** (turn `> 1` dual-seed ≈ 2×) |
 
-Origin distances (81 LY pod, warp table) stay in **game concepts**.
+Origin distances (81 LY pod, warp table) and the shared ship-limit gate stay in **game concepts**. Hard definite from location evidence is **single-starbase new-build only** -- there is no evidence-hit promotion threshold.
 
 ---
 

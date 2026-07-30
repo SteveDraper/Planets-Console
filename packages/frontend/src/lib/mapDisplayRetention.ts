@@ -81,9 +81,10 @@ function showingMapView(
  * Phase priority (first match wins):
  * 1. retained frame -- show prior map during turn step or refetch, with any layer error surfaced
  * 2. turn ensure loading -- no stored turn yet for the selected scope
- * 3. error -- fetch failed with nothing displayable
- * 4. initial map loading -- first paint or no displayable data yet
- * 5. live frame -- map visible; optional deferred pending overlay
+ * 3. initial map loading -- first paint or no displayable data yet (including when some
+ *    layers already failed but others are still pending -- avoid a full-error flash)
+ * 4. error -- all map queries settled, at least one failed, nothing displayable
+ * 5. live frame -- map visible; optional deferred pending overlay and layer error banner
  */
 export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView {
   const {
@@ -110,11 +111,18 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
     return { phase: 'full-loading', loadingMessage: turnEnsureLoading.loadingMessage }
   }
 
+  // Prefer loading over full-error while any map query is still in flight so a fast
+  // overlay failure (e.g. homeworld turn-gap) does not flash ShellErrorPane before
+  // base-map arrives.
+  if (!mapHasAnyData && mapPending) {
+    return { phase: 'full-loading', loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE }
+  }
+
   if (mapHasError && !mapHasAnyData) {
     return { phase: 'error', error: mapError }
   }
 
-  if (frame.source === 'none' || (!mapHasAnyData && mapPending)) {
+  if (frame.source === 'none' || !mapHasAnyData) {
     return { phase: 'full-loading', loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE }
   }
 

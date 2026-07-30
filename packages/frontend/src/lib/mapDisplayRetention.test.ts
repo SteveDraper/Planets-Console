@@ -136,11 +136,29 @@ describe('deriveMapShellView', () => {
       deriveMapShellView({
         ...baseInput,
         frame: { source: 'none' },
+        mapPending: false,
         mapHasError: true,
         mapHasAnyData: false,
         mapError: err,
       })
     ).toEqual({ phase: 'error', error: err })
+  })
+
+  it('stays in map-loading when one layer failed but others are still pending', () => {
+    const err = new Error('turn 59 is not stored')
+    expect(
+      deriveMapShellView({
+        ...baseInput,
+        frame: { source: 'none' },
+        mapPending: true,
+        mapHasError: true,
+        mapHasAnyData: false,
+        mapError: err,
+      })
+    ).toEqual({
+      phase: 'full-loading',
+      loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
+    })
   })
 
   it('keeps showing-map with layerError when some analytics fail but others have data', () => {
