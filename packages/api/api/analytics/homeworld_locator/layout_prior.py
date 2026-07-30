@@ -7,13 +7,19 @@ shared modules). Discrete search is delegated to a replaceable ``LayoutPriorSolv
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from api.analytics.homeworld_locator.geometry import resolve_map_center
 from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     load_default_layout_distributions_asset,
+)
+from api.analytics.homeworld_locator.layout_prior_anneal import AnnealingLayoutPriorSolver
+from api.analytics.homeworld_locator.layout_prior_cost import (
+    evaluate_layout_prior_selection,
+    mid_stand_in_positions,
 )
 from api.analytics.homeworld_locator.layout_prior_enumerate import (
     MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR,
@@ -24,7 +30,11 @@ from api.analytics.homeworld_locator.layout_prior_problem import (
     build_layout_prior_problem,
     build_sector_layout_states,
 )
-from api.analytics.homeworld_locator.layout_prior_report import build_projected_selection_report
+from api.analytics.homeworld_locator.layout_prior_refine import refine_stand_in_positions
+from api.analytics.homeworld_locator.layout_prior_report import (
+    LayoutPriorTimingMs,
+    build_projected_selection_report,
+)
 from api.analytics.homeworld_locator.layout_prior_run_history import record_layout_prior_report
 from api.analytics.homeworld_locator.layout_prior_solver import (
     LAYOUT_PRIOR_SOLVER_ANNEAL,
@@ -51,6 +61,7 @@ from api.analytics.homeworld_locator.sector_overlays import (
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord, HomeworldCandidateView
 from api.analytics.turn_roster import players_by_id
 from api.concepts.visibility_coverage import planet_scan_origins, visibility_owner_ids
+from api.config import get_config
 from api.models.game import TurnInfo
 
 __all__ = [
@@ -60,6 +71,7 @@ __all__ = [
     "LayoutPriorProblem",
     "LayoutPriorSolution",
     "LayoutPriorSolver",
+    "ProjectedLayoutSelection",
     "SectorLayoutState",
     "apply_layout_prior_most_probable",
     "build_sector_layout_states",
@@ -110,8 +122,6 @@ def try_layout_prior_problem(
     (populated from the shell evidence aggregate at materialize); λ defaults from
     config when omitted (absolute-turn update weight ``w(t)=λ^t``).
     """
-    from api.config import get_config
-
     resolved_count = player_count if player_count is not None else len(players_by_id(turn))
     pin = resolve_viewpoint_pin_planet(view, turn.planets)
     if pin is None or not homeworld_sector_emission_eligible(
@@ -284,28 +294,35 @@ def try_project_previous_layout_selection(
     return chosen
 
 
+@dataclass(frozen=True)
+class ProjectedLayoutSelection:
+    """A scored continuity projection plus the wall time scoring it cost."""
+
+    solution: LayoutPriorSolution
+    timing: LayoutPriorTimingMs
+
+
 def score_projected_layout_selection(
     problem: LayoutPriorProblem,
     chosen_by_sector: Mapping[int, int],
-) -> LayoutPriorSolution | None:
+) -> ProjectedLayoutSelection | None:
     """Score an admissible prior assignment (refine path; no SA).
 
     Used so a still-legal previous selection can beat both continuity anneals
     when it scores better -- stability against SA noise, not a search shortcut.
+    Timing covers the stand-in refine and final evaluation this path actually
+    runs, so a projection win reports its own cost rather than zeros.
     """
-    from api.analytics.homeworld_locator.layout_prior_cost import (
-        evaluate_layout_prior_selection,
-        mid_stand_in_positions,
-    )
-    from api.analytics.homeworld_locator.layout_prior_refine import refine_stand_in_positions
-
+    total_t0 = time.perf_counter()
     stand_in_sectors = [state for state in problem.sector_states if state.kind == "stand_in"]
     mid_stand_ins = mid_stand_in_positions(stand_in_sectors)
+    refine_t0 = time.perf_counter()
     refined = refine_stand_in_positions(
         problem,
         chosen_by_sector,
         initial_stand_in_positions=mid_stand_ins,
     )
+    refine_ms = (time.perf_counter() - refine_t0) * 1000.0
     stand_ins = refined or mid_stand_ins
     scored = evaluate_layout_prior_selection(
         problem, chosen_by_sector, stand_in_positions=stand_ins
@@ -313,11 +330,19 @@ def score_projected_layout_selection(
     if scored is None:
         return None
     cost, tie_key = scored
-    return LayoutPriorSolution(
-        chosen_planet_ids_by_sector=dict(chosen_by_sector),
-        stand_in_positions_by_sector=stand_ins,
-        cost=cost,
-        tie_key=tie_key,
+    return ProjectedLayoutSelection(
+        solution=LayoutPriorSolution(
+            chosen_planet_ids_by_sector=dict(chosen_by_sector),
+            stand_in_positions_by_sector=stand_ins,
+            cost=cost,
+            tie_key=tie_key,
+        ),
+        timing=LayoutPriorTimingMs(
+            greedy_ms=0.0,
+            sa_ms=0.0,
+            refine_ms=refine_ms,
+            total_ms=(time.perf_counter() - total_t0) * 1000.0,
+        ),
     )
 
 
@@ -351,8 +376,6 @@ def _solve_layout_prior_for_annotation(
     3. Score admissible previous selection (projection, no SA) -- stability
        against SA noise; prefer when better than both anneals by cost/tie-key.
     """
-    from api.analytics.homeworld_locator.layout_prior_anneal import AnnealingLayoutPriorSolver
-
     if not isinstance(solver, AnnealingLayoutPriorSolver):
         result = solver.solve(problem, stop_gate=fresh_layout_prior_stop_gate(template_gate))
         record_layout_prior_report(result.report)
@@ -373,15 +396,16 @@ def _solve_layout_prior_for_annotation(
     if projected_chosen is None:
         return best
     projected = score_projected_layout_selection(problem, projected_chosen)
-    if projected is not None and _layout_prior_solution_is_better(projected, best.solution):
-        report = build_projected_selection_report(
-            cost=projected.cost,
-            tie_key=projected.tie_key,
-            reference_report=best.report,
-        )
-        record_layout_prior_report(report)
-        return LayoutPriorSolveResult(solution=projected, report=report)
-    return best
+    if projected is None or not _layout_prior_solution_is_better(projected.solution, best.solution):
+        return best
+    report = build_projected_selection_report(
+        cost=projected.solution.cost,
+        tie_key=projected.solution.tie_key,
+        timing=projected.timing,
+        reference_report=best.report,
+    )
+    record_layout_prior_report(report)
+    return LayoutPriorSolveResult(solution=projected.solution, report=report)
 
 
 def _layout_prior_solution_is_better(
@@ -414,9 +438,6 @@ def _default_stop_gate_for_injected_solver(solver: LayoutPriorSolver) -> StopGat
     ``NeverStopGate`` is correct for the exhaustive enumerator (and most fakes).
     Anneal would hang forever on that gate, so use the configured deadline budget.
     """
-    from api.analytics.homeworld_locator.layout_prior_anneal import AnnealingLayoutPriorSolver
-    from api.config import get_config
-
     if isinstance(solver, AnnealingLayoutPriorSolver):
         return DeadlineStopGate(get_config().homeworld_locator.layout_prior_budget_ms)
     return NeverStopGate()

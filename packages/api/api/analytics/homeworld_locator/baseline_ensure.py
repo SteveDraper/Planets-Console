@@ -15,6 +15,8 @@ from api.analytics.homeworld_locator.compute_services import (
 from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
 from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
+from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
+from api.analytics.homeworld_locator.evidence_refine_timing_history import record_baseline_report
 from api.analytics.homeworld_locator.layout_prior import (
     apply_layout_prior_most_probable,
     layout_prior_input_fingerprint,
@@ -135,11 +137,6 @@ def compute_homeworld_baseline(
     owns the write after epoch checks. Map/table/export call
     :func:`ensure_homeworld_baseline`, which computes then persists.
     """
-    from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
-    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
-        record_baseline_report,
-    )
-
     total_t0 = time.perf_counter()
     settings_source = shell_turn if shell_turn is not None else None
     if settings_source is None:

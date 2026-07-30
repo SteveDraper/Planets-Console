@@ -26,9 +26,6 @@ from api.models.planet import Planet
 
 SectorKind = Literal["fixed", "choice", "stand_in", "skip"]
 
-# Default soft-evidence blend weight (matches HomeworldLocatorConfig).
-DEFAULT_ORIGIN_DISTANCE_EVIDENCE_LAMBDA = 0.95
-
 
 @dataclass(frozen=True)
 class SectorLayoutState:
@@ -59,6 +56,9 @@ class LayoutPriorProblem:
     r_inner: float
     r_outer: float
     distributions: CategoryLayoutDistributions
+    # Soft origin-distance evidence blend weight base (``w(t)=λ^t``). Required:
+    # the only default lives on ``HomeworldLocatorConfig``, so callers resolve it.
+    origin_distance_evidence_lambda: float
     # Seed materials for deterministic anneal (shell scope + input fingerprint).
     seed_game_id: int = 0
     seed_turn: int = 0
@@ -71,7 +71,6 @@ class LayoutPriorProblem:
     layout_category: str | None = None
     # Soft origin-distance evidence (equal third cost family).
     origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
-    origin_distance_evidence_lambda: float = DEFAULT_ORIGIN_DISTANCE_EVIDENCE_LAMBDA
 
 
 def build_sector_layout_states(
@@ -238,13 +237,13 @@ def build_layout_prior_problem(
     scan_origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter],
     distributions: CategoryLayoutDistributions,
+    origin_distance_evidence_lambda: float,
     seed_game_id: int = 0,
     seed_turn: int = 0,
     seed_perspective: int = 0,
     seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = (),
     layout_category: str | None = None,
     origin_distance_observations: Sequence[OriginDistanceObservation] = (),
-    origin_distance_evidence_lambda: float = DEFAULT_ORIGIN_DISTANCE_EVIDENCE_LAMBDA,
 ) -> LayoutPriorProblem:
     """Build the solver-facing problem from candidates and map geometry."""
     return LayoutPriorProblem(

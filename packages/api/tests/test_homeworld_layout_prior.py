@@ -35,6 +35,7 @@ from api.concepts.homeworld_layout import (
     MAP_SHAPE_ROUND,
     homeworld_settings_fingerprint,
 )
+from api.config import get_config
 from api.models.planet import Planet
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
@@ -409,6 +410,9 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         r_inner=r_inner,
         r_outer=r_outer,
         distributions=asset.for_category("standard"),
+        origin_distance_evidence_lambda=(
+            get_config().homeworld_locator.origin_distance_evidence_lambda
+        ),
     )
     assert len(nearest_mid_choice_ids(choice, problem)) == MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR
     solution = EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate()).solution
@@ -742,7 +746,7 @@ def test_shell_layout_prior_persisted_and_reused(
     from api.analytics.homeworld_locator import baseline_ensure as baseline_mod
     from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
     from api.analytics.homeworld_locator.layout_prior import layout_prior_input_fingerprint
-    from api.config import get_config, set_config
+    from api.config import set_config
 
     turn, _pin = _eligible_turn(sample_turn, template_planet)
     center = (2000.0, 2000.0)

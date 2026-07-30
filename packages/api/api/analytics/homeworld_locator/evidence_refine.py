@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
 from api.analytics.homeworld_locator.cull_candidates import TCullable
 from api.analytics.homeworld_locator.evidence_refine_report import (
@@ -28,6 +29,10 @@ from api.analytics.homeworld_locator.location_evidence import (
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     HomeworldSingleStarbasePromotion,
+)
+from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
+    observations_through_turn,
+    resolve_origin_distance_evidence_through_turn,
 )
 from api.analytics.homeworld_locator.sector_overlays import (
     homeworld_layout_asset_category,
@@ -64,11 +69,6 @@ def refine_homeworld_evidence_aggregate(
     needs to place the soft origin-distance cutoff at the earliest at/over-limit
     turn. It is only called when a freeze is first being decided.
     """
-    from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
-        observations_through_turn,
-        resolve_origin_distance_evidence_through_turn,
-    )
-
     total_t0 = time.perf_counter()
     turn_number = turn.settings.turn
     through_turn = resolve_origin_distance_evidence_through_turn(
@@ -82,6 +82,7 @@ def refine_homeworld_evidence_aggregate(
         prior.origin_distance_observations,
         through_turn,
     )
+    retained_observation_count = len(observations)
     promotions: tuple[HomeworldSingleStarbasePromotion, ...] = prior.single_starbase_promotions
     prior_promo_count = len(promotions)
     hulls_by_id = {hull.id: hull for hull in turn.hulls}
@@ -152,7 +153,8 @@ def refine_homeworld_evidence_aggregate(
             candidate_count=len(candidate_planet_ids_set),
             prior_observation_count=prior_observation_count,
             origin_distance_matches=origin_distance_matches,
-            new_observations_appended=len(observations) - prior_observation_count,
+            observations_dropped_by_freeze=prior_observation_count - retained_observation_count,
+            new_observations_appended=len(observations) - retained_observation_count,
             single_starbase_promotions=len(promotions) - prior_promo_count,
         ),
     )
@@ -242,8 +244,6 @@ def materialize_evidence_adjusted_candidates(
     Shell map/table serving uses ``materialize_homeworld_candidates``, which
     owns the full order through layout-prior annotation.
     """
-    from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
-
     adjusted = apply_recorded_single_starbase_promotions(
         candidates,
         aggregate.single_starbase_promotions,

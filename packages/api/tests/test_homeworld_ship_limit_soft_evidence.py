@@ -211,7 +211,47 @@ def test_refine_stops_origin_distance_after_ship_limit() -> None:
     assert result.aggregate.origin_distance_evidence_through_turn == 23
     assert all(o.turn <= 23 for o in result.aggregate.origin_distance_observations)
     assert not any(o.turn == 24 for o in result.aggregate.origin_distance_observations)
-    assert result.counts.new_observations_appended <= 0
+    # Freeze drops the post-cutoff prior observation; nothing new is appended.
+    assert result.counts.observations_dropped_by_freeze == 1
+    assert result.counts.new_observations_appended == 0
+
+
+def test_refine_counts_appended_observations_before_freeze() -> None:
+    sample = _load_turn()
+    candidate = _planet(sample.planets[0], planet_id=10, x=100, y=100)
+    ship = _ship(
+        sample.ships[0],
+        ship_id=1,
+        x=candidate.x + 81,
+        y=candidate.y,
+        ownerid=sample.player.id + 1,
+    )
+    turns = _scoreboard_turns(sample, through=24, first_over_limit_turn=99)
+    shell = replace(
+        turns[24],
+        settings=replace(turns[24].settings, planetscanrange=300),
+        planets=[candidate],
+        ships=[ship],
+    )
+    prior = HomeworldEvidenceAggregate(
+        turn=23,
+        baseline_turn=1,
+        origin_distance_observations=(
+            OriginDistanceObservation(turn=10, x=0, y=0, matched_planet_ids=(10,)),
+        ),
+    )
+    result = refine_homeworld_evidence_aggregate(
+        prior,
+        turn=shell,
+        candidate_planet_ids_set=frozenset({10}),
+        planets_by_id={10: candidate},
+        load_turn=_turn_loader(turns),
+    )
+    assert result.aggregate.origin_distance_evidence_through_turn is None
+    assert result.counts.origin_distance_matches == 1
+    assert result.counts.observations_dropped_by_freeze == 0
+    assert result.counts.new_observations_appended == 1
+    assert result.counts.prior_observation_count == 1
 
 
 def test_refine_freeze_cutoff_from_earlier_historical_crossing() -> None:

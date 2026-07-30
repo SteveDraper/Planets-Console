@@ -100,9 +100,13 @@ def test_build_projected_selection_report_matches_solution_not_anneal() -> None:
     projected = build_projected_selection_report(
         cost=3.25,
         tie_key=((0, 70), (1, 71)),
+        timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=0.0, refine_ms=0.75, total_ms=0.9),
         reference_report=anneal,
     )
     assert projected.stop_reason == "projected"
+    assert projected.timing.refine_ms == pytest.approx(0.75)
+    assert projected.timing.total_ms == pytest.approx(0.9)
+    assert projected.timing.sa_ms == 0.0
     assert projected.search.final_cost == pytest.approx(3.25)
     assert projected.search.tie_key == ((0, 70), (1, 71))
     assert projected.search.sa_steps_attempted == 0

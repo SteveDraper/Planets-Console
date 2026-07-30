@@ -40,6 +40,7 @@ from api.analytics.homeworld_locator.layout_prior_stop_gate import (
 from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
 from api.concepts.visibility_coverage import planet_scan_origins, visibility_owner_ids
+from api.config import get_config
 from api.errors import ValidationError
 from api.serialization.turn import turn_info_from_json
 
@@ -140,6 +141,9 @@ def _build_choice_problem(
         r_inner=r_inner,
         r_outer=r_outer,
         distributions=asset.for_category("standard"),
+        origin_distance_evidence_lambda=(
+            get_config().homeworld_locator.origin_distance_evidence_lambda
+        ),
         seed_game_id=seed_game_id,
         seed_turn=seed_turn,
         seed_perspective=seed_perspective,
@@ -446,6 +450,9 @@ def test_stand_in_refine_improves_or_equals_mid(template_planet, sample_turn) ->
         r_inner=r_inner,
         r_outer=r_outer,
         distributions=asset.for_category("standard"),
+        origin_distance_evidence_lambda=(
+            get_config().homeworld_locator.origin_distance_evidence_lambda
+        ),
         seed_game_id=1,
         seed_turn=1,
         seed_perspective=1,
@@ -781,6 +788,11 @@ def test_facade_prefers_admissible_previous_selection_over_worse_anneal(
     assert result.report.search.tie_key == result.solution.tie_key
     assert result.report.search.sa_steps_attempted == 0
     assert result.report.search.final_cost != pytest.approx(100.0)
+    # Projection runs stand-in refine + evaluation; timing must reflect that work.
+    assert result.report.timing.refine_ms > 0.0
+    assert result.report.timing.total_ms >= result.report.timing.refine_ms
+    assert result.report.timing.greedy_ms == 0.0
+    assert result.report.timing.sa_ms == 0.0
 
 
 def test_facade_projection_win_report_not_anneal_reuse(
@@ -866,7 +878,10 @@ def test_facade_projection_win_report_not_anneal_reuse(
 def test_facade_anneal_win_keeps_anneal_report(template_planet, sample_turn, monkeypatch) -> None:
     """When anneal beats the projection, return that anneal's report unchanged."""
     from api.analytics.homeworld_locator import layout_prior as layout_prior_mod
-    from api.analytics.homeworld_locator.layout_prior import _solve_layout_prior_for_annotation
+    from api.analytics.homeworld_locator.layout_prior import (
+        ProjectedLayoutSelection,
+        _solve_layout_prior_for_annotation,
+    )
     from api.analytics.homeworld_locator.layout_prior_report import (
         LayoutPriorSearchStats,
         LayoutPriorStopGateInfo,
@@ -930,11 +945,14 @@ def test_facade_anneal_win_keeps_anneal_report(template_planet, sample_turn, mon
         return LayoutPriorSolveResult(solution=solution, report=report)
 
     def worse_projection(problem, chosen_by_sector):
-        return LayoutPriorSolution(
-            chosen_planet_ids_by_sector=dict(chosen_by_sector),
-            stand_in_positions_by_sector={},
-            cost=50.0,
-            tie_key=tuple(sorted((s, p) for s, p in chosen_by_sector.items())),
+        return ProjectedLayoutSelection(
+            solution=LayoutPriorSolution(
+                chosen_planet_ids_by_sector=dict(chosen_by_sector),
+                stand_in_positions_by_sector={},
+                cost=50.0,
+                tie_key=tuple(sorted((s, p) for s, p in chosen_by_sector.items())),
+            ),
+            timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=0.0, refine_ms=0.2, total_ms=0.4),
         )
 
     monkeypatch.setattr(AnnealingLayoutPriorSolver, "solve", fake_solve)

@@ -53,6 +53,7 @@ def test_evidence_refine_report_wire_and_summary() -> None:
             candidate_count=400,
             prior_observation_count=1000,
             origin_distance_matches=12,
+            observations_dropped_by_freeze=4,
             new_observations_appended=3,
             single_starbase_promotions=0,
         ),
@@ -63,6 +64,7 @@ def test_evidence_refine_report_wire_and_summary() -> None:
     assert wire["timingInner"]["observationUpsertMs"] == 15.0
     assert wire["counts"]["candidateCount"] == 400
     assert wire["counts"]["priorObservationCount"] == 1000
+    assert wire["counts"]["observationsDroppedByFreeze"] == 4
     assert wire["counts"]["newObservationsAppended"] == 3
 
     payload = get_layout_prior_reports_wire(game_id=663307, perspective=2, turn=60)

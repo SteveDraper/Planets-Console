@@ -169,12 +169,14 @@ def build_projected_selection_report(
     *,
     cost: float,
     tie_key: tuple[tuple[int, int], ...],
+    timing: LayoutPriorTimingMs,
     reference_report: LayoutPriorSolverRunReport,
 ) -> LayoutPriorSolverRunReport:
     """Telemetry for a continuity projection win (admissible prior selection).
 
-    Costs and tie-key describe the projected selection. Stop reason is
-    ``projected`` so diagnostics do not reuse an anneal run's SA final /
+    Costs, tie-key, and timing describe the projection itself -- the stand-in
+    refine and final evaluation it runs, with no greedy or SA phase. Stop reason
+    is ``projected`` so diagnostics do not reuse an anneal run's SA final /
     stop reason. Identity and problem-size hints come from the competing
     anneal report for the same continuity round.
     """
@@ -185,7 +187,7 @@ def build_projected_selection_report(
         solver=reference_report.solver,
         stop_gate=reference_report.stop_gate,
         stop_reason="projected",
-        timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=0.0),
+        timing=timing,
         search=LayoutPriorSearchStats(
             sa_steps_attempted=0,
             sa_steps_accepted=0,

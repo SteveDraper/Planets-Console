@@ -48,7 +48,10 @@ class EvidenceRefineCounts:
     candidate_count: int
     prior_observation_count: int
     origin_distance_matches: int
+    observations_dropped_by_freeze: int
+    """Prior observations discarded because they sit past the soft OD freeze cutoff."""
     new_observations_appended: int
+    """Observations added on top of the retained (post-freeze-filter) prior set."""
     single_starbase_promotions: int
 
 
@@ -118,6 +121,7 @@ def evidence_refine_report_to_wire(report: EvidenceRefineRunReport) -> dict[str,
             "candidateCount": report.counts.candidate_count,
             "priorObservationCount": report.counts.prior_observation_count,
             "originDistanceMatches": report.counts.origin_distance_matches,
+            "observationsDroppedByFreeze": report.counts.observations_dropped_by_freeze,
             "newObservationsAppended": report.counts.new_observations_appended,
             "singleStarbasePromotions": report.counts.single_starbase_promotions,
         },
