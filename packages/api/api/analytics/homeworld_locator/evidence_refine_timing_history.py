@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import threading
-from collections import deque
-
 from api.analytics.homeworld_locator.evidence_refine_report import (
     BASELINE_REPORT_RING_CAPACITY,
     ENSURE_FAILURE_REPORT_RING_CAPACITY,
@@ -17,49 +14,27 @@ from api.analytics.homeworld_locator.evidence_refine_report import (
     evidence_refine_report_to_wire,
     summarize_evidence_refine_reports,
 )
+from api.analytics.homeworld_locator.report_ring import ReportRing
 
-_refine_lock = threading.Lock()
-_baseline_lock = threading.Lock()
-_ensure_failure_lock = threading.Lock()
-_refine_buffer: deque[EvidenceRefineRunReport] | None = None
-_baseline_buffer: deque[BaselineRunReport] | None = None
-_ensure_failure_buffer: deque[EnsureFailureReport] | None = None
-
-
-def _get_refine_buffer() -> deque[EvidenceRefineRunReport]:
-    global _refine_buffer
-    if _refine_buffer is None:
-        _refine_buffer = deque(maxlen=EVIDENCE_REFINE_REPORT_RING_CAPACITY)
-    return _refine_buffer
-
-
-def _get_baseline_buffer() -> deque[BaselineRunReport]:
-    global _baseline_buffer
-    if _baseline_buffer is None:
-        _baseline_buffer = deque(maxlen=BASELINE_REPORT_RING_CAPACITY)
-    return _baseline_buffer
-
-
-def _get_ensure_failure_buffer() -> deque[EnsureFailureReport]:
-    global _ensure_failure_buffer
-    if _ensure_failure_buffer is None:
-        _ensure_failure_buffer = deque(maxlen=ENSURE_FAILURE_REPORT_RING_CAPACITY)
-    return _ensure_failure_buffer
+_refine_ring: ReportRing[EvidenceRefineRunReport] = ReportRing(
+    capacity=EVIDENCE_REFINE_REPORT_RING_CAPACITY
+)
+_baseline_ring: ReportRing[BaselineRunReport] = ReportRing(capacity=BASELINE_REPORT_RING_CAPACITY)
+_ensure_failure_ring: ReportRing[EnsureFailureReport] = ReportRing(
+    capacity=ENSURE_FAILURE_REPORT_RING_CAPACITY
+)
 
 
 def record_evidence_refine_report(report: EvidenceRefineRunReport) -> None:
-    with _refine_lock:
-        _get_refine_buffer().append(report)
+    _refine_ring.record(report)
 
 
 def record_baseline_report(report: BaselineRunReport) -> None:
-    with _baseline_lock:
-        _get_baseline_buffer().append(report)
+    _baseline_ring.record(report)
 
 
 def record_ensure_failure_report(report: EnsureFailureReport) -> None:
-    with _ensure_failure_lock:
-        _get_ensure_failure_buffer().append(report)
+    _ensure_failure_ring.record(report)
 
 
 def recent_evidence_refine_reports(
@@ -68,19 +43,7 @@ def recent_evidence_refine_reports(
     perspective: int | None = None,
 ) -> tuple[EvidenceRefineRunReport, ...]:
     """Newest-first refine reports; filter by game/perspective (all turns)."""
-    with _refine_lock:
-        items = list(_get_refine_buffer())
-    items.reverse()
-    if game_id is None and perspective is None:
-        return tuple(items)
-    filtered: list[EvidenceRefineRunReport] = []
-    for report in items:
-        if game_id is not None and report.game_id != game_id:
-            continue
-        if perspective is not None and report.perspective != perspective:
-            continue
-        filtered.append(report)
-    return tuple(filtered)
+    return _refine_ring.recent(game_id=game_id, perspective=perspective)
 
 
 def recent_baseline_reports(
@@ -88,19 +51,7 @@ def recent_baseline_reports(
     game_id: int | None = None,
     perspective: int | None = None,
 ) -> tuple[BaselineRunReport, ...]:
-    with _baseline_lock:
-        items = list(_get_baseline_buffer())
-    items.reverse()
-    if game_id is None and perspective is None:
-        return tuple(items)
-    filtered: list[BaselineRunReport] = []
-    for report in items:
-        if game_id is not None and report.game_id != game_id:
-            continue
-        if perspective is not None and report.perspective != perspective:
-            continue
-        filtered.append(report)
-    return tuple(filtered)
+    return _baseline_ring.recent(game_id=game_id, perspective=perspective)
 
 
 def recent_ensure_failure_reports(
@@ -108,19 +59,7 @@ def recent_ensure_failure_reports(
     game_id: int | None = None,
     perspective: int | None = None,
 ) -> tuple[EnsureFailureReport, ...]:
-    with _ensure_failure_lock:
-        items = list(_get_ensure_failure_buffer())
-    items.reverse()
-    if game_id is None and perspective is None:
-        return tuple(items)
-    filtered: list[EnsureFailureReport] = []
-    for report in items:
-        if game_id is not None and report.game_id != game_id:
-            continue
-        if perspective is not None and report.perspective != perspective:
-            continue
-        filtered.append(report)
-    return tuple(filtered)
+    return _ensure_failure_ring.recent(game_id=game_id, perspective=perspective)
 
 
 def recent_evidence_refine_reports_wire(
@@ -167,25 +106,19 @@ def evidence_refine_summary_wire(
 
 
 def clear_evidence_refine_reports() -> None:
-    with _refine_lock:
-        _get_refine_buffer().clear()
+    _refine_ring.clear()
 
 
 def clear_baseline_reports() -> None:
-    with _baseline_lock:
-        _get_baseline_buffer().clear()
+    _baseline_ring.clear()
 
 
 def clear_ensure_failure_reports() -> None:
-    with _ensure_failure_lock:
-        _get_ensure_failure_buffer().clear()
+    _ensure_failure_ring.clear()
 
 
 def reset_evidence_refine_report_history_for_tests() -> None:
-    global _refine_buffer, _baseline_buffer, _ensure_failure_buffer
-    with _refine_lock:
-        _refine_buffer = None
-    with _baseline_lock:
-        _baseline_buffer = None
-    with _ensure_failure_lock:
-        _ensure_failure_buffer = None
+    """Fixture entry point that returns all timing rings to their empty state."""
+    clear_evidence_refine_reports()
+    clear_baseline_reports()
+    clear_ensure_failure_reports()
