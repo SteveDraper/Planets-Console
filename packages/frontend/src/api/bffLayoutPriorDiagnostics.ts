@@ -2,11 +2,8 @@
  * Homeworld diagnostics BFF client (#274): layout-prior + evidence-refine timing.
  */
 
-import {
-  bffRequest,
-  withEndpointIfGeneric,
-  type AnalyticShellScope,
-} from './bff'
+import { bffRequest, type AnalyticShellScope } from './bff'
+import { throwBffHttpErrorFromResponse } from './bffHttpError'
 
 export type LayoutPriorReportsResponse = {
   shell: AnalyticShellScope
@@ -45,7 +42,7 @@ export async function fetchLayoutPriorReports(
   const endpointLabel = 'GET /bff/diagnostics/homeworld/layout-prior-reports'
   const r = await bffRequest(path, undefined, endpointLabel)
   if (!r.ok) {
-    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
   const body = (await r.json()) as {
     shell: { gameId: number | string; perspective: number; turn: number }
