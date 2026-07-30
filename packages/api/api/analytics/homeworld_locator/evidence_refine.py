@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
@@ -56,14 +56,13 @@ def refine_homeworld_evidence_aggregate(
     turn: TurnInfo,
     candidate_planet_ids_set: frozenset[int],
     planets_by_id: Mapping[int, Planet],
-    scoreboard_history: Sequence[TurnInfo] | None = None,
+    load_turn: Callable[[int], TurnInfo | None],
 ) -> EvidenceRefineComputeResult:
     """Advance the durable evidence aggregate by one turn of observations.
 
-    ``scoreboard_history`` supplies scoreboard turns for ship-limit freeze cutoff
-    (earliest at/over shared limit). Production ensure passes contiguous history
-    from the accelerated ensure floor through the shell; omit for shell-only
-    unit tests.
+    ``load_turn`` lets the ship-limit freeze policy read the scoreboard turns it
+    needs to place the soft origin-distance cutoff at the earliest at/over-limit
+    turn. It is only called when a freeze is first being decided.
     """
     from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
         observations_through_turn,
@@ -75,7 +74,7 @@ def refine_homeworld_evidence_aggregate(
     through_turn = resolve_origin_distance_evidence_through_turn(
         prior,
         turn=turn,
-        scoreboard_history=scoreboard_history,
+        load_turn=load_turn,
     )
     soft_evidence_frozen = through_turn is not None
     prior_observation_count = len(prior.origin_distance_observations)

@@ -32,32 +32,22 @@ def effective_origin_distance_observations(
     )
 
 
-def earliest_shared_ship_limit_turn(history: Sequence[TurnInfo]) -> int | None:
-    """Earliest turn number in ``history`` at/over the shared ship limit."""
-    earliest: int | None = None
-    for sample in history:
-        if not is_at_or_over_shared_ship_limit(sample.settings, sample.scores):
-            continue
-        turn_number = sample.settings.turn
-        if earliest is None or turn_number < earliest:
-            earliest = turn_number
-    return earliest
-
-
-def load_scoreboard_history_for_ship_limit_freeze(
+def first_shared_ship_limit_turn(
     *,
     shell_turn: TurnInfo,
     load_turn: Callable[[int], TurnInfo | None],
-) -> tuple[TurnInfo, ...]:
-    """Load contiguous scoreboard turns from the ensure floor through shell.
+) -> int:
+    """Earliest turn at/over the shared ship limit on ``[ensure_floor, shell]``.
 
-    Incomplete history is a hard failure: guessing a cutoff from a partial chain
-    would leave post-limit observations sticky forever. Matches the evidence-chain
-    convention that turns on ``[ensure_floor, shell]`` must be loadable.
+    ``shell_turn`` must itself be at/over the limit, so a crossing always exists;
+    the shell is the answer when no earlier turn had crossed.
+
+    Scoreboard turns before the crossing must be loadable: guessing a cutoff from
+    a partial chain would leave post-limit observations sticky forever. Matches the
+    evidence-chain convention that turns on ``[ensure_floor, shell]`` are required.
     """
     shell = shell_turn.settings.turn
     floor = accelerated_ensure_floor(shell_turn.settings, shell)
-    history: list[TurnInfo] = []
     for turn_number in range(floor, shell):
         loaded = load_turn(turn_number)
         if loaded is None:
@@ -66,16 +56,16 @@ def load_scoreboard_history_for_ship_limit_freeze(
                 "origin-distance evidence freeze at ship limit "
                 "(sign in to auto-fetch missing turns for the evidence chain)"
             )
-        history.append(loaded)
-    history.append(shell_turn)
-    return tuple(history)
+        if is_at_or_over_shared_ship_limit(loaded.settings, loaded.scores):
+            return turn_number
+    return shell
 
 
 def resolve_origin_distance_evidence_through_turn(
     prior: HomeworldEvidenceAggregate,
     *,
     turn: TurnInfo,
-    scoreboard_history: Sequence[TurnInfo] | None = None,
+    load_turn: Callable[[int], TurnInfo | None],
 ) -> int | None:
     """Sticky soft-evidence cutoff from earliest shared ship-limit crossing.
 
@@ -83,18 +73,13 @@ def resolve_origin_distance_evidence_through_turn(
     Once set on ``prior``, the cutoff never advances or clears.
 
     On first freeze (current shell at/over shared ship limit), the cutoff is
-    ``T_limit - 1`` where ``T_limit`` is the earliest turn in ``scoreboard_history``
-    at/over the limit. When ``scoreboard_history`` is omitted, only ``turn`` is
-    consulted (shell-only; for unit tests). Production ensure supplies contiguous
-    history from the accelerated ensure floor through the shell.
+    ``T_limit - 1`` for the earliest scoreboard turn at/over the limit, found by
+    walking ``[ensure_floor, shell]`` through ``load_turn``. Scoreboard turns are
+    only loaded when a freeze is actually being decided.
     """
     if prior.origin_distance_evidence_through_turn is not None:
         return prior.origin_distance_evidence_through_turn
     if not is_at_or_over_shared_ship_limit(turn.settings, turn.scores):
         return None
-    history = scoreboard_history if scoreboard_history is not None else (turn,)
-    t_limit = earliest_shared_ship_limit_turn(history)
-    if t_limit is None:
-        # Shell is over-limit; treat shell as the crossing when history omitted it.
-        t_limit = turn.settings.turn
-    return max(0, t_limit - 1)
+    crossing = first_shared_ship_limit_turn(shell_turn=turn, load_turn=load_turn)
+    return max(0, crossing - 1)
