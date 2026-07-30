@@ -111,6 +111,25 @@ describe('deriveMapShellView', () => {
     })
   })
 
+  it('keeps a retained frame visible and surfaces the layer error when the reload fails', () => {
+    const err = new Error('turn 59 is not stored')
+    expect(
+      deriveMapShellView({
+        ...baseInput,
+        frame: { source: 'retained', data: sampleMap },
+        mapPending: false,
+        mapHasError: true,
+        mapHasAnyData: false,
+        mapError: err,
+      })
+    ).toEqual({
+      phase: 'showing-map',
+      displayMapData: sampleMap,
+      showDeferredPending: false,
+      layerError: err,
+    })
+  })
+
   it('returns error when map fetch fails without a retained frame', () => {
     const err = new Error('map failed')
     expect(

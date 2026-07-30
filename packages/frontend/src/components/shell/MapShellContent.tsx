@@ -85,12 +85,17 @@ function MapShellShowingMap({
           cartography={cartography}
         />
       </MapPaneWithDisplayControls>
-      <HomeworldBaselineDegradedBanner
-        baselineDegraded={mapShellView.displayMapData.baselineDegraded === true}
-        baselineTurn={mapShellView.displayMapData.baselineTurn}
-      />
-      <MapLayerErrorBanner error={mapShellView.layerError} />
-      <DeferredPendingMessage pending={mapShellView.showDeferredPending} />
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col"
+        data-testid="map-banner-stack"
+      >
+        <HomeworldBaselineDegradedBanner
+          baselineDegraded={mapShellView.displayMapData.baselineDegraded === true}
+          baselineTurn={mapShellView.displayMapData.baselineTurn}
+        />
+        <MapLayerErrorBanner error={mapShellView.layerError} />
+        <DeferredPendingMessage pending={mapShellView.showDeferredPending} />
+      </div>
     </main>
   )
 }
@@ -105,10 +110,7 @@ function HomeworldBaselineDegradedBanner({
 }) {
   if (!baselineDegraded) return null
   return (
-    <p
-      className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-black/90 px-4 py-1 text-xs text-amber-300/90"
-      role="status"
-    >
+    <p className="bg-black/90 px-4 py-1 text-xs text-amber-300/90" role="status">
       {homeworldBaselineDegradedMessage(baselineTurn)}
     </p>
   )
@@ -119,16 +121,13 @@ function MapLayerErrorBanner({ error }: { error: unknown }) {
   if (error == null) return null
   const detail = errorDetailFromUnknown(error)
   return (
-    <p
-      className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-black/90 px-4 py-1 text-xs text-red-300/90"
-      role="alert"
-    >
+    <p className="bg-black/90 px-4 py-1 text-xs text-red-300/90" role="alert">
       {detail}
     </p>
   )
 }
 
-/** Shows "Loading additional map data…" after a short delay. Overlays the map so the pane size never changes. */
+/** Shows "Loading additional map data…" after a short delay. */
 function DeferredPendingMessage({ pending }: { pending: boolean }) {
   const [show, setShow] = useState(false)
   useEffect(() => {
@@ -148,7 +147,7 @@ function DeferredPendingMessage({ pending }: { pending: boolean }) {
   }, [pending])
   if (!pending || !show) return null
   return (
-    <p className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-black/90 px-4 py-1 text-sm text-gray-400">
+    <p className="bg-black/90 px-4 py-1 text-sm text-gray-400">
       Loading additional map data…
     </p>
   )

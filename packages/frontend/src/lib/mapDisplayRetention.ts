@@ -79,7 +79,7 @@ function showingMapView(
  * Map-mode shell view for loading, retention, and error UI.
  *
  * Phase priority (first match wins):
- * 1. retained frame -- show prior map during turn step or refetch
+ * 1. retained frame -- show prior map during turn step or refetch, with any layer error surfaced
  * 2. turn ensure loading -- no stored turn yet for the selected scope
  * 3. error -- fetch failed with nothing displayable
  * 4. initial map loading -- first paint or no displayable data yet
@@ -98,7 +98,7 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
   } = input
 
   if (frame.source === 'retained') {
-    return showingMapView(frame.data, false)
+    return showingMapView(frame.data, false, mapHasError ? mapError : undefined)
   }
 
   const turnEnsureLoading = deriveTurnEnsureLoadingView({

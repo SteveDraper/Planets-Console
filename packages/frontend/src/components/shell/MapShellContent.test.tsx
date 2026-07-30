@@ -130,4 +130,35 @@ describe('MapShellContent', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/Homeworld locator/i)
     expect(screen.getByRole('alert')).toHaveTextContent(/turn 59 is not stored/i)
   })
+
+  it('stacks the degraded baseline note and the layer error instead of overlapping them', () => {
+    render(
+      <MapShellContent
+        mapShellView={{
+          phase: 'showing-map',
+          displayMapData: {
+            ...displayMapData,
+            baselineDegraded: true,
+            baselineTurn: 4,
+          },
+          showDeferredPending: false,
+          layerError: new Error('Homeworld locator: turn 59 is not stored'),
+        }}
+        futureTurnOffset={0}
+        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
+        onPlanetLabelOptionsChange={vi.fn()}
+        onMapZoomChange={vi.fn()}
+        onSetZoomReady={vi.fn()}
+      />
+    )
+
+    const degraded = screen.getByRole('status')
+    const layerError = screen.getByRole('alert')
+    const stack = screen.getByTestId('map-banner-stack')
+
+    expect(degraded.parentElement).toBe(stack)
+    expect(layerError.parentElement).toBe(stack)
+    expect(degraded).not.toHaveClass('absolute')
+    expect(layerError).not.toHaveClass('absolute')
+  })
 })
