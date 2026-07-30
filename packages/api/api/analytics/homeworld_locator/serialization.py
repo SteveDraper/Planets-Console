@@ -220,20 +220,32 @@ def _layout_prior_input_fingerprint_from_json(
 
 def _layout_prior_selection_from_json(
     selection_raw: object,
-) -> tuple[int, tuple[tuple[int, str, int | None], ...], float, str, tuple[int, ...]]:
-    """Parse a complete ``layoutPriorSelection`` reuse key (no transitional shapes)."""
+) -> tuple[int, tuple[tuple[int, str, int | None], ...], float, str, tuple[int, ...]] | None:
+    """Parse a complete ``layoutPriorSelection`` reuse key.
+
+    Legacy or incomplete selections (missing reuse-key fields) return ``None`` so
+    the aggregate still loads and layout-prior reuse misses. Present-but-invalid
+    field types still raise ``ValidationError``.
+    """
     if not isinstance(selection_raw, dict):
         raise ValidationError("homeworld evidence aggregate layoutPriorSelection must be an object")
+    # Complete reuse key only; omit any required field → clear selection (reuse miss).
+    required_keys = (
+        "algorithmVersion",
+        "inputFingerprint",
+        "evidenceLambda",
+        "evidenceFingerprint",
+        "mostProbablePlanetIds",
+    )
+    if any(key not in selection_raw for key in required_keys):
+        return None
+
     version = selection_raw.get("algorithmVersion")
     if not isinstance(version, int) or version < 1:
         raise ValidationError("homeworld layoutPriorSelection.algorithmVersion must be an int >= 1")
-    if "inputFingerprint" not in selection_raw:
-        raise ValidationError("homeworld layoutPriorSelection.inputFingerprint is required")
     fingerprint = _layout_prior_input_fingerprint_from_json(selection_raw.get("inputFingerprint"))
 
     evidence_lambda_raw = selection_raw.get("evidenceLambda")
-    if evidence_lambda_raw is None:
-        raise ValidationError("homeworld layoutPriorSelection.evidenceLambda is required")
     if not isinstance(evidence_lambda_raw, (int, float)) or isinstance(evidence_lambda_raw, bool):
         raise ValidationError("homeworld layoutPriorSelection.evidenceLambda must be a number")
     evidence_lambda = float(evidence_lambda_raw)
@@ -247,8 +259,6 @@ def _layout_prior_selection_from_json(
         )
 
     ids_raw = selection_raw.get("mostProbablePlanetIds")
-    if ids_raw is None:
-        raise ValidationError("homeworld layoutPriorSelection.mostProbablePlanetIds is required")
     if not isinstance(ids_raw, list) or not all(isinstance(item, int) for item in ids_raw):
         raise ValidationError(
             "homeworld layoutPriorSelection.mostProbablePlanetIds must be an int array"
@@ -324,13 +334,15 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
     most_probable_ids: tuple[int, ...] = ()
     selection_raw = data.get("layoutPriorSelection")
     if selection_raw is not None:
-        (
-            selection_version,
-            selection_fingerprint,
-            selection_evidence_lambda,
-            selection_evidence_fingerprint,
-            most_probable_ids,
-        ) = _layout_prior_selection_from_json(selection_raw)
+        parsed_selection = _layout_prior_selection_from_json(selection_raw)
+        if parsed_selection is not None:
+            (
+                selection_version,
+                selection_fingerprint,
+                selection_evidence_lambda,
+                selection_evidence_fingerprint,
+                most_probable_ids,
+            ) = parsed_selection
 
     through_raw = data.get("originDistanceEvidenceThroughTurn")
     through_turn: int | None

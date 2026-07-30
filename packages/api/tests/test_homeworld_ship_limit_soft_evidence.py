@@ -57,6 +57,9 @@ def _scoreboard_turns(
                 shiplimit=over_limit if turn_number >= first_over_limit_turn else under_limit,
                 acceleratedturns=0,
             ),
+            # Keep score.turn aligned with settings.turn so the shared ship-limit
+            # helper's current-turn filter still sees these rows.
+            scores=tuple(replace(score, turn=turn_number) for score in template.scores),
             ships=[],
         )
         for turn_number in range(1, through + 1)
@@ -87,6 +90,29 @@ def test_shared_ship_limit_uses_scoreboard_total() -> None:
     assert is_at_or_over_shared_ship_limit(over, turn.scores) is True
     under = replace(turn.settings, shiplimit=total + 1)
     assert is_at_or_over_shared_ship_limit(under, turn.scores) is False
+
+
+def test_shared_ship_limit_ignores_non_current_turn_score_rows() -> None:
+    turn = _load_turn()
+    current_total = total_reported_ships(
+        [score for score in turn.scores if score.turn == turn.settings.turn]
+    )
+    stale = tuple(
+        replace(
+            score,
+            turn=turn.settings.turn - 1,
+            capitalships=score.capitalships + 10_000,
+            freighters=score.freighters + 10_000,
+        )
+        for score in turn.scores
+    )
+    mixed = tuple(turn.scores) + stale
+    over = replace(turn.settings, shiplimit=max(1, current_total))
+    under = replace(turn.settings, shiplimit=current_total + 1)
+    assert is_at_or_over_shared_ship_limit(over, mixed) is True
+    assert is_at_or_over_shared_ship_limit(under, mixed) is False
+    # Without the current-turn filter, stale rows alone would trip an under-limit gate.
+    assert total_reported_ships(mixed) > under.shiplimit
 
 
 def test_resolve_through_turn_sticky_on_first_limit_hit() -> None:

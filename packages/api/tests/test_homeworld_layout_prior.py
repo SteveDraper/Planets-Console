@@ -744,16 +744,43 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
         },
     ]
     for selection in incomplete_selections:
-        with pytest.raises(ValidationError, match="layoutPriorSelection"):
-            homeworld_evidence_aggregate_from_json(
-                {
-                    "turn": 13,
-                    "baselineTurn": 1,
-                    "originDistanceObservations": [],
-                    "singleStarbasePromotions": [],
-                    "layoutPriorSelection": selection,
-                }
-            )
+        cleared = homeworld_evidence_aggregate_from_json(
+            {
+                "turn": 13,
+                "baselineTurn": 1,
+                "originDistanceObservations": [],
+                "singleStarbasePromotions": [],
+                "layoutPriorSelection": selection,
+            }
+        )
+        assert cleared.layout_prior_algorithm_version is None
+        assert cleared.layout_prior_input_fingerprint == ()
+        assert cleared.layout_prior_evidence_lambda is None
+        assert cleared.layout_prior_evidence_fingerprint is None
+        assert cleared.most_probable_planet_ids == ()
+
+    with pytest.raises(ValidationError, match="evidenceLambda"):
+        homeworld_evidence_aggregate_from_json(
+            {
+                "turn": 13,
+                "baselineTurn": 1,
+                "originDistanceObservations": [],
+                "singleStarbasePromotions": [],
+                "layoutPriorSelection": {
+                    "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+                    "inputFingerprint": [
+                        {
+                            "planetId": 12,
+                            "confidenceTier": CONFIDENCE_DEFINITE,
+                            "perspective": 1,
+                        },
+                    ],
+                    "evidenceLambda": "0.95",
+                    "evidenceFingerprint": evidence_fp,
+                    "mostProbablePlanetIds": [12],
+                },
+            }
+        )
 
     with pytest.raises(ValidationError, match="layout_prior_evidence_lambda"):
         homeworld_evidence_aggregate_to_json(
