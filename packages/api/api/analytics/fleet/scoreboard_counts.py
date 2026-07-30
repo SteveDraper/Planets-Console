@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 from api.analytics.fleet.scoreboard_ship_totals import (
     compute_max_ship_id_bound,
     iter_current_turn_scores,
@@ -11,16 +9,11 @@ from api.analytics.fleet.scoreboard_ship_totals import (
 from api.analytics.turn_roster import iter_turn_players
 from api.concepts.ship_limit import total_reported_ships
 from api.models.game import TurnInfo
-from api.models.player import Score
-
-
-def _current_turn_scores(turn: TurnInfo) -> Iterator[Score]:
-    return iter_current_turn_scores(turn)
 
 
 def global_ship_count_from_scores(turn: TurnInfo) -> int | None:
     """Sum scoreboard ship totals for the turn, when score rows exist."""
-    scores = list(_current_turn_scores(turn))
+    scores = list(iter_current_turn_scores(turn))
     if not scores:
         return None
     return total_reported_ships(scores)
@@ -29,7 +22,7 @@ def global_ship_count_from_scores(turn: TurnInfo) -> int | None:
 def global_build_count_from_scores(turn: TurnInfo) -> int:
     """Sum positive warship and freighter builds reported on the turn."""
     total = 0
-    for score in _current_turn_scores(turn):
+    for score in iter_current_turn_scores(turn):
         if score.shipchange > 0:
             total += score.shipchange
         if score.freighterchange > 0:
@@ -39,24 +32,12 @@ def global_build_count_from_scores(turn: TurnInfo) -> int:
 
 def global_net_delta_from_scores(turn: TurnInfo) -> int:
     """Sum signed warship and freighter scoreboard deltas for the turn."""
-    return sum(score.shipchange + score.freighterchange for score in _current_turn_scores(turn))
-
-
-def _max_ship_id_bound_from_scores(scores: list[Score]) -> int:
-    total = total_reported_ships(scores)
-    net = sum(score.shipchange + score.freighterchange for score in scores)
-    builds = sum(max(0, score.shipchange) + max(0, score.freighterchange) for score in scores)
-    return total - net + builds
-
-
-def global_ship_count_from_score_rows(scores: list[Score]) -> int:
-    """Sum scoreboard ship totals across score rows."""
-    return total_reported_ships(scores)
+    return sum(score.shipchange + score.freighterchange for score in iter_current_turn_scores(turn))
 
 
 def global_ship_count_at_synthetic_prior(turn: TurnInfo) -> int | None:
     """Global ship total at host turn N-1 inferred from first reliable accelerated row N."""
-    scores = list(_current_turn_scores(turn))
+    scores = list(iter_current_turn_scores(turn))
     if not scores:
         return None
     return sum(

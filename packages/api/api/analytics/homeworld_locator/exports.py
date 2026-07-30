@@ -253,7 +253,15 @@ def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bo
 
     turn = ctx.load_turn(scope.turn)
     if turn is None:
-        return True
+        _record_ensure_failure_and_raise(
+            scope,
+            reason="turn_not_stored",
+            message=(
+                f"homeworld locator cannot refine turn {scope.turn}: "
+                f"turn {scope.turn} is not stored"
+            ),
+            missing_turn=scope.turn,
+        )
     if not is_homeworld_locator_available(turn.settings):
         return True
 

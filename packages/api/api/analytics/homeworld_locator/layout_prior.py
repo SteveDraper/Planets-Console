@@ -410,7 +410,6 @@ def _solve_layout_prior_for_annotation(
     for rng_turn in layout_prior_continuity_rng_seed_turns(problem.seed_turn):
         seeded = replace(problem, rng_seed_turn=rng_turn)
         result = solver.solve(seeded, stop_gate=fresh_layout_prior_stop_gate(template_gate))
-        record_layout_prior_report(result.report)
         results.append(result)
     best = select_best_layout_prior_solve_result(results)
 
@@ -418,19 +417,24 @@ def _solve_layout_prior_for_annotation(
         problem,
         () if previous_most_probable_planet_ids is None else previous_most_probable_planet_ids,
     )
-    if projected_chosen is None:
-        return best
-    projected = score_projected_layout_selection(problem, projected_chosen)
-    if projected is None or not _layout_prior_solution_is_better(projected.solution, best.solution):
-        return best
-    report = build_projected_selection_report(
-        cost=projected.solution.cost,
-        tie_key=projected.solution.tie_key,
-        timing=projected.timing,
-        reference_report=best.report,
-    )
-    record_layout_prior_report(report)
-    return LayoutPriorSolveResult(solution=projected.solution, report=report)
+    winner = best
+    if projected_chosen is not None:
+        projected = score_projected_layout_selection(problem, projected_chosen)
+        if projected is not None and _layout_prior_solution_is_better(
+            projected.solution, best.solution
+        ):
+            winner = LayoutPriorSolveResult(
+                solution=projected.solution,
+                report=build_projected_selection_report(
+                    cost=projected.solution.cost,
+                    tie_key=projected.solution.tie_key,
+                    timing=projected.timing,
+                    reference_report=best.report,
+                ),
+            )
+    # One diagnostics entry per continuity round (winning anneal or projection).
+    record_layout_prior_report(winner.report)
+    return winner
 
 
 def _layout_prior_solution_is_better(
@@ -445,16 +449,22 @@ def _layout_prior_solution_is_better(
 
 
 def fresh_layout_prior_stop_gate(template: StopGate) -> StopGate:
-    """Unused stop-gate with the same budget/kind as ``template``."""
+    """Unused stop-gate with the same budget/kind as ``template``.
+
+    Dual-seed anneal must not share a mutable gate instance across solves.
+    Unknown gate types raise rather than returning ``template``.
+    """
     if isinstance(template, DeadlineStopGate):
         return DeadlineStopGate(template.budget_ms)
     if isinstance(template, MaxStepsStopGate):
         return MaxStepsStopGate(template.max_steps)
     if isinstance(template, NeverStopGate):
         return NeverStopGate()
-    # Unknown gate types: reuse only when the caller supplied a one-shot gate
-    # and we are not dual-solving; dual anneal always clones known kinds above.
-    return template
+    raise ValueError(
+        "fresh_layout_prior_stop_gate cannot clone "
+        f"{type(template).__name__}; use DeadlineStopGate, MaxStepsStopGate, "
+        "or NeverStopGate"
+    )
 
 
 def _default_stop_gate_for_injected_solver(solver: LayoutPriorSolver) -> StopGate:

@@ -36,6 +36,7 @@ from api.concepts.homeworld_layout import (
     homeworld_settings_fingerprint,
 )
 from api.config import get_config
+from api.errors import ValidationError
 from api.models.planet import Planet
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
@@ -698,8 +699,11 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
     assert restored.layout_prior_evidence_lambda == 0.95
     assert restored.layout_prior_evidence_fingerprint == evidence_fp
     assert restored.most_probable_planet_ids == (12, 34)
-    # Legacy evidenceHits-only payloads load with empty observations (re-refine expected).
-    legacy_hits_only = homeworld_evidence_aggregate_from_json(
+    assert "layoutPriorSelection" not in homeworld_evidence_aggregate_to_json(
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
+    )
+    # Unknown pre-selection evidenceHits key is ignored (empty observations).
+    hits_only = homeworld_evidence_aggregate_from_json(
         {
             "turn": 13,
             "baselineTurn": 1,
@@ -707,69 +711,61 @@ def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
             "singleStarbasePromotions": [],
         }
     )
-    assert legacy_hits_only.origin_distance_observations == ()
-    # Legacy wire that still carries promotionThreshold remains readable (field ignored).
-    legacy_with_threshold = homeworld_evidence_aggregate_from_json(
+    assert hits_only.origin_distance_observations == ()
+    assert hits_only.layout_prior_algorithm_version is None
+
+    incomplete_selections = [
         {
-            "turn": 13,
-            "baselineTurn": 1,
-            "originDistanceObservations": [],
-            "singleStarbasePromotions": [],
-            "layoutPriorSelection": {
-                "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
-                "promotionThreshold": 2,
-                "inputFingerprint": [
-                    {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
-                ],
-                "mostProbablePlanetIds": [12],
-            },
-        }
-    )
-    assert legacy_with_threshold.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-    assert legacy_with_threshold.layout_prior_evidence_lambda is None
-    assert legacy_with_threshold.layout_prior_evidence_fingerprint is None
-    assert legacy_with_threshold.most_probable_planet_ids == (12,)
-    assert "promotionThreshold" not in homeworld_evidence_aggregate_to_json(
-        legacy_with_threshold
-    ).get("layoutPriorSelection", {})
-    assert "layoutPriorSelection" not in homeworld_evidence_aggregate_to_json(
-        HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
-    )
-    # Legacy selection without inputFingerprint is dropped (forces recompute).
-    legacy = homeworld_evidence_aggregate_from_json(
+            "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+            "mostProbablePlanetIds": [12],
+        },
         {
-            "turn": 13,
-            "baselineTurn": 1,
-            "originDistanceObservations": [],
-            "singleStarbasePromotions": [],
-            "layoutPriorSelection": {
-                "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
-                "mostProbablePlanetIds": [12],
-            },
-        }
-    )
-    assert legacy.layout_prior_algorithm_version is None
-    assert legacy.most_probable_planet_ids == ()
-    # Legacy selection with λ but omitting evidenceFingerprint loads; fingerprint is
-    # None so materialize misses reuse.
-    legacy_no_od_fp = homeworld_evidence_aggregate_from_json(
+            "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+            "inputFingerprint": [
+                {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
+            ],
+            "mostProbablePlanetIds": [12],
+        },
         {
-            "turn": 13,
-            "baselineTurn": 1,
-            "originDistanceObservations": [],
-            "singleStarbasePromotions": [],
-            "layoutPriorSelection": {
-                "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
-                "inputFingerprint": [
-                    {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
-                ],
-                "evidenceLambda": 0.95,
-                "mostProbablePlanetIds": [12],
-            },
-        }
-    )
-    assert legacy_no_od_fp.layout_prior_evidence_lambda == 0.95
-    assert legacy_no_od_fp.layout_prior_evidence_fingerprint is None
+            "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+            "inputFingerprint": [
+                {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
+            ],
+            "evidenceLambda": 0.95,
+            "mostProbablePlanetIds": [12],
+        },
+        {
+            "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+            "promotionThreshold": 2,
+            "inputFingerprint": [
+                {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
+            ],
+            "mostProbablePlanetIds": [12],
+        },
+    ]
+    for selection in incomplete_selections:
+        with pytest.raises(ValidationError, match="layoutPriorSelection"):
+            homeworld_evidence_aggregate_from_json(
+                {
+                    "turn": 13,
+                    "baselineTurn": 1,
+                    "originDistanceObservations": [],
+                    "singleStarbasePromotions": [],
+                    "layoutPriorSelection": selection,
+                }
+            )
+
+    with pytest.raises(ValidationError, match="layout_prior_evidence_lambda"):
+        homeworld_evidence_aggregate_to_json(
+            HomeworldEvidenceAggregate(
+                turn=13,
+                baseline_turn=1,
+                layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
+                layout_prior_input_fingerprint=fingerprint,
+                layout_prior_evidence_fingerprint=evidence_fp,
+                most_probable_planet_ids=(12,),
+            )
+        )
 
 
 def test_shell_layout_prior_persisted_and_reused(
@@ -969,15 +965,17 @@ def test_shell_layout_prior_persisted_and_reused(
         row.planet_id for row in first.candidates if row.is_most_probable
     }
 
-    # Missing evidenceFingerprint on otherwise-matching selection forces recompute
-    # (legacy payloads; refine-clears remain defense in depth).
+    # Stale evidenceFingerprint (wrong digest) forces recompute even when other
+    # reuse keys still match.
     prior_calls = calls["n"]
+    stale_fp = "0" * 64
+    assert stale_fp != new_evidence_fp
     persistence.put_evidence_aggregate(
         628580,
         1,
         replace(
             after_od,
-            layout_prior_evidence_fingerprint=None,
+            layout_prior_evidence_fingerprint=stale_fp,
             most_probable_planet_ids=(pin_planet.id,),
         ),
     )

@@ -625,7 +625,8 @@ def test_anneal_facade_runs_two_continuity_solves_on_turn_gt_one(
     assert solve_calls == [53, 54]
     assert {row.planet_id for row in annotated if row.is_most_probable} == {orphan.id}
     reports = recent_layout_prior_reports(game_id=663307, turn=54)
-    assert len(reports) == 2
+    # Continuity records one winning report for the round, not one per seed.
+    assert len(reports) == 1
     clear_layout_prior_reports()
 
 
@@ -973,3 +974,19 @@ def test_facade_anneal_win_keeps_anneal_report(template_planet, sample_turn, mon
     assert result.report.search.final_cost == pytest.approx(0.01)
     assert result.report.search.tie_key == ((choice.sector_index, 71),)
     assert result.report.search.sa_steps_attempted == 1
+
+
+def test_fresh_layout_prior_stop_gate_rejects_unknown_type() -> None:
+    from api.analytics.homeworld_locator.layout_prior import fresh_layout_prior_stop_gate
+    from api.analytics.homeworld_locator.layout_prior_stop_gate import StopGate
+
+    class _CustomGate:
+        def should_stop(self) -> bool:
+            return False
+
+        def has_fired(self) -> bool:
+            return False
+
+    gate: StopGate = _CustomGate()  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="cannot clone _CustomGate"):
+        fresh_layout_prior_stop_gate(gate)
