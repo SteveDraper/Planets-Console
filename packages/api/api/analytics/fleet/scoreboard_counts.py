@@ -9,6 +9,7 @@ from api.analytics.fleet.scoreboard_ship_totals import (
     iter_current_turn_scores,
 )
 from api.analytics.turn_roster import iter_turn_players
+from api.concepts.ship_limit import total_reported_ships
 from api.models.game import TurnInfo
 from api.models.player import Score
 
@@ -22,7 +23,7 @@ def global_ship_count_from_scores(turn: TurnInfo) -> int | None:
     scores = list(_current_turn_scores(turn))
     if not scores:
         return None
-    return sum(score.capitalships + score.freighters for score in scores)
+    return total_reported_ships(scores)
 
 
 def global_build_count_from_scores(turn: TurnInfo) -> int:
@@ -42,7 +43,7 @@ def global_net_delta_from_scores(turn: TurnInfo) -> int:
 
 
 def _max_ship_id_bound_from_scores(scores: list[Score]) -> int:
-    total = sum(score.capitalships + score.freighters for score in scores)
+    total = total_reported_ships(scores)
     net = sum(score.shipchange + score.freighterchange for score in scores)
     builds = sum(max(0, score.shipchange) + max(0, score.freighterchange) for score in scores)
     return total - net + builds
@@ -50,7 +51,7 @@ def _max_ship_id_bound_from_scores(scores: list[Score]) -> int:
 
 def global_ship_count_from_score_rows(scores: list[Score]) -> int:
     """Sum scoreboard ship totals across score rows."""
-    return sum(score.capitalships + score.freighters for score in scores)
+    return total_reported_ships(scores)
 
 
 def global_ship_count_at_synthetic_prior(turn: TurnInfo) -> int | None:
