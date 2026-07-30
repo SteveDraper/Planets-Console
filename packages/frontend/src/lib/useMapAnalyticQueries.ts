@@ -91,12 +91,16 @@ export function useMapAnalyticQueries({
       }
       return {
         mapQueries: results,
-        combined: combineMapDataFromAnalyticQueries(mapIds, results.map((q) => q.data), {
-          liveConnectionsParams,
-        }),
+        // TanStack Query retains prior successful `data` when a refetch fails (`isError`).
+        // Do not feed that stale payload into combined -- the banner already reports the layer.
+        combined: combineMapDataFromAnalyticQueries(
+          mapIds,
+          results.map((q) => (q.isError ? undefined : q.data)),
+          { liveConnectionsParams }
+        ),
         pending: results.some((q) => q.isPending),
         hasError: failures.length > 0,
-        hasAnyData: results.some((q) => q.data != null),
+        hasAnyData: results.some((q) => !q.isError && q.data != null),
         mapError:
           failures.length > 0 ? new Error(formatMapLayerErrorBanner(failures)) : null,
       }
