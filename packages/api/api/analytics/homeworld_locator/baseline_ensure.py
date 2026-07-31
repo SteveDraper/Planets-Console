@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -12,14 +13,17 @@ from api.analytics.homeworld_locator.compute_services import (
     resolve_homeworld_services,
 )
 from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
-from api.analytics.homeworld_locator.evidence_ensure import (
-    evidence_aggregate_at_shell_turn,
-    promotion_threshold,
-)
+from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
 from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
+from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
+from api.analytics.homeworld_locator.evidence_refine_timing_history import record_baseline_report
 from api.analytics.homeworld_locator.layout_prior import (
     apply_layout_prior_most_probable,
+    layout_prior_evidence_fingerprint,
     layout_prior_input_fingerprint,
+)
+from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
+    effective_origin_distance_observations,
 )
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
@@ -134,6 +138,7 @@ def compute_homeworld_baseline(
     owns the write after epoch checks. Map/table/export call
     :func:`ensure_homeworld_baseline`, which computes then persists.
     """
+    total_t0 = time.perf_counter()
     settings_source = shell_turn if shell_turn is not None else None
     if settings_source is None:
         # Fingerprint from any stored turn; prefer earliest for stability.
@@ -161,6 +166,17 @@ def compute_homeworld_baseline(
             raise ValidationError(
                 "homeworld locator floor aggregate missing after satisfaction probe"
             )
+        record_baseline_report(
+            build_baseline_report(
+                game_id=services.game_id,
+                perspective=services.perspective,
+                baseline_turn=state.baseline_turn,
+                recomputed=False,
+                candidate_count=len(state.candidates),
+                infer_ms=0.0,
+                total_ms=(time.perf_counter() - total_t0) * 1000.0,
+            )
+        )
         return HomeworldBaselineEnsureResult(
             game_state=state,
             floor_aggregate=floor,
@@ -176,6 +192,7 @@ def compute_homeworld_baseline(
         services,
         viewpoint_player_id=viewpoint_player.id,
     )
+    infer_t0 = time.perf_counter()
     inferred = infer_homeworld_baseline_candidates(
         baseline_turn_info.planets,
         settings=baseline_turn_info.settings,
@@ -186,6 +203,7 @@ def compute_homeworld_baseline(
         starbase_planet_ids=_starbase_planet_ids(baseline_turn_info),
         min_baseline_clans=min_clans,
     )
+    infer_ms = (time.perf_counter() - infer_t0) * 1000.0
     candidates = merge_candidates_preserving_user_asserted(
         inferred=candidate_records_from_inferred(inferred),
         existing=existing.candidates if existing is not None else None,
@@ -199,7 +217,17 @@ def compute_homeworld_baseline(
     floor = HomeworldEvidenceAggregate(
         turn=baseline_turn,
         baseline_turn=baseline_turn,
-        evidence_hits=(),
+    )
+    record_baseline_report(
+        build_baseline_report(
+            game_id=services.game_id,
+            perspective=services.perspective,
+            baseline_turn=baseline_turn,
+            recomputed=True,
+            candidate_count=len(candidates),
+            infer_ms=infer_ms,
+            total_ms=(time.perf_counter() - total_t0) * 1000.0,
+        )
     )
     return HomeworldBaselineEnsureResult(
         game_state=state,
@@ -243,24 +271,26 @@ def materialize_homeworld_candidates(
     baseline_turn: int,
     baseline_degraded: bool,
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Ordered shell materialize: promote → co-sector → neighborhood → layout prior.
+    """Ordered shell materialize: SB promote → co-sector → neighborhood → layout prior.
 
     Design lock: docs/design-homeworld-locator-analytic.md §4.3.1.
     """
-    threshold = promotion_threshold()
     adjusted = materialize_evidence_adjusted_candidates(
         candidates,
         aggregate,
         planets=shell_turn.planets,
         settings_turn=shell_turn,
         player_count=_player_count(shell_turn),
-        promotion_threshold=threshold,
     )
     input_fingerprint = layout_prior_input_fingerprint(adjusted)
+    evidence_lambda = get_config().homeworld_locator.origin_distance_evidence_lambda
+    effective_observations = effective_origin_distance_observations(aggregate)
+    evidence_fingerprint = layout_prior_evidence_fingerprint(effective_observations)
     if (
         aggregate.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-        and aggregate.layout_prior_promotion_threshold == threshold
         and aggregate.layout_prior_input_fingerprint == input_fingerprint
+        and aggregate.layout_prior_evidence_lambda == evidence_lambda
+        and aggregate.layout_prior_evidence_fingerprint == evidence_fingerprint
     ):
         selected = frozenset(aggregate.most_probable_planet_ids)
         return tuple(replace(row, is_most_probable=row.planet_id in selected) for row in adjusted)
@@ -270,12 +300,20 @@ def materialize_homeworld_candidates(
         baseline_turn=baseline_turn,
         baseline_degraded=baseline_degraded,
         available=True,
+        origin_distance_observations=effective_observations,
+    )
+    previous_most_probable = _previous_turn_most_probable_planet_ids(
+        services,
+        shell_turn=shell_turn,
     )
     annotated = apply_layout_prior_most_probable(
         adjusted,
         turn=shell_turn,
         view=interim_view,
         player_count=_player_count(shell_turn),
+        origin_distance_observations=effective_observations,
+        origin_distance_evidence_lambda=evidence_lambda,
+        previous_most_probable_planet_ids=previous_most_probable,
     )
     most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
     services.persistence.put_evidence_aggregate(
@@ -284,12 +322,32 @@ def materialize_homeworld_candidates(
         replace(
             aggregate,
             layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
-            layout_prior_promotion_threshold=threshold,
             layout_prior_input_fingerprint=input_fingerprint,
+            layout_prior_evidence_lambda=evidence_lambda,
+            layout_prior_evidence_fingerprint=evidence_fingerprint,
             most_probable_planet_ids=most_probable_ids,
         ),
     )
     return annotated
+
+
+def _previous_turn_most_probable_planet_ids(
+    services: HomeworldLocatorComputeServices,
+    *,
+    shell_turn: TurnInfo,
+) -> tuple[int, ...]:
+    """Prior shell-turn selection for continuity scoring, or empty when absent."""
+    turn_number = int(shell_turn.settings.turn)
+    if turn_number <= 1:
+        return ()
+    prior = services.persistence.get_evidence_aggregate(
+        services.game_id,
+        services.perspective,
+        turn_number - 1,
+    )
+    if prior is None:
+        return ()
+    return prior.most_probable_planet_ids
 
 
 def materialize_homeworld_candidate_view(
@@ -342,4 +400,5 @@ def materialize_homeworld_candidate_view(
         baseline_degraded=state.baseline_degraded,
         available=True,
         inactive_reason=None,
+        origin_distance_observations=effective_origin_distance_observations(aggregate),
     )

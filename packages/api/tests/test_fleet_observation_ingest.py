@@ -21,6 +21,7 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
     FleetShipRecordFields,
 )
+from api.concepts.ship_limit import total_reported_ships
 
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 
@@ -314,7 +315,7 @@ def test_compute_max_ship_id_bound_uses_scoreboard_totals(sample_turn):
     bound = compute_max_ship_id_bound(sample_turn)
     turn_number = sample_turn.settings.turn
     current_scores = [score for score in sample_turn.scores if score.turn == turn_number]
-    total = sum(score.capitalships + score.freighters for score in current_scores)
+    total = total_reported_ships(current_scores)
     net = sum(score.shipchange + score.freighterchange for score in current_scores)
     builds = sum(
         max(0, score.shipchange) + max(0, score.freighterchange) for score in current_scores

@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
 from api.analytics.homeworld_locator.models import (
-    HomeworldIndependentEvidenceHit,
     HomeworldSingleStarbasePromotion,
     InferredHomeworldCandidate,
+    OriginDistanceObservation,
 )
 
 
@@ -41,12 +41,20 @@ class HomeworldEvidenceAggregate:
     baseline_turn: int
     """Turn that supplied the homeworld inference baseline for this chain."""
 
-    evidence_hits: tuple[HomeworldIndependentEvidenceHit, ...] = ()
+    origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
     single_starbase_promotions: tuple[HomeworldSingleStarbasePromotion, ...] = ()
+    # Sticky soft OD freeze: last turn whose observations participate in layout-prior
+    # cost. Set on first shell at/over shared ship limit to T_limit-1, where T_limit
+    # is the earliest scoreboard-history turn at/over the limit.
+    origin_distance_evidence_through_turn: int | None = None
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
-    layout_prior_promotion_threshold: int | None = None
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
+    """Post-promote/cull candidate triples that fed selection (planet, tier, perspective)."""
+    layout_prior_evidence_lambda: float | None = None
+    """Configured soft-evidence λ used for the stored selection; part of the reuse key."""
+    layout_prior_evidence_fingerprint: str | None = None
+    """SHA-256 hex of effective soft OD observations; part of the reuse key."""
     most_probable_planet_ids: tuple[int, ...] = ()
 
 
@@ -59,6 +67,8 @@ class HomeworldCandidateView:
     baseline_degraded: bool
     available: bool
     inactive_reason: str | None = None
+    # Soft layout-prior evidence from the shell evidence aggregate (may be empty).
+    origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
 
 
 @dataclass(frozen=True)

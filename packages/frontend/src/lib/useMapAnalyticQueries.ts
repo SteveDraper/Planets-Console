@@ -16,6 +16,10 @@ import {
   enabledMapAnalyticIds,
   mapIdsToFetch,
 } from './mapAnalyticQueryPlan'
+import {
+  formatMapLayerErrorBanner,
+  type MapLayerFailure,
+} from './formatMapLayerErrorBanner'
 
 export type UseMapAnalyticQueriesInput = {
   enabledAnalyticIds: string[]
@@ -34,6 +38,13 @@ export type UseMapAnalyticQueriesResult = {
   hasAnyData: boolean
   mapError: unknown
   mapQueries: UseQueryResult<MapDataResponse, Error>[]
+}
+
+function analyticNameById(
+  analytics: AnalyticItem[],
+  analyticId: string
+): string | undefined {
+  return analytics.find((row) => row.id === analyticId)?.name
 }
 
 export function useMapAnalyticQueries({
@@ -64,17 +75,37 @@ export function useMapAnalyticQueries({
   const liveConnectionsParams = analyticFetchEnabled ? connectionsMapParams : null
 
   const combineMapQueries = useCallback(
-    (results: UseQueryResult<MapDataResponse, Error>[]) => ({
-      mapQueries: results,
-      combined: combineMapDataFromAnalyticQueries(mapIds, results.map((q) => q.data), {
-        liveConnectionsParams,
-      }),
-      pending: results.some((q) => q.isPending),
-      hasError: results.some((q) => q.isError),
-      hasAnyData: results.some((q) => q.data != null),
-      mapError: results.find((q) => q.error)?.error ?? null,
-    }),
-    [mapIds, liveConnectionsParams]
+    (results: UseQueryResult<MapDataResponse, Error>[]) => {
+      const failures: MapLayerFailure[] = []
+      for (let index = 0; index < results.length; index += 1) {
+        const result = results[index]
+        const analyticId = mapIds[index]
+        if (result == null || analyticId == null || !result.isError || result.error == null) {
+          continue
+        }
+        failures.push({
+          analyticId,
+          analyticName: analyticNameById(analytics, analyticId),
+          error: result.error,
+        })
+      }
+      return {
+        mapQueries: results,
+        // TanStack Query retains prior successful `data` when a refetch fails (`isError`).
+        // Do not feed that stale payload into combined -- the banner already reports the layer.
+        combined: combineMapDataFromAnalyticQueries(
+          mapIds,
+          results.map((q) => (q.isError ? undefined : q.data)),
+          { liveConnectionsParams }
+        ),
+        pending: results.some((q) => q.isPending),
+        hasError: failures.length > 0,
+        hasAnyData: results.some((q) => !q.isError && q.data != null),
+        mapError:
+          failures.length > 0 ? new Error(formatMapLayerErrorBanner(failures)) : null,
+      }
+    },
+    [mapIds, liveConnectionsParams, analytics]
   )
 
   const { mapQueries, combined, pending, hasError, hasAnyData, mapError } = useQueries({

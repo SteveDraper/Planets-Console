@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from api.concepts.ship_limit import total_reported_ships
 from api.models.game import TurnInfo
 from api.models.player import Score
 
@@ -25,7 +26,7 @@ def compute_max_ship_id_bound(turn: TurnInfo) -> int | None:
     scores = list(iter_current_turn_scores(turn))
     if not scores:
         return None
-    total = sum(score.capitalships + score.freighters for score in scores)
+    total = total_reported_ships(scores)
     net = sum(score.shipchange + score.freighterchange for score in scores)
     builds = sum(max(0, score.shipchange) + max(0, score.freighterchange) for score in scores)
     return total - net + builds

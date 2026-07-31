@@ -9,7 +9,11 @@ from typing import Literal
 
 from api.analytics.homeworld_locator.geometry import sector_index_for_angle
 from api.analytics.homeworld_locator.layout_distributions_asset import CategoryLayoutDistributions
-from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
+from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_DEFINITE,
+    CONFIDENCE_POSSIBLE,
+    OriginDistanceObservation,
+)
 from api.analytics.homeworld_locator.sector_overlays import (
     sector_band_geometric_center,
     unobserved_band_sample_points,
@@ -52,11 +56,21 @@ class LayoutPriorProblem:
     r_inner: float
     r_outer: float
     distributions: CategoryLayoutDistributions
+    # Soft origin-distance evidence blend weight base (``w(t)=λ^t``). Required:
+    # the only default lives on ``HomeworldLocatorConfig``, so callers resolve it.
+    origin_distance_evidence_lambda: float
     # Seed materials for deterministic anneal (shell scope + input fingerprint).
     seed_game_id: int = 0
     seed_turn: int = 0
     seed_perspective: int = 0
     seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
+    # When set, anneal RNG hashes this turn instead of ``seed_turn`` (report turn
+    # stays ``seed_turn``). Used by prev-seed + this-seed continuity solves.
+    rng_seed_turn: int | None = None
+    # Layout distribution category key (epic|standard) for telemetry / cooling analysis.
+    layout_category: str | None = None
+    # Soft origin-distance evidence (equal third cost family).
+    origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
 
 
 def build_sector_layout_states(
@@ -223,10 +237,13 @@ def build_layout_prior_problem(
     scan_origins: Sequence[CoverageOrigin],
     nebulas: Sequence[NebulaCenter],
     distributions: CategoryLayoutDistributions,
+    origin_distance_evidence_lambda: float,
     seed_game_id: int = 0,
     seed_turn: int = 0,
     seed_perspective: int = 0,
     seed_input_fingerprint: tuple[tuple[int, str, int | None], ...] = (),
+    layout_category: str | None = None,
+    origin_distance_observations: Sequence[OriginDistanceObservation] = (),
 ) -> LayoutPriorProblem:
     """Build the solver-facing problem from candidates and map geometry."""
     return LayoutPriorProblem(
@@ -253,4 +270,7 @@ def build_layout_prior_problem(
         seed_turn=seed_turn,
         seed_perspective=seed_perspective,
         seed_input_fingerprint=seed_input_fingerprint,
+        layout_category=layout_category,
+        origin_distance_observations=tuple(origin_distance_observations),
+        origin_distance_evidence_lambda=origin_distance_evidence_lambda,
     )

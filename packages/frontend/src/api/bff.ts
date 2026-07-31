@@ -846,7 +846,7 @@ export async function fetchAnalyticMap(
   const endpointLabel = `GET ${path}`
   const r = await bffRequest(`${path}${qs}`, { cache: 'no-store' }, endpointLabel)
   if (!r.ok) {
-    throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
   const raw = await r.json()
   return normalizeMapDataResponse(raw)

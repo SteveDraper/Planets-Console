@@ -111,17 +111,72 @@ describe('deriveMapShellView', () => {
     })
   })
 
+  it('keeps a retained frame visible and surfaces the layer error when the reload fails', () => {
+    const err = new Error('turn 59 is not stored')
+    expect(
+      deriveMapShellView({
+        ...baseInput,
+        frame: { source: 'retained', data: sampleMap },
+        mapPending: false,
+        mapHasError: true,
+        mapHasAnyData: false,
+        mapError: err,
+      })
+    ).toEqual({
+      phase: 'showing-map',
+      displayMapData: sampleMap,
+      showDeferredPending: false,
+      layerError: err,
+    })
+  })
+
   it('returns error when map fetch fails without a retained frame', () => {
     const err = new Error('map failed')
     expect(
       deriveMapShellView({
         ...baseInput,
         frame: { source: 'none' },
+        mapPending: false,
         mapHasError: true,
         mapHasAnyData: false,
         mapError: err,
       })
     ).toEqual({ phase: 'error', error: err })
+  })
+
+  it('stays in map-loading when one layer failed but others are still pending', () => {
+    const err = new Error('turn 59 is not stored')
+    expect(
+      deriveMapShellView({
+        ...baseInput,
+        frame: { source: 'none' },
+        mapPending: true,
+        mapHasError: true,
+        mapHasAnyData: false,
+        mapError: err,
+      })
+    ).toEqual({
+      phase: 'full-loading',
+      loadingMessage: MAP_SHELL_MAP_LOADING_MESSAGE,
+    })
+  })
+
+  it('keeps showing-map with layerError when some analytics fail but others have data', () => {
+    const err = new Error('turn 59 is not stored')
+    expect(
+      deriveMapShellView({
+        ...baseInput,
+        frame: { source: 'live', data: sampleMap },
+        mapHasError: true,
+        mapHasAnyData: true,
+        mapError: err,
+      })
+    ).toEqual({
+      phase: 'showing-map',
+      displayMapData: sampleMap,
+      showDeferredPending: false,
+      layerError: err,
+    })
   })
 
   it('returns showing-map (not turn-loading) during turn ensure when a prior frame is kept', () => {

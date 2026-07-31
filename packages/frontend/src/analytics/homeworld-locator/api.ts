@@ -1,8 +1,8 @@
 import {
   bffRequest,
-  withEndpointIfGeneric,
   type AnalyticShellScope,
 } from '../../api/bff'
+import { throwBffHttpErrorFromResponse } from '../../api/bffHttpError'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from './constants'
 import {
   parseHomeworldLocatorPayload,
@@ -31,7 +31,7 @@ async function fetchHomeworldLocator(
   const endpointLabel = `GET ${path}`
   const response = await bffRequest(`${path}${qs}`, { cache: 'no-store' }, endpointLabel)
   if (!response.ok) {
-    throw new Error(withEndpointIfGeneric(String(response.status), endpointLabel))
+    await throwBffHttpErrorFromResponse(response, endpointLabel)
   }
   const raw: unknown = await response.json()
   const parsed = parseHomeworldLocatorPayload(raw)

@@ -6,12 +6,14 @@ import {
   isIncludeDiagnosticsSessionEnabled,
   setIncludeDiagnosticsSessionEnabled,
 } from '../api/bff'
+import type { LayoutPriorReportsResponse } from '../api/bffLayoutPriorDiagnostics'
 import { useModalKeydownFocusTrap } from '../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
 import { useComputeDiagnosticsStore } from '../stores/computeDiagnostics'
 import { DiagnosticsComputeTab } from './diagnostics/DiagnosticsComputeTab'
+import { DiagnosticsHomeworldsTab } from './diagnostics/DiagnosticsHomeworldsTab'
 import {
   DiagnosticsRequestsTab,
   formatAllDiagnosticsItems,
@@ -52,6 +54,9 @@ export function DiagnosticsModal({
   const [recordBffDiagnostics, setRecordBffDiagnostics] = useState(false)
   const scoresSnapshot = useAnalyticDiagnosticsStore((state) => state.scores)
   const computeSnapshot = useComputeDiagnosticsStore((state) => state.snapshot)
+  const [homeworldsSnapshot, setHomeworldsSnapshot] = useState<LayoutPriorReportsResponse | null>(
+    null
+  )
 
   const visibleTabIds: readonly DiagnosticsTabId[] = computeDiagnosticsEnabled
     ? DIAGNOSTICS_TAB_IDS
@@ -88,6 +93,11 @@ export function DiagnosticsModal({
       setActiveTab('requests')
     }
   }, [activeTab, isOpen, visibleTabIds])
+
+  useEffect(() => {
+    if (isOpen) return
+    setHomeworldsSnapshot(null)
+  }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
@@ -154,6 +164,10 @@ export function DiagnosticsModal({
       runClipboardCopy(JSON.stringify(scoresSnapshot, null, 2))
       return
     }
+    if (activeTab === 'homeworlds' && homeworldsSnapshot != null) {
+      runClipboardCopy(JSON.stringify(homeworldsSnapshot, null, 2))
+      return
+    }
     if (activeTab === 'compute' && computeSnapshot != null) {
       runClipboardCopy(JSON.stringify(computeSnapshot, null, 2))
     }
@@ -166,7 +180,13 @@ export function DiagnosticsModal({
       ? Boolean(items?.length)
       : activeTab === 'scores'
         ? scoresSnapshot != null
-        : computeSnapshot != null
+        : activeTab === 'homeworlds'
+          ? homeworldsSnapshot != null &&
+            (homeworldsSnapshot.reports.length > 0 ||
+              homeworldsSnapshot.evidenceRefineReports.length > 0 ||
+              homeworldsSnapshot.baselineReports.length > 0 ||
+              homeworldsSnapshot.ensureFailures.length > 0)
+          : computeSnapshot != null
 
   return (
     <div
@@ -276,6 +296,13 @@ export function DiagnosticsModal({
             <DiagnosticsRequestsTab items={items} loadError={loadError} onCopy={runClipboardCopy} />
           ) : activeTab === 'scores' ? (
             <DiagnosticsScoresTab snapshot={scoresSnapshot} onCopy={runClipboardCopy} />
+          ) : activeTab === 'homeworlds' ? (
+            <DiagnosticsHomeworldsTab
+              scope={analyticScope}
+              onCopy={runClipboardCopy}
+              isActive={isOpen && activeTab === 'homeworlds'}
+              onSnapshotChange={setHomeworldsSnapshot}
+            />
           ) : (
             <DiagnosticsComputeTab scope={analyticScope} onCopy={runClipboardCopy} />
           )}

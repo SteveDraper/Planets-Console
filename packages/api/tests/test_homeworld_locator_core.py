@@ -153,7 +153,7 @@ def test_persistence_round_trip_ephemeral(persistence) -> None:
         baseline_degraded=False,
         settings_fingerprint=(1, 2, 3),
     )
-    floor = HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_hits=())
+    floor = HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
     persistence.put_baseline(628580, 1, state, floor)
 
     loaded_state = persistence.get_game_state(628580)
@@ -458,6 +458,37 @@ def test_export_ensure_requires_shell_evidence_aggregate(persistence, sample_tur
     assert persistence.get_evidence_aggregate(628580, 1, 111) is not None
 
 
+def test_export_ensure_raises_when_shell_turn_not_stored(persistence, sample_turn) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+        clear_ensure_failure_reports,
+        recent_ensure_failure_reports,
+        reset_evidence_refine_report_history_for_tests,
+    )
+
+    reset_evidence_refine_report_history_for_tests()
+    clear_ensure_failure_reports()
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    # Baseline exists so ensure is not already satisfied, but shell turn 111 is absent.
+    services = _services(persistence, {1: turn_one})
+    ensure_homeworld_baseline(services, shell_turn=turn_one)
+
+    ctx = make_analytic_compute_context(
+        turn_one,
+        load_turn=lambda n: {1: turn_one}.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    scope = ExportScope(game_id=628580, perspective=1, turn=111)
+    assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
+    with pytest.raises(ValidationError, match="turn 111 is not stored"):
+        ensure_homeworld_export(ctx, scope)
+    failures = recent_ensure_failure_reports(game_id=628580, perspective=1)
+    assert len(failures) == 1
+    assert failures[0].reason == "turn_not_stored"
+    assert failures[0].missing_turn == 111
+    clear_ensure_failure_reports()
+
+
 def test_baseline_ensure_durable_perspective_uses_slot_not_player_id(
     persistence, sample_turn
 ) -> None:
@@ -700,7 +731,6 @@ def test_baseline_persist_recompute_clears_shell_evidence(persistence, sample_tu
         HomeworldEvidenceAggregate(
             turn=2,
             baseline_turn=2,
-            evidence_hits=(),
         ),
     )
     assert persistence.get_evidence_aggregate(628580, 1, 2) is not None
@@ -768,7 +798,7 @@ def test_baseline_persist_without_recompute_keeps_shell_evidence(persistence, sa
     persistence.put_evidence_aggregate(
         628580,
         1,
-        HomeworldEvidenceAggregate(turn=111, baseline_turn=1, evidence_hits=()),
+        HomeworldEvidenceAggregate(turn=111, baseline_turn=1),
     )
 
     ctx = make_analytic_compute_context(

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { BffHttpError } from '../api/bffHttpError'
 import {
   errorDetailFromUnknown,
+  httpStatusFromError,
   parseHttpStatusFromErrorMessage,
   shouldRetryTanStackQuery,
 } from './queryRetry'
@@ -26,7 +28,52 @@ describe('parseHttpStatusFromErrorMessage', () => {
   })
 })
 
+describe('httpStatusFromError', () => {
+  it('prefers the typed status over the message', () => {
+    const err = new BffHttpError(503, 'Homeworld layout prior is warming up', 'GET /bff/x')
+    expect(httpStatusFromError(err)).toBe(503)
+  })
+
+  it('falls back to message parsing for untyped errors', () => {
+    expect(httpStatusFromError(new Error('504 Gateway Timeout'))).toBe(504)
+    expect(httpStatusFromError('nothing numeric')).toBeNull()
+  })
+})
+
 describe('shouldRetryTanStackQuery', () => {
+  it('retries transient BffHttpError statuses regardless of detail wording', () => {
+    for (const status of [408, 503, 504]) {
+      const err = new BffHttpError(status, 'Layout prior evidence is not ready', 'GET /bff/x')
+      expect(shouldRetryTanStackQuery(0, err)).toBe(true)
+    }
+  })
+
+  it('does not retry non-transient BffHttpError statuses', () => {
+    expect(
+      shouldRetryTanStackQuery(0, new BffHttpError(401, 'Login credentials are required.', 'GET /bff/x'))
+    ).toBe(false)
+    expect(shouldRetryTanStackQuery(0, new BffHttpError(404, 'Turn not found', 'GET /bff/x'))).toBe(
+      false
+    )
+    expect(
+      shouldRetryTanStackQuery(0, new BffHttpError(502, 'Forbidden perspective', 'GET /bff/x'))
+    ).toBe(false)
+    expect(shouldRetryTanStackQuery(0, new BffHttpError(500, 'Solver crashed', 'GET /bff/x'))).toBe(
+      false
+    )
+  })
+
+  it('stops retrying BffHttpError at the failure cap', () => {
+    const err = new BffHttpError(503, 'Service Unavailable', 'GET /bff/x')
+    expect(shouldRetryTanStackQuery(2, err)).toBe(true)
+    expect(shouldRetryTanStackQuery(3, err)).toBe(false)
+  })
+
+  it('does not treat a typed 4xx with network-sounding detail as a network failure', () => {
+    const err = new BffHttpError(400, 'Failed to fetch upstream turn data', 'GET /bff/x')
+    expect(shouldRetryTanStackQuery(0, err)).toBe(false)
+  })
+
   it('does not retry 4xx', () => {
     expect(shouldRetryTanStackQuery(0, new Error('404 (GET /bff/x)'))).toBe(false)
     expect(shouldRetryTanStackQuery(0, new Error('422 Unprocessable'))).toBe(false)

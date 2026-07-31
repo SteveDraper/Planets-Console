@@ -19,6 +19,11 @@ from api.analytics.homeworld_locator import (
     meets_homeworld_cluster_constraint,
     unique_baseline_profile_match,
 )
+from api.analytics.homeworld_locator.layout_distributions_asset import (
+    CategoryLayoutDistributions,
+    LayoutDistributionsAsset,
+    SmoothedMetricDistribution,
+)
 from api.concepts.homeworld_layout import (
     HW_DISTRIBUTION_CIRCULAR,
     HW_DISTRIBUTION_RANDOM_SPACED,
@@ -71,10 +76,32 @@ def _planet(
     )
 
 
+def _stub_layout_asset(*, support_min: float = 500.0, support_max: float = 600.0):
+    mid = 0.5 * (support_min + support_max)
+    metric = SmoothedMetricDistribution(
+        sample_count=10,
+        support_min=support_min,
+        support_max=support_max,
+        mean=mid,
+        std=max(1.0, (support_max - support_min) / 6.0),
+    )
+    category = CategoryLayoutDistributions(
+        center_distance=metric,
+        neighbor_separation=metric,
+    )
+    return LayoutDistributionsAsset(
+        schema_version=2,
+        bin_width_ly=10.0,
+        cost_model="normal_neg_log_density",
+        categories={"epic": category, "standard": category},
+        source={},
+    )
+
+
 def test_homeworld_locator_config_defaults() -> None:
     cfg = HomeworldLocatorConfig()
     assert cfg.min_baseline_clans == 10_000
-    assert cfg.evidence_promotion_threshold == 2
+    assert cfg.origin_distance_evidence_lambda == 0.95
 
 
 def test_supports_circular_round_only(sample_settings) -> None:
@@ -725,6 +752,58 @@ def test_infer_baseline_culls_co_sector_cluster_orphans(template_planet, sample_
     assert next(row for row in candidates if row.planet_id == 1).confidence_tier == (
         CONFIDENCE_DEFINITE
     )
+
+
+def test_infer_baseline_culls_orphans_outside_layout_center_band(
+    template_planet, sample_settings
+) -> None:
+    """Epic|standard circular orphans must lie in the layout center-distance band."""
+    settings = replace(
+        sample_settings,
+        hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+        mapshape=MAP_SHAPE_ROUND,
+        homeworldhasstarbase=False,
+        verycloseplanets=1,
+        closeplanets=1,
+        shiplimit=500,
+        endturn=100,
+        campaignmode=False,
+    )
+    center = (0.0, 0.0)
+    pin = _planet(
+        template_planet,
+        planet_id=1,
+        x=550,
+        y=0,
+        ownerid=1,
+        clans=20_000,
+        temp=50,
+    )
+    # In-band opposite-sector orphan (~550 LY from C).
+    in_band = _planet(template_planet, planet_id=5, x=-550, y=0)
+    in_near = _planet(template_planet, planet_id=6, x=-570, y=0)
+    in_close = _planet(template_planet, planet_id=7, x=-550, y=140)
+    # Out-of-band cluster orphan (~300 LY from C; below supportMin 500).
+    out_band = _planet(template_planet, planet_id=15, x=-300, y=0)
+    out_near = _planet(template_planet, planet_id=16, x=-320, y=0)
+    out_close = _planet(template_planet, planet_id=17, x=-300, y=140)
+
+    candidates = infer_homeworld_baseline_candidates(
+        [pin, in_band, in_near, in_close, out_band, out_near, out_close],
+        settings=settings,
+        viewpoint_player_id=1,
+        viewpoint_perspective=1,
+        viewpoint_race_id=1,
+        player_count=11,
+        starbase_planet_ids=set(),
+        min_baseline_clans=10_000,
+        map_center=center,
+        layout_asset=_stub_layout_asset(support_min=500.0, support_max=600.0),
+    )
+    ids = {row.planet_id for row in candidates}
+    assert 1 in ids
+    assert 5 in ids
+    assert 15 not in ids
 
 
 def test_infer_baseline_non_circular_uses_cluster_orphans_only(

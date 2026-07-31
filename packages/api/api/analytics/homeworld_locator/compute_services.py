@@ -22,7 +22,9 @@ class HomeworldLocatorComputeServices:
     load_turn: Callable[[int], TurnInfo | None]
     list_stored_turns: Callable[[], list[int]]
     ensure_turn: Callable[[int], TurnInfo | None] | None = None
-    """Optional auto-ensure hook (e.g. turn 1). Returns loaded turn or None on failure."""
+    """Optional turn-load hook (login-backed). Used for baseline turn 1 and to
+    auto-fetch missing intermediate turns on the evidence ensure chain.
+    Returns the loaded turn, or None when credentials/upstream fail."""
     game_info: GameInfo | None = None
     """Optional roster for Player.id ↔ perspective slot mapping via GameService."""
 

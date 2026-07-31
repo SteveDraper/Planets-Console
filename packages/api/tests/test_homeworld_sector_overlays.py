@@ -80,22 +80,22 @@ def _planet(
 
 
 def _stub_layout_asset(*, support_min: float = 500.0, support_max: float = 600.0):
+    mid = 0.5 * (support_min + support_max)
     metric = SmoothedMetricDistribution(
         sample_count=10,
         support_min=support_min,
         support_max=support_max,
-        percentiles=tuple(support_min + (support_max - support_min) * i / 100 for i in range(101)),
+        mean=mid,
+        std=max(1.0, (support_max - support_min) / 6.0),
     )
     category = CategoryLayoutDistributions(
         center_distance=metric,
         neighbor_separation=metric,
     )
     return LayoutDistributionsAsset(
-        schema_version=1,
+        schema_version=2,
         bin_width_ly=10.0,
-        smoothing_method="laplace",
-        laplace_alpha=1.0,
-        percentile_step=1,
+        cost_model="normal_neg_log_density",
         categories={"epic": category, "standard": category},
         source={},
     )
@@ -319,7 +319,7 @@ def test_closest_unobserved_prefers_mid_angle_on_inner_arc_tie(template_planet) 
 
 
 def test_envelope_center_closest_candidate_to_sector_mid(template_planet) -> None:
-    """Orphan envelopes prefer the candidate nearest the sector geometric center."""
+    """Without most-probable, orphan envelopes use the candidate nearest sector mid."""
     center = (0.0, 0.0)
     pin = _planet(template_planet, planet_id=1, x=550, y=0)
     # Sector 1 (~+π/2): inner (closer to C), mid-band, and outer.
@@ -346,6 +346,33 @@ def test_envelope_center_closest_candidate_to_sector_mid(template_planet) -> Non
     assert sector_one.geometry.disks[0].y == mid.y
     # Must not prefer the inner-arc candidate (closest to C under the old rule).
     assert sector_one.geometry.disks[0].y != inner.y
+
+
+def test_envelope_center_prefers_most_probable_over_sector_mid(template_planet) -> None:
+    """Orphan envelopes follow layout-prior most-probable, not geometric mid."""
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    mid = _planet(template_planet, planet_id=313, x=0, y=550)
+    most_probable = _planet(template_planet, planet_id=428, x=0, y=590)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin, mid, most_probable],
+        candidate_planet_ids=frozenset({pin.id, mid.id, most_probable.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        nebulas=(),
+        most_probable_planet_ids=frozenset({most_probable.id}),
+    )
+    sector_one = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-1")
+    assert sector_one.is_pinned is False
+    assert sector_one.geometry.disks[0].x == most_probable.x
+    assert sector_one.geometry.disks[0].y == most_probable.y
+    assert sector_one.geometry.disks[0].y != mid.y
 
 
 def test_incomplete_with_candidates_prefers_candidate_center(template_planet) -> None:

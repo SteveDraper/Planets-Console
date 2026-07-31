@@ -17,7 +17,11 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
     SmoothedMetricDistribution,
 )
 from api.analytics.homeworld_locator.layout_prior import apply_layout_prior_most_probable
-from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
+from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_DEFINITE,
+    CONFIDENCE_POSSIBLE,
+    OriginDistanceObservation,
+)
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
@@ -31,6 +35,8 @@ from api.concepts.homeworld_layout import (
     MAP_SHAPE_ROUND,
     homeworld_settings_fingerprint,
 )
+from api.config import get_config
+from api.errors import ValidationError
 from api.models.planet import Planet
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
@@ -85,14 +91,13 @@ def _planet(
 
 
 def _linear_metric(*, support_min: float, support_max: float) -> SmoothedMetricDistribution:
-    percentiles = tuple(
-        support_min + (support_max - support_min) * index / 100 for index in range(101)
-    )
+    mid = 0.5 * (support_min + support_max)
     return SmoothedMetricDistribution(
         sample_count=100,
         support_min=support_min,
         support_max=support_max,
-        percentiles=percentiles,
+        mean=mid,
+        std=max(1.0, (support_max - support_min) / 6.0),
     )
 
 
@@ -103,11 +108,9 @@ def _stub_layout_asset(*, support_min: float = 500.0, support_max: float = 600.0
         neighbor_separation=metric,
     )
     return LayoutDistributionsAsset(
-        schema_version=1,
+        schema_version=2,
         bin_width_ly=10.0,
-        smoothing_method="laplace",
-        laplace_alpha=1.0,
-        percentile_step=1,
+        cost_model="normal_neg_log_density",
         categories={"epic": category, "standard": category},
         source={},
     )
@@ -162,12 +165,14 @@ def _view(*candidates: HomeworldCandidateRecord) -> HomeworldCandidateView:
     )
 
 
-def test_percentile_for_value_inverts_value_at_percentile() -> None:
+def test_neg_log_density_is_lowest_at_mean() -> None:
     metric = _linear_metric(support_min=100.0, support_max=200.0)
-    assert metric.percentile_for_value(100.0) == pytest.approx(0.0)
-    assert metric.percentile_for_value(150.0) == pytest.approx(50.0)
-    assert metric.percentile_for_value(200.0) == pytest.approx(100.0)
-    assert metric.value_at_percentile(metric.percentile_for_value(137.5)) == pytest.approx(137.5)
+    at_mean = metric.neg_log_density(metric.mean)
+    assert metric.neg_log_density(metric.mean - 3 * metric.std) > at_mean
+    assert metric.neg_log_density(metric.mean + 3 * metric.std) > at_mean
+    assert metric.neg_log_density(metric.mean) == pytest.approx(
+        0.5 * math.log(2 * math.pi * metric.std * metric.std)
+    )
 
 
 def test_ineligible_gate_leaves_is_most_probable_false(template_planet, sample_turn) -> None:
@@ -265,14 +270,13 @@ def test_tie_break_prefers_lex_smaller_planet_id(template_planet, sample_turn) -
         sample_count=1,
         support_min=0.0,
         support_max=1000.0,
-        percentiles=(500.0,) * 101,
+        mean=500.0,
+        std=1.0e6,
     )
     flat_asset = LayoutDistributionsAsset(
-        schema_version=1,
+        schema_version=2,
         bin_width_ly=10.0,
-        smoothing_method="laplace",
-        laplace_alpha=1.0,
-        percentile_step=1,
+        cost_model="normal_neg_log_density",
         categories={
             "epic": CategoryLayoutDistributions(
                 center_distance=flat_metric,
@@ -407,11 +411,15 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         r_inner=r_inner,
         r_outer=r_outer,
         distributions=asset.for_category("standard"),
+        origin_distance_evidence_lambda=(
+            get_config().homeworld_locator.origin_distance_evidence_lambda
+        ),
     )
     assert len(nearest_mid_choice_ids(choice, problem)) == MAX_LAYOUT_PRIOR_CHOICES_PER_SECTOR
-    solution = EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate())
+    solution = EnumeratingLayoutPriorSolver().solve(problem, stop_gate=NeverStopGate()).solution
     assert len(solution.chosen_planet_ids_by_sector) == 1
-    # Selection still completes and marks one most-probable.
+    assert next(iter(solution.chosen_planet_ids_by_sector.values())) in choice.choice_planet_ids
+    # Selection still completes and marks one most-probable in the legal set.
     annotated = apply_layout_prior_most_probable(
         tuple(candidates),
         turn=turn,
@@ -421,15 +429,25 @@ def test_layout_prior_caps_choices_per_sector(template_planet, sample_turn) -> N
         map_center=center,
         solver=EnumeratingLayoutPriorSolver(),
     )
-    assert sum(1 for row in annotated if row.is_most_probable) == 1
-    assert {row.planet_id for row in annotated if row.is_most_probable} == set(
-        solution.chosen_planet_ids_by_sector.values()
-    )
+    most_probable = {row.planet_id for row in annotated if row.is_most_probable}
+    assert len(most_probable) == 1
+    assert most_probable.issubset(set(choice.choice_planet_ids))
 
 
 def test_layout_prior_solver_injection_honors_fixed_choice(template_planet, sample_turn) -> None:
     """Injectable LayoutPriorSolver proves annotate path is solver-replaceable."""
-    from api.analytics.homeworld_locator.layout_prior_solver import LayoutPriorSolution
+    from api.analytics.homeworld_locator.layout_prior_report import (
+        LayoutPriorSearchStats,
+        LayoutPriorStopGateInfo,
+        LayoutPriorTimingMs,
+        build_run_report,
+        problem_size_hints,
+    )
+    from api.analytics.homeworld_locator.layout_prior_solver import (
+        LAYOUT_PRIOR_SOLVER_ENUMERATE,
+        LayoutPriorSolution,
+        LayoutPriorSolveResult,
+    )
 
     turn, pin = _eligible_turn(sample_turn, template_planet)
     center = (2000.0, 2000.0)
@@ -493,12 +511,38 @@ def test_layout_prior_solver_injection_honors_fixed_choice(template_planet, samp
             assert choice_sectors
             # Force a specific planet regardless of cost ranking.
             chosen = {choice_sectors[0].sector_index: preferred.id}
-            return LayoutPriorSolution(
+            solution = LayoutPriorSolution(
                 chosen_planet_ids_by_sector=chosen,
                 stand_in_positions_by_sector={},
                 cost=0.0,
                 tie_key=tuple(sorted(chosen.items())),
             )
+            report = build_run_report(
+                game_id=problem.seed_game_id,
+                turn=problem.seed_turn,
+                perspective=problem.seed_perspective,
+                solver=LAYOUT_PRIOR_SOLVER_ENUMERATE,
+                stop_gate=LayoutPriorStopGateInfo(kind="never"),
+                stop_reason="exhausted",
+                timing=LayoutPriorTimingMs(greedy_ms=0.0, sa_ms=0.0, refine_ms=0.0, total_ms=0.0),
+                search=LayoutPriorSearchStats(
+                    sa_steps_attempted=0,
+                    sa_steps_accepted=0,
+                    greedy_cost=0.0,
+                    pre_refine_cost=0.0,
+                    final_cost=0.0,
+                    tie_key=solution.tie_key,
+                ),
+                problem_size=problem_size_hints(
+                    choice_sector_count=len(choice_sectors),
+                    total_possibles=len(choice_sectors),
+                    stand_in_sector_count=0,
+                    planet_count=len(problem.planets_by_id),
+                    category=problem.layout_category,
+                ),
+                incumbent_cost_series=(),
+            )
+            return LayoutPriorSolveResult(solution=solution, report=report)
 
     annotated = apply_layout_prior_most_probable(
         (definite, preferred_row, ignored_row, other_row),
@@ -602,53 +646,153 @@ def test_empty_nebular_sector_stand_in_does_not_block_most_probable(
 
 def test_layout_prior_selection_round_trips_on_evidence_aggregate() -> None:
     from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
+    from api.analytics.homeworld_locator.layout_prior import layout_prior_evidence_fingerprint
     from api.analytics.homeworld_locator.serialization import (
         homeworld_evidence_aggregate_from_json,
         homeworld_evidence_aggregate_to_json,
     )
 
     fingerprint = ((12, CONFIDENCE_DEFINITE, 1), (34, CONFIDENCE_POSSIBLE, None))
+    observations = (
+        OriginDistanceObservation(turn=12, x=100, y=200, matched_planet_ids=(12, 34)),
+        OriginDistanceObservation(turn=13, x=300, y=400, matched_planet_ids=(12,)),
+    )
+    evidence_fp = layout_prior_evidence_fingerprint(observations)
+    assert len(evidence_fp) == 64
+    # Hash is order-independent and constant-size.
+    assert layout_prior_evidence_fingerprint(tuple(reversed(observations))) == evidence_fp
+    assert layout_prior_evidence_fingerprint(()) == layout_prior_evidence_fingerprint([])
+    assert layout_prior_evidence_fingerprint(observations) != layout_prior_evidence_fingerprint(
+        observations[:1]
+    )
     aggregate = HomeworldEvidenceAggregate(
         turn=13,
         baseline_turn=1,
+        origin_distance_observations=observations,
         layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
-        layout_prior_promotion_threshold=2,
         layout_prior_input_fingerprint=fingerprint,
+        layout_prior_evidence_lambda=0.95,
+        layout_prior_evidence_fingerprint=evidence_fp,
         most_probable_planet_ids=(12, 34),
     )
     wire = homeworld_evidence_aggregate_to_json(aggregate)
+    assert wire["originDistanceObservations"] == [
+        {"turn": 12, "x": 100, "y": 200, "matchedPlanetIds": [12, 34]},
+        {"turn": 13, "x": 300, "y": 400, "matchedPlanetIds": [12]},
+    ]
+    assert "evidenceHits" not in wire
     assert wire["layoutPriorSelection"] == {
         "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
-        "promotionThreshold": 2,
         "inputFingerprint": [
             {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
             {"planetId": 34, "confidenceTier": CONFIDENCE_POSSIBLE, "perspective": None},
         ],
+        "evidenceLambda": 0.95,
+        "evidenceFingerprint": evidence_fp,
         "mostProbablePlanetIds": [12, 34],
     }
+    assert "promotionThreshold" not in wire["layoutPriorSelection"]
     restored = homeworld_evidence_aggregate_from_json(wire)
+    assert restored.origin_distance_observations == observations
     assert restored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-    assert restored.layout_prior_promotion_threshold == 2
     assert restored.layout_prior_input_fingerprint == fingerprint
+    assert restored.layout_prior_evidence_lambda == 0.95
+    assert restored.layout_prior_evidence_fingerprint == evidence_fp
     assert restored.most_probable_planet_ids == (12, 34)
     assert "layoutPriorSelection" not in homeworld_evidence_aggregate_to_json(
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
     )
-    # Legacy selection without reuse-key fields is dropped (forces recompute).
-    legacy = homeworld_evidence_aggregate_from_json(
+    # Unknown pre-selection evidenceHits key is ignored (empty observations).
+    hits_only = homeworld_evidence_aggregate_from_json(
         {
             "turn": 13,
             "baselineTurn": 1,
-            "evidenceHits": [],
+            "evidenceHits": [{"planetId": 12, "turn": 12, "kind": "origin_distance"}],
             "singleStarbasePromotions": [],
-            "layoutPriorSelection": {
-                "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
-                "mostProbablePlanetIds": [12],
-            },
         }
     )
-    assert legacy.layout_prior_algorithm_version is None
-    assert legacy.most_probable_planet_ids == ()
+    assert hits_only.origin_distance_observations == ()
+    assert hits_only.layout_prior_algorithm_version is None
+
+    incomplete_selections = [
+        {
+            "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+            "mostProbablePlanetIds": [12],
+        },
+        {
+            "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+            "inputFingerprint": [
+                {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
+            ],
+            "mostProbablePlanetIds": [12],
+        },
+        {
+            "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+            "inputFingerprint": [
+                {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
+            ],
+            "evidenceLambda": 0.95,
+            "mostProbablePlanetIds": [12],
+        },
+        {
+            "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+            "promotionThreshold": 2,
+            "inputFingerprint": [
+                {"planetId": 12, "confidenceTier": CONFIDENCE_DEFINITE, "perspective": 1},
+            ],
+            "mostProbablePlanetIds": [12],
+        },
+    ]
+    for selection in incomplete_selections:
+        cleared = homeworld_evidence_aggregate_from_json(
+            {
+                "turn": 13,
+                "baselineTurn": 1,
+                "originDistanceObservations": [],
+                "singleStarbasePromotions": [],
+                "layoutPriorSelection": selection,
+            }
+        )
+        assert cleared.layout_prior_algorithm_version is None
+        assert cleared.layout_prior_input_fingerprint == ()
+        assert cleared.layout_prior_evidence_lambda is None
+        assert cleared.layout_prior_evidence_fingerprint is None
+        assert cleared.most_probable_planet_ids == ()
+
+    with pytest.raises(ValidationError, match="evidenceLambda"):
+        homeworld_evidence_aggregate_from_json(
+            {
+                "turn": 13,
+                "baselineTurn": 1,
+                "originDistanceObservations": [],
+                "singleStarbasePromotions": [],
+                "layoutPriorSelection": {
+                    "algorithmVersion": LAYOUT_PRIOR_ALGORITHM_VERSION,
+                    "inputFingerprint": [
+                        {
+                            "planetId": 12,
+                            "confidenceTier": CONFIDENCE_DEFINITE,
+                            "perspective": 1,
+                        },
+                    ],
+                    "evidenceLambda": "0.95",
+                    "evidenceFingerprint": evidence_fp,
+                    "mostProbablePlanetIds": [12],
+                },
+            }
+        )
+
+    with pytest.raises(ValidationError, match="layout_prior_evidence_lambda"):
+        homeworld_evidence_aggregate_to_json(
+            HomeworldEvidenceAggregate(
+                turn=13,
+                baseline_turn=1,
+                layout_prior_algorithm_version=LAYOUT_PRIOR_ALGORITHM_VERSION,
+                layout_prior_input_fingerprint=fingerprint,
+                layout_prior_evidence_fingerprint=evidence_fp,
+                most_probable_planet_ids=(12,),
+            )
+        )
 
 
 def test_shell_layout_prior_persisted_and_reused(
@@ -657,8 +801,11 @@ def test_shell_layout_prior_persisted_and_reused(
     """First shell materialize persists selection; second call reuses without recomputing."""
     from api.analytics.homeworld_locator import baseline_ensure as baseline_mod
     from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
-    from api.analytics.homeworld_locator.layout_prior import layout_prior_input_fingerprint
-    from api.config import get_config, set_config
+    from api.analytics.homeworld_locator.layout_prior import (
+        layout_prior_evidence_fingerprint,
+        layout_prior_input_fingerprint,
+    )
+    from api.config import set_config
 
     turn, _pin = _eligible_turn(sample_turn, template_planet)
     center = (2000.0, 2000.0)
@@ -718,11 +865,13 @@ def test_shell_layout_prior_persisted_and_reused(
     stored = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
     assert stored is not None
     assert stored.layout_prior_algorithm_version == LAYOUT_PRIOR_ALGORITHM_VERSION
-    assert (
-        stored.layout_prior_promotion_threshold
-        == get_config().homeworld_locator.evidence_promotion_threshold
-    )
     assert stored.layout_prior_input_fingerprint == layout_prior_input_fingerprint(first.candidates)
+    assert (
+        stored.layout_prior_evidence_lambda
+        == get_config().homeworld_locator.origin_distance_evidence_lambda
+    )
+    empty_evidence_fp = layout_prior_evidence_fingerprint(())
+    assert stored.layout_prior_evidence_fingerprint == empty_evidence_fp
     assert orphan.id in stored.most_probable_planet_ids
     assert calls["n"] == 1
 
@@ -755,52 +904,42 @@ def test_shell_layout_prior_persisted_and_reused(
     assert orphan.id in rewritten.most_probable_planet_ids
     assert pin_planet.id not in rewritten.most_probable_planet_ids
 
-    # Threshold change alone forces recompute even when candidate fingerprint matches.
+    # Soft-evidence λ config change alone forces recompute (reuse keys are
+    # algorithm version + candidate fingerprint + evidenceLambda + evidenceFingerprint).
     prior_calls = calls["n"]
     cfg = get_config()
-    elevated_threshold = cfg.homeworld_locator.evidence_promotion_threshold + 1
     set_config(
         replace(
             cfg,
             homeworld_locator=replace(
                 cfg.homeworld_locator,
-                evidence_promotion_threshold=elevated_threshold,
+                origin_distance_evidence_lambda=0.5,
             ),
         )
     )
     try:
         fourth = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
         assert calls["n"] == prior_calls + 1
-        after_threshold = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
-        assert after_threshold is not None
-        assert after_threshold.layout_prior_promotion_threshold == elevated_threshold
+        after_lambda = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+        assert after_lambda is not None
+        assert after_lambda.layout_prior_evidence_lambda == 0.5
+        assert after_lambda.layout_prior_evidence_fingerprint == empty_evidence_fp
+        assert orphan.id in after_lambda.most_probable_planet_ids
         assert {row.planet_id for row in fourth.candidates if row.is_most_probable} == {
             row.planet_id for row in first.candidates if row.is_most_probable
         }
     finally:
         set_config(cfg)
 
-    # Restoring config invalidates the elevated-threshold lock; sync once.
-    prior_calls = calls["n"]
-    synced_view = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
-    assert calls["n"] == prior_calls + 1
-    synced = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
-    assert synced is not None
-    assert (
-        synced.layout_prior_promotion_threshold
-        == get_config().homeworld_locator.evidence_promotion_threshold
-    )
-    assert {row.planet_id for row in synced_view.candidates if row.is_most_probable} == {
-        row.planet_id for row in first.candidates if row.is_most_probable
-    }
-
     # Fingerprint mismatch (post-cull candidate set) forces recompute.
     prior_calls = calls["n"]
+    rewritten_after_lambda = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+    assert rewritten_after_lambda is not None
     persistence.put_evidence_aggregate(
         628580,
         1,
         replace(
-            synced,
+            rewritten_after_lambda,
             layout_prior_input_fingerprint=((pin_planet.id, CONFIDENCE_DEFINITE, 1),),
             most_probable_planet_ids=(pin_planet.id,),
         ),
@@ -815,4 +954,64 @@ def test_shell_layout_prior_persisted_and_reused(
     assert after_fingerprint.layout_prior_input_fingerprint == layout_prior_input_fingerprint(
         fifth.candidates
     )
+    assert after_fingerprint.layout_prior_evidence_lambda == (
+        get_config().homeworld_locator.origin_distance_evidence_lambda
+    )
+    assert after_fingerprint.layout_prior_evidence_fingerprint == empty_evidence_fp
     assert orphan.id in after_fingerprint.most_probable_planet_ids
+
+    # Soft OD observation identity change alone forces recompute (candidate set + λ unchanged).
+    prior_calls = calls["n"]
+    new_observations = (
+        OriginDistanceObservation(
+            turn=turn.settings.turn,
+            x=pin_planet.x,
+            y=pin_planet.y,
+            matched_planet_ids=(orphan.id,),
+        ),
+    )
+    new_evidence_fp = layout_prior_evidence_fingerprint(new_observations)
+    assert new_evidence_fp != empty_evidence_fp
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        replace(
+            after_fingerprint,
+            origin_distance_observations=new_observations,
+            # Leave stale evidenceFingerprint (empty) so reuse must miss.
+            most_probable_planet_ids=(pin_planet.id,),
+        ),
+    )
+    sixth = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
+    assert calls["n"] == prior_calls + 1
+    after_od = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+    assert after_od is not None
+    assert after_od.layout_prior_evidence_fingerprint == new_evidence_fp
+    assert orphan.id in after_od.most_probable_planet_ids
+    assert {row.planet_id for row in sixth.candidates if row.is_most_probable} == {
+        row.planet_id for row in first.candidates if row.is_most_probable
+    }
+
+    # Stale evidenceFingerprint (wrong digest) forces recompute even when other
+    # reuse keys still match.
+    prior_calls = calls["n"]
+    stale_fp = "0" * 64
+    assert stale_fp != new_evidence_fp
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        replace(
+            after_od,
+            layout_prior_evidence_fingerprint=stale_fp,
+            most_probable_planet_ids=(pin_planet.id,),
+        ),
+    )
+    seventh = materialize_homeworld_candidate_view(ctx, shell_turn=turn)
+    assert calls["n"] == prior_calls + 1
+    restored_fp = persistence.get_evidence_aggregate(628580, 1, turn.settings.turn)
+    assert restored_fp is not None
+    assert restored_fp.layout_prior_evidence_fingerprint == new_evidence_fp
+    assert orphan.id in restored_fp.most_probable_planet_ids
+    assert {row.planet_id for row in seventh.candidates if row.is_most_probable} == {
+        row.planet_id for row in first.candidates if row.is_most_probable
+    }

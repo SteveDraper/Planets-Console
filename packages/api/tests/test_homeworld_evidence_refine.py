@@ -23,8 +23,8 @@ from api.analytics.homeworld_locator.exports import EXPORT_CATALOG
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
-    HomeworldIndependentEvidenceHit,
     HomeworldSingleStarbasePromotion,
+    OriginDistanceObservation,
 )
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.types import (
@@ -88,7 +88,7 @@ def test_export_catalog_declares_self_chain() -> None:
     )
 
 
-def test_refine_accumulates_independent_hits_across_turns(persistence) -> None:
+def test_refine_accumulates_empty_observations_across_turns(persistence) -> None:
     from api.analytics.compute_context import make_analytic_compute_context
     from api.analytics.export_types import ExportScope
     from api.analytics.homeworld_locator.exports import ensure_homeworld_export
@@ -115,10 +115,10 @@ def test_refine_accumulates_independent_hits_across_turns(persistence) -> None:
     aggregate = persistence.get_evidence_aggregate(628580, 1, 3)
     assert aggregate is not None
     assert aggregate.turn == 3
-    assert aggregate.evidence_hits == ()
+    assert aggregate.origin_distance_observations == ()
 
 
-def test_refine_records_origin_distance_hit_on_shell_turn(persistence) -> None:
+def test_refine_records_origin_distance_observation_on_shell_turn(persistence) -> None:
     from api.analytics.compute_context import make_analytic_compute_context
     from api.analytics.export_types import ExportScope
     from api.analytics.homeworld_locator.exports import ensure_homeworld_export
@@ -149,7 +149,111 @@ def test_refine_records_origin_distance_hit_on_shell_turn(persistence) -> None:
     aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
     assert aggregate is not None
     assert aggregate.turn == 2
-    assert aggregate.evidence_hits == (HomeworldIndependentEvidenceHit(planet_id=10, turn=2),)
+    assert aggregate.origin_distance_observations == (
+        OriginDistanceObservation(
+            turn=2,
+            x=ship.x,
+            y=ship.y,
+            matched_planet_ids=(10,),
+        ),
+    )
+
+
+def test_refine_dedupes_colocated_ships_and_keeps_distinct_locations(persistence) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    ship_template = turn_two.ships[0]
+    planet_a = _planet(turn_two.planets[0], planet_id=10, x=500, y=500)
+    warp8 = max_travel_distance(8, False)
+    loc1_x = 500 + int(warp8)
+    loc1_y = 500
+    loc2_x = 500
+    loc2_y = 500 + int(warp8)
+    ships = [
+        _ship(ship_template, ship_id=1, x=loc1_x, y=loc1_y),
+        _ship(ship_template, ship_id=2, x=loc1_x, y=loc1_y),
+        _ship(ship_template, ship_id=3, x=loc2_x, y=loc2_y),
+    ]
+    turn_two = replace(turn_two, planets=[planet_a], ships=ships)
+    turns = {1: turn_one, 2: turn_two}
+
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+
+    ctx = make_analytic_compute_context(
+        turn_two,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
+    aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
+    assert aggregate is not None
+    assert aggregate.origin_distance_observations == (
+        OriginDistanceObservation(
+            turn=2,
+            x=loc1_x,
+            y=loc1_y,
+            matched_planet_ids=(10,),
+        ),
+        OriginDistanceObservation(
+            turn=2,
+            x=loc2_x,
+            y=loc2_y,
+            matched_planet_ids=(10,),
+        ),
+    )
+
+
+def test_refine_records_ambiguous_match_set(persistence) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    ship_template = turn_two.ships[0]
+    # Two candidates at the same origin-distance band from one ship location.
+    planet_a = _planet(turn_two.planets[0], planet_id=435, x=500, y=500)
+    planet_b = _planet(turn_two.planets[0], planet_id=483, x=500, y=500)
+    warp8 = max_travel_distance(8, False)
+    ship = _ship(ship_template, ship_id=99, x=500 + int(warp8), y=500)
+    turn_two = replace(turn_two, planets=[planet_a, planet_b], ships=[ship])
+    turns = {1: turn_one, 2: turn_two}
+
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(435), _candidate(483)),
+        _floor_aggregate(),
+    )
+
+    ctx = make_analytic_compute_context(
+        turn_two,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
+    aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
+    assert aggregate is not None
+    assert aggregate.origin_distance_observations == (
+        OriginDistanceObservation(
+            turn=2,
+            x=ship.x,
+            y=ship.y,
+            matched_planet_ids=(435, 483),
+        ),
+    )
+    assert len(aggregate.origin_distance_observations[0].matched_planet_ids) == 2
 
 
 def test_single_step_refine_requires_prior_when_above_ensure_floor(persistence) -> None:
@@ -177,6 +281,134 @@ def test_single_step_refine_requires_prior_when_above_ensure_floor(persistence) 
             shell_turn=turn_four,
             game_state_baseline_turn=1,
         )
+
+
+def test_export_ensure_raises_on_missing_intermediate_turn(persistence) -> None:
+    """Sparse stores must fail with an explicit missing-turn ValidationError."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+        clear_ensure_failure_reports,
+        recent_ensure_failure_reports,
+    )
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+    from api.errors import ValidationError
+    from api.services.layout_prior_diagnostics_service import get_layout_prior_reports_wire
+
+    clear_ensure_failure_reports()
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turn_three = replace(turn_one, settings=replace(turn_one.settings, turn=3))
+    # Hole at turn 2 -- same shape as 663307 missing 59 with 58 and 60 present.
+    turns = {1: turn_one, 3: turn_three}
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+
+    ctx = make_analytic_compute_context(
+        turn_three,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    with pytest.raises(ValidationError, match="sign in to auto-fetch"):
+        ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
+
+    failures = recent_ensure_failure_reports(game_id=628580, perspective=1)
+    assert len(failures) == 1
+    assert failures[0].missing_turn == 2
+    assert failures[0].shell_turn == 3
+    wire = get_layout_prior_reports_wire(game_id=628580, perspective=1, turn=3)
+    assert wire["ensureFailures"][0]["missingTurn"] == 2
+
+
+def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> None:
+    """Login-backed ensure_turn fills holes so the evidence chain can continue."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    turn_three = replace(turn_one, settings=replace(turn_one.settings, turn=3))
+    turns = {1: turn_one, 3: turn_three}
+    ensure_calls: list[int] = []
+
+    def ensure_turn(turn_number: int):
+        ensure_calls.append(turn_number)
+        if turn_number == 2:
+            turns[2] = turn_two
+            return turn_two
+        return None
+
+    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+
+    ctx = make_analytic_compute_context(
+        turn_three,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
+    assert ensure_calls == [2]
+    assert persistence.get_evidence_aggregate(628580, 1, 3) is not None
+
+
+def test_export_ensure_reports_fetch_failure_after_partial_autofetch(persistence) -> None:
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.evidence_refine_timing_history import (
+        clear_ensure_failure_reports,
+        recent_ensure_failure_reports,
+    )
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+    from api.errors import ValidationError
+
+    clear_ensure_failure_reports()
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    turn_four = replace(turn_one, settings=replace(turn_one.settings, turn=4))
+    turns = {1: turn_one, 4: turn_four}
+
+    def ensure_turn(turn_number: int):
+        if turn_number == 2:
+            turns[2] = turn_two
+            return turn_two
+        return None  # turn 3 fetch fails
+
+    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+    ctx = make_analytic_compute_context(
+        turn_four,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+    with pytest.raises(ValidationError, match="could not load turn 3"):
+        ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
+    failures = recent_ensure_failure_reports(game_id=628580, perspective=1)
+    assert failures[0].reason == "turn_fetch_failed"
+    assert failures[0].missing_turn == 3
 
 
 def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
@@ -214,14 +446,108 @@ def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     assert persistence.get_evidence_aggregate(628580, 1, 4) is not None
 
 
-def test_threshold_promotion_materializes_definite(persistence) -> None:
+def test_export_ensure_delegates_the_ensure_loop_to_the_framework(persistence) -> None:
+    """Dependency ensure runs through ``ensure_declared_dependencies``, not a local loop."""
+    from unittest.mock import patch
+
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_context import AnalyticQueryContext
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turns = {
+        1: turn_one,
+        2: replace(turn_one, settings=replace(turn_one.settings, turn=2)),
+        3: replace(turn_one, settings=replace(turn_one.settings, turn=3)),
+    }
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+    ctx = make_analytic_compute_context(
+        turns[3],
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+
+    original_ensure_declared = AnalyticQueryContext.ensure_declared_dependencies
+    ensured_scopes: list[tuple[str, int]] = []
+
+    def tracking_ensure_declared_dependencies(self, analytic_id, scope):
+        ensured_scopes.append((analytic_id, scope.turn))
+        return original_ensure_declared(self, analytic_id, scope)
+
+    with patch.object(
+        AnalyticQueryContext,
+        "ensure_declared_dependencies",
+        tracking_ensure_declared_dependencies,
+    ):
+        assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
+
+    assert ensured_scopes == [(ANALYTIC_ID, 3), (ANALYTIC_ID, 2)]
+    assert persistence.get_evidence_aggregate(628580, 1, 3) is not None
+
+
+def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persistence) -> None:
+    """A hole the walk never needs must not fail the shell turn or trigger auto-fetch."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    # Hole at turn 2, but evidence is already refined through turn 3.
+    turns = {
+        1: turn_one,
+        3: replace(turn_one, settings=replace(turn_one.settings, turn=3)),
+        4: replace(turn_one, settings=replace(turn_one.settings, turn=4)),
+    }
+    fetch_calls: list[int] = []
+
+    def ensure_turn(turn_number: int):
+        fetch_calls.append(turn_number)
+        return None
+
+    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(turn=3, baseline_turn=1),
+    )
+    ctx = make_analytic_compute_context(
+        turns[4],
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+    ).exports
+
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
+    assert fetch_calls == []
+    assert persistence.get_evidence_aggregate(628580, 1, 4) is not None
+
+
+def test_origin_distance_observations_do_not_promote_to_definite() -> None:
     turn = _load_turn()
     aggregate = HomeworldEvidenceAggregate(
         turn=5,
         baseline_turn=1,
-        evidence_hits=(
-            HomeworldIndependentEvidenceHit(planet_id=10, turn=2),
-            HomeworldIndependentEvidenceHit(planet_id=10, turn=3),
+        origin_distance_observations=(
+            OriginDistanceObservation(turn=2, x=100, y=200, matched_planet_ids=(10,)),
+            OriginDistanceObservation(turn=3, x=110, y=210, matched_planet_ids=(10,)),
         ),
     )
     candidates = materialize_evidence_adjusted_candidates(
@@ -230,9 +556,8 @@ def test_threshold_promotion_materializes_definite(persistence) -> None:
         planets=turn.planets,
         settings_turn=turn,
         player_count=11,
-        promotion_threshold=2,
     )
-    assert candidates[0].confidence_tier == CONFIDENCE_DEFINITE
+    assert candidates[0].confidence_tier == CONFIDENCE_POSSIBLE
 
 
 def test_single_starbase_promotion_materializes_without_owner_assignment() -> None:
@@ -249,7 +574,6 @@ def test_single_starbase_promotion_materializes_without_owner_assignment() -> No
         planets=turn.planets,
         settings_turn=turn,
         player_count=11,
-        promotion_threshold=2,
     )
     assert candidates[0].confidence_tier == CONFIDENCE_DEFINITE
     assert candidates[0].perspective is None
@@ -304,7 +628,6 @@ def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sampl
         planets=[definite, nearby],
         settings_turn=turn,
         player_count=11,
-        promotion_threshold=2,
     )
     assert [row.planet_id for row in candidates] == [1, 2]
 

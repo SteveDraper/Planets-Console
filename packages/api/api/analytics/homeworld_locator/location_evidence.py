@@ -7,8 +7,8 @@ from collections.abc import Mapping, Sequence
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
-    HomeworldIndependentEvidenceHit,
     HomeworldSingleStarbasePromotion,
+    OriginDistanceObservation,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
 from api.concepts.hull_abilities import hull_has_gravitonic_movement
@@ -122,35 +122,45 @@ def implicated_candidate_planet_ids(
     return tuple(implicated)
 
 
-def independent_hit_keys(
-    hits: Sequence[HomeworldIndependentEvidenceHit],
-) -> frozenset[tuple[int, int]]:
-    return frozenset((hit.planet_id, hit.turn) for hit in hits)
-
-
-def append_independent_origin_distance_hits(
-    existing_hits: Sequence[HomeworldIndependentEvidenceHit],
+def upsert_origin_distance_observation(
+    existing: Sequence[OriginDistanceObservation],
     *,
     turn: int,
+    x: int,
+    y: int,
     matched_planet_ids: Sequence[int],
-) -> tuple[HomeworldIndependentEvidenceHit, ...]:
-    """Record at most one independent hit per (planet, turn)."""
-    seen = independent_hit_keys(existing_hits)
-    appended = list(existing_hits)
-    for planet_id in matched_planet_ids:
-        key = (planet_id, turn)
-        if key in seen:
-            continue
-        seen = frozenset((*seen, key))
-        appended.append(HomeworldIndependentEvidenceHit(planet_id=planet_id, turn=turn))
-    return tuple(appended)
-
-
-def independent_hit_count_for_planet(
-    hits: Sequence[HomeworldIndependentEvidenceHit],
-    planet_id: int,
-) -> int:
-    return sum(1 for hit in hits if hit.planet_id == planet_id)
+) -> tuple[OriginDistanceObservation, ...]:
+    """Upsert one observation keyed by (turn, x, y), unioning match set M."""
+    if not matched_planet_ids:
+        return tuple(existing)
+    key = (turn, x, y)
+    incoming = frozenset(matched_planet_ids)
+    updated: list[OriginDistanceObservation] = []
+    found = False
+    for observation in existing:
+        if (observation.turn, observation.x, observation.y) == key:
+            found = True
+            merged = tuple(sorted(frozenset(observation.matched_planet_ids) | incoming))
+            updated.append(
+                OriginDistanceObservation(
+                    turn=turn,
+                    x=x,
+                    y=y,
+                    matched_planet_ids=merged,
+                )
+            )
+        else:
+            updated.append(observation)
+    if not found:
+        updated.append(
+            OriginDistanceObservation(
+                turn=turn,
+                x=x,
+                y=y,
+                matched_planet_ids=tuple(sorted(incoming)),
+            )
+        )
+    return tuple(updated)
 
 
 def scoreboard_starbase_count_for_owner(turn: TurnInfo, owner_id: int) -> int | None:

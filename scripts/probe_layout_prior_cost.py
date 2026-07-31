@@ -54,6 +54,7 @@ from api.analytics.homeworld_locator.layout_prior_solver import LayoutPriorSolut
 from api.analytics.homeworld_locator.layout_prior_stop_gate import (  # noqa: E402
     DeadlineStopGate,
 )
+from api.analytics.homeworld_locator.models import OriginDistanceObservation  # noqa: E402
 from api.analytics.homeworld_locator.persistence import (  # noqa: E402
     HomeworldLocatorPersistenceService,
 )
@@ -110,8 +111,14 @@ def _build_problem(
     *,
     turn: TurnInfo,
     view: HomeworldCandidateView,
+    origin_distance_observations: Sequence[OriginDistanceObservation] = (),
 ) -> LayoutPriorProblem:
-    problem = try_layout_prior_problem(view.candidates, turn=turn, view=view)
+    problem = try_layout_prior_problem(
+        view.candidates,
+        turn=turn,
+        view=view,
+        origin_distance_observations=origin_distance_observations,
+    )
     if problem is None:
         raise ValidationError(
             "layout prior emission gate failed (no pin, ineligible map, or no category)"
@@ -243,8 +250,7 @@ def _print_focus_planet_terms(
     else:
         typer.echo(
             f"    center-distance: {center_term.center_distance_ly:.3f} LY "
-            f"→ pct {center_term.percentile:.2f} "
-            f"(|pct-50|={center_term.abs_deviation_from_50:.4f})"
+            f"→ -log dens={center_term.neg_log_density:.4f}"
         )
     incoming = next((e for e in bd.neighbor_edges if e.to_sector == sector), None)
     outgoing = next((e for e in bd.neighbor_edges if e.from_sector == sector), None)
@@ -255,8 +261,7 @@ def _print_focus_planet_terms(
         typer.echo(
             f"    {label}: {_sector_label(edge.from_sector, selection.chosen_by_sector, problem)}"
             f" → {_sector_label(edge.to_sector, selection.chosen_by_sector, problem)}: "
-            f"{edge.separation_ly:.3f} LY → pct {edge.percentile:.2f} "
-            f"(|pct-50|={edge.abs_deviation_from_50:.4f})"
+            f"{edge.separation_ly:.3f} LY → -log dens={edge.neg_log_density:.4f}"
         )
 
 
@@ -271,7 +276,8 @@ def _print_scored(
     bd = selection.breakdown
     typer.echo(
         f"  cost: {selection.cost:.6f} "
-        f"(neighbor_mean={bd.neighbor_mean:.6f} + center_mean={bd.center_mean:.6f})"
+        f"(neighbor_mean={bd.neighbor_mean:.6f} + center_mean={bd.center_mean:.6f}"
+        f" + evidence_mean={bd.evidence_mean:.6f})"
     )
     typer.echo(f"  tie_key: {selection.tie_key}")
     ordered = sorted(selection.chosen_by_sector.items())
@@ -354,9 +360,16 @@ def main(
     if not view.available:
         raise ValidationError(f"homeworld locator unavailable: {view.inactive_reason}")
 
-    problem = _build_problem(turn=shell_turn, view=view)
+    aggregate = persistence.get_evidence_aggregate(game_id, resolved_perspective, turn)
+    observations = () if aggregate is None else aggregate.origin_distance_observations
+    problem = _build_problem(
+        turn=shell_turn,
+        view=view,
+        origin_distance_observations=observations,
+    )
     solver = AnnealingLayoutPriorSolver()
-    solution: LayoutPriorSolution = solver.solve(problem, stop_gate=DeadlineStopGate(budget_ms))
+    solve_result = solver.solve(problem, stop_gate=DeadlineStopGate(budget_ms))
+    solution: LayoutPriorSolution = solve_result.solution
 
     preferred = _score(
         "preferred (anneal + sample-grid refine)",
@@ -416,9 +429,10 @@ def main(
         delta = swapped.cost - preferred.cost
         typer.echo(f"\ndelta (swap - preferred): {delta:+.6f}")
         typer.echo(
-            "note: total cost is mean(|pct-50|) over all ring edges plus "
-            "mean(|pct-50|) over all unpinned members; focus lines show raw "
-            "term deviations, not how much the means move."
+            "note: total cost is mean(-log Normal dens) over all ring edges plus "
+            "mean(-log Normal dens) over all unpinned center distances plus "
+            "λ-blended soft origin-distance evidence; focus lines "
+            "show per-term -log densities, not how much the means move."
         )
 
 

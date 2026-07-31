@@ -12,8 +12,9 @@ from api.analytics.homeworld_locator.compute_services import (
 )
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.evidence_ensure import (
-    compute_homeworld_evidence_refine_step,
+    compute_homeworld_evidence_refine_step_detailed,
     evidence_refined_through_shell,
+    record_evidence_refine_step_report,
 )
 from api.analytics.homeworld_locator.serialization import (
     homeworld_evidence_aggregate_from_json,
@@ -182,10 +183,13 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         baseline_turn=state.baseline_turn,
         shell_turn=shell_turn,
     )
-    refined = compute_homeworld_evidence_refine_step(services, turn=turn)
+    step = compute_homeworld_evidence_refine_step_detailed(services, turn=turn)
+    # Persist timing is owned by PersistencePolicy; record refine compute cost here.
+    if not already_durable:
+        record_evidence_refine_step_report(services, turn=turn, step=step, persist_ms=0.0)
     payload = {
         "available": True,
-        "evidenceAggregate": homeworld_evidence_aggregate_to_json(refined),
+        "evidenceAggregate": homeworld_evidence_aggregate_to_json(step.aggregate),
     }
     if already_durable:
         return StepResult(outcome="complete", payload=payload)

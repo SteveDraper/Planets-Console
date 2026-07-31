@@ -242,4 +242,63 @@ describe('useMapAnalyticQueries', () => {
       expect(result.current.combined.nodes[0]?.y).toBe(99)
     })
   })
+
+  it('excludes errored layer last-good data from combined while keeping healthy layers', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let stellarShouldFail = false
+    vi.mocked(fetchAnalyticMap).mockImplementation(async (analyticId) => {
+      if (analyticId === 'base-map') {
+        return {
+          analyticId: 'base-map',
+          nodes: [{ id: 'p1', label: 'p1', x: 1, y: 2 }],
+          edges: [],
+        }
+      }
+      if (analyticId === 'connections') {
+        return { analyticId: 'connections', nodes: [], edges: [], routes: [] }
+      }
+      if (analyticId === 'stellar-cartography') {
+        if (stellarShouldFail) {
+          throw new Error('stellar cartography map failed')
+        }
+        return {
+          analyticId: 'stellar-cartography',
+          nodes: [{ id: 'wh-1', label: '', x: 5, y: 6 }],
+          edges: [],
+          overlayCircles: [],
+        }
+      }
+      throw new Error(`unexpected analytic ${analyticId}`)
+    })
+
+    const { result } = renderHook(
+      () =>
+        useMapAnalyticQueries(
+          defaultHookInput({
+            enabledAnalyticIds: ['connections', 'stellar-cartography'],
+          })
+        ),
+      { wrapper: createWrapper(client) }
+    )
+
+    await waitFor(() => {
+      expect(result.current.combined.wormholeUnknownEntrances).toEqual([{ x: 5, y: 6 }])
+    })
+    expect(result.current.hasError).toBe(false)
+
+    stellarShouldFail = true
+    await client.invalidateQueries({ queryKey: ['analytic', 'stellar-cartography', 'map'] })
+
+    await waitFor(() => {
+      expect(result.current.hasError).toBe(true)
+    })
+
+    const failedLayer = result.current.mapQueries.find((q) => q.isError)
+    expect(failedLayer?.data).toBeDefined()
+    expect(failedLayer?.data?.analyticId).toBe('stellar-cartography')
+    expect(result.current.combined.wormholeUnknownEntrances).toEqual([])
+    expect(result.current.combined.nodes.length).toBeGreaterThan(0)
+    expect(result.current.hasAnyData).toBe(true)
+    expect(String(result.current.mapError)).toMatch(/stellar cartography map failed/i)
+  })
 })

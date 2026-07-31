@@ -8,9 +8,7 @@ from pathlib import Path
 
 from api.analytics.homeworld_locator.location_evidence import (
     ORIGIN_DISTANCE_MATCH_TOLERANCE_LY,
-    append_independent_origin_distance_hits,
     candidate_planet_ids,
-    independent_hit_count_for_planet,
     origin_distance_candidate_planet_ids,
     origin_distance_targets,
     promote_candidate_to_definite,
@@ -20,11 +18,12 @@ from api.analytics.homeworld_locator.location_evidence import (
     ship_gravitonic_movement,
     ship_matches_origin_distance_to_planet,
     single_starbase_new_build_implicated_planet_id,
+    upsert_origin_distance_observation,
 )
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
-    HomeworldIndependentEvidenceHit,
+    OriginDistanceObservation,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
 from api.concepts.hull_abilities import hull_has_gravitonic_movement
@@ -198,17 +197,57 @@ def test_origin_distance_matches_existing_candidates_only() -> None:
     assert matched == (10,)
 
 
-def test_independent_hit_accounting_one_per_planet_turn() -> None:
-    hits = append_independent_origin_distance_hits((), turn=5, matched_planet_ids=(10, 10, 11))
-    assert hits == (
-        HomeworldIndependentEvidenceHit(planet_id=10, turn=5),
-        HomeworldIndependentEvidenceHit(planet_id=11, turn=5),
+def test_origin_distance_observation_upsert_by_location() -> None:
+    """Two locations → two observations; same coords → one with unioned M."""
+    first = upsert_origin_distance_observation(
+        (),
+        turn=5,
+        x=100,
+        y=200,
+        matched_planet_ids=(10,),
     )
-    hits_again = append_independent_origin_distance_hits(hits, turn=5, matched_planet_ids=(10,))
-    assert hits_again == hits
-    hits_next_turn = append_independent_origin_distance_hits(hits, turn=6, matched_planet_ids=(10,))
-    assert len(hits_next_turn) == 3
-    assert independent_hit_count_for_planet(hits_next_turn, 10) == 2
+    assert first == (OriginDistanceObservation(turn=5, x=100, y=200, matched_planet_ids=(10,)),)
+    two_locations = upsert_origin_distance_observation(
+        first,
+        turn=5,
+        x=300,
+        y=400,
+        matched_planet_ids=(10,),
+    )
+    assert two_locations == (
+        OriginDistanceObservation(turn=5, x=100, y=200, matched_planet_ids=(10,)),
+        OriginDistanceObservation(turn=5, x=300, y=400, matched_planet_ids=(10,)),
+    )
+    colocated_union = upsert_origin_distance_observation(
+        two_locations,
+        turn=5,
+        x=100,
+        y=200,
+        matched_planet_ids=(11, 10),
+    )
+    assert colocated_union == (
+        OriginDistanceObservation(turn=5, x=100, y=200, matched_planet_ids=(10, 11)),
+        OriginDistanceObservation(turn=5, x=300, y=400, matched_planet_ids=(10,)),
+    )
+    ambiguous = upsert_origin_distance_observation(
+        (),
+        turn=12,
+        x=50,
+        y=60,
+        matched_planet_ids=(483, 435),
+    )
+    assert ambiguous == (
+        OriginDistanceObservation(turn=12, x=50, y=60, matched_planet_ids=(435, 483)),
+    )
+    assert len(ambiguous[0].matched_planet_ids) == 2
+    empty = upsert_origin_distance_observation(
+        first,
+        turn=5,
+        x=1,
+        y=2,
+        matched_planet_ids=(),
+    )
+    assert empty == first
 
 
 def test_single_starbase_new_build_promotes_possible_to_definite() -> None:

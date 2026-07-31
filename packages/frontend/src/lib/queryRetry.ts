@@ -5,6 +5,8 @@
  * retrying those only adds delay. We retry only statuses and errors that are commonly transient.
  */
 
+import { BffHttpError } from '../api/bffHttpError'
+
 const MAX_FAILURE_COUNT_BEFORE_STOP = 3
 
 export function errorDetailFromUnknown(error: unknown, fallback = 'Unknown error'): string {
@@ -19,6 +21,17 @@ export function errorDetailFromUnknown(error: unknown, fallback = 'Unknown error
 
 function errorMessage(error: unknown): string {
   return errorDetailFromUnknown(error)
+}
+
+/**
+ * HTTP status of a failed request: authoritative from {@link BffHttpError}, otherwise
+ * inferred from the message of an untyped Error.
+ */
+export function httpStatusFromError(error: unknown): number | null {
+  if (error instanceof BffHttpError) {
+    return error.status
+  }
+  return parseHttpStatusFromErrorMessage(errorMessage(error))
 }
 
 /** HTTP status inferred from our Error messages (see api/bff.ts). */
@@ -80,18 +93,9 @@ export function shouldRetryTanStackQuery(failureCount: number, error: unknown): 
   if (failureCount >= MAX_FAILURE_COUNT_BEFORE_STOP) {
     return false
   }
-  if (isLikelyNetworkFailure(error)) {
-    return true
+  const code = httpStatusFromError(error)
+  if (code != null) {
+    return isTransientHttpStatus(code)
   }
-  const code = parseHttpStatusFromErrorMessage(errorMessage(error))
-  if (code == null) {
-    return false
-  }
-  if (isTransientHttpStatus(code)) {
-    return true
-  }
-  if (code >= 400 && code < 500) {
-    return false
-  }
-  return false
+  return isLikelyNetworkFailure(error)
 }

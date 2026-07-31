@@ -129,22 +129,48 @@ def _parse_homeworld_locator_config(raw: object) -> HomeworldLocatorConfig:
         )
     if min_clans < 0:
         raise ValueError(f"api.homeworld_locator.min_baseline_clans must be >= 0, got {min_clans}")
-    threshold = raw.get(
-        "evidence_promotion_threshold",
-        defaults.evidence_promotion_threshold,
+    lambda_raw = raw.get(
+        "origin_distance_evidence_lambda",
+        defaults.origin_distance_evidence_lambda,
     )
-    if isinstance(threshold, bool) or not isinstance(threshold, int):
+    if isinstance(lambda_raw, bool) or not isinstance(lambda_raw, (int, float)):
         raise TypeError(
-            f"api.homeworld_locator.evidence_promotion_threshold must be an int, got "
-            f"{type(threshold).__name__}: {threshold!r}"
+            f"api.homeworld_locator.origin_distance_evidence_lambda must be a number, got "
+            f"{type(lambda_raw).__name__}: {lambda_raw!r}"
         )
-    if threshold < 1:
+    evidence_lambda = float(lambda_raw)
+    if not (0.0 < evidence_lambda <= 1.0):
         raise ValueError(
-            f"api.homeworld_locator.evidence_promotion_threshold must be >= 1, got {threshold}"
+            "api.homeworld_locator.origin_distance_evidence_lambda must be in (0, 1], "
+            f"got {evidence_lambda}"
+        )
+    solver = raw.get("layout_prior_solver", defaults.layout_prior_solver)
+    if not isinstance(solver, str):
+        raise TypeError(
+            f"api.homeworld_locator.layout_prior_solver must be a string, got "
+            f"{type(solver).__name__}: {solver!r}"
+        )
+    known_solvers = frozenset({"anneal", "enumerate"})
+    if solver not in known_solvers:
+        known = ", ".join(sorted(known_solvers))
+        raise ValueError(
+            f"api.homeworld_locator.layout_prior_solver must be one of: {known}, got {solver!r}"
+        )
+    budget_ms = raw.get("layout_prior_budget_ms", defaults.layout_prior_budget_ms)
+    if isinstance(budget_ms, bool) or not isinstance(budget_ms, int):
+        raise TypeError(
+            f"api.homeworld_locator.layout_prior_budget_ms must be an int, got "
+            f"{type(budget_ms).__name__}: {budget_ms!r}"
+        )
+    if budget_ms < 0:
+        raise ValueError(
+            f"api.homeworld_locator.layout_prior_budget_ms must be >= 0, got {budget_ms}"
         )
     return HomeworldLocatorConfig(
         min_baseline_clans=min_clans,
-        evidence_promotion_threshold=threshold,
+        origin_distance_evidence_lambda=evidence_lambda,
+        layout_prior_solver=solver,
+        layout_prior_budget_ms=budget_ms,
     )
 
 

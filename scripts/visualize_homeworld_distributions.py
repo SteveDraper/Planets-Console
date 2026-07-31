@@ -2,8 +2,8 @@
 """Compute and distill homeworld distance distributions from sampled_homeworlds.csv.
 
 Report mode (default) writes histogram JSON under ``local/`` (gitignored). Distill
-mode Laplace-smooths those histograms into the committed layout distribution asset
-used by homeworld region overlay paint and later likelihood scoring.
+mode fits Normal mean/std (plus empirical support edges) into the committed layout
+distribution asset used by homeworld region overlay paint and layout-prior cost.
 
 Regenerate the shipped asset (from repo root)::
 
@@ -28,7 +28,6 @@ from pathlib import Path
 
 import typer
 from api.analytics.homeworld_locator.layout_distributions_asset import (
-    DEFAULT_LAPLACE_ALPHA,
     default_layout_distributions_path,
     distill_layout_distributions_from_report,
     write_layout_distributions_asset,
@@ -380,18 +379,14 @@ def distill_command(
             f"(default: {default_layout_distributions_path()})."
         ),
     ),
-    alpha: float = typer.Option(
-        DEFAULT_LAPLACE_ALPHA,
-        "--alpha",
-        help="Laplace smoothing pseudo-count applied to each trimmed histogram bin.",
-    ),
 ) -> None:
     """Distill a histogram report into the shipped layout distribution asset.
 
-    Requires ``local/homeworld_distributions.json`` (or ``--report``). Rebuild that
-    report from ``local/sampled_homeworlds.csv`` + ``.sampler_data`` via the default
-    command when regenerating from raw samples. Raw CSV remains gitignored; only
-    the distilled asset is committed.
+    Writes schema v2 tables: empirical support edges plus Normal mean/std for
+    layout-prior ``-log`` density cost. Requires ``local/homeworld_distributions.json``
+    (or ``--report``). Rebuild that report from ``local/sampled_homeworlds.csv`` +
+    ``.sampler_data`` via the default command when regenerating from raw samples.
+    Raw CSV remains gitignored; only the distilled asset is committed.
     """
     if not report_path.is_file():
         typer.echo(f"Report not found: {report_path}", err=True)
@@ -408,14 +403,19 @@ def distill_command(
 
     asset = distill_layout_distributions_from_report(
         report,
-        alpha=alpha,
         source={"reportPath": str(report_path)},
     )
     written = write_layout_distributions_asset(asset, path=output)
     typer.echo(f"wrote layout distribution asset to {written}")
     for category in ("epic", "standard"):
         inner, outer = asset.center_distance_band(category)
-        typer.echo(f"  {category} center-distance band: [{inner}, {outer}] LY")
+        tables = asset.for_category(category)
+        typer.echo(
+            f"  {category} center band: [{inner}, {outer}] LY  "
+            f"N(μ={tables.center_distance.mean}, σ={tables.center_distance.std}); "
+            f"neighbor N(μ={tables.neighbor_separation.mean}, "
+            f"σ={tables.neighbor_separation.std})"
+        )
 
 
 def main() -> None:

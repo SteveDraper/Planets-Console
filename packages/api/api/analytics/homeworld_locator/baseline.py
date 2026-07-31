@@ -17,15 +17,52 @@ from api.analytics.homeworld_locator.geometry import (
     resolve_map_center,
     sector_index_for_angle,
 )
+from api.analytics.homeworld_locator.layout_distributions_asset import (
+    LayoutDistributionsAsset,
+    load_default_layout_distributions_asset,
+)
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
     InferredHomeworldCandidate,
 )
+from api.concepts.game_category import GameCategory
 from api.concepts.homeworld_layout import supports_circular_round_candidate_geometry
+from api.concepts.stellar_cartography.nebula_visibility import distance_ly
 from api.concepts.warp_well import planet_is_planetoid
 from api.models.game import GameSettings
 from api.models.planet import Planet
+
+
+def layout_center_distance_band(
+    settings: GameSettings,
+    *,
+    player_count: int,
+    layout_asset: LayoutDistributionsAsset | None = None,
+) -> tuple[float, float] | None:
+    """Return asset center-distance support band when sector paint applies; else None.
+
+    Same epic|standard + circular + round gate as homeworld sector overlays.
+    """
+    if not supports_circular_round_candidate_geometry(settings):
+        return None
+    category = GameCategory.from_game_settings(settings, player_count=player_count)
+    if category not in (GameCategory.EPIC, GameCategory.STANDARD):
+        return None
+    asset = layout_asset if layout_asset is not None else load_default_layout_distributions_asset()
+    return asset.center_distance_band(category)
+
+
+def planet_in_center_distance_band(
+    planet: Planet,
+    *,
+    center: tuple[float, float],
+    r_inner: float,
+    r_outer: float,
+) -> bool:
+    """True when planet lies in the closed annular band around ``center``."""
+    dist = distance_ly(planet.x, planet.y, center[0], center[1])
+    return r_inner <= dist <= r_outer
 
 
 def cull_co_sector_candidates_after_definites(
@@ -117,6 +154,7 @@ def infer_homeworld_baseline_candidates(
     starbase_planet_ids: Set[int],
     min_baseline_clans: int,
     map_center: tuple[float, float] | None = None,
+    layout_asset: LayoutDistributionsAsset | None = None,
 ) -> tuple[InferredHomeworldCandidate, ...]:
     """Infer slot-anchored and orphan homeworld candidates from a baseline turn.
 
@@ -124,10 +162,12 @@ def infer_homeworld_baseline_candidates(
     round maps, remaining ring sites become orphan possibles only when they also
     meet the **homeworld cluster constraint** (geometry AND cluster -- not OR).
     Cluster-constraint matches also yield orphan possibles when ring math does not
-    apply (or for off-ring planets). After emission, possibles that share a sector
-    with a definite are culled (one HW per Circular sector). Rival slots are not
-    cross-product bound in v1 baseline. Debris-disk planetoids are never candidates
-    and never count toward cluster neighborhood minima.
+    apply (or for off-ring planets). When the layout-asset epic|standard band
+    applies (same gate as sector overlays), orphan candidates outside that
+    center-distance support are never emitted. After emission, possibles that share
+    a sector with a definite are culled (one HW per Circular sector). Rival slots
+    are not cross-product bound in v1 baseline. Debris-disk planetoids are never
+    candidates and never count toward cluster neighborhood minima.
 
     ``viewpoint_player_id`` matches planet ``ownerid`` (Player.id).
     ``viewpoint_perspective`` is the 1-based shell storage slot written on
@@ -149,6 +189,25 @@ def infer_homeworld_baseline_candidates(
         and supports_circular_round_candidate_geometry(settings)
         and player_count >= 2
     )
+    band = (
+        layout_center_distance_band(
+            settings,
+            player_count=player_count,
+            layout_asset=layout_asset,
+        )
+        if use_ring
+        else None
+    )
+
+    def _orphan_allowed(planet: Planet) -> bool:
+        if band is None:
+            return True
+        return planet_in_center_distance_band(
+            planet,
+            center=center,
+            r_inner=band[0],
+            r_outer=band[1],
+        )
 
     if pin is not None:
         emitted[pin.id] = InferredHomeworldCandidate(
@@ -166,6 +225,8 @@ def infer_homeworld_baseline_candidates(
             ):
                 if site.id == pin.id:
                     continue
+                if not _orphan_allowed(site):
+                    continue
                 counts = count_cluster_neighbors(site, planets)
                 if not meets_homeworld_cluster_constraint(counts, settings):
                     continue
@@ -182,6 +243,8 @@ def infer_homeworld_baseline_candidates(
         if planet.id in emitted:
             continue
         if planet_is_planetoid(planet):
+            continue
+        if not _orphan_allowed(planet):
             continue
         counts = count_cluster_neighbors(planet, planets)
         if not meets_homeworld_cluster_constraint(counts, settings):

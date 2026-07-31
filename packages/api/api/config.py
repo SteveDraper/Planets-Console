@@ -12,13 +12,17 @@ class HomeworldLocatorConfig:
     min_baseline_clans: int = 10_000
     """Floor for homeworld baseline profile clan matching."""
 
-    evidence_promotion_threshold: int = 2
-    """Independent evidence hits required for possible -> definite."""
+    origin_distance_evidence_lambda: float = 0.95
+    """Absolute-turn weight base for soft origin-distance evidence in layout-prior cost.
+
+    On nonempty turn ``t``, ``E = (E + w(t) e_t) / (1 + w(t))`` with ``w(t) = λ^t``.
+    Valid range ``(0, 1]``.
+    """
 
     layout_prior_solver: str = "anneal"
     """Layout-prior discrete solver: ``anneal`` (default) or ``enumerate``."""
 
-    layout_prior_budget_ms: int = 150
+    layout_prior_budget_ms: int = 1000
     """Wall-clock SA budget for ``anneal`` (DeadlineStopGate). Conservative
     interactive default for dense circular maps (~680224-class); enumerate
     ignores this. Tune up if materialize has spare latency headroom.
@@ -57,7 +61,7 @@ class ApiConfig:
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
 
     homeworld_locator: HomeworldLocatorConfig = field(default_factory=HomeworldLocatorConfig)
-    """Homeworld locator policy (baseline clans, evidence threshold, layout-prior knobs)."""
+    """Homeworld locator policy (baseline clans, soft evidence λ, layout-prior knobs)."""
 
 
 def get_config() -> ApiConfig:
