@@ -17,3 +17,4 @@ local/
 .sampler_data/
 
 # Frontend (packages/frontend has its own .gitignore for node_modules, dist)
+node_modules/
