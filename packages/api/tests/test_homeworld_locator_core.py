@@ -11,6 +11,7 @@ from api.analytics.export_types import ExportScope
 from api.analytics.homeworld_locator.baseline_ensure import (
     ensure_homeworld_baseline,
     materialize_homeworld_candidate_view,
+    needs_baseline_recompute,
     resolve_baseline_turn,
 )
 from api.analytics.homeworld_locator.compute import get_homeworld_locator
@@ -19,6 +20,7 @@ from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
     ATTRIBUTION_INFERRED,
     ATTRIBUTION_USER_ASSERTED,
+    HOMEWORLD_BASELINE_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.exports import (
     EXPORT_CATALOG,
@@ -41,6 +43,7 @@ from api.concepts.homeworld_layout import (
     INACTIVE_REASON_NO_HOMEWORLD,
     INACTIVE_REASON_WANDERING_TRIBES,
     homeworld_locator_inactive_reason,
+    homeworld_settings_fingerprint,
     is_homeworld_locator_available,
 )
 from api.errors import ValidationError
@@ -406,6 +409,36 @@ def test_recompute_when_turn_one_appears_after_degraded(persistence, sample_turn
     assert second.recomputed is True
     assert second.game_state.baseline_turn == 1
     assert second.game_state.baseline_degraded is False
+
+
+def test_recompute_when_baseline_algorithm_version_mismatches(
+    persistence, sample_turn
+) -> None:
+    """Stale HOMEWORLD_BASELINE_ALGORITHM_VERSION must force baseline recompute."""
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    first = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    assert first.recomputed is True
+    assert first.game_state.baseline_algorithm_version == HOMEWORLD_BASELINE_ALGORITHM_VERSION
+
+    fingerprint = homeworld_settings_fingerprint(turn_one.settings)
+    assert needs_baseline_recompute(services, settings_fingerprint=fingerprint) is False
+    second = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    assert second.recomputed is False
+
+    # 0 is the pre-version sentinel on HomeworldLocatorGameState.
+    stale = replace(first.game_state, baseline_algorithm_version=0)
+    persistence.put_baseline(
+        628580,
+        1,
+        stale,
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
+    )
+    assert needs_baseline_recompute(services, settings_fingerprint=fingerprint) is True
+    third = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    assert third.recomputed is True
+    assert third.game_state.baseline_algorithm_version == HOMEWORLD_BASELINE_ALGORITHM_VERSION
 
 
 def test_export_ensure_unsatisfied_when_degraded_and_turn_one_present(
