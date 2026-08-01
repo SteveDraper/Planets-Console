@@ -411,9 +411,7 @@ def test_recompute_when_turn_one_appears_after_degraded(persistence, sample_turn
     assert second.game_state.baseline_degraded is False
 
 
-def test_recompute_when_baseline_algorithm_version_mismatches(
-    persistence, sample_turn
-) -> None:
+def test_recompute_when_baseline_algorithm_version_mismatches(persistence, sample_turn) -> None:
     """Stale HOMEWORLD_BASELINE_ALGORITHM_VERSION must force baseline recompute."""
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     turns = {1: turn_one}
