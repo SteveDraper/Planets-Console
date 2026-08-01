@@ -6,7 +6,7 @@ Analytic console for [planets.nu](https://planets.nu) game state (VGA Planets–
 
 ### Prerequisites
 
-- **Python 3.12+** — managed with [uv](https://docs.astral.sh/uv/)
+- **Python 3.14+** — managed with [uv](https://docs.astral.sh/uv/)
 - **Node.js 18+** and npm (or pnpm) — for the frontend
 
 ### 1. Clone and install backend
@@ -129,7 +129,7 @@ make check_frontend_api_no_monolithic_schema   # fails if src/api/schema.ts exis
 
 ### User documentation
 
-- **[User guide](docs/user-guide.md)** -- full tour of the console UI (header, analytics, tabular and map views, map options, login). Image paths under `docs/images/user-guide/` are placeholders for screenshots.
+- **[User guide](docs/user-guide.md)** -- full tour of the console UI (header, analytics, tabular and map views, map options, login). Image paths under `docs/images/user-guide/` are placeholders for screenshots.  *Note* - way out of date currently!
 
 ### Design documentation
 
