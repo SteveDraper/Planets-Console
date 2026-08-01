@@ -12,7 +12,10 @@ from api.analytics.homeworld_locator.compute_services import (
     HomeworldLocatorComputeServices,
     resolve_homeworld_services,
 )
-from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
+from api.analytics.homeworld_locator.constants import (
+    HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+    LAYOUT_PRIOR_ALGORITHM_VERSION,
+)
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
 from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
 from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
@@ -41,6 +44,7 @@ from api.concepts.homeworld_layout import (
     homeworld_settings_fingerprint,
     is_homeworld_locator_available,
 )
+from api.concepts.visibility_coverage import planet_scan_origins, visibility_owner_ids
 from api.config import get_config
 from api.errors import ValidationError
 from api.models.game import TurnInfo
@@ -114,13 +118,15 @@ def needs_baseline_recompute(
     *,
     settings_fingerprint: tuple[object, ...],
 ) -> bool:
-    """True when missing floor, settings changed, or turn 1 appeared after degraded."""
+    """True when missing floor, settings changed, algo bump, or turn 1 after degraded."""
     state = services.persistence.get_game_state(services.game_id)
     if state is None:
         return True
     if not services.persistence.has_baseline_floor(services.game_id, services.perspective):
         return True
     if state.settings_fingerprint != settings_fingerprint:
+        return True
+    if state.baseline_algorithm_version != HOMEWORLD_BASELINE_ALGORITHM_VERSION:
         return True
     if state.baseline_degraded and services.load_turn(1) is not None:
         return True
@@ -185,12 +191,21 @@ def compute_homeworld_baseline(
 
     baseline_turn_info, baseline_turn, degraded = resolve_baseline_turn(services)
     existing = services.persistence.get_game_state(services.game_id)
-    min_clans = get_config().homeworld_locator.min_baseline_clans
+    hw_cfg = get_config().homeworld_locator
+    min_clans = hw_cfg.min_baseline_clans
     # Ownership matching uses Player.id; durable candidates use the shell slot.
     viewpoint_player = baseline_turn_info.player
     viewpoint_perspective = _durable_viewpoint_perspective(
         services,
         viewpoint_player_id=viewpoint_player.id,
+    )
+    owner_ids = visibility_owner_ids(viewpoint_player.id, baseline_turn_info.relations)
+    scan_origins = planet_scan_origins(
+        baseline_turn_info.planets,
+        baseline_turn_info.ships,
+        baseline_turn_info.hulls,
+        owner_ids,
+        planet_scan_range=float(baseline_turn_info.settings.planetscanrange),
     )
     infer_t0 = time.perf_counter()
     inferred = infer_homeworld_baseline_candidates(
@@ -202,6 +217,9 @@ def compute_homeworld_baseline(
         player_count=_player_count(baseline_turn_info),
         starbase_planet_ids=_starbase_planet_ids(baseline_turn_info),
         min_baseline_clans=min_clans,
+        scan_origins=scan_origins,
+        nebulas=baseline_turn_info.nebulas,
+        cluster_fow_density_credit_multiplier=hw_cfg.cluster_fow_density_credit_multiplier,
     )
     infer_ms = (time.perf_counter() - infer_t0) * 1000.0
     candidates = merge_candidates_preserving_user_asserted(
@@ -213,6 +231,7 @@ def compute_homeworld_baseline(
         baseline_turn=baseline_turn,
         baseline_degraded=degraded,
         settings_fingerprint=fingerprint,
+        baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
     )
     floor = HomeworldEvidenceAggregate(
         turn=baseline_turn,

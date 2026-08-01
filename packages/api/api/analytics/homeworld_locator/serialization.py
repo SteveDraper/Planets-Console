@@ -62,6 +62,7 @@ def homeworld_locator_game_state_to_json(state: HomeworldLocatorGameState) -> di
         "baselineTurn": state.baseline_turn,
         "baselineDegraded": state.baseline_degraded,
         "settingsFingerprint": list(state.settings_fingerprint),
+        "baselineAlgorithmVersion": state.baseline_algorithm_version,
     }
 
 
@@ -80,11 +81,15 @@ def homeworld_locator_game_state_from_json(data: dict[str, Any]) -> HomeworldLoc
     fingerprint_raw = data.get("settingsFingerprint", [])
     if not isinstance(fingerprint_raw, list):
         raise ValidationError("homeworld locator settingsFingerprint must be a JSON array")
+    version_raw = data.get("baselineAlgorithmVersion", 0)
+    if isinstance(version_raw, bool) or not isinstance(version_raw, int) or version_raw < 0:
+        raise ValidationError("homeworld locator baselineAlgorithmVersion must be an int >= 0")
     return HomeworldLocatorGameState(
         candidates=tuple(homeworld_candidate_record_from_json(row) for row in candidates_raw),
         baseline_turn=baseline_turn,
         baseline_degraded=baseline_degraded,
         settings_fingerprint=tuple(fingerprint_raw),
+        baseline_algorithm_version=version_raw,
     )
 
 

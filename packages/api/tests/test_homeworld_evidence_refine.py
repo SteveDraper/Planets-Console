@@ -14,7 +14,10 @@ from api.analytics.homeworld_locator.compute_orchestration import (
     build_homeworld_refine_job_wire,
     run_homeworld_refine,
 )
-from api.analytics.homeworld_locator.constants import ANALYTIC_ID
+from api.analytics.homeworld_locator.constants import (
+    ANALYTIC_ID,
+    HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+)
 from api.analytics.homeworld_locator.evidence_refine import (
     cull_definite_neighborhood_candidates,
     materialize_evidence_adjusted_candidates,
@@ -75,6 +78,7 @@ def _baseline_state(
         baseline_turn=1,
         baseline_degraded=False,
         settings_fingerprint=homeworld_settings_fingerprint(turn_settings),
+        baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
     )
 
 

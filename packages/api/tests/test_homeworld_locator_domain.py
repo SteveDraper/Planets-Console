@@ -102,6 +102,7 @@ def test_homeworld_locator_config_defaults() -> None:
     cfg = HomeworldLocatorConfig()
     assert cfg.min_baseline_clans == 10_000
     assert cfg.origin_distance_evidence_lambda == 0.95
+    assert cfg.cluster_fow_density_credit_multiplier == 1.0
 
 
 def test_supports_circular_round_only(sample_settings) -> None:

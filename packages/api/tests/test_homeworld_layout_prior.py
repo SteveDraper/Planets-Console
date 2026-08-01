@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 from api.analytics.homeworld_locator.baseline_ensure import materialize_homeworld_candidate_view
 from api.analytics.homeworld_locator.compute import get_homeworld_locator
-from api.analytics.homeworld_locator.constants import ANALYTIC_ID
+from api.analytics.homeworld_locator.constants import (
+    ANALYTIC_ID,
+    HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+)
 from api.analytics.homeworld_locator.layout_distributions_asset import (
     CategoryLayoutDistributions,
     LayoutDistributionsAsset,
@@ -619,6 +622,7 @@ def test_empty_nebular_sector_stand_in_does_not_block_most_probable(
             baseline_turn=1,
             baseline_degraded=False,
             settings_fingerprint=homeworld_settings_fingerprint(turn.settings),
+            baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
         ),
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
     )
@@ -847,6 +851,7 @@ def test_shell_layout_prior_persisted_and_reused(
             baseline_turn=1,
             baseline_degraded=False,
             settings_fingerprint=homeworld_settings_fingerprint(turn.settings),
+            baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
         ),
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
     )
