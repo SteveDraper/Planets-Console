@@ -141,6 +141,7 @@ class HomeworldLocatorPersistenceService:
             baseline_turn=existing.baseline_turn,
             baseline_degraded=existing.baseline_degraded,
             settings_fingerprint=(),
+            baseline_algorithm_version=existing.baseline_algorithm_version,
         )
         self.put_game_state(game_id, retained)
         self._bump_generations_for_game(game_id)

@@ -323,6 +323,7 @@ def test_evidence_through_turn_codec_round_trip() -> None:
 
 def test_ensure_refine_freeze_cutoff_walks_scoreboard_turns() -> None:
     """Ensure path resolves the freeze via services.load_turn at the earliest crossing."""
+    from api.analytics.homeworld_locator.constants import HOMEWORLD_BASELINE_ALGORITHM_VERSION
     from api.analytics.homeworld_locator.evidence_ensure import (
         compute_homeworld_evidence_refine_step_detailed,
     )
@@ -348,6 +349,7 @@ def test_ensure_refine_freeze_cutoff_walks_scoreboard_turns() -> None:
             baseline_turn=1,
             baseline_degraded=False,
             settings_fingerprint=homeworld_settings_fingerprint(shell.settings),
+            baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
         ),
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
     )

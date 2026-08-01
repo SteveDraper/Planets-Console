@@ -8,7 +8,11 @@ from collections.abc import Mapping, Sequence, Set
 from api.analytics.homeworld_locator.baseline_profile import unique_baseline_profile_match
 from api.analytics.homeworld_locator.cluster import (
     count_cluster_neighbors,
-    meets_homeworld_cluster_constraint,
+)
+from api.analytics.homeworld_locator.cluster_fow_credit import (
+    cluster_band_fow_credit,
+    estimate_traditional_planet_density,
+    meets_homeworld_cluster_constraint_with_credit,
 )
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
 from api.analytics.homeworld_locator.cull_candidates import TCullable
@@ -28,7 +32,8 @@ from api.analytics.homeworld_locator.models import (
 )
 from api.concepts.game_category import GameCategory
 from api.concepts.homeworld_layout import supports_circular_round_candidate_geometry
-from api.concepts.stellar_cartography.nebula_visibility import distance_ly
+from api.concepts.map_region_coverage import CoverageOrigin
+from api.concepts.stellar_cartography.nebula_visibility import NebulaCenter, distance_ly
 from api.concepts.warp_well import planet_is_planetoid
 from api.models.game import GameSettings
 from api.models.planet import Planet
@@ -153,8 +158,11 @@ def infer_homeworld_baseline_candidates(
     player_count: int,
     starbase_planet_ids: Set[int],
     min_baseline_clans: int,
+    scan_origins: Sequence[CoverageOrigin],
     map_center: tuple[float, float] | None = None,
     layout_asset: LayoutDistributionsAsset | None = None,
+    nebulas: Sequence[NebulaCenter] = (),
+    cluster_fow_density_credit_multiplier: float = 1.0,
 ) -> tuple[InferredHomeworldCandidate, ...]:
     """Infer slot-anchored and orphan homeworld candidates from a baseline turn.
 
@@ -168,6 +176,12 @@ def infer_homeworld_baseline_candidates(
     a sector with a definite are culled (one HW per Circular sector). Rival slots
     are not cross-product bound in v1 baseline. Debris-disk planetoids are never
     candidates and never count toward cluster neighborhood minima.
+
+    Cluster candidature applies FoW density credit for unobserved very-close /
+    close annulus area using ``scan_origins`` / ``nebulas`` and
+    ``cluster_fow_density_credit_multiplier``. ``scan_origins`` is required:
+    pass the perspective planet-scan origins from ensure. An empty sequence is
+    valid and means full-band unobserved credit (no scan coverage model).
 
     ``viewpoint_player_id`` matches planet ``ownerid`` (Player.id).
     ``viewpoint_perspective`` is the 1-based shell storage slot written on
@@ -184,6 +198,25 @@ def infer_homeworld_baseline_candidates(
 
     emitted: dict[int, InferredHomeworldCandidate] = {}
     center = map_center if map_center is not None else resolve_map_center(planets)
+    density = estimate_traditional_planet_density(
+        planets,
+        settings,
+        origins=scan_origins,
+        nebulas=nebulas,
+        map_center=center,
+    )
+
+    def _meets_cluster(planet: Planet) -> bool:
+        known = count_cluster_neighbors(planet, planets)
+        credit = cluster_band_fow_credit(
+            planet,
+            density_per_ly2=density,
+            origins=scan_origins,
+            nebulas=nebulas,
+            credit_multiplier=cluster_fow_density_credit_multiplier,
+        )
+        return meets_homeworld_cluster_constraint_with_credit(known, credit, settings)
+
     use_ring = (
         pin is not None
         and supports_circular_round_candidate_geometry(settings)
@@ -227,8 +260,7 @@ def infer_homeworld_baseline_candidates(
                     continue
                 if not _orphan_allowed(site):
                     continue
-                counts = count_cluster_neighbors(site, planets)
-                if not meets_homeworld_cluster_constraint(counts, settings):
+                if not _meets_cluster(site):
                     continue
                 emitted.setdefault(
                     site.id,
@@ -246,8 +278,7 @@ def infer_homeworld_baseline_candidates(
             continue
         if not _orphan_allowed(planet):
             continue
-        counts = count_cluster_neighbors(planet, planets)
-        if not meets_homeworld_cluster_constraint(counts, settings):
+        if not _meets_cluster(planet):
             continue
         emitted[planet.id] = InferredHomeworldCandidate(
             planet_id=planet.id,

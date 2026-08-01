@@ -293,6 +293,7 @@ def test_load_config_homeworld_locator_defaults():
     assert root.api.homeworld_locator.origin_distance_evidence_lambda == 0.95
     assert root.api.homeworld_locator.layout_prior_solver == "anneal"
     assert root.api.homeworld_locator.layout_prior_budget_ms == 1000
+    assert root.api.homeworld_locator.cluster_fow_density_credit_multiplier == 1.0
 
 
 def test_load_config_homeworld_locator_overrides(tmp_path):
@@ -305,6 +306,7 @@ def test_load_config_homeworld_locator_overrides(tmp_path):
         "    origin_distance_evidence_lambda: 0.5\n"
         "    layout_prior_solver: enumerate\n"
         "    layout_prior_budget_ms: 1500\n"
+        "    cluster_fow_density_credit_multiplier: 1.25\n"
         "bff: {}\n",
         encoding="utf-8",
     )
@@ -313,6 +315,7 @@ def test_load_config_homeworld_locator_overrides(tmp_path):
     assert root.api.homeworld_locator.origin_distance_evidence_lambda == 0.5
     assert root.api.homeworld_locator.layout_prior_solver == "enumerate"
     assert root.api.homeworld_locator.layout_prior_budget_ms == 1500
+    assert root.api.homeworld_locator.cluster_fow_density_credit_multiplier == 1.25
 
 
 def test_load_config_homeworld_locator_leaf_override():

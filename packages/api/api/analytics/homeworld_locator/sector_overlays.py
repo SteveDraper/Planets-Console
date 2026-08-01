@@ -33,7 +33,10 @@ from api.concepts.map_region_coverage import (
     MapRegionOverlay,
     MapRegionOverlayDisk,
     MapRegionOverlayVertex,
+    annulus_angle_span,
+    annulus_polar_sample_counts,
     boundary_to_overlay,
+    iter_annulus_polar_sample_points,
     point_covered_by_origins,
 )
 from api.concepts.stellar_cartography.nebula_visibility import NebulaCenter, distance_ly
@@ -55,10 +58,6 @@ STATUS_ERROR = "error"
 # stroke-only on the map (``fillOpacity`` always 0). Color marks ok vs error.
 SECTOR_COLOR = "#f97316"
 ERROR_SECTOR_COLOR = "#ef4444"
-
-# Observation sampling over the annular sector band.
-_RADIAL_SAMPLE_STEP_LY = 10.0
-_MIN_ANGLE_SAMPLES = 12
 
 ENVELOPE_RADII_LY: tuple[float, float] = (
     VERY_CLOSE_PLANETS_MAX_LY,
@@ -152,13 +151,6 @@ def annular_sector_boundary(
     return vertices, edges
 
 
-def _sector_angle_span(angle_start: float, angle_end: float) -> float:
-    span = angle_end - angle_start
-    if span <= 0:
-        span += 2.0 * math.pi
-    return span
-
-
 def sector_band_geometric_center(
     *,
     center: tuple[float, float],
@@ -168,7 +160,7 @@ def sector_band_geometric_center(
     r_outer: float,
 ) -> tuple[float, float]:
     """Angular mid-ray at the midpoint radius of the annular sector."""
-    mid_angle = angle_start + 0.5 * _sector_angle_span(angle_start, angle_end)
+    mid_angle = angle_start + 0.5 * annulus_angle_span(angle_start, angle_end)
     mid_radius = 0.5 * (r_inner + r_outer)
     return (
         center[0] + mid_radius * math.cos(mid_angle),
@@ -198,20 +190,18 @@ def unobserved_band_sample_points(
             ),
         )
 
-    span = _sector_angle_span(angle_start, angle_end)
-    angle_samples = max(_MIN_ANGLE_SAMPLES, int(math.ceil(span / (math.pi / 36.0))))
-    radial_steps = max(1, int(math.ceil((r_outer - r_inner) / _RADIAL_SAMPLE_STEP_LY)))
-
     points: list[tuple[float, float]] = []
-    for angle_index in range(angle_samples + 1):
-        angle = angle_start + span * (angle_index / angle_samples)
-        for radial_index in range(radial_steps + 1):
-            radius = r_inner + (r_outer - r_inner) * (radial_index / radial_steps)
-            x = center[0] + radius * math.cos(angle)
-            y = center[1] + radius * math.sin(angle)
-            if point_covered_by_origins(x, y, origins, nebulas):
-                continue
-            points.append((x, y))
+    for x, y in iter_annulus_polar_sample_points(
+        center=center,
+        angle_start=angle_start,
+        angle_end=angle_end,
+        r_inner=r_inner,
+        r_outer=r_outer,
+        closed_angle=True,
+    ):
+        if point_covered_by_origins(x, y, origins, nebulas):
+            continue
+        points.append((x, y))
     return tuple(points)
 
 
@@ -240,11 +230,13 @@ def closest_unobserved_band_point(
             r_outer=r_outer,
         )
 
-    span = _sector_angle_span(angle_start, angle_end)
+    span, angle_samples, radial_steps = annulus_polar_sample_counts(
+        angle_start=angle_start,
+        angle_end=angle_end,
+        r_inner=r_inner,
+        r_outer=r_outer,
+    )
     mid_angle = angle_start + 0.5 * span
-    angle_samples = max(_MIN_ANGLE_SAMPLES, int(math.ceil(span / (math.pi / 36.0))))
-    radial_steps = max(1, int(math.ceil((r_outer - r_inner) / _RADIAL_SAMPLE_STEP_LY)))
-
     best: tuple[float, float] | None = None
     best_dist = float("inf")
     best_angle_delta = float("inf")

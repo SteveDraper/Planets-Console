@@ -1,5 +1,7 @@
 """Tests for hybrid map-region coverage (disks + nebula-local patches)."""
 
+import math
+
 from api.concepts.map_region_coverage import (
     CoverageOrigin,
     MapRegionBoundaryArcEdge,
@@ -10,12 +12,54 @@ from api.concepts.map_region_coverage import (
     build_hybrid_coverage,
     decode_patch_coverage,
     hybrid_coverage_to_overlay,
+    iter_annulus_polar_sample_points,
     map_region_overlay_to_wire,
     patch_cell_covered,
     point_covered_by_origins,
 )
 from api.concepts.stellar_cartography.nebula_visibility import nebula_visibility_ly
 from api.models.space import Nebula
+
+
+def test_iter_annulus_polar_sample_points_full_circle_omits_seam():
+    points = list(
+        iter_annulus_polar_sample_points(
+            center=(0.0, 0.0),
+            angle_start=0.0,
+            angle_end=2.0 * math.pi,
+            r_inner=0.0,
+            r_outer=10.0,
+            closed_angle=False,
+        )
+    )
+    closed = list(
+        iter_annulus_polar_sample_points(
+            center=(0.0, 0.0),
+            angle_start=0.0,
+            angle_end=2.0 * math.pi,
+            r_inner=0.0,
+            r_outer=10.0,
+            closed_angle=True,
+        )
+    )
+    assert points
+    assert len(closed) > len(points)
+
+
+def test_iter_annulus_polar_sample_points_excludes_inner_boundary():
+    points = list(
+        iter_annulus_polar_sample_points(
+            center=(0.0, 0.0),
+            angle_start=0.0,
+            angle_end=math.pi / 2.0,
+            r_inner=10.0,
+            r_outer=20.0,
+            closed_angle=True,
+            exclude_inner_boundary=True,
+        )
+    )
+    assert points
+    assert all((x * x + y * y) ** 0.5 > 10.0 - 1e-6 for x, y in points)
 
 
 def test_point_covered_by_origins_matches_disk():

@@ -28,6 +28,14 @@ class HomeworldLocatorConfig:
     ignores this. Tune up if materialize has spare latency headroom.
     """
 
+    cluster_fow_density_credit_multiplier: float = 1.0
+    """Multiplier on FoW density credit for homeworld cluster candidature.
+
+    Effective credit is ``density × unobserved_band_area × multiplier``, then
+    capped per band at the remaining map-gen deficit. Valid range ``>= 0``.
+    Absent YAML key uses ``1.0``.
+    """
+
 
 @dataclass(frozen=True)
 class ApiConfig:
@@ -61,7 +69,7 @@ class ApiConfig:
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
 
     homeworld_locator: HomeworldLocatorConfig = field(default_factory=HomeworldLocatorConfig)
-    """Homeworld locator policy (baseline clans, soft evidence λ, layout-prior knobs)."""
+    """Homeworld locator policy (baseline clans, soft evidence λ, FoW credit, layout-prior)."""
 
 
 def get_config() -> ApiConfig:

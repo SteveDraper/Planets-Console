@@ -41,6 +41,7 @@ The amalgamated config has three top-level keys:
 | `homeworld_locator.origin_distance_evidence_lambda` | float | `0.95` | Absolute-turn soft-evidence update weight base λ: on nonempty turn `t`, `E = (E + w e_t) / (1 + w)` with `w = λ^t`. Empty turns leave `E` unchanged. Valid range `(0, 1]`. Default keeps useful mid-game updates (~T4-T20 standard / ~T5-T30 epic) while late updates stay weak. |
 | `homeworld_locator.layout_prior_solver` | string | `anneal` | Layout-prior discrete solver: `anneal` (greedy + seeded SA + sample-grid refine, production default) or `enumerate` (`EnumeratingLayoutPriorSolver`, ≤4 nearest-mid product; emergency / regression). Switching solver is an ops concern and typically pairs with understanding `LAYOUT_PRIOR_ALGORITHM_VERSION` cache invalidation. |
 | `homeworld_locator.layout_prior_budget_ms` | integer | `1000` | Wall-clock SA budget (ms) for `anneal` via `DeadlineStopGate`. Enumerate ignores this. **Default rationale:** enough wall-clock for budget-progress cooling to escape early local minima on dense circular maps (663307-class T10/T11); not a CI wall-clock assert. Lower only after measuring anneal quality vs latency on target hardware. |
+| `homeworld_locator.cluster_fow_density_credit_multiplier` | float | `1.0` | Multiplier on **homeworld cluster constraint** FoW density credit: effective credit is `density × unobserved_band_area × multiplier`, then capped per band at the remaining map-gen deficit. Valid range `>= 0`. Absent YAML key uses `1.0`. |
 
 ### `bff` (BFF)
 
@@ -66,6 +67,7 @@ api:
     origin_distance_evidence_lambda: 0.95
     layout_prior_solver: anneal
     layout_prior_budget_ms: 1000
+    cluster_fow_density_credit_multiplier: 1.0
 
 bff:
   cors_origins:

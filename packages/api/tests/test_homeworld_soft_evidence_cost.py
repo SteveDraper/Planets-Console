@@ -7,7 +7,10 @@ import math
 from pathlib import Path
 
 import pytest
-from api.analytics.homeworld_locator.constants import LAYOUT_PRIOR_ALGORITHM_VERSION
+from api.analytics.homeworld_locator.constants import (
+    HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+    LAYOUT_PRIOR_ALGORITHM_VERSION,
+)
 from api.analytics.homeworld_locator.layout_prior_cost import (
     ORIGIN_DISTANCE_EVIDENCE_EMPTY_INTERSECTION_EPS,
     origin_distance_evidence_mean,
@@ -250,6 +253,7 @@ def test_layout_prior_problem_from_materialized_view_retains_soft_evidence_obser
             baseline_turn=1,
             baseline_degraded=False,
             settings_fingerprint=homeworld_settings_fingerprint(turn.settings),
+            baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
         ),
         HomeworldEvidenceAggregate(
             turn=1,

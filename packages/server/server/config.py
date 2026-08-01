@@ -166,11 +166,27 @@ def _parse_homeworld_locator_config(raw: object) -> HomeworldLocatorConfig:
         raise ValueError(
             f"api.homeworld_locator.layout_prior_budget_ms must be >= 0, got {budget_ms}"
         )
+    credit_raw = raw.get(
+        "cluster_fow_density_credit_multiplier",
+        defaults.cluster_fow_density_credit_multiplier,
+    )
+    if isinstance(credit_raw, bool) or not isinstance(credit_raw, (int, float)):
+        raise TypeError(
+            f"api.homeworld_locator.cluster_fow_density_credit_multiplier must be a number, "
+            f"got {type(credit_raw).__name__}: {credit_raw!r}"
+        )
+    credit_multiplier = float(credit_raw)
+    if credit_multiplier < 0.0:
+        raise ValueError(
+            "api.homeworld_locator.cluster_fow_density_credit_multiplier must be >= 0, "
+            f"got {credit_multiplier}"
+        )
     return HomeworldLocatorConfig(
         min_baseline_clans=min_clans,
         origin_distance_evidence_lambda=evidence_lambda,
         layout_prior_solver=solver,
         layout_prior_budget_ms=budget_ms,
+        cluster_fow_density_credit_multiplier=credit_multiplier,
     )
 
 

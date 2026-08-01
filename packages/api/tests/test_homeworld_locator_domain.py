@@ -31,11 +31,17 @@ from api.concepts.homeworld_layout import (
     MAP_SHAPE_ROUND,
     supports_circular_round_candidate_geometry,
 )
+from api.concepts.map_region_coverage import CoverageOrigin
 from api.config import HomeworldLocatorConfig
 from api.models.planet import Planet
 from api.serialization.turn import turn_info_from_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+
+# Wide scan reach so FoW density credit stays ~0 (pre-credit cluster parity).
+_FULL_CHART_SCAN_ORIGINS: tuple[CoverageOrigin, ...] = (
+    CoverageOrigin(x=0, y=0, base_range=10_000),
+)
 
 
 @pytest.fixture
@@ -102,6 +108,7 @@ def test_homeworld_locator_config_defaults() -> None:
     cfg = HomeworldLocatorConfig()
     assert cfg.min_baseline_clans == 10_000
     assert cfg.origin_distance_evidence_lambda == 0.95
+    assert cfg.cluster_fow_density_credit_multiplier == 1.0
 
 
 def test_supports_circular_round_only(sample_settings) -> None:
@@ -404,6 +411,7 @@ def test_infer_baseline_never_emits_planetoid_candidates(template_planet, sample
         player_count=2,
         starbase_planet_ids=set(),
         min_baseline_clans=10_000,
+        scan_origins=_FULL_CHART_SCAN_ORIGINS,
     )
     ids = {row.planet_id for row in candidates}
     assert 4 not in ids
@@ -494,6 +502,7 @@ def test_infer_baseline_viewpoint_definite_and_ring_orphans(
         player_count=player_count,
         starbase_planet_ids=set(),
         min_baseline_clans=10_000,
+        scan_origins=_FULL_CHART_SCAN_ORIGINS,
         map_center=center,
     )
     by_id = {row.planet_id: row for row in candidates}
@@ -562,6 +571,7 @@ def test_infer_baseline_ring_site_requires_cluster_constraint(
         player_count=player_count,
         starbase_planet_ids=set(),
         min_baseline_clans=10_000,
+        scan_origins=_FULL_CHART_SCAN_ORIGINS,
         map_center=center,
     )
     by_id = {row.planet_id: row for row in candidates}
@@ -743,6 +753,7 @@ def test_infer_baseline_culls_co_sector_cluster_orphans(template_planet, sample_
         player_count=2,
         starbase_planet_ids=set(),
         min_baseline_clans=10_000,
+        scan_origins=_FULL_CHART_SCAN_ORIGINS,
         map_center=center,
     )
     ids = {row.planet_id for row in candidates}
@@ -797,6 +808,7 @@ def test_infer_baseline_culls_orphans_outside_layout_center_band(
         player_count=11,
         starbase_planet_ids=set(),
         min_baseline_clans=10_000,
+        scan_origins=_FULL_CHART_SCAN_ORIGINS,
         map_center=center,
         layout_asset=_stub_layout_asset(support_min=500.0, support_max=600.0),
     )
@@ -839,6 +851,7 @@ def test_infer_baseline_non_circular_uses_cluster_orphans_only(
         player_count=4,
         starbase_planet_ids=set(),
         min_baseline_clans=10_000,
+        scan_origins=_FULL_CHART_SCAN_ORIGINS,
         map_center=(0.0, 0.0),
     )
     by_id = {row.planet_id: row for row in candidates}
@@ -890,6 +903,7 @@ def test_infer_baseline_player_id_distinct_from_perspective_slot(
         player_count=4,
         starbase_planet_ids=set(),
         min_baseline_clans=10_000,
+        scan_origins=_FULL_CHART_SCAN_ORIGINS,
     )
     assert len(candidates) == 1
     assert candidates[0].planet_id == 10

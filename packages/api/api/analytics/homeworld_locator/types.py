@@ -31,6 +31,8 @@ class HomeworldLocatorGameState:
     baseline_turn: int
     baseline_degraded: bool
     settings_fingerprint: tuple[object, ...] = ()
+    baseline_algorithm_version: int = 0
+    """``HOMEWORLD_BASELINE_ALGORITHM_VERSION`` at last baseline write; 0 = pre-version."""
 
 
 @dataclass(frozen=True)
