@@ -7,7 +7,8 @@ exclusive blit authority (clip disks against them, then paint each patch once).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import math
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 
 from api.concepts.stellar_cartography.nebula_visibility import (
@@ -28,6 +29,78 @@ CellAabb = tuple[int, int, int, int]
 # Nebula Scanner ability: floor effective reach inside nebulae (still capped
 # by base_range when base_range < 100).
 NEBULA_SCANNER_FLOOR_LY = 100.0
+
+# Shared polar grid for annular-sector / annulus FoW sampling (#35 / #275).
+ANNULUS_RADIAL_SAMPLE_STEP_LY = 10.0
+ANNULUS_MIN_ANGLE_SAMPLES = 12
+ANNULUS_ANGLE_STEP_RAD = math.pi / 36.0
+
+
+def annulus_angle_span(angle_start: float, angle_end: float) -> float:
+    """Positive CCW span from ``angle_start`` to ``angle_end`` (wraps over 2π)."""
+    span = angle_end - angle_start
+    if span <= 0:
+        span += 2.0 * math.pi
+    return span
+
+
+def annulus_polar_sample_counts(
+    *,
+    angle_start: float,
+    angle_end: float,
+    r_inner: float,
+    r_outer: float,
+) -> tuple[float, int, int]:
+    """Return ``(span, angle_samples, radial_steps)`` for the shared polar grid."""
+    span = annulus_angle_span(angle_start, angle_end)
+    angle_samples = max(
+        ANNULUS_MIN_ANGLE_SAMPLES,
+        int(math.ceil(span / ANNULUS_ANGLE_STEP_RAD)),
+    )
+    radial_width = max(0.0, r_outer - r_inner)
+    radial_steps = max(1, int(math.ceil(radial_width / ANNULUS_RADIAL_SAMPLE_STEP_LY)))
+    return span, angle_samples, radial_steps
+
+
+def iter_annulus_polar_sample_points(
+    *,
+    center: tuple[float, float],
+    angle_start: float,
+    angle_end: float,
+    r_inner: float,
+    r_outer: float,
+    closed_angle: bool = True,
+    exclude_inner_boundary: bool = False,
+) -> Iterator[tuple[float, float]]:
+    """Yield polar-grid sample points in an annular sector (or full annulus).
+
+    ``closed_angle=True`` includes both angle endpoints (sector edges).
+    ``closed_angle=False`` omits the end angle so a full 2π sweep does not
+    double-count the seam. ``exclude_inner_boundary`` skips the exact ``r_inner``
+    ring so samples sit in ``(r_inner, r_outer]`` when ``r_inner > 0``.
+    """
+    if r_outer <= r_inner:
+        return
+    span, angle_samples, radial_steps = annulus_polar_sample_counts(
+        angle_start=angle_start,
+        angle_end=angle_end,
+        r_inner=r_inner,
+        r_outer=r_outer,
+    )
+    angle_count = angle_samples + 1 if closed_angle else angle_samples
+    center_x, center_y = center
+    for angle_index in range(angle_count):
+        angle = angle_start + span * (angle_index / angle_samples)
+        for radial_index in range(radial_steps + 1):
+            radius = r_inner + (r_outer - r_inner) * (radial_index / radial_steps)
+            if exclude_inner_boundary and r_inner > 0.0 and radius <= r_inner + 1e-9:
+                continue
+            if radius > r_outer + 1e-9:
+                continue
+            yield (
+                center_x + radius * math.cos(angle),
+                center_y + radius * math.sin(angle),
+            )
 
 
 @dataclass(frozen=True)

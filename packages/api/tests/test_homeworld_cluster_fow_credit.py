@@ -13,7 +13,6 @@ from api.analytics.homeworld_locator.cluster_fow_credit import (
     ClusterFowBandCredit,
     capped_cluster_fow_credit,
     cluster_band_fow_credit,
-    cluster_constraint_deficit_with_credit,
     estimate_traditional_planet_density,
     max_traditional_planet_spacing_ly,
     meets_homeworld_cluster_constraint_with_credit,
@@ -159,7 +158,6 @@ def test_credit_cap_prevents_over_satisfaction(sample_settings) -> None:
     assert capped.very_close == pytest.approx(1.0)
     assert capped.close_band == pytest.approx(3.0)
     assert meets_homeworld_cluster_constraint_with_credit(known, raw_credit, settings)
-    assert cluster_constraint_deficit_with_credit(known, raw_credit, settings) == 0
 
 
 def test_known_neighbors_not_double_counted_with_credit(template_planet, sample_settings) -> None:
@@ -207,6 +205,21 @@ def test_p40_class_close_band_regains_candidacy_with_fow_credit(
     )
     assert credit.close_band >= 3.0
     assert meets_homeworld_cluster_constraint_with_credit(known, credit, settings)
+
+
+def test_empty_origins_credit_full_band_area(template_planet) -> None:
+    """Explicit empty scan_origins ⇒ full geometric band area (full-band FoW credit)."""
+    candidate = _planet(template_planet, planet_id=1, x=0, y=0)
+    density = 1.0e-4
+    credit = cluster_band_fow_credit(
+        candidate,
+        density_per_ly2=density,
+        origins=(),
+        nebulas=(),
+        credit_multiplier=1.0,
+    )
+    assert credit.very_close == pytest.approx(density * math.pi * (81.0**2))
+    assert credit.close_band == pytest.approx(density * math.pi * (162.0**2 - 81.0**2))
 
 
 def test_nebula_increases_unobserved_annulus_area(template_planet) -> None:

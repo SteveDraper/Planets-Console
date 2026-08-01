@@ -19,16 +19,18 @@ from api.concepts.homeworld_layout import (
     MAP_SHAPE_ROUND,
     VERY_CLOSE_PLANETS_MAX_LY,
 )
-from api.concepts.map_region_coverage import CoverageOrigin, point_covered_by_origins
+from api.concepts.map_region_coverage import (
+    CoverageOrigin,
+    iter_annulus_polar_sample_points,
+    point_covered_by_origins,
+)
 from api.concepts.stellar_cartography.nebula_visibility import NebulaCenter, distance_ly
 from api.concepts.warp_well import planet_is_planetoid
 from api.models.game import GameSettings
 from api.models.planet import Planet
 
-# Sample spacing for map-wide observed-fraction and per-candidate annulus area.
+# Sample spacing for map-wide observed-fraction estimates.
 _MAP_SAMPLE_STEP_LY = 40.0
-_ANNULUS_RADIAL_STEP_LY = 10.0
-_ANNULUS_MIN_ANGLE_SAMPLES = 12
 
 
 @dataclass(frozen=True)
@@ -113,8 +115,9 @@ def observed_area_fraction(
 ) -> float:
     """Fraction of the geometric map area that is planet-scan observed.
 
-    Round maps sample the populated circle of diameter ``D``; rectangular maps
-    sample the ``mapwidth × mapheight`` rectangle anchored at the map center.
+    Round maps sample the populated circle of diameter ``D`` centered at
+    ``map_center``. Rectangular maps sample the ``mapwidth × mapheight`` AABB
+    with origin at ``(0, 0)`` (``map_center`` is unused for that branch).
     Empty origins ⇒ fully unobserved (fraction 0).
     """
     if not origins:
@@ -197,8 +200,9 @@ def unobserved_annulus_area_ly2(
 ) -> float:
     """Estimated unobserved area (ly²) in the closed outer / open inner annulus.
 
-    Samples polar grid points; multiplies geometric annulus area by the
-    unobserved sample fraction. Empty origins ⇒ fully unobserved.
+    Samples the shared polar grid; multiplies geometric annulus area by the
+    unobserved sample fraction. Empty origins ⇒ fully unobserved (full geometric
+    band area credited -- same as full-band FoW credit for cluster candidature).
     """
     if r_outer <= r_inner:
         return 0.0
@@ -208,29 +212,20 @@ def unobserved_annulus_area_ly2(
     if not origins:
         return geometric
 
-    span = 2.0 * math.pi
-    angle_samples = max(
-        _ANNULUS_MIN_ANGLE_SAMPLES,
-        int(math.ceil(span / (math.pi / 36.0))),
-    )
-    radial_steps = max(1, int(math.ceil((r_outer - r_inner) / _ANNULUS_RADIAL_STEP_LY)))
     total = 0
     unobserved = 0
-    for angle_index in range(angle_samples):
-        angle = span * (angle_index / angle_samples)
-        for radial_index in range(radial_steps + 1):
-            radius = r_inner + (r_outer - r_inner) * (radial_index / radial_steps)
-            # Exclude the exact inner boundary for the close band (r_inner > 0)
-            # so samples sit in (r_inner, r_outer]; very-close uses r_inner=0.
-            if r_inner > 0.0 and radius <= r_inner + 1e-9:
-                continue
-            if radius > r_outer + 1e-9:
-                continue
-            x = candidate.x + radius * math.cos(angle)
-            y = candidate.y + radius * math.sin(angle)
-            total += 1
-            if not point_covered_by_origins(x, y, origins, nebulas):
-                unobserved += 1
+    for x, y in iter_annulus_polar_sample_points(
+        center=(float(candidate.x), float(candidate.y)),
+        angle_start=0.0,
+        angle_end=2.0 * math.pi,
+        r_inner=r_inner,
+        r_outer=r_outer,
+        closed_angle=False,
+        exclude_inner_boundary=r_inner > 0.0,
+    ):
+        total += 1
+        if not point_covered_by_origins(x, y, origins, nebulas):
+            unobserved += 1
     if total == 0:
         return 0.0
     return geometric * (unobserved / total)
@@ -244,7 +239,11 @@ def cluster_band_fow_credit(
     nebulas: Sequence[NebulaCenter],
     credit_multiplier: float = 1.0,
 ) -> ClusterFowBandCredit:
-    """Raw FoW credit (before per-band deficit cap) for one candidate."""
+    """Raw FoW credit (before per-band deficit cap) for one candidate.
+
+    Empty ``origins`` treats both bands as fully unobserved (full-band credit
+    before the per-band deficit cap).
+    """
     if density_per_ly2 <= 0.0 or credit_multiplier <= 0.0:
         return ClusterFowBandCredit(very_close=0.0, close_band=0.0)
     very_close_area = unobserved_annulus_area_ly2(
@@ -292,17 +291,3 @@ def meets_homeworld_cluster_constraint_with_credit(
         known.very_close + capped.very_close >= settings.verycloseplanets
         and known.close_band + capped.close_band >= settings.closeplanets
     )
-
-
-def cluster_constraint_deficit_with_credit(
-    known: ClusterNeighborCounts,
-    credit: ClusterFowBandCredit,
-    settings: GameSettings,
-) -> int:
-    """Non-negative integer deficit after applying capped FoW credit (0 = meets)."""
-    capped = capped_cluster_fow_credit(known, credit, settings)
-    very_close_deficit = max(
-        0, math.ceil(settings.verycloseplanets - known.very_close - capped.very_close)
-    )
-    close_deficit = max(0, math.ceil(settings.closeplanets - known.close_band - capped.close_band))
-    return very_close_deficit + close_deficit

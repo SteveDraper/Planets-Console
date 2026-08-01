@@ -158,9 +158,9 @@ def infer_homeworld_baseline_candidates(
     player_count: int,
     starbase_planet_ids: Set[int],
     min_baseline_clans: int,
+    scan_origins: Sequence[CoverageOrigin],
     map_center: tuple[float, float] | None = None,
     layout_asset: LayoutDistributionsAsset | None = None,
-    scan_origins: Sequence[CoverageOrigin] = (),
     nebulas: Sequence[NebulaCenter] = (),
     cluster_fow_density_credit_multiplier: float = 1.0,
 ) -> tuple[InferredHomeworldCandidate, ...]:
@@ -177,9 +177,11 @@ def infer_homeworld_baseline_candidates(
     are not cross-product bound in v1 baseline. Debris-disk planetoids are never
     candidates and never count toward cluster neighborhood minima.
 
-    Cluster candidature may apply FoW density credit for unobserved very-close /
-    close annulus area (perspective chart incompleteness) using ``scan_origins`` /
-    ``nebulas`` and ``cluster_fow_density_credit_multiplier``.
+    Cluster candidature applies FoW density credit for unobserved very-close /
+    close annulus area using ``scan_origins`` / ``nebulas`` and
+    ``cluster_fow_density_credit_multiplier``. ``scan_origins`` is required:
+    pass the perspective planet-scan origins from ensure. An empty sequence is
+    valid and means full-band unobserved credit (no scan coverage model).
 
     ``viewpoint_player_id`` matches planet ``ownerid`` (Player.id).
     ``viewpoint_perspective`` is the 1-based shell storage slot written on
