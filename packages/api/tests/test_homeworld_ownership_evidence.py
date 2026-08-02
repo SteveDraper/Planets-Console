@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from api.analytics.homeworld_locator.constants import HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
 from api.analytics.homeworld_locator.models import (
     AGE_SOURCE_FLEET_BUILT_TURN,
     AGE_SOURCE_SHIP_ID_SCOREBOARD,
@@ -503,12 +504,16 @@ def test_sector_owner_sets_serialization_round_trip() -> None:
         baseline_turn=1,
         sector_owner_sets=((1, (member,)),),
         owner_possible_sectors=((2, (1,)),),
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
     restored = homeworld_evidence_aggregate_from_json(
         homeworld_evidence_aggregate_to_json(aggregate)
     )
     assert restored.sector_owner_sets == aggregate.sector_owner_sets
     assert restored.owner_possible_sectors == aggregate.owner_possible_sectors
+    assert restored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    wire = homeworld_evidence_aggregate_to_json(aggregate)
+    assert wire["evidenceAlgorithmVersion"] == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
 
 
 def test_apply_unique_owner_orphan_bind_sets_perspective(template_planet) -> None:

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from api.analytics.homeworld_locator.constants import (
     HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+    HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     LAYOUT_PRIOR_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.layout_prior_cost import (
@@ -259,6 +260,7 @@ def test_layout_prior_problem_from_materialized_view_retains_soft_evidence_obser
             turn=1,
             baseline_turn=1,
             origin_distance_observations=observations,
+            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
         ),
     )
 

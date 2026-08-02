@@ -7,7 +7,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
-from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
+from api.analytics.homeworld_locator.constants import (
+    ATTRIBUTION_USER_ASSERTED,
+    HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+)
 from api.analytics.homeworld_locator.cull_candidates import TCullable
 from api.analytics.homeworld_locator.evidence_refine_report import (
     EvidenceRefineCounts,
@@ -153,6 +156,7 @@ def refine_homeworld_evidence_aggregate(
         origin_distance_evidence_through_turn=through_turn,
         sector_owner_sets=sector_owner_sets,
         owner_possible_sectors=owner_possible_sectors,
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
     total_ms = (time.perf_counter() - total_t0) * 1000.0
     return EvidenceRefineComputeResult(

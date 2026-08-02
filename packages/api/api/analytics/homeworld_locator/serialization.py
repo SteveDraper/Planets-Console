@@ -458,6 +458,8 @@ def homeworld_evidence_aggregate_to_json(
         payload["ownerPossibleSectors"] = _owner_possible_sectors_to_json(
             aggregate.owner_possible_sectors
         )
+    if aggregate.evidence_algorithm_version > 0:
+        payload["evidenceAlgorithmVersion"] = aggregate.evidence_algorithm_version
     if aggregate.layout_prior_algorithm_version is not None:
         payload["layoutPriorSelection"] = _layout_prior_selection_to_json(aggregate)
     return payload
@@ -529,6 +531,12 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             "must be an int >= 0 when present"
         )
 
+    version_raw = data.get("evidenceAlgorithmVersion", 0)
+    if isinstance(version_raw, bool) or not isinstance(version_raw, int) or version_raw < 0:
+        raise ValidationError(
+            "homeworld evidence aggregate evidenceAlgorithmVersion must be an int >= 0"
+        )
+
     return HomeworldEvidenceAggregate(
         turn=turn,
         baseline_turn=baseline_turn,
@@ -537,6 +545,7 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         origin_distance_evidence_through_turn=through_turn,
         sector_owner_sets=_sector_owner_sets_from_json(data.get("sectorOwnerSets")),
         owner_possible_sectors=_owner_possible_sectors_from_json(data.get("ownerPossibleSectors")),
+        evidence_algorithm_version=version_raw,
         layout_prior_algorithm_version=selection_version,
         layout_prior_input_fingerprint=selection_fingerprint,
         layout_prior_evidence_lambda=selection_evidence_lambda,

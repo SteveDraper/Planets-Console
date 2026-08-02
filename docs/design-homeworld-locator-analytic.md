@@ -205,7 +205,7 @@ Strengthens **homeworld owner** attribution for **homeworld sectors** (whose HW 
 | Concern | Rule |
 |---------|------|
 | Scope | Viewpoint **perspective** TurnInfo only (same **homeworld evidence scope** as location evidence) |
-| Persistence | Turn-scoped on the **homeworld evidence aggregate** (durable sector owner sets + provenances through *T*); materialize projects onto sector overlays / candidate bind helpers |
+| Persistence | Turn-scoped on the **homeworld evidence aggregate** (durable sector owner sets + provenances through *T*); materialize projects onto sector overlays / candidate bind helpers. Stamp ``evidenceAlgorithmVersion`` (`HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`, currently **1**; absent/0 = pre-version). Satisfaction / ensure refuse stale versions so the self-chain rewalks from the baseline floor; floor-only shells re-run refine in place |
 | Location candidates | Never create orphans; never flip `confidence_tier` from ownership alone |
 | Candidate `perspective` | Optional bind when a sector has a **unique** possible owner (orphans in that sector may become slot-anchored for layout-prior / pin display). Ambiguous sectors leave orphans unbound. Prose always says **homeworld owner**, not perspective |
 
@@ -483,3 +483,4 @@ Grill locks: §4.3.2 (this doc). CONTEXT: **homeworld ownership evidence**, **ho
 | 2026-08-02 | #269: retract soft fleet ledger read -- race with open-turn fleet; hard DAG dep on final ``fleet@N`` per **all roster** players (`player_id` fan-out; ``None`` fleet ensure is a no-op) |
 | 2026-08-02 | #269 Phase 2: ``player_id="all"`` ENSURE fan-out wired in export walk + compute DAG; ownership refine reads ``built_turn`` from ``DependencyOutputs`` fleet wires |
 | 2026-08-02 | #269 invalidation wake deferred: open-turn race = DAG only; reverse-ENSURE invalidate + ``force_fresh`` (and scores/fleet refactor onto it) tracked in [#280](https://github.com/SteveDraper/Planets-Console/issues/280) |
+| 2026-08-02 | #269: ``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` (1) on evidence aggregates; stale version fails satisfaction and forces floor re-refine / DAG rewalk |

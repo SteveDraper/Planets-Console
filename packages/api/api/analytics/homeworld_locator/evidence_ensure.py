@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
+from api.analytics.homeworld_locator.constants import HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
 from api.analytics.homeworld_locator.evidence_refine import (
     EvidenceRefineComputeResult,
     candidate_planet_ids_from_records,
@@ -61,6 +62,8 @@ def evidence_refined_through_shell(
     if aggregate is None:
         return False
     if aggregate.baseline_turn != baseline_turn:
+        return False
+    if aggregate.evidence_algorithm_version != HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
         return False
     target_turn = shell_turn if shell_turn > baseline_turn else baseline_turn
     return aggregate.turn == target_turn
@@ -141,9 +144,31 @@ def compute_homeworld_evidence_refine_step_detailed(
         )
         if floor is None:
             raise ValidationError("homeworld floor evidence aggregate missing before refine")
+        if floor.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
+            return EvidenceRefineStepResult(
+                aggregate=floor,
+                computed=False,
+                step_elapsed_ms=(time.perf_counter() - step_t0) * 1000.0,
+            )
+        # Algo bump on floor-only shell: re-run refine on the baseline turn so
+        # ownership (and future evidence policy) rewrites the floor aggregate.
+        candidate_ids = candidate_planet_ids_from_records(state.candidates)
+        planets_by_id = {planet.id: planet for planet in turn.planets}
+        computed = refine_homeworld_evidence_aggregate(
+            floor,
+            turn=turn,
+            candidates=state.candidates,
+            candidate_planet_ids_set=candidate_ids,
+            planets_by_id=planets_by_id,
+            load_turn=services.load_turn,
+            fleet_built_turns=fleet_built_turns,
+        )
         return EvidenceRefineStepResult(
-            aggregate=floor,
-            computed=False,
+            aggregate=computed.aggregate,
+            computed=True,
+            compute=computed,
+            load_game_state_ms=load_game_state_ms,
+            load_prior_ms=0.0,
             step_elapsed_ms=(time.perf_counter() - step_t0) * 1000.0,
         )
 
@@ -162,6 +187,12 @@ def compute_homeworld_evidence_refine_step_detailed(
     if prior is None or prior.baseline_turn != baseline_turn:
         raise ValidationError(
             f"homeworld evidence aggregate before turn {shell} is required before refine"
+        )
+    if prior.evidence_algorithm_version != HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
+        raise ValidationError(
+            f"homeworld evidence aggregate before turn {shell} has stale "
+            f"evidenceAlgorithmVersion {prior.evidence_algorithm_version}; "
+            f"expected {HOMEWORLD_EVIDENCE_ALGORITHM_VERSION}"
         )
 
     candidate_ids = candidate_planet_ids_from_records(state.candidates)

@@ -17,6 +17,7 @@ from api.analytics.homeworld_locator.compute_orchestration import (
 from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
     HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+    HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.evidence_refine import (
     cull_definite_neighborhood_candidates,
@@ -83,7 +84,11 @@ def _baseline_state(
 
 
 def _floor_aggregate() -> HomeworldEvidenceAggregate:
-    return HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
+    return HomeworldEvidenceAggregate(
+        turn=1,
+        baseline_turn=1,
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+    )
 
 
 def test_export_catalog_declares_self_chain() -> None:
@@ -532,7 +537,11 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
     persistence.put_evidence_aggregate(
         628580,
         1,
-        HomeworldEvidenceAggregate(turn=3, baseline_turn=1),
+        HomeworldEvidenceAggregate(
+            turn=3,
+            baseline_turn=1,
+            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+        ),
     )
     ctx = make_analytic_compute_context(
         turns[4],
@@ -707,6 +716,54 @@ def test_materialize_view_refines_through_shell_turn(persistence) -> None:
     assert view.candidates[0].confidence_tier == CONFIDENCE_DEFINITE
     assert view.candidates[0].perspective is None
     assert persistence.get_evidence_aggregate(628580, 1, 2) is not None
+
+
+def test_stale_evidence_algorithm_version_forces_floor_rerefine(persistence) -> None:
+    """Version 0 floor at baseline shell must recompute and stamp current version."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        compute_homeworld_evidence_refine_step_detailed,
+        evidence_refined_through_shell,
+    )
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    assert evidence_refined_through_shell(services, baseline_turn=1, shell_turn=1) is False
+    step = compute_homeworld_evidence_refine_step_detailed(services, turn=turn_one)
+    assert step.computed is True
+    assert step.aggregate.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+
+
+def test_stale_prior_evidence_algorithm_version_raises(persistence) -> None:
+    """Advancing past a stale prior must fail closed so DAG rewalks from the floor."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        compute_homeworld_evidence_refine_step_detailed,
+    )
+    from api.errors import ValidationError
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    turns = {1: turn_one, 2: turn_two}
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    with pytest.raises(ValidationError, match="stale evidenceAlgorithmVersion"):
+        compute_homeworld_evidence_refine_step_detailed(services, turn=turn_two)
 
 
 @pytest.fixture

@@ -56,6 +56,8 @@ class HomeworldEvidenceAggregate:
     """``(sector_index, members)`` rows; empty when no ownership attributions yet."""
     owner_possible_sectors: tuple[tuple[int, tuple[int, ...]], ...] = ()
     """``(owner_slot, remaining_sector_indexes)`` after envelope intersections."""
+    evidence_algorithm_version: int = 0
+    """``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` at last refine write; 0 = pre-version."""
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()

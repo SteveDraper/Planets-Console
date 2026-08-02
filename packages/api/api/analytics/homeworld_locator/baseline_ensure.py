@@ -14,6 +14,7 @@ from api.analytics.homeworld_locator.compute_services import (
 )
 from api.analytics.homeworld_locator.constants import (
     HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+    HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     LAYOUT_PRIOR_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
@@ -237,6 +238,7 @@ def compute_homeworld_baseline(
     floor = HomeworldEvidenceAggregate(
         turn=baseline_turn,
         baseline_turn=baseline_turn,
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
     record_baseline_report(
         build_baseline_report(
