@@ -49,7 +49,7 @@ from tests.test_homeworld_location_evidence import (
     _ship,
     _turn_with_owner_starbase_count,
 )
-from tests.test_homeworld_locator_core import _services
+from tests.test_homeworld_locator_core import _export_services, _services
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -89,6 +89,7 @@ def _floor_aggregate() -> HomeworldEvidenceAggregate:
 def test_export_catalog_declares_self_chain() -> None:
     assert EXPORT_CATALOG.ensure_dependencies == (
         EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
+        EnsureDependency(analytic_id="fleet", turn_delta=0, player_id="all", quality="final"),
     )
 
 
@@ -113,7 +114,7 @@ def test_refine_accumulates_empty_observations_across_turns(persistence) -> None
     ctx = make_analytic_compute_context(
         turn_three,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
     aggregate = persistence.get_evidence_aggregate(628580, 1, 3)
@@ -147,7 +148,7 @@ def test_refine_records_origin_distance_observation_on_shell_turn(persistence) -
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
     aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
@@ -196,7 +197,7 @@ def test_refine_dedupes_colocated_ships_and_keeps_distinct_locations(persistence
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
     aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
@@ -244,7 +245,7 @@ def test_refine_records_ambiguous_match_set(persistence) -> None:
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
     aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
@@ -318,7 +319,7 @@ def test_export_ensure_raises_on_missing_intermediate_turn(persistence) -> None:
     ctx = make_analytic_compute_context(
         turn_three,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     with pytest.raises(ValidationError, match="sign in to auto-fetch"):
         ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
@@ -364,7 +365,7 @@ def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> No
     ctx = make_analytic_compute_context(
         turn_three,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
     assert ensure_calls == [2]
@@ -406,7 +407,7 @@ def test_export_ensure_reports_fetch_failure_after_partial_autofetch(persistence
     ctx = make_analytic_compute_context(
         turn_four,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     with pytest.raises(ValidationError, match="could not load turn 3"):
         ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
@@ -441,7 +442,7 @@ def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     ctx = make_analytic_compute_context(
         turns[4],
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
 
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
@@ -478,7 +479,7 @@ def test_export_ensure_delegates_the_ensure_loop_to_the_framework(persistence) -
     ctx = make_analytic_compute_context(
         turns[3],
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
 
     original_ensure_declared = AnalyticQueryContext.ensure_declared_dependencies
@@ -536,7 +537,7 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
     ctx = make_analytic_compute_context(
         turns[4],
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
 
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
@@ -641,7 +642,8 @@ def test_run_homeworld_refine_persist_round_trip(persistence) -> None:
 
     turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
     turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
-    services = _services(persistence, {1: turn_one, 2: turn_two})
+    turns = {1: turn_one, 2: turn_two}
+    services = _services(persistence, turns)
     persistence.put_baseline(
         628580,
         1,
@@ -652,7 +654,7 @@ def test_run_homeworld_refine_persist_round_trip(persistence) -> None:
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: {1: turn_one, 2: turn_two}.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -699,7 +701,7 @@ def test_materialize_view_refines_through_shell_turn(persistence) -> None:
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     view = materialize_homeworld_candidate_view(ctx, shell_turn=turn_two)
     assert view.candidates[0].confidence_tier == CONFIDENCE_DEFINITE

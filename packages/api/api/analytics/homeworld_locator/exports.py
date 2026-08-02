@@ -49,9 +49,11 @@ from api.errors import ValidationError
 PATH_PREFIX_SCOPE_RULES: tuple[PathPrefixScopeRule, ...] = ()
 
 # Baseline floor at turn 1 (or degraded earliest) plus linear self-chain for
-# shell-turn evidence refine (#36).
+# shell-turn evidence refine (#36). Ownership evidence (#269) waits on final
+# fleet ledgers for every roster player at the shell turn (built_turn ages).
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
     EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
+    EnsureDependency(analytic_id="fleet", turn_delta=0, player_id="all", quality="final"),
 )
 
 EXPORT_VALUE_SCHEMA: dict[str, Any] = {

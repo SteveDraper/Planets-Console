@@ -9,6 +9,7 @@ from api.analytics.homeworld_locator.models import (
     HomeworldSingleStarbasePromotion,
     InferredHomeworldCandidate,
     OriginDistanceObservation,
+    SectorOwnerMember,
 )
 
 
@@ -49,6 +50,12 @@ class HomeworldEvidenceAggregate:
     # cost. Set on first shell at/over shared ship limit to T_limit-1, where T_limit
     # is the earliest scoreboard-history turn at/over the limit.
     origin_distance_evidence_through_turn: int | None = None
+    # Ownership evidence (#269): per-sector possible-owner sets + sticky per-owner
+    # remaining possible-sector sets (None-equivalent omitted = uninitialized).
+    sector_owner_sets: tuple[tuple[int, tuple[SectorOwnerMember, ...]], ...] = ()
+    """``(sector_index, members)`` rows; empty when no ownership attributions yet."""
+    owner_possible_sectors: tuple[tuple[int, tuple[int, ...]], ...] = ()
+    """``(owner_slot, remaining_sector_indexes)`` after envelope intersections."""
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()

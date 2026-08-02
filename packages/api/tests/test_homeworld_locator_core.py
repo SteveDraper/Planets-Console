@@ -8,6 +8,12 @@ from pathlib import Path
 
 import pytest
 from api.analytics.export_types import ExportScope
+from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
+from api.analytics.fleet.types import (
+    FleetAcquisitionLedger,
+    FleetMaterializationProvenance,
+    PersistedFleetLedger,
+)
 from api.analytics.homeworld_locator.baseline_ensure import (
     ensure_homeworld_baseline,
     materialize_homeworld_candidate_view,
@@ -39,6 +45,7 @@ from api.analytics.persistence_paths import (
     game_global_analytic_document_key,
     turn_scoped_analytic_document_key,
 )
+from api.analytics.turn_roster import iter_turn_players
 from api.concepts.homeworld_layout import (
     INACTIVE_REASON_NO_HOMEWORLD,
     INACTIVE_REASON_WANDERING_TRIBES,
@@ -89,6 +96,51 @@ def _services(
         ensure_turn=ensure_turn,
         game_info=game_info,
     )
+
+
+def _final_fleet_ledger(player_id: int) -> PersistedFleetLedger:
+    return PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=player_id),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+
+
+def _seed_fleet_final_ledgers(
+    fleet_services,
+    *,
+    turns: dict[int, TurnInfo],
+) -> None:
+    for turn_number, turn in turns.items():
+        for player in iter_turn_players(turn):
+            fleet_services.persistence.put_ledger(
+                fleet_services.game_id,
+                fleet_services.perspective,
+                turn_number,
+                player.id,
+                _final_fleet_ledger(player.id),
+            )
+
+
+def _export_services(
+    services,
+    turns: dict[int, TurnInfo],
+) -> dict[str, object]:
+    """Homeworld + fleet export services with final fleet ledgers for dependency walk."""
+    shell_turn = turns[max(turns)]
+    fleet_services = build_ephemeral_fleet_compute_services(
+        shell_turn,
+        game_id=services.game_id,
+        perspective=services.perspective,
+        stored_turns=turns,
+    )
+    _seed_fleet_final_ledgers(fleet_services, turns=turns)
+    return {
+        ANALYTIC_ID: services,
+        "fleet": fleet_services,
+    }
 
 
 def _turn_ladder(turn_one: TurnInfo, shell_turn: TurnInfo) -> dict[int, TurnInfo]:
@@ -457,7 +509,7 @@ def test_export_ensure_unsatisfied_when_degraded_and_turn_one_present(
     ctx = make_analytic_compute_context(
         late,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: _services(persistence, turns)},
+        export_services=_export_services(_services(persistence, turns), turns),
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -481,7 +533,7 @@ def test_export_ensure_requires_shell_evidence_aggregate(persistence, sample_tur
     ctx = make_analytic_compute_context(
         sample_turn,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -507,7 +559,7 @@ def test_export_ensure_raises_when_shell_turn_not_stored(persistence, sample_tur
     ctx = make_analytic_compute_context(
         turn_one,
         load_turn=lambda n: {1: turn_one}.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, {1: turn_one}),
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -607,7 +659,7 @@ def test_map_table_payload_smoke(persistence, sample_turn) -> None:
     payload = get_homeworld_locator(
         sample_turn,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     )
     assert payload["analyticId"] == ANALYTIC_ID
     assert payload["available"] is True
@@ -636,7 +688,7 @@ def test_inactive_map_table_payload(persistence, sample_turn) -> None:
     services = _services(persistence, {111: inactive_turn})
     payload = get_homeworld_locator(
         inactive_turn,
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, {111: inactive_turn}),
     )
     assert payload["available"] is False
     assert payload["inactiveReason"] == INACTIVE_REASON_NO_HOMEWORLD
@@ -655,7 +707,7 @@ def test_candidate_view_materialize(persistence, sample_turn) -> None:
     ctx = make_analytic_compute_context(
         sample_turn,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     view = materialize_homeworld_candidate_view(ctx, shell_turn=sample_turn)
     assert view.available is True
@@ -668,6 +720,7 @@ def test_export_catalog_declares_self_chain() -> None:
     assert EXPORT_CATALOG.analytic_id == ANALYTIC_ID
     assert EXPORT_CATALOG.ensure_dependencies == (
         EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
+        EnsureDependency(analytic_id="fleet", turn_delta=0, player_id="all", quality="final"),
     )
 
 
@@ -700,7 +753,7 @@ def test_run_homeworld_baseline_persist_round_trip(persistence, sample_turn) -> 
     ctx = make_analytic_compute_context(
         sample_turn,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -771,7 +824,7 @@ def test_baseline_persist_recompute_clears_shell_evidence(persistence, sample_tu
     ctx = make_analytic_compute_context(
         late,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -835,7 +888,7 @@ def test_baseline_persist_without_recompute_keeps_shell_evidence(persistence, sa
     ctx = make_analytic_compute_context(
         sample_turn,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -874,7 +927,7 @@ def test_run_homeworld_baseline_inactive_completes_without_persist(
     ctx = make_analytic_compute_context(
         inactive,
         load_turn=lambda n: {111: inactive}.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, {111: inactive}),
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,

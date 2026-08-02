@@ -16,7 +16,7 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     load_default_layout_distributions_asset,
 )
-from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE
+from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, SectorOwnerMember
 from api.analytics.homeworld_locator.types import HomeworldCandidateView
 from api.analytics.turn_roster import players_by_id
 from api.concepts.game_category import GameCategory
@@ -33,6 +33,7 @@ from api.concepts.map_region_coverage import (
     MapRegionOverlay,
     MapRegionOverlayDisk,
     MapRegionOverlayVertex,
+    MapRegionPossibleOwner,
     annulus_angle_span,
     annulus_polar_sample_counts,
     boundary_to_overlay,
@@ -399,6 +400,20 @@ def _decide_sector_overlay(
     )
 
 
+def _possible_owners_for_sector(
+    members: Sequence[SectorOwnerMember],
+) -> tuple[MapRegionPossibleOwner, ...] | None:
+    if not members:
+        return None
+    return tuple(
+        MapRegionPossibleOwner(
+            owner_slot=member.owner_slot,
+            provenance_kinds=tuple(sorted({row.kind for row in member.provenances})),
+        )
+        for member in sorted(members, key=lambda row: row.owner_slot)
+    )
+
+
 def build_homeworld_sector_overlays(
     *,
     center: tuple[float, float],
@@ -413,6 +428,7 @@ def build_homeworld_sector_overlays(
     nebulas: Sequence[NebulaCenter] = (),
     pinned_player_label_by_planet_id: Mapping[int, str] | None = None,
     most_probable_planet_ids: frozenset[int] = frozenset(),
+    sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Build one boundary overlay per equal angular sector.
 
@@ -432,6 +448,7 @@ def build_homeworld_sector_overlays(
         raise ValueError("r_outer must be >= r_inner")
 
     label_by_planet = dict(pinned_player_label_by_planet_id or ())
+    owner_sets = dict(sector_owner_sets or ())
     center_x, center_y = center
     pin_angle = math.atan2(pin.y - center_y, pin.x - center_x)
     half = math.pi / player_count
@@ -521,6 +538,7 @@ def build_homeworld_sector_overlays(
                 status=decision.status,
                 candidate_count=decision.candidate_count,
                 player_label=decision.player_label,
+                possible_owners=_possible_owners_for_sector(owner_sets.get(index, ())),
             )
         )
 
@@ -536,6 +554,7 @@ def build_homeworld_sector_overlays_for_turn(
     shell_perspective: int | None = None,
     game_info: GameInfo | None = None,
     game_id: int | None = None,
+    sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Emit sector overlays for a shell turn when the emission gate passes."""
     pin = resolve_viewpoint_pin_planet(view, turn.planets)
@@ -585,6 +604,7 @@ def build_homeworld_sector_overlays_for_turn(
         nebulas=turn.nebulas,
         pinned_player_label_by_planet_id=labels,
         most_probable_planet_ids=most_probable_ids,
+        sector_owner_sets=sector_owner_sets,
     )
 
 

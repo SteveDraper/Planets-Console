@@ -8,6 +8,8 @@ from api.analytics.compute_context import AnalyticComputeContext, invoke_analyti
 from api.analytics.homeworld_locator.baseline_ensure import materialize_homeworld_candidate_view
 from api.analytics.homeworld_locator.compute_services import resolve_homeworld_services
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
+from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
+from api.analytics.homeworld_locator.ownership_refine import sector_owner_sets_to_dict
 from api.analytics.homeworld_locator.sector_overlays import (
     build_homeworld_sector_overlays_for_turn,
 )
@@ -71,12 +73,23 @@ def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
 
     services = resolve_homeworld_services(ctx.exports)
     view = materialize_homeworld_candidate_view(ctx.exports, shell_turn=ctx.turn)
+    state = services.persistence.get_game_state(services.game_id)
+    sector_owner_sets = None
+    if state is not None:
+        aggregate = evidence_aggregate_at_shell_turn(
+            services,
+            baseline_turn=state.baseline_turn,
+            shell_turn=ctx.turn.settings.turn,
+        )
+        if aggregate is not None:
+            sector_owner_sets = sector_owner_sets_to_dict(aggregate.sector_owner_sets)
     overlays = build_homeworld_sector_overlays_for_turn(
         ctx.turn,
         view,
         shell_perspective=services.perspective,
         game_info=services.game_info,
         game_id=services.game_id,
+        sector_owner_sets=sector_owner_sets,
     )
     return _view_to_wire(
         view,

@@ -125,7 +125,7 @@ The orchestrator builds a **DAG of compute scopes** from these edges (same walk 
 
 | Rule | Detail |
 |------|--------|
-| **Cross-player** | No edges; batch callers fan out to N scopes |
+| **Cross-player** | Default: no edges; batch callers fan out to N scopes. ``EnsureDependency.player_id="all"`` expands to one scope per roster player at the dependency turn (homeworld ownership → final fleet@N, [#269](https://github.com/SteveDraper/Planets-Console/issues/269)) |
 | **Cross-turn unwind** | Gap turns `M..N` expand to forward-by-turn nodes (not one monolithic job) |
 | **Shared read-only inputs** | e.g. `FleetTurnContext` from RST -- not graph edges; prefetch once per turn in wire builder |
 | **Cycle** | Ensure-graph cycle → `ensure_cycle` (probe); resolution-stack cycle unchanged |
@@ -378,6 +378,8 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 | **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist` |
 
 Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` reads the **turn-scoped** fleet epoch for `fleet@(host_turn - 1)` so in-flight `tier_solve` work is discarded when that prior fleet changes -- not when same-player scores/fleet activity on unrelated turns advances the player-scoped counter used by fleet compute / gap-fill; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
+
+**Follow-on ([#280](https://github.com/SteveDraper/Planets-Console/issues/280)):** generalize ancestor-repersist → dependent wipe + `force_fresh` as orchestrator **reverse-ENSURE** routing (derived from catalog edges, including `player_id="all"`). Migrate scores↔fleet off the scores-specific ledger callback onto that path; homeworld ownership ([#269](https://github.com/SteveDraper/Planets-Console/issues/269)) remains DAG-gated for open-turn until then. Does **not** demand-wake `waiting_deps` / parked nodes (ADR 0006).
 
 ---
 

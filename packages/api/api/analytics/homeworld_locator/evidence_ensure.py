@@ -7,6 +7,7 @@ Multi-turn gap-fill is owned by export/orchestrator DAG unwind
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
@@ -101,6 +102,7 @@ def compute_homeworld_evidence_refine_step_detailed(
     services: HomeworldLocatorComputeServices,
     *,
     turn: TurnInfo,
+    fleet_built_turns: Mapping[int, int] | None = None,
 ) -> EvidenceRefineStepResult:
     """Like :func:`compute_homeworld_evidence_refine_step`` with timing payload."""
     step_t0 = time.perf_counter()
@@ -168,9 +170,11 @@ def compute_homeworld_evidence_refine_step_detailed(
     computed = refine_homeworld_evidence_aggregate(
         prior,
         turn=turn,
+        candidates=state.candidates,
         candidate_planet_ids_set=candidate_ids,
         planets_by_id=planets_by_id,
         load_turn=services.load_turn,
+        fleet_built_turns=fleet_built_turns,
     )
     return EvidenceRefineStepResult(
         aggregate=computed.aggregate,

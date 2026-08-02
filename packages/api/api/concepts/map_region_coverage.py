@@ -200,6 +200,14 @@ MapRegionOverlayGeometry = MapRegionCoverageGeometry | MapRegionBoundaryGeometry
 
 
 @dataclass(frozen=True)
+class MapRegionPossibleOwner:
+    """One possible homeworld owner slot with provenance kind tags for map overlays."""
+
+    owner_slot: int
+    provenance_kinds: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class MapRegionOverlay:
     """Analytic-agnostic shaded region overlay for the combined map.
 
@@ -219,6 +227,7 @@ class MapRegionOverlay:
     status: str | None = None
     candidate_count: int | None = None
     player_label: str | None = None
+    possible_owners: tuple[MapRegionPossibleOwner, ...] | None = None
 
 
 def default_effective_range(base_range: float, density: float) -> float:
@@ -516,6 +525,14 @@ def map_region_overlay_to_wire(overlay: MapRegionOverlay) -> dict:
         wire["candidateCount"] = overlay.candidate_count
     if overlay.player_label is not None:
         wire["playerLabel"] = overlay.player_label
+    if overlay.possible_owners is not None:
+        wire["possibleOwners"] = [
+            {
+                "ownerSlot": owner.owner_slot,
+                "provenanceKinds": list(owner.provenance_kinds),
+            }
+            for owner in overlay.possible_owners
+        ]
     return wire
 
 
@@ -553,6 +570,7 @@ def boundary_to_overlay(
     status: str | None = None,
     candidate_count: int | None = None,
     player_label: str | None = None,
+    possible_owners: Sequence[MapRegionPossibleOwner] | None = None,
 ) -> MapRegionOverlay:
     """Wrap a closed boundary path (and optional envelope disks) for the wire.
 
@@ -581,6 +599,7 @@ def boundary_to_overlay(
         status=status,
         candidate_count=candidate_count,
         player_label=player_label,
+        possible_owners=None if possible_owners is None else tuple(possible_owners),
     )
 
 

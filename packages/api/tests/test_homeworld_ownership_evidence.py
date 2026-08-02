@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from api.analytics.homeworld_locator.models import (
     AGE_SOURCE_FLEET_BUILT_TURN,
     AGE_SOURCE_SHIP_ID_SCOREBOARD,
@@ -31,6 +33,7 @@ from api.analytics.homeworld_locator.ownership_evidence import (
     travel_turns_at_shell,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
+from api.concepts.homeworld_layout import HW_DISTRIBUTION_CIRCULAR, MAP_SHAPE_ROUND
 from api.concepts.hull_abilities import hull_has_hyperjump
 from api.concepts.planet_connections.wells import max_travel_distance
 from api.models.components import Engine, Hull
@@ -44,6 +47,33 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "asset
 def _load_turn():
     raw = json.loads((ASSETS_DIR / "turn_sample.json").read_text(encoding="utf-8"))
     return turn_info_from_json(raw, settings_defaults=raw["settings"])
+
+
+@pytest.fixture
+def template_planet():
+    return _load_turn().planets[0]
+
+
+def _eligible_geometry_turn(template_planet, *, planets: list[Planet], ships: list | None = None):
+    turn = _load_turn()
+    players = [replace(turn.player, id=index + 1, username=f"p{index + 1}") for index in range(11)]
+    settings = replace(
+        turn.settings,
+        turn=10,
+        hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+        mapshape=MAP_SHAPE_ROUND,
+        shiplimit=500,
+        endturn=100,
+        campaignmode=False,
+    )
+    return replace(
+        turn,
+        settings=settings,
+        player=players[0],
+        players=players,
+        planets=planets,
+        ships=ships or [],
+    )
 
 
 def _planet(
@@ -375,3 +405,169 @@ def test_preferred_candidate_ordering_definite_over_most_probable() -> None:
         ).planet_id
         == 3
     )
+
+
+def test_accumulate_ownership_evidence_envelope_pin_and_sightings(template_planet) -> None:
+    from api.analytics.homeworld_locator.ownership_refine import (
+        accumulate_ownership_evidence_for_turn,
+        sector_owner_sets_to_dict,
+    )
+    from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
+
+    center = (2000.0, 2000.0)
+    player_count = 11
+    radius = 550.0
+    planets: list[Planet] = []
+    for index in range(player_count):
+        angle = index * (2.0 * math.pi / player_count)
+        planets.append(
+            _planet(
+                template_planet,
+                planet_id=index + 1,
+                x=int(round(center[0] + radius * math.cos(angle))),
+                y=int(round(center[1] + radius * math.sin(angle))),
+                ownerid=5 if index == 1 else 0,
+            )
+        )
+    pin = planets[0]
+    ship = _ship(
+        _load_turn().ships[0],
+        ship_id=42,
+        x=int(center[0] + 500),
+        y=int(center[1]),
+        ownerid=3,
+        engineid=9,
+    )
+    shell = _eligible_geometry_turn(template_planet, planets=planets, ships=[ship])
+    shell = replace(shell, engines=[_engine(engine_id=9, techlevel=9)])
+
+    candidates = (
+        HomeworldCandidateRecord(
+            planet_id=pin.id,
+            perspective=1,
+            confidence_tier=CONFIDENCE_DEFINITE,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=planets[1].id,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+        ),
+    )
+    prior = HomeworldEvidenceAggregate(turn=9, baseline_turn=1)
+
+    sector_owner_sets, owner_possible = accumulate_ownership_evidence_for_turn(
+        prior,
+        turn=shell,
+        candidates=candidates,
+        fleet_built_turns={42: 8},
+        load_turn=lambda turn_number: shell if turn_number == 10 else None,
+        ensure_floor=1,
+    )
+    by_sector = sector_owner_sets_to_dict(sector_owner_sets)
+    assert 0 in by_sector
+    assert 3 in [member.owner_slot for member in by_sector[0]]
+    assert 5 in [member.owner_slot for member in by_sector[1]]
+    preferred_member = next(member for member in by_sector[1] if member.owner_slot == 5)
+    assert preferred_member.provenances[0].kind == PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP
+    assert owner_possible == ((3, (0,)),)
+
+
+def test_sector_owner_sets_serialization_round_trip() -> None:
+    from api.analytics.homeworld_locator.models import OwnershipProvenance, SectorOwnerMember
+    from api.analytics.homeworld_locator.serialization import (
+        homeworld_evidence_aggregate_from_json,
+        homeworld_evidence_aggregate_to_json,
+    )
+    from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
+
+    member = SectorOwnerMember(
+        owner_slot=2,
+        provenances=(
+            OwnershipProvenance(
+                kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                turn=10,
+                ship_id=42,
+                radius_ly=81.0,
+                age_source=AGE_SOURCE_FLEET_BUILT_TURN,
+            ),
+            OwnershipProvenance(
+                kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                turn=10,
+                planet_id=20,
+                distance_ly=100.0,
+            ),
+        ),
+    )
+    aggregate = HomeworldEvidenceAggregate(
+        turn=10,
+        baseline_turn=1,
+        sector_owner_sets=((1, (member,)),),
+        owner_possible_sectors=((2, (1,)),),
+    )
+    restored = homeworld_evidence_aggregate_from_json(
+        homeworld_evidence_aggregate_to_json(aggregate)
+    )
+    assert restored.sector_owner_sets == aggregate.sector_owner_sets
+    assert restored.owner_possible_sectors == aggregate.owner_possible_sectors
+
+
+def test_apply_unique_owner_orphan_bind_sets_perspective(template_planet) -> None:
+    from api.analytics.homeworld_locator.models import OwnershipProvenance, SectorOwnerMember
+    from api.analytics.homeworld_locator.ownership_refine import apply_unique_owner_orphan_bind
+    from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
+
+    center = (2000.0, 2000.0)
+    player_count = 11
+    radius = 550.0
+    planets = []
+    for index in range(player_count):
+        angle = index * (2.0 * math.pi / player_count)
+        planets.append(
+            _planet(
+                template_planet,
+                planet_id=index + 1,
+                x=int(round(center[0] + radius * math.cos(angle))),
+                y=int(round(center[1] + radius * math.sin(angle))),
+            )
+        )
+    shell = _eligible_geometry_turn(template_planet, planets=planets)
+    orphan = HomeworldCandidateRecord(
+        planet_id=planets[1].id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    aggregate = HomeworldEvidenceAggregate(
+        turn=10,
+        baseline_turn=1,
+        sector_owner_sets=(
+            (
+                1,
+                (
+                    SectorOwnerMember(
+                        owner_slot=4,
+                        provenances=(
+                            OwnershipProvenance(
+                                kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                                turn=10,
+                                ship_id=1,
+                                radius_ly=50.0,
+                                age_source=AGE_SOURCE_FLEET_BUILT_TURN,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    definite = HomeworldCandidateRecord(
+        planet_id=planets[0].id,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    bound = apply_unique_owner_orphan_bind(
+        (definite, orphan),
+        aggregate,
+        turn=shell,
+    )
+    by_id = {row.planet_id: row for row in bound}
+    assert by_id[orphan.planet_id].perspective == 4

@@ -540,3 +540,27 @@ def test_get_turn_analytic_wires_query_context(sample_turn):
     empty_result = ctx.exports.query("base-map", ["$.meta"])
     assert empty_result.status == "unavailable"
     assert empty_result.reason == "empty_catalog"
+
+
+def test_dependency_scopes_for_player_all_fans_out_to_roster(sample_turn):
+    from api.analytics.export_dependency_walk import dependency_scopes_for
+    from api.analytics.turn_roster import iter_turn_players
+
+    ctx = make_fixture_query_context(sample_turn)
+    scope = ExportScope(
+        game_id=sample_turn.settings.id,
+        perspective=sample_turn.player.id,
+        turn=sample_turn.settings.turn,
+        player_id=None,
+    )
+    dependency = EnsureDependency(
+        analytic_id="fleet",
+        turn_delta=0,
+        player_id="all",
+        quality="final",
+    )
+    scopes = dependency_scopes_for(ctx, scope, dependency)
+    roster_ids = {player.id for player in iter_turn_players(sample_turn)}
+    assert len(scopes) == len(roster_ids)
+    assert {row.player_id for row in scopes} == roster_ids
+    assert all(row.turn == scope.turn for row in scopes)

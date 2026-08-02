@@ -11,6 +11,8 @@ from api.analytics.homeworld_locator.models import (
     EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD,
     HomeworldSingleStarbasePromotion,
     OriginDistanceObservation,
+    OwnershipProvenance,
+    SectorOwnerMember,
 )
 from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
@@ -271,6 +273,166 @@ def _layout_prior_selection_from_json(
     return version, fingerprint, evidence_lambda, evidence_fingerprint, tuple(ids_raw)
 
 
+def _ownership_provenance_to_json(provenance: OwnershipProvenance) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "kind": provenance.kind,
+        "turn": provenance.turn,
+    }
+    if provenance.ship_id is not None:
+        payload["shipId"] = provenance.ship_id
+    if provenance.planet_id is not None:
+        payload["planetId"] = provenance.planet_id
+    if provenance.radius_ly is not None:
+        payload["radiusLy"] = provenance.radius_ly
+    if provenance.distance_ly is not None:
+        payload["distanceLy"] = provenance.distance_ly
+    if provenance.age_source is not None:
+        payload["ageSource"] = provenance.age_source
+    return payload
+
+
+def _ownership_provenance_from_json(data: dict[str, Any]) -> OwnershipProvenance:
+    kind = data.get("kind")
+    if not isinstance(kind, str) or not kind:
+        raise ValidationError("homeworld ownership provenance kind must be a non-empty string")
+    turn = data.get("turn")
+    if not isinstance(turn, int) or turn < 1:
+        raise ValidationError("homeworld ownership provenance turn must be an int >= 1")
+    ship_id = data.get("shipId")
+    if ship_id is not None and not isinstance(ship_id, int):
+        raise ValidationError("homeworld ownership provenance shipId must be an int when present")
+    planet_id = data.get("planetId")
+    if planet_id is not None and not isinstance(planet_id, int):
+        raise ValidationError("homeworld ownership provenance planetId must be an int when present")
+    radius_ly = data.get("radiusLy")
+    if radius_ly is not None and (
+        isinstance(radius_ly, bool) or not isinstance(radius_ly, (int, float))
+    ):
+        raise ValidationError(
+            "homeworld ownership provenance radiusLy must be a number when present"
+        )
+    distance_ly = data.get("distanceLy")
+    if distance_ly is not None and (
+        isinstance(distance_ly, bool) or not isinstance(distance_ly, (int, float))
+    ):
+        raise ValidationError(
+            "homeworld ownership provenance distanceLy must be a number when present"
+        )
+    age_source = data.get("ageSource")
+    if age_source is not None and (not isinstance(age_source, str) or not age_source):
+        raise ValidationError(
+            "homeworld ownership provenance ageSource must be a non-empty string when present"
+        )
+    return OwnershipProvenance(
+        kind=kind,
+        turn=turn,
+        ship_id=ship_id,
+        planet_id=planet_id,
+        radius_ly=float(radius_ly) if radius_ly is not None else None,
+        distance_ly=float(distance_ly) if distance_ly is not None else None,
+        age_source=age_source,
+    )
+
+
+def _sector_owner_member_to_json(member: SectorOwnerMember) -> dict[str, Any]:
+    return {
+        "ownerSlot": member.owner_slot,
+        "provenances": [_ownership_provenance_to_json(row) for row in member.provenances],
+    }
+
+
+def _sector_owner_member_from_json(data: dict[str, Any]) -> SectorOwnerMember:
+    owner_slot = data.get("ownerSlot")
+    if not isinstance(owner_slot, int) or owner_slot < 1:
+        raise ValidationError("homeworld sector owner member ownerSlot must be an int >= 1")
+    provenances_raw = data.get("provenances", [])
+    if not isinstance(provenances_raw, list):
+        raise ValidationError("homeworld sector owner member provenances must be a JSON array")
+    provenances = tuple(
+        _ownership_provenance_from_json(row) for row in provenances_raw if isinstance(row, dict)
+    )
+    if len(provenances) != len(provenances_raw):
+        raise ValidationError("homeworld sector owner member provenances entries must be objects")
+    return SectorOwnerMember(owner_slot=owner_slot, provenances=provenances)
+
+
+def _sector_owner_sets_to_json(
+    sector_owner_sets: tuple[tuple[int, tuple[SectorOwnerMember, ...]], ...],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "sectorIndex": sector_index,
+            "members": [_sector_owner_member_to_json(member) for member in members],
+        }
+        for sector_index, members in sector_owner_sets
+    ]
+
+
+def _sector_owner_sets_from_json(
+    raw: object,
+) -> tuple[tuple[int, tuple[SectorOwnerMember, ...]], ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValidationError("homeworld evidence aggregate sectorOwnerSets must be a JSON array")
+    rows: list[tuple[int, tuple[SectorOwnerMember, ...]]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValidationError("homeworld sectorOwnerSets entries must be objects")
+        sector_index = entry.get("sectorIndex")
+        if not isinstance(sector_index, int) or sector_index < 0:
+            raise ValidationError("homeworld sectorOwnerSets.sectorIndex must be an int >= 0")
+        members_raw = entry.get("members", [])
+        if not isinstance(members_raw, list):
+            raise ValidationError("homeworld sectorOwnerSets.members must be a JSON array")
+        members = tuple(
+            _sector_owner_member_from_json(row) for row in members_raw if isinstance(row, dict)
+        )
+        if len(members) != len(members_raw):
+            raise ValidationError("homeworld sectorOwnerSets.members entries must be objects")
+        rows.append((sector_index, members))
+    return tuple(sorted(rows, key=lambda row: row[0]))
+
+
+def _owner_possible_sectors_to_json(
+    owner_possible_sectors: tuple[tuple[int, tuple[int, ...]], ...],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "ownerSlot": owner_slot,
+            "sectorIndexes": list(sector_indexes),
+        }
+        for owner_slot, sector_indexes in owner_possible_sectors
+    ]
+
+
+def _owner_possible_sectors_from_json(
+    raw: object,
+) -> tuple[tuple[int, tuple[int, ...]], ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValidationError(
+            "homeworld evidence aggregate ownerPossibleSectors must be a JSON array"
+        )
+    rows: list[tuple[int, tuple[int, ...]]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValidationError("homeworld ownerPossibleSectors entries must be objects")
+        owner_slot = entry.get("ownerSlot")
+        if not isinstance(owner_slot, int) or owner_slot < 1:
+            raise ValidationError("homeworld ownerPossibleSectors.ownerSlot must be an int >= 1")
+        indexes_raw = entry.get("sectorIndexes")
+        if not isinstance(indexes_raw, list) or not all(
+            isinstance(item, int) for item in indexes_raw
+        ):
+            raise ValidationError(
+                "homeworld ownerPossibleSectors.sectorIndexes must be an int array"
+            )
+        rows.append((owner_slot, tuple(sorted(indexes_raw))))
+    return tuple(sorted(rows, key=lambda row: row[0]))
+
+
 def homeworld_evidence_aggregate_to_json(
     aggregate: HomeworldEvidenceAggregate,
 ) -> dict[str, Any]:
@@ -289,6 +451,12 @@ def homeworld_evidence_aggregate_to_json(
     if aggregate.origin_distance_evidence_through_turn is not None:
         payload["originDistanceEvidenceThroughTurn"] = (
             aggregate.origin_distance_evidence_through_turn
+        )
+    if aggregate.sector_owner_sets:
+        payload["sectorOwnerSets"] = _sector_owner_sets_to_json(aggregate.sector_owner_sets)
+    if aggregate.owner_possible_sectors:
+        payload["ownerPossibleSectors"] = _owner_possible_sectors_to_json(
+            aggregate.owner_possible_sectors
         )
     if aggregate.layout_prior_algorithm_version is not None:
         payload["layoutPriorSelection"] = _layout_prior_selection_to_json(aggregate)
@@ -367,6 +535,8 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         origin_distance_observations=observations,
         single_starbase_promotions=promotions,
         origin_distance_evidence_through_turn=through_turn,
+        sector_owner_sets=_sector_owner_sets_from_json(data.get("sectorOwnerSets")),
+        owner_possible_sectors=_owner_possible_sectors_from_json(data.get("ownerPossibleSectors")),
         layout_prior_algorithm_version=selection_version,
         layout_prior_input_fingerprint=selection_fingerprint,
         layout_prior_evidence_lambda=selection_evidence_lambda,
