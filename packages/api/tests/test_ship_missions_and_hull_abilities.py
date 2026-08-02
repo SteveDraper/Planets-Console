@@ -3,6 +3,7 @@
 from api.concepts.hull_abilities import (
     hull_has_bioscan,
     hull_has_gravitonic_movement,
+    hull_has_hyperjump,
     hull_has_nebula_scanner,
 )
 from api.concepts.ship_missions import (
@@ -76,3 +77,9 @@ def test_hull_has_nebula_scanner_from_special():
     special = "Nebula Scanner - Can detect ships or planets within a nebula"
     assert hull_has_nebula_scanner(_hull(special=special))
     assert not hull_has_nebula_scanner(_hull(special="Bioscan - Will detect"))
+
+
+def test_hull_has_hyperjump_from_special():
+    assert hull_has_hyperjump(_hull(special="Hyperjump - Can jump 350 ly with FC HYP"))
+    assert hull_has_hyperjump(_hull(special="Hyperdrive capable escort"))
+    assert not hull_has_hyperjump(_hull(special="Gravitonic - moves twice as far"))

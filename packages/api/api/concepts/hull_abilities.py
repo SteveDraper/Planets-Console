@@ -22,3 +22,9 @@ def hull_has_nebula_scanner(hull: Hull) -> bool:
 def hull_has_gravitonic_movement(hull: Hull) -> bool:
     """True when the hull uses gravitonic accelerators (2x travel range)."""
     return "gravitonic" in hull.special.lower()
+
+
+def hull_has_hyperjump(hull: Hull) -> bool:
+    """True when the hull has the Hyperjump ability (HYP-capable)."""
+    text = hull.special.lower()
+    return "hyperjump" in text or "hyperdrive" in text
