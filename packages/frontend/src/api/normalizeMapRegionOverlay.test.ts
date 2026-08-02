@@ -162,6 +162,38 @@ describe('normalizeMapRegionOverlay', () => {
     ).toBeNull()
   })
 
+  it('accepts possibleOwners ownership-evidence annotations', () => {
+    const { playerLabel: _ignored, ...base } = validBoundary
+    const withOwners = {
+      ...base,
+      isPinned: false,
+      possibleOwners: [
+        {
+          ownerSlot: 3,
+          provenanceKinds: ['ship_travel_envelope'],
+          playerLabel: 'alice (The Federation)',
+        },
+        { ownerSlot: 5, provenanceKinds: ['nearby_planet_ownership'] },
+      ],
+    }
+    expect(normalizeMapRegionOverlay(withOwners)).toEqual(withOwners)
+  })
+
+  it('rejects malformed possibleOwners entries', () => {
+    expect(
+      normalizeMapRegionOverlay({
+        ...validBoundary,
+        possibleOwners: [{ ownerSlot: 0, provenanceKinds: ['ship_travel_envelope'] }],
+      })
+    ).toBeNull()
+    expect(
+      normalizeMapRegionOverlay({
+        ...validBoundary,
+        possibleOwners: [{ ownerSlot: 2, provenanceKinds: [42] }],
+      })
+    ).toBeNull()
+  })
+
   it('ignores legacy hoverSummary without requiring it', () => {
     const withLegacy = { ...validBoundary, hoverSummary: 'pinned sector' }
     const out = normalizeMapRegionOverlay(withLegacy)

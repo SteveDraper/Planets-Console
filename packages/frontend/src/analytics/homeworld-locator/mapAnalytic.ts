@@ -64,7 +64,7 @@ export function resolveHomeworldMarkerDisplays(
 export function homeworldLocatorMapQueryKey(analyticScope: MapAnalyticQueryContext['analyticScope']) {
   // Bump when overlay wire annotations change (e.g. structured hover facts) so
   // cached map payloads without those fields cannot keep hover/display broken.
-  return ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'map', analyticScope, 'sectors-v3'] as const
+  return ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'map', analyticScope, 'sectors-v4'] as const
 }
 
 function markersFromMapResponse(data: MapDataResponse): HomeworldMapMarker[] {

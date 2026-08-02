@@ -83,6 +83,13 @@ export type MapRegionOverlayPaint = {
   diskStrokes?: readonly MapRegionDiskStrokePaint[]
 }
 
+export type MapRegionPossibleOwner = {
+  ownerSlot: number
+  provenanceKinds: string[]
+  /** Roster identity ``username (race)`` when Core resolved the slot. */
+  playerLabel?: string
+}
+
 export type MapRegionOverlay = {
   kind: string
   id: string
@@ -95,6 +102,8 @@ export type MapRegionOverlay = {
   candidateCount?: number
   /** Roster identity for a pinned owner (e.g. ``username (race)``), not UI prose. */
   playerLabel?: string
+  /** Ownership-evidence possible homeworld owners for this sector. */
+  possibleOwners?: MapRegionPossibleOwner[]
   /** Optional client paint policy (analytic adapters; not Core wire). */
   paint?: MapRegionOverlayPaint
 }

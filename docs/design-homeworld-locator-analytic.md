@@ -484,3 +484,4 @@ Grill locks: §4.3.2 (this doc). CONTEXT: **homeworld ownership evidence**, **ho
 | 2026-08-02 | #269 Phase 2: ``player_id="all"`` ENSURE fan-out wired in export walk + compute DAG; ownership refine reads ``built_turn`` from ``DependencyOutputs`` fleet wires |
 | 2026-08-02 | #269 invalidation wake deferred: open-turn race = DAG only; reverse-ENSURE invalidate + ``force_fresh`` (and scores/fleet refactor onto it) tracked in [#280](https://github.com/SteveDraper/Planets-Console/issues/280) |
 | 2026-08-02 | #269: ``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` (1) on evidence aggregates; stale version fails satisfaction and forces floor re-refine / DAG rewalk |
+| 2026-08-02 | #269 Phase 3: sector ``possibleOwners`` (+ optional per-slot ``playerLabel``) on wire; FE normalize + hover unique vs **ambiguous** |

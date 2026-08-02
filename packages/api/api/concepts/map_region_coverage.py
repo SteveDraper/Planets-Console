@@ -205,6 +205,7 @@ class MapRegionPossibleOwner:
 
     owner_slot: int
     provenance_kinds: tuple[str, ...]
+    player_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -526,13 +527,15 @@ def map_region_overlay_to_wire(overlay: MapRegionOverlay) -> dict:
     if overlay.player_label is not None:
         wire["playerLabel"] = overlay.player_label
     if overlay.possible_owners is not None:
-        wire["possibleOwners"] = [
-            {
+        wire["possibleOwners"] = []
+        for owner in overlay.possible_owners:
+            entry: dict = {
                 "ownerSlot": owner.owner_slot,
                 "provenanceKinds": list(owner.provenance_kinds),
             }
-            for owner in overlay.possible_owners
-        ]
+            if owner.player_label is not None:
+                entry["playerLabel"] = owner.player_label
+            wire["possibleOwners"].append(entry)
     return wire
 
 

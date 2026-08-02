@@ -402,13 +402,17 @@ def _decide_sector_overlay(
 
 def _possible_owners_for_sector(
     members: Sequence[SectorOwnerMember],
+    *,
+    label_by_slot: Mapping[int, str] | None = None,
 ) -> tuple[MapRegionPossibleOwner, ...] | None:
     if not members:
         return None
+    labels = dict(label_by_slot or ())
     return tuple(
         MapRegionPossibleOwner(
             owner_slot=member.owner_slot,
             provenance_kinds=tuple(sorted({row.kind for row in member.provenances})),
+            player_label=labels.get(member.owner_slot),
         )
         for member in sorted(members, key=lambda row: row.owner_slot)
     )
@@ -429,6 +433,7 @@ def build_homeworld_sector_overlays(
     pinned_player_label_by_planet_id: Mapping[int, str] | None = None,
     most_probable_planet_ids: frozenset[int] = frozenset(),
     sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None = None,
+    possible_owner_label_by_slot: Mapping[int, str] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Build one boundary overlay per equal angular sector.
 
@@ -439,6 +444,9 @@ def build_homeworld_sector_overlays(
     ``pinned_player_label_by_planet_id`` maps slot-anchored planet ids to
     roster identity strings (``username (race)``) for wire ``playerLabel``.
 
+    ``possible_owner_label_by_slot`` maps ownership-evidence owner slots to the
+    same roster identity strings for ``possibleOwners[].playerLabel``.
+
     ``most_probable_planet_ids`` are layout-prior selections; orphan envelopes
     center on those when present so disks align with most-probable markers.
     """
@@ -448,6 +456,7 @@ def build_homeworld_sector_overlays(
         raise ValueError("r_outer must be >= r_inner")
 
     label_by_planet = dict(pinned_player_label_by_planet_id or ())
+    owner_labels = dict(possible_owner_label_by_slot or ())
     owner_sets = dict(sector_owner_sets or ())
     center_x, center_y = center
     pin_angle = math.atan2(pin.y - center_y, pin.x - center_x)
@@ -538,7 +547,10 @@ def build_homeworld_sector_overlays(
                 status=decision.status,
                 candidate_count=decision.candidate_count,
                 player_label=decision.player_label,
-                possible_owners=_possible_owners_for_sector(owner_sets.get(index, ())),
+                possible_owners=_possible_owners_for_sector(
+                    owner_sets.get(index, ()),
+                    label_by_slot=owner_labels,
+                ),
             )
         )
 
@@ -590,6 +602,13 @@ def build_homeworld_sector_overlays_for_turn(
         game_info=game_info,
         game_id=resolved_game_id,
     )
+    owner_slot_labels = possible_owner_labels_for_sets(
+        turn,
+        sector_owner_sets,
+        shell_perspective=shell_perspective,
+        game_info=game_info,
+        game_id=resolved_game_id,
+    )
 
     return build_homeworld_sector_overlays(
         center=center,
@@ -605,6 +624,7 @@ def build_homeworld_sector_overlays_for_turn(
         pinned_player_label_by_planet_id=labels,
         most_probable_planet_ids=most_probable_ids,
         sector_owner_sets=sector_owner_sets,
+        possible_owner_label_by_slot=owner_slot_labels,
     )
 
 
@@ -664,4 +684,34 @@ def pinned_player_labels_for_view(
         if player is None:
             continue
         labels[row.planet_id] = format_pinned_player_label(player, races_by_id)
+    return labels
+
+
+def possible_owner_labels_for_sets(
+    turn: TurnInfo,
+    sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None,
+    *,
+    shell_perspective: int | None = None,
+    game_info: GameInfo | None = None,
+    game_id: int | None = None,
+) -> dict[int, str]:
+    """Map ownership-evidence owner slots to roster identity labels."""
+    if not sector_owner_sets:
+        return {}
+    races_by_id = {race.id: race for race in turn.races}
+    labels: dict[int, str] = {}
+    for members in sector_owner_sets.values():
+        for member in members:
+            if member.owner_slot in labels:
+                continue
+            player = player_for_homeworld_perspective(
+                turn,
+                member.owner_slot,
+                shell_perspective=shell_perspective,
+                game_info=game_info,
+                game_id=game_id,
+            )
+            if player is None:
+                continue
+            labels[member.owner_slot] = format_pinned_player_label(player, races_by_id)
     return labels
