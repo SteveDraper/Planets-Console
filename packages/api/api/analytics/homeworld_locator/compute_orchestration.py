@@ -13,6 +13,7 @@ from api.analytics.homeworld_locator.compute_services import (
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.evidence_ensure import (
     compute_homeworld_evidence_refine_step_detailed,
+    ensure_evidence_floor_algorithm_current,
     evidence_refined_through_shell,
     record_evidence_refine_step_report,
 )
@@ -196,11 +197,17 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         elif isinstance(ship_id, str) and ship_id.isdigit():
             built_turn_map[int(ship_id)] = built_turn
 
-    already_durable = shell_turn <= state.baseline_turn or evidence_refined_through_shell(
+    already_durable = evidence_refined_through_shell(
         services,
         baseline_turn=state.baseline_turn,
         shell_turn=shell_turn,
     )
+    if not already_durable:
+        ensure_evidence_floor_algorithm_current(
+            services,
+            baseline_turn=state.baseline_turn,
+            fleet_built_turns=built_turn_map,
+        )
     step = compute_homeworld_evidence_refine_step_detailed(
         services,
         turn=turn,

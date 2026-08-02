@@ -69,6 +69,62 @@ def evidence_refined_through_shell(
     return aggregate.turn == target_turn
 
 
+def ensure_evidence_floor_algorithm_current(
+    services: HomeworldLocatorComputeServices,
+    *,
+    baseline_turn: int,
+    fleet_built_turns: Mapping[int, int] | None = None,
+) -> bool:
+    """Rewrite+persist the baseline floor when ``evidenceAlgorithmVersion`` is stale.
+
+    Export DAG walks treat turn 1 as ``_is_at_baseline`` and skip ensuring it, so a
+    shell open at turn > 1 must upgrade the floor here before chain advance.
+    Returns True when a rewrite was persisted.
+    """
+    state = services.persistence.get_game_state(services.game_id)
+    if state is None:
+        raise ValidationError("homeworld game-global state missing before evidence floor rewrite")
+    if state.baseline_turn != baseline_turn:
+        raise ValidationError(
+            "homeworld evidence floor rewrite baseline_turn does not match game-global state"
+        )
+
+    floor = services.persistence.get_evidence_aggregate(
+        services.game_id,
+        services.perspective,
+        baseline_turn,
+    )
+    if floor is None:
+        raise ValidationError("homeworld floor evidence aggregate missing before algorithm rewrite")
+    if floor.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
+        return False
+
+    turn = services.load_turn(baseline_turn)
+    if turn is None:
+        raise ValidationError(
+            f"homeworld baseline turn {baseline_turn} is not stored; "
+            "required to rewrite stale evidenceAlgorithmVersion"
+        )
+
+    candidate_ids = candidate_planet_ids_from_records(state.candidates)
+    planets_by_id = {planet.id: planet for planet in turn.planets}
+    computed = refine_homeworld_evidence_aggregate(
+        floor,
+        turn=turn,
+        candidates=state.candidates,
+        candidate_planet_ids_set=candidate_ids,
+        planets_by_id=planets_by_id,
+        load_turn=services.load_turn,
+        fleet_built_turns=fleet_built_turns,
+    )
+    services.persistence.put_evidence_aggregate(
+        services.game_id,
+        services.perspective,
+        computed.aggregate,
+    )
+    return True
+
+
 @dataclass(frozen=True)
 class EvidenceRefineStepResult:
     """Outcome of ``compute_homeworld_evidence_refine_step``."""
@@ -280,9 +336,16 @@ def ensure_homeworld_evidence_refined(
             raise ValidationError("homeworld evidence aggregate missing after satisfaction probe")
         return aggregate
 
+    ensure_evidence_floor_algorithm_current(
+        services,
+        baseline_turn=game_state_baseline_turn,
+    )
+
     step = compute_homeworld_evidence_refine_step_detailed(services, turn=shell_turn)
     persist_ms = 0.0
-    if shell > game_state_baseline_turn:
+    if step.computed:
+        # Includes baseline-floor algorithm bumps (shell <= baseline_turn): the
+        # rewrite must land durably or later turns see a stale prior and fail.
         persist_t0 = time.perf_counter()
         services.persistence.put_evidence_aggregate(
             services.game_id,

@@ -719,9 +719,9 @@ def test_materialize_view_refines_through_shell_turn(persistence) -> None:
 
 
 def test_stale_evidence_algorithm_version_forces_floor_rerefine(persistence) -> None:
-    """Version 0 floor at baseline shell must recompute and stamp current version."""
+    """Version 0 floor at baseline shell must recompute, stamp, and persist."""
     from api.analytics.homeworld_locator.evidence_ensure import (
-        compute_homeworld_evidence_refine_step_detailed,
+        ensure_homeworld_evidence_refined,
         evidence_refined_through_shell,
     )
 
@@ -735,21 +735,32 @@ def test_stale_evidence_algorithm_version_forces_floor_rerefine(persistence) -> 
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
     )
     assert evidence_refined_through_shell(services, baseline_turn=1, shell_turn=1) is False
-    step = compute_homeworld_evidence_refine_step_detailed(services, turn=turn_one)
-    assert step.computed is True
-    assert step.aggregate.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    aggregate = ensure_homeworld_evidence_refined(
+        services,
+        shell_turn=turn_one,
+        game_state_baseline_turn=1,
+    )
+    assert aggregate.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    stored = persistence.get_evidence_aggregate(628580, 1, 1)
+    assert stored is not None
+    assert stored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    assert evidence_refined_through_shell(services, baseline_turn=1, shell_turn=1) is True
 
 
 def test_stale_prior_evidence_algorithm_version_raises(persistence) -> None:
-    """Advancing past a stale prior must fail closed so DAG rewalks from the floor."""
+    """Advancing past a stale mid-chain prior must fail closed so DAG rewalks."""
     from api.analytics.homeworld_locator.evidence_ensure import (
         compute_homeworld_evidence_refine_step_detailed,
     )
     from api.errors import ValidationError
 
-    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
     turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
-    turns = {1: turn_one, 2: turn_two}
+    turn_three = replace(turn_one, settings=replace(turn_one.settings, turn=3))
+    turns = {1: turn_one, 2: turn_two, 3: turn_three}
     services = _services(persistence, turns)
     persistence.put_baseline(
         628580,
@@ -760,10 +771,65 @@ def test_stale_prior_evidence_algorithm_version_raises(persistence) -> None:
     persistence.put_evidence_aggregate(
         628580,
         1,
-        HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
+        HomeworldEvidenceAggregate(
+            turn=2,
+            baseline_turn=1,
+            evidence_algorithm_version=0,
+        ),
     )
     with pytest.raises(ValidationError, match="stale evidenceAlgorithmVersion"):
-        compute_homeworld_evidence_refine_step_detailed(services, turn=turn_two)
+        compute_homeworld_evidence_refine_step_detailed(services, turn=turn_three)
+
+
+def test_export_ensure_rewalks_stale_evidence_algorithm_chain(persistence) -> None:
+    """Shell ensure must rewrite a version-0 floor then advance, not warn-banner."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turns = {
+        1: turn_one,
+        2: replace(turn_one, settings=replace(turn_one.settings, turn=2)),
+        3: replace(turn_one, settings=replace(turn_one.settings, turn=3)),
+    }
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(turn=2, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(turn=3, baseline_turn=1, evidence_algorithm_version=0),
+    )
+
+    ctx = make_analytic_compute_context(
+        turns[3],
+        load_turn=lambda n: turns.get(n),
+        export_services=_export_services(services, turns),
+    ).exports
+    assert (
+        ensure_homeworld_export(
+            ctx,
+            ExportScope(game_id=628580, perspective=1, turn=3),
+        )
+        is True
+    )
+    for turn_number in (1, 2, 3):
+        stored = persistence.get_evidence_aggregate(628580, 1, turn_number)
+        assert stored is not None
+        assert stored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
 
 
 @pytest.fixture
