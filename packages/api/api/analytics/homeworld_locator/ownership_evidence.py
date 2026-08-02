@@ -27,6 +27,9 @@ from api.models.planet import Planet
 from api.models.ship import Ship
 
 DEFAULT_ENGINE_WARP_WHEN_UNKNOWN = 9
+# Host travel uses integer LY / targeting rounding; at warp 9 a ship can land
+# slightly past warp² (about 81.5 direct, a bit more with overshoot tricks).
+ENVELOPE_ROUNDING_SLACK_LY_PER_TURN = 1.0
 NEARBY_OWNERSHIP_RADIUS_LY = max_travel_distance(9, gravitonic_movement=True)
 """162 LY -- gravitonic warp-9 travel; nearby planetary ownership cap."""
 
@@ -87,14 +90,19 @@ def travel_envelope_radius_ly(
     hulls_by_id: Mapping[int, Hull],
     engines_by_id: Mapping[int, Engine],
 ) -> float | None:
-    """Max travel LY from age × warp². ``None`` when the ship is HYP-capable (ignored)."""
+    """Max travel LY from age × (warp² + rounding slack). ``None`` when HYP-capable.
+
+    Each travel turn allows ``max_travel_distance`` plus
+    ``ENVELOPE_ROUNDING_SLACK_LY_PER_TURN`` so host LY rounding / overshoot
+    targeting does not falsely exclude a one-hop origin.
+    """
     hull = hulls_by_id.get(ship.hullid)
     if hull is not None and hull_has_hyperjump(hull):
         return None
     gravitonic = hull is not None and hull_has_gravitonic_movement(hull)
     warp = engine_warp_capability(ship, engines_by_id=engines_by_id)
     turns = travel_turns_at_shell(shell_turn=shell_turn, built_turn=built_turn)
-    per_turn = max_travel_distance(warp, gravitonic)
+    per_turn = max_travel_distance(warp, gravitonic) + ENVELOPE_ROUNDING_SLACK_LY_PER_TURN
     return float(turns) * per_turn
 
 

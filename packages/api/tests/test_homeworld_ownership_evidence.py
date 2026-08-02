@@ -19,6 +19,7 @@ from api.analytics.homeworld_locator.models import (
     PROVENANCE_SHIP_TRAVEL_ENVELOPE,
 )
 from api.analytics.homeworld_locator.ownership_evidence import (
+    ENVELOPE_ROUNDING_SLACK_LY_PER_TURN,
     NEARBY_OWNERSHIP_RADIUS_LY,
     add_provenance_to_sector_owner_set,
     apply_nearby_planet_ownership,
@@ -215,7 +216,7 @@ def test_travel_turns_and_envelope_radius_warp_square() -> None:
     hulls = {ship.hullid: _hull(hull_id=ship.hullid, special="")}
 
     assert travel_turns_at_shell(shell_turn=10, built_turn=7) == 3
-    # 3 turns × warp8² = 3 × 64 = 192
+    # 3 turns × (warp8² + 1 LY rounding slack)
     radius = travel_envelope_radius_ly(
         ship,
         shell_turn=10,
@@ -223,7 +224,9 @@ def test_travel_turns_and_envelope_radius_warp_square() -> None:
         hulls_by_id=hulls,
         engines_by_id=engines,
     )
-    assert radius == 3.0 * max_travel_distance(8, False)
+    assert radius == 3.0 * (
+        max_travel_distance(8, False) + ENVELOPE_ROUNDING_SLACK_LY_PER_TURN
+    )
 
 
 def test_unknown_engines_assume_warp_9() -> None:
@@ -238,7 +241,9 @@ def test_unknown_engines_assume_warp_9() -> None:
         hulls_by_id=hulls,
         engines_by_id={},
     )
-    assert radius == 2.0 * max_travel_distance(9, False)
+    assert radius == 2.0 * (
+        max_travel_distance(9, False) + ENVELOPE_ROUNDING_SLACK_LY_PER_TURN
+    )
 
 
 def test_gravitonic_doubles_envelope_hyperjump_ignored() -> None:
@@ -256,7 +261,9 @@ def test_gravitonic_doubles_envelope_hyperjump_ignored() -> None:
         hulls_by_id=grav,
         engines_by_id=engines,
     )
-    assert grav_radius == 2.0 * max_travel_distance(9, True)
+    assert grav_radius == 2.0 * (
+        max_travel_distance(9, True) + ENVELOPE_ROUNDING_SLACK_LY_PER_TURN
+    )
 
     assert (
         travel_envelope_radius_ly(

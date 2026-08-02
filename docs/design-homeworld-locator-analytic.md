@@ -230,9 +230,9 @@ Strengthens **homeworld owner** attribution for **homeworld sectors** (whose HW 
 
 | Input | Rule |
 |-------|------|
-| Radius | `travel_turns × warp²` LY (`max_travel_distance` / warp-square family in **game concepts**) |
+| Radius | `travel_turns × (warp² + 1)` LY -- warp-square family plus **1 LY/turn** host rounding / overshoot slack (W9 one-hop ≈ 82 LY, not 81) |
 | Engines unknown | Assume warp **9** |
-| Gravitonic | Apply 2× range **only** for gravitonic hulls (`hull_has_gravitonic_movement`) |
+| Gravitonic | Apply 2× range **only** for gravitonic hulls (`hull_has_gravitonic_movement`); rounding slack is still +1 LY/turn on top |
 | Hyperdrive | **Ignore** HYP-capable hulls for envelopes (hull ability / known HYP hull set -- not FC=`HYP` alone) |
 | Chunnel / tow / wormhole | No special handling in v1 (envelope is the naive warp budget) |
 
@@ -485,3 +485,4 @@ Grill locks: §4.3.2 (this doc). CONTEXT: **homeworld ownership evidence**, **ho
 | 2026-08-02 | #269 invalidation wake deferred: open-turn race = DAG only; reverse-ENSURE invalidate + ``force_fresh`` (and scores/fleet refactor onto it) tracked in [#280](https://github.com/SteveDraper/Planets-Console/issues/280) |
 | 2026-08-02 | #269: ``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` (1) on evidence aggregates; stale version fails satisfaction and forces floor re-refine / DAG rewalk |
 | 2026-08-02 | #269 Phase 3: sector ``possibleOwners`` (+ optional per-slot ``playerLabel``) on wire; FE normalize + hover unique vs **ambiguous** |
+| 2026-08-02 | Ownership travel envelope: +1 LY/turn rounding slack (`travel_turns × (warp² + 1)`); bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 2 |
