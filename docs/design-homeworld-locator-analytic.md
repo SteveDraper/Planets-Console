@@ -205,7 +205,7 @@ Strengthens **homeworld owner** attribution for **homeworld sectors** (whose HW 
 | Concern | Rule |
 |---------|------|
 | Scope | Viewpoint **perspective** TurnInfo only (same **homeworld evidence scope** as location evidence) |
-| Persistence | Turn-scoped on the **homeworld evidence aggregate** (durable sector owner sets + provenances through *T*); materialize projects onto sector overlays / candidate bind helpers. Stamp ``evidenceAlgorithmVersion`` (`HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`, currently **1**; absent/0 = pre-version). Satisfaction / ensure refuse stale versions so the self-chain rewalks from the baseline floor; floor-only shells re-run refine in place |
+| Persistence | Turn-scoped on the **homeworld evidence aggregate** (durable sector owner sets + provenances through *T*); materialize projects onto sector overlays / candidate bind helpers. Stamp ``evidenceAlgorithmVersion`` (`HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`, currently **3**; absent/0 = pre-version). Satisfaction / ensure refuse stale versions so the self-chain rewalks from the baseline floor; floor rewrite is owned solely by ``ensure_evidence_floor_algorithm_current`` (clears sticky ownership before re-accumulate, then stamps the current version) |
 | Location candidates | Never create orphans; never flip `confidence_tier` from ownership alone |
 | Candidate `perspective` | Optional bind when a sector has a **unique** possible owner (orphans in that sector may become slot-anchored for layout-prior / pin display). Ambiguous sectors leave orphans unbound. Prose always says **homeworld owner**, not perspective |
 
@@ -221,7 +221,7 @@ Strengthens **homeworld owner** attribution for **homeworld sectors** (whose HW 
 |---------|------|
 | Edge | `homeworld@N` → `fleet@N` with `quality="final"` (same shell turn; `built_turn` is on that turn's final ledger) |
 | Cross-player | Homeworld scope has no `player_id`. Fleet ensure with `player_id=None` is a **no-op** (`is_fleet_export_ensure_satisfied` returns true). Therefore declare / expand to **one final-fleet dependency per roster player** at turn *N* (new `EnsureDependency` fan-out, e.g. `player_id="all"`, or equivalent walk expansion). **All roster players** -- not the visible-ship-owner subset -- so the edge set is stable and every ship id can resolve `built_turn` when its owner's ledger is final. Orchestrator today documents cross-player as caller fan-out -- #269 needs graph-level expansion so a single homeworld node waits on all player fleet nodes. |
-| Wire | Refine job wire receives final ledger slices (or player→`built_turn` map) via `DependencyOutputs` -- no live `ensure_fleet_export` inside the refine worker |
+| Wire | Orchestrator refine job wire receives final ledger slices (or player→`built_turn` map) via `DependencyOutputs`. Sync export ensure, after fleet ENSURE is satisfied, loads the same ages from final on-disk ledgers (`fleet_built_turns_from_final_ledgers`) -- no live `ensure_fleet_export` inside the refine worker |
 | ENSURE fan-out | ``EnsureDependency.player_id="all"`` is implemented in ``dependency_scopes_for`` / ``plan_compute_dag`` (one final-fleet edge per roster player at shell *N*) |
 | Invalidation | **#269 stays DAG-only** for open-turn correctness (homeworld waits on final fleet before refine). Ancestor **re-persist** wipe + `force_fresh` wake is **not** implemented here -- tracked as generic orchestrator reverse-ENSURE work ([#280](https://github.com/SteveDraper/Planets-Console/issues/280)), including refactor of scores↔fleet onto that path |
 | Baseline | Baseline step does **not** need fleet; only ownership-aware evidence refine / materialize that consumes `built_turn` |
@@ -486,3 +486,4 @@ Grill locks: §4.3.2 (this doc). CONTEXT: **homeworld ownership evidence**, **ho
 | 2026-08-02 | #269: ``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` (1) on evidence aggregates; stale version fails satisfaction and forces floor re-refine / DAG rewalk |
 | 2026-08-02 | #269 Phase 3: sector ``possibleOwners`` (+ optional per-slot ``playerLabel``) on wire; FE normalize + hover unique vs **ambiguous** |
 | 2026-08-02 | Ownership travel envelope: +1 LY/turn rounding slack (`travel_turns × (warp² + 1)`); bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 2 |
+| 2026-08-02 | Sync ensure loads fleet `built_turn` from final on-disk ledgers after ENSURE; floor algo rewrite clears sticky ownership before re-accumulate; sole floor-rewrite owner; shared sector partition helper; bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 3 |

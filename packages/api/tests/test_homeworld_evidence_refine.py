@@ -747,6 +747,140 @@ def test_stale_evidence_algorithm_version_forces_floor_rerefine(persistence) -> 
     assert evidence_refined_through_shell(services, baseline_turn=1, shell_turn=1) is True
 
 
+def test_stale_floor_without_ensure_floor_rewrite_raises(persistence) -> None:
+    """Floor algo bumps are owned by ensure_evidence_floor_algorithm_current only."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        compute_homeworld_evidence_refine_step_detailed,
+    )
+    from api.errors import ValidationError
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    with pytest.raises(ValidationError, match="ensure_evidence_floor_algorithm_current"):
+        compute_homeworld_evidence_refine_step_detailed(services, turn=turn_one)
+
+
+def test_floor_algorithm_rewrite_clears_sticky_ownership(persistence) -> None:
+    """Algo bump must reset ownership sets before re-accumulate (loosening-safe)."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        ensure_evidence_floor_algorithm_current,
+    )
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+        OwnershipProvenance,
+        SectorOwnerMember,
+    )
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    stale_member = SectorOwnerMember(
+        owner_slot=2,
+        provenances=(
+            OwnershipProvenance(
+                kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                turn=1,
+                ship_id=99,
+                radius_ly=10.0,
+                age_source="fleet_built_turn",
+            ),
+        ),
+    )
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        HomeworldEvidenceAggregate(
+            turn=1,
+            baseline_turn=1,
+            evidence_algorithm_version=0,
+            sector_owner_sets=((0, (stale_member,)),),
+            owner_possible_sectors=((2, (0,)),),
+        ),
+    )
+    assert (
+        ensure_evidence_floor_algorithm_current(
+            services,
+            baseline_turn=1,
+            fleet_built_turns={},
+        )
+        is True
+    )
+    stored = persistence.get_evidence_aggregate(628580, 1, 1)
+    assert stored is not None
+    assert stored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    # Stale sticky rows must not survive as the sole rewritten state when the
+    # baseline turn has no ships to re-pin (empty ownership after clear+re-accumulate).
+    assert stored.sector_owner_sets == ()
+    assert stored.owner_possible_sectors == ()
+
+
+def test_fleet_built_turns_from_final_ledgers_merges_known_ages(sample_turn) -> None:
+    """Sync ensure source: final on-disk ledgers supply ship_id -> built_turn."""
+    from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
+    from api.analytics.fleet.types import (
+        FleetAcquisitionLedger,
+        FleetFieldKnown,
+        FleetMaterializationProvenance,
+        FleetShipRecord,
+        FleetShipRecordFields,
+        PersistedFleetLedger,
+    )
+    from api.analytics.homeworld_locator.fleet_built_turns import (
+        fleet_built_turns_from_final_ledgers,
+    )
+    from api.analytics.turn_roster import iter_turn_players
+
+    fleet_services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=sample_turn.game.id,
+        perspective=1,
+        stored_turns={sample_turn.settings.turn: sample_turn},
+    )
+    player_ids = [player.id for player in iter_turn_players(sample_turn)]
+    assert player_ids
+    owner = player_ids[0]
+    fleet_services.persistence.put_ledger(
+        fleet_services.game_id,
+        fleet_services.perspective,
+        sample_turn.settings.turn,
+        owner,
+        PersistedFleetLedger(
+            ledger=FleetAcquisitionLedger(
+                player_id=owner,
+                records=[
+                    FleetShipRecord(
+                        record_id="rec-42",
+                        fields=FleetShipRecordFields(
+                            ship_id=FleetFieldKnown(42),
+                            built_turn=FleetFieldKnown(7),
+                        ),
+                    ),
+                ],
+            ),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
+    built = fleet_built_turns_from_final_ledgers(
+        fleet_services.persistence,
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
+        turn_number=sample_turn.settings.turn,
+        player_ids=player_ids,
+    )
+    assert built[42] == 7
+
+
 def test_stale_prior_evidence_algorithm_version_raises(persistence) -> None:
     """Advancing past a stale mid-chain prior must fail closed so DAG rewalks."""
     from api.analytics.homeworld_locator.evidence_ensure import (

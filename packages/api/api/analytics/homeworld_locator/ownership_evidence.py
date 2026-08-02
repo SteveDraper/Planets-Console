@@ -1,6 +1,7 @@
 """Homeworld ownership evidence: travel envelopes and planetary ownership sightings.
 
-Pure domain helpers for #269. Orchestrator / fleet DAG wiring is Phase 2.
+Pure domain helpers for #269. Refine / fleet ENSURE wiring lives in ownership_refine
+and evidence_ensure.
 """
 
 from __future__ import annotations

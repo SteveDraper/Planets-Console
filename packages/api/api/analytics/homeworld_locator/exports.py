@@ -18,6 +18,7 @@ from api.analytics.export_types import (
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
+from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.homeworld_locator.baseline_ensure import (
     ensure_homeworld_baseline,
     needs_baseline_recompute,
@@ -35,16 +36,19 @@ from api.analytics.homeworld_locator.evidence_refine_report import build_ensure_
 from api.analytics.homeworld_locator.evidence_refine_timing_history import (
     record_ensure_failure_report,
 )
+from api.analytics.homeworld_locator.fleet_built_turns import fleet_built_turns_from_final_ledgers
 from api.analytics.homeworld_locator.serialization import (
     homeworld_candidate_record_to_json,
     homeworld_evidence_aggregate_to_json,
     homeworld_locator_game_state_to_json,
 )
+from api.analytics.turn_roster import iter_turn_players
 from api.concepts.homeworld_layout import (
     homeworld_settings_fingerprint,
     is_homeworld_locator_available,
 )
 from api.errors import ValidationError
+from api.models.game import TurnInfo
 
 PATH_PREFIX_SCOPE_RULES: tuple[PathPrefixScopeRule, ...] = ()
 
@@ -249,6 +253,22 @@ def _ensure_homeworld_chain_dependencies(
     _raise_dependency_ensure_unavailable(ctx, scope, unavailable)
 
 
+def _fleet_built_turns_after_ensure(
+    ctx: AnalyticQueryContext,
+    turn: TurnInfo,
+    services: HomeworldLocatorComputeServices,
+) -> dict[int, int]:
+    """Load ship ages from final fleet ledgers (deps already satisfied)."""
+    fleet_services = resolve_fleet_services(ctx)
+    return fleet_built_turns_from_final_ledgers(
+        fleet_services.persistence,
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn_number=turn.settings.turn,
+        player_ids=[player.id for player in iter_turn_players(turn)],
+    )
+
+
 def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     if is_homeworld_export_ensure_satisfied(ctx, scope):
         return True
@@ -275,6 +295,7 @@ def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bo
         services,
         shell_turn=turn,
         game_state_baseline_turn=baseline_result.game_state.baseline_turn,
+        fleet_built_turns=_fleet_built_turns_after_ensure(ctx, turn, services),
     )
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
     return is_homeworld_export_ensure_satisfied(ctx, scope)
@@ -303,6 +324,7 @@ def materialize_homeworld_export_tree(
         services,
         shell_turn=turn,
         game_state_baseline_turn=result.game_state.baseline_turn,
+        fleet_built_turns=_fleet_built_turns_after_ensure(ctx, turn, services),
     )
     return {
         "meta": build_export_meta_branch(host_turn=scope.turn),

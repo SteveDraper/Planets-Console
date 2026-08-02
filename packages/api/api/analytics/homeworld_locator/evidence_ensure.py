@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.constants import HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
@@ -69,6 +69,22 @@ def evidence_refined_through_shell(
     return aggregate.turn == target_turn
 
 
+def _floor_prior_for_algorithm_rewrite(
+    floor: HomeworldEvidenceAggregate,
+) -> HomeworldEvidenceAggregate:
+    """Clear sticky ownership so algo bumps recompute from empty sets.
+
+    OD / single-SB upserts are idempotent on re-refine; ownership intersections are
+    not -- intersecting a loosened envelope into a prior narrowed set cannot restore
+    wrongly excluded sectors.
+    """
+    return replace(
+        floor,
+        sector_owner_sets=(),
+        owner_possible_sectors=(),
+    )
+
+
 def ensure_evidence_floor_algorithm_current(
     services: HomeworldLocatorComputeServices,
     *,
@@ -77,9 +93,9 @@ def ensure_evidence_floor_algorithm_current(
 ) -> bool:
     """Rewrite+persist the baseline floor when ``evidenceAlgorithmVersion`` is stale.
 
-    Export DAG walks treat turn 1 as ``_is_at_baseline`` and skip ensuring it, so a
-    shell open at turn > 1 must upgrade the floor here before chain advance.
-    Returns True when a rewrite was persisted.
+    Sole owner of floor algorithm rewrites (export DAG skips ensuring turn 1 as
+    baseline). Clears sticky ownership before re-accumulate, then stamps the
+    current version. Returns True when a rewrite was persisted.
     """
     state = services.persistence.get_game_state(services.game_id)
     if state is None:
@@ -109,7 +125,7 @@ def ensure_evidence_floor_algorithm_current(
     candidate_ids = candidate_planet_ids_from_records(state.candidates)
     planets_by_id = {planet.id: planet for planet in turn.planets}
     computed = refine_homeworld_evidence_aggregate(
-        floor,
+        _floor_prior_for_algorithm_rewrite(floor),
         turn=turn,
         candidates=state.candidates,
         candidate_planet_ids_set=candidate_ids,
@@ -142,6 +158,7 @@ def compute_homeworld_evidence_refine_step(
     services: HomeworldLocatorComputeServices,
     *,
     turn: TurnInfo,
+    fleet_built_turns: Mapping[int, int] | None = None,
 ) -> HomeworldEvidenceAggregate:
     """Compute one refine step for ``turn`` without persisting.
 
@@ -154,7 +171,11 @@ def compute_homeworld_evidence_refine_step(
     Prefer :func:`compute_homeworld_evidence_refine_step_detailed` when the
     caller will record timing telemetry.
     """
-    return compute_homeworld_evidence_refine_step_detailed(services, turn=turn).aggregate
+    return compute_homeworld_evidence_refine_step_detailed(
+        services,
+        turn=turn,
+        fleet_built_turns=fleet_built_turns,
+    ).aggregate
 
 
 def compute_homeworld_evidence_refine_step_detailed(
@@ -163,7 +184,12 @@ def compute_homeworld_evidence_refine_step_detailed(
     turn: TurnInfo,
     fleet_built_turns: Mapping[int, int] | None = None,
 ) -> EvidenceRefineStepResult:
-    """Like :func:`compute_homeworld_evidence_refine_step`` with timing payload."""
+    """Like :func:`compute_homeworld_evidence_refine_step`` with timing payload.
+
+    Floor algorithm bumps are owned exclusively by
+    :func:`ensure_evidence_floor_algorithm_current` -- callers must run that first
+    when the floor may be stale. A stale floor here fails closed.
+    """
     step_t0 = time.perf_counter()
     state_t0 = time.perf_counter()
     state = services.persistence.get_game_state(services.game_id)
@@ -200,31 +226,16 @@ def compute_homeworld_evidence_refine_step_detailed(
         )
         if floor is None:
             raise ValidationError("homeworld floor evidence aggregate missing before refine")
-        if floor.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
-            return EvidenceRefineStepResult(
-                aggregate=floor,
-                computed=False,
-                step_elapsed_ms=(time.perf_counter() - step_t0) * 1000.0,
+        if floor.evidence_algorithm_version != HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
+            raise ValidationError(
+                f"homeworld floor evidence aggregate has stale "
+                f"evidenceAlgorithmVersion {floor.evidence_algorithm_version}; "
+                f"expected {HOMEWORLD_EVIDENCE_ALGORITHM_VERSION} "
+                "(call ensure_evidence_floor_algorithm_current first)"
             )
-        # Algo bump on floor-only shell: re-run refine on the baseline turn so
-        # ownership (and future evidence policy) rewrites the floor aggregate.
-        candidate_ids = candidate_planet_ids_from_records(state.candidates)
-        planets_by_id = {planet.id: planet for planet in turn.planets}
-        computed = refine_homeworld_evidence_aggregate(
-            floor,
-            turn=turn,
-            candidates=state.candidates,
-            candidate_planet_ids_set=candidate_ids,
-            planets_by_id=planets_by_id,
-            load_turn=services.load_turn,
-            fleet_built_turns=fleet_built_turns,
-        )
         return EvidenceRefineStepResult(
-            aggregate=computed.aggregate,
-            computed=True,
-            compute=computed,
-            load_game_state_ms=load_game_state_ms,
-            load_prior_ms=0.0,
+            aggregate=floor,
+            computed=False,
             step_elapsed_ms=(time.perf_counter() - step_t0) * 1000.0,
         )
 
@@ -307,11 +318,14 @@ def ensure_homeworld_evidence_refined(
     *,
     shell_turn: TurnInfo,
     game_state_baseline_turn: int,
+    fleet_built_turns: Mapping[int, int] | None = None,
 ) -> HomeworldEvidenceAggregate:
     """Ensure evidence at the shell turn via a single refine step, then persist.
 
     Prior-turn gap-fill must already have run via ``ENSURE_DEPENDENCIES`` unwind.
     ``game_state_baseline_turn`` must match the durable game-global baseline.
+    ``fleet_built_turns`` should be loaded from final fleet ledgers after ENSURE
+    (scoreboard max-age remains the per-ship fallback when a ship id is absent).
     """
     state = services.persistence.get_game_state(services.game_id)
     if state is None:
@@ -339,13 +353,16 @@ def ensure_homeworld_evidence_refined(
     ensure_evidence_floor_algorithm_current(
         services,
         baseline_turn=game_state_baseline_turn,
+        fleet_built_turns=fleet_built_turns,
     )
 
-    step = compute_homeworld_evidence_refine_step_detailed(services, turn=shell_turn)
+    step = compute_homeworld_evidence_refine_step_detailed(
+        services,
+        turn=shell_turn,
+        fleet_built_turns=fleet_built_turns,
+    )
     persist_ms = 0.0
     if step.computed:
-        # Includes baseline-floor algorithm bumps (shell <= baseline_turn): the
-        # rewrite must land durably or later turns see a stale prior and fail.
         persist_t0 = time.perf_counter()
         services.persistence.put_evidence_aggregate(
             services.game_id,

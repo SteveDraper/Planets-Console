@@ -18,6 +18,7 @@ from api.analytics.homeworld_locator.evidence_ensure import (
     record_evidence_refine_step_report,
 )
 from api.analytics.homeworld_locator.fleet_built_turns import (
+    coerce_fleet_built_turns_map,
     fleet_built_turns_from_dependency_outputs,
 )
 from api.analytics.homeworld_locator.serialization import (
@@ -184,18 +185,11 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
 
     shell_turn = turn.settings.turn
     fleet_built_turns = job_wire.get(_FLEET_BUILT_TURNS_KEY)
-    if fleet_built_turns is None:
-        fleet_built_turns = {}
-    if not isinstance(fleet_built_turns, dict):
+    if fleet_built_turns is not None and not isinstance(fleet_built_turns, dict):
         raise TypeError("homeworld refine job wire fleetBuiltTurns must be a dict when present")
-    built_turn_map: dict[int, int] = {}
-    for ship_id, built_turn in fleet_built_turns.items():
-        if not isinstance(built_turn, int):
-            continue
-        if isinstance(ship_id, int):
-            built_turn_map[ship_id] = built_turn
-        elif isinstance(ship_id, str) and ship_id.isdigit():
-            built_turn_map[int(ship_id)] = built_turn
+    built_turn_map = coerce_fleet_built_turns_map(
+        fleet_built_turns if isinstance(fleet_built_turns, dict) else None
+    )
 
     already_durable = evidence_refined_through_shell(
         services,
