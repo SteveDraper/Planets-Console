@@ -236,9 +236,7 @@ def definite_candidate_planet_ids(
     candidates: Sequence[HomeworldCandidateRecord],
 ) -> tuple[int, ...]:
     """Planet ids whose durable candidate row is currently definite (baseline pins)."""
-    return tuple(
-        row.planet_id for row in candidates if row.confidence_tier == CONFIDENCE_DEFINITE
-    )
+    return tuple(row.planet_id for row in candidates if row.confidence_tier == CONFIDENCE_DEFINITE)
 
 
 def baseline_profile_location_provenances(

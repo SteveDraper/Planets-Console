@@ -269,9 +269,7 @@ def test_single_starbase_provenance_derives_possible_to_definite() -> None:
         ),
     )
     location_provenances = collect_machine_location_provenances(
-        single_starbase_promotions=(
-            HomeworldSingleStarbasePromotion(planet_id=10, turn=5),
-        ),
+        single_starbase_promotions=(HomeworldSingleStarbasePromotion(planet_id=10, turn=5),),
     )
     derived = derive_candidates_from_merged_evidence(
         candidates,
@@ -384,9 +382,7 @@ def test_single_starbase_promotion_does_not_assign_homeworld_owner_from_ship_own
     from api.analytics.homeworld_locator.models import HomeworldSingleStarbasePromotion
 
     location_provenances = collect_machine_location_provenances(
-        single_starbase_promotions=(
-            HomeworldSingleStarbasePromotion(planet_id=planet_id, turn=5),
-        ),
+        single_starbase_promotions=(HomeworldSingleStarbasePromotion(planet_id=planet_id, turn=5),),
     )
     derived = derive_candidates_from_merged_evidence(
         (orphan,),
@@ -532,9 +528,7 @@ def test_collect_backfills_baseline_profile_when_prior_empty_and_od_present() ->
     assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE
     # Without backfill, OD-only list would demote planet 10 to possible.
-    od_only = (
-        LocationProvenance(kind=PROVENANCE_ORIGIN_DISTANCE, turn=3, planet_id=20),
-    )
+    od_only = (LocationProvenance(kind=PROVENANCE_ORIGIN_DISTANCE, turn=3, planet_id=20),)
     demoted = derive_candidates_from_merged_evidence(
         candidates,
         MergedHomeworldEvidence(
