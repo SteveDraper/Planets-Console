@@ -1,6 +1,6 @@
 # Design: Homeworld locator analytic
 
-This document captures **game-domain and inference rules** for the **Homeworld locator** **turn analytic**. It supplements the GitHub issues ([#33](https://github.com/SteveDraper/Planets-Console/issues/33) PRD, child slices [#34](https://github.com/SteveDraper/Planets-Console/issues/34)--[#37](https://github.com/SteveDraper/Planets-Console/issues/37)) with the reasoning and constraints from design review. Use **CONTEXT.md** for project vocabulary and [ADR 0002](adr/0002-analytic-persistence.md) for persistence paths.
+This document captures **game-domain and inference rules** for the **Homeworld locator** **turn analytic**. It supplements the GitHub issues ([#33](https://github.com/SteveDraper/Planets-Console/issues/33) PRD, child slices [#34](https://github.com/SteveDraper/Planets-Console/issues/34)--[#37](https://github.com/SteveDraper/Planets-Console/issues/37)) with the reasoning and constraints from design review. Use **CONTEXT.md** for project vocabulary, [ADR 0002](adr/0002-analytic-persistence.md) for persistence paths, and [ADR 0010](adr/0010-homeworld-assertion-provenance-strength.md) for assertion provenances.
 
 **Nu help (Starmap):** [Game Setup Customization](https://planets.nu/customization) -- homeworld placement lives under **Starmap**, not classic Host Configuration turn-processing defaults.
 
@@ -200,7 +200,7 @@ Strengthens **where** a HW is (confidence on existing candidates). Does **not** 
 
 Strengthens **homeworld owner** attribution for **homeworld sectors** (whose HW / sector), not location tier. Does **not** invent location candidates and does **not** replace #36 location promotion. Out of scope for #36 / layout-prior / user assertions (#37) / fleet SB-region consumption (#134).
 
-**Unit of attribution:** the **homeworld sector**, not candidate wire `perspective`. Each sector carries a **possible homeworld owner set**: zero or more **Player** slots, each with a **provenance collection** (summaries of why that slot is in the set). Conflicts are retained as multiple members -- the SPA decides display. Motivation: [#37](https://github.com/SteveDraper/Planets-Console/issues/37) can add a **user-asserted** provenance the UI may treat as decisive even when other evidence remains.
+**Unit of attribution:** the **homeworld sector**, not candidate wire `perspective`. Each sector carries a **possible homeworld owner set**: zero or more **Player** slots, each with a provenance collection. Conflicts at the same **homeworld evidence strength class** stay multi-member (**ambiguous**); higher-strength provenances decide per [ADR 0010](adr/0010-homeworld-assertion-provenance-strength.md) / #37.
 
 | Concern | Rule |
 |---------|------|
@@ -247,7 +247,7 @@ Strengthens **homeworld owner** attribution for **homeworld sectors** (whose HW 
 
 Empty / unknown `ownerid` does not contribute. Ownership sightings **add** to the set; they do not remove other members by themselves (envelope reduction is the narrowing channel for ship-origin sectors).
 
-**Provenance summary (v1 machine facts):** each set member stores one or more `{kind, turn, ...}` records (`ship_travel_envelope` \| `preferred_candidate_ownership` \| `nearby_planet_ownership`; later `user_asserted` from #37). Core emits structured facts only -- no English hover strings (ADR 0008).
+**Provenance summary (v1):** each set member stores one or more `{kind, turn, strength, ...}` records (`ship_travel_envelope` \| `preferred_candidate_ownership` \| `nearby_planet_ownership` \| asserted from #37). Core emits structured facts only -- no English hover strings (ADR 0008).
 
 **Materialize order:** after location promote + co-sector cull + definite-neighborhood cull; **before** layout prior. Ownership apply updates sector owner sets (and unique-owner orphan bind when applicable); layout prior still keys off candidate tiers / pins.
 
@@ -277,9 +277,32 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 
 **Evidence does not replace baseline;** it adjusts confidence on candidates already hypothesized from baseline + geometry.
 
-### 4.4 User assertion
+### 4.4 User assertion (#37)
 
-**User-asserted** records use the same **homeworld candidate record** shape as inferred rows. Promotion to **definite**, **homeworld owner** assignment, or race tag with **user-asserted** attribution always wins over inference until revoked (#37).
+**Two independent axes.** Users may assert **ownership** (whose sector / whose planet) and **location** (which planet is the HW) separately or together. Each axis keeps a provenance list; kinds map to **homeworld evidence strength class** (`weak` < `strong` < `asserted`). Display/decision state uses **homeworld evidence strength resolution** (max strength wins; same-strength conflicts stay ambiguous / possible). ADR: [0010](adr/0010-homeworld-assertion-provenance-strength.md).
+
+**Kind → strength (v1):**
+
+| Axis | Kind | Strength |
+|------|------|----------|
+| Location | Origin-distance observation | weak |
+| Location | Baseline profile match; single-starbase new-build | strong |
+| Location | UI “this planet is the HW” | asserted |
+| Ownership | `nearby_planet_ownership`; `preferred_candidate_ownership` (preferred not yet location-definite) | weak |
+| Ownership | `preferred_candidate_ownership` when preferred is location-**definite**; `ship_travel_envelope` | strong |
+| Ownership | UI owner assert | asserted |
+
+Geometry / co-sector / definite-neighborhood culls do not mint provenances.
+
+**Durable storage:** **asserted** provenances live only in **homeworld locator state (game-global)**. Machine provenances stay on the turn-scoped **homeworld evidence aggregate**. A thin merge layer above persistence read unions both so processing sees one list per axis.
+
+**v1 product locks:**
+- Positive location assert only (revoke to undo; no durable “is not”)
+- No durable race annotation -- SPA ownership pick-list shows `"<name> (<race>)"` → slot id
+- Location assert may target any traditional (non-planetoid) planet, creating a candidate if needed
+- Ownership **sector-keyed** when sectors exist (planet menu resolves sector); **planet-keyed** only when sectors do not exist
+- **Homeworld locator refresh:** clear inferred game-global candidates + evidence aggregates for the shell perspective (baseline through shell), ensure / `force_fresh` rebuild; asserts preserved
+- UI: **homeworld locator panel** + map context menus (planet markers and sector overlays) + refresh; tabular tile is a read-only mirror
 
 ---
 
@@ -287,11 +310,11 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 
 | Kind | When |
 |------|------|
-| **Definite** | Baseline profile match; OR geometry leaves no plausible alternative; OR **single-starbase new-build** promotion; OR **user-asserted** |
-| **Possible** | Consistent with settings/spacing/evidence but not unique; default for orphans |
+| **Definite** | Winning **location** strength is **strong** or **asserted** and that class resolves to one planet (baseline profile, single-SB new-build, or UI location assert) |
+| **Possible** | Only **weak** location evidence, or winning-class location conflict |
 | **Most probable** (`isMostProbable`) | Selection status on one **possible** per unpinned sector under layout prior -- **not** a confidence tier |
 
-Orphans: location-first candidates not yet tied to a **homeworld owner** -- remain **possible** until anchored or confirmed.
+Orphans: location-first candidates not yet tied to a **homeworld owner** -- remain **possible** until ownership resolves or the user asserts owner (when applicable).
 
 ---
 
@@ -302,19 +325,18 @@ Two parallel output modes (**C** from design review):
 1. **Slot-anchored** -- tied to a **homeworld owner** (Player / slot whose HW this is)
 2. **Orphan** -- planet or region that looks like a HW; owner not yet assigned
 
-**Homeworld candidate record** (persisted and on the wire):
+**Homeworld candidate record** (materialized view on the wire -- not the durable assertion store):
 
 ```
-record_id
-perspective?          # wire name: homeworld owner slot when slot-anchored (not shell viewpoint)
-planet_id?            # when pinned to a planet
-region?               # when only sector/envelope known
-race_id?              # override or annotation
-confidence_tier       # definite | possible
-is_most_probable      # view-time selection status (#36); not durable evidence
-attribution           # inferred | user-asserted
-evidence_summary?     # counts for UI
+planet_id                 # traditional planet
+perspective?              # derived homeworld owner slot when resolved (not shell viewpoint)
+confidence_tier           # derived: definite | possible
+is_most_probable          # view-time selection status (#36); not durable evidence
+asserted_cue?             # derived: asserted-strength provenance present on location and/or ownership
+provenance_summary?       # optional counts / kinds for UI
 ```
+
+Durable facts: game-global **asserted** provenances + machine provenances on the evidence aggregate (merged above read). See §4.4 / ADR 0010.
 
 ---
 
@@ -324,8 +346,8 @@ evidence_summary?     # counts for UI
 |------|-------|
 | Baseline planet signals | Earliest turn for shell **perspective** (prefer turn 1) |
 | Later-turn evidence | Turns stored at current **viewpoint** **perspective** only |
-| User assertions | **Homeworld locator state (game-global)** -- shared across viewers |
-| Evidence accumulation | **Homeworld locator evidence (perspective)** per slot |
+| User assertions (**asserted** provenances) | **Homeworld locator state (game-global)** -- shared across viewers |
+| Evidence accumulation | Turn-scoped **homeworld evidence aggregate** per shell perspective |
 
 Planet **x/y coordinates** are static; map display can use current shell turn while inference reads baseline + evidence turns.
 
@@ -351,7 +373,7 @@ See [ADR 0002](adr/0002-analytic-persistence.md) (homeworld example amended with
 - Turn 1 newly available after a **baseline degraded** run triggers baseline recompute
 - Manual **homeworld locator refresh** (#37)
 
-**User-asserted** records preserved on recompute (#37).
+**Asserted** provenances preserved on recompute (#37 / ADR 0010).
 
 ---
 
@@ -375,11 +397,11 @@ Origin distances (81 LY pod, warp table) and the shared ship-limit gate stay in 
 | Element | Behavior |
 |---------|----------|
 | **Homeworld map marker** | Decoration on **base map** node -- solid = definite; dashed/light = possible; **most probable** = stronger possible (double-layer dotted ring) via `isMostProbable` |
-| **User-asserted definite** | Same definite marker + attribution cue (border/badge) |
+| **Asserted cue** | Distinct marker/overlay cue when an **asserted**-strength provenance is present (location and/or ownership) |
 | **Homeworld region overlay** | Shared **map region overlay** boundary sectors (+ optional envelopes) for Circular round; filtered by **homeworld region display mode** |
-| **Homeworld locator panel** | Sidebar table + refresh + degraded baseline warning |
-| Map context menu | Quick **homeworld assertion** |
-| Tabular tile | Same rows as panel in main **tabular** **view mode**; show most-probable cue |
+| **Homeworld locator panel** | Sidebar table + refresh + degraded baseline warning; ownership/location assert + revoke |
+| Map context menu | Quick **homeworld assertion** on planet markers and sector overlays |
+| Tabular tile | Read-only mirror of panel rows in main **tabular** **view mode**; show most-probable cue |
 | **Homeworld region display mode** | Sidebar expandable control (Cartography pattern); global preference |
 
 ---
@@ -392,7 +414,7 @@ Origin distances (81 LY pod, warp table) and the shared ship-limit gate stay in 
 | [#35](https://github.com/SteveDraper/Planets-Console/issues/35) | **Homeworld region overlay** paint: shared boundary `regionOverlays`, layout distribution asset, sector emission, display mode + hover ([ADR 0008](adr/0008-shared-map-region-overlays.md)) |
 | [#36](https://github.com/SteveDraper/Planets-Console/issues/36) | Location evidence refine through shell turn; origin-distance + single-SB new-build; promotion; definite-neighborhood cull; layout prior **most probable**; FE markers/table cue |
 | [#269](https://github.com/SteveDraper/Planets-Console/issues/269) | **Homeworld ownership evidence** (travel envelopes, sector possible-owner sets + provenance, planetary ownership sightings, minimal sector hover) -- not location promotion |
-| [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | User assertions, refresh, **homeworld locator panel**, attribution UX (may add decisive `user_asserted` provenance into the same owner set) |
+| [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | Dual-axis **homeworld assertion** (tiered provenances), refresh, **homeworld locator panel**, map context menus; ADR 0010 |
 
 ### 11.1 Issue #34 phased plan
 
@@ -432,6 +454,14 @@ Grill locks: §4.3.2 (this doc). CONTEXT: **homeworld ownership evidence**, **ho
 1. **Ownership domain** -- ship age (fleet `built_turn` else id/scoreboard max age); travel envelopes (warp² / Grav / ignore HYP); sector reachable-set reduction; planetary preferred + nearby-162 ownership adds; pure helpers + unit tests (envelope pin, sighting merge, ambiguous multi-owner set). No HTTP.
 2. **Evidence refine + materialize + fleet DAG** -- durable sector owner sets on the evidence aggregate; refine accumulation; **ENSURE fan-out to final `fleet@N` per roster player** + `DependencyOutputs` built_turn map; materialize apply after culls / before layout prior; unique-owner orphan bind; serialization + Core/orchestrator tests; docs/ADR amend as needed.
 3. **Minimal FE** -- extend sector overlay wire facts + `formatHomeworldSectorHoverLine` (single owner vs **ambiguous** + possibles); normalize/tests. No panel.
+
+### 11.6 Issue #37 phased plan
+
+Grill locks: §4.4 / ADR [0010](adr/0010-homeworld-assertion-provenance-strength.md). CONTEXT: **homeworld evidence strength class**, **homeworld evidence strength resolution**, **homeworld location provenance**, **homeworld assertion**.
+
+1. **Domain + persistence** -- strength-class mapping; location provenance collection; game-global asserted provenances; merge-above-read; strength resolution; preserve asserts across baseline/evidence recompute; unit tests (no HTTP).
+2. **Core + BFF mutations** -- assert upsert/revoke (ownership sector- or planet-keyed; location positive); refresh (machine wipe + ensure/`force_fresh`); map/table wire carries derived asserted cue; OpenAPI; Core/BFF tests.
+3. **FE panel + menus** -- **homeworld locator panel** (table, degraded, refresh); planet + sector context menus; TanStack mutations + refetch; tabular tile read-only mirror; asserted marker cue.
 
 ---
 
@@ -487,3 +517,4 @@ Grill locks: §4.3.2 (this doc). CONTEXT: **homeworld ownership evidence**, **ho
 | 2026-08-02 | #269 Phase 3: sector ``possibleOwners`` (+ optional per-slot ``playerLabel``) on wire; FE normalize + hover unique vs **ambiguous** |
 | 2026-08-02 | Ownership travel envelope: +1 LY/turn rounding slack (`travel_turns × (warp² + 1)`); bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 2 |
 | 2026-08-02 | Sync ensure loads fleet `built_turn` from final on-disk ledgers after ENSURE; floor algo rewrite clears sticky ownership before re-accumulate; sole floor-rewrite owner; shared sector partition helper; bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 3 |
+| 2026-08-03 | #37 grill: dual-axis tiered provenances (weak/strong/asserted); game-global asserts + merge-above-read; positive location only; no race annotation; refresh = full machine wipe; ADR 0010; §4.4 / §11.6 |
