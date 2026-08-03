@@ -4,28 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
-from api.analytics.fleet.types import (
-    FleetAcquisitionLedger,
-    FleetMaterializationProvenance,
-    PersistedFleetLedger,
-)
 from api.analytics.homeworld_locator.assertions import (
     revoke_location_assertion,
     revoke_ownership_assertion,
     upsert_location_assertion,
     upsert_ownership_assertion,
 )
-from api.analytics.homeworld_locator.compute import get_homeworld_locator
-from api.analytics.homeworld_locator.compute_services import (
-    HomeworldLocatorComputeServices,
-    build_ephemeral_homeworld_services,
-)
-from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.sector_overlays import homeworld_layout_asset_category
 from api.analytics.homeworld_locator.types import HomeworldLocatorGameState
-from api.analytics.turn_roster import iter_turn_players, players_by_id
+from api.analytics.turn_roster import players_by_id
 from api.concepts.warp_well import planet_is_planetoid
 from api.errors import NotFoundError, ValidationError
 from api.models.game import TurnInfo
@@ -44,16 +32,6 @@ def homeworld_sectors_exist(turn: TurnInfo) -> bool:
     return homeworld_layout_asset_category(turn, player_count=player_count) is not None
 
 
-def _final_fleet_ledger(player_id: int) -> PersistedFleetLedger:
-    return PersistedFleetLedger(
-        ledger=FleetAcquisitionLedger(player_id=player_id),
-        provenance=FleetMaterializationProvenance(
-            turn_evidence_at_n=True,
-            prior_ledger_at_n_minus_1=True,
-        ),
-    )
-
-
 class HomeworldAssertionService:
     """Thin assertion/refresh service: validate, persist game-global asserts, rematerialize."""
 
@@ -62,14 +40,12 @@ class HomeworldAssertionService:
         *,
         persistence: HomeworldLocatorPersistenceService,
         load_turn: Callable[[int], TurnInfo | None],
-        list_stored_turns: Callable[[], list[int]],
         game_id: int,
         perspective: int,
-        rematerialize: Callable[[int], dict] | None = None,
+        rematerialize: Callable[[int], dict],
     ) -> None:
         self._persistence = persistence
         self._load_turn = load_turn
-        self._list_stored_turns = list_stored_turns
         self._game_id = game_id
         self._perspective = perspective
         self._rematerialize = rematerialize
@@ -80,7 +56,7 @@ class HomeworldAssertionService:
         state = self._load_or_empty_state()
         updated = upsert_location_assertion(state, planet_id=planet_id, turn=turn_number)
         self._persistence.put_game_state(self._game_id, updated)
-        return self._candidate_view(turn_number)
+        return self._rematerialize(turn_number)
 
     def revoke_location_assertion(self, *, planet_id: int, turn_number: int) -> dict:
         self._require_turn(turn_number)
@@ -89,7 +65,7 @@ class HomeworldAssertionService:
         state = self._load_or_empty_state()
         updated = revoke_location_assertion(state, planet_id=planet_id)
         self._persistence.put_game_state(self._game_id, updated)
-        return self._candidate_view(turn_number)
+        return self._rematerialize(turn_number)
 
     def upsert_ownership_assertion(
         self,
@@ -115,7 +91,7 @@ class HomeworldAssertionService:
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         self._persistence.put_game_state(self._game_id, updated)
-        return self._candidate_view(turn_number)
+        return self._rematerialize(turn_number)
 
     def revoke_ownership_assertion(
         self,
@@ -138,13 +114,13 @@ class HomeworldAssertionService:
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         self._persistence.put_game_state(self._game_id, updated)
-        return self._candidate_view(turn_number)
+        return self._rematerialize(turn_number)
 
     def refresh(self, *, turn_number: int) -> dict:
         """Wipe machine homeworld state for the shell perspective, then ensure rebuild."""
         self._require_turn(turn_number)
         self._persistence.clear_baseline_for_recompute(self._game_id, self._perspective)
-        return self._candidate_view(turn_number)
+        return self._rematerialize(turn_number)
 
     def apply_assertion(
         self,
@@ -220,55 +196,6 @@ class HomeworldAssertionService:
             baseline_turn=0,
             baseline_degraded=False,
         )
-
-    def _candidate_view(self, turn_number: int) -> dict:
-        if self._rematerialize is not None:
-            return self._rematerialize(turn_number)
-        turn = self._require_turn(turn_number)
-        services = build_ephemeral_homeworld_services(
-            persistence=self._persistence,
-            game_id=self._game_id,
-            perspective=self._perspective,
-            load_turn=self._load_turn,
-            list_stored_turns=self._list_stored_turns,
-        )
-        return get_homeworld_locator(
-            turn,
-            load_turn=self._load_turn,
-            export_services=self._export_services(services, turn),
-        )
-
-    def _export_services(
-        self,
-        services: HomeworldLocatorComputeServices,
-        shell_turn: TurnInfo,
-    ) -> dict[str, object]:
-        stored = {
-            turn_number: loaded
-            for turn_number in self._list_stored_turns()
-            if (loaded := self._load_turn(turn_number)) is not None
-        }
-        if shell_turn.settings.turn not in stored:
-            stored[shell_turn.settings.turn] = shell_turn
-        fleet_services = build_ephemeral_fleet_compute_services(
-            shell_turn,
-            game_id=self._game_id,
-            perspective=self._perspective,
-            stored_turns=stored,
-        )
-        for turn_number, turn in stored.items():
-            for player in iter_turn_players(turn):
-                fleet_services.persistence.put_ledger(
-                    self._game_id,
-                    self._perspective,
-                    turn_number,
-                    player.id,
-                    _final_fleet_ledger(player.id),
-                )
-        return {
-            ANALYTIC_ID: services,
-            "fleet": fleet_services,
-        }
 
 
 __all__ = [

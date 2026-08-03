@@ -532,10 +532,6 @@ class TurnAnalyticService:
         return HomeworldAssertionService(
             persistence=self._homeworld_persistence,
             load_turn=load_turn,
-            list_stored_turns=lambda: self._turns.list_stored_turn_numbers(
-                game_id,
-                perspective,
-            ),
             game_id=game_id,
             perspective=perspective,
             rematerialize=rematerialize,

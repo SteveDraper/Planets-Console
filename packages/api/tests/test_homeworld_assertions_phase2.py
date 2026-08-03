@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from api.analytics.homeworld_locator.compute import get_homeworld_locator
 from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
     ATTRIBUTION_USER_ASSERTED,
@@ -39,6 +41,8 @@ from api.storage import clear_backend_cache, get_storage
 from api.storage.memory_asset import MemoryAssetBackend
 from fastapi.testclient import TestClient
 
+from tests.test_homeworld_locator_core import _export_services, _services
+
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
 
@@ -53,20 +57,57 @@ def persistence():
     return HomeworldLocatorPersistenceService(MemoryAssetBackend(initial={}))
 
 
+def _assertion_rematerialize(
+    persistence: HomeworldLocatorPersistenceService,
+    turns: dict[int, TurnInfo],
+    *,
+    game_id: int = 628580,
+    perspective: int = 1,
+) -> Callable[[int], dict]:
+    """Production-shaped rematerialize via get_homeworld_locator + shared test exports."""
+
+    def rematerialize(turn_number: int) -> dict:
+        turn = turns[turn_number]
+        services = _services(
+            persistence,
+            turns,
+            game_id=game_id,
+            perspective=perspective,
+        )
+        return get_homeworld_locator(
+            turn,
+            load_turn=lambda n: turns.get(n),
+            export_services=_export_services(services, turns),
+        )
+
+    return rematerialize
+
+
+def _make_assertion_service(
+    persistence: HomeworldLocatorPersistenceService,
+    turns: dict[int, TurnInfo],
+    *,
+    game_id: int = 628580,
+    perspective: int = 1,
+) -> HomeworldAssertionService:
+    return HomeworldAssertionService(
+        persistence=persistence,
+        load_turn=lambda n: turns.get(n),
+        game_id=game_id,
+        perspective=perspective,
+        rematerialize=_assertion_rematerialize(
+            persistence,
+            turns,
+            game_id=game_id,
+            perspective=perspective,
+        ),
+    )
+
+
 @pytest.fixture
 def assertion_service(persistence, sample_turn):
     turns = {sample_turn.settings.turn: sample_turn}
-
-    def load_turn(n: int):
-        return turns.get(n)
-
-    return HomeworldAssertionService(
-        persistence=persistence,
-        load_turn=load_turn,
-        list_stored_turns=lambda: sorted(turns),
-        game_id=628580,
-        perspective=1,
-    )
+    return _make_assertion_service(persistence, turns)
 
 
 def _seed_minimal_state(
@@ -197,13 +238,7 @@ def test_location_assert_rejects_planetoid(assertion_service, persistence, sampl
     planets[2] = planetoid
     mutated = replace(sample_turn, planets=planets)
     turns = {turn_number: mutated}
-    service = HomeworldAssertionService(
-        persistence=persistence,
-        load_turn=lambda n: turns.get(n),
-        list_stored_turns=lambda: sorted(turns),
-        game_id=628580,
-        perspective=1,
-    )
+    service = _make_assertion_service(persistence, turns)
     _seed_minimal_state(persistence, mutated)
     with pytest.raises(ValidationError, match="planetoid"):
         service.upsert_location_assertion(planet_id=planetoid.id, turn_number=turn_number)
@@ -214,13 +249,7 @@ def test_refresh_wipes_machine_state_preserves_asserts_and_rebuilds(
 ) -> None:
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     turns = {1: turn_one}
-    service = HomeworldAssertionService(
-        persistence=persistence,
-        load_turn=lambda n: turns.get(n),
-        list_stored_turns=lambda: sorted(turns),
-        game_id=628580,
-        perspective=1,
-    )
+    service = _make_assertion_service(persistence, turns)
     fingerprint = homeworld_settings_fingerprint(turn_one.settings)
     # Seed asserts + machine evidence; refresh must keep asserts and rebuild via ensure.
     persistence.put_game_state(
