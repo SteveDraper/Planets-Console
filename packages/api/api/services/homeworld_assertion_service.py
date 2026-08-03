@@ -11,9 +11,10 @@ from api.analytics.homeworld_locator.assertions import (
     upsert_ownership_assertion,
 )
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
-from api.analytics.homeworld_locator.sector_overlays import homeworld_layout_asset_category
+from api.analytics.homeworld_locator.sector_overlays import (
+    homeworld_sector_geometry_eligible,
+)
 from api.analytics.homeworld_locator.types import HomeworldLocatorGameState
-from api.analytics.turn_roster import players_by_id
 from api.concepts.warp_well import planet_is_planetoid
 from api.errors import NotFoundError, ValidationError
 from api.models.game import TurnInfo
@@ -30,10 +31,7 @@ def homeworld_sectors_exist(turn: TurnInfo) -> bool:
     epic|standard layout asset category with at least two players), without
     requiring a viewpoint pin so API keying stays stable before pin resolve.
     """
-    player_count = len(players_by_id(turn))
-    if player_count < 2:
-        return False
-    return homeworld_layout_asset_category(turn, player_count=player_count) is not None
+    return homeworld_sector_geometry_eligible(turn)
 
 
 class HomeworldAssertionService:
