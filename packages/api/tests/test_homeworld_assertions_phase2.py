@@ -413,6 +413,47 @@ def test_core_http_upsert_and_revoke_location(http_client) -> None:
     assert not any(row.get("assertedCue") for row in revoke.json()["rows"])
 
 
+def test_core_http_upsert_and_revoke_ownership(http_client) -> None:
+    # Sample turn has no homeworld sectors → planet-keyed ownership.
+    # Ownership cues attach to existing candidate rows and do not mint shells.
+    # http_client seeds baseline_degraded=True with turn 1 stored, so ensure would
+    # recompute and drop the seed candidate; clear degraded so the shell survives.
+    hw = HomeworldLocatorPersistenceService(get_storage())
+    state = hw.get_game_state(628580)
+    assert state is not None
+    hw.put_game_state(628580, replace(state, baseline_degraded=False))
+
+    upsert = http_client.post(
+        "/v1/games/628580/1/turns/1/analytics/homeworld-locator/assertions",
+        json={
+            "axis": "ownership",
+            "action": "upsert",
+            "ownerSlot": 2,
+            "planetId": 1,
+        },
+    )
+    assert upsert.status_code == 200, upsert.text
+    body = upsert.json()
+    assert any(
+        row["planetId"] == 1
+        and row["assertedCue"] is True
+        and row["attribution"] == ATTRIBUTION_USER_ASSERTED
+        for row in body["rows"]
+    )
+
+    revoke = http_client.post(
+        "/v1/games/628580/1/turns/1/analytics/homeworld-locator/assertions",
+        json={
+            "axis": "ownership",
+            "action": "revoke",
+            "ownerSlot": 2,
+            "planetId": 1,
+        },
+    )
+    assert revoke.status_code == 200, revoke.text
+    assert not any(row.get("assertedCue") for row in revoke.json()["rows"])
+
+
 def test_core_http_refresh(http_client) -> None:
     upsert = http_client.post(
         "/v1/games/628580/1/turns/1/analytics/homeworld-locator/assertions",
