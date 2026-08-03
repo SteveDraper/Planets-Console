@@ -17,6 +17,10 @@ from api.analytics.turn_roster import players_by_id
 from api.concepts.warp_well import planet_is_planetoid
 from api.errors import NotFoundError, ValidationError
 from api.models.game import TurnInfo
+from api.transport.homeworld_assertions import (
+    HomeworldAssertionAction,
+    HomeworldAssertionAxis,
+)
 
 
 def homeworld_sectors_exist(turn: TurnInfo) -> bool:
@@ -125,13 +129,14 @@ class HomeworldAssertionService:
     def apply_assertion(
         self,
         *,
-        axis: str,
-        action: str,
+        axis: HomeworldAssertionAxis,
+        action: HomeworldAssertionAction,
         turn_number: int,
         planet_id: int | None = None,
         sector_index: int | None = None,
         owner_slot: int | None = None,
     ) -> dict:
+        # Defense in depth for non-HTTP callers that bypass transport validation.
         if axis not in {"location", "ownership"}:
             raise ValidationError("axis must be 'location' or 'ownership'")
         if action not in {"upsert", "revoke"}:

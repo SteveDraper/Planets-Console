@@ -292,10 +292,16 @@ export interface components {
          * @description Upsert or revoke a location or ownership homeworld assertion.
          */
         HomeworldAssertionRequest: {
-            /** Axis */
-            axis: string;
-            /** Action */
-            action: string;
+            /**
+             * Axis
+             * @enum {string}
+             */
+            axis: "location" | "ownership";
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "upsert" | "revoke";
             /** Planetid */
             planetId?: number | null;
             /** Sectorindex */

@@ -34,6 +34,10 @@ from api.transport.concept_warp_well import (
     WarpWellTypeParam,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
+from api.transport.homeworld_assertions import (
+    HomeworldAssertionAction,
+    HomeworldAssertionAxis,
+)
 from api.transport.load_all_turns import LoadAllStreamItem
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import HTTPException
@@ -396,8 +400,8 @@ class CoreClient:
         perspective: int,
         turn_number: int,
         *,
-        axis: str,
-        action: str,
+        axis: HomeworldAssertionAxis,
+        action: HomeworldAssertionAction,
         planet_id: int | None = None,
         sector_index: int | None = None,
         owner_slot: int | None = None,

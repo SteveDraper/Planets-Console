@@ -362,3 +362,18 @@ def test_core_http_refresh(http_client) -> None:
     asserted = [row for row in body["rows"] if row["planetId"] == 2]
     assert len(asserted) == 1
     assert asserted[0]["assertedCue"] is True
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"axis": "not-an-axis", "action": "upsert", "planetId": 3},
+        {"axis": "location", "action": "not-an-action", "planetId": 3},
+    ],
+)
+def test_core_http_rejects_invalid_axis_or_action(http_client, payload: dict) -> None:
+    response = http_client.post(
+        "/v1/games/628580/1/turns/1/analytics/homeworld-locator/assertions",
+        json=payload,
+    )
+    assert response.status_code == 422, response.text

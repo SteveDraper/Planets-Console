@@ -26,6 +26,10 @@ from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
 from api.transport.connections_options import FlareConnectionMode
 from api.transport.game_info_update import RefreshGameInfoParams
+from api.transport.homeworld_assertions import (
+    HomeworldAssertionAction,
+    HomeworldAssertionAxis,
+)
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -543,8 +547,8 @@ class TurnAnalyticService:
         perspective: int,
         turn_number: int,
         *,
-        axis: str,
-        action: str,
+        axis: HomeworldAssertionAxis,
+        action: HomeworldAssertionAction,
         planet_id: int | None = None,
         sector_index: int | None = None,
         owner_slot: int | None = None,
