@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 from api.analytics.homeworld_locator.models import (
-    CONFIDENCE_POSSIBLE,
     PROVENANCE_ASSERTED,
     LocationProvenance,
     OwnershipProvenance,
@@ -13,7 +12,6 @@ from api.analytics.homeworld_locator.models import (
 )
 from api.analytics.homeworld_locator.ownership_evidence import add_provenance_to_sector_owner_set
 from api.analytics.homeworld_locator.types import (
-    HomeworldCandidateRecord,
     HomeworldLocatorGameState,
     ensure_candidates_for_asserted_locations,
 )
@@ -181,17 +179,7 @@ def revoke_ownership_assertion(
     )
 
 
-def candidate_shell_for_asserted_location(planet_id: int) -> HomeworldCandidateRecord:
-    """Materialized seed row for a location-asserted planet not yet in inferred candidates."""
-    return HomeworldCandidateRecord(
-        planet_id=planet_id,
-        perspective=None,
-        confidence_tier=CONFIDENCE_POSSIBLE,
-    )
-
-
 __all__ = [
-    "candidate_shell_for_asserted_location",
     "revoke_location_assertion",
     "revoke_ownership_assertion",
     "upsert_location_assertion",

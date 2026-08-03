@@ -27,11 +27,16 @@ from api.analytics.homeworld_locator.layout_prior import (
     layout_prior_input_fingerprint,
 )
 from api.analytics.homeworld_locator.location_evidence import baseline_profile_location_provenances
+from api.analytics.homeworld_locator.materialize_from_provenances import (
+    derive_candidates_from_merged_evidence,
+)
+from api.analytics.homeworld_locator.merge_above_read import merge_homeworld_evidence_above_read
 from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE
 from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
     effective_origin_distance_observations,
 )
 from api.analytics.homeworld_locator.ownership_refine import apply_unique_owner_orphan_bind
+from api.analytics.homeworld_locator.sector_partition import build_homeworld_sector_partition
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
     HomeworldCandidateRecord,
@@ -315,12 +320,6 @@ def materialize_homeworld_candidates(
     Design lock: docs/design-homeworld-locator-analytic.md §4.3.1 / §4.3.2.
     Asserted provenances merge above the evidence aggregate (ADR 0010).
     """
-    from api.analytics.homeworld_locator.materialize_from_provenances import (
-        derive_candidates_from_merged_evidence,
-    )
-    from api.analytics.homeworld_locator.merge_above_read import merge_homeworld_evidence_above_read
-    from api.analytics.homeworld_locator.sector_partition import build_homeworld_sector_partition
-
     seeded = ensure_candidates_for_asserted_locations(
         inferred=candidates,
         asserted_location_provenances=game_state.asserted_location_provenances,
