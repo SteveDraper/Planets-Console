@@ -592,3 +592,59 @@ def test_derive_empty_location_list_keeps_prior_tier() -> None:
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE
+
+
+@pytest.mark.parametrize(
+    ("keying", "prior_perspective", "expected_perspective"),
+    [
+        ("sector", None, 7),
+        ("planet", None, 7),
+        ("sector", 3, 3),
+        ("planet", 3, 3),
+    ],
+)
+def test_derive_unique_ownership_bind_preserves_existing_perspective(
+    keying: str,
+    prior_perspective: int | None,
+    expected_perspective: int,
+) -> None:
+    """Sector- and planet-keyed unique ownership share the None-guard bind policy."""
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+
+    unique_owner = (
+        SectorOwnerMember(
+            owner_slot=7,
+            provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=5),),
+        ),
+    )
+    candidates = (
+        HomeworldCandidateRecord(
+            planet_id=20,
+            perspective=prior_perspective,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+        ),
+    )
+    if keying == "sector":
+        merged = MergedHomeworldEvidence(
+            location_provenances=(),
+            sector_owner_sets=((0, unique_owner),),
+            planet_owner_sets=(),
+        )
+        derived = derive_candidates_from_merged_evidence(
+            candidates,
+            merged,
+            planet_sector_index={20: 0},
+        )
+    else:
+        merged = MergedHomeworldEvidence(
+            location_provenances=(),
+            sector_owner_sets=(),
+            planet_owner_sets=((20, unique_owner),),
+        )
+        derived = derive_candidates_from_merged_evidence(candidates, merged)
+
+    assert len(derived) == 1
+    assert derived[0].perspective == expected_perspective

@@ -59,7 +59,9 @@ def derive_candidates_from_merged_evidence(
     """Apply location strength resolution and asserted cues onto candidate rows.
 
     When ``planet_sector_index`` is provided, ownership cues/bind use sector-keyed
-    merged sets. Otherwise planet-keyed asserted ownership is used.
+    merged sets. Otherwise planet-keyed asserted ownership is used. Unique
+    ownership binds ``perspective`` only when the row is still unbound
+    (``perspective is None``) -- both keying modes share that preserve policy.
     """
     has_location_provenances = bool(merged.location_provenances)
     location_resolution = resolve_location_axis(merged.location_provenances)
@@ -102,7 +104,7 @@ def derive_candidates_from_merged_evidence(
                 ownership_for_cue,
                 location_definite_planet_ids=definite_ids,
             )
-            if ownership_resolution.is_unique:
+            if ownership_resolution.is_unique and perspective is None:
                 perspective = ownership_resolution.resolved_owner_slot
 
         asserted_cue = provenance_has_asserted_strength(
