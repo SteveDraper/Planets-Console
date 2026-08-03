@@ -562,3 +562,33 @@ def test_derive_does_not_keep_prior_definite_without_planet_provenance() -> None
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[20].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[10].confidence_tier == CONFIDENCE_POSSIBLE
+
+
+def test_derive_empty_location_list_keeps_prior_tier() -> None:
+    """Empty merged location list intentionally falls back to candidate row tiers."""
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+
+    candidates = (
+        HomeworldCandidateRecord(
+            planet_id=10,
+            perspective=1,
+            confidence_tier=CONFIDENCE_DEFINITE,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=20,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+        ),
+    )
+    merged = MergedHomeworldEvidence(
+        location_provenances=(),
+        sector_owner_sets=(),
+        planet_owner_sets=(),
+    )
+    derived = derive_candidates_from_merged_evidence(candidates, merged)
+    by_planet = {row.planet_id: row for row in derived}
+    assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
+    assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE

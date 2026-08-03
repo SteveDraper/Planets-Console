@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from api.analytics.homeworld_locator.evidence_strength import (
+    LocationAxisResolution,
     provenance_has_asserted_strength,
     resolve_location_axis,
     resolve_ownership_axis,
@@ -32,18 +33,19 @@ def _confidence_for_planet(
     *,
     planet_id: int,
     prior_tier: str,
-    location_provenances: Sequence[LocationProvenance],
+    has_location_provenances: bool,
+    location_resolution: LocationAxisResolution,
 ) -> str:
-    """Derive location confidence for one candidate from the full merged location list.
+    """Map one planet onto confidence from a single ``LocationAxisResolution``.
 
-    When any location provenances are present, the merged list is authoritative:
-    ``prior_tier`` must not keep a non-winner definite (ADR 0010). Empty list
-    falls back to the candidate row tier (pre-mint / transitional aggregates).
+    Non-empty merged location lists are authoritative (ADR 0010): the axis
+    winner is definite; every other planet is possible -- ``prior_tier`` must
+    not preserve false definites. Empty list falls back to the candidate row
+    tier (pre-mint / transitional aggregates).
     """
-    if not location_provenances:
+    if not has_location_provenances:
         return prior_tier
-    resolution = resolve_location_axis(location_provenances)
-    if resolution.is_definite and resolution.resolved_planet_id == planet_id:
+    if location_resolution.is_definite and location_resolution.resolved_planet_id == planet_id:
         return CONFIDENCE_DEFINITE
     return CONFIDENCE_POSSIBLE
 
@@ -59,6 +61,7 @@ def derive_candidates_from_merged_evidence(
     When ``planet_sector_index`` is provided, ownership cues/bind use sector-keyed
     merged sets. Otherwise planet-keyed asserted ownership is used.
     """
+    has_location_provenances = bool(merged.location_provenances)
     location_resolution = resolve_location_axis(merged.location_provenances)
     definite_ids = (
         frozenset({location_resolution.resolved_planet_id})
@@ -77,7 +80,8 @@ def derive_candidates_from_merged_evidence(
         confidence = _confidence_for_planet(
             planet_id=row.planet_id,
             prior_tier=row.confidence_tier,
-            location_provenances=merged.location_provenances,
+            has_location_provenances=has_location_provenances,
+            location_resolution=location_resolution,
         )
 
         ownership_for_cue: tuple[SectorOwnerMember, ...] = ()
