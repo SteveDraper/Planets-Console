@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_dependency_walk import (
-    dependency_scope_for,
+    dependency_scopes_for,
     ensure_dependency_turn_floor,
     walk_dependency_tree,
 )
@@ -78,21 +78,21 @@ def plan_compute_dag(
         )
         dependency_scopes: list[ComputeScope] = []
         for dependency in catalog.ensure_dependencies:
-            dependency_export_scope = dependency_scope_for(pending_scope, dependency)
             turn_floor = ensure_dependency_turn_floor(ctx, pending_scope)
-            if dependency_export_scope.turn < turn_floor:
-                continue
-            dependency_key = _pending_key(dependency.analytic_id, dependency_export_scope)
-            if dependency_key not in pending_by_key:
-                continue
-            dependency_registration = compute_registry[dependency.analytic_id]
-            dependency_scopes.append(
-                normalize_export_scope_to_compute_scope(
-                    dependency_export_scope,
-                    analytic_id=dependency.analytic_id,
-                    scope_key_spec=dependency_registration.scope_key_spec,
+            for dependency_export_scope in dependency_scopes_for(ctx, pending_scope, dependency):
+                if dependency_export_scope.turn < turn_floor:
+                    continue
+                dependency_key = _pending_key(dependency.analytic_id, dependency_export_scope)
+                if dependency_key not in pending_by_key:
+                    continue
+                dependency_registration = compute_registry[dependency.analytic_id]
+                dependency_scopes.append(
+                    normalize_export_scope_to_compute_scope(
+                        dependency_export_scope,
+                        analytic_id=dependency.analytic_id,
+                        scope_key_spec=dependency_registration.scope_key_spec,
+                    )
                 )
-            )
         planned.append(
             PlannedComputeNode(
                 scope=scope,

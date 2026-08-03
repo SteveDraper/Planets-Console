@@ -66,6 +66,62 @@ describe('formatHomeworldSectorHoverLine', () => {
     ).toBe('player known · 1 candidate homeworld')
   })
 
+  it('formats unique ownership evidence owner', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          candidateCount: 2,
+          possibleOwners: [
+            {
+              ownerSlot: 3,
+              provenanceKinds: ['ship_travel_envelope'],
+              playerLabel: 'alice (The Federation)',
+            },
+          ],
+        })
+      )
+    ).toBe('homeworld owner: alice (The Federation) · 2 candidate homeworlds')
+  })
+
+  it('formats ambiguous ownership evidence owners', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          candidateCount: 3,
+          possibleOwners: [
+            { ownerSlot: 2, provenanceKinds: ['nearby_planet_ownership'] },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              playerLabel: 'bob (The Rebel Confederation)',
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'ambiguous · homeworld owners: slot 2, bob (The Rebel Confederation) · 3 candidate homeworlds'
+    )
+  })
+
+  it('prefers pinned player over possibleOwners to avoid duplicate owner text', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          isPinned: true,
+          playerLabel: 'koshling (The Lizard Alliance)',
+          candidateCount: 1,
+          possibleOwners: [
+            {
+              ownerSlot: 1,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              playerLabel: 'koshling (The Lizard Alliance)',
+            },
+          ],
+        })
+      )
+    ).toBe('player: koshling (The Lizard Alliance) · 1 candidate homeworld')
+  })
+
   it('returns null for non-homeworld kinds', () => {
     expect(
       formatHomeworldSectorHoverLine(sector({ kind: 'visibility-ship-scan' }))

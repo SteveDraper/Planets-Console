@@ -18,6 +18,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 from clear_analytic_persistence import (
     clear_analytic_persistence,
+    parse_analytics_ids,
     parse_selector,
 )
 
@@ -96,6 +97,16 @@ def test_parse_selector_wildcard_and_int() -> None:
     assert parse_selector("11", label="perspective") == 11
     with pytest.raises(ValueError, match="perspective"):
         parse_selector("x", label="perspective")
+
+
+def test_parse_analytics_ids_default_and_lists() -> None:
+    assert parse_analytics_ids(None) is None
+    assert parse_analytics_ids([]) is None
+    assert parse_analytics_ids(["", "  "]) is None
+    assert parse_analytics_ids(["homeworld-locator"]) == frozenset({"homeworld-locator"})
+    assert parse_analytics_ids(["fleet,scores", " homeworld-locator "]) == frozenset(
+        {"fleet", "scores", "homeworld-locator"}
+    )
 
 
 def test_clear_perspective_all_players_removes_turn_docs(storage: MemoryAssetBackend) -> None:
@@ -195,3 +206,55 @@ def test_dry_run_does_not_mutate(storage: MemoryAssetBackend) -> None:
     )
     assert result.deleted_documents
     assert storage.get("games/628580/11/turns/5/analytics/fleet")[FLEET_LEDGERS_KEY]
+
+
+def test_analytics_filter_clears_only_listed_ids(storage: MemoryAssetBackend) -> None:
+    storage.put("games/628580/analytics/homeworld-locator", {"candidates": []})
+    storage.put("games/628580/11/analytics/homeworld-locator", {"evidence": {}})
+    storage.put(
+        "games/628580/11/turns/1/analytics/homeworld-locator",
+        {"turn": 1, "baselineTurn": 1},
+    )
+    _put_fleet_ledger(storage, game_id=628580, perspective=11, turn=1, player_id=8)
+    _put_scores_row(storage, game_id=628580, perspective=11, turn=1, player_id=8)
+    _put_hull_mask(storage, game_id=628580, player_id=8)
+
+    result = clear_analytic_persistence(
+        storage,
+        game_id=628580,
+        perspective=None,
+        player_id=None,
+        analytic_ids=frozenset({"homeworld-locator"}),
+    )
+
+    assert "games/628580/analytics/homeworld-locator" in result.deleted_documents
+    assert "games/628580/11/analytics/homeworld-locator" in result.deleted_documents
+    assert "games/628580/11/turns/1/analytics/homeworld-locator" in result.deleted_documents
+    assert "games/628580/11/turns/1/analytics/fleet" not in result.deleted_documents
+    assert storage.get("games/628580/11/turns/1/analytics/fleet")[FLEET_LEDGERS_KEY]
+    assert (
+        storage.get(InferenceRowPersistenceService.row_store_key(628580, 11, 1, 8))["playerId"] == 8
+    )
+    assert storage.get("games/628580/analytics/scores/inference_hull_catalog_masks/8")
+
+
+def test_analytics_filter_homeworld_turn_docs(storage: MemoryAssetBackend) -> None:
+    storage.put(
+        "games/628580/11/turns/2/analytics/homeworld-locator",
+        {"turn": 2, "baselineTurn": 1},
+    )
+    _put_fleet_ledger(storage, game_id=628580, perspective=11, turn=2, player_id=8)
+
+    result = clear_analytic_persistence(
+        storage,
+        game_id=628580,
+        perspective=11,
+        player_id=None,
+        analytic_ids=frozenset({"homeworld-locator"}),
+    )
+
+    assert "games/628580/11/turns/2/analytics/homeworld-locator" in result.deleted_documents
+    assert "games/628580/11/turns/2/analytics/fleet" not in result.deleted_documents
+    assert storage.get("games/628580/11/turns/2/analytics/fleet")[FLEET_LEDGERS_KEY]
+    with pytest.raises(NotFoundError):
+        storage.get("games/628580/11/turns/2/analytics/homeworld-locator")

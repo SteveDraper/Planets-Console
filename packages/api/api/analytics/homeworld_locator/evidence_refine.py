@@ -7,7 +7,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
-from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
+from api.analytics.homeworld_locator.constants import (
+    ATTRIBUTION_USER_ASSERTED,
+    HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+)
 from api.analytics.homeworld_locator.cull_candidates import TCullable
 from api.analytics.homeworld_locator.evidence_refine_report import (
     EvidenceRefineCounts,
@@ -34,6 +37,9 @@ from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
     observations_through_turn,
     resolve_origin_distance_evidence_through_turn,
 )
+from api.analytics.homeworld_locator.ownership_refine import (
+    accumulate_ownership_evidence_for_turn,
+)
 from api.analytics.homeworld_locator.sector_overlays import (
     homeworld_layout_asset_category,
 )
@@ -59,9 +65,11 @@ def refine_homeworld_evidence_aggregate(
     prior: HomeworldEvidenceAggregate,
     *,
     turn: TurnInfo,
+    candidates: Sequence[HomeworldCandidateRecord],
     candidate_planet_ids_set: frozenset[int],
     planets_by_id: Mapping[int, Planet],
     load_turn: Callable[[int], TurnInfo | None],
+    fleet_built_turns: Mapping[int, int] | None = None,
 ) -> EvidenceRefineComputeResult:
     """Advance the durable evidence aggregate by one turn of observations.
 
@@ -132,12 +140,23 @@ def refine_homeworld_evidence_aggregate(
             )
         single_starbase_ms += (time.perf_counter() - sb_t0) * 1000.0
 
+    sector_owner_sets, owner_possible_sectors = accumulate_ownership_evidence_for_turn(
+        prior,
+        turn=turn,
+        candidates=candidates,
+        fleet_built_turns=fleet_built_turns or {},
+        load_turn=load_turn,
+    )
+
     aggregate = HomeworldEvidenceAggregate(
         turn=turn_number,
         baseline_turn=prior.baseline_turn,
         origin_distance_observations=observations,
         single_starbase_promotions=promotions,
         origin_distance_evidence_through_turn=through_turn,
+        sector_owner_sets=sector_owner_sets,
+        owner_possible_sectors=owner_possible_sectors,
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
     total_ms = (time.perf_counter() - total_t0) * 1000.0
     return EvidenceRefineComputeResult(
@@ -240,9 +259,10 @@ def materialize_evidence_adjusted_candidates(
 
     Origin-distance hits do not change confidence tier. The only automatic
     possible→definite path here is recorded single-starbase new-build.
-    These are the pre-layout-prior steps of the §4.3.1 materialize ladder.
-    Shell map/table serving uses ``materialize_homeworld_candidates``, which
-    owns the full order through layout-prior annotation.
+    These are the pre-ownership / pre-layout-prior steps of the §4.3.1
+    materialize ladder. Shell map/table serving uses
+    ``materialize_homeworld_candidates``, which owns ownership apply and
+    layout-prior annotation.
     """
     adjusted = apply_recorded_single_starbase_promotions(
         candidates,

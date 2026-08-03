@@ -13,6 +13,7 @@ from api.analytics.homeworld_locator.compute import get_homeworld_locator
 from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
     HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+    HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.layout_distributions_asset import (
     CategoryLayoutDistributions,
@@ -624,7 +625,11 @@ def test_empty_nebular_sector_stand_in_does_not_block_most_probable(
             settings_fingerprint=homeworld_settings_fingerprint(turn.settings),
             baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
         ),
-        HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
+        HomeworldEvidenceAggregate(
+            turn=1,
+            baseline_turn=1,
+            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+        ),
     )
 
     ctx = _materialize_ctx(services, turn, {1: turn})
@@ -853,7 +858,11 @@ def test_shell_layout_prior_persisted_and_reused(
             settings_fingerprint=homeworld_settings_fingerprint(turn.settings),
             baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
         ),
-        HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
+        HomeworldEvidenceAggregate(
+            turn=1,
+            baseline_turn=1,
+            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+        ),
     )
 
     calls = {"n": 0}

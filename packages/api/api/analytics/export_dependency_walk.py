@@ -89,46 +89,46 @@ def walk_dependency_tree(
             return result
 
         for dependency in catalog.ensure_dependencies:
-            dependency_scope = dependency_scope_for(scope, dependency)
-            turn_floor = ensure_dependency_turn_floor(ctx, scope)
-            if dependency_scope.turn < turn_floor:
-                continue
+            for dependency_scope in dependency_scopes_for(ctx, scope, dependency):
+                turn_floor = ensure_dependency_turn_floor(ctx, scope)
+                if dependency_scope.turn < turn_floor:
+                    continue
 
-            if ctx.load_turn(dependency_scope.turn) is None:
-                result.turn_unavailable = "turn_not_stored"
-                result.unavailable_turn = dependency_scope.turn
-                return result
+                if ctx.load_turn(dependency_scope.turn) is None:
+                    result.turn_unavailable = "turn_not_stored"
+                    result.unavailable_turn = dependency_scope.turn
+                    return result
 
-            validate_ensure_dependency_target(
-                catalog.analytic_id,
-                dependency,
-                ctx.export_registry,
-                role="query",
-            )
+                validate_ensure_dependency_target(
+                    catalog.analytic_id,
+                    dependency,
+                    ctx.export_registry,
+                    role="query",
+                )
 
-            nested = walk_dependency_tree(
-                ctx,
-                dependency.analytic_id,
-                dependency_scope,
-                visiting=visiting,
-            )
-            if nested.turn_unavailable is not None:
-                result.turn_unavailable = nested.turn_unavailable
-                result.unavailable_turn = nested.unavailable_turn
-                return result
+                nested = walk_dependency_tree(
+                    ctx,
+                    dependency.analytic_id,
+                    dependency_scope,
+                    visiting=visiting,
+                )
+                if nested.turn_unavailable is not None:
+                    result.turn_unavailable = nested.turn_unavailable
+                    result.unavailable_turn = nested.unavailable_turn
+                    return result
 
-            _extend_unique(
-                result.missing_steps,
-                nested.missing_steps,
-                seen_missing,
-                _missing_step_key,
-            )
-            _extend_unique(
-                result.pending_ensure,
-                nested.pending_ensure,
-                seen_pending,
-                _pending_ensure_key,
-            )
+                _extend_unique(
+                    result.missing_steps,
+                    nested.missing_steps,
+                    seen_missing,
+                    _missing_step_key,
+                )
+                _extend_unique(
+                    result.pending_ensure,
+                    nested.pending_ensure,
+                    seen_pending,
+                    _pending_ensure_key,
+                )
 
         result.missing_steps.append(
             EnsureMissingStep(
@@ -173,6 +173,14 @@ def dependency_scope_for(
     scope: ExportScope,
     dependency: EnsureDependency,
 ) -> ExportScope:
+    """Map one ensure edge to one child scope (``same`` / ``None`` only).
+
+    For ``player_id="all"`` use :func:`dependency_scopes_for` instead.
+    """
+    if dependency.player_id == "all":
+        raise ValueError(
+            "EnsureDependency.player_id='all' expands to multiple scopes; use dependency_scopes_for"
+        )
     player_id = scope.player_id
     if dependency.player_id != "same":
         player_id = None
@@ -181,6 +189,44 @@ def dependency_scope_for(
         perspective=scope.perspective,
         turn=scope.turn + dependency.turn_delta,
         player_id=player_id,
+    )
+
+
+def dependency_scopes_for(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    dependency: EnsureDependency,
+) -> tuple[ExportScope, ...]:
+    """Expand one ensure edge to one or more child scopes.
+
+    ``player_id="all"`` fans out to every roster player at the dependency turn.
+    When that turn is not stored, returns a single unscoped placeholder so the
+    walk can report ``turn_not_stored`` (same as a missing same-player dep turn).
+    """
+    if dependency.player_id != "all":
+        return (dependency_scope_for(scope, dependency),)
+
+    dep_turn = scope.turn + dependency.turn_delta
+    turn = ctx.load_turn(dep_turn)
+    if turn is None:
+        return (
+            ExportScope(
+                game_id=scope.game_id,
+                perspective=scope.perspective,
+                turn=dep_turn,
+                player_id=None,
+            ),
+        )
+    from api.analytics.turn_roster import iter_turn_players
+
+    return tuple(
+        ExportScope(
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=dep_turn,
+            player_id=player.id,
+        )
+        for player in iter_turn_players(turn)
     )
 
 
@@ -208,8 +254,8 @@ def _is_at_baseline(
         return True
     if scope.turn <= 1:
         for dependency in catalog.ensure_dependencies:
-            dependency_scope = dependency_scope_for(scope, dependency)
-            if dependency_scope.turn < 1:
+            dep_turn = scope.turn + dependency.turn_delta
+            if dep_turn < 1:
                 return True
     return False
 
@@ -220,16 +266,18 @@ def is_ensure_dependency_satisfied(
     scope: ExportScope,
 ) -> bool:
     """Cheap probe: whether one declared ensure edge is already satisfied."""
-    dependency_scope = dependency_scope_for(scope, dependency)
     catalog = ctx.export_registry.get(dependency.analytic_id)
     if catalog is None or catalog.is_empty:
         return True
-    return _is_ensure_satisfied(
-        ctx,
-        dependency.analytic_id,
-        dependency_scope,
-        catalog,
-        quality=dependency.quality,
+    return all(
+        _is_ensure_satisfied(
+            ctx,
+            dependency.analytic_id,
+            dependency_scope,
+            catalog,
+            quality=dependency.quality,
+        )
+        for dependency_scope in dependency_scopes_for(ctx, scope, dependency)
     )
 
 

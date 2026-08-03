@@ -14,6 +14,7 @@ from api.analytics.homeworld_locator.compute_services import (
 )
 from api.analytics.homeworld_locator.constants import (
     HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+    HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     LAYOUT_PRIOR_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
@@ -28,6 +29,7 @@ from api.analytics.homeworld_locator.layout_prior import (
 from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
     effective_origin_distance_observations,
 )
+from api.analytics.homeworld_locator.ownership_refine import apply_unique_owner_orphan_bind
 from api.analytics.homeworld_locator.types import (
     HomeworldBaselineEnsureResult,
     HomeworldCandidateRecord,
@@ -236,6 +238,7 @@ def compute_homeworld_baseline(
     floor = HomeworldEvidenceAggregate(
         turn=baseline_turn,
         baseline_turn=baseline_turn,
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
     record_baseline_report(
         build_baseline_report(
@@ -290,9 +293,9 @@ def materialize_homeworld_candidates(
     baseline_turn: int,
     baseline_degraded: bool,
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Ordered shell materialize: SB promote → co-sector → neighborhood → layout prior.
+    """Ordered shell materialize through ownership bind then layout prior.
 
-    Design lock: docs/design-homeworld-locator-analytic.md §4.3.1.
+    Design lock: docs/design-homeworld-locator-analytic.md §4.3.1 / §4.3.2.
     """
     adjusted = materialize_evidence_adjusted_candidates(
         candidates,
@@ -300,6 +303,11 @@ def materialize_homeworld_candidates(
         planets=shell_turn.planets,
         settings_turn=shell_turn,
         player_count=_player_count(shell_turn),
+    )
+    adjusted = apply_unique_owner_orphan_bind(
+        adjusted,
+        aggregate,
+        turn=shell_turn,
     )
     input_fingerprint = layout_prior_input_fingerprint(adjusted)
     evidence_lambda = get_config().homeworld_locator.origin_distance_evidence_lambda

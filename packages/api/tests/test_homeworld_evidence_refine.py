@@ -17,6 +17,7 @@ from api.analytics.homeworld_locator.compute_orchestration import (
 from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
     HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+    HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.evidence_refine import (
     cull_definite_neighborhood_candidates,
@@ -49,7 +50,7 @@ from tests.test_homeworld_location_evidence import (
     _ship,
     _turn_with_owner_starbase_count,
 )
-from tests.test_homeworld_locator_core import _services
+from tests.test_homeworld_locator_core import _export_services, _services
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -83,12 +84,17 @@ def _baseline_state(
 
 
 def _floor_aggregate() -> HomeworldEvidenceAggregate:
-    return HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
+    return HomeworldEvidenceAggregate(
+        turn=1,
+        baseline_turn=1,
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+    )
 
 
 def test_export_catalog_declares_self_chain() -> None:
     assert EXPORT_CATALOG.ensure_dependencies == (
         EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
+        EnsureDependency(analytic_id="fleet", turn_delta=0, player_id="all", quality="final"),
     )
 
 
@@ -113,7 +119,7 @@ def test_refine_accumulates_empty_observations_across_turns(persistence) -> None
     ctx = make_analytic_compute_context(
         turn_three,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
     aggregate = persistence.get_evidence_aggregate(628580, 1, 3)
@@ -147,7 +153,7 @@ def test_refine_records_origin_distance_observation_on_shell_turn(persistence) -
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
     aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
@@ -196,7 +202,7 @@ def test_refine_dedupes_colocated_ships_and_keeps_distinct_locations(persistence
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
     aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
@@ -244,7 +250,7 @@ def test_refine_records_ambiguous_match_set(persistence) -> None:
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=2))
     aggregate = persistence.get_evidence_aggregate(628580, 1, 2)
@@ -318,7 +324,7 @@ def test_export_ensure_raises_on_missing_intermediate_turn(persistence) -> None:
     ctx = make_analytic_compute_context(
         turn_three,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     with pytest.raises(ValidationError, match="sign in to auto-fetch"):
         ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
@@ -364,7 +370,7 @@ def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> No
     ctx = make_analytic_compute_context(
         turn_three,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
     assert ensure_calls == [2]
@@ -406,7 +412,7 @@ def test_export_ensure_reports_fetch_failure_after_partial_autofetch(persistence
     ctx = make_analytic_compute_context(
         turn_four,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     with pytest.raises(ValidationError, match="could not load turn 3"):
         ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
@@ -441,7 +447,7 @@ def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     ctx = make_analytic_compute_context(
         turns[4],
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
 
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
@@ -478,7 +484,7 @@ def test_export_ensure_delegates_the_ensure_loop_to_the_framework(persistence) -
     ctx = make_analytic_compute_context(
         turns[3],
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
 
     original_ensure_declared = AnalyticQueryContext.ensure_declared_dependencies
@@ -531,12 +537,16 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
     persistence.put_evidence_aggregate(
         628580,
         1,
-        HomeworldEvidenceAggregate(turn=3, baseline_turn=1),
+        HomeworldEvidenceAggregate(
+            turn=3,
+            baseline_turn=1,
+            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+        ),
     )
     ctx = make_analytic_compute_context(
         turns[4],
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
 
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
@@ -641,7 +651,8 @@ def test_run_homeworld_refine_persist_round_trip(persistence) -> None:
 
     turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
     turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
-    services = _services(persistence, {1: turn_one, 2: turn_two})
+    turns = {1: turn_one, 2: turn_two}
+    services = _services(persistence, turns)
     persistence.put_baseline(
         628580,
         1,
@@ -652,7 +663,7 @@ def test_run_homeworld_refine_persist_round_trip(persistence) -> None:
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: {1: turn_one, 2: turn_two}.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -699,12 +710,260 @@ def test_materialize_view_refines_through_shell_turn(persistence) -> None:
     ctx = make_analytic_compute_context(
         turn_two,
         load_turn=lambda n: turns.get(n),
-        export_services={ANALYTIC_ID: services},
+        export_services=_export_services(services, turns),
     ).exports
     view = materialize_homeworld_candidate_view(ctx, shell_turn=turn_two)
     assert view.candidates[0].confidence_tier == CONFIDENCE_DEFINITE
     assert view.candidates[0].perspective is None
     assert persistence.get_evidence_aggregate(628580, 1, 2) is not None
+
+
+def test_stale_evidence_algorithm_version_forces_floor_rerefine(persistence) -> None:
+    """Version 0 floor at baseline shell must recompute, stamp, and persist."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        ensure_homeworld_evidence_refined,
+        evidence_refined_through_shell,
+    )
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    assert evidence_refined_through_shell(services, baseline_turn=1, shell_turn=1) is False
+    aggregate = ensure_homeworld_evidence_refined(
+        services,
+        shell_turn=turn_one,
+        game_state_baseline_turn=1,
+    )
+    assert aggregate.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    stored = persistence.get_evidence_aggregate(628580, 1, 1)
+    assert stored is not None
+    assert stored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    assert evidence_refined_through_shell(services, baseline_turn=1, shell_turn=1) is True
+
+
+def test_stale_floor_without_ensure_floor_rewrite_raises(persistence) -> None:
+    """Floor algo bumps are owned by ensure_evidence_floor_algorithm_current only."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        compute_homeworld_evidence_refine_step_detailed,
+    )
+    from api.errors import ValidationError
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    with pytest.raises(ValidationError, match="ensure_evidence_floor_algorithm_current"):
+        compute_homeworld_evidence_refine_step_detailed(services, turn=turn_one)
+
+
+def test_floor_algorithm_rewrite_clears_sticky_ownership(persistence) -> None:
+    """Algo bump must reset ownership sets before re-accumulate (loosening-safe)."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        ensure_evidence_floor_algorithm_current,
+    )
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+        OwnershipProvenance,
+        SectorOwnerMember,
+    )
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    stale_member = SectorOwnerMember(
+        owner_slot=2,
+        provenances=(
+            OwnershipProvenance(
+                kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                turn=1,
+                ship_id=99,
+                radius_ly=10.0,
+                age_source="fleet_built_turn",
+            ),
+        ),
+    )
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        HomeworldEvidenceAggregate(
+            turn=1,
+            baseline_turn=1,
+            evidence_algorithm_version=0,
+            sector_owner_sets=((0, (stale_member,)),),
+            owner_possible_sectors=((2, (0,)),),
+        ),
+    )
+    assert (
+        ensure_evidence_floor_algorithm_current(
+            services,
+            baseline_turn=1,
+            fleet_built_turns={},
+        )
+        is True
+    )
+    stored = persistence.get_evidence_aggregate(628580, 1, 1)
+    assert stored is not None
+    assert stored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    # Stale sticky rows must not survive as the sole rewritten state when the
+    # baseline turn has no ships to re-pin (empty ownership after clear+re-accumulate).
+    assert stored.sector_owner_sets == ()
+    assert stored.owner_possible_sectors == ()
+
+
+def test_fleet_built_turns_from_final_ledgers_merges_known_ages(sample_turn) -> None:
+    """Sync ensure source: final on-disk ledgers supply ship_id -> built_turn."""
+    from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
+    from api.analytics.fleet.types import (
+        FleetAcquisitionLedger,
+        FleetFieldKnown,
+        FleetMaterializationProvenance,
+        FleetShipRecord,
+        FleetShipRecordFields,
+        PersistedFleetLedger,
+    )
+    from api.analytics.homeworld_locator.fleet_built_turns import (
+        fleet_built_turns_from_final_ledgers,
+    )
+    from api.analytics.turn_roster import iter_turn_players
+
+    fleet_services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=sample_turn.game.id,
+        perspective=1,
+        stored_turns={sample_turn.settings.turn: sample_turn},
+    )
+    player_ids = [player.id for player in iter_turn_players(sample_turn)]
+    assert player_ids
+    owner = player_ids[0]
+    fleet_services.persistence.put_ledger(
+        fleet_services.game_id,
+        fleet_services.perspective,
+        sample_turn.settings.turn,
+        owner,
+        PersistedFleetLedger(
+            ledger=FleetAcquisitionLedger(
+                player_id=owner,
+                records=[
+                    FleetShipRecord(
+                        record_id="rec-42",
+                        fields=FleetShipRecordFields(
+                            ship_id=FleetFieldKnown(42),
+                            built_turn=FleetFieldKnown(7),
+                        ),
+                    ),
+                ],
+            ),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
+    built = fleet_built_turns_from_final_ledgers(
+        fleet_services.persistence,
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
+        turn_number=sample_turn.settings.turn,
+        player_ids=player_ids,
+    )
+    assert built[42] == 7
+
+
+def test_stale_prior_evidence_algorithm_version_raises(persistence) -> None:
+    """Advancing past a stale mid-chain prior must fail closed so DAG rewalks."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        compute_homeworld_evidence_refine_step_detailed,
+    )
+    from api.errors import ValidationError
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turn_two = replace(turn_one, settings=replace(turn_one.settings, turn=2))
+    turn_three = replace(turn_one, settings=replace(turn_one.settings, turn=3))
+    turns = {1: turn_one, 2: turn_two, 3: turn_three}
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        _floor_aggregate(),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(
+            turn=2,
+            baseline_turn=1,
+            evidence_algorithm_version=0,
+        ),
+    )
+    with pytest.raises(ValidationError, match="stale evidenceAlgorithmVersion"):
+        compute_homeworld_evidence_refine_step_detailed(services, turn=turn_three)
+
+
+def test_export_ensure_rewalks_stale_evidence_algorithm_chain(persistence) -> None:
+    """Shell ensure must rewrite a version-0 floor then advance, not warn-banner."""
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    turn_one = replace(
+        _load_turn(),
+        settings=replace(_load_turn().settings, turn=1, acceleratedturns=0),
+    )
+    turns = {
+        1: turn_one,
+        2: replace(turn_one, settings=replace(turn_one.settings, turn=2)),
+        3: replace(turn_one, settings=replace(turn_one.settings, turn=3)),
+    }
+    services = _services(persistence, turns)
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, _candidate(10)),
+        HomeworldEvidenceAggregate(turn=1, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(turn=2, baseline_turn=1, evidence_algorithm_version=0),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(turn=3, baseline_turn=1, evidence_algorithm_version=0),
+    )
+
+    ctx = make_analytic_compute_context(
+        turns[3],
+        load_turn=lambda n: turns.get(n),
+        export_services=_export_services(services, turns),
+    ).exports
+    assert (
+        ensure_homeworld_export(
+            ctx,
+            ExportScope(game_id=628580, perspective=1, turn=3),
+        )
+        is True
+    )
+    for turn_number in (1, 2, 3):
+        stored = persistence.get_evidence_aggregate(628580, 1, turn_number)
+        assert stored is not None
+        assert stored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
 
 
 @pytest.fixture

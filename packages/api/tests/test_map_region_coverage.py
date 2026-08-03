@@ -8,6 +8,7 @@ from api.concepts.map_region_coverage import (
     MapRegionBoundaryLineEdge,
     MapRegionOverlayDisk,
     MapRegionOverlayVertex,
+    MapRegionPossibleOwner,
     boundary_to_overlay,
     build_hybrid_coverage,
     decode_patch_coverage,
@@ -219,6 +220,53 @@ def test_boundary_wire_round_trip_with_annotations():
     assert wire["candidateCount"] == 1
     assert wire["playerLabel"] == "koshling (The Lizard Alliance)"
     assert "hoverSummary" not in wire
+
+
+def test_possible_owners_wire_includes_optional_player_label():
+    overlay = boundary_to_overlay(
+        kind="homeworld-sector",
+        overlay_id="sector-1",
+        fill_color="#f97316",
+        fill_opacity=0.2,
+        vertices=(
+            MapRegionOverlayVertex(x=200.0, y=0.0),
+            MapRegionOverlayVertex(x=0.0, y=200.0),
+            MapRegionOverlayVertex(x=0.0, y=100.0),
+            MapRegionOverlayVertex(x=100.0, y=0.0),
+        ),
+        edges=(
+            MapRegionBoundaryArcEdge(center_x=0.0, center_y=0.0, clockwise=False),
+            MapRegionBoundaryLineEdge(),
+            MapRegionBoundaryArcEdge(center_x=0.0, center_y=0.0, clockwise=True),
+            MapRegionBoundaryLineEdge(),
+        ),
+        is_pinned=False,
+        status="ok",
+        candidate_count=2,
+        possible_owners=(
+            MapRegionPossibleOwner(
+                owner_slot=3,
+                provenance_kinds=("ship_travel_envelope",),
+                player_label="alice (The Federation)",
+            ),
+            MapRegionPossibleOwner(
+                owner_slot=5,
+                provenance_kinds=("nearby_planet_ownership",),
+            ),
+        ),
+    )
+    wire = map_region_overlay_to_wire(overlay)
+    assert wire["possibleOwners"] == [
+        {
+            "ownerSlot": 3,
+            "provenanceKinds": ["ship_travel_envelope"],
+            "playerLabel": "alice (The Federation)",
+        },
+        {
+            "ownerSlot": 5,
+            "provenanceKinds": ["nearby_planet_ownership"],
+        },
+    ]
 
 
 def test_boundary_rejects_mismatched_edge_count():

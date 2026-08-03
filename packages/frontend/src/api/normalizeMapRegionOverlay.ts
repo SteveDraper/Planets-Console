@@ -14,6 +14,7 @@ import type {
   MapRegionOverlayGeometry,
   MapRegionOverlayPatch,
   MapRegionOverlayVertex,
+  MapRegionPossibleOwner,
 } from './mapRegionOverlayTypes'
 import { parseJsonFiniteNumber, parseJsonInteger } from './normalizeMapWireParsing'
 
@@ -236,7 +237,45 @@ export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null
     return null
   }
   if (playerLabel !== undefined) overlay.playerLabel = playerLabel
+  const possibleOwners = normalizePossibleOwners(o.possibleOwners ?? o.possible_owners)
+  if (
+    (o.possibleOwners !== undefined || o.possible_owners !== undefined) &&
+    possibleOwners === undefined
+  ) {
+    return null
+  }
+  if (possibleOwners !== undefined) overlay.possibleOwners = possibleOwners
   return overlay
+}
+
+function normalizePossibleOwners(raw: unknown): MapRegionPossibleOwner[] | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw)) return undefined
+  const owners: MapRegionPossibleOwner[] = []
+  for (const entry of raw) {
+    if (entry == null || typeof entry !== 'object') return undefined
+    const row = entry as Record<string, unknown>
+    const ownerSlot = parseJsonInteger(row.ownerSlot ?? row.owner_slot)
+    if (ownerSlot == null || ownerSlot < 1) return undefined
+    const kindsRaw = row.provenanceKinds ?? row.provenance_kinds
+    if (!Array.isArray(kindsRaw)) return undefined
+    const provenanceKinds: string[] = []
+    for (const kind of kindsRaw) {
+      if (typeof kind !== 'string' || kind === '') return undefined
+      provenanceKinds.push(kind)
+    }
+    const owner: MapRegionPossibleOwner = { ownerSlot, provenanceKinds }
+    const label = normalizeOptionalString(row.playerLabel ?? row.player_label)
+    if (
+      (row.playerLabel !== undefined || row.player_label !== undefined) &&
+      label === undefined
+    ) {
+      return undefined
+    }
+    if (label !== undefined) owner.playerLabel = label
+    owners.push(owner)
+  }
+  return owners
 }
 
 export function normalizeMapRegionOverlays(raw: unknown): MapRegionOverlay[] {

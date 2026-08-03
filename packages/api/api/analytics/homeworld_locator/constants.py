@@ -10,6 +10,12 @@ ATTRIBUTION_USER_ASSERTED = "user_asserted"
 # game-global candidates recompute after algorithm changes.
 HOMEWORLD_BASELINE_ALGORITHM_VERSION = 1
 
+# Bump when turn-scoped evidence refine policy changes (ownership evidence,
+# origin-distance / single-SB rules that rewrite aggregates). Checked in
+# evidence_refined_through_shell so shell ensure re-runs the chain after deploys.
+# 0 on disk = pre-version / legacy aggregates.
+HOMEWORLD_EVIDENCE_ALGORITHM_VERSION = 3
+
 # Bump when layout-prior cost, caps, stand-in policy, tie-break, or default
 # solver identity changes (e.g. soft evidence family, anneal default). Post-promote/cull
 # candidate-set, soft-evidence λ, and OD observation identity invalidate via

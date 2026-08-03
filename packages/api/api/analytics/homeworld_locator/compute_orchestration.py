@@ -13,8 +13,13 @@ from api.analytics.homeworld_locator.compute_services import (
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.evidence_ensure import (
     compute_homeworld_evidence_refine_step_detailed,
+    ensure_evidence_floor_algorithm_current,
     evidence_refined_through_shell,
     record_evidence_refine_step_report,
+)
+from api.analytics.homeworld_locator.fleet_built_turns import (
+    coerce_fleet_built_turns_map,
+    fleet_built_turns_from_dependency_outputs,
 )
 from api.analytics.homeworld_locator.serialization import (
     homeworld_evidence_aggregate_from_json,
@@ -41,8 +46,9 @@ HOMEWORLD_COMPUTE_PROFILE = AnalyticComputeProfile(
     ),
 )
 
-# Inline-only job-wire key: HomeworldLocatorComputeServices (not JSON-serializable).
+# Inline-only job-wire keys (not JSON-serializable across pool boundaries).
 _COMPUTE_SERVICES_KEY = "computeServices"
+_FLEET_BUILT_TURNS_KEY = "fleetBuiltTurns"
 
 
 def build_homeworld_baseline_job_wire(
@@ -125,7 +131,6 @@ def build_homeworld_refine_job_wire(
     ctx: AnalyticQueryContext | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
-    del dependency_outputs
     if ctx is None:
         raise RuntimeError("homeworld refine job wire requires AnalyticQueryContext")
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -145,6 +150,7 @@ def build_homeworld_refine_job_wire(
         "turnWire": turn_info_to_json(turn),
         "analyticId": ANALYTIC_ID,
         _COMPUTE_SERVICES_KEY: resolve_homeworld_services(ctx),
+        _FLEET_BUILT_TURNS_KEY: fleet_built_turns_from_dependency_outputs(dependency_outputs),
     }
 
 
@@ -178,12 +184,29 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         raise ValidationError("homeworld refine requires game-global state")
 
     shell_turn = turn.settings.turn
-    already_durable = shell_turn <= state.baseline_turn or evidence_refined_through_shell(
+    fleet_built_turns = job_wire.get(_FLEET_BUILT_TURNS_KEY)
+    if fleet_built_turns is not None and not isinstance(fleet_built_turns, dict):
+        raise TypeError("homeworld refine job wire fleetBuiltTurns must be a dict when present")
+    built_turn_map = coerce_fleet_built_turns_map(
+        fleet_built_turns if isinstance(fleet_built_turns, dict) else None
+    )
+
+    already_durable = evidence_refined_through_shell(
         services,
         baseline_turn=state.baseline_turn,
         shell_turn=shell_turn,
     )
-    step = compute_homeworld_evidence_refine_step_detailed(services, turn=turn)
+    if not already_durable:
+        ensure_evidence_floor_algorithm_current(
+            services,
+            baseline_turn=state.baseline_turn,
+            fleet_built_turns=built_turn_map,
+        )
+    step = compute_homeworld_evidence_refine_step_detailed(
+        services,
+        turn=turn,
+        fleet_built_turns=built_turn_map,
+    )
     # Persist timing is owned by PersistencePolicy; record refine compute cost here.
     if not already_durable:
         record_evidence_refine_step_report(services, turn=turn, step=step, persist_ms=0.0)

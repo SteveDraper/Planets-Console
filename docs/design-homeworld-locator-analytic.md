@@ -194,11 +194,64 @@ Strengthens **where** a HW is (confidence on existing candidates). Does **not** 
 | Single-starbase new-build | Ship first seen at *T-1* (or fleet `built_turn == T-1`) and owner scoreboard `starbases == 1` -> **immediate** possible->definite on implicated candidate; skip if SB count unknown / Stealth. **Only** automatic hard definite from location evidence. |
 | Candidate creation | Distance matches **never** invent new orphans -- only existing candidates |
 
-**Materialize (shared, after refine):** single-SB promote (if recorded) -> **co-sector cull** -> **homeworld definite-neighborhood cull** (asset `neighbor_separation.supportMin`) -> **homeworld layout prior selection** (`isMostProbable`). Origin-distance observations never promote.
+**Materialize (shared, after refine):** single-SB promote (if recorded) -> **co-sector cull** -> **homeworld definite-neighborhood cull** (asset `neighbor_separation.supportMin`) -> **homeworld ownership evidence** apply (sector owner sets) -> **homeworld layout prior selection** (`isMostProbable`). Origin-distance observations never promote.
 
 #### 4.3.2 Homeworld ownership evidence ([#269](https://github.com/SteveDraper/Planets-Console/issues/269))
 
-Strengthens **homeworld owner** (whose HW / sector). Signals: ship proximity + ship-age max-travel envelopes (sector set reduction / unique sector pin); direct sensor sightings revealing planetary ownership. Out of scope for #36.
+Strengthens **homeworld owner** attribution for **homeworld sectors** (whose HW / sector), not location tier. Does **not** invent location candidates and does **not** replace #36 location promotion. Out of scope for #36 / layout-prior / user assertions (#37) / fleet SB-region consumption (#134).
+
+**Unit of attribution:** the **homeworld sector**, not candidate wire `perspective`. Each sector carries a **possible homeworld owner set**: zero or more **Player** slots, each with a **provenance collection** (summaries of why that slot is in the set). Conflicts are retained as multiple members -- the SPA decides display. Motivation: [#37](https://github.com/SteveDraper/Planets-Console/issues/37) can add a **user-asserted** provenance the UI may treat as decisive even when other evidence remains.
+
+| Concern | Rule |
+|---------|------|
+| Scope | Viewpoint **perspective** TurnInfo only (same **homeworld evidence scope** as location evidence) |
+| Persistence | Turn-scoped on the **homeworld evidence aggregate** (durable sector owner sets + provenances through *T*); materialize projects onto sector overlays / candidate bind helpers. Stamp ``evidenceAlgorithmVersion`` (`HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`, currently **3**; absent/0 = pre-version). Satisfaction / ensure refuse stale versions so the self-chain rewalks from the baseline floor; floor rewrite is owned solely by ``ensure_evidence_floor_algorithm_current`` (clears sticky ownership before re-accumulate, then stamps the current version) |
+| Location candidates | Never create orphans; never flip `confidence_tier` from ownership alone |
+| Candidate `perspective` | Optional bind when a sector has a **unique** possible owner (orphans in that sector may become slot-anchored for layout-prior / pin display). Ambiguous sectors leave orphans unbound. Prose always says **homeworld owner**, not perspective |
+
+**Ship age (travel-turn budget):**
+
+1. Prefer known fleet ledger **`built_turn`** for that ship id when available. Homeworld refine **depends** on **final** fleet ledgers for the shell turn via the compute orchestrator DAG (`ENSURE_DEPENDENCIES`) -- not a soft opportunistic read. Soft-read loses the open-turn race (homeworld often completes before fleet) and nothing would recompute when fleet later finishes.
+2. Otherwise assume **maximum age**: earliest scoreboard-history turn *T* where `total_reported_ships >= ship.id` is the earliest possible build turn. Travel-turn budget at shell *S* is `max(0, S - T)`.
+3. Incomplete scoreboard history that prevents computing the id-age bound: skip that ship's envelope (do not hard-fail the whole ensure). Ship-limit freeze history remains its own hard-fail path.
+
+**Fleet DAG dependency (required for (1)):**
+
+| Concern | Rule |
+|---------|------|
+| Edge | `homeworld@N` → `fleet@N` with `quality="final"` (same shell turn; `built_turn` is on that turn's final ledger) |
+| Cross-player | Homeworld scope has no `player_id`. Fleet ensure with `player_id=None` is a **no-op** (`is_fleet_export_ensure_satisfied` returns true). Therefore declare / expand to **one final-fleet dependency per roster player** at turn *N* (new `EnsureDependency` fan-out, e.g. `player_id="all"`, or equivalent walk expansion). **All roster players** -- not the visible-ship-owner subset -- so the edge set is stable and every ship id can resolve `built_turn` when its owner's ledger is final. Orchestrator today documents cross-player as caller fan-out -- #269 needs graph-level expansion so a single homeworld node waits on all player fleet nodes. |
+| Wire | Orchestrator refine job wire receives final ledger slices (or player→`built_turn` map) via `DependencyOutputs`. Sync export ensure, after fleet ENSURE is satisfied, loads the same ages from final on-disk ledgers (`fleet_built_turns_from_final_ledgers`) -- no live `ensure_fleet_export` inside the refine worker |
+| ENSURE fan-out | ``EnsureDependency.player_id="all"`` is implemented in ``dependency_scopes_for`` / ``plan_compute_dag`` (one final-fleet edge per roster player at shell *N*) |
+| Invalidation | **#269 stays DAG-only** for open-turn correctness (homeworld waits on final fleet before refine). Ancestor **re-persist** wipe + `force_fresh` wake is **not** implemented here -- tracked as generic orchestrator reverse-ENSURE work ([#280](https://github.com/SteveDraper/Planets-Console/issues/280)), including refactor of scores↔fleet onto that path |
+| Baseline | Baseline step does **not** need fleet; only ownership-aware evidence refine / materialize that consumes `built_turn` |
+
+**Travel envelope:**
+
+| Input | Rule |
+|-------|------|
+| Radius | `travel_turns × (warp² + 1)` LY -- warp-square family plus **1 LY/turn** host rounding / overshoot slack (W9 one-hop ≈ 82 LY, not 81) |
+| Engines unknown | Assume warp **9** |
+| Gravitonic | Apply 2× range **only** for gravitonic hulls (`hull_has_gravitonic_movement`); rounding slack is still +1 LY/turn on top |
+| Hyperdrive | **Ignore** HYP-capable hulls for envelopes (hull ability / known HYP hull set -- not FC=`HYP` alone) |
+| Chunnel / tow / wormhole | No special handling in v1 (envelope is the naive warp budget) |
+
+**Sector reduction (ship → owner):** For ship of `ownerid` *X* at (*x*,*y*) with envelope radius *R*, the reachable **homeworld sectors** are those whose **preferred sector HW position** (definite planet if any; else most-probable; else closest-to-mid candidate; else sector annular mid when no candidates) lies within *R* of the ship. Intersect that reachable set into owner *X*'s remaining possible-sector set (initialized to all eligible sectors). When owner *X*'s possible-sector set shrinks to a single sector, add *X* to that sector's possible-owner set with a **ship-travel-envelope** provenance summary (ship id, turn, radius, age source).
+
+**Planetary ownership sightings:**
+
+| Signal | Rule |
+|--------|------|
+| Preferred candidate HW | Known planetary `ownerid` on the sector's **preferred** HW candidate (definite > most-probable > closest-to-mid) **adds** that slot to the sector's possible-owner set with **preferred-candidate-ownership** provenance |
+| Nearby planets | Known `ownerid` on any traditional (non-planetoid) planet within **162 LY** of a sector **candidate** HW planet **adds** that slot to the sector's possible-owner set with **nearby-planet-ownership** provenance (planet id, distance). Cap radius is gravitonic warp-9 travel (162 LY) |
+
+Empty / unknown `ownerid` does not contribute. Ownership sightings **add** to the set; they do not remove other members by themselves (envelope reduction is the narrowing channel for ship-origin sectors).
+
+**Provenance summary (v1 machine facts):** each set member stores one or more `{kind, turn, ...}` records (`ship_travel_envelope` \| `preferred_candidate_ownership` \| `nearby_planet_ownership`; later `user_asserted` from #37). Core emits structured facts only -- no English hover strings (ADR 0008).
+
+**Materialize order:** after location promote + co-sector cull + definite-neighborhood cull; **before** layout prior. Ownership apply updates sector owner sets (and unique-owner orphan bind when applicable); layout prior still keys off candidate tiers / pins.
+
+**Wire / UI (minimal for #269):** sector `regionOverlays` carry possible-owner facts (slot ids, roster labels, provenance kind counts or short machine tags). SPA hover (`formatHomeworldSectorHoverLine`) shows a single owner when `|set|=1`, else **ambiguous** plus the possible owners when `|set|>1`. No new sidebar panel in this ticket.
 
 #### 4.3.3 Homeworld layout prior selection ([#36](https://github.com/SteveDraper/Planets-Console/issues/36), upgraded by [#270](https://github.com/SteveDraper/Planets-Console/issues/270))
 
@@ -338,8 +391,8 @@ Origin distances (81 LY pod, warp table) and the shared ship-limit gate stay in 
 | [#34](https://github.com/SteveDraper/Planets-Console/issues/34) | Config, race climate, baseline profile + **candidate geometry** + cluster orphans, orchestrator baseline ensure, persistence, map markers + table, availability; degraded via payload metadata |
 | [#35](https://github.com/SteveDraper/Planets-Console/issues/35) | **Homeworld region overlay** paint: shared boundary `regionOverlays`, layout distribution asset, sector emission, display mode + hover ([ADR 0008](adr/0008-shared-map-region-overlays.md)) |
 | [#36](https://github.com/SteveDraper/Planets-Console/issues/36) | Location evidence refine through shell turn; origin-distance + single-SB new-build; promotion; definite-neighborhood cull; layout prior **most probable**; FE markers/table cue |
-| [#269](https://github.com/SteveDraper/Planets-Console/issues/269) | **Homeworld ownership evidence** (proximity envelopes, sector owner pin, planetary ownership sightings) -- not location promotion |
-| [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | User assertions, refresh, **homeworld locator panel**, attribution UX |
+| [#269](https://github.com/SteveDraper/Planets-Console/issues/269) | **Homeworld ownership evidence** (travel envelopes, sector possible-owner sets + provenance, planetary ownership sightings, minimal sector hover) -- not location promotion |
+| [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | User assertions, refresh, **homeworld locator panel**, attribution UX (may add decisive `user_asserted` provenance into the same owner set) |
 
 ### 11.1 Issue #34 phased plan
 
@@ -371,6 +424,14 @@ Full plan: [plan-issue-270-layout-prior-budgeted-solver.md](plan-issue-270-layou
 
 1. **Encapsulate enumerator** -- `LayoutPriorSolver` boundary; shared cost outside solvers; `EnumeratingLayoutPriorSolver` (#36 behavior); no algorithm version bump; fixture selection parity.
 2. **SA + sample-grid refine** -- greedy frontier init; seeded size-aware SA under pluggable stop-gate; alternating sample-grid stand-in refine + #273 scored-sample hook; default switch; bump `LAYOUT_PRIOR_ALGORITHM_VERSION`; tune `layout_prior_budget_ms` on dense maps.
+
+### 11.5 Issue #269 phased plan
+
+Grill locks: §4.3.2 (this doc). CONTEXT: **homeworld ownership evidence**, **homeworld sector owner set**.
+
+1. **Ownership domain** -- ship age (fleet `built_turn` else id/scoreboard max age); travel envelopes (warp² / Grav / ignore HYP); sector reachable-set reduction; planetary preferred + nearby-162 ownership adds; pure helpers + unit tests (envelope pin, sighting merge, ambiguous multi-owner set). No HTTP.
+2. **Evidence refine + materialize + fleet DAG** -- durable sector owner sets on the evidence aggregate; refine accumulation; **ENSURE fan-out to final `fleet@N` per roster player** + `DependencyOutputs` built_turn map; materialize apply after culls / before layout prior; unique-owner orphan bind; serialization + Core/orchestrator tests; docs/ADR amend as needed.
+3. **Minimal FE** -- extend sector overlay wire facts + `formatHomeworldSectorHoverLine` (single owner vs **ambiguous** + possibles); normalize/tests. No panel.
 
 ---
 
@@ -418,3 +479,11 @@ Full plan: [plan-issue-270-layout-prior-budgeted-solver.md](plan-issue-270-layou
 | 2026-07-29 | Layout-prior reuse includes config ``evidenceLambda`` with candidate ``inputFingerprint`` (λ retune forces recompute; no algorithm-version bump) |
 | 2026-07-29 | Document dual-seed anneal + prior projection as deliberate continuity (this-seed variation, prev-seed dynamics, projection vs SA noise) -- not a single warm-start |
 | 2026-07-30 | Layout-prior reuse includes ``evidenceFingerprint`` (SHA-256 of effective soft OD observations); observation identity change forces recompute; no algorithm-version bump |
+| 2026-08-02 | #269 grill: sector **possible-owner sets** + provenance collections; ship age = fleet `built_turn` else id/scoreboard max age; envelope = turns×warp² (W9 default, Grav hulls only, ignore HYP); preferred + nearby-162 planet ownership adds; materialize after culls / before layout prior; minimal sector hover (ambiguous when multi); §11.5 |
+| 2026-08-02 | #269: retract soft fleet ledger read -- race with open-turn fleet; hard DAG dep on final ``fleet@N`` per **all roster** players (`player_id` fan-out; ``None`` fleet ensure is a no-op) |
+| 2026-08-02 | #269 Phase 2: ``player_id="all"`` ENSURE fan-out wired in export walk + compute DAG; ownership refine reads ``built_turn`` from ``DependencyOutputs`` fleet wires |
+| 2026-08-02 | #269 invalidation wake deferred: open-turn race = DAG only; reverse-ENSURE invalidate + ``force_fresh`` (and scores/fleet refactor onto it) tracked in [#280](https://github.com/SteveDraper/Planets-Console/issues/280) |
+| 2026-08-02 | #269: ``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` (1) on evidence aggregates; stale version fails satisfaction and forces floor re-refine / DAG rewalk |
+| 2026-08-02 | #269 Phase 3: sector ``possibleOwners`` (+ optional per-slot ``playerLabel``) on wire; FE normalize + hover unique vs **ambiguous** |
+| 2026-08-02 | Ownership travel envelope: +1 LY/turn rounding slack (`travel_turns × (warp² + 1)`); bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 2 |
+| 2026-08-02 | Sync ensure loads fleet `built_turn` from final on-disk ledgers after ENSURE; floor algo rewrite clears sticky ownership before re-accumulate; sole floor-rewrite owner; shared sector partition helper; bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 3 |

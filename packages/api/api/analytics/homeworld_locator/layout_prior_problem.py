@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from api.analytics.homeworld_locator.geometry import sector_index_for_angle
 from api.analytics.homeworld_locator.layout_distributions_asset import CategoryLayoutDistributions
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
@@ -18,10 +16,12 @@ from api.analytics.homeworld_locator.sector_overlays import (
     sector_band_geometric_center,
     unobserved_band_sample_points,
 )
+from api.analytics.homeworld_locator.sector_partition import (
+    partition_candidates_by_homeworld_sector,
+)
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
 from api.concepts.map_region_coverage import CoverageOrigin
 from api.concepts.stellar_cartography.nebula_visibility import NebulaCenter, distance_ly
-from api.concepts.warp_well import planet_is_planetoid
 from api.models.planet import Planet
 
 SectorKind = Literal["fixed", "choice", "stand_in", "skip"]
@@ -89,30 +89,26 @@ def build_sector_layout_states(
     nebulas: Sequence[NebulaCenter],
 ) -> tuple[SectorLayoutState, ...]:
     """Classify each homeworld sector as fixed, choice, stand-in, or skip."""
-    center_x, center_y = center
-    pin_sector = sector_index_for_angle(pin_angle, pin_angle=pin_angle, player_count=player_count)
-
+    candidate_rows_by_sector, candidate_planets_by_sector, _planet_sector_index = (
+        partition_candidates_by_homeworld_sector(
+            candidates=candidates,
+            planets_by_id=planets_by_id,
+            pin=pin,
+            pin_angle=pin_angle,
+            player_count=player_count,
+            center=center,
+            r_inner=r_inner,
+            r_outer=r_outer,
+        )
+    )
     candidates_by_sector: list[list[tuple[HomeworldCandidateRecord, Planet]]] = [
-        [] for _ in range(player_count)
+        list(zip(rows, planets, strict=True))
+        for rows, planets in zip(
+            candidate_rows_by_sector,
+            candidate_planets_by_sector,
+            strict=True,
+        )
     ]
-    for row in candidates:
-        planet = planets_by_id.get(row.planet_id)
-        if planet is None or planet_is_planetoid(planet):
-            continue
-        dist = distance_ly(planet.x, planet.y, center_x, center_y)
-        if dist < r_inner or dist > r_outer:
-            continue
-        angle = math.atan2(planet.y - center_y, planet.x - center_x)
-        index = sector_index_for_angle(angle, pin_angle=pin_angle, player_count=player_count)
-        candidates_by_sector[index].append((row, planet))
-
-    if all(planet.id != pin.id for _, planet in candidates_by_sector[pin_sector]):
-        pin_planet = planets_by_id.get(pin.id)
-        if pin_planet is not None:
-            for row in candidates:
-                if row.planet_id == pin.id:
-                    candidates_by_sector[pin_sector].append((row, pin_planet))
-                    break
 
     states: list[SectorLayoutState] = []
     for index in range(player_count):

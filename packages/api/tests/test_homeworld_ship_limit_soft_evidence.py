@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from api.analytics.homeworld_locator.evidence_refine import refine_homeworld_evidence_aggregate
-from api.analytics.homeworld_locator.models import OriginDistanceObservation
+from api.analytics.homeworld_locator.models import CONFIDENCE_POSSIBLE, OriginDistanceObservation
 from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
     effective_origin_distance_observations,
     first_shared_ship_limit_turn,
@@ -19,7 +19,10 @@ from api.analytics.homeworld_locator.serialization import (
     homeworld_evidence_aggregate_from_json,
     homeworld_evidence_aggregate_to_json,
 )
-from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
+from api.analytics.homeworld_locator.types import (
+    HomeworldCandidateRecord,
+    HomeworldEvidenceAggregate,
+)
 from api.concepts.ship_limit import (
     is_at_or_over_shared_ship_limit,
     total_reported_ships,
@@ -36,6 +39,14 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "asset
 def _load_turn():
     raw = json.loads((ASSETS_DIR / "turn_sample.json").read_text(encoding="utf-8"))
     return turn_info_from_json(raw, settings_defaults=raw["settings"])
+
+
+def _candidate(planet_id: int) -> HomeworldCandidateRecord:
+    return HomeworldCandidateRecord(
+        planet_id=planet_id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
 
 
 def _scoreboard_turns(
@@ -230,6 +241,7 @@ def test_refine_stops_origin_distance_after_ship_limit() -> None:
     result = refine_homeworld_evidence_aggregate(
         prior,
         turn=shell,
+        candidates=(_candidate(10),),
         candidate_planet_ids_set=frozenset({10}),
         planets_by_id={10: candidate},
         load_turn=_turn_loader(turns),
@@ -269,6 +281,7 @@ def test_refine_counts_appended_observations_before_freeze() -> None:
     result = refine_homeworld_evidence_aggregate(
         prior,
         turn=shell,
+        candidates=(_candidate(10),),
         candidate_planet_ids_set=frozenset({10}),
         planets_by_id={10: candidate},
         load_turn=_turn_loader(turns),
@@ -297,6 +310,7 @@ def test_refine_freeze_cutoff_from_earlier_historical_crossing() -> None:
     result = refine_homeworld_evidence_aggregate(
         prior,
         turn=shell,
+        candidates=(_candidate(10),),
         candidate_planet_ids_set=frozenset({10}),
         planets_by_id={10: candidate},
         load_turn=_turn_loader(turns),
@@ -323,7 +337,10 @@ def test_evidence_through_turn_codec_round_trip() -> None:
 
 def test_ensure_refine_freeze_cutoff_walks_scoreboard_turns() -> None:
     """Ensure path resolves the freeze via services.load_turn at the earliest crossing."""
-    from api.analytics.homeworld_locator.constants import HOMEWORLD_BASELINE_ALGORITHM_VERSION
+    from api.analytics.homeworld_locator.constants import (
+        HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+        HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+    )
     from api.analytics.homeworld_locator.evidence_ensure import (
         compute_homeworld_evidence_refine_step_detailed,
     )
@@ -359,6 +376,7 @@ def test_ensure_refine_freeze_cutoff_walks_scoreboard_turns() -> None:
         HomeworldEvidenceAggregate(
             turn=4,
             baseline_turn=1,
+            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
             origin_distance_observations=(
                 OriginDistanceObservation(turn=2, x=0, y=0, matched_planet_ids=(10,)),
                 OriginDistanceObservation(turn=4, x=1, y=1, matched_planet_ids=(10,)),
