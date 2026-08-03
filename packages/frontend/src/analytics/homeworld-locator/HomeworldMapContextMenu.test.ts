@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isEventInsideHomeworldMenu } from './HomeworldMapContextMenu'
 import {
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
@@ -61,5 +62,25 @@ describe('homeworld map context menu target resolution', () => {
       planetId: 9,
       sectorIndex: null,
     })
+  })
+})
+
+describe('isEventInsideHomeworldMenu', () => {
+  it('returns false when the menu is not mounted', () => {
+    expect(isEventInsideHomeworldMenu(document.createElement('div'), null)).toBe(false)
+  })
+
+  it('returns true for the menu element and its children', () => {
+    const menu = document.createElement('div')
+    const child = document.createElement('button')
+    menu.appendChild(child)
+    expect(isEventInsideHomeworldMenu(menu, menu)).toBe(true)
+    expect(isEventInsideHomeworldMenu(child, menu)).toBe(true)
+  })
+
+  it('returns false for outside targets', () => {
+    const menu = document.createElement('div')
+    const outside = document.createElement('div')
+    expect(isEventInsideHomeworldMenu(outside, menu)).toBe(false)
   })
 })

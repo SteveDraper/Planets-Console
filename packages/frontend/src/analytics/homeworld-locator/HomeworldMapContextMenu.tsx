@@ -3,7 +3,7 @@
  * Homeworld-owned: listens on the React Flow pane and hit-tests planets then sectors.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import type { AnalyticShellScope, MapNode } from '../../api/bff'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
@@ -60,6 +60,15 @@ function planetIdFromNodeId(nodeId: string, nodes: readonly MapNode[]): number |
   return null
 }
 
+/** True when the event target is inside the open menu (or the menu itself). */
+export function isEventInsideHomeworldMenu(
+  target: EventTarget | null,
+  menuElement: HTMLElement | null
+): boolean {
+  if (menuElement == null || !(target instanceof Node)) return false
+  return menuElement.contains(target)
+}
+
 export type HomeworldMapContextMenuProps = {
   analyticScope: AnalyticShellScope | null
   enabled: boolean
@@ -80,6 +89,7 @@ export function HomeworldMapContextMenu({
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const [menu, setMenu] = useState<MenuTarget | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const assertMutation = useHomeworldLocatorAssertionMutation(analyticScope)
   const setSelection = useHomeworldLocatorSelectionStore((s) => s.setSelection)
 
@@ -98,7 +108,10 @@ export function HomeworldMapContextMenu({
     const onContextMenu = (event: MouseEvent) => {
       if (!transform) return
       const flow = clientToFlowPosition(event.clientX, event.clientY, domNode, transform)
-      if (flow == null) return
+      if (flow == null) {
+        setMenu(null)
+        return
+      }
       const scale = safeZoomScale(transform[2])
       const { px, py } = flowCenterToPlanet(flow.x, flow.y)
 
@@ -146,24 +159,31 @@ export function HomeworldMapContextMenu({
             clientX: event.clientX,
             clientY: event.clientY,
           })
+          return
         }
       }
+
+      // Right-click on empty map space dismisses any open menu.
+      setMenu(null)
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setMenu(null)
     }
-    const onPointerDown = (event: MouseEvent) => {
-      if (event.button === 0) setMenu(null)
+
+    // Capture phase so React Flow pan/drag handlers cannot swallow the dismiss.
+    const onPointerDownCapture = (event: PointerEvent) => {
+      if (isEventInsideHomeworldMenu(event.target, menuRef.current)) return
+      setMenu(null)
     }
 
     domNode.addEventListener('contextmenu', onContextMenu)
     window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('pointerdown', onPointerDownCapture, true)
     return () => {
       domNode.removeEventListener('contextmenu', onContextMenu)
       window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('pointerdown', onPointerDownCapture, true)
     }
   }, [
     enabled,
@@ -191,10 +211,10 @@ export function HomeworldMapContextMenu({
 
   return (
     <div
+      ref={menuRef}
       className="fixed z-[80] min-w-[12rem] rounded border border-[#52575d] bg-[#2f3338] py-1 text-xs text-slate-100 shadow-lg"
       style={{ left: menu.clientX, top: menu.clientY }}
       role="menu"
-      onMouseDown={(event) => event.stopPropagation()}
     >
       {menu.kind === 'planet' ? (
         <>
