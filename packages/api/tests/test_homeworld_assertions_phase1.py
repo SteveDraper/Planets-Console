@@ -399,6 +399,8 @@ def test_ensure_candidates_for_asserted_locations() -> None:
         asserted_location_provenances=asserted,
     )
     assert [row.planet_id for row in merged] == [10, 99]
+    # Shells are not stamped with asserted_cue; cull protection uses durable keys.
+    assert all(row.asserted_cue is False for row in merged)
 
 
 def test_derive_candidates_sets_definite_and_asserted_cue() -> None:

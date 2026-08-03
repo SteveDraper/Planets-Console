@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence, Set
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
@@ -202,6 +202,7 @@ def cull_definite_neighborhood_candidates(
     planets_by_id: Mapping[int, Planet],
     *,
     min_separation_ly: float,
+    protected_planet_ids: Set[int] = frozenset(),
 ) -> tuple[TCullable, ...]:
     """Drop inferred possibles closer than *min_separation_ly* to any definite homeworld."""
     if min_separation_ly <= 0 or not candidates:
@@ -219,7 +220,7 @@ def cull_definite_neighborhood_candidates(
 
     kept: list[TCullable] = []
     for row in candidates:
-        if candidate_is_assert_protected(row):
+        if candidate_is_assert_protected(row, protected_planet_ids=protected_planet_ids):
             kept.append(row)
             continue
         if row.confidence_tier == CONFIDENCE_DEFINITE:
@@ -261,6 +262,7 @@ def materialize_evidence_adjusted_candidates(
     settings_turn: TurnInfo,
     player_count: int,
     layout_asset: LayoutDistributionsAsset | None = None,
+    protected_planet_ids: Set[int] = frozenset(),
 ) -> tuple[HomeworldCandidateRecord, ...]:
     """Single-SB promote then co-sector cull then definite-neighborhood cull.
 
@@ -270,6 +272,9 @@ def materialize_evidence_adjusted_candidates(
     materialize ladder. Shell map/table serving uses
     ``materialize_homeworld_candidates``, which owns ownership apply and
     layout-prior annotation.
+
+    ``protected_planet_ids`` are durable asserted location planet ids; culls keep
+    those rows even when ``asserted_cue`` is not yet derived.
     """
     adjusted = apply_recorded_single_starbase_promotions(
         candidates,
@@ -280,6 +285,7 @@ def materialize_evidence_adjusted_candidates(
         planets,
         settings=settings_turn.settings,
         player_count=player_count,
+        protected_planet_ids=protected_planet_ids,
     )
     min_separation = neighbor_separation_support_min(
         settings_turn,
@@ -292,6 +298,7 @@ def materialize_evidence_adjusted_candidates(
             adjusted,
             planets_by_id,
             min_separation_ly=min_separation,
+            protected_planet_ids=protected_planet_ids,
         )
     return adjusted
 

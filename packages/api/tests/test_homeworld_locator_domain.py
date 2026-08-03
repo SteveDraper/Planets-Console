@@ -715,6 +715,49 @@ def test_cull_preserves_user_asserted_co_sector_possible(template_planet) -> Non
     assert {row.planet_id for row in culled} == {1, 2}
 
 
+def test_cull_preserves_durable_assert_location_shell_without_cue(template_planet) -> None:
+    """Assert-created shells have no asserted_cue until derive; durable keys protect culls."""
+    from api.analytics.homeworld_locator.baseline import (
+        cull_co_sector_candidates_after_definites,
+    )
+    from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
+
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=500, y=0)
+    assert_shell = _planet(template_planet, planet_id=2, x=550, y=20)
+    rows = (
+        HomeworldCandidateRecord(
+            planet_id=1,
+            perspective=1,
+            confidence_tier=CONFIDENCE_DEFINITE,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=2,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            # ensure_candidates_for_asserted_locations leaves asserted_cue=False
+        ),
+    )
+    without_keys = cull_co_sector_candidates_after_definites(
+        rows,
+        {1: pin, 2: assert_shell},
+        center=center,
+        player_count=4,
+        pin_angle=0.0,
+    )
+    assert {row.planet_id for row in without_keys} == {1}
+
+    with_keys = cull_co_sector_candidates_after_definites(
+        rows,
+        {1: pin, 2: assert_shell},
+        center=center,
+        player_count=4,
+        pin_angle=0.0,
+        protected_planet_ids=frozenset({2}),
+    )
+    assert {row.planet_id for row in with_keys} == {1, 2}
+
+
 def test_infer_baseline_culls_co_sector_cluster_orphans(template_planet, sample_settings) -> None:
     """Cluster orphans in the definite pin's sector are removed; other sectors kept."""
     settings = replace(

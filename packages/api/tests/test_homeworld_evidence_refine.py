@@ -615,6 +615,41 @@ def test_definite_neighborhood_cull_uses_support_min(template_planet) -> None:
     assert [row.planet_id for row in culled] == [1, 3]
 
 
+def test_neighborhood_cull_preserves_durable_assert_location_shell(template_planet) -> None:
+    """Assert shells without asserted_cue survive neighborhood cull via durable keys."""
+    from api.analytics.homeworld_locator.models import PROVENANCE_ASSERTED, LocationProvenance
+    from api.analytics.homeworld_locator.types import ensure_candidates_for_asserted_locations
+
+    definite = _planet(template_planet, planet_id=1, x=0, y=0)
+    assert_shell = _planet(template_planet, planet_id=2, x=100, y=0)
+    planets_by_id = {1: definite, 2: assert_shell}
+    asserted = (LocationProvenance(kind=PROVENANCE_ASSERTED, turn=3, planet_id=2),)
+    seeded = ensure_candidates_for_asserted_locations(
+        inferred=(
+            HomeworldCandidateRecord(
+                planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE
+            ),
+        ),
+        asserted_location_provenances=asserted,
+    )
+    assert next(row for row in seeded if row.planet_id == 2).asserted_cue is False
+
+    without_keys = cull_definite_neighborhood_candidates(
+        seeded,
+        planets_by_id,
+        min_separation_ly=430.0,
+    )
+    assert [row.planet_id for row in without_keys] == [1]
+
+    with_keys = cull_definite_neighborhood_candidates(
+        seeded,
+        planets_by_id,
+        min_separation_ly=430.0,
+        protected_planet_ids=frozenset(row.planet_id for row in asserted),
+    )
+    assert [row.planet_id for row in with_keys] == [1, 2]
+
+
 def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sample_settings) -> None:
     from api.concepts.homeworld_layout import HW_DISTRIBUTION_RANDOM_SPACED
 

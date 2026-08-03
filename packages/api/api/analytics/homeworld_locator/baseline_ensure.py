@@ -327,12 +327,16 @@ def materialize_homeworld_candidates(
         inferred=candidates,
         asserted_location_provenances=game_state.asserted_location_provenances,
     )
+    protected_planet_ids = frozenset(
+        row.planet_id for row in game_state.asserted_location_provenances
+    )
     adjusted = materialize_evidence_adjusted_candidates(
         seeded,
         aggregate,
         planets=shell_turn.planets,
         settings_turn=shell_turn,
         player_count=_player_count(shell_turn),
+        protected_planet_ids=protected_planet_ids,
     )
     merged = merge_homeworld_evidence_above_read(game_state=game_state, aggregate=aggregate)
     adjusted = apply_unique_owner_orphan_bind(
