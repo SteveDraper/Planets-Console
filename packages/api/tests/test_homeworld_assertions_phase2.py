@@ -264,9 +264,7 @@ def test_ownership_assert_sector_keyed_when_sectors_exist(
                     (
                         SectorOwnerMember(
                             owner_slot=9,
-                            provenances=(
-                                OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=turn),
-                            ),
+                            provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=turn),),
                         ),
                     ),
                 ),
@@ -296,9 +294,7 @@ def test_ownership_assert_sector_keyed_when_sectors_exist(
     members = updated.asserted_sector_ownership[0][1]
     assert len(members) == 1
     assert members[0].owner_slot == 2
-    assert members[0].provenances == (
-        OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=turn),
-    )
+    assert members[0].provenances == (OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=turn),)
 
 
 def test_location_assert_rejects_planetoid(assertion_service, persistence, sample_turn) -> None:
