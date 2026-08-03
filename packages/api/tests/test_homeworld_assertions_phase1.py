@@ -552,9 +552,7 @@ def test_derive_does_not_keep_prior_definite_without_planet_provenance() -> None
         ),
     )
     merged = MergedHomeworldEvidence(
-        location_provenances=(
-            LocationProvenance(kind=PROVENANCE_ASSERTED, turn=5, planet_id=20),
-        ),
+        location_provenances=(LocationProvenance(kind=PROVENANCE_ASSERTED, turn=5, planet_id=20),),
         sector_owner_sets=(),
         planet_owner_sets=(),
     )

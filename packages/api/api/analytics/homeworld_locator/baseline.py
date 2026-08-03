@@ -96,9 +96,7 @@ def cull_co_sector_candidates_after_definites(
     center_x, center_y = center
 
     def _is_protected(row: TCullable) -> bool:
-        return candidate_is_assert_protected(
-            row, protected_planet_ids=protected_planet_ids
-        )
+        return candidate_is_assert_protected(row, protected_planet_ids=protected_planet_ids)
 
     def _sector_for(row: TCullable) -> int | None:
         planet = planets_by_id.get(row.planet_id)
