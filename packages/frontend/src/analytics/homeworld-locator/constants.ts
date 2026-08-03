@@ -4,6 +4,9 @@ export const HOMEWORLD_LOCATOR_ANALYTIC_ID = 'homeworld-locator'
 export const CONFIDENCE_DEFINITE = 'definite' as const
 export const CONFIDENCE_POSSIBLE = 'possible' as const
 
+/** Ownership / location provenance kind minted by UI asserts (Core ``PROVENANCE_ASSERTED``). */
+export const PROVENANCE_KIND_ASSERTED = 'asserted' as const
+
 export const INACTIVE_REASON_NO_HOMEWORLD = 'nohomeworld'
 export const INACTIVE_REASON_WANDERING_TRIBES = 'wandering_tribes'
 /** Ashes / Crazy Intermix / Disunited Kingdoms (recipe-shaped GameSettings). */

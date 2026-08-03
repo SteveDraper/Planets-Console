@@ -36,11 +36,21 @@ import {
 } from './map-graph/RegionOverlayHoverPanel'
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
+import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
+import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
 import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
 import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homeworldRegionStyle'
+import { findHomeworldSectorAtMapPoint } from '../analytics/homeworld-locator/resolveOwnershipAssertTarget'
+import { parseHomeworldSectorIndex } from '../analytics/homeworld-locator/homeworldSectorIndex'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
+import { deriveAnalyticScope } from '../shell/shellContext'
+import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
+import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
 import { useHomeworldRegionDisplayStore } from '../stores/homeworldRegionDisplay'
+import { useSessionStore } from '../stores/session'
+import { useShellStore } from '../stores/shell'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
+import type { PerspectiveRow } from '../lib/gameInfoShell'
 import {
   WormholeInteractionProvider,
   useWormholeInteractionState,
@@ -57,6 +67,8 @@ import {
   SliderZoomControl,
   ViewportZoomSync,
 } from './map-graph/viewportControls'
+
+const EMPTY_PERSPECTIVES: readonly PerspectiveRow[] = []
 
 type MapGraphProps = {
   data: CombinedMapData
@@ -233,18 +245,55 @@ function MapGraphFlow({
   const homeworldRegionDisplayMode = useHomeworldRegionDisplayStore(
     (s) => s.regionDisplayMode
   )
+  const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
+  const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
+  const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
+  const selectedGameId = useShellStore((s) => s.selectedGameId)
+  const gameInfoContext = useShellStore((s) => s.gameInfoContext)
+  const selectedTurn = useShellStore((s) => s.selectedTurn)
+  const perspectiveOverrideOrdinal = useShellStore((s) => s.perspectiveOverrideOrdinal)
+  const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
+  const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
+  const loginName = useSessionStore((s) => s.name)
+  const roster = gameInfoContext?.perspectives ?? EMPTY_PERSPECTIVES
+  const analyticScope = deriveAnalyticScope({
+    selectedGameId,
+    gameInfoContext,
+    selectedTurn,
+    perspectiveOverrideOrdinal,
+    loginName,
+    storageOnlyLoad,
+    storageAvailablePerspectives,
+    viewedDataTurn: selectedTurn,
+    turnUsernamesByPlayerId: null,
+  })
+
   // Visibility prefs only mutate visibility kinds; homeworld display mode filters
   // sectors; homeworld style adapter attaches paint metadata for shared blit.
-  const regionOverlays = useMemo(
-    () =>
-      applyHomeworldRegionStyle(
-        applyHomeworldRegionDisplayMode(
-          applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
-          homeworldRegionDisplayMode
-        )
-      ),
-    [data.regionOverlays, visibilityKinds, homeworldRegionDisplayMode]
-  )
+  const regionOverlays = useMemo(() => {
+    const filtered = applyHomeworldRegionDisplayMode(
+      applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
+      homeworldRegionDisplayMode
+    )
+    let selectedSectorIndex: number | null =
+      selection?.kind === 'sector' ? selection.sectorIndex : null
+    if (selection?.kind === 'planet') {
+      const marker = data.homeworldMarkers.find((m) => m.planetId === selection.planetId)
+      if (marker != null) {
+        const planetOverlay = findHomeworldSectorAtMapPoint(filtered, marker.x, marker.y)
+        if (planetOverlay != null) {
+          selectedSectorIndex = parseHomeworldSectorIndex(planetOverlay.id)
+        }
+      }
+    }
+    return applyHomeworldRegionStyle(filtered, { selectedSectorIndex })
+  }, [
+    data.regionOverlays,
+    data.homeworldMarkers,
+    visibilityKinds,
+    homeworldRegionDisplayMode,
+    selection,
+  ])
 
   return (
     <ReactFlow
@@ -302,6 +351,14 @@ function MapGraphFlow({
         blockedByPlanetHover={blockedByPlanetHover}
         cartography={cartography}
         wormholeHoverLines={wormholeHoverLines}
+      />
+      <HomeworldMapContextMenu
+        analyticScope={analyticScope}
+        enabled={homeworldEnabled}
+        regionOverlays={regionOverlays}
+        planetGrid={planetGrid}
+        planetMapNodes={planetMapNodes}
+        roster={roster}
       />
     </ReactFlow>
   )

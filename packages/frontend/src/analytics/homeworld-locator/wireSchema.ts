@@ -16,6 +16,8 @@ export const homeworldCandidateRecordSchema = z.object({
   perspective: z.number().int().nullable(),
   confidenceTier: homeworldConfidenceTierSchema,
   attribution: z.string().min(1),
+  /** Derived cue: asserted-strength provenance present on location and/or ownership. */
+  assertedCue: z.boolean().default(false),
   isMostProbable: z.boolean().default(false),
 })
 

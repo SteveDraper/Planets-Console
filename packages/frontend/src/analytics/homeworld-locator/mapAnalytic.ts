@@ -55,6 +55,7 @@ export function resolveHomeworldMarkerDisplays(
       confidenceTier: marker.confidenceTier,
       perspective: marker.perspective,
       attribution: marker.attribution,
+      assertedCue: marker.assertedCue ?? false,
       isMostProbable: marker.isMostProbable ?? false,
     })
   }
@@ -62,9 +63,8 @@ export function resolveHomeworldMarkerDisplays(
 }
 
 export function homeworldLocatorMapQueryKey(analyticScope: MapAnalyticQueryContext['analyticScope']) {
-  // Bump when overlay wire annotations change (e.g. structured hover facts) so
-  // cached map payloads without those fields cannot keep hover/display broken.
-  return ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'map', analyticScope, 'sectors-v4'] as const
+  // Bump when marker/overlay wire annotations change so stale caches cannot hide cues.
+  return ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'map', analyticScope, 'sectors-v5'] as const
 }
 
 function markersFromMapResponse(data: MapDataResponse): HomeworldMapMarker[] {

@@ -92,6 +92,29 @@ describe('homeworldRegionStyle', () => {
     expect(paint.diskStrokes).toEqual([{ strokeColor: '#e2e8f0', strokeWidth: 1.75 }])
   })
 
+  it('uses asserted ownership stroke when possibleOwners include asserted', () => {
+    const paint = homeworldSectorPaint(
+      sectorOverlay({
+        possibleOwners: [
+          {
+            ownerSlot: 2,
+            provenanceKinds: ['asserted'],
+            playerLabel: 'alice (The Federation)',
+          },
+        ],
+      })
+    )
+    expect(paint.strokeColor).toBe('#fbbf24')
+    expect(paint.strokeWidth).toBe(2.25)
+  })
+
+  it('highlights a selected sector with cyan stroke', () => {
+    const [styled] = applyHomeworldRegionStyle([sectorOverlay()], {
+      selectedSectorIndex: 0,
+    })
+    expect(styled!.paint?.strokeColor).toBe('#38bdf8')
+  })
+
   it('preserves homeworld visual behavior through shared blit', () => {
     const styled = applyHomeworldRegionStyle([sectorOverlay({ status: 'ok' })])
     const group = buildMapRegionOverlayPaneShapes(styled, viewport).groups[0]!

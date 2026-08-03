@@ -41,6 +41,7 @@ describe('HomeworldLocatorTableTile', () => {
           perspective: 1,
           confidenceTier: 'definite',
           attribution: 'inferred',
+          assertedCue: false,
           isMostProbable: false,
         },
         {
@@ -48,6 +49,7 @@ describe('HomeworldLocatorTableTile', () => {
           perspective: null,
           confidenceTier: 'possible',
           attribution: 'inferred',
+          assertedCue: false,
           isMostProbable: true,
         },
       ],
@@ -59,6 +61,8 @@ describe('HomeworldLocatorTableTile', () => {
     expect(screen.getByText('Orphan')).toBeInTheDocument()
     expect(screen.getByText('Definite')).toBeInTheDocument()
     expect(screen.getByText('Possible (most probable)')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Asserted' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /assert hw/i })).not.toBeInTheDocument()
   })
 
   it('shows inactive hint when the analytic is unavailable', async () => {

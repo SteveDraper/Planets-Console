@@ -4,6 +4,9 @@ import type { HomeworldMapMarker } from './wireSchema'
 const DEFINITE_STROKE = '#f8fafc'
 const POSSIBLE_STROKE = '#94a3b8'
 const MOST_PROBABLE_STROKE = '#cbd5e1'
+/** Asserted-strength cue -- distinct from inferred definite (warm amber). */
+const ASSERTED_STROKE = '#fbbf24'
+const SELECTED_STROKE = '#38bdf8'
 
 export type HomeworldMarkerRing = {
   radiusScale: number
@@ -13,8 +16,15 @@ export type HomeworldMarkerRing = {
   opacity: number
 }
 
-/** SVG ring paint for one homeworld map marker (one or two concentric rings). */
-export function homeworldMarkerRings(
+export type HomeworldMarkerRingInput = Pick<
+  HomeworldMapMarker,
+  'confidenceTier' | 'isMostProbable' | 'assertedCue'
+> & {
+  /** Ephemeral UI highlight when the panel/table row is focused. */
+  isSelected?: boolean
+}
+
+function confidenceRings(
   marker: Pick<HomeworldMapMarker, 'confidenceTier' | 'isMostProbable'>
 ): HomeworldMarkerRing[] {
   if (marker.confidenceTier === CONFIDENCE_DEFINITE) {
@@ -54,4 +64,30 @@ export function homeworldMarkerRings(
       opacity: 0.75,
     },
   ]
+}
+
+/**
+ * SVG ring paint for one homeworld map marker.
+ * Asserted cue adds an outer amber ring; selection adds a cyan halo.
+ */
+export function homeworldMarkerRings(marker: HomeworldMarkerRingInput): HomeworldMarkerRing[] {
+  const rings = confidenceRings(marker)
+  if (marker.assertedCue) {
+    rings.unshift({
+      radiusScale: 1.35,
+      stroke: ASSERTED_STROKE,
+      strokeWidth: 2,
+      opacity: 1,
+    })
+  }
+  if (marker.isSelected) {
+    rings.unshift({
+      radiusScale: marker.assertedCue ? 1.65 : 1.4,
+      stroke: SELECTED_STROKE,
+      strokeWidth: 1.5,
+      strokeDasharray: '2 2',
+      opacity: 0.95,
+    })
+  }
+  return rings
 }

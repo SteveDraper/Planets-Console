@@ -1,8 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { tileClassName } from '../tileChrome'
 import { DisplayModeControl } from '../DisplayModeControl'
+import { deriveAnalyticScope } from '../../shell/shellContext'
+import { useSessionStore } from '../../stores/session'
+import { useShellStore } from '../../stores/shell'
+import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import { homeworldInactiveHint } from './constants'
 import {
   HOMEWORLD_REGION_DISPLAY_MODE_LABELS,
@@ -10,6 +15,9 @@ import {
   type HomeworldRegionDisplayMode,
 } from './homeworldRegionDisplayMode'
 import { useHomeworldRegionDisplayStore } from '../../stores/homeworldRegionDisplay'
+import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
+
+const EMPTY_ROSTER: readonly PerspectiveRow[] = []
 
 type HomeworldLocatorTileProps = {
   name: string
@@ -41,8 +49,8 @@ function HomeworldRegionDisplayModeControl({
 }
 
 /**
- * Sidebar enable toggle for Homeworld locator with expandable region display mode
- * (Cartography chevron + segment control pattern).
+ * Sidebar enable toggle for Homeworld locator with expandable panel
+ * (region display mode, candidate table, assert/revoke, refresh).
  */
 export function HomeworldLocatorTile({
   name,
@@ -62,14 +70,33 @@ export function HomeworldLocatorTile({
   const regionDisplayMode = useHomeworldRegionDisplayStore((s) => s.regionDisplayMode)
   const setRegionDisplayMode = useHomeworldRegionDisplayStore((s) => s.setRegionDisplayMode)
 
-  useEffect(() => {
-    if (!canExpand) {
-      setExpanded(false)
-    }
-  }, [canExpand])
+  const selectedGameId = useShellStore((s) => s.selectedGameId)
+  const gameInfoContext = useShellStore((s) => s.gameInfoContext)
+  const selectedTurn = useShellStore((s) => s.selectedTurn)
+  const perspectiveOverrideOrdinal = useShellStore((s) => s.perspectiveOverrideOrdinal)
+  const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
+  const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
+  const loginName = useSessionStore((s) => s.name)
+  const perspectives = gameInfoContext?.perspectives
+  const roster = perspectives ?? EMPTY_ROSTER
+  const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
+  const setSelection = useHomeworldLocatorSelectionStore((s) => s.setSelection)
+
+  const analyticScope = deriveAnalyticScope({
+    selectedGameId,
+    gameInfoContext,
+    selectedTurn,
+    perspectiveOverrideOrdinal,
+    loginName,
+    storageOnlyLoad,
+    storageAvailablePerspectives,
+    viewedDataTurn: selectedTurn,
+    turnUsernamesByPlayerId: null,
+  })
 
   const showExpandedBody = canExpand && expanded
   const chevronPointsDown = showExpandedBody
+  const selectedPlanetId = selection?.kind === 'planet' ? selection.planetId : null
 
   return (
     <div
@@ -127,12 +154,19 @@ export function HomeworldLocatorTile({
       </div>
       {showExpandedBody ? (
         <div
-          className="flex min-w-0 flex-col gap-1 border-t border-[#52575d]/70 px-2 pb-2 pt-1.5 text-xs text-slate-300"
+          className="flex min-w-0 flex-col gap-1.5 border-t border-[#52575d]/70 px-2 pb-2 pt-1.5 text-xs text-slate-300"
           onClick={(e) => e.stopPropagation()}
         >
           <HomeworldRegionDisplayModeControl
             value={regionDisplayMode}
             onChange={setRegionDisplayMode}
+          />
+          <HomeworldLocatorPanel
+            analyticScope={analyticScope}
+            fetchEnabled={canExpand}
+            roster={roster}
+            selectedPlanetId={selectedPlanetId}
+            onSelectPlanet={(planetId) => setSelection({ kind: 'planet', planetId })}
           />
         </div>
       ) : null}
