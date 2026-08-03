@@ -160,6 +160,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/homeworld-locator/assertions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Homeworld Locator Assertion
+         * @description Upsert or revoke a homeworld location or ownership assertion.
+         */
+        post: operations["post_homeworld_locator_assertion_analytics_homeworld_locator_assertions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/homeworld-locator/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Homeworld Locator Refresh
+         * @description Wipe machine homeworld state and rebuild via ensure (asserts preserved).
+         */
+        post: operations["post_homeworld_locator_refresh_analytics_homeworld_locator_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics": {
         parameters: {
             query?: never;
@@ -246,6 +286,22 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HomeworldAssertionRequest
+         * @description Upsert or revoke a location or ownership homeworld assertion.
+         */
+        HomeworldAssertionRequest: {
+            /** Axis */
+            axis: string;
+            /** Action */
+            action: string;
+            /** Planetid */
+            planetId?: number | null;
+            /** Sectorindex */
+            sectorIndex?: number | null;
+            /** Ownerslot */
+            ownerSlot?: number | null;
         };
         /** InferenceHullCatalogMaskUpdateRequest */
         InferenceHullCatalogMaskUpdateRequest: {
@@ -637,6 +693,76 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                     "application/x-ndjson": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_homeworld_locator_assertion_analytics_homeworld_locator_assertions_post: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HomeworldAssertionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_homeworld_locator_refresh_analytics_homeworld_locator_refresh_post: {
+        parameters: {
+            query: {
+                gameId: number;
+                turn: number;
+                perspective: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

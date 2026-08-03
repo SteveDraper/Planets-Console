@@ -41,6 +41,7 @@ def _view_to_wire(
             "perspective": row.perspective,
             "confidenceTier": row.confidence_tier,
             "attribution": _wire_attribution(row),
+            "assertedCue": row.asserted_cue,
             "isMostProbable": row.is_most_probable,
         }
         for row in view.candidates
@@ -49,6 +50,7 @@ def _view_to_wire(
         {
             **homeworld_candidate_record_to_json(row),
             "attribution": _wire_attribution(row),
+            "assertedCue": row.asserted_cue,
             "isMostProbable": row.is_most_probable,
         }
         for row in view.candidates

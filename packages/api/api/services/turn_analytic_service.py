@@ -511,3 +511,63 @@ class TurnAnalyticService:
             turn_number,
         )
         return scheduler.global_pause_status(scope)
+
+    def _homeworld_assertion_service(
+        self,
+        game_id: int,
+        perspective: int,
+    ):
+        from api.services.homeworld_assertion_service import HomeworldAssertionService
+
+        load_turn = self._load_scoreboard_turn(game_id, perspective)
+
+        def rematerialize(turn_number: int) -> dict:
+            return self.get_turn_analytics(
+                game_id,
+                perspective,
+                turn_number,
+                HOMEWORLD_ANALYTIC_ID,
+            )
+
+        return HomeworldAssertionService(
+            persistence=self._homeworld_persistence,
+            load_turn=load_turn,
+            list_stored_turns=lambda: self._turns.list_stored_turn_numbers(
+                game_id,
+                perspective,
+            ),
+            game_id=game_id,
+            perspective=perspective,
+            rematerialize=rematerialize,
+        )
+
+    def apply_homeworld_assertion(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        axis: str,
+        action: str,
+        planet_id: int | None = None,
+        sector_index: int | None = None,
+        owner_slot: int | None = None,
+    ) -> dict:
+        return self._homeworld_assertion_service(game_id, perspective).apply_assertion(
+            axis=axis,
+            action=action,
+            turn_number=turn_number,
+            planet_id=planet_id,
+            sector_index=sector_index,
+            owner_slot=owner_slot,
+        )
+
+    def refresh_homeworld_locator(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict:
+        return self._homeworld_assertion_service(game_id, perspective).refresh(
+            turn_number=turn_number,
+        )

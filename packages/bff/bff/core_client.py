@@ -390,6 +390,45 @@ class CoreClient:
             )
         )
 
+    def apply_homeworld_assertion(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        axis: str,
+        action: str,
+        planet_id: int | None = None,
+        sector_index: int | None = None,
+        owner_slot: int | None = None,
+    ) -> dict:
+        return self._invoke(
+            lambda: self._analytics.apply_homeworld_assertion(
+                game_id,
+                perspective,
+                turn_number,
+                axis=axis,
+                action=action,
+                planet_id=planet_id,
+                sector_index=sector_index,
+                owner_slot=owner_slot,
+            )
+        )
+
+    def refresh_homeworld_locator(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict:
+        return self._invoke(
+            lambda: self._analytics.refresh_homeworld_locator(
+                game_id,
+                perspective,
+                turn_number,
+            )
+        )
+
 
 _core_client_singleton: CoreClient | None = None
 
