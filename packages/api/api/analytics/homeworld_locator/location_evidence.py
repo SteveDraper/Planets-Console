@@ -255,6 +255,15 @@ def record_single_starbase_promotion(
     )
 
 
+def definite_candidate_planet_ids(
+    candidates: Sequence[HomeworldCandidateRecord],
+) -> tuple[int, ...]:
+    """Planet ids whose durable candidate row is currently definite (baseline pins)."""
+    return tuple(
+        row.planet_id for row in candidates if row.confidence_tier == CONFIDENCE_DEFINITE
+    )
+
+
 def baseline_profile_location_provenances(
     *,
     baseline_turn: int,
@@ -276,12 +285,16 @@ def collect_machine_location_provenances(
     prior_location_provenances: Sequence[LocationProvenance] = (),
     origin_distance_observations: Sequence[OriginDistanceObservation] = (),
     single_starbase_promotions: Sequence[HomeworldSingleStarbasePromotion] = (),
+    baseline_turn: int | None = None,
+    baseline_definite_planet_ids: Sequence[int] = (),
 ) -> tuple[LocationProvenance, ...]:
     """Rebuild machine location provenances from durable evidence facts.
 
-    Baseline-profile rows are carried from *prior* (minted at floor write). Origin-
-    distance and single-starbase rows are derived from the observation / promotion
-    collections so refine stays the single write path for those kinds.
+    Baseline-profile rows are carried from *prior* (minted at floor write) and
+    backfilled from *baseline_definite_planet_ids* when missing so legacy
+    aggregates without profiles cannot lose baseline pins to weak OD-only lists.
+    Origin-distance and single-starbase rows are derived from the observation /
+    promotion collections so refine stays the single write path for those kinds.
     """
     rows: list[LocationProvenance] = [
         row for row in prior_location_provenances if row.kind == PROVENANCE_BASELINE_PROFILE
@@ -294,6 +307,13 @@ def collect_machine_location_provenances(
             return
         seen.add(key)
         rows.append(LocationProvenance(kind=kind, turn=turn, planet_id=planet_id))
+
+    if baseline_turn is not None and baseline_definite_planet_ids:
+        for seed in baseline_profile_location_provenances(
+            baseline_turn=baseline_turn,
+            definite_planet_ids=baseline_definite_planet_ids,
+        ):
+            _add(seed.kind, seed.turn, seed.planet_id)
 
     for observation in origin_distance_observations:
         for planet_id in observation.matched_planet_ids:

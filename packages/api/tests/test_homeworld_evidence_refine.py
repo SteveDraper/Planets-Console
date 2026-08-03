@@ -857,6 +857,82 @@ def test_floor_algorithm_rewrite_clears_sticky_ownership(persistence) -> None:
     assert stored.owner_possible_sectors == ()
 
 
+def test_floor_algorithm_rewrite_backfills_baseline_profile_before_od_demotion(
+    persistence,
+) -> None:
+    """Stale empty-profile floor + OD mint must not demote game-global baseline pins."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        ensure_evidence_floor_algorithm_current,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_BASELINE_PROFILE,
+        PROVENANCE_ORIGIN_DISTANCE,
+        LocationProvenance,
+    )
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    definite = HomeworldCandidateRecord(
+        planet_id=10,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    possible = HomeworldCandidateRecord(
+        planet_id=20,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    # Legacy floor: algo version stale, no baseline_profile rows, but OD already
+    # recorded (the production demotion path after mint without profiles).
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, definite, possible),
+        HomeworldEvidenceAggregate(
+            turn=1,
+            baseline_turn=1,
+            evidence_algorithm_version=0,
+            origin_distance_observations=(
+                OriginDistanceObservation(turn=1, x=1, y=2, matched_planet_ids=(20,)),
+            ),
+            location_provenances=(
+                LocationProvenance(kind=PROVENANCE_ORIGIN_DISTANCE, turn=1, planet_id=20),
+            ),
+        ),
+    )
+    assert (
+        ensure_evidence_floor_algorithm_current(
+            services,
+            baseline_turn=1,
+            fleet_built_turns={},
+        )
+        is True
+    )
+    stored = persistence.get_evidence_aggregate(628580, 1, 1)
+    assert stored is not None
+    assert stored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    kinds = {(row.kind, row.planet_id) for row in stored.location_provenances}
+    assert (PROVENANCE_BASELINE_PROFILE, 10) in kinds
+    assert (PROVENANCE_ORIGIN_DISTANCE, 20) in kinds
+
+    derived = derive_candidates_from_merged_evidence(
+        (definite, possible),
+        MergedHomeworldEvidence(
+            location_provenances=stored.location_provenances,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    by_planet = {row.planet_id: row for row in derived}
+    assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
+    assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE
+
+
 def test_fleet_built_turns_from_final_ledgers_merges_known_ages(sample_turn) -> None:
     """Sync ensure source: final on-disk ledgers supply ship_id -> built_turn."""
     from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services

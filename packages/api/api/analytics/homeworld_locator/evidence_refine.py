@@ -22,6 +22,7 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
 from api.analytics.homeworld_locator.location_evidence import (
     candidate_planet_ids,
     collect_machine_location_provenances,
+    definite_candidate_planet_ids,
     origin_distance_candidate_planet_ids,
     promote_candidate_to_definite,
     record_single_starbase_promotion,
@@ -152,6 +153,8 @@ def refine_homeworld_evidence_aggregate(
         prior_location_provenances=prior.location_provenances,
         origin_distance_observations=observations,
         single_starbase_promotions=promotions,
+        baseline_turn=prior.baseline_turn,
+        baseline_definite_planet_ids=definite_candidate_planet_ids(candidates),
     )
 
     aggregate = HomeworldEvidenceAggregate(

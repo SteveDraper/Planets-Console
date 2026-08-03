@@ -434,3 +434,68 @@ def test_collect_machine_location_provenances_mints_v1_kinds() -> None:
     assert (PROVENANCE_ORIGIN_DISTANCE, 99, 2) not in kinds_by_planet
     sb_rows = [row for row in collected if row.kind == EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD]
     assert len(sb_rows) == 1
+
+
+def test_collect_backfills_baseline_profile_when_prior_empty_and_od_present() -> None:
+    """Legacy empty-profile prior + OD facts must still keep baseline pins strong."""
+    from api.analytics.homeworld_locator.location_evidence import (
+        collect_machine_location_provenances,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_BASELINE_PROFILE,
+        PROVENANCE_ORIGIN_DISTANCE,
+        LocationProvenance,
+    )
+
+    collected = collect_machine_location_provenances(
+        prior_location_provenances=(),
+        origin_distance_observations=(
+            OriginDistanceObservation(turn=3, x=1, y=2, matched_planet_ids=(20,)),
+        ),
+        baseline_turn=1,
+        baseline_definite_planet_ids=(10,),
+    )
+    kinds_by_planet = {(row.kind, row.planet_id, row.turn) for row in collected}
+    assert (PROVENANCE_BASELINE_PROFILE, 10, 1) in kinds_by_planet
+    assert (PROVENANCE_ORIGIN_DISTANCE, 20, 3) in kinds_by_planet
+
+    candidates = (
+        HomeworldCandidateRecord(
+            planet_id=10,
+            perspective=1,
+            confidence_tier=CONFIDENCE_DEFINITE,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=20,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+        ),
+    )
+    derived = derive_candidates_from_merged_evidence(
+        candidates,
+        MergedHomeworldEvidence(
+            location_provenances=collected,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    by_planet = {row.planet_id: row for row in derived}
+    assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
+    assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE
+    # Without backfill, OD-only list would demote planet 10 to possible.
+    od_only = (
+        LocationProvenance(kind=PROVENANCE_ORIGIN_DISTANCE, turn=3, planet_id=20),
+    )
+    demoted = derive_candidates_from_merged_evidence(
+        candidates,
+        MergedHomeworldEvidence(
+            location_provenances=od_only,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    assert {row.planet_id: row.confidence_tier for row in demoted}[10] == CONFIDENCE_POSSIBLE
