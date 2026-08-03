@@ -27,9 +27,9 @@ from api.transport.homeworld_assertions import (
 def homeworld_sectors_exist(turn: TurnInfo) -> bool:
     """True when ownership asserts are sector-keyed for this shell turn.
 
-    Matches materialize sector partition eligibility (circular + round +
-    epic|standard layout asset category with at least two players), without
-    requiring a viewpoint pin so API keying stays stable before pin resolve.
+    Uses ``homeworld_sector_geometry_eligible`` (player count + epic|standard
+    layout category). Unlike overlay emission / sector partition, this does
+    not require a viewpoint pin, so API keying stays stable before pin resolve.
     """
     return homeworld_sector_geometry_eligible(turn)
 

@@ -13,6 +13,7 @@ from api.analytics.homeworld_locator.constants import (
     ATTRIBUTION_USER_ASSERTED,
 )
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
+from api.analytics.homeworld_locator.merge_above_read import merge_homeworld_evidence_above_read
 from api.analytics.homeworld_locator.ownership_refine import sector_owner_sets_to_dict
 from api.analytics.homeworld_locator.sector_overlays import (
     build_homeworld_sector_overlays_for_turn,
@@ -88,13 +89,18 @@ def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
     state = services.persistence.get_game_state(services.game_id)
     sector_owner_sets = None
     if state is not None:
+        # Same merge-above-read as materialize: overlays must not re-open the
+        # game-global vs aggregate storage split (ADR 0010).
         aggregate = evidence_aggregate_at_shell_turn(
             services,
             baseline_turn=state.baseline_turn,
             shell_turn=ctx.turn.settings.turn,
         )
-        if aggregate is not None:
-            sector_owner_sets = sector_owner_sets_to_dict(aggregate.sector_owner_sets)
+        merged = merge_homeworld_evidence_above_read(
+            game_state=state,
+            aggregate=aggregate,
+        )
+        sector_owner_sets = sector_owner_sets_to_dict(merged.sector_owner_sets)
     overlays = build_homeworld_sector_overlays_for_turn(
         ctx.turn,
         view,

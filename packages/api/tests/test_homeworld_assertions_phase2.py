@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from api.analytics.homeworld_locator.compute import get_homeworld_locator
@@ -27,10 +28,15 @@ from api.analytics.homeworld_locator.models import (
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
+    HomeworldCandidateView,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
 )
-from api.concepts.homeworld_layout import homeworld_settings_fingerprint
+from api.concepts.homeworld_layout import (
+    HW_DISTRIBUTION_CIRCULAR,
+    MAP_SHAPE_ROUND,
+    homeworld_settings_fingerprint,
+)
 from api.config import ApiConfig, set_config
 from api.errors import ValidationError
 from api.models.game import TurnInfo
@@ -295,6 +301,119 @@ def test_ownership_assert_sector_keyed_when_sectors_exist(
     assert len(members) == 1
     assert members[0].owner_slot == 2
     assert members[0].provenances == (OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=turn),)
+
+
+def test_overlays_include_asserted_sector_ownership_via_merge(persistence, sample_turn) -> None:
+    """regionOverlays possibleOwners use merge-above-read (ADR 0010), not machine-only."""
+    players = [
+        replace(sample_turn.player, id=index + 1, username=f"p{index + 1}") for index in range(11)
+    ]
+    pin = replace(
+        sample_turn.planets[0],
+        id=1,
+        x=2550,
+        y=2000,
+        ownerid=players[0].id,
+        debrisdisk=0,
+    )
+    settings = replace(
+        sample_turn.settings,
+        turn=1,
+        hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+        mapshape=MAP_SHAPE_ROUND,
+        shiplimit=500,
+        endturn=100,
+        campaignmode=False,
+        planetscanrange=10000,
+    )
+    turn = replace(
+        sample_turn,
+        settings=settings,
+        player=players[0],
+        players=players,
+        planets=[pin],
+        ships=[],
+        relations=[],
+    )
+    turns = {1: turn}
+    fingerprint = homeworld_settings_fingerprint(settings)
+    # Machine aggregate has no ownership; asserted sector ownership must still wire.
+    persistence.put_game_state(
+        628580,
+        HomeworldLocatorGameState(
+            candidates=(
+                HomeworldCandidateRecord(
+                    planet_id=1,
+                    perspective=1,
+                    confidence_tier=CONFIDENCE_DEFINITE,
+                ),
+            ),
+            baseline_turn=1,
+            baseline_degraded=False,
+            settings_fingerprint=fingerprint,
+            baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+            asserted_sector_ownership=(
+                (
+                    0,
+                    (
+                        SectorOwnerMember(
+                            owner_slot=2,
+                            provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=1),),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(
+            turn=1,
+            baseline_turn=1,
+            location_provenances=(
+                LocationProvenance(
+                    kind=PROVENANCE_BASELINE_PROFILE,
+                    turn=1,
+                    planet_id=1,
+                ),
+            ),
+            sector_owner_sets=(),
+            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+        ),
+    )
+    view = HomeworldCandidateView(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=1,
+                perspective=1,
+                confidence_tier=CONFIDENCE_DEFINITE,
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=False,
+        available=True,
+    )
+    services = _services(persistence, turns)
+    with patch(
+        "api.analytics.homeworld_locator.compute.materialize_homeworld_candidate_view",
+        return_value=view,
+    ):
+        payload = get_homeworld_locator(
+            turn,
+            load_turn=lambda n: turns.get(n),
+            export_services=_export_services(services, turns),
+        )
+    overlays = payload["regionOverlays"]
+    assert len(overlays) == 11
+    owners = [
+        owner
+        for overlay in overlays
+        for owner in (overlay.get("possibleOwners") or [])
+        if owner.get("ownerSlot") == 2
+    ]
+    assert len(owners) == 1
+    assert PROVENANCE_ASSERTED in owners[0]["provenanceKinds"]
 
 
 def test_location_assert_rejects_planetoid(assertion_service, persistence, sample_turn) -> None:
