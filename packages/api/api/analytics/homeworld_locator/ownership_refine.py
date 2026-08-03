@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 
 from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
-from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
+from api.analytics.homeworld_locator.cull_candidates import candidate_is_assert_protected
 from api.analytics.homeworld_locator.layout_distributions_asset import LayoutDistributionsAsset
 from api.analytics.homeworld_locator.models import SectorOwnerMember
 from api.analytics.homeworld_locator.ownership_evidence import (
@@ -230,7 +230,7 @@ def apply_unique_owner_orphan_bind(
 
     bound: list[HomeworldCandidateRecord] = []
     for row in candidates:
-        if row.perspective is not None or row.attribution == ATTRIBUTION_USER_ASSERTED:
+        if row.perspective is not None or candidate_is_assert_protected(row):
             bound.append(row)
             continue
         sector_index = context.planet_sector_index.get(row.planet_id)

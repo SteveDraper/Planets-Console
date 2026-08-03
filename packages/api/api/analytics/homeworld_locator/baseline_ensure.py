@@ -26,6 +26,8 @@ from api.analytics.homeworld_locator.layout_prior import (
     layout_prior_evidence_fingerprint,
     layout_prior_input_fingerprint,
 )
+from api.analytics.homeworld_locator.location_evidence import baseline_profile_location_provenances
+from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE
 from api.analytics.homeworld_locator.origin_distance_evidence_policy import (
     effective_origin_distance_observations,
 )
@@ -38,6 +40,7 @@ from api.analytics.homeworld_locator.types import (
     HomeworldLocatorGameState,
     candidate_records_from_inferred,
     empty_candidate_view,
+    ensure_candidates_for_asserted_locations,
     merge_candidates_preserving_user_asserted,
 )
 from api.analytics.turn_roster import players_by_id
@@ -224,9 +227,11 @@ def compute_homeworld_baseline(
         cluster_fow_density_credit_multiplier=hw_cfg.cluster_fow_density_credit_multiplier,
     )
     infer_ms = (time.perf_counter() - infer_t0) * 1000.0
+    asserted_locations = existing.asserted_location_provenances if existing is not None else ()
     candidates = merge_candidates_preserving_user_asserted(
         inferred=candidate_records_from_inferred(inferred),
         existing=existing.candidates if existing is not None else None,
+        asserted_location_provenances=asserted_locations,
     )
     state = HomeworldLocatorGameState(
         candidates=candidates,
@@ -234,10 +239,23 @@ def compute_homeworld_baseline(
         baseline_degraded=degraded,
         settings_fingerprint=fingerprint,
         baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+        asserted_location_provenances=asserted_locations,
+        asserted_sector_ownership=(
+            existing.asserted_sector_ownership if existing is not None else ()
+        ),
+        asserted_planet_ownership=(
+            existing.asserted_planet_ownership if existing is not None else ()
+        ),
     )
     floor = HomeworldEvidenceAggregate(
         turn=baseline_turn,
         baseline_turn=baseline_turn,
+        location_provenances=baseline_profile_location_provenances(
+            baseline_turn=baseline_turn,
+            definite_planet_ids=tuple(
+                row.planet_id for row in inferred if row.confidence_tier == CONFIDENCE_DEFINITE
+            ),
+        ),
         evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
     record_baseline_report(
@@ -289,6 +307,7 @@ def materialize_homeworld_candidates(
     *,
     candidates: tuple[HomeworldCandidateRecord, ...],
     aggregate: HomeworldEvidenceAggregate,
+    game_state: HomeworldLocatorGameState,
     shell_turn: TurnInfo,
     baseline_turn: int,
     baseline_degraded: bool,
@@ -296,18 +315,42 @@ def materialize_homeworld_candidates(
     """Ordered shell materialize through ownership bind then layout prior.
 
     Design lock: docs/design-homeworld-locator-analytic.md §4.3.1 / §4.3.2.
+    Asserted provenances merge above the evidence aggregate (ADR 0010).
     """
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import merge_homeworld_evidence_above_read
+    from api.analytics.homeworld_locator.sector_partition import build_homeworld_sector_partition
+
+    seeded = ensure_candidates_for_asserted_locations(
+        inferred=candidates,
+        asserted_location_provenances=game_state.asserted_location_provenances,
+    )
     adjusted = materialize_evidence_adjusted_candidates(
-        candidates,
+        seeded,
         aggregate,
         planets=shell_turn.planets,
         settings_turn=shell_turn,
         player_count=_player_count(shell_turn),
     )
+    merged = merge_homeworld_evidence_above_read(game_state=game_state, aggregate=aggregate)
     adjusted = apply_unique_owner_orphan_bind(
         adjusted,
-        aggregate,
+        replace(aggregate, sector_owner_sets=merged.sector_owner_sets),
         turn=shell_turn,
+    )
+    partition = build_homeworld_sector_partition(
+        shell_turn,
+        candidates=adjusted,
+        baseline_turn=baseline_turn,
+    )
+    adjusted = derive_candidates_from_merged_evidence(
+        adjusted,
+        merged,
+        planet_sector_index=(
+            dict(partition.planet_sector_index) if partition is not None else None
+        ),
     )
     input_fingerprint = layout_prior_input_fingerprint(adjusted)
     evidence_lambda = get_config().homeworld_locator.origin_distance_evidence_lambda
@@ -417,6 +460,7 @@ def materialize_homeworld_candidate_view(
         services,
         candidates=state.candidates,
         aggregate=aggregate,
+        game_state=state,
         shell_turn=shell_turn,
         baseline_turn=state.baseline_turn,
         baseline_degraded=state.baseline_degraded,

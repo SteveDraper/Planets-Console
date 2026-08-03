@@ -292,12 +292,18 @@ def test_merge_candidates_preserving_user_asserted() -> None:
     assert [row.planet_id for row in merged] == [1, 2, 3]
     by_planet = {row.planet_id: row for row in merged}
     assert by_planet[1].attribution == ATTRIBUTION_INFERRED
-    assert by_planet[2].attribution == ATTRIBUTION_USER_ASSERTED
+    assert by_planet[2].asserted_cue is True
     assert by_planet[2].perspective == 9
-    assert by_planet[3].attribution == ATTRIBUTION_USER_ASSERTED
+    assert by_planet[3].asserted_cue is True
+    assert by_planet[3].perspective == 1
 
 
 def test_invalidate_inferred_preserves_user_asserted(persistence) -> None:
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_ASSERTED,
+        LocationProvenance,
+    )
+
     persistence.put_game_state(
         628580,
         HomeworldLocatorGameState(
@@ -312,23 +318,21 @@ def test_invalidate_inferred_preserves_user_asserted(persistence) -> None:
                     planet_id=20,
                     perspective=2,
                     confidence_tier="possible",
-                    attribution=ATTRIBUTION_USER_ASSERTED,
                 ),
             ),
             baseline_turn=1,
             baseline_degraded=False,
             settings_fingerprint=(1, 2, 3),
+            asserted_location_provenances=(
+                LocationProvenance(kind=PROVENANCE_ASSERTED, turn=1, planet_id=20),
+            ),
         ),
     )
     retained = persistence.invalidate_inferred_game_state(628580)
     assert retained is not None
-    assert retained.candidates == (
-        HomeworldCandidateRecord(
-            planet_id=20,
-            perspective=2,
-            confidence_tier="possible",
-            attribution=ATTRIBUTION_USER_ASSERTED,
-        ),
+    assert {row.planet_id for row in retained.candidates} == {20}
+    assert retained.asserted_location_provenances == (
+        LocationProvenance(kind=PROVENANCE_ASSERTED, turn=1, planet_id=20),
     )
     assert retained.settings_fingerprint == ()
     assert persistence.get_game_state(628580) == retained

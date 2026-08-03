@@ -377,3 +377,60 @@ def test_record_single_starbase_promotion_dedupes_per_planet_turn() -> None:
     second = record_single_starbase_promotion(first, turn=5, planet_id=10)
     assert first == second
     assert len(first) == 1
+
+
+def test_baseline_profile_location_provenances_mints_strong() -> None:
+    from api.analytics.homeworld_locator.location_evidence import (
+        baseline_profile_location_provenances,
+    )
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_BASELINE_PROFILE,
+        LocationProvenance,
+    )
+
+    rows = baseline_profile_location_provenances(
+        baseline_turn=1,
+        definite_planet_ids=(20, 10, 10),
+    )
+    assert rows == (
+        LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=10),
+        LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=20),
+    )
+
+
+def test_collect_machine_location_provenances_mints_v1_kinds() -> None:
+    from api.analytics.homeworld_locator.location_evidence import (
+        collect_machine_location_provenances,
+    )
+    from api.analytics.homeworld_locator.models import (
+        EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD,
+        PROVENANCE_BASELINE_PROFILE,
+        PROVENANCE_ORIGIN_DISTANCE,
+        HomeworldSingleStarbasePromotion,
+        LocationProvenance,
+    )
+
+    prior = (
+        LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=10),
+        # Stale OD/SB on prior must be rebuilt from collections, not carried.
+        LocationProvenance(kind=PROVENANCE_ORIGIN_DISTANCE, turn=2, planet_id=99),
+    )
+    collected = collect_machine_location_provenances(
+        prior_location_provenances=prior,
+        origin_distance_observations=(
+            OriginDistanceObservation(turn=3, x=1, y=2, matched_planet_ids=(10, 20)),
+            OriginDistanceObservation(turn=3, x=5, y=6, matched_planet_ids=(10,)),
+        ),
+        single_starbase_promotions=(
+            HomeworldSingleStarbasePromotion(planet_id=20, turn=4),
+            HomeworldSingleStarbasePromotion(planet_id=20, turn=4),
+        ),
+    )
+    kinds_by_planet = {(row.kind, row.planet_id, row.turn) for row in collected}
+    assert (PROVENANCE_BASELINE_PROFILE, 10, 1) in kinds_by_planet
+    assert (PROVENANCE_ORIGIN_DISTANCE, 10, 3) in kinds_by_planet
+    assert (PROVENANCE_ORIGIN_DISTANCE, 20, 3) in kinds_by_planet
+    assert (EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD, 20, 4) in kinds_by_planet
+    assert (PROVENANCE_ORIGIN_DISTANCE, 99, 2) not in kinds_by_planet
+    sb_rows = [row for row in collected if row.kind == EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD]
+    assert len(sb_rows) == 1

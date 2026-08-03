@@ -8,10 +8,9 @@ from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
 from api.analytics.homeworld_locator.constants import (
-    ATTRIBUTION_USER_ASSERTED,
     HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
 )
-from api.analytics.homeworld_locator.cull_candidates import TCullable
+from api.analytics.homeworld_locator.cull_candidates import TCullable, candidate_is_assert_protected
 from api.analytics.homeworld_locator.evidence_refine_report import (
     EvidenceRefineCounts,
     EvidenceRefineInnerTimingMs,
@@ -22,6 +21,7 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
 )
 from api.analytics.homeworld_locator.location_evidence import (
     candidate_planet_ids,
+    collect_machine_location_provenances,
     origin_distance_candidate_planet_ids,
     promote_candidate_to_definite,
     record_single_starbase_promotion,
@@ -148,6 +148,12 @@ def refine_homeworld_evidence_aggregate(
         load_turn=load_turn,
     )
 
+    location_provenances = collect_machine_location_provenances(
+        prior_location_provenances=prior.location_provenances,
+        origin_distance_observations=observations,
+        single_starbase_promotions=promotions,
+    )
+
     aggregate = HomeworldEvidenceAggregate(
         turn=turn_number,
         baseline_turn=prior.baseline_turn,
@@ -156,6 +162,7 @@ def refine_homeworld_evidence_aggregate(
         origin_distance_evidence_through_turn=through_turn,
         sector_owner_sets=sector_owner_sets,
         owner_possible_sectors=owner_possible_sectors,
+        location_provenances=location_provenances,
         evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
     total_ms = (time.perf_counter() - total_t0) * 1000.0
@@ -212,7 +219,7 @@ def cull_definite_neighborhood_candidates(
 
     kept: list[TCullable] = []
     for row in candidates:
-        if row.attribution == ATTRIBUTION_USER_ASSERTED:
+        if candidate_is_assert_protected(row):
             kept.append(row)
             continue
         if row.confidence_tier == CONFIDENCE_DEFINITE:

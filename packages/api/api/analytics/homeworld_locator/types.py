@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
 from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_POSSIBLE,
     HomeworldSingleStarbasePromotion,
     InferredHomeworldCandidate,
+    LocationProvenance,
     OriginDistanceObservation,
     SectorOwnerMember,
 )
@@ -15,18 +18,22 @@ from api.analytics.homeworld_locator.models import (
 
 @dataclass(frozen=True)
 class HomeworldCandidateRecord:
-    """One durable or served homeworld candidate (inferred or user-asserted)."""
+    """One homeworld candidate (materialized view; not the durable assertion store)."""
 
     planet_id: int
     perspective: int | None
     confidence_tier: str
     attribution: str = ATTRIBUTION_INFERRED
+    """Derived wire cue; not durable authority over provenance lists (ADR 0010)."""
+
     is_most_probable: bool = False
+    asserted_cue: bool = False
+    """Derived: asserted-strength provenance present on location and/or ownership."""
 
 
 @dataclass(frozen=True)
 class HomeworldLocatorGameState:
-    """Game-global homeworld locator state (candidates + baseline metadata)."""
+    """Game-global homeworld locator state (candidates + baseline + asserts)."""
 
     candidates: tuple[HomeworldCandidateRecord, ...]
     baseline_turn: int
@@ -34,6 +41,12 @@ class HomeworldLocatorGameState:
     settings_fingerprint: tuple[object, ...] = ()
     baseline_algorithm_version: int = 0
     """``HOMEWORLD_BASELINE_ALGORITHM_VERSION`` at last baseline write; 0 = pre-version."""
+    asserted_location_provenances: tuple[LocationProvenance, ...] = ()
+    """Durable UI location asserts (positive only); merged above evidence read."""
+    asserted_sector_ownership: tuple[tuple[int, tuple[SectorOwnerMember, ...]], ...] = ()
+    """Durable UI ownership asserts keyed by sector index when sectors exist."""
+    asserted_planet_ownership: tuple[tuple[int, tuple[SectorOwnerMember, ...]], ...] = ()
+    """Durable UI ownership asserts keyed by planet id when sectors do not exist."""
 
 
 @dataclass(frozen=True)
@@ -56,6 +69,8 @@ class HomeworldEvidenceAggregate:
     """``(sector_index, members)`` rows; empty when no ownership attributions yet."""
     owner_possible_sectors: tuple[tuple[int, tuple[int, ...]], ...] = ()
     """``(owner_slot, remaining_sector_indexes)`` after envelope intersections."""
+    location_provenances: tuple[LocationProvenance, ...] = ()
+    """Machine location provenances accumulated through this turn (not UI asserts)."""
     evidence_algorithm_version: int = 0
     """``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` at last refine write; 0 = pre-version."""
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
@@ -105,21 +120,68 @@ def candidate_records_from_inferred(
     )
 
 
+def ensure_candidates_for_asserted_locations(
+    *,
+    inferred: Sequence[HomeworldCandidateRecord],
+    asserted_location_provenances: Sequence[LocationProvenance],
+) -> tuple[HomeworldCandidateRecord, ...]:
+    """Keep inferred rows; add possible shells for asserted location planets missing from set."""
+    by_planet = {row.planet_id: row for row in inferred}
+    for provenance in asserted_location_provenances:
+        if provenance.planet_id in by_planet:
+            continue
+        by_planet[provenance.planet_id] = HomeworldCandidateRecord(
+            planet_id=provenance.planet_id,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+        )
+    return tuple(sorted(by_planet.values(), key=lambda row: row.planet_id))
+
+
 def merge_candidates_preserving_user_asserted(
     *,
     inferred: tuple[HomeworldCandidateRecord, ...],
     existing: tuple[HomeworldCandidateRecord, ...] | None,
+    asserted_location_provenances: Sequence[LocationProvenance] = (),
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Replace inferred rows; keep user-asserted records from *existing* (#37)."""
-    from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
+    """Replace inferred rows; keep planets covered by asserted location provenances (#37).
 
-    preserved: list[HomeworldCandidateRecord] = []
+    Legacy ``attribution == user_asserted`` rows on *existing* are treated as implied
+    location asserts when ``asserted_location_provenances`` is empty (read migration).
+    Those legacy rows keep their perspective / tier into the merged candidate set.
+    """
+    from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
+    from api.analytics.homeworld_locator.models import PROVENANCE_ASSERTED
+
+    asserted = list(asserted_location_provenances)
+    legacy_asserted_rows: list[HomeworldCandidateRecord] = []
     if existing is not None:
-        preserved = [row for row in existing if row.attribution == ATTRIBUTION_USER_ASSERTED]
+        for row in existing:
+            if row.attribution != ATTRIBUTION_USER_ASSERTED:
+                continue
+            legacy_asserted_rows.append(row)
+            if not asserted_location_provenances:
+                asserted.append(
+                    LocationProvenance(
+                        kind=PROVENANCE_ASSERTED,
+                        turn=1,
+                        planet_id=row.planet_id,
+                    )
+                )
     by_planet = {row.planet_id: row for row in inferred}
-    for row in preserved:
-        by_planet[row.planet_id] = row
-    return tuple(sorted(by_planet.values(), key=lambda row: row.planet_id))
+    for row in legacy_asserted_rows:
+        by_planet[row.planet_id] = HomeworldCandidateRecord(
+            planet_id=row.planet_id,
+            perspective=row.perspective,
+            confidence_tier=row.confidence_tier,
+            attribution=ATTRIBUTION_INFERRED,
+            is_most_probable=row.is_most_probable,
+            asserted_cue=True,
+        )
+    return ensure_candidates_for_asserted_locations(
+        inferred=tuple(sorted(by_planet.values(), key=lambda row: row.planet_id)),
+        asserted_location_provenances=asserted,
+    )
 
 
 def empty_candidate_view(*, inactive_reason: str | None = None) -> HomeworldCandidateView:
@@ -140,5 +202,6 @@ __all__ = [
     "HomeworldLocatorGameState",
     "candidate_records_from_inferred",
     "empty_candidate_view",
+    "ensure_candidates_for_asserted_locations",
     "merge_candidates_preserving_user_asserted",
 ]

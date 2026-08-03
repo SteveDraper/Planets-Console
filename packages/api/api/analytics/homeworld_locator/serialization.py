@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+from api.analytics.homeworld_locator.constants import (
+    ATTRIBUTION_INFERRED,
+    ATTRIBUTION_USER_ASSERTED,
+)
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
     EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD,
+    PROVENANCE_ASSERTED,
     HomeworldSingleStarbasePromotion,
+    LocationProvenance,
     OriginDistanceObservation,
     OwnershipProvenance,
     SectorOwnerMember,
@@ -18,6 +23,7 @@ from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
+    ensure_candidates_for_asserted_locations,
 )
 from api.errors import ValidationError
 
@@ -25,12 +31,17 @@ _VALID_TIERS = frozenset({CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE})
 
 
 def homeworld_candidate_record_to_json(record: HomeworldCandidateRecord) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "planetId": record.planet_id,
         "perspective": record.perspective,
         "confidenceTier": record.confidence_tier,
         "attribution": record.attribution,
     }
+    if record.asserted_cue:
+        payload["assertedCue"] = True
+    if record.is_most_probable:
+        payload["isMostProbable"] = True
+    return payload
 
 
 def homeworld_candidate_record_from_json(data: dict[str, Any]) -> HomeworldCandidateRecord:
@@ -50,22 +61,79 @@ def homeworld_candidate_record_from_json(data: dict[str, Any]) -> HomeworldCandi
     attribution = data.get("attribution", ATTRIBUTION_INFERRED)
     if not isinstance(attribution, str) or not attribution:
         raise ValidationError("homeworld candidate attribution must be a non-empty string")
+    asserted_cue = data.get("assertedCue", False)
+    if not isinstance(asserted_cue, bool):
+        raise ValidationError("homeworld candidate assertedCue must be a bool when present")
+    is_most_probable = data.get("isMostProbable", False)
+    if not isinstance(is_most_probable, bool):
+        raise ValidationError("homeworld candidate isMostProbable must be a bool when present")
     return HomeworldCandidateRecord(
         planet_id=planet_id,
         perspective=perspective,
         confidence_tier=tier,
         attribution=attribution,
+        asserted_cue=asserted_cue,
+        is_most_probable=is_most_probable,
     )
 
 
-def homeworld_locator_game_state_to_json(state: HomeworldLocatorGameState) -> dict[str, Any]:
+def _location_provenance_to_json(provenance: LocationProvenance) -> dict[str, Any]:
     return {
+        "kind": provenance.kind,
+        "turn": provenance.turn,
+        "planetId": provenance.planet_id,
+    }
+
+
+def _location_provenance_from_json(data: dict[str, Any]) -> LocationProvenance:
+    kind = data.get("kind")
+    if not isinstance(kind, str) or not kind:
+        raise ValidationError("homeworld location provenance kind must be a non-empty string")
+    turn = data.get("turn")
+    if not isinstance(turn, int) or turn < 1:
+        raise ValidationError("homeworld location provenance turn must be an int >= 1")
+    planet_id = data.get("planetId")
+    if not isinstance(planet_id, int) or planet_id < 1:
+        raise ValidationError("homeworld location provenance planetId must be an int >= 1")
+    return LocationProvenance(kind=kind, turn=turn, planet_id=planet_id)
+
+
+def _location_provenances_from_json(
+    raw: object,
+    *,
+    field_name: str,
+) -> tuple[LocationProvenance, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValidationError(f"{field_name} must be a JSON array")
+    rows = tuple(_location_provenance_from_json(entry) for entry in raw if isinstance(entry, dict))
+    if len(rows) != len(raw):
+        raise ValidationError(f"{field_name} entries must be objects")
+    return rows
+
+
+def homeworld_locator_game_state_to_json(state: HomeworldLocatorGameState) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "candidates": [homeworld_candidate_record_to_json(row) for row in state.candidates],
         "baselineTurn": state.baseline_turn,
         "baselineDegraded": state.baseline_degraded,
         "settingsFingerprint": list(state.settings_fingerprint),
         "baselineAlgorithmVersion": state.baseline_algorithm_version,
     }
+    if state.asserted_location_provenances:
+        payload["assertedLocationProvenances"] = [
+            _location_provenance_to_json(row) for row in state.asserted_location_provenances
+        ]
+    if state.asserted_sector_ownership:
+        payload["assertedSectorOwnership"] = _sector_owner_sets_to_json(
+            state.asserted_sector_ownership
+        )
+    if state.asserted_planet_ownership:
+        payload["assertedPlanetOwnership"] = _sector_owner_sets_to_json(
+            state.asserted_planet_ownership
+        )
+    return payload
 
 
 def homeworld_locator_game_state_from_json(data: dict[str, Any]) -> HomeworldLocatorGameState:
@@ -86,12 +154,48 @@ def homeworld_locator_game_state_from_json(data: dict[str, Any]) -> HomeworldLoc
     version_raw = data.get("baselineAlgorithmVersion", 0)
     if isinstance(version_raw, bool) or not isinstance(version_raw, int) or version_raw < 0:
         raise ValidationError("homeworld locator baselineAlgorithmVersion must be an int >= 0")
+    candidates = tuple(homeworld_candidate_record_from_json(row) for row in candidates_raw)
+    asserted_location = _location_provenances_from_json(
+        data.get("assertedLocationProvenances"),
+        field_name="homeworld locator assertedLocationProvenances",
+    )
+    # Migrate legacy attribution=user_asserted candidate rows into asserted location list.
+    if not asserted_location:
+        migrated: list[LocationProvenance] = []
+        for row in candidates:
+            if row.attribution == ATTRIBUTION_USER_ASSERTED:
+                migrated.append(
+                    LocationProvenance(
+                        kind=PROVENANCE_ASSERTED,
+                        turn=baseline_turn,
+                        planet_id=row.planet_id,
+                    )
+                )
+        asserted_location = tuple(migrated)
+    normalized = tuple(
+        HomeworldCandidateRecord(
+            planet_id=row.planet_id,
+            perspective=row.perspective,
+            confidence_tier=row.confidence_tier,
+            attribution=ATTRIBUTION_INFERRED,
+            is_most_probable=row.is_most_probable,
+            asserted_cue=row.asserted_cue or row.attribution == ATTRIBUTION_USER_ASSERTED,
+        )
+        for row in candidates
+    )
+    candidates = ensure_candidates_for_asserted_locations(
+        inferred=normalized,
+        asserted_location_provenances=asserted_location,
+    )
     return HomeworldLocatorGameState(
-        candidates=tuple(homeworld_candidate_record_from_json(row) for row in candidates_raw),
+        candidates=candidates,
         baseline_turn=baseline_turn,
         baseline_degraded=baseline_degraded,
         settings_fingerprint=tuple(fingerprint_raw),
         baseline_algorithm_version=version_raw,
+        asserted_location_provenances=asserted_location,
+        asserted_sector_ownership=_sector_owner_sets_from_json(data.get("assertedSectorOwnership")),
+        asserted_planet_ownership=_sector_owner_sets_from_json(data.get("assertedPlanetOwnership")),
     )
 
 
@@ -458,6 +562,10 @@ def homeworld_evidence_aggregate_to_json(
         payload["ownerPossibleSectors"] = _owner_possible_sectors_to_json(
             aggregate.owner_possible_sectors
         )
+    if aggregate.location_provenances:
+        payload["locationProvenances"] = [
+            _location_provenance_to_json(row) for row in aggregate.location_provenances
+        ]
     if aggregate.evidence_algorithm_version > 0:
         payload["evidenceAlgorithmVersion"] = aggregate.evidence_algorithm_version
     if aggregate.layout_prior_algorithm_version is not None:
@@ -545,6 +653,10 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         origin_distance_evidence_through_turn=through_turn,
         sector_owner_sets=_sector_owner_sets_from_json(data.get("sectorOwnerSets")),
         owner_possible_sectors=_owner_possible_sectors_from_json(data.get("ownerPossibleSectors")),
+        location_provenances=_location_provenances_from_json(
+            data.get("locationProvenances"),
+            field_name="homeworld evidence aggregate locationProvenances",
+        ),
         evidence_algorithm_version=version_raw,
         layout_prior_algorithm_version=selection_version,
         layout_prior_input_fingerprint=selection_fingerprint,

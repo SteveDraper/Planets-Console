@@ -14,8 +14,7 @@ from api.analytics.homeworld_locator.cluster_fow_credit import (
     estimate_traditional_planet_density,
     meets_homeworld_cluster_constraint_with_credit,
 )
-from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
-from api.analytics.homeworld_locator.cull_candidates import TCullable
+from api.analytics.homeworld_locator.cull_candidates import TCullable, candidate_is_assert_protected
 from api.analytics.homeworld_locator.geometry import (
     find_circular_ring_homeworld_sites,
     resolve_map_center,
@@ -115,11 +114,11 @@ def cull_co_sector_candidates_after_definites(
 
     kept_definite_ids: set[int] = set()
     for sector_rows in definites_by_sector.values():
-        user_asserted = [row for row in sector_rows if row.attribution == ATTRIBUTION_USER_ASSERTED]
+        user_asserted = [row for row in sector_rows if candidate_is_assert_protected(row)]
         if user_asserted:
             kept_definite_ids.update(row.planet_id for row in user_asserted)
             continue
-        inferred = [row for row in sector_rows if row.attribution != ATTRIBUTION_USER_ASSERTED]
+        inferred = [row for row in sector_rows if not candidate_is_assert_protected(row)]
         if not inferred:
             continue
         winner = min(
@@ -134,7 +133,7 @@ def cull_co_sector_candidates_after_definites(
     definite_sectors = set(definites_by_sector)
     kept: list[TCullable] = []
     for row in candidates:
-        if row.attribution == ATTRIBUTION_USER_ASSERTED:
+        if candidate_is_assert_protected(row):
             kept.append(row)
             continue
         if row.confidence_tier == CONFIDENCE_DEFINITE:
