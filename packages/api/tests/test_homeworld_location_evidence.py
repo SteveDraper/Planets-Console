@@ -11,7 +11,6 @@ from api.analytics.homeworld_locator.location_evidence import (
     candidate_planet_ids,
     origin_distance_candidate_planet_ids,
     origin_distance_targets,
-    promote_candidate_to_definite,
     record_single_starbase_promotion,
     scoreboard_starbase_count_for_owner,
     ship_at_planet,
@@ -250,19 +249,42 @@ def test_origin_distance_observation_upsert_by_location() -> None:
     assert empty == first
 
 
-def test_single_starbase_new_build_promotes_possible_to_definite() -> None:
+def test_single_starbase_provenance_derives_possible_to_definite() -> None:
+    """SB promotion mints a strong location provenance; derive sets definite."""
+    from api.analytics.homeworld_locator.location_evidence import (
+        collect_machine_location_provenances,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+    from api.analytics.homeworld_locator.models import HomeworldSingleStarbasePromotion
+
     candidates = (
         _candidate(10, perspective=None),
         HomeworldCandidateRecord(
             planet_id=20,
             perspective=2,
-            confidence_tier=CONFIDENCE_DEFINITE,
+            confidence_tier=CONFIDENCE_POSSIBLE,
         ),
     )
-    promoted = promote_candidate_to_definite(candidates, planet_id=10)
-    assert promoted[0].confidence_tier == CONFIDENCE_DEFINITE
-    assert promoted[0].perspective is None
-    assert promoted[1] == candidates[1]
+    location_provenances = collect_machine_location_provenances(
+        single_starbase_promotions=(
+            HomeworldSingleStarbasePromotion(planet_id=10, turn=5),
+        ),
+    )
+    derived = derive_candidates_from_merged_evidence(
+        candidates,
+        MergedHomeworldEvidence(
+            location_provenances=location_provenances,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    by_planet = {row.planet_id: row for row in derived}
+    assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
+    assert by_planet[10].perspective is None
+    assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE
 
 
 def test_single_starbase_new_build_implicates_at_planet_candidate() -> None:
@@ -351,8 +373,31 @@ def test_single_starbase_promotion_does_not_assign_homeworld_owner_from_ship_own
         planets_by_id={10: hw_planet},
     )
     assert planet_id == 10
-    promoted = promote_candidate_to_definite((orphan,), planet_id=planet_id)
-    assert promoted[0].perspective is None
+
+    from api.analytics.homeworld_locator.location_evidence import (
+        collect_machine_location_provenances,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+    from api.analytics.homeworld_locator.models import HomeworldSingleStarbasePromotion
+
+    location_provenances = collect_machine_location_provenances(
+        single_starbase_promotions=(
+            HomeworldSingleStarbasePromotion(planet_id=planet_id, turn=5),
+        ),
+    )
+    derived = derive_candidates_from_merged_evidence(
+        (orphan,),
+        MergedHomeworldEvidence(
+            location_provenances=location_provenances,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    assert derived[0].confidence_tier == CONFIDENCE_DEFINITE
+    assert derived[0].perspective is None
 
 
 def test_ship_gravitonic_movement_uses_turn_hull_catalog() -> None:

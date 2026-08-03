@@ -19,7 +19,7 @@ HOMEWORLD_BASELINE_ALGORITHM_VERSION = 1
 HOMEWORLD_EVIDENCE_ALGORITHM_VERSION = 4
 
 # Bump when layout-prior cost, caps, stand-in policy, tie-break, or default
-# solver identity changes (e.g. soft evidence family, anneal default). Post-promote/cull
+# solver identity changes (e.g. soft evidence family, anneal default). Post-derive/cull
 # candidate-set, soft-evidence λ, and OD observation identity invalidate via
 # inputFingerprint + evidenceLambda + evidenceFingerprint on layoutPriorSelection;
 # evidence refine rewrites clear the selection block (defense in depth).

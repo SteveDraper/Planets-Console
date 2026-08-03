@@ -1,4 +1,4 @@
-"""Refine homeworld location evidence aggregates and materialize promotions."""
+"""Refine homeworld location evidence aggregates and materialize cull helpers."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from api.analytics.homeworld_locator.location_evidence import (
     collect_machine_location_provenances,
     definite_candidate_planet_ids,
     origin_distance_candidate_planet_ids,
-    promote_candidate_to_definite,
     record_single_starbase_promotion,
     ship_gravitonic_movement,
     single_starbase_new_build_implicated_planet_id,
@@ -189,17 +188,6 @@ def refine_homeworld_evidence_aggregate(
     )
 
 
-def apply_recorded_single_starbase_promotions(
-    candidates: Sequence[HomeworldCandidateRecord],
-    promotions: Sequence[HomeworldSingleStarbasePromotion],
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Apply immediate single-starbase promotions recorded in the evidence aggregate."""
-    promoted: tuple[HomeworldCandidateRecord, ...] = tuple(candidates)
-    for promotion in promotions:
-        promoted = promote_candidate_to_definite(promoted, planet_id=promotion.planet_id)
-    return promoted
-
-
 def cull_definite_neighborhood_candidates(
     candidates: Sequence[TCullable],
     planets_by_id: Mapping[int, Planet],
@@ -271,6 +259,10 @@ def apply_definite_keyed_candidate_culls(
     Callers that resolve location strength (derive) must run this *after* that
     resolution so culls key off the strength-derived definite set. Asserted
     location planets stay via ``protected_planet_ids`` and/or ``asserted_cue``.
+
+    Shell map/table serving uses ``materialize_homeworld_candidates``, which
+    derives strength-resolved tiers then applies these culls so post-assert
+    demotions are dropped.
     """
     adjusted = apply_co_sector_candidate_cull(
         candidates,
@@ -293,44 +285,6 @@ def apply_definite_keyed_candidate_culls(
             protected_planet_ids=protected_planet_ids,
         )
     return adjusted
-
-
-def materialize_evidence_adjusted_candidates(
-    candidates: Sequence[HomeworldCandidateRecord],
-    aggregate: HomeworldEvidenceAggregate,
-    *,
-    planets: Sequence[Planet],
-    settings_turn: TurnInfo,
-    player_count: int,
-    layout_asset: LayoutDistributionsAsset | None = None,
-    protected_planet_ids: Set[int] = frozenset(),
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Single-SB promote then co-sector cull then definite-neighborhood cull.
-
-    Origin-distance hits do not change confidence tier. The only automatic
-    possible→definite path here is recorded single-starbase new-build.
-    These are the pre-ownership / pre-layout-prior steps of the §4.3.1
-    materialize ladder when strength resolution is not in play.
-
-    Shell map/table serving uses ``materialize_homeworld_candidates``, which
-    promotes, derives strength-resolved tiers, then applies the same culls via
-    ``apply_definite_keyed_candidate_culls`` so post-assert demotions are culled.
-
-    ``protected_planet_ids`` are durable asserted location planet ids; culls keep
-    those rows even when ``asserted_cue`` is not yet derived.
-    """
-    adjusted = apply_recorded_single_starbase_promotions(
-        candidates,
-        aggregate.single_starbase_promotions,
-    )
-    return apply_definite_keyed_candidate_culls(
-        adjusted,
-        planets=planets,
-        settings_turn=settings_turn,
-        player_count=player_count,
-        layout_asset=layout_asset,
-        protected_planet_ids=protected_planet_ids,
-    )
 
 
 def candidate_planet_ids_from_records(

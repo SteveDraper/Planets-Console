@@ -22,7 +22,6 @@ from api.analytics.homeworld_locator.constants import (
 from api.analytics.homeworld_locator.evidence_refine import (
     apply_definite_keyed_candidate_culls,
     cull_definite_neighborhood_candidates,
-    materialize_evidence_adjusted_candidates,
 )
 from api.analytics.homeworld_locator.exports import EXPORT_CATALOG
 from api.analytics.homeworld_locator.models import (
@@ -556,18 +555,34 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
 
 
 def test_origin_distance_observations_do_not_promote_to_definite() -> None:
+    from api.analytics.homeworld_locator.location_evidence import (
+        collect_machine_location_provenances,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+
     turn = _load_turn()
-    aggregate = HomeworldEvidenceAggregate(
-        turn=5,
-        baseline_turn=1,
-        origin_distance_observations=(
-            OriginDistanceObservation(turn=2, x=100, y=200, matched_planet_ids=(10,)),
-            OriginDistanceObservation(turn=3, x=110, y=210, matched_planet_ids=(10,)),
+    observations = (
+        OriginDistanceObservation(turn=2, x=100, y=200, matched_planet_ids=(10,)),
+        OriginDistanceObservation(turn=3, x=110, y=210, matched_planet_ids=(10,)),
+    )
+    location_provenances = collect_machine_location_provenances(
+        origin_distance_observations=observations,
+    )
+    derived = derive_candidates_from_merged_evidence(
+        (_candidate(10),),
+        MergedHomeworldEvidence(
+            location_provenances=location_provenances,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
         ),
     )
-    candidates = materialize_evidence_adjusted_candidates(
-        (_candidate(10),),
-        aggregate,
+    assert derived[0].confidence_tier == CONFIDENCE_POSSIBLE
+    # OD-only lists do not feed definite-keyed culls as a promote path either.
+    candidates = apply_definite_keyed_candidate_culls(
+        derived,
         planets=turn.planets,
         settings_turn=turn,
         player_count=11,
@@ -576,16 +591,30 @@ def test_origin_distance_observations_do_not_promote_to_definite() -> None:
 
 
 def test_single_starbase_promotion_materializes_without_owner_assignment() -> None:
+    from api.analytics.homeworld_locator.location_evidence import (
+        collect_machine_location_provenances,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+
     turn = _load_turn()
     orphan = _candidate(10, perspective=None)
-    aggregate = HomeworldEvidenceAggregate(
-        turn=5,
-        baseline_turn=1,
-        single_starbase_promotions=(HomeworldSingleStarbasePromotion(planet_id=10, turn=5),),
+    promotions = (HomeworldSingleStarbasePromotion(planet_id=10, turn=5),)
+    location_provenances = collect_machine_location_provenances(
+        single_starbase_promotions=promotions,
     )
-    candidates = materialize_evidence_adjusted_candidates(
+    derived = derive_candidates_from_merged_evidence(
         (orphan,),
-        aggregate,
+        MergedHomeworldEvidence(
+            location_provenances=location_provenances,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    candidates = apply_definite_keyed_candidate_culls(
+        derived,
         planets=turn.planets,
         settings_turn=turn,
         player_count=11,
@@ -847,8 +876,7 @@ def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sampl
     )
     definite = _planet(template_planet, planet_id=1, x=0, y=0)
     nearby = _planet(template_planet, planet_id=2, x=50, y=0)
-    aggregate = HomeworldEvidenceAggregate(turn=5, baseline_turn=1)
-    candidates = materialize_evidence_adjusted_candidates(
+    candidates = apply_definite_keyed_candidate_culls(
         (
             HomeworldCandidateRecord(
                 planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE
@@ -857,7 +885,6 @@ def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sampl
                 planet_id=2, perspective=None, confidence_tier=CONFIDENCE_POSSIBLE
             ),
         ),
-        aggregate,
         planets=[definite, nearby],
         settings_turn=turn,
         player_count=11,

@@ -20,7 +20,6 @@ from api.analytics.homeworld_locator.constants import (
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
 from api.analytics.homeworld_locator.evidence_refine import (
     apply_definite_keyed_candidate_culls,
-    apply_recorded_single_starbase_promotions,
 )
 from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
 from api.analytics.homeworld_locator.evidence_refine_timing_history import record_baseline_report
@@ -318,10 +317,12 @@ def materialize_homeworld_candidates(
     baseline_turn: int,
     baseline_degraded: bool,
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Ordered shell materialize: promote, ownership, derive, cull, layout prior.
+    """Ordered shell materialize: ownership, derive, cull, layout prior.
 
     Design lock: docs/design-homeworld-locator-analytic.md §4.3.1 / §4.3.2.
     Asserted provenances merge above the evidence aggregate (ADR 0010).
+    Single-SB and other machine strong facts affect confidence only via
+    location provenances + derive -- not a parallel row-tier promote step.
     Definite-keyed culls run after location strength derive so demoted machine
     pins near asserted definites are dropped; asserted planets stay protected.
     """
@@ -332,15 +333,9 @@ def materialize_homeworld_candidates(
     protected_planet_ids = frozenset(
         row.planet_id for row in game_state.asserted_location_provenances
     )
-    # Promote first; definite-keyed culls run after derive so they see
-    # strength-resolved tiers (assert demoting a nearby machine definite).
-    adjusted = apply_recorded_single_starbase_promotions(
-        seeded,
-        aggregate.single_starbase_promotions,
-    )
     merged = merge_homeworld_evidence_above_read(game_state=game_state, aggregate=aggregate)
     adjusted = apply_unique_owner_orphan_bind(
-        adjusted,
+        seeded,
         replace(aggregate, sector_owner_sets=merged.sector_owner_sets),
         turn=shell_turn,
     )

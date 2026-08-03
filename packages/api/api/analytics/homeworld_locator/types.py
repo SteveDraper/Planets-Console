@@ -80,7 +80,7 @@ class HomeworldEvidenceAggregate:
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
-    """Post-promote/cull candidate triples that fed selection (planet, tier, perspective)."""
+    """Post-derive/cull candidate triples that fed selection (planet, tier, perspective)."""
     layout_prior_evidence_lambda: float | None = None
     """Configured soft-evidence λ used for the stored selection; part of the reuse key."""
     layout_prior_evidence_fingerprint: str | None = None

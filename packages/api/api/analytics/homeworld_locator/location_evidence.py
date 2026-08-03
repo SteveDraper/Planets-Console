@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
-    CONFIDENCE_POSSIBLE,
     PROVENANCE_BASELINE_PROFILE,
     PROVENANCE_ORIGIN_DISTANCE,
     HomeworldSingleStarbasePromotion,
@@ -214,28 +213,6 @@ def single_starbase_new_build_implicated_planet_id(
     if len(implicated) != 1:
         return None
     return implicated[0]
-
-
-def promote_candidate_to_definite(
-    candidates: Sequence[HomeworldCandidateRecord],
-    *,
-    planet_id: int,
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Promote one existing possible candidate to definite without changing homeworld owner."""
-    promoted: list[HomeworldCandidateRecord] = []
-    for row in candidates:
-        if row.planet_id == planet_id and row.confidence_tier == CONFIDENCE_POSSIBLE:
-            promoted.append(
-                HomeworldCandidateRecord(
-                    planet_id=row.planet_id,
-                    perspective=row.perspective,
-                    confidence_tier=CONFIDENCE_DEFINITE,
-                    attribution=row.attribution,
-                )
-            )
-        else:
-            promoted.append(row)
-    return tuple(promoted)
 
 
 def record_single_starbase_promotion(
