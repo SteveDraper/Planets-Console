@@ -5,6 +5,8 @@ Removes turn-scoped and perspective-scoped analytic documents under file storage
 game-global per-player hull catalog masks. Use ``*`` for ``--perspective`` or
 ``--player`` to match all values for that axis independently.
 
+Optionally restrict to one or more analytic ids via ``--analytics`` (default: all).
+
 Examples::
 
     uv run python scripts/clear_analytic_persistence.py \\
@@ -13,11 +15,15 @@ Examples::
         --game-id 628580 --perspective '*' --player 8
     uv run python scripts/clear_analytic_persistence.py \\
         --game-id 628580 --perspective '*' --player '*'
+    uv run python scripts/clear_analytic_persistence.py \\
+        --game-id 628580 --perspective '*' --player '*' \\
+        --analytics homeworld-locator
 """
 
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -46,7 +52,8 @@ app = typer.Typer(
     add_completion=False,
     help=(
         "Clear persisted analytic state for a game. "
-        "Perspective and player may each be a number or '*'."
+        "Perspective and player may each be a number or '*'. "
+        "Optionally restrict to analytic id(s) via --analytics."
     ),
 )
 
@@ -75,6 +82,28 @@ def parse_selector(raw: str, *, label: str) -> int | None:
     if parsed < 0:
         raise ValueError(f"{label} must be >= 0, got {parsed}")
     return parsed
+
+
+def parse_analytics_ids(raw: Sequence[str] | None) -> frozenset[str] | None:
+    """Return analytic ids to clear, or ``None`` for all analytics.
+
+    Accepts repeated CLI values and/or comma-separated lists. Empty input means all.
+    """
+    if raw is None:
+        return None
+    ids: set[str] = set()
+    for item in raw:
+        for part in item.split(","):
+            analytic_id = part.strip()
+            if analytic_id:
+                ids.add(analytic_id)
+    if not ids:
+        return None
+    return frozenset(ids)
+
+
+def _includes_analytic(analytic_ids: frozenset[str] | None, analytic_id: str) -> bool:
+    return analytic_ids is None or analytic_id in analytic_ids
 
 
 def _list_segments(storage: StorageBackend, prefix: str) -> list[str]:
@@ -149,6 +178,7 @@ def _clear_turn_analytics_for_all_players(
     *,
     game_id: int,
     perspective: int,
+    analytic_ids: frozenset[str] | None,
     dry_run: bool,
     result: ClearAnalyticPersistenceResult,
 ) -> None:
@@ -156,6 +186,8 @@ def _clear_turn_analytics_for_all_players(
     for turn_number in _list_int_segments(storage, turns_prefix):
         analytics_prefix = f"{turns_prefix}/{turn_number}/analytics"
         for analytic_id in sorted(_list_segments(storage, analytics_prefix)):
+            if not _includes_analytic(analytic_ids, analytic_id):
+                continue
             _delete_document(
                 storage,
                 f"{analytics_prefix}/{analytic_id}",
@@ -244,11 +276,14 @@ def _clear_perspective_analytics(
     *,
     game_id: int,
     perspective: int,
+    analytic_ids: frozenset[str] | None,
     dry_run: bool,
     result: ClearAnalyticPersistenceResult,
 ) -> None:
     prefix = f"games/{game_id}/{perspective}/analytics"
     for analytic_id in sorted(_list_segments(storage, prefix)):
+        if not _includes_analytic(analytic_ids, analytic_id):
+            continue
         _delete_document(
             storage,
             f"{prefix}/{analytic_id}",
@@ -301,6 +336,7 @@ def _clear_game_global_non_player_analytics(
     storage: StorageBackend,
     *,
     game_id: int,
+    analytic_ids: frozenset[str] | None,
     dry_run: bool,
     result: ClearAnalyticPersistenceResult,
 ) -> None:
@@ -308,6 +344,8 @@ def _clear_game_global_non_player_analytics(
     for analytic_id in sorted(_list_segments(storage, prefix)):
         if analytic_id == SCORES_ANALYTIC_ID:
             # Hull masks are handled separately as player-keyed entries.
+            continue
+        if not _includes_analytic(analytic_ids, analytic_id):
             continue
         _delete_document(
             storage,
@@ -323,11 +361,13 @@ def clear_analytic_persistence(
     game_id: int,
     perspective: int | None,
     player_id: int | None,
+    analytic_ids: frozenset[str] | None = None,
     dry_run: bool = False,
 ) -> ClearAnalyticPersistenceResult:
     """Clear analytic persistence matching ``perspective`` / ``player_id`` selectors.
 
-    ``None`` means wildcard (all) for that axis.
+    ``None`` for perspective/player means wildcard (all) for that axis.
+    ``analytic_ids`` ``None`` means all analytics; otherwise only listed ids.
 
     * Turn-scoped and perspective-scoped documents are filtered by ``perspective``.
     * Per-player fleet ledgers, scores inference rows, and hull catalog masks are
@@ -340,6 +380,8 @@ def clear_analytic_persistence(
     fleet = FleetSnapshotPersistenceService(storage)
     scores = InferenceRowPersistenceService(storage)
     perspectives = _resolve_perspectives(storage, game_id, perspective)
+    clear_fleet = _includes_analytic(analytic_ids, FLEET_ANALYTIC_ID)
+    clear_scores = _includes_analytic(analytic_ids, SCORES_ANALYTIC_ID)
 
     for perspective_id in perspectives:
         if player_id is None:
@@ -347,6 +389,7 @@ def clear_analytic_persistence(
                 storage,
                 game_id=game_id,
                 perspective=perspective_id,
+                analytic_ids=analytic_ids,
                 dry_run=dry_run,
                 result=result,
             )
@@ -354,41 +397,46 @@ def clear_analytic_persistence(
                 storage,
                 game_id=game_id,
                 perspective=perspective_id,
+                analytic_ids=analytic_ids,
                 dry_run=dry_run,
                 result=result,
             )
             continue
-        _clear_fleet_player_ledgers(
-            storage,
-            fleet,
-            game_id=game_id,
-            perspective=perspective_id,
-            player_id=player_id,
-            dry_run=dry_run,
-            result=result,
-        )
-        _clear_scores_player_rows(
-            storage,
-            scores,
-            game_id=game_id,
-            perspective=perspective_id,
-            player_id=player_id,
-            dry_run=dry_run,
-            result=result,
-        )
+        if clear_fleet:
+            _clear_fleet_player_ledgers(
+                storage,
+                fleet,
+                game_id=game_id,
+                perspective=perspective_id,
+                player_id=player_id,
+                dry_run=dry_run,
+                result=result,
+            )
+        if clear_scores:
+            _clear_scores_player_rows(
+                storage,
+                scores,
+                game_id=game_id,
+                perspective=perspective_id,
+                player_id=player_id,
+                dry_run=dry_run,
+                result=result,
+            )
 
-    _clear_hull_catalog_masks(
-        storage,
-        game_id=game_id,
-        player_id=player_id,
-        dry_run=dry_run,
-        result=result,
-    )
+    if clear_scores:
+        _clear_hull_catalog_masks(
+            storage,
+            game_id=game_id,
+            player_id=player_id,
+            dry_run=dry_run,
+            result=result,
+        )
 
     if perspective is None and player_id is None:
         _clear_game_global_non_player_analytics(
             storage,
             game_id=game_id,
+            analytic_ids=analytic_ids,
             dry_run=dry_run,
             result=result,
         )
@@ -398,6 +446,12 @@ def clear_analytic_persistence(
 
 def _default_storage_root() -> Path:
     return Path(".data")
+
+
+def _format_analytics_label(analytic_ids: frozenset[str] | None) -> str:
+    if analytic_ids is None:
+        return "all"
+    return ",".join(sorted(analytic_ids))
 
 
 @app.command()
@@ -413,6 +467,15 @@ def main(
         "--player",
         help="Player id to clear, or '*' for all players.",
     ),
+    analytics: list[str] | None = typer.Option(
+        None,
+        "--analytics",
+        "-a",
+        help=(
+            "Analytic id(s) to clear (repeatable or comma-separated). "
+            "Default: all analytics."
+        ),
+    ),
     storage_root: Path = typer.Option(
         _default_storage_root(),
         "--storage-root",
@@ -427,6 +490,7 @@ def main(
     try:
         perspective_selector = parse_selector(perspective, label="perspective")
         player_selector = parse_selector(player, label="player")
+        analytic_ids = parse_analytics_ids(analytics)
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
@@ -446,6 +510,7 @@ def main(
         game_id=game_id,
         perspective=perspective_selector,
         player_id=player_selector,
+        analytic_ids=analytic_ids,
         dry_run=dry_run,
     )
 
@@ -453,7 +518,8 @@ def main(
     typer.echo(
         f"{action} {result.total} analytic persistence item(s) "
         f"for game {game_id} "
-        f"(perspective={perspective}, player={player})"
+        f"(perspective={perspective}, player={player}, "
+        f"analytics={_format_analytics_label(analytic_ids)})"
     )
     for key in result.deleted_documents:
         typer.echo(f"  document {key}")
