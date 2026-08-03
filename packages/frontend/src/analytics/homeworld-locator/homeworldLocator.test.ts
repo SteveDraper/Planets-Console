@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
   homeworldInactiveHint,
@@ -12,7 +12,12 @@ import {
   withoutInactiveHomeworldLocator,
 } from './homeworldAvailability'
 import { parseHomeworldLocatorPayload } from './wireSchema'
-import { resolveHomeworldMarkerDisplays } from './mapAnalytic'
+import {
+  fetchHomeworldLocatorMapDataResponse,
+  resolveHomeworldMarkerDisplays,
+} from './mapAnalytic'
+import * as homeworldApi from './api'
+
 
 describe('homeworldLocatorInactiveReasonFromGameInfo', () => {
   it('returns null when traditional homeworlds exist', () => {
@@ -332,5 +337,54 @@ describe('resolveHomeworldMarkerDisplays', () => {
       'base-map'
     )
     expect(displays[0]?.isMostProbable).toBe(true)
+  })
+})
+
+describe('fetchHomeworldLocatorMapDataResponse', () => {
+  it('keeps homeworldMarkers on the shared map cache payload (panel must not strip them)', async () => {
+    vi.spyOn(homeworldApi, 'fetchHomeworldLocatorMap').mockResolvedValue({
+      analyticId: HOMEWORLD_LOCATOR_ANALYTIC_ID,
+      available: true,
+      baselineDegraded: false,
+      markers: [
+        {
+          planetId: 7,
+          perspective: 1,
+          confidenceTier: 'definite',
+          attribution: 'inferred',
+          assertedCue: false,
+          isMostProbable: false,
+        },
+      ],
+      regionOverlays: [
+        {
+          kind: 'homeworld-sector',
+          id: 'homeworld-sector-0',
+          fillColor: '#f97316',
+          fillOpacity: 0,
+          geometry: {
+            type: 'boundary',
+            vertices: [
+              { x: 0, y: 0 },
+              { x: 1, y: 0 },
+              { x: 1, y: 1 },
+              { x: 0, y: 1 },
+            ],
+            edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }, { type: 'line' }],
+          },
+        },
+      ],
+    })
+
+    const data = await fetchHomeworldLocatorMapDataResponse({
+      gameId: '680224',
+      turn: 20,
+      perspective: 2,
+    })
+
+    expect(data.homeworldMarkers).toHaveLength(1)
+    expect(data.homeworldMarkers?.[0]?.planetId).toBe(7)
+    expect(data.regionOverlays).toHaveLength(1)
+    vi.restoreAllMocks()
   })
 })

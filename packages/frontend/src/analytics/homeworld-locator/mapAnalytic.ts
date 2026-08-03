@@ -76,6 +76,28 @@ function regionOverlaysFromPayload(payload: HomeworldLocatorPayload): MapRegionO
 }
 
 /**
+ * Shared map-layer queryFn for the homeworld locator TanStack cache entry.
+ * Panel and map registration MUST use this exact shape -- a partial return under the
+ * same ``homeworldLocatorMapQueryKey`` would overwrite markers and blank the map cues.
+ */
+export async function fetchHomeworldLocatorMapDataResponse(
+  analyticScope: NonNullable<MapAnalyticQueryContext['analyticScope']>
+): Promise<MapDataResponse> {
+  const payload = await fetchHomeworldLocatorMap(analyticScope)
+  const available = payload.available
+  return {
+    analyticId: HOMEWORLD_LOCATOR_ANALYTIC_ID,
+    nodes: [],
+    edges: [],
+    homeworldMarkers: available ? (payload.markers ?? []) : [],
+    regionOverlays: available ? regionOverlaysFromPayload(payload) : [],
+    // Only surface degraded metadata when the analytic is active (matches table tile).
+    baselineDegraded: available ? payload.baselineDegraded : false,
+    baselineTurn: available ? (payload.baselineTurn ?? null) : null,
+  }
+}
+
+/**
  * Homeworld locator: fetch candidate markers and sector ``regionOverlays``,
  * then merge into combined map data. Display-mode filtering is render-time.
  */
@@ -87,18 +109,7 @@ export const homeworldLocatorMapAnalytic: MapAnalyticRegistration = {
         if (context.analyticScope == null) {
           throw new Error('Homeworld locator map query requires analytic scope')
         }
-        const payload = await fetchHomeworldLocatorMap(context.analyticScope)
-        const available = payload.available
-        return {
-          analyticId: HOMEWORLD_LOCATOR_ANALYTIC_ID,
-          nodes: [],
-          edges: [],
-          homeworldMarkers: available ? (payload.markers ?? []) : [],
-          regionOverlays: available ? regionOverlaysFromPayload(payload) : [],
-          // Only surface degraded metadata when the analytic is active (matches table tile).
-          baselineDegraded: available ? payload.baselineDegraded : false,
-          baselineTurn: available ? (payload.baselineTurn ?? null) : null,
-        }
+        return fetchHomeworldLocatorMapDataResponse(context.analyticScope)
       },
       enabled: context.analyticFetchEnabled && context.analyticScope != null,
     }

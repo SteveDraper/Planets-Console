@@ -10,15 +10,17 @@ import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { BASE_MAP_ANALYTIC_ID } from '../mapAnalyticIds'
-import { fetchHomeworldLocatorMap, fetchHomeworldLocatorTable } from './api'
+import { fetchHomeworldLocatorTable } from './api'
 import { buildPlanetOwnershipTargets } from './buildPlanetOwnershipTargets'
 import {
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
   homeworldInactiveHint,
 } from './constants'
 import { HomeworldCandidateRows } from './HomeworldCandidateRows'
-import { homeworldLocatorMapQueryKey } from './mapAnalytic'
-import { normalizeMapRegionOverlays } from '../../api/normalizeMapRegionOverlay'
+import {
+  fetchHomeworldLocatorMapDataResponse,
+  homeworldLocatorMapQueryKey,
+} from './mapAnalytic'
 import {
   useHomeworldLocatorAssertionMutation,
   useHomeworldLocatorRefreshMutation,
@@ -76,13 +78,10 @@ export function HomeworldLocatorPanel({
     enabled: fetchEnabled && analyticScope != null,
   })
   const mapQuery = useQuery({
+    // Same key + MapDataResponse shape as ``homeworldLocatorMapAnalytic`` -- do not
+    // return a partial payload here or markers disappear from the map layer cache.
     queryKey: homeworldLocatorMapQueryKey(analyticScope),
-    queryFn: async () => {
-      const payload = await fetchHomeworldLocatorMap(analyticScope!)
-      return {
-        regionOverlays: normalizeMapRegionOverlays(payload.regionOverlays ?? []),
-      }
-    },
+    queryFn: () => fetchHomeworldLocatorMapDataResponse(analyticScope!),
     enabled: fetchEnabled && analyticScope != null,
   })
   const overlays = useMemo(
