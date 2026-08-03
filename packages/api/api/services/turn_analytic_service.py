@@ -19,6 +19,7 @@ from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import LoginCredentialsRequiredError, NotFoundError, UpstreamPlanetsError
 from api.models.game import TurnInfo
 from api.planets_nu import PlanetsNuClient
+from api.services.homeworld_assertion_service import HomeworldAssertionService
 from api.services.inference_hull_catalog_service import InferenceHullCatalogService
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -521,8 +522,6 @@ class TurnAnalyticService:
         game_id: int,
         perspective: int,
     ):
-        from api.services.homeworld_assertion_service import HomeworldAssertionService
-
         load_turn = self._load_scoreboard_turn(game_id, perspective)
 
         def rematerialize(turn_number: int) -> dict:
