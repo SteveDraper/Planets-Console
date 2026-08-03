@@ -469,8 +469,8 @@ A user-initiated add/replace of an **asserted**-strength provenance on the **own
 _Avoid_: override POST that rewrites the whole candidate as inferred-free, requiring both axes in one assertion, writing asserts into turn-scoped aggregates, leaking the game-global vs aggregate split into every processing caller, durable race assertion as a third evidence axis, negative location exclusion provenances in v1, requiring a pre-existing inferred candidate before location assert, inventing synthetic sectors solely to store ownership asserts, dual-persisting sector-keyed and planet-keyed ownership asserts for the same fact
 
 **Homeworld locator panel**:
-The **homeworld locator** analytic details UI -- table of sectors/candidates (ownership and location columns), **baseline degraded** warning, and **homeworld locator refresh**. Map-primary: context menu on **homeworld map marker** and **homeworld region overlay** for quick **homeworld assertion** (ownership via player pick-list `"<name> (<race>)"` → slot; positive location assert / revoke). Table for bulk review with map highlight on row focus. Main-area tabular tile is a **read-only mirror** of the same rows (mutations live in panel + map menus only). No separate race-assert control; no “is not HW” assert in v1. Sector overlay context menu is in scope even while #35 polish remains open -- overlays already emit.
-_Avoid_: HW settings drawer, annotation modal (generic), race override editor, negative-exclusion assert UX in v1, duplicate assert controls on the tabular tile, blocking #37 on #35
+The **homeworld locator** analytic details UI -- per-**homeworld sector** collapsible sections (ordered clockwise from the northernmost sector; title = known owner `"<name> (<race>)"` / roster label when known, else Unknown), preferred-first candidate lists, thin FE hover summaries (no backend presentation payloads), **baseline degraded** warning, and **homeworld locator refresh**. Sector title multi-select (thicker border) drives which **homeworld region overlay** outlines appear via **homeworld region selection**. Map-primary: context menu on **homeworld map marker** and **homeworld region overlay** for quick **homeworld assertion** (ownership via player pick-list `"<name> (<race>)"` → slot; positive location assert / revoke). Candidate row click flashes the map marker and pans only when the planet is outside the current viewport. Main-area tabular tile is a **read-only mirror** (prefer the same sector grouping; mutations live in panel + map menus only). No separate race-assert control; no “is not HW” assert in v1.
+_Avoid_: HW settings drawer, annotation modal (generic), race override editor, negative-exclusion assert UX in v1, duplicate assert controls on the tabular tile, flat-only panel as the long-term shape after #283, backend hover-summary fields for presentation
 
 **Homeworld evidence scope**:
 Which **TurnInfo** snapshots supply **homeworld inference evidence** after the baseline. **Baseline** planet signals come from the earliest stored turn for the shell **perspective**; **later-turn evidence** (e.g. ship sightings, origin-distance signals) uses only turns stored at the current **viewpoint**'s **perspective** -- not a union across all slots.
@@ -489,12 +489,20 @@ Map decoration on a **base map** planet node for a **homeworld candidate** at a 
 _Avoid_: HW node (separate graph node), duplicate planet
 
 **Homeworld region overlay**:
-The **homeworld locator** analytic's use of shared **map region overlay** geometry for circular-ring sectors (stroke-only annular boundaries, plus optional cluster envelope disks) when no planet is pinned -- or to show un-pinned / pinned sectors per **homeworld region display mode**. Emitted as `regionOverlays` boundary entries (not cartography `overlayCircles`). Slot binding and rival labels are separate slices.
+The **homeworld locator** analytic's use of shared **map region overlay** geometry for circular-ring sectors (stroke-only annular boundaries, plus optional cluster envelope disks). Which sector **outlines** appear is controlled by **homeworld region selection**; which **envelope disks** appear is controlled by **homeworld envelope overlay toggle** on the selected set. Emitted as `regionOverlays` boundary entries (not cartography `overlayCircles`). Slot binding and rival labels are separate slices.
 _Avoid_: possible zone (vague), sector blob (informal), overlayCircles for homeworld sectors, homeworld-only parallel wire field
 
-**Homeworld region display mode**:
-Global client preference (localStorage) controlling which **homeworld region overlay** sectors appear on the map: off, un-pinned only (default -- sectors where the owning player is not yet known), pinned only (homeworld determined and owning player known / slot-anchored), or all. Same sticky preference pattern as **Cartography layer** toggles; independent of **Visibility region kind** enablement.
-_Avoid_: visibility kind toggle (wrong analytic), per-game preference scope for this mode
+**Homeworld region selection**:
+Client preference (localStorage) for which **homeworld region overlay** sector outlines appear: a sticky preset **Pinned / Unpinned / Selected** (default **Selected**) plus an explicit multi-select of sector indexes. **Pinned** / **Unpinned** rewrite the selected set to match pinned or non-pinned sectors; any direct sector-tile toggle forces **Selected**. Initial selected set is **all** emitted homeworld sectors. Same sticky preference pattern as **Cartography layer** toggles; independent of **Visibility region kind** enablement. Replaces the older **homeworld region display mode** (`off` / `un-pinned` / `pinned` / `all`).
+_Avoid_: visibility kind toggle (wrong analytic), per-game preference scope for this mode, treating assert-focus single selection as the outline multi-select
+
+**Homeworld region display mode** *(superseded naming)*:
+Older four-way paint filter (`off` \| `un-pinned` \| `pinned` \| `all`, default `un-pinned`) for **homeworld region overlay** visibility. Replaced by **homeworld region selection**; do not use for new work.
+_Avoid_: as current architecture -- use **homeworld region selection**
+
+**Homeworld envelope overlay toggle**:
+Client preference (**Show overlays** checkbox) controlling whether 81/162 LY cluster envelope disks paint for **selected** homeworld sectors. Default on. Independent of sector outline multi-select, but envelopes paint only for sectors that are selected under **homeworld region selection**.
+_Avoid_: reintroducing envelopes for non-selected sectors, backend-owned envelope visibility flag
 
 **Homeworld layout distribution asset**:
 Committed, reloadable tables for homeworld center-distance and neighbor-separation on epic and standard circular layouts. Each metric stores empirical `supportMin`/`supportMax` (paint band / cull) plus fitted Normal `mean`/`std` for layout-prior `-log` density scoring. Derived from sampled layout histograms, not recomputed from live TurnInfo each request.

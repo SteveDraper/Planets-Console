@@ -167,8 +167,8 @@ When no planet is pinned for a slot, [#35](https://github.com/SteveDraper/Planet
 | Wire | Shared **map region overlay** boundary primitive ([ADR 0008](adr/0008-shared-map-region-overlays.md)); not a homeworld-only field; not cartography `overlayCircles` |
 | Band radii | From **homeworld layout distribution asset** smoothed center-distance support extremes |
 | Envelopes | 81 + 162 LY disks when a sector center exists (orphan: layout-prior **most probable** in the sector when annotated, else candidate closest to sector geometric mid; pinned planet when pinned; incomplete + no candidates → geometric band center; fully observed + zero candidates → no disks, error stroke + hover) |
-| Sector paint | Stroke-only annular boundaries (no fill); FE display mode filters which sectors show |
-| FE display | **Homeworld region display mode** (`off` \| `un-pinned` \| `pinned` \| `all`, default `un-pinned`) |
+| Sector paint | Stroke-only annular boundaries (no fill); FE **homeworld region selection** chooses which sector outlines show |
+| FE display | **Homeworld region selection** (#283): preset `pinned` \| `unpinned` \| `selected` (default `selected`) drives a multi-select of sector indexes; initial selected set = **all** sectors. **Show overlays** checkbox (default on) toggles 81/162 envelope disks for **selected** sectors only. Replaces #35's `off` \| `un-pinned` \| `pinned` \| `all` display mode |
 | Labels | No rival slot labels in #35 (assignment stays #37) |
 
 Candidate geometry itself remains [#34](https://github.com/SteveDraper/Planets-Console/issues/34).
@@ -397,13 +397,14 @@ Origin distances (81 LY pod, warp table) and the shared ship-limit gate stay in 
 
 | Element | Behavior |
 |---------|----------|
-| **Homeworld map marker** | Decoration on **base map** node -- solid = definite; dashed/light = possible; **most probable** = stronger possible (double-layer dotted ring) via `isMostProbable` |
+| **Homeworld map marker** | Decorates on **base map** node -- solid = definite; dashed/light = possible; **most probable** = stronger possible (double-layer dotted ring) via `isMostProbable` |
 | **Asserted cue** | Distinct marker/overlay cue when an **asserted**-strength provenance is present (location and/or ownership) |
-| **Homeworld region overlay** | Shared **map region overlay** boundary sectors (+ optional envelopes) for Circular round; filtered by **homeworld region display mode** |
-| **Homeworld locator panel** | Sidebar table + refresh + degraded baseline warning; ownership/location assert + revoke |
+| **Homeworld region overlay** | Shared **map region overlay** boundary sectors (+ optional envelopes) for Circular round; outlines follow **homeworld region selection**; envelopes follow **homeworld envelope overlay toggle** on selected sectors |
+| **Homeworld locator panel** | Per-sector collapsible sections (clockwise from northernmost; title = known owner label else Unknown); preferred-first candidates; thin FE hover evidence; sector title multi-select (thicker border) drives outline visibility; refresh + degraded baseline warning; ownership/location assert + revoke (#37). Candidate click flashes the map marker and pans only if off-screen (#283) |
 | Map context menu | Quick **homeworld assertion** on planet markers and sector overlays |
-| Tabular tile | Read-only mirror of panel rows in main **tabular** **view mode**; show most-probable cue |
-| **Homeworld region display mode** | Sidebar expandable control (Cartography pattern); global preference |
+| Tabular tile | Read-only mirror of panel rows (prefer same sector grouping) in main **tabular** **view mode**; show most-probable cue |
+| **Homeworld region selection** | Sidebar control (Cartography sticky preference): preset **Pinned / Unpinned / Selected** (default Selected). Presets rewrite the selected-sector set; direct tile toggles force Selected. Initial selected set = **all** sectors |
+| **Homeworld envelope overlay toggle** | **Show overlays** checkbox above Region selection; when on, paint 81/162 LY disks for selected sectors only |
 
 ---
 
@@ -416,6 +417,7 @@ Origin distances (81 LY pod, warp table) and the shared ship-limit gate stay in 
 | [#36](https://github.com/SteveDraper/Planets-Console/issues/36) | Location evidence refine through shell turn; origin-distance + single-SB new-build; promotion; definite-neighborhood cull; layout prior **most probable**; FE markers/table cue |
 | [#269](https://github.com/SteveDraper/Planets-Console/issues/269) | **Homeworld ownership evidence** (travel envelopes, sector possible-owner sets + provenance, planetary ownership sightings, minimal sector hover) -- not location promotion |
 | [#37](https://github.com/SteveDraper/Planets-Console/issues/37) | Dual-axis **homeworld assertion** (tiered provenances), refresh, **homeworld locator panel**, map context menus; ADR 0010 |
+| [#283](https://github.com/SteveDraper/Planets-Console/issues/283) | Sector accordion panel + **homeworld region selection** + envelope checkbox + thin FE hovers + candidate flash/pan |
 
 ### 11.1 Issue #34 phased plan
 
@@ -432,7 +434,7 @@ Hybrid phases (each independently reviewable):
 1. **Shared region boundary** -- discriminate `regionOverlays` coverage vs boundary; FE normalize + pane; MapGraph Visibility-pref isolation; ADR 0008; CONTEXT/design grill locks (this section / §4.2).
 2. **Layout distribution asset** -- committed Normal mean/std plus empirical support extremes (epic/standard); loader; support extremes for paint band; ``-log`` density cost for layout prior. Shipped at `assets/analytics/homeworld-locator/layout_distributions.json` (schema v2). Regenerate: build gitignored `local/homeworld_distributions.json` from `local/sampled_homeworlds.csv` + `.sampler_data` via `scripts/visualize_homeworld_distributions.py`, then `… distill --report local/homeworld_distributions.json`.
 3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes (`regionOverlays` boundary entries; FE display-mode filter is phase 4).
-4. **FE display mode + hover** -- preference store, merge/filter, hit-test structured overlay facts; FE formats hover lines.
+4. **FE display mode + hover** -- preference store, merge/filter, hit-test structured overlay facts; FE formats hover lines. (**Superseded for visibility controls by [#283](https://github.com/SteveDraper/Planets-Console/issues/283)** region selection -- keep hover facts.)
 
 ### 11.3 Issue #36 phased plan
 
@@ -463,6 +465,18 @@ Grill locks: §4.4 / ADR [0010](adr/0010-homeworld-assertion-provenance-strength
 1. **Domain + persistence** -- strength-class mapping; location provenance collection; game-global asserted provenances; merge-above-read; strength resolution; preserve asserts across baseline/evidence recompute; unit tests (no HTTP).
 2. **Core + BFF mutations** -- assert upsert/revoke (ownership sector- or planet-keyed; location positive); refresh (machine wipe + ensure/`force_fresh`); map/table wire carries derived asserted cue; OpenAPI; Core/BFF tests.
 3. **FE panel + menus** -- **homeworld locator panel** (table, degraded, refresh); planet + sector context menus; TanStack mutations + refetch; tabular tile read-only mirror; asserted marker cue.
+
+### 11.7 Issue #283 phased plan
+
+Grill locks: §4.2 FE display row, §10 (this doc). CONTEXT: **homeworld region selection**, **homeworld envelope overlay toggle**, **homeworld locator panel**. Full AC + agent anchors: [#283](https://github.com/SteveDraper/Planets-Console/issues/283).
+
+**Locked:** initial selected sectors = **all**; planet hover = thin FE (no backend presentation fields); Show overlays = checkbox; Region selection = Pinned / Unpinned / Selected (default Selected); PR splitting deferred to implement time.
+
+0. **Docs + issue** -- this section / CONTEXT / #283 opening (no product code).
+1. **Selection model** -- replace region display mode store/helpers with region-selection preset + selected sector indexes + envelope checkbox; migrate/ignore old localStorage key; control rename + Show overlays checkbox; unit tests.
+2. **Sector accordion panel** -- collapsible per sector (northernmost-then-clockwise titles); preferred-first candidates; sector title multi-select chrome; thin FE planet hover; ownership sector-title hover; tabular read-only mirror grouping; RTL.
+3. **Map paint** -- outlines for selected sectors only; envelopes when checkbox on and sector selected; assert-focus highlight stays separate; MapGraph / style tests.
+4. **Flash + conditional pan** -- candidate click flashes marker; pan only if off-screen at current scale; reuse recenter + pulse precedents.
 
 ---
 
@@ -519,3 +533,4 @@ Grill locks: §4.4 / ADR [0010](adr/0010-homeworld-assertion-provenance-strength
 | 2026-08-02 | Ownership travel envelope: +1 LY/turn rounding slack (`travel_turns × (warp² + 1)`); bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 2 |
 | 2026-08-02 | Sync ensure loads fleet `built_turn` from final on-disk ledgers after ENSURE; floor algo rewrite clears sticky ownership before re-accumulate; sole floor-rewrite owner; shared sector partition helper; bump `HOMEWORLD_EVIDENCE_ALGORITHM_VERSION` to 3 |
 | 2026-08-03 | #37 grill: dual-axis tiered provenances (weak/strong/asserted); game-global asserts + merge-above-read; positive location only; no race annotation; refresh = full machine wipe; ADR 0010; §4.4 / §11.6 |
+| 2026-08-03 | #283: sector accordion panel + region selection (Pinned/Unpinned/Selected, default Selected, initial set = all) + Show overlays checkbox; thin FE hovers; candidate flash/pan; replaces #35 display mode; §4.2 / §10 / §11.7 |
