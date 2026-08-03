@@ -18,7 +18,10 @@ from api.analytics.homeworld_locator.constants import (
     LAYOUT_PRIOR_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
-from api.analytics.homeworld_locator.evidence_refine import materialize_evidence_adjusted_candidates
+from api.analytics.homeworld_locator.evidence_refine import (
+    apply_definite_keyed_candidate_culls,
+    apply_recorded_single_starbase_promotions,
+)
 from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
 from api.analytics.homeworld_locator.evidence_refine_timing_history import record_baseline_report
 from api.analytics.homeworld_locator.layout_prior import (
@@ -315,10 +318,12 @@ def materialize_homeworld_candidates(
     baseline_turn: int,
     baseline_degraded: bool,
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Ordered shell materialize through ownership bind then layout prior.
+    """Ordered shell materialize: promote, ownership, derive, cull, layout prior.
 
     Design lock: docs/design-homeworld-locator-analytic.md §4.3.1 / §4.3.2.
     Asserted provenances merge above the evidence aggregate (ADR 0010).
+    Definite-keyed culls run after location strength derive so demoted machine
+    pins near asserted definites are dropped; asserted planets stay protected.
     """
     seeded = ensure_candidates_for_asserted_locations(
         inferred=candidates,
@@ -327,13 +332,11 @@ def materialize_homeworld_candidates(
     protected_planet_ids = frozenset(
         row.planet_id for row in game_state.asserted_location_provenances
     )
-    adjusted = materialize_evidence_adjusted_candidates(
+    # Promote first; definite-keyed culls run after derive so they see
+    # strength-resolved tiers (assert demoting a nearby machine definite).
+    adjusted = apply_recorded_single_starbase_promotions(
         seeded,
-        aggregate,
-        planets=shell_turn.planets,
-        settings_turn=shell_turn,
-        player_count=_player_count(shell_turn),
-        protected_planet_ids=protected_planet_ids,
+        aggregate.single_starbase_promotions,
     )
     merged = merge_homeworld_evidence_above_read(game_state=game_state, aggregate=aggregate)
     adjusted = apply_unique_owner_orphan_bind(
@@ -352,6 +355,13 @@ def materialize_homeworld_candidates(
         planet_sector_index=(
             dict(partition.planet_sector_index) if partition is not None else None
         ),
+    )
+    adjusted = apply_definite_keyed_candidate_culls(
+        adjusted,
+        planets=shell_turn.planets,
+        settings_turn=shell_turn,
+        player_count=_player_count(shell_turn),
+        protected_planet_ids=protected_planet_ids,
     )
     input_fingerprint = layout_prior_input_fingerprint(adjusted)
     evidence_lambda = get_config().homeworld_locator.origin_distance_evidence_lambda
