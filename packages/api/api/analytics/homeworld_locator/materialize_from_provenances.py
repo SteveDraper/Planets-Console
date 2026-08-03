@@ -5,10 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
-from api.analytics.homeworld_locator.constants import (
-    ATTRIBUTION_INFERRED,
-    ATTRIBUTION_USER_ASSERTED,
-)
 from api.analytics.homeworld_locator.evidence_strength import (
     provenance_has_asserted_strength,
     resolve_location_axis,
@@ -109,14 +105,12 @@ def derive_candidates_from_merged_evidence(
             location_provenances=planet_location,
             ownership_members=ownership_for_cue,
         )
-        attribution = ATTRIBUTION_USER_ASSERTED if asserted_cue else ATTRIBUTION_INFERRED
         derived.append(
             replace(
                 row,
                 confidence_tier=confidence,
                 perspective=perspective,
                 asserted_cue=asserted_cue,
-                attribution=attribution,
             )
         )
     return tuple(derived)

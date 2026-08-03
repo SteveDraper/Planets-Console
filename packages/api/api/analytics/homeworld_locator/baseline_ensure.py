@@ -41,7 +41,6 @@ from api.analytics.homeworld_locator.types import (
     candidate_records_from_inferred,
     empty_candidate_view,
     ensure_candidates_for_asserted_locations,
-    merge_candidates_preserving_user_asserted,
 )
 from api.analytics.turn_roster import players_by_id
 from api.concepts.homeworld_layout import (
@@ -228,9 +227,8 @@ def compute_homeworld_baseline(
     )
     infer_ms = (time.perf_counter() - infer_t0) * 1000.0
     asserted_locations = existing.asserted_location_provenances if existing is not None else ()
-    candidates = merge_candidates_preserving_user_asserted(
+    candidates = ensure_candidates_for_asserted_locations(
         inferred=candidate_records_from_inferred(inferred),
-        existing=existing.candidates if existing is not None else None,
         asserted_location_provenances=asserted_locations,
     )
     state = HomeworldLocatorGameState(

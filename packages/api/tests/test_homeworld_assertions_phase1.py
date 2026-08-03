@@ -9,7 +9,10 @@ from api.analytics.homeworld_locator.assertions import (
     upsert_location_assertion,
     upsert_ownership_assertion,
 )
-from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+from api.analytics.homeworld_locator.constants import (
+    ATTRIBUTION_INFERRED,
+    ATTRIBUTION_USER_ASSERTED,
+)
 from api.analytics.homeworld_locator.merge_above_read import (
     MergedHomeworldEvidence,
     merge_homeworld_evidence_above_read,
@@ -97,6 +100,46 @@ def test_game_state_round_trips_asserted_provenances() -> None:
     )
     restored = homeworld_locator_game_state_from_json(homeworld_locator_game_state_to_json(state))
     assert restored == state
+
+
+def test_legacy_attribution_user_asserted_migrates_on_game_state_read() -> None:
+    """Single read-path migration: attribution=user_asserted → asserted locations."""
+    restored = homeworld_locator_game_state_from_json(
+        {
+            "candidates": [
+                {
+                    "planetId": 10,
+                    "perspective": 1,
+                    "confidenceTier": CONFIDENCE_DEFINITE,
+                    "attribution": ATTRIBUTION_INFERRED,
+                },
+                {
+                    "planetId": 20,
+                    "perspective": 2,
+                    "confidenceTier": CONFIDENCE_POSSIBLE,
+                    "attribution": ATTRIBUTION_USER_ASSERTED,
+                    "assertedCue": True,
+                },
+            ],
+            "baselineTurn": 3,
+            "baselineDegraded": False,
+            "settingsFingerprint": [],
+        }
+    )
+    assert restored.asserted_location_provenances == (
+        LocationProvenance(kind=PROVENANCE_ASSERTED, turn=3, planet_id=20),
+    )
+    by_planet = {row.planet_id: row for row in restored.candidates}
+    assert by_planet[10].attribution == ATTRIBUTION_INFERRED
+    assert by_planet[10].asserted_cue is False
+    assert by_planet[20].attribution == ATTRIBUTION_INFERRED
+    assert by_planet[20].asserted_cue is False
+    # Persisted payload must not re-store user_asserted / assertedCue as authority.
+    payload = homeworld_locator_game_state_to_json(restored)
+    assert "assertedLocationProvenances" in payload
+    for row in payload["candidates"]:
+        assert row["attribution"] == ATTRIBUTION_INFERRED
+        assert "assertedCue" not in row
 
 
 def test_evidence_aggregate_round_trips_location_provenances() -> None:
@@ -447,9 +490,11 @@ def test_derive_candidates_sets_definite_and_asserted_cue() -> None:
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[20].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[20].asserted_cue is True
+    assert by_planet[20].attribution == ATTRIBUTION_INFERRED
     assert by_planet[20].perspective == 7
     assert by_planet[10].confidence_tier == CONFIDENCE_POSSIBLE
     assert by_planet[10].asserted_cue is False
+    assert by_planet[10].attribution == ATTRIBUTION_INFERRED
 
 
 def test_derive_asserted_wins_over_machine_strong_despite_prior_definite() -> None:

@@ -25,7 +25,6 @@ from api.analytics.homeworld_locator.compute_services import build_ephemeral_hom
 from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
     ATTRIBUTION_INFERRED,
-    ATTRIBUTION_USER_ASSERTED,
     HOMEWORLD_BASELINE_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.exports import (
@@ -39,7 +38,7 @@ from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
-    merge_candidates_preserving_user_asserted,
+    ensure_candidates_for_asserted_locations,
 )
 from api.analytics.persistence_paths import (
     game_global_analytic_document_key,
@@ -253,7 +252,12 @@ def test_game_state_from_json_rejects_non_dict_candidate() -> None:
         )
 
 
-def test_merge_candidates_preserving_user_asserted() -> None:
+def test_ensure_candidates_keeps_asserted_location_shells() -> None:
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_ASSERTED,
+        LocationProvenance,
+    )
+
     inferred = (
         HomeworldCandidateRecord(
             planet_id=1,
@@ -268,34 +272,20 @@ def test_merge_candidates_preserving_user_asserted() -> None:
             attribution=ATTRIBUTION_INFERRED,
         ),
     )
-    existing = (
-        HomeworldCandidateRecord(
-            planet_id=2,
-            perspective=9,
-            confidence_tier="definite",
-            attribution=ATTRIBUTION_USER_ASSERTED,
-        ),
-        HomeworldCandidateRecord(
-            planet_id=3,
-            perspective=1,
-            confidence_tier="definite",
-            attribution=ATTRIBUTION_USER_ASSERTED,
-        ),
-        HomeworldCandidateRecord(
-            planet_id=4,
-            perspective=1,
-            confidence_tier="possible",
-            attribution=ATTRIBUTION_INFERRED,
-        ),
+    asserted = (
+        LocationProvenance(kind=PROVENANCE_ASSERTED, turn=1, planet_id=2),
+        LocationProvenance(kind=PROVENANCE_ASSERTED, turn=1, planet_id=3),
     )
-    merged = merge_candidates_preserving_user_asserted(inferred=inferred, existing=existing)
+    merged = ensure_candidates_for_asserted_locations(
+        inferred=inferred,
+        asserted_location_provenances=asserted,
+    )
     assert [row.planet_id for row in merged] == [1, 2, 3]
     by_planet = {row.planet_id: row for row in merged}
     assert by_planet[1].attribution == ATTRIBUTION_INFERRED
-    assert by_planet[2].asserted_cue is True
-    assert by_planet[2].perspective == 9
-    assert by_planet[3].asserted_cue is True
-    assert by_planet[3].perspective == 1
+    assert by_planet[2].asserted_cue is False
+    assert by_planet[3].asserted_cue is False
+    assert by_planet[3].confidence_tier == "possible"
 
 
 def test_invalidate_inferred_preserves_user_asserted(persistence) -> None:

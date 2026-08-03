@@ -32,16 +32,12 @@ def candidate_is_assert_protected(
 ) -> bool:
     """True when culls must keep this row.
 
-    Prefer durable asserted location planet ids. ``asserted_cue`` / legacy
-    ``user_asserted`` attribution remain for callers that already stamped those
-    views (or unit tests that exercise the legacy path directly).
+    Prefer durable asserted location planet ids. ``asserted_cue`` covers
+    already-derived candidate views; ``attribution`` is not authority (ADR 0010).
     """
-    from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
-
     if row.planet_id in protected_planet_ids:
         return True
-    asserted_cue = getattr(row, "asserted_cue", False)
-    return bool(asserted_cue) or row.attribution == ATTRIBUTION_USER_ASSERTED
+    return bool(getattr(row, "asserted_cue", False))
 
 
 __all__ = [

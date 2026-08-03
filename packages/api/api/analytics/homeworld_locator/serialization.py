@@ -31,14 +31,18 @@ _VALID_TIERS = frozenset({CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE})
 
 
 def homeworld_candidate_record_to_json(record: HomeworldCandidateRecord) -> dict[str, Any]:
+    """Persist candidate shell fields only.
+
+    ``attribution`` stays ``inferred`` on disk; ``asserted_cue`` is derived at
+    materialize and is not persisted (ADR 0010). Wire emit maps
+    ``asserted_cue`` → ``attribution=user_asserted`` for FE compat.
+    """
     payload: dict[str, Any] = {
         "planetId": record.planet_id,
         "perspective": record.perspective,
         "confidenceTier": record.confidence_tier,
-        "attribution": record.attribution,
+        "attribution": ATTRIBUTION_INFERRED,
     }
-    if record.asserted_cue:
-        payload["assertedCue"] = True
     if record.is_most_probable:
         payload["isMostProbable"] = True
     return payload
@@ -61,9 +65,7 @@ def homeworld_candidate_record_from_json(data: dict[str, Any]) -> HomeworldCandi
     attribution = data.get("attribution", ATTRIBUTION_INFERRED)
     if not isinstance(attribution, str) or not attribution:
         raise ValidationError("homeworld candidate attribution must be a non-empty string")
-    asserted_cue = data.get("assertedCue", False)
-    if not isinstance(asserted_cue, bool):
-        raise ValidationError("homeworld candidate assertedCue must be a bool when present")
+    # assertedCue on disk is ignored: cue is derived at materialize from provenances.
     is_most_probable = data.get("isMostProbable", False)
     if not isinstance(is_most_probable, bool):
         raise ValidationError("homeworld candidate isMostProbable must be a bool when present")
@@ -71,8 +73,9 @@ def homeworld_candidate_record_from_json(data: dict[str, Any]) -> HomeworldCandi
         planet_id=planet_id,
         perspective=perspective,
         confidence_tier=tier,
+        # Preserve raw attribution only long enough for game-state migration below.
         attribution=attribution,
-        asserted_cue=asserted_cue,
+        asserted_cue=False,
         is_most_probable=is_most_probable,
     )
 
@@ -159,7 +162,7 @@ def homeworld_locator_game_state_from_json(data: dict[str, Any]) -> HomeworldLoc
         data.get("assertedLocationProvenances"),
         field_name="homeworld locator assertedLocationProvenances",
     )
-    # Migrate legacy attribution=user_asserted candidate rows into asserted location list.
+    # Single read-path migration: legacy attribution=user_asserted → asserted locations.
     if not asserted_location:
         migrated: list[LocationProvenance] = []
         for row in candidates:
@@ -179,7 +182,7 @@ def homeworld_locator_game_state_from_json(data: dict[str, Any]) -> HomeworldLoc
             confidence_tier=row.confidence_tier,
             attribution=ATTRIBUTION_INFERRED,
             is_most_probable=row.is_most_probable,
-            asserted_cue=row.asserted_cue or row.attribution == ATTRIBUTION_USER_ASSERTED,
+            asserted_cue=False,
         )
         for row in candidates
     )

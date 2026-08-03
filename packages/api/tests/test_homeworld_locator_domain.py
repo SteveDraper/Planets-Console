@@ -678,14 +678,11 @@ def test_cull_co_sector_drops_extra_inferred_definites(template_planet) -> None:
     assert pin_row.confidence_tier == CONFIDENCE_DEFINITE
 
 
-def test_cull_preserves_user_asserted_co_sector_possible(template_planet) -> None:
+def test_cull_preserves_asserted_cue_co_sector_possible(template_planet) -> None:
     from api.analytics.homeworld_locator.baseline import (
         cull_co_sector_candidates_after_definites,
     )
-    from api.analytics.homeworld_locator.constants import (
-        ATTRIBUTION_INFERRED,
-        ATTRIBUTION_USER_ASSERTED,
-    )
+    from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
     from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
 
     center = (0.0, 0.0)
@@ -702,7 +699,8 @@ def test_cull_preserves_user_asserted_co_sector_possible(template_planet) -> Non
             planet_id=2,
             perspective=None,
             confidence_tier=CONFIDENCE_POSSIBLE,
-            attribution=ATTRIBUTION_USER_ASSERTED,
+            attribution=ATTRIBUTION_INFERRED,
+            asserted_cue=True,
         ),
     )
     culled = cull_co_sector_candidates_after_definites(

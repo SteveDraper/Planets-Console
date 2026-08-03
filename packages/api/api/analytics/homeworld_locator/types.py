@@ -24,7 +24,11 @@ class HomeworldCandidateRecord:
     perspective: int | None
     confidence_tier: str
     attribution: str = ATTRIBUTION_INFERRED
-    """Derived wire cue; not durable authority over provenance lists (ADR 0010)."""
+    """Legacy field retained on the dataclass; durable authority is provenance lists.
+
+    Persist and derive keep this as ``inferred``. Wire emit may map
+    ``asserted_cue`` → ``user_asserted`` for FE compat (ADR 0010).
+    """
 
     is_most_probable: bool = False
     asserted_cue: bool = False
@@ -138,52 +142,6 @@ def ensure_candidates_for_asserted_locations(
     return tuple(sorted(by_planet.values(), key=lambda row: row.planet_id))
 
 
-def merge_candidates_preserving_user_asserted(
-    *,
-    inferred: tuple[HomeworldCandidateRecord, ...],
-    existing: tuple[HomeworldCandidateRecord, ...] | None,
-    asserted_location_provenances: Sequence[LocationProvenance] = (),
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Replace inferred rows; keep planets covered by asserted location provenances (#37).
-
-    Legacy ``attribution == user_asserted`` rows on *existing* are treated as implied
-    location asserts when ``asserted_location_provenances`` is empty (read migration).
-    Those legacy rows keep their perspective / tier into the merged candidate set.
-    """
-    from api.analytics.homeworld_locator.constants import ATTRIBUTION_USER_ASSERTED
-    from api.analytics.homeworld_locator.models import PROVENANCE_ASSERTED
-
-    asserted = list(asserted_location_provenances)
-    legacy_asserted_rows: list[HomeworldCandidateRecord] = []
-    if existing is not None:
-        for row in existing:
-            if row.attribution != ATTRIBUTION_USER_ASSERTED:
-                continue
-            legacy_asserted_rows.append(row)
-            if not asserted_location_provenances:
-                asserted.append(
-                    LocationProvenance(
-                        kind=PROVENANCE_ASSERTED,
-                        turn=1,
-                        planet_id=row.planet_id,
-                    )
-                )
-    by_planet = {row.planet_id: row for row in inferred}
-    for row in legacy_asserted_rows:
-        by_planet[row.planet_id] = HomeworldCandidateRecord(
-            planet_id=row.planet_id,
-            perspective=row.perspective,
-            confidence_tier=row.confidence_tier,
-            attribution=ATTRIBUTION_INFERRED,
-            is_most_probable=row.is_most_probable,
-            asserted_cue=True,
-        )
-    return ensure_candidates_for_asserted_locations(
-        inferred=tuple(sorted(by_planet.values(), key=lambda row: row.planet_id)),
-        asserted_location_provenances=asserted,
-    )
-
-
 def empty_candidate_view(*, inactive_reason: str | None = None) -> HomeworldCandidateView:
     return HomeworldCandidateView(
         candidates=(),
@@ -203,5 +161,4 @@ __all__ = [
     "candidate_records_from_inferred",
     "empty_candidate_view",
     "ensure_candidates_for_asserted_locations",
-    "merge_candidates_preserving_user_asserted",
 ]

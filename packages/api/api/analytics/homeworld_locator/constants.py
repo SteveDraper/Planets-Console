@@ -3,6 +3,8 @@
 ANALYTIC_ID = "homeworld-locator"
 
 ATTRIBUTION_INFERRED = "inferred"
+# Wire/FE-compat only: derive at emit from ``asserted_cue``. Not durable authority
+# (ADR 0010); do not store as parallel to asserted location provenances.
 ATTRIBUTION_USER_ASSERTED = "user_asserted"
 
 # Bump when baseline candidacy policy changes (cluster FoW density credit, orphan
