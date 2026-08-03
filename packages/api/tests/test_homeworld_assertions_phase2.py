@@ -21,6 +21,8 @@ from api.analytics.homeworld_locator.models import (
     PROVENANCE_ASSERTED,
     PROVENANCE_BASELINE_PROFILE,
     LocationProvenance,
+    OwnershipProvenance,
+    SectorOwnerMember,
 )
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.types import (
@@ -204,7 +206,7 @@ def test_ownership_assert_planet_keyed_when_sectors_absent(
 ) -> None:
     turn = sample_turn.settings.turn
     _seed_minimal_state(persistence, sample_turn)
-    assertion_service.upsert_ownership_assertion(
+    result = assertion_service.upsert_ownership_assertion(
         owner_slot=2,
         turn_number=turn,
         planet_id=1,
@@ -215,6 +217,14 @@ def test_ownership_assert_planet_keyed_when_sectors_absent(
     assert state.asserted_sector_ownership == ()
     assert len(state.asserted_planet_ownership) == 1
     assert state.asserted_planet_ownership[0][0] == 1
+    # Ownership assert rematerializes assertedCue / user_asserted on the target row.
+    owned_rows = [row for row in result["rows"] if row["planetId"] == 1]
+    assert len(owned_rows) == 1
+    assert owned_rows[0]["assertedCue"] is True
+    assert owned_rows[0]["attribution"] == ATTRIBUTION_USER_ASSERTED
+    owned_markers = [m for m in result["markers"] if m["planetId"] == 1]
+    assert owned_markers[0]["assertedCue"] is True
+    assert owned_markers[0]["attribution"] == ATTRIBUTION_USER_ASSERTED
 
 
 def test_ownership_assert_rejects_sector_key_when_sectors_absent(
@@ -229,6 +239,66 @@ def test_ownership_assert_rejects_sector_key_when_sectors_absent(
             planet_id=None,
             sector_index=0,
         )
+
+
+def test_ownership_assert_sector_keyed_when_sectors_exist(
+    assertion_service, persistence, sample_turn, monkeypatch
+) -> None:
+    """Service wrapper: sectors_exist True → sector key required; no dual planet persist."""
+    monkeypatch.setattr(
+        "api.services.homeworld_assertion_service.homeworld_sectors_exist",
+        lambda _turn: True,
+    )
+    turn = sample_turn.settings.turn
+    _seed_minimal_state(persistence, sample_turn)
+    # Pre-seed planet-keyed ownership so sector upsert must clear it (no dual-persist).
+    state = persistence.get_game_state(628580)
+    assert state is not None
+    persistence.put_game_state(
+        628580,
+        replace(
+            state,
+            asserted_planet_ownership=(
+                (
+                    1,
+                    (
+                        SectorOwnerMember(
+                            owner_slot=9,
+                            provenances=(
+                                OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=turn),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="sector"):
+        assertion_service.upsert_ownership_assertion(
+            owner_slot=2,
+            turn_number=turn,
+            planet_id=1,
+            sector_index=None,
+        )
+
+    assertion_service.upsert_ownership_assertion(
+        owner_slot=2,
+        turn_number=turn,
+        planet_id=None,
+        sector_index=0,
+    )
+    updated = persistence.get_game_state(628580)
+    assert updated is not None
+    assert updated.asserted_planet_ownership == ()
+    assert len(updated.asserted_sector_ownership) == 1
+    assert updated.asserted_sector_ownership[0][0] == 0
+    members = updated.asserted_sector_ownership[0][1]
+    assert len(members) == 1
+    assert members[0].owner_slot == 2
+    assert members[0].provenances == (
+        OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=turn),
+    )
 
 
 def test_location_assert_rejects_planetoid(assertion_service, persistence, sample_turn) -> None:
