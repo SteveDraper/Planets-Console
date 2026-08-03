@@ -471,10 +471,7 @@ def main(
         None,
         "--analytics",
         "-a",
-        help=(
-            "Analytic id(s) to clear (repeatable or comma-separated). "
-            "Default: all analytics."
-        ),
+        help=("Analytic id(s) to clear (repeatable or comma-separated). Default: all analytics."),
     ),
     storage_root: Path = typer.Option(
         _default_storage_root(),

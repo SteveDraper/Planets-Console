@@ -232,9 +232,9 @@ def test_analytics_filter_clears_only_listed_ids(storage: MemoryAssetBackend) ->
     assert "games/628580/11/turns/1/analytics/homeworld-locator" in result.deleted_documents
     assert "games/628580/11/turns/1/analytics/fleet" not in result.deleted_documents
     assert storage.get("games/628580/11/turns/1/analytics/fleet")[FLEET_LEDGERS_KEY]
-    assert storage.get(
-        InferenceRowPersistenceService.row_store_key(628580, 11, 1, 8)
-    )["playerId"] == 8
+    assert (
+        storage.get(InferenceRowPersistenceService.row_store_key(628580, 11, 1, 8))["playerId"] == 8
+    )
     assert storage.get("games/628580/analytics/scores/inference_hull_catalog_masks/8")
 
 
