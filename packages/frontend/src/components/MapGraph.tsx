@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from 'react'
@@ -38,13 +39,7 @@ import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
-import {
-  allHomeworldSectorIndexes,
-  applyHomeworldRegionSelection,
-  sectorIndexesForPreset,
-} from '../analytics/homeworld-locator/homeworldRegionSelection'
-import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homeworldRegionStyle'
-import { resolveHomeworldSelectedSectorIndex } from '../analytics/homeworld-locator/resolveHomeworldSelectedSectorIndex'
+import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
@@ -271,43 +266,34 @@ function MapGraphFlow({
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays
 
-  useEffect(() => {
+  // Sync before paint so preset rewrites (Pinned/Unpinned) and initial all-seed
+  // land in ``selectedSectorIndexes`` without MapGraph re-deriving paint indexes.
+  useLayoutEffect(() => {
     syncSelectionWithOverlays(data.regionOverlays)
   }, [data.regionOverlays, regionSelectionPreset, syncSelectionWithOverlays])
 
-  // Visibility prefs only mutate visibility kinds; region selection filters
-  // sectors/envelopes; homeworld style adapter attaches paint metadata for shared blit.
-  const regionOverlays = useMemo(() => {
-    const visibilityFiltered = applyVisibilityRegionPreferences(
+  // Visibility prefs → region selection filter + envelope toggle → assert-focus style.
+  const regionOverlays = useMemo(
+    () =>
+      buildHomeworldRegionOverlaysForPaint({
+        overlays: applyVisibilityRegionPreferences(
+          data.regionOverlays,
+          visibilityKinds
+        ),
+        selectedSectorIndexes,
+        showEnvelopeOverlays,
+        assertFocusSelection: selection,
+        homeworldMarkers: data.homeworldMarkers,
+      }),
+    [
       data.regionOverlays,
-      visibilityKinds
-    )
-    const paintIndexes =
-      regionSelectionPreset === 'pinned' || regionSelectionPreset === 'unpinned'
-        ? sectorIndexesForPreset(visibilityFiltered, regionSelectionPreset)
-        : selectedSectorIndexes.length === 0
-          ? allHomeworldSectorIndexes(visibilityFiltered)
-          : selectedSectorIndexes
-    const filtered = applyHomeworldRegionSelection(
-      visibilityFiltered,
-      paintIndexes,
-      showEnvelopeOverlays
-    )
-    const selectedSectorIndex = resolveHomeworldSelectedSectorIndex(
-      selection,
       data.homeworldMarkers,
-      filtered
-    )
-    return applyHomeworldRegionStyle(filtered, { selectedSectorIndex })
-  }, [
-    data.regionOverlays,
-    data.homeworldMarkers,
-    visibilityKinds,
-    regionSelectionPreset,
-    selectedSectorIndexes,
-    showEnvelopeOverlays,
-    selection,
-  ])
+      visibilityKinds,
+      selectedSectorIndexes,
+      showEnvelopeOverlays,
+      selection,
+    ]
+  )
 
   return (
     <ReactFlow

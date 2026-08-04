@@ -95,10 +95,11 @@ export function toggleSectorIndexInSelection(
 }
 
 /**
- * Filter ``regionOverlays`` by selected sector indexes and envelope toggle.
+ * Filter ``regionOverlays`` for map paint by selected sector indexes and
+ * envelope toggle (``filterHomeworldSectorsForPaint`` semantics).
  * Non-homeworld overlays pass through unchanged.
  * Selected homeworld sectors keep outlines; envelope disks remain only when
- * ``showEnvelopeOverlays`` is true.
+ * ``showEnvelopeOverlays`` is true. Unselected homeworld sectors are omitted.
  */
 export function applyHomeworldRegionSelection(
   overlays: readonly MapRegionOverlay[],
