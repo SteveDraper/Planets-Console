@@ -26,32 +26,16 @@ import {
   useHomeworldLocatorRefreshMutation,
 } from './useHomeworldLocatorMutations'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
+import { planetIdFromMapNode } from './planetIdFromMapNode'
 import type { OwnershipAssertTarget } from './resolveOwnershipAssertTarget'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
 
-function planetIdFromBaseMapNode(node: MapNode): number | null {
-  const raw = node.planet?.id
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return Math.trunc(raw)
-  }
-  if (typeof raw === 'string' && raw.trim() !== '') {
-    const parsed = Number.parseInt(raw.trim(), 10)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  const localId = node.id.includes(':') ? node.id.slice(node.id.indexOf(':') + 1) : node.id
-  const match = /^p(\d+)$/.exec(localId)
-  if (match != null) {
-    return Number.parseInt(match[1]!, 10)
-  }
-  return null
-}
-
 function planetPositionsFromBaseMap(nodes: readonly MapNode[]): Map<number, { x: number; y: number }> {
   const out = new Map<number, { x: number; y: number }>()
   for (const node of nodes) {
-    const planetId = planetIdFromBaseMapNode(node)
+    const planetId = planetIdFromMapNode(node)
     if (planetId == null) continue
     out.set(planetId, { x: Number(node.x), y: Number(node.y) })
   }

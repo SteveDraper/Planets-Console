@@ -8,26 +8,10 @@ import { normalizeMapRegionOverlays } from '../../api/normalizeMapRegionOverlay'
 import type { MapAnalyticQueryContext, MapAnalyticRegistration } from '../mapAnalyticRegistry'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from './constants'
 import { fetchHomeworldLocatorMap } from './api'
+import { planetIdFromMapNode } from './planetIdFromMapNode'
 import type { HomeworldLocatorPayload, HomeworldMapMarker } from './wireSchema'
 
 export type { HomeworldMapMarkerDisplay }
-
-function planetIdFromMapNode(node: MapNode): number | null {
-  const raw = node.planet?.id
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return Math.trunc(raw)
-  }
-  if (typeof raw === 'string' && raw.trim() !== '') {
-    const parsed = Number.parseInt(raw.trim(), 10)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  const localId = node.id.includes(':') ? node.id.slice(node.id.indexOf(':') + 1) : node.id
-  const match = /^p(\d+)$/.exec(localId)
-  if (match != null) {
-    return Number.parseInt(match[1]!, 10)
-  }
-  return null
-}
 
 /** Resolve homeworld markers onto base-map planet coordinates. */
 export function resolveHomeworldMarkerDisplays(

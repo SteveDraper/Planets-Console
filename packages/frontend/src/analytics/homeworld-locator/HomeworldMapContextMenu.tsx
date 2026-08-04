@@ -23,6 +23,7 @@ import {
   resolveOwnershipRevokeSlots,
   type OwnershipAssertTarget,
 } from './resolveOwnershipAssertTarget'
+import { planetIdFromNodeId } from './planetIdFromMapNode'
 import { parseHomeworldSectorIndex } from './homeworldSectorIndex'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
 import { useHomeworldLocatorAssertionMutation } from './useHomeworldLocatorMutations'
@@ -57,22 +58,6 @@ type MenuTarget =
       clientX: number
       clientY: number
     }
-
-function planetIdFromNodeId(nodeId: string, nodes: readonly MapNode[]): number | null {
-  const node = nodes.find((row) => row.id === nodeId)
-  if (node?.planet?.id != null) {
-    const raw = node.planet.id
-    if (typeof raw === 'number' && Number.isFinite(raw)) return Math.trunc(raw)
-    if (typeof raw === 'string' && raw.trim() !== '') {
-      const parsed = Number.parseInt(raw.trim(), 10)
-      if (Number.isFinite(parsed)) return parsed
-    }
-  }
-  const localId = nodeId.includes(':') ? nodeId.slice(nodeId.indexOf(':') + 1) : nodeId
-  const match = /^p(\d+)$/.exec(localId)
-  if (match != null) return Number.parseInt(match[1]!, 10)
-  return null
-}
 
 /** True when the event target is inside the open menu (or the menu itself). */
 export function isEventInsideHomeworldMenu(
