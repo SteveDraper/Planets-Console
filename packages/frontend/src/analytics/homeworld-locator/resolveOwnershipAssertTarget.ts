@@ -99,32 +99,48 @@ export function resolveOwnershipAssertedSlots(
   return collectAssertedOwnerSlots(overlay)
 }
 
-/**
- * Owner submenu current-selection slots for highlighting.
- * Prefer asserted owners; otherwise a single inferred owner (sector
- * ``possibleOwners.length === 1``, or candidate ``boundOwnerSlot``).
- * Empty → highlight Unknown.
- */
-export function resolveOwnershipMenuSelectedSlots(
+export type OwnershipMenuSelection = {
+  /** Asserted owner slots highlighted in the roster. */
+  selectedOwnerSlots: number[]
+  /** Whether Unknown is the current selection (bold). */
+  unknownSelected: boolean
+}
+
+/** True when the target has a single inferred owner (not asserted). */
+function ownershipTargetHasInferredCurrent(
   overlays: readonly MapRegionOverlay[],
   target: OwnershipAssertTarget,
   options?: { boundOwnerSlot?: number | null }
-): number[] {
-  const asserted = resolveOwnershipAssertedSlots(overlays, target)
-  if (asserted.length > 0) return asserted
-
+): boolean {
   if (target.keying === 'sector') {
     const overlay = findHomeworldSectorOverlayByIndex(overlays, target.sectorIndex)
     const possibleOwners = overlay?.possibleOwners ?? []
     if (possibleOwners.length === 1) {
-      return [possibleOwners[0]!.ownerSlot]
+      return true
     }
   }
+  return options?.boundOwnerSlot != null
+}
 
-  if (options?.boundOwnerSlot != null) {
-    return [options.boundOwnerSlot]
+/**
+ * Owner submenu highlight state.
+ * Roster slots are asserted owners only. Unknown is bold only when there are
+ * no asserted owners and no inferred current (unique sector owner or bound slot).
+ */
+export function resolveOwnershipMenuSelection(
+  overlays: readonly MapRegionOverlay[],
+  target: OwnershipAssertTarget,
+  options?: { boundOwnerSlot?: number | null }
+): OwnershipMenuSelection {
+  const selectedOwnerSlots = resolveOwnershipAssertedSlots(overlays, target)
+  if (selectedOwnerSlots.length > 0) {
+    return { selectedOwnerSlots, unknownSelected: false }
   }
-  return []
+  const hasInferredCurrent = ownershipTargetHasInferredCurrent(overlays, target, options)
+  return {
+    selectedOwnerSlots: [],
+    unknownSelected: !hasInferredCurrent,
+  }
 }
 
 /**

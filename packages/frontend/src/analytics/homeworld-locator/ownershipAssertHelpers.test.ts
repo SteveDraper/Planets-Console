@@ -13,7 +13,7 @@ import {
   resolveOwnershipAssertedSlots,
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
-  resolveOwnershipMenuSelectedSlots,
+  resolveOwnershipMenuSelection,
   resolveOwnershipRevokeSlots,
 } from './resolveOwnershipAssertTarget'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
@@ -142,8 +142,8 @@ describe('resolveOwnershipAssertedSlots', () => {
   })
 })
 
-describe('resolveOwnershipMenuSelectedSlots', () => {
-  it('prefers asserted slots over inferred possibles', () => {
+describe('resolveOwnershipMenuSelection', () => {
+  it('highlights asserted slots only when present', () => {
     const overlay = {
       ...sectorOverlay(1),
       possibleOwners: [
@@ -152,21 +152,21 @@ describe('resolveOwnershipMenuSelectedSlots', () => {
       ],
     }
     expect(
-      resolveOwnershipMenuSelectedSlots([overlay], { keying: 'sector', sectorIndex: 1 })
-    ).toEqual([2])
+      resolveOwnershipMenuSelection([overlay], { keying: 'sector', sectorIndex: 1 })
+    ).toEqual({ selectedOwnerSlots: [2], unknownSelected: false })
   })
 
-  it('uses a single inferred sector owner when none are asserted', () => {
+  it('bolds neither owner nor Unknown for a single inferred sector owner', () => {
     const overlay = {
       ...sectorOverlay(1),
       possibleOwners: [{ ownerSlot: 4, provenanceKinds: ['ship_travel_envelope'] }],
     }
     expect(
-      resolveOwnershipMenuSelectedSlots([overlay], { keying: 'sector', sectorIndex: 1 })
-    ).toEqual([4])
+      resolveOwnershipMenuSelection([overlay], { keying: 'sector', sectorIndex: 1 })
+    ).toEqual({ selectedOwnerSlots: [], unknownSelected: false })
   })
 
-  it('stays Unknown when multiple inferred owners and no assert', () => {
+  it('bolds Unknown when multiple inferred owners and no assert', () => {
     const overlay = {
       ...sectorOverlay(1),
       possibleOwners: [
@@ -175,26 +175,32 @@ describe('resolveOwnershipMenuSelectedSlots', () => {
       ],
     }
     expect(
-      resolveOwnershipMenuSelectedSlots([overlay], { keying: 'sector', sectorIndex: 1 })
-    ).toEqual([])
+      resolveOwnershipMenuSelection([overlay], { keying: 'sector', sectorIndex: 1 })
+    ).toEqual({ selectedOwnerSlots: [], unknownSelected: true })
   })
 
-  it('uses candidate bound owner when planet-keyed and nothing asserted', () => {
+  it('bolds neither owner nor Unknown for a bound planet owner', () => {
     expect(
-      resolveOwnershipMenuSelectedSlots([], { keying: 'planet', planetId: 12 }, {
+      resolveOwnershipMenuSelection([], { keying: 'planet', planetId: 12 }, {
         boundOwnerSlot: 3,
       })
-    ).toEqual([3])
+    ).toEqual({ selectedOwnerSlots: [], unknownSelected: false })
   })
 
-  it('uses candidate bound owner when sector has no unique inferred owner', () => {
+  it('bolds neither when sector has no unique inferred owner but planet is bound', () => {
     expect(
-      resolveOwnershipMenuSelectedSlots(
+      resolveOwnershipMenuSelection(
         [sectorOverlay(1)],
         { keying: 'sector', sectorIndex: 1, planetId: 12 },
         { boundOwnerSlot: 5 }
       )
-    ).toEqual([5])
+    ).toEqual({ selectedOwnerSlots: [], unknownSelected: false })
+  })
+
+  it('bolds Unknown when nothing is asserted or inferred', () => {
+    expect(
+      resolveOwnershipMenuSelection([], { keying: 'planet', planetId: 12 })
+    ).toEqual({ selectedOwnerSlots: [], unknownSelected: true })
   })
 })
 

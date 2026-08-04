@@ -21,7 +21,7 @@ import {
   findHomeworldSectorAtMapPoint,
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
-  resolveOwnershipMenuSelectedSlots,
+  resolveOwnershipMenuSelection,
   resolveOwnershipRevokeSlots,
   type OwnershipAssertTarget,
 } from './resolveOwnershipAssertTarget'
@@ -70,24 +70,26 @@ export function isEventInsideHomeworldMenu(
 /**
  * Shared Owner submenu for planet and sector menus.
  * Roster picks upsert ownership; Unknown revokes asserted ownership for the target.
- * Current selection is bold: asserted owners, else a single inferred owner, else Unknown.
+ * Current selection is bold: asserted owners only; Unknown when truly empty.
  */
 function OwnerSubmenu({
   roster,
   disabled,
   selectedOwnerSlots,
+  unknownSelected,
   onPickOwner,
   onPickUnknown,
 }: {
   roster: readonly PerspectiveRow[]
   disabled: boolean
-  /** Asserted owner slots for this target; empty means Unknown is current. */
+  /** Asserted owner slots for this target. */
   selectedOwnerSlots: readonly number[]
+  /** Whether Unknown is the current selection (bold). */
+  unknownSelected: boolean
   onPickOwner: (ownerSlot: number) => void
   onPickUnknown: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const unknownSelected = selectedOwnerSlots.length === 0
 
   return (
     <div className="relative">
@@ -294,12 +296,12 @@ export function HomeworldMapContextMenu({
           boundOwnerSlot,
         })
       : []
-  const selectedOwnerSlots =
+  const ownershipMenuSelection =
     menu.ownership != null
-      ? resolveOwnershipMenuSelectedSlots(ownershipRegionOverlays, menu.ownership, {
+      ? resolveOwnershipMenuSelection(ownershipRegionOverlays, menu.ownership, {
           boundOwnerSlot,
         })
-      : []
+      : { selectedOwnerSlots: [], unknownSelected: false }
 
   const locationActions =
     menu.kind === 'planet'
@@ -386,7 +388,8 @@ export function HomeworldMapContextMenu({
           <OwnerSubmenu
             roster={roster}
             disabled={assertPending}
-            selectedOwnerSlots={selectedOwnerSlots}
+            selectedOwnerSlots={ownershipMenuSelection.selectedOwnerSlots}
+            unknownSelected={ownershipMenuSelection.unknownSelected}
             onPickOwner={(ownerSlot) => runOwnershipUpsert(ownerSlot, menu.ownership!)}
             onPickUnknown={() => {
               void runOwnershipUnknown(menu.ownership!)
