@@ -9,6 +9,7 @@ import {
   CONFIDENCE_DEFINITE,
   homeworldBaselineDegradedMessage,
 } from './constants'
+import { formatHomeworldPlanetHover } from './formatHomeworldPlanetHover'
 import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 import type { OwnershipAssertTarget } from './resolveOwnershipAssertTarget'
@@ -24,6 +25,10 @@ type HomeworldCandidateRowsSharedProps = {
   onSelectPlanet: (planetId: number) => void
   /** Compact layout for the narrow sidebar panel. */
   compact?: boolean
+  /** When false, omit the column header row (used inside sector sections). */
+  showHeader?: boolean
+  /** Override empty-state copy (sector sections use a quieter message). */
+  emptyMessage?: string
 }
 
 export type HomeworldCandidateRowsInteractiveProps = HomeworldCandidateRowsSharedProps & {
@@ -72,6 +77,8 @@ export function HomeworldCandidateRows(props: HomeworldCandidateRowsProps) {
     selectedPlanetId,
     onSelectPlanet,
     compact = false,
+    showHeader = true,
+    emptyMessage = 'No homeworld candidates inferred.',
   } = props
   const mutationPending = mode === 'interactive' ? (props.mutationPending ?? false) : false
   const cellPad = compact ? 'px-1.5 py-1' : 'px-3 py-2'
@@ -97,29 +104,31 @@ export function HomeworldCandidateRows(props: HomeworldCandidateRowsProps) {
             compact ? 'px-0.5 py-1 text-[11px]' : 'px-2 py-2 text-sm'
           )}
         >
-          No homeworld candidates inferred.
+          {emptyMessage}
         </div>
       ) : (
         <div className="overflow-auto">
           <table className={cn('min-w-full border-collapse', textSize)}>
-            <thead>
-              <tr className="border-b border-[#52575d]">
-                <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Planet</th>
-                <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Owner</th>
-                <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>
-                  Confidence
-                </th>
-                {!compact ? (
+            {showHeader ? (
+              <thead>
+                <tr className="border-b border-[#52575d]">
+                  <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Planet</th>
+                  <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Owner</th>
                   <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>
-                    Attribution
+                    Confidence
                   </th>
-                ) : null}
-                <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Asserted</th>
-                {mode === 'interactive' ? (
-                  <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Actions</th>
-                ) : null}
-              </tr>
-            </thead>
+                  {!compact ? (
+                    <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>
+                      Attribution
+                    </th>
+                  ) : null}
+                  <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Asserted</th>
+                  {mode === 'interactive' ? (
+                    <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Actions</th>
+                  ) : null}
+                </tr>
+              </thead>
+            ) : null}
             <tbody>
               {rows.map((row) => {
                 const selected = selectedPlanetId === row.planetId
@@ -133,6 +142,7 @@ export function HomeworldCandidateRows(props: HomeworldCandidateRowsProps) {
                       selected && 'bg-sky-500/15',
                       'cursor-pointer'
                     )}
+                    title={formatHomeworldPlanetHover(row, roster)}
                     onClick={() => onSelectPlanet(row.planetId)}
                     aria-selected={selected}
                   >

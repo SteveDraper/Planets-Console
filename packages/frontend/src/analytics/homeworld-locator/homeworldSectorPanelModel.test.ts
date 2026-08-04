@@ -1,0 +1,182 @@
+/**
+ * Unit tests for homeworld sector accordion panel model helpers.
+ */
+
+import { describe, expect, it } from 'vitest'
+import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
+import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
+import {
+  buildHomeworldSectorPanelModel,
+  clockwiseFromNorthSortKey,
+  homeworldSectorAccordionTitle,
+  sectorMidAngleRadians,
+  sortCandidatesPreferredFirst,
+  sortHomeworldSectorsNorthernmostClockwise,
+} from './homeworldSectorPanelModel'
+import type { HomeworldCandidateRecord } from './wireSchema'
+
+/** Annular quarter-sector at origin spanning [angleStart, angleEnd] (CCW). */
+function annularSector(
+  id: string,
+  angleStart: number,
+  angleEnd: number,
+  overrides: Partial<MapRegionOverlay> = {}
+): MapRegionOverlay {
+  const rOuter = 200
+  const rInner = 100
+  return {
+    kind: HOMEWORLD_SECTOR_KIND,
+    id,
+    fillColor: '#f97316',
+    fillOpacity: 0,
+    geometry: {
+      type: 'boundary',
+      vertices: [
+        { x: rOuter * Math.cos(angleStart), y: rOuter * Math.sin(angleStart) },
+        { x: rOuter * Math.cos(angleEnd), y: rOuter * Math.sin(angleEnd) },
+        { x: rInner * Math.cos(angleEnd), y: rInner * Math.sin(angleEnd) },
+        { x: rInner * Math.cos(angleStart), y: rInner * Math.sin(angleStart) },
+      ],
+      edges: [
+        { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+        { type: 'line' },
+        { type: 'arc', centerX: 0, centerY: 0, clockwise: true },
+        { type: 'line' },
+      ],
+    },
+    isPinned: false,
+    status: 'ok',
+    candidateCount: 0,
+    ...overrides,
+  }
+}
+
+function candidate(
+  overrides: Partial<HomeworldCandidateRecord> & Pick<HomeworldCandidateRecord, 'planetId'>
+): HomeworldCandidateRecord {
+  return {
+    planetId: overrides.planetId,
+    perspective: 'perspective' in overrides ? overrides.perspective! : 1,
+    confidenceTier: overrides.confidenceTier ?? 'possible',
+    attribution: overrides.attribution ?? 'inferred',
+    assertedCue: overrides.assertedCue ?? false,
+    locationAsserted: overrides.locationAsserted ?? false,
+    isMostProbable: overrides.isMostProbable ?? false,
+  }
+}
+
+describe('homeworldSectorPanelModel', () => {
+  it('computes mid-angle from outer arc endpoints', () => {
+    // North-east quarter: 0 → π/2, mid = π/4
+    const overlay = annularSector('homeworld-sector-0', 0, Math.PI / 2)
+    const mid = sectorMidAngleRadians(overlay)
+    expect(mid).not.toBeNull()
+    expect(mid!).toBeCloseTo(Math.PI / 4, 5)
+  })
+
+  it('sorts sectors northernmost then clockwise', () => {
+    // Four equal sectors: mid-angles at 0 (east), π/2 (north), π (west), -π/2 (south)
+    const east = annularSector('homeworld-sector-0', -Math.PI / 4, Math.PI / 4)
+    const north = annularSector('homeworld-sector-1', Math.PI / 4, (3 * Math.PI) / 4)
+    const west = annularSector('homeworld-sector-2', (3 * Math.PI) / 4, (5 * Math.PI) / 4)
+    const south = annularSector('homeworld-sector-3', (5 * Math.PI) / 4, (7 * Math.PI) / 4)
+
+    const ordered = sortHomeworldSectorsNorthernmostClockwise([east, south, west, north])
+    expect(ordered.map((o) => o.id)).toEqual([
+      'homeworld-sector-1', // north
+      'homeworld-sector-0', // east (clockwise from north)
+      'homeworld-sector-3', // south
+      'homeworld-sector-2', // west
+    ])
+  })
+
+  it('places northernmost first in clockwise-from-north keys', () => {
+    expect(clockwiseFromNorthSortKey(Math.PI / 2)).toBeCloseTo(0, 5)
+    expect(clockwiseFromNorthSortKey(0)).toBeCloseTo(Math.PI / 2, 5)
+  })
+
+  it('titles sectors from playerLabel, unique owner, or Unknown', () => {
+    expect(
+      homeworldSectorAccordionTitle(
+        annularSector('homeworld-sector-0', 0, Math.PI / 2, {
+          playerLabel: 'alice (The Federation)',
+        })
+      )
+    ).toBe('alice (The Federation)')
+
+    expect(
+      homeworldSectorAccordionTitle(
+        annularSector('homeworld-sector-1', 0, Math.PI / 2, {
+          possibleOwners: [
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['ship_travel_envelope'],
+              playerLabel: 'bob (The Lizards)',
+            },
+          ],
+        })
+      )
+    ).toBe('bob (The Lizards)')
+
+    expect(
+      homeworldSectorAccordionTitle(
+        annularSector('homeworld-sector-2', 0, Math.PI / 2, {
+          possibleOwners: [
+            { ownerSlot: 1, provenanceKinds: ['nearby_planet_ownership'] },
+            { ownerSlot: 3, provenanceKinds: ['ship_travel_envelope'] },
+          ],
+        })
+      )
+    ).toBe('Unknown')
+  })
+
+  it('orders candidates preferred-first', () => {
+    const rows = [
+      candidate({ planetId: 30, confidenceTier: 'possible', isMostProbable: false }),
+      candidate({ planetId: 10, confidenceTier: 'definite' }),
+      candidate({ planetId: 20, confidenceTier: 'possible', isMostProbable: true }),
+      candidate({ planetId: 11, confidenceTier: 'definite' }),
+    ]
+    expect(sortCandidatesPreferredFirst(rows).map((r) => r.planetId)).toEqual([
+      10, 11, 20, 30,
+    ])
+  })
+
+  it('builds flat model when no sector overlays', () => {
+    const rows = [
+      candidate({ planetId: 2, confidenceTier: 'possible' }),
+      candidate({ planetId: 1, confidenceTier: 'definite' }),
+    ]
+    const model = buildHomeworldSectorPanelModel(rows, [], new Map())
+    expect(model.kind).toBe('flat')
+    if (model.kind === 'flat') {
+      expect(model.candidates.map((r) => r.planetId)).toEqual([1, 2])
+    }
+  })
+
+  it('groups candidates into sectors by map position', () => {
+    const north = annularSector('homeworld-sector-1', Math.PI / 4, (3 * Math.PI) / 4, {
+      playerLabel: 'north-owner',
+      candidateCount: 1,
+    })
+    const east = annularSector('homeworld-sector-0', -Math.PI / 4, Math.PI / 4, {
+      candidateCount: 1,
+    })
+    const rows = [
+      candidate({ planetId: 100, confidenceTier: 'possible', isMostProbable: true }),
+      candidate({ planetId: 101, confidenceTier: 'definite' }),
+    ]
+    const positions = new Map([
+      [100, { x: 150, y: 0 }], // east
+      [101, { x: 0, y: 150 }], // north
+    ])
+    const model = buildHomeworldSectorPanelModel(rows, [east, north], positions)
+    expect(model.kind).toBe('sectors')
+    if (model.kind === 'sectors') {
+      expect(model.sections.map((s) => s.title)).toEqual(['north-owner', 'Unknown'])
+      expect(model.sections[0]!.candidates.map((c) => c.planetId)).toEqual([101])
+      expect(model.sections[1]!.candidates.map((c) => c.planetId)).toEqual([100])
+      expect(model.unassigned).toEqual([])
+    }
+  })
+})

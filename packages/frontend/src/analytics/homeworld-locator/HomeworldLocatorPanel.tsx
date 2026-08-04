@@ -1,14 +1,15 @@
 /**
- * Homeworld locator sidebar panel: candidate table, assert/revoke, refresh (#37).
+ * Homeworld locator sidebar panel: sector accordion, assert/revoke, refresh (#37 / #283).
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import type { AnalyticShellScope, MapNode } from '../../api/bff'
+import type { AnalyticShellScope } from '../../api/bff'
 import { fetchAnalyticMap } from '../../api/bff'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
+import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelection'
 import { BASE_MAP_ANALYTIC_ID } from '../mapAnalyticIds'
 import { fetchHomeworldLocatorTable } from './api'
 import { buildPlanetOwnershipTargets } from './buildPlanetOwnershipTargets'
@@ -17,6 +18,8 @@ import {
   homeworldInactiveHint,
 } from './constants'
 import { HomeworldCandidateRows } from './HomeworldCandidateRows'
+import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
+import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
 import {
   fetchHomeworldLocatorMapDataResponse,
   homeworldLocatorMapQueryKey,
@@ -28,21 +31,12 @@ import {
   useHomeworldLocatorRefreshMutation,
 } from './useHomeworldLocatorMutations'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
-import { planetIdFromMapNode } from './planetIdFromMapNode'
+import { planetPositionsFromBaseMap } from './planetPositionsFromBaseMap'
 import type { OwnershipAssertTarget } from './resolveOwnershipAssertTarget'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
-
-function planetPositionsFromBaseMap(nodes: readonly MapNode[]): Map<number, { x: number; y: number }> {
-  const out = new Map<number, { x: number; y: number }>()
-  for (const node of nodes) {
-    const planetId = planetIdFromMapNode(node)
-    if (planetId == null) continue
-    out.set(planetId, { x: Number(node.x), y: Number(node.y) })
-  }
-  return out
-}
+const EMPTY_POSITIONS: ReadonlyMap<number, { x: number; y: number }> = new Map()
 
 export type HomeworldLocatorPanelProps = {
   analyticScope: AnalyticShellScope | null
@@ -82,6 +76,29 @@ export function HomeworldLocatorPanel({
     enabled: fetchEnabled && analyticScope != null && needsBaseMap,
   })
 
+  const selectedSectorIndexes = useHomeworldRegionSelectionStore(
+    (s) => s.selectedSectorIndexes
+  )
+  const toggleSectorIndex = useHomeworldRegionSelectionStore((s) => s.toggleSectorIndex)
+  const syncSelectionWithOverlays = useHomeworldRegionSelectionStore(
+    (s) => s.syncSelectionWithOverlays
+  )
+
+  useEffect(() => {
+    if (!mapQuery.isSuccess || overlays.length === 0) return
+    syncSelectionWithOverlays(overlays)
+  }, [mapQuery.isSuccess, overlays, syncSelectionWithOverlays])
+
+  const selectedSectorIndexSet = useMemo(
+    () => new Set(selectedSectorIndexes),
+    [selectedSectorIndexes]
+  )
+
+  const planetPositions = useMemo(() => {
+    if (!baseMapQuery.isSuccess) return EMPTY_POSITIONS
+    return planetPositionsFromBaseMap(baseMapQuery.data?.nodes ?? [])
+  }, [baseMapQuery.isSuccess, baseMapQuery.data?.nodes])
+
   const ownershipByPlanet = useMemo(() => {
     // Empty overlays before map success only mean "still loading", not "no sectors".
     if (!mapQuery.isSuccess) {
@@ -100,15 +117,22 @@ export function HomeworldLocatorPanel({
     if (!baseMapQuery.isSuccess) {
       return new Map<number, OwnershipAssertTarget>()
     }
-    const positions = planetPositionsFromBaseMap(baseMapQuery.data?.nodes ?? [])
-    return buildPlanetOwnershipTargets(overlays, positions)
+    return buildPlanetOwnershipTargets(overlays, planetPositions)
   }, [
     mapQuery.isSuccess,
     overlays,
     baseMapQuery.isSuccess,
-    baseMapQuery.data?.nodes,
+    planetPositions,
     tableQuery.data?.rows,
   ])
+
+  const panelModel = useMemo(() => {
+    const rows: readonly HomeworldCandidateRecord[] = tableQuery.data?.rows ?? []
+    if (!mapQuery.isSuccess) {
+      return buildHomeworldSectorPanelModel(rows, EMPTY_OVERLAYS, EMPTY_POSITIONS)
+    }
+    return buildHomeworldSectorPanelModel(rows, overlays, planetPositions)
+  }, [tableQuery.data?.rows, mapQuery.isSuccess, overlays, planetPositions])
 
   const assertMutation = useHomeworldLocatorAssertionMutation(analyticScope)
   const assertPending = useHomeworldLocatorAssertionPending(analyticScope)
@@ -143,8 +167,31 @@ export function HomeworldLocatorPanel({
     )
   }
 
-  const rows: readonly HomeworldCandidateRecord[] = data.rows ?? []
   const mutationError = assertError ?? refreshMutation.error
+  const interactiveRowProps = {
+    roster,
+    selectedPlanetId,
+    onSelectPlanet,
+    mutationPending,
+    resolveOwnershipTarget: (row: HomeworldCandidateRecord) =>
+      ownershipByPlanet.get(row.planetId) ?? null,
+    onAssertLocation: (planetId: number) =>
+      assertMutation.mutate({
+        axis: 'location' as const,
+        action: 'upsert' as const,
+        planetId,
+      }),
+    onRevokeLocation: (planetId: number) =>
+      assertMutation.mutate({
+        axis: 'location' as const,
+        action: 'revoke' as const,
+        planetId,
+      }),
+    onAssertOwnership: (target: OwnershipAssertTarget, ownerSlot: number) =>
+      assertMutation.mutate(buildOwnershipAssertionBody('upsert', ownerSlot, target)),
+    onRevokeOwnership: (target: OwnershipAssertTarget, ownerSlot: number) =>
+      assertMutation.mutate(buildOwnershipAssertionBody('revoke', ownerSlot, target)),
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
@@ -171,38 +218,28 @@ export function HomeworldLocatorPanel({
           {errorDetailFromUnknown(baseMapQuery.error)}
         </p>
       ) : null}
-      <HomeworldCandidateRows
-        rows={rows}
-        baselineDegraded={data.baselineDegraded}
-        baselineTurn={data.baselineTurn}
-        mode="interactive"
-        compact
-        roster={roster}
-        selectedPlanetId={selectedPlanetId}
-        onSelectPlanet={onSelectPlanet}
-        mutationPending={mutationPending}
-        resolveOwnershipTarget={(row) => ownershipByPlanet.get(row.planetId) ?? null}
-        onAssertLocation={(planetId) =>
-          assertMutation.mutate({
-            axis: 'location',
-            action: 'upsert',
-            planetId,
-          })
-        }
-        onRevokeLocation={(planetId) =>
-          assertMutation.mutate({
-            axis: 'location',
-            action: 'revoke',
-            planetId,
-          })
-        }
-        onAssertOwnership={(target, ownerSlot) =>
-          assertMutation.mutate(buildOwnershipAssertionBody('upsert', ownerSlot, target))
-        }
-        onRevokeOwnership={(target, ownerSlot) =>
-          assertMutation.mutate(buildOwnershipAssertionBody('revoke', ownerSlot, target))
-        }
-      />
+      {panelModel.kind === 'sectors' ? (
+        <HomeworldSectorAccordion
+          mode="interactive"
+          sections={panelModel.sections}
+          unassigned={panelModel.unassigned}
+          baselineDegraded={data.baselineDegraded}
+          baselineTurn={data.baselineTurn}
+          compact
+          selectedSectorIndexes={selectedSectorIndexSet}
+          onToggleSectorIndex={toggleSectorIndex}
+          {...interactiveRowProps}
+        />
+      ) : (
+        <HomeworldCandidateRows
+          rows={panelModel.candidates}
+          baselineDegraded={data.baselineDegraded}
+          baselineTurn={data.baselineTurn}
+          mode="interactive"
+          compact
+          {...interactiveRowProps}
+        />
+      )}
     </div>
   )
 }
