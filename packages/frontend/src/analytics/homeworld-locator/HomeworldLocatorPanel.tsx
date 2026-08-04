@@ -96,8 +96,12 @@ export function HomeworldLocatorPanel({
   })
 
   const ownershipByPlanet = useMemo(() => {
+    // Empty overlays before map success only mean "still loading", not "no sectors".
+    if (!mapQuery.isSuccess) {
+      return new Map<number, OwnershipAssertTarget>()
+    }
     const positions = planetPositionsFromBaseMap(baseMapQuery.data?.nodes ?? [])
-    // When no sector overlays, planet-keyed targets for every table row.
+    // When map settled with no sector overlays, planet-keyed targets for every table row.
     if (overlays.length === 0) {
       const rows = tableQuery.data?.rows ?? []
       const map = new Map<number, OwnershipAssertTarget>()
@@ -107,7 +111,7 @@ export function HomeworldLocatorPanel({
       return map
     }
     return buildPlanetOwnershipTargets(overlays, positions)
-  }, [overlays, baseMapQuery.data?.nodes, tableQuery.data?.rows])
+  }, [mapQuery.isSuccess, overlays, baseMapQuery.data?.nodes, tableQuery.data?.rows])
 
   const assertMutation = useHomeworldLocatorAssertionMutation(analyticScope)
   const refreshMutation = useHomeworldLocatorRefreshMutation(analyticScope)

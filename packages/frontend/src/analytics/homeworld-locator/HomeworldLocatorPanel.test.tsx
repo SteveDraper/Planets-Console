@@ -113,6 +113,45 @@ describe('HomeworldLocatorPanel', () => {
     })
   })
 
+  it('hides ownership controls until map query succeeds', async () => {
+    let resolveMap!: (value: Awaited<ReturnType<typeof fetchHomeworldLocatorMap>>) => void
+    const mapDeferred = new Promise<Awaited<ReturnType<typeof fetchHomeworldLocatorMap>>>((resolve) => {
+      resolveMap = resolve
+    })
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [
+        {
+          planetId: 12,
+          perspective: 1,
+          confidenceTier: 'definite',
+          attribution: 'inferred',
+          assertedCue: false,
+          isMostProbable: false,
+        },
+      ],
+    })
+    vi.mocked(fetchHomeworldLocatorMap).mockReturnValue(mapDeferred)
+
+    renderPanel()
+
+    expect(await screen.findByText('12')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/assert ownership for planet 12/i)).not.toBeInTheDocument()
+
+    resolveMap({
+      analyticId: 'homeworld-locator',
+      available: true,
+      baselineDegraded: false,
+      regionOverlays: [],
+      markers: [],
+    })
+
+    expect(await screen.findByLabelText(/assert ownership for planet 12/i)).toBeInTheDocument()
+  })
+
   it('posts ownership upsert with perspective slot ordinal, not host playerId', async () => {
     const user = userEvent.setup()
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
