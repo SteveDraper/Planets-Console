@@ -1,0 +1,99 @@
+/**
+ * Ownership inference hover copy from structured possible-owner facts.
+ * Core emits kind tags + counts + winning strength; English templates live here
+ * (ADR 0008).
+ */
+
+import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
+import { PROVENANCE_KIND_ASSERTED } from './constants'
+
+/** Core machine kind for ship travel-envelope ownership evidence. */
+export const PROVENANCE_KIND_SHIP_TRAVEL_ENVELOPE = 'ship_travel_envelope'
+
+/** Core machine kind for nearby planetary ownership sightings. */
+export const PROVENANCE_KIND_NEARBY_PLANET_OWNERSHIP = 'nearby_planet_ownership'
+
+/** Core machine kind for preferred-candidate planetary ownership sightings. */
+export const PROVENANCE_KIND_PREFERRED_CANDIDATE_OWNERSHIP =
+  'preferred_candidate_ownership'
+
+export type OwnershipInferenceEvidence = Pick<
+  MapRegionPossibleOwner,
+  'provenanceKinds' | 'provenanceKindCounts'
+>
+
+export type FormatOwnershipInferenceOptions = {
+  /** Overlay ``ownershipWinningStrength`` after display projection. */
+  winningStrength?: string | null
+}
+
+function observationCount(
+  evidence: OwnershipInferenceEvidence,
+  kind: string
+): number {
+  const counts = evidence.provenanceKindCounts
+  if (counts != null && Object.keys(counts).length > 0) {
+    return counts[kind] ?? 0
+  }
+  // Legacy wire: unique kinds only -- presence is at least one observation.
+  return evidence.provenanceKinds.includes(kind) ? 1 : 0
+}
+
+/**
+ * Ownership status label with ship/planet observation counts when evidence is
+ * present. Asserted → ``asserted``; unique strong → ``definite``; weak →
+ * ``inferred``.
+ *
+ * Returns null when there is no ownership evidence to summarize.
+ */
+export function formatHomeworldOwnershipInferenceSummary(
+  evidence: OwnershipInferenceEvidence | null | undefined,
+  options: FormatOwnershipInferenceOptions = {}
+): string | null {
+  if (evidence == null) return null
+  if (evidence.provenanceKinds.length === 0) return null
+
+  if (
+    evidence.provenanceKinds.includes(PROVENANCE_KIND_ASSERTED) ||
+    options.winningStrength === 'asserted'
+  ) {
+    return 'asserted'
+  }
+
+  const shipObservations = observationCount(
+    evidence,
+    PROVENANCE_KIND_SHIP_TRAVEL_ENVELOPE
+  )
+  const planetObservations =
+    observationCount(evidence, PROVENANCE_KIND_NEARBY_PLANET_OWNERSHIP) +
+    observationCount(evidence, PROVENANCE_KIND_PREFERRED_CANDIDATE_OWNERSHIP)
+
+  const status =
+    options.winningStrength === 'strong' ||
+    evidence.provenanceKinds.includes(PROVENANCE_KIND_SHIP_TRAVEL_ENVELOPE)
+      ? 'definite'
+      : 'inferred'
+
+  return (
+    `${status} (ship observations: ${shipObservations}, ` +
+    `planet observations: ${planetObservations})`
+  )
+}
+
+/**
+ * Pick the ownership-evidence member that applies to a candidate row:
+ * matching perspective slot, else the unique sector owner, else null.
+ */
+export function resolveOwnershipEvidenceForCandidate(
+  possibleOwners: readonly MapRegionPossibleOwner[] | undefined,
+  perspective: number | null
+): MapRegionPossibleOwner | null {
+  const owners = possibleOwners ?? []
+  if (owners.length === 0) return null
+  if (perspective != null) {
+    const matched = owners.find((owner) => owner.ownerSlot === perspective)
+    if (matched != null) return matched
+  }
+  if (owners.length === 1) return owners[0]!
+  return null
+}

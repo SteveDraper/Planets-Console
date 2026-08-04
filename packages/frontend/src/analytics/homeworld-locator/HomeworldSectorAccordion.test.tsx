@@ -2,7 +2,7 @@
  * RTL tests for homeworld sector accordion: order, titles, expand, selection chrome, tooltips.
  */
 
-import { render, screen, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
@@ -91,7 +91,6 @@ describe('HomeworldSectorAccordion', () => {
     })
     render(
       <HomeworldSectorAccordion
-        mode="readOnly"
         sections={[
           section(1, 'alice (The Federation)', north, [candidate({ planetId: 101 })]),
           section(0, 'Unknown', east, [candidate({ planetId: 100 })], 'ambiguous · 1 candidate homeworld'),
@@ -126,7 +125,7 @@ describe('HomeworldSectorAccordion', () => {
     expect(eastSection).toHaveAttribute('data-selected', 'false')
   })
 
-  it('expands/collapses and shows preferred-first candidates with planet hover title', async () => {
+  it('starts collapsed and expands to show preferred-first candidates', async () => {
     const user = userEvent.setup()
     const north = annularSector('homeworld-sector-1', Math.PI / 4, (3 * Math.PI) / 4, {
       playerLabel: 'alice (The Federation)',
@@ -137,7 +136,6 @@ describe('HomeworldSectorAccordion', () => {
     ]
     render(
       <HomeworldSectorAccordion
-        mode="readOnly"
         sections={[section(1, 'alice (The Federation)', north, rows)]}
         unassigned={[]}
         baselineDegraded={false}
@@ -151,6 +149,8 @@ describe('HomeworldSectorAccordion', () => {
       />
     )
 
+    expect(screen.queryByText('10')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /expand sector alice/i }))
     expect(screen.getByText('10')).toBeInTheDocument()
     expect(screen.getByText('20')).toBeInTheDocument()
     const planetRow = screen.getByText('10').closest('tr')
@@ -161,8 +161,6 @@ describe('HomeworldSectorAccordion', () => {
 
     await user.click(screen.getByRole('button', { name: /collapse sector alice/i }))
     expect(screen.queryByText('10')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /expand sector alice/i }))
-    expect(screen.getByText('10')).toBeInTheDocument()
   })
 
   it('toggles sector selection from the title bar', async () => {
@@ -174,14 +172,13 @@ describe('HomeworldSectorAccordion', () => {
     })
     render(
       <HomeworldSectorAccordion
-        mode="readOnly"
         sections={[
           section(
             1,
             'alice (The Federation)',
             north,
             [candidate({ planetId: 101 })],
-            'player: alice (The Federation) · 1 candidate homeworld'
+            'player: alice (The Federation) · definite · 1 candidate homeworld'
           ),
         ]}
         unassigned={[]}
@@ -198,19 +195,19 @@ describe('HomeworldSectorAccordion', () => {
     const title = screen.getByRole('button', { name: /toggle sector selection: alice/i })
     expect(title).toHaveAttribute(
       'title',
-      'player: alice (The Federation) · 1 candidate homeworld'
+      'player: alice (The Federation) · definite · 1 candidate homeworld'
     )
     await user.click(title)
     expect(onToggle).toHaveBeenCalledWith(1)
   })
 
-  it('keeps assert actions in interactive mode', () => {
+  it('shows degraded baseline and omits assert controls (map menu owns asserts)', async () => {
+    const user = userEvent.setup()
     const north = annularSector('homeworld-sector-1', Math.PI / 4, (3 * Math.PI) / 4, {
       playerLabel: 'alice (The Federation)',
     })
     render(
       <HomeworldSectorAccordion
-        mode="interactive"
         sections={[
           section(1, 'alice (The Federation)', north, [
             candidate({ planetId: 12, confidenceTier: 'definite' }),
@@ -225,18 +222,49 @@ describe('HomeworldSectorAccordion', () => {
         selectedSectorIndexes={new Set([1])}
         onToggleSectorIndex={vi.fn()}
         compact
-        mutationPending={false}
-        resolveOwnershipTarget={() => ({ keying: 'planet', planetId: 12 })}
-        onAssertLocation={vi.fn()}
-        onRevokeLocation={vi.fn()}
-        onAssertOwnership={vi.fn()}
-        onRevokeOwnership={vi.fn()}
       />
     )
 
     expect(screen.getByRole('status')).toHaveTextContent(/Baseline degraded/)
-    const sectionEl = document.querySelector('[data-sector-index="1"]')
-    expect(sectionEl).toBeInstanceOf(HTMLElement)
-    expect(within(sectionEl as HTMLElement).getByRole('button', { name: /assert hw/i })).toBeInTheDocument()
+    expect(screen.queryByText('12')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /expand sector alice/i }))
+    expect(screen.getByText('12')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /assert hw/i })).not.toBeInTheDocument()
+  })
+
+  it('omits Owner under sector sections but keeps it for Unassigned', async () => {
+    const user = userEvent.setup()
+    const north = annularSector('homeworld-sector-1', Math.PI / 4, (3 * Math.PI) / 4, {
+      playerLabel: 'alice (The Federation)',
+    })
+    render(
+      <HomeworldSectorAccordion
+        sections={[
+          section(1, 'alice (The Federation)', north, [
+            candidate({ planetId: 12, perspective: 1, confidenceTier: 'definite' }),
+          ]),
+        ]}
+        unassigned={[candidate({ planetId: 99, perspective: 2 })]}
+        baselineDegraded={false}
+        baselineTurn={null}
+        roster={[
+          perspectiveRow(1, 'alice', { raceName: 'The Federation' }),
+          perspectiveRow(2, 'bob', { raceName: 'The Lizards' }),
+        ]}
+        selectedPlanetId={null}
+        onSelectPlanet={vi.fn()}
+        selectedSectorIndexes={new Set([1])}
+        onToggleSectorIndex={vi.fn()}
+        compact
+      />
+    )
+
+    expect(screen.getByText('bob (The Lizards)')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /expand sector alice/i }))
+    const sectorEl = document.querySelector('[data-sector-index="1"]')
+    expect(sectorEl).toBeInstanceOf(HTMLElement)
+    expect(sectorEl!.textContent).toContain('12')
+    // Sector title carries ownership; candidate row must not repeat owner label.
+    expect(sectorEl!.querySelector('tbody')?.textContent).not.toContain('alice (The Federation)')
   })
 })

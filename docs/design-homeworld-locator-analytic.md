@@ -251,7 +251,7 @@ Empty / unknown `ownerid` does not contribute. Ownership sightings **add** to th
 
 **Materialize order:** after location promote + co-sector cull + definite-neighborhood cull; **before** layout prior. Ownership apply updates sector owner sets (and unique-owner orphan bind when applicable); layout prior still keys off candidate tiers / pins.
 
-**Wire / UI (minimal for #269):** sector `regionOverlays` carry possible-owner facts (slot ids, roster labels, provenance kind counts or short machine tags). SPA hover (`formatHomeworldSectorHoverLine`) shows a single owner when `|set|=1`, else **ambiguous** plus the possible owners when `|set|>1`. No new sidebar panel in this ticket.
+**Wire / UI (minimal for #269):** sector `regionOverlays` carry **display-projected** possible-owner facts (slot ids, roster labels, provenance kind counts, winning strength). Projection (overlay emit only -- not durable trim): max-strength contenders per ADR 0010, then drop slots uniquely settled strong/asserted (or definite slot-anchored location pin) on another sector so assert changes cannot leave sticky holes. SPA hover shows a single owner when `|set|=1` (`definite` when winning strength is strong, `inferred` when weak, `asserted` when asserted), else **ambiguous** plus the possible owners when `|set|>1`. Accordion titles follow the same projected set (not raw `playerLabel` over multi-member evidence).
 
 #### 4.3.3 Homeworld layout prior selection ([#36](https://github.com/SteveDraper/Planets-Console/issues/36), upgraded by [#270](https://github.com/SteveDraper/Planets-Console/issues/270))
 

@@ -185,7 +185,7 @@ describe('mapRegionOverlayHitTest', () => {
         50,
         formatHomeworldSectorHoverLine
       )
-    ).toEqual(['player: alice · 1 candidate homeworld'])
+    ).toEqual(['player: alice · definite · 1 candidate homeworld'])
     expect(pointHitsMapRegionOverlay(150, 50, hit)).toBe(true)
     expect(pointHitsMapRegionOverlay(150, 50, miss)).toBe(false)
   })

@@ -7,13 +7,67 @@ import type {
   MapRegionOverlay,
   MapRegionPossibleOwner,
 } from '../../api/mapRegionOverlayTypes'
+import { formatHomeworldOwnershipInferenceSummary } from './formatHomeworldOwnershipInference'
 import { isHomeworldSectorOverlay } from './homeworldSectorIndex'
 
-function formatPossibleOwnerDisplay(owner: MapRegionPossibleOwner): string {
-  if (owner.playerLabel != null && owner.playerLabel !== '') {
-    return owner.playerLabel
+function formatPossibleOwnerDisplay(
+  owner: MapRegionPossibleOwner,
+  winningStrength: string | null | undefined
+): string {
+  const label =
+    owner.playerLabel != null && owner.playerLabel !== ''
+      ? owner.playerLabel
+      : `slot ${owner.ownerSlot}`
+  const inference = formatHomeworldOwnershipInferenceSummary(owner, {
+    winningStrength,
+  })
+  return inference != null ? `${label} · ${inference}` : label
+}
+
+/**
+ * Append ownership-evidence hover parts.
+ * When ``includeOwnerLabels`` is false (pinned sectors), only the inference
+ * summary is added so the determined player identity is not repeated.
+ */
+function appendOwnershipEvidenceParts(
+  parts: string[],
+  possibleOwners: readonly MapRegionPossibleOwner[],
+  options: { includeOwnerLabels: boolean; winningStrength?: string | null }
+): void {
+  if (possibleOwners.length === 0) return
+
+  if (!options.includeOwnerLabels) {
+    if (possibleOwners.length === 1) {
+      const summary = formatHomeworldOwnershipInferenceSummary(possibleOwners[0]!, {
+        winningStrength: options.winningStrength,
+      })
+      if (summary != null) parts.push(summary)
+      return
+    }
+    parts.push('ambiguous')
+    parts.push(
+      `homeworld owners: ${possibleOwners
+        .map((owner) => formatPossibleOwnerDisplay(owner, options.winningStrength))
+        .join(', ')}`
+    )
+    return
   }
-  return `slot ${owner.ownerSlot}`
+
+  if (possibleOwners.length === 1) {
+    parts.push(
+      `homeworld owner: ${formatPossibleOwnerDisplay(
+        possibleOwners[0]!,
+        options.winningStrength
+      )}`
+    )
+    return
+  }
+  parts.push('ambiguous')
+  parts.push(
+    `homeworld owners: ${possibleOwners
+      .map((owner) => formatPossibleOwnerDisplay(owner, options.winningStrength))
+      .join(', ')}`
+  )
 }
 
 /** Format one homeworld-sector overlay into a tooltip line, or null if not applicable. */
@@ -25,22 +79,29 @@ export function formatHomeworldSectorHoverLine(
 
   const parts: string[] = []
   const possibleOwners = overlay.possibleOwners ?? []
+  const winningStrength = overlay.ownershipWinningStrength
 
-  // Pinned sectors keep the determined-HW identity; ownership evidence is for
-  // unpinned sectors (avoid duplicating owner text when both are present).
+  // Pinned: determined-HW player identity first; still surface ownership
+  // observation counts from possibleOwners without repeating the owner label.
   if (overlay.isPinned) {
     if (overlay.playerLabel != null && overlay.playerLabel !== '') {
       parts.push(`player: ${overlay.playerLabel}`)
     } else {
       parts.push('player known')
     }
-  } else if (possibleOwners.length === 1) {
-    parts.push(`homeworld owner: ${formatPossibleOwnerDisplay(possibleOwners[0])}`)
-  } else if (possibleOwners.length > 1) {
-    parts.push('ambiguous')
-    parts.push(
-      `homeworld owners: ${possibleOwners.map(formatPossibleOwnerDisplay).join(', ')}`
-    )
+    if (possibleOwners.length === 0) {
+      parts.push('definite')
+    } else {
+      appendOwnershipEvidenceParts(parts, possibleOwners, {
+        includeOwnerLabels: false,
+        winningStrength,
+      })
+    }
+  } else {
+    appendOwnershipEvidenceParts(parts, possibleOwners, {
+      includeOwnerLabels: true,
+      winningStrength,
+    })
   }
 
   if (overlay.status === 'incomplete') {

@@ -132,13 +132,12 @@ export function sortHomeworldSectorsNorthernmostClockwise(
 }
 
 /**
- * Sector accordion title: known owner label else Unknown.
- * Prefers pinned ``playerLabel``, then unique possible-owner label/slot.
+ * Sector accordion title: unique projected owner label, else Unknown.
+ * Does not prefer pinned ``playerLabel`` over multi-member ownership evidence
+ * (that mismatch was claiming a unique owner while hover said ambiguous).
+ * When ownership evidence is empty, fall back to pinned player identity.
  */
 export function homeworldSectorAccordionTitle(overlay: MapRegionOverlay): string {
-  if (overlay.playerLabel != null && overlay.playerLabel !== '') {
-    return overlay.playerLabel
-  }
   const possibleOwners = overlay.possibleOwners ?? []
   if (possibleOwners.length === 1) {
     const owner = possibleOwners[0]!
@@ -146,6 +145,12 @@ export function homeworldSectorAccordionTitle(overlay: MapRegionOverlay): string
       return owner.playerLabel
     }
     return `Slot ${owner.ownerSlot}`
+  }
+  if (possibleOwners.length > 1) {
+    return 'Unknown'
+  }
+  if (overlay.playerLabel != null && overlay.playerLabel !== '') {
+    return overlay.playerLabel
   }
   return 'Unknown'
 }

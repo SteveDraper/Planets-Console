@@ -1,19 +1,15 @@
-/**
- * Unit tests for thin FE planet hover summary.
- */
-
 import { describe, expect, it } from 'vitest'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { formatHomeworldPlanetHover } from './formatHomeworldPlanetHover'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
-function row(
-  overrides: Partial<HomeworldCandidateRecord> & Pick<HomeworldCandidateRecord, 'planetId'>
+function candidate(
+  overrides: Partial<HomeworldCandidateRecord> = {}
 ): HomeworldCandidateRecord {
   return {
-    planetId: overrides.planetId,
+    planetId: overrides.planetId ?? 12,
     perspective: 'perspective' in overrides ? overrides.perspective! : 1,
-    confidenceTier: overrides.confidenceTier ?? 'possible',
+    confidenceTier: overrides.confidenceTier ?? 'definite',
     attribution: overrides.attribution ?? 'inferred',
     assertedCue: overrides.assertedCue ?? false,
     locationAsserted: overrides.locationAsserted ?? false,
@@ -22,15 +18,12 @@ function row(
 }
 
 describe('formatHomeworldPlanetHover', () => {
-  it('summarizes definite asserted candidate with roster owner', () => {
+  it('formats definite asserted candidates with roster owner label', () => {
     expect(
       formatHomeworldPlanetHover(
-        row({
-          planetId: 12,
-          confidenceTier: 'definite',
+        candidate({
           attribution: 'user_asserted',
           assertedCue: true,
-          perspective: 1,
         }),
         [perspectiveRow(1, 'alice', { raceName: 'The Federation' })]
       )
@@ -39,16 +32,46 @@ describe('formatHomeworldPlanetHover', () => {
     )
   })
 
-  it('marks most-probable possibles and orphan owners', () => {
+  it('formats most-probable orphans without a roster match', () => {
     expect(
       formatHomeworldPlanetHover(
-        row({
+        candidate({
           planetId: 44,
           perspective: null,
+          confidenceTier: 'possible',
           isMostProbable: true,
           attribution: 'inferred',
         })
       )
     ).toBe('planet 44 · possible (most probable) · owner: orphan · inferred')
+  })
+
+  it('expands inferred ownership with observation counts from sector evidence', () => {
+    expect(
+      formatHomeworldPlanetHover(
+        candidate({
+          perspective: 3,
+          confidenceTier: 'possible',
+          attribution: 'inferred',
+        }),
+        [perspectiveRow(3, 'enlar', { raceName: 'The Privateers' })],
+        {
+          possibleOwners: [
+            {
+              ownerSlot: 3,
+              provenanceKinds: ['ship_travel_envelope'],
+              playerLabel: 'enlar (The Privateers)',
+              provenanceKindCounts: {
+                ship_travel_envelope: 2,
+                nearby_planet_ownership: 0,
+              },
+            },
+          ],
+        }
+      )
+    ).toBe(
+      'planet 12 · possible · owner: enlar (The Privateers) · ' +
+        'definite (ship observations: 2, planet observations: 0)'
+    )
   })
 })

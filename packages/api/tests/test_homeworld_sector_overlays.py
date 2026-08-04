@@ -495,3 +495,80 @@ def test_for_turn_emits_when_gate_passes_and_empty_without_pin(
         )
         == ()
     )
+
+
+def test_possible_owners_emit_provenance_kind_counts(template_planet) -> None:
+    """Ownership hover needs per-kind multiplicity, not only unique kind tags."""
+    from api.analytics.homeworld_locator.models import (
+        OwnershipProvenance,
+        PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+        PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+        SectorOwnerMember,
+    )
+
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    orphan = _planet(template_planet, planet_id=2, x=0, y=550)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    sector_index = sector_index_for_angle(
+        math.atan2(orphan.y - center[1], orphan.x - center[0]),
+        player_count=4,
+        pin_angle=math.atan2(pin.y - center[1], pin.x - center[0]),
+    )
+    members = (
+        SectorOwnerMember(
+            owner_slot=3,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=5,
+                    ship_id=10,
+                    radius_ly=81.0,
+                ),
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=6,
+                    ship_id=11,
+                    radius_ly=82.0,
+                ),
+                OwnershipProvenance(
+                    kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                    turn=6,
+                    planet_id=99,
+                    distance_ly=40.0,
+                ),
+            ),
+        ),
+    )
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin, orphan],
+        candidate_planet_ids=frozenset({pin.id, orphan.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        nebulas=(),
+        sector_owner_sets={sector_index: members},
+        possible_owner_label_by_slot={3: "enlar (The Privateers)"},
+    )
+    target = next(
+        overlay for overlay in overlays if overlay.id == f"homeworld-sector-{sector_index}"
+    )
+    wire = map_region_overlay_to_wire(target)
+    assert wire["possibleOwners"] == [
+        {
+            "ownerSlot": 3,
+            "provenanceKinds": [
+                PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+            ],
+            "playerLabel": "enlar (The Privateers)",
+            "provenanceKindCounts": {
+                PROVENANCE_NEARBY_PLANET_OWNERSHIP: 1,
+                PROVENANCE_SHIP_TRAVEL_ENVELOPE: 2,
+            },
+        },
+    ]

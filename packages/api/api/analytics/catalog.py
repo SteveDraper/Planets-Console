@@ -63,7 +63,7 @@ TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = (
     TurnAnalyticCatalogEntry(
         id="homeworld-locator",
         name="Homeworld locator",
-        supports_table=True,
+        supports_table=False,
         supports_map=True,
         type="selectable",
     ),

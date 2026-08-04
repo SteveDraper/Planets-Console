@@ -121,6 +121,7 @@ describe('homeworldSectorPanelModel', () => {
     expect(
       homeworldSectorAccordionTitle(
         annularSector('homeworld-sector-2', 0, Math.PI / 2, {
+          playerLabel: 'enlar (The Privateer Bands)',
           possibleOwners: [
             { ownerSlot: 1, provenanceKinds: ['nearby_planet_ownership'] },
             { ownerSlot: 3, provenanceKinds: ['ship_travel_envelope'] },

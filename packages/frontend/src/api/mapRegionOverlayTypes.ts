@@ -93,6 +93,11 @@ export type MapRegionPossibleOwner = {
   provenanceKinds: string[]
   /** Roster identity ``username (race)`` when Core resolved the slot. */
   playerLabel?: string
+  /**
+   * Per-kind ownership observation multiplicity (machine tags → counts).
+   * SPA formats hover copy; Core emits structured facts only.
+   */
+  provenanceKindCounts?: Record<string, number>
 }
 
 export type MapRegionOverlay = {
@@ -109,6 +114,11 @@ export type MapRegionOverlay = {
   playerLabel?: string
   /** Ownership-evidence possible homeworld owners for this sector. */
   possibleOwners?: MapRegionPossibleOwner[]
+  /**
+   * Winning ownership strength class for projected ``possibleOwners``
+   * (``weak`` | ``strong`` | ``asserted``).
+   */
+  ownershipWinningStrength?: string
   /** Optional client paint policy (analytic adapters; not Core wire). */
   paint?: MapRegionOverlayPaint
 }

@@ -172,11 +172,30 @@ describe('normalizeMapRegionOverlay', () => {
           ownerSlot: 3,
           provenanceKinds: ['ship_travel_envelope'],
           playerLabel: 'alice (The Federation)',
+          provenanceKindCounts: {
+            ship_travel_envelope: 2,
+            nearby_planet_ownership: 0,
+          },
         },
         { ownerSlot: 5, provenanceKinds: ['nearby_planet_ownership'] },
       ],
     }
     expect(normalizeMapRegionOverlay(withOwners)).toEqual(withOwners)
+  })
+
+  it('rejects malformed provenanceKindCounts', () => {
+    expect(
+      normalizeMapRegionOverlay({
+        ...validBoundary,
+        possibleOwners: [
+          {
+            ownerSlot: 2,
+            provenanceKinds: ['ship_travel_envelope'],
+            provenanceKindCounts: { ship_travel_envelope: -1 },
+          },
+        ],
+      })
+    ).toBeNull()
   })
 
   it('rejects malformed possibleOwners entries', () => {

@@ -70,6 +70,13 @@ const sampleAnalytics: AnalyticItem[] = [
     supportsMap: true,
     type: 'selectable',
   },
+  {
+    id: 'homeworld-locator',
+    name: 'Homeworld locator',
+    supportsTable: false,
+    supportsMap: true,
+    type: 'selectable',
+  },
 ]
 
 const sampleScope: AnalyticShellScope = {
@@ -263,7 +270,12 @@ describe('MainArea tabular analytic sections', () => {
     render(
       <MainArea
         {...defaultMainAreaProps('tabular')}
-        enabledAnalyticIds={['connections', 'scores', 'stellar-cartography']}
+        enabledAnalyticIds={[
+          'connections',
+          'scores',
+          'stellar-cartography',
+          'homeworld-locator',
+        ]}
       />,
       { wrapper: createWrapper() }
     )
@@ -271,6 +283,7 @@ describe('MainArea tabular analytic sections', () => {
     expect(screen.getByRole('button', { name: 'Collapse Scores' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Connections/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Stellar Cartography/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Homeworld locator/i })).not.toBeInTheDocument()
     expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
     expect(fetchAnalyticTable).toHaveBeenCalledWith(
       'scores',
@@ -283,7 +296,7 @@ describe('MainArea tabular analytic sections', () => {
     render(
       <MainArea
         {...defaultMainAreaProps('tabular')}
-        enabledAnalyticIds={['connections', 'stellar-cartography']}
+        enabledAnalyticIds={['connections', 'stellar-cartography', 'homeworld-locator']}
       />,
       { wrapper: createWrapper() }
     )

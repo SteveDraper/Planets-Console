@@ -3,8 +3,13 @@
  * Composed from existing wire fields only -- no backend presentation payloads.
  */
 
+import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { CONFIDENCE_DEFINITE } from './constants'
+import {
+  formatHomeworldOwnershipInferenceSummary,
+  resolveOwnershipEvidenceForCandidate,
+} from './formatHomeworldOwnershipInference'
 import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
@@ -20,10 +25,18 @@ function ownerSlotLabel(
   return `slot ${perspective}`
 }
 
+export type FormatHomeworldPlanetHoverOptions = {
+  /** Sector (or planet-keyed) ownership evidence for expanding ``inferred``. */
+  possibleOwners?: readonly MapRegionPossibleOwner[]
+  /** Overlay winning ownership strength after display projection. */
+  ownershipWinningStrength?: string | null
+}
+
 /** Single-line tooltip summarizing candidate location/status evidence. */
 export function formatHomeworldPlanetHover(
   row: HomeworldCandidateRecord,
-  roster: readonly PerspectiveRow[] = []
+  roster: readonly PerspectiveRow[] = [],
+  options: FormatHomeworldPlanetHoverOptions = {}
 ): string {
   const parts: string[] = [`planet ${row.planetId}`]
 
@@ -36,9 +49,21 @@ export function formatHomeworldPlanetHover(
   }
 
   parts.push(`owner: ${ownerSlotLabel(row.perspective, roster)}`)
-  parts.push(row.attribution)
 
-  if (row.assertedCue === true) {
+  const ownershipEvidence = resolveOwnershipEvidenceForCandidate(
+    options.possibleOwners,
+    row.perspective
+  )
+  const ownershipSummary = formatHomeworldOwnershipInferenceSummary(ownershipEvidence, {
+    winningStrength: options.ownershipWinningStrength,
+  })
+  if (ownershipSummary != null) {
+    parts.push(ownershipSummary)
+  } else {
+    parts.push(row.attribution)
+  }
+
+  if (row.assertedCue === true && ownershipSummary !== 'asserted') {
     parts.push('asserted')
   }
 

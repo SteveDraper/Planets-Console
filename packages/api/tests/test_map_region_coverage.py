@@ -269,6 +269,50 @@ def test_possible_owners_wire_includes_optional_player_label():
     ]
 
 
+def test_map_region_possible_owner_wire_includes_kind_counts():
+    overlay = boundary_to_overlay(
+        kind="homeworld-sector",
+        overlay_id="homeworld-sector-0",
+        fill_color="#f97316",
+        fill_opacity=0.0,
+        vertices=(
+            MapRegionOverlayVertex(x=200.0, y=0.0),
+            MapRegionOverlayVertex(x=0.0, y=200.0),
+            MapRegionOverlayVertex(x=0.0, y=100.0),
+            MapRegionOverlayVertex(x=100.0, y=0.0),
+        ),
+        edges=(
+            MapRegionBoundaryArcEdge(center_x=0.0, center_y=0.0, clockwise=False),
+            MapRegionBoundaryLineEdge(),
+            MapRegionBoundaryArcEdge(center_x=0.0, center_y=0.0, clockwise=True),
+            MapRegionBoundaryLineEdge(),
+        ),
+        possible_owners=(
+            MapRegionPossibleOwner(
+                owner_slot=3,
+                provenance_kinds=("nearby_planet_ownership", "ship_travel_envelope"),
+                player_label="alice (The Federation)",
+                provenance_kind_counts=(
+                    ("nearby_planet_ownership", 1),
+                    ("ship_travel_envelope", 2),
+                ),
+            ),
+        ),
+    )
+    wire = map_region_overlay_to_wire(overlay)
+    assert wire["possibleOwners"] == [
+        {
+            "ownerSlot": 3,
+            "provenanceKinds": ["nearby_planet_ownership", "ship_travel_envelope"],
+            "playerLabel": "alice (The Federation)",
+            "provenanceKindCounts": {
+                "nearby_planet_ownership": 1,
+                "ship_travel_envelope": 2,
+            },
+        },
+    ]
+
+
 def test_boundary_rejects_mismatched_edge_count():
     try:
         boundary_to_overlay(

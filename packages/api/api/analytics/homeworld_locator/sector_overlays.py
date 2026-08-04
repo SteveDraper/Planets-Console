@@ -16,7 +16,15 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     load_default_layout_distributions_asset,
 )
-from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, SectorOwnerMember
+from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_DEFINITE,
+    OwnershipProvenance,
+    SectorOwnerMember,
+)
+from api.analytics.homeworld_locator.ownership_display import (
+    ownership_winning_strength_for_members,
+    project_sector_owner_sets_for_display,
+)
 from api.analytics.homeworld_locator.types import HomeworldCandidateView
 from api.analytics.turn_roster import players_by_id
 from api.concepts.game_category import GameCategory
@@ -414,6 +422,16 @@ def _decide_sector_overlay(
     )
 
 
+def _provenance_kind_counts(
+    provenances: Sequence[OwnershipProvenance],
+) -> tuple[tuple[str, int], ...]:
+    """Per-kind multiplicity for ownership hover (sorted by kind)."""
+    counts: dict[str, int] = {}
+    for row in provenances:
+        counts[row.kind] = counts.get(row.kind, 0) + 1
+    return tuple(sorted(counts.items()))
+
+
 def _possible_owners_for_sector(
     members: Sequence[SectorOwnerMember],
     *,
@@ -427,6 +445,7 @@ def _possible_owners_for_sector(
             owner_slot=member.owner_slot,
             provenance_kinds=tuple(sorted({row.kind for row in member.provenances})),
             player_label=labels.get(member.owner_slot),
+            provenance_kind_counts=_provenance_kind_counts(member.provenances),
         )
         for member in sorted(members, key=lambda row: row.owner_slot)
     )
@@ -448,6 +467,8 @@ def build_homeworld_sector_overlays(
     most_probable_planet_ids: frozenset[int] = frozenset(),
     sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None = None,
     possible_owner_label_by_slot: Mapping[int, str] | None = None,
+    location_definite_planet_ids: frozenset[int] = frozenset(),
+    perspective_by_planet_id: Mapping[int, int] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Build one boundary overlay per equal angular sector.
 
@@ -463,6 +484,12 @@ def build_homeworld_sector_overlays(
 
     ``most_probable_planet_ids`` are layout-prior selections; orphan envelopes
     center on those when present so disks align with most-probable markers.
+
+    ``location_definite_planet_ids`` upgrades preferred-candidate ownership
+    strength for display projection (ADR 0010). Sector ``possibleOwners`` are
+    projected (winning-strength + cross-sector settled trim) -- not raw durable
+    membership. ``perspective_by_planet_id`` supplies slot-anchored owner slots
+    so definite location pins also settle owners for cross-sector trim.
     """
     if player_count < 2:
         return ()
@@ -471,7 +498,7 @@ def build_homeworld_sector_overlays(
 
     label_by_planet = dict(pinned_player_label_by_planet_id or ())
     owner_labels = dict(possible_owner_label_by_slot or ())
-    owner_sets = dict(sector_owner_sets or ())
+    perspectives = dict(perspective_by_planet_id or ())
     center_x, center_y = center
     pin_angle = math.atan2(pin.y - center_y, pin.x - center_x)
     half = math.pi / player_count
@@ -490,6 +517,27 @@ def build_homeworld_sector_overlays(
         angle = math.atan2(planet.y - center_y, planet.x - center_x)
         index = sector_index_for_angle(angle, pin_angle=pin_angle, player_count=player_count)
         candidates_by_sector[index].append(planet)
+
+    location_home_claims: dict[int, list[int]] = {}
+    for index, sector_planets in enumerate(candidates_by_sector):
+        for planet in sector_planets:
+            if planet.id not in location_definite_planet_ids:
+                continue
+            owner_slot = perspectives.get(planet.id)
+            if owner_slot is None:
+                continue
+            location_home_claims.setdefault(owner_slot, []).append(index)
+    settled_from_location = {
+        owner_slot: sectors[0]
+        for owner_slot, sectors in location_home_claims.items()
+        if len(set(sectors)) == 1
+    }
+
+    owner_sets = project_sector_owner_sets_for_display(
+        dict(sector_owner_sets or ()),
+        location_definite_planet_ids=location_definite_planet_ids,
+        settled_owner_home_by_slot=settled_from_location,
+    )
 
     pin_sector = sector_index_for_angle(pin_angle, pin_angle=pin_angle, player_count=player_count)
     overlays: list[MapRegionOverlay] = []
@@ -548,6 +596,7 @@ def build_homeworld_sector_overlays(
             r_inner=r_inner,
             r_outer=r_outer,
         )
+        projected_members = owner_sets.get(index, ())
         overlays.append(
             boundary_to_overlay(
                 kind=KIND_HOMEWORLD_SECTOR,
@@ -562,8 +611,12 @@ def build_homeworld_sector_overlays(
                 candidate_count=decision.candidate_count,
                 player_label=decision.player_label,
                 possible_owners=_possible_owners_for_sector(
-                    owner_sets.get(index, ()),
+                    projected_members,
                     label_by_slot=owner_labels,
+                ),
+                ownership_winning_strength=ownership_winning_strength_for_members(
+                    projected_members,
+                    location_definite_planet_ids=location_definite_planet_ids,
                 ),
             )
         )
@@ -608,6 +661,14 @@ def build_homeworld_sector_overlays_for_turn(
         row.planet_id for row in view.candidates if row.perspective is not None
     )
     most_probable_ids = frozenset(row.planet_id for row in view.candidates if row.is_most_probable)
+    location_definite_ids = frozenset(
+        row.planet_id for row in view.candidates if row.confidence_tier == CONFIDENCE_DEFINITE
+    )
+    perspective_by_planet = {
+        row.planet_id: row.perspective
+        for row in view.candidates
+        if row.perspective is not None
+    }
     resolved_game_id = game_id if game_id is not None else turn.settings.id
     labels = pinned_player_labels_for_view(
         turn,
@@ -639,6 +700,8 @@ def build_homeworld_sector_overlays_for_turn(
         most_probable_planet_ids=most_probable_ids,
         sector_owner_sets=sector_owner_sets,
         possible_owner_label_by_slot=owner_slot_labels,
+        location_definite_planet_ids=location_definite_ids,
+        perspective_by_planet_id=perspective_by_planet,
     )
 
 

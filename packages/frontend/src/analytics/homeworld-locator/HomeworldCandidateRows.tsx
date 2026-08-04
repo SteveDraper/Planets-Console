@@ -1,10 +1,11 @@
 /**
- * Shared candidate row list for homeworld locator panel (interactive) and
- * tabular tile (read-only mirror).
+ * Shared candidate row list for the homeworld locator sidebar panel.
+ * Assert/revoke lives on the map context menu -- rows are read-only.
  */
 
-import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { cn } from '../../lib/utils'
+import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
+import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import {
   CONFIDENCE_DEFINITE,
   homeworldBaselineDegradedMessage,
@@ -12,11 +13,8 @@ import {
 import { formatHomeworldPlanetHover } from './formatHomeworldPlanetHover'
 import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import type { HomeworldCandidateRecord } from './wireSchema'
-import type { OwnershipAssertTarget } from './resolveOwnershipAssertTarget'
 
-export type HomeworldCandidateRowsMode = 'interactive' | 'readOnly'
-
-type HomeworldCandidateRowsSharedProps = {
+export type HomeworldCandidateRowsProps = {
   rows: readonly HomeworldCandidateRecord[]
   baselineDegraded: boolean
   baselineTurn: number | null | undefined
@@ -27,32 +25,37 @@ type HomeworldCandidateRowsSharedProps = {
   compact?: boolean
   /** When false, omit the column header row (used inside sector sections). */
   showHeader?: boolean
+  /**
+   * Owner column. Default true for flat / unassigned lists.
+   * False inside a sector section -- sector title already carries ownership.
+   */
+  showOwnerColumn?: boolean
   /** Override empty-state copy (sector sections use a quieter message). */
   emptyMessage?: string
+  /**
+   * Sector (or planet-keyed) ownership evidence for expanding planet-row hover
+   * ``inferred`` with observation counts.
+   */
+  possibleOwners?: readonly MapRegionPossibleOwner[]
+  /** Overlay winning ownership strength after display projection. */
+  ownershipWinningStrength?: string | null
 }
-
-export type HomeworldCandidateRowsInteractiveProps = HomeworldCandidateRowsSharedProps & {
-  mode: 'interactive'
-  mutationPending?: boolean
-  resolveOwnershipTarget: (row: HomeworldCandidateRecord) => OwnershipAssertTarget | null
-  onAssertLocation: (planetId: number) => void
-  onRevokeLocation: (planetId: number) => void
-  onAssertOwnership: (target: OwnershipAssertTarget, ownerSlot: number) => void
-  onRevokeOwnership: (target: OwnershipAssertTarget, ownerSlot: number) => void
-}
-
-export type HomeworldCandidateRowsReadOnlyProps = HomeworldCandidateRowsSharedProps & {
-  mode: 'readOnly'
-}
-
-export type HomeworldCandidateRowsProps =
-  | HomeworldCandidateRowsInteractiveProps
-  | HomeworldCandidateRowsReadOnlyProps
 
 function confidenceLabel(row: HomeworldCandidateRecord): string {
-  if (row.confidenceTier === CONFIDENCE_DEFINITE) return 'Definite'
-  if (row.isMostProbable) return 'Possible (most probable)'
-  return 'Possible'
+  let label: string
+  if (row.confidenceTier === CONFIDENCE_DEFINITE) {
+    label = 'Definite'
+  } else if (row.isMostProbable) {
+    label = 'Possible (most probable)'
+  } else {
+    label = 'Possible'
+  }
+  if (row.assertedCue === true) {
+    return label === 'Possible (most probable)'
+      ? 'Possible (most probable, asserted)'
+      : `${label} (asserted)`
+  }
+  return label
 }
 
 function slotLabel(perspective: number | null, roster: readonly PerspectiveRow[]): string {
@@ -64,23 +67,21 @@ function slotLabel(perspective: number | null, roster: readonly PerspectiveRow[]
   return `Slot ${perspective}`
 }
 
-/**
- * Candidate table shared by sidebar panel and main-area tabular tile.
- */
-export function HomeworldCandidateRows(props: HomeworldCandidateRowsProps) {
-  const {
-    rows,
-    baselineDegraded,
-    baselineTurn,
-    mode,
-    roster,
-    selectedPlanetId,
-    onSelectPlanet,
-    compact = false,
-    showHeader = true,
-    emptyMessage = 'No homeworld candidates inferred.',
-  } = props
-  const mutationPending = mode === 'interactive' ? (props.mutationPending ?? false) : false
+/** Candidate table for the homeworld locator sidebar panel (read-only). */
+export function HomeworldCandidateRows({
+  rows,
+  baselineDegraded,
+  baselineTurn,
+  roster,
+  selectedPlanetId,
+  onSelectPlanet,
+  compact = false,
+  showHeader = true,
+  showOwnerColumn = true,
+  emptyMessage = 'No homeworld candidates inferred.',
+  possibleOwners,
+  ownershipWinningStrength,
+}: HomeworldCandidateRowsProps) {
   const cellPad = compact ? 'px-1.5 py-1' : 'px-3 py-2'
   const textSize = compact ? 'text-[11px]' : 'text-sm'
 
@@ -113,27 +114,18 @@ export function HomeworldCandidateRows(props: HomeworldCandidateRowsProps) {
               <thead>
                 <tr className="border-b border-[#52575d]">
                   <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Planet</th>
-                  <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Owner</th>
+                  {showOwnerColumn ? (
+                    <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Owner</th>
+                  ) : null}
                   <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>
                     Confidence
                   </th>
-                  {!compact ? (
-                    <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>
-                      Attribution
-                    </th>
-                  ) : null}
-                  <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Asserted</th>
-                  {mode === 'interactive' ? (
-                    <th className={cn(cellPad, 'text-left font-medium text-slate-200')}>Actions</th>
-                  ) : null}
                 </tr>
               </thead>
             ) : null}
             <tbody>
               {rows.map((row) => {
                 const selected = selectedPlanetId === row.planetId
-                const ownershipTarget =
-                  props.mode === 'interactive' ? props.resolveOwnershipTarget(row) : null
                 return (
                   <tr
                     key={`${row.planetId}-${row.perspective ?? 'orphan'}-${row.confidenceTier}`}
@@ -142,89 +134,20 @@ export function HomeworldCandidateRows(props: HomeworldCandidateRowsProps) {
                       selected && 'bg-sky-500/15',
                       'cursor-pointer'
                     )}
-                    title={formatHomeworldPlanetHover(row, roster)}
+                    title={formatHomeworldPlanetHover(row, roster, {
+                      possibleOwners,
+                      ownershipWinningStrength,
+                    })}
                     onClick={() => onSelectPlanet(row.planetId)}
                     aria-selected={selected}
                   >
                     <td className={cn(cellPad, 'text-slate-200 tabular-nums')}>{row.planetId}</td>
-                    <td className={cn(cellPad, 'text-slate-300')}>
-                      {slotLabel(row.perspective, roster)}
-                    </td>
-                    <td className={cn(cellPad, 'text-slate-300')}>{confidenceLabel(row)}</td>
-                    {!compact ? (
-                      <td className={cn(cellPad, 'text-slate-400')}>{row.attribution}</td>
-                    ) : null}
-                    <td className={cn(cellPad, 'text-slate-300')}>
-                      {row.assertedCue === true ? 'Yes' : '—'}
-                    </td>
-                    {props.mode === 'interactive' ? (
-                      <td
-                        className={cn(cellPad, 'text-slate-300')}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <div className="flex min-w-[9rem] flex-col gap-1">
-                          <div className="flex flex-wrap gap-1">
-                            <button
-                              type="button"
-                              className="rounded border border-[#52575d] px-1.5 py-0.5 text-[10px] text-slate-200 hover:bg-black/20 disabled:opacity-40"
-                              disabled={mutationPending}
-                              onClick={() => props.onAssertLocation(row.planetId)}
-                            >
-                              Assert HW
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded border border-[#52575d] px-1.5 py-0.5 text-[10px] text-slate-200 hover:bg-black/20 disabled:opacity-40"
-                              disabled={mutationPending}
-                              onClick={() => props.onRevokeLocation(row.planetId)}
-                            >
-                              Revoke HW
-                            </button>
-                          </div>
-                          {ownershipTarget != null && roster.length > 0 ? (
-                            <label className="flex flex-col gap-0.5 text-[10px] text-slate-400">
-                              <span>Owner</span>
-                              <select
-                                className="max-w-full rounded border border-[#52575d] bg-slate-800 px-1 py-0.5 text-[10px] text-slate-200"
-                                defaultValue=""
-                                disabled={mutationPending}
-                                aria-label={`Assert ownership for planet ${row.planetId}`}
-                                onChange={(event) => {
-                                  const value = event.target.value
-                                  if (value === '') return
-                                  const ownerSlot = Number.parseInt(value, 10)
-                                  if (!Number.isFinite(ownerSlot)) return
-                                  props.onAssertOwnership(ownershipTarget, ownerSlot)
-                                  event.target.value = ''
-                                }}
-                              >
-                                <option value="">Assert owner…</option>
-                                {roster.map((player) => (
-                                  <option key={player.playerId} value={player.ordinal}>
-                                    {formatHomeworldOwnershipPickLabel(
-                                      player.name,
-                                      player.raceName
-                                    )}
-                                  </option>
-                                ))}
-                              </select>
-                              {row.perspective != null ? (
-                                <button
-                                  type="button"
-                                  className="self-start rounded border border-[#52575d] px-1.5 py-0.5 text-[10px] text-slate-200 hover:bg-black/20 disabled:opacity-40"
-                                  disabled={mutationPending}
-                                  onClick={() =>
-                                    props.onRevokeOwnership(ownershipTarget, row.perspective!)
-                                  }
-                                >
-                                  Revoke owner
-                                </button>
-                              ) : null}
-                            </label>
-                          ) : null}
-                        </div>
+                    {showOwnerColumn ? (
+                      <td className={cn(cellPad, 'text-slate-300')}>
+                        {slotLabel(row.perspective, roster)}
                       </td>
                     ) : null}
+                    <td className={cn(cellPad, 'text-slate-300')}>{confidenceLabel(row)}</td>
                   </tr>
                 )
               })}

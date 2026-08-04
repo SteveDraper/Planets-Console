@@ -1,9 +1,10 @@
 /**
- * Per-sector collapsible sections for the homeworld locator panel / tabular tile.
+ * Per-sector collapsible sections for the homeworld locator sidebar panel.
  * Sector title chrome toggles region multi-select (outline visibility).
+ * Assert/revoke lives on the map context menu -- candidate rows are read-only.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
@@ -11,9 +12,8 @@ import { homeworldBaselineDegradedMessage } from './constants'
 import { HomeworldCandidateRows } from './HomeworldCandidateRows'
 import type { HomeworldSectorPanelSection } from './homeworldSectorPanelModel'
 import type { HomeworldCandidateRecord } from './wireSchema'
-import type { OwnershipAssertTarget } from './resolveOwnershipAssertTarget'
 
-type HomeworldSectorAccordionSharedProps = {
+export type HomeworldSectorAccordionProps = {
   sections: readonly HomeworldSectorPanelSection[]
   unassigned: readonly HomeworldCandidateRecord[]
   baselineDegraded: boolean
@@ -27,52 +27,21 @@ type HomeworldSectorAccordionSharedProps = {
   compact?: boolean
 }
 
-type HomeworldSectorAccordionInteractiveProps = HomeworldSectorAccordionSharedProps & {
-  mode: 'interactive'
-  mutationPending?: boolean
-  resolveOwnershipTarget: (row: HomeworldCandidateRecord) => OwnershipAssertTarget | null
-  onAssertLocation: (planetId: number) => void
-  onRevokeLocation: (planetId: number) => void
-  onAssertOwnership: (target: OwnershipAssertTarget, ownerSlot: number) => void
-  onRevokeOwnership: (target: OwnershipAssertTarget, ownerSlot: number) => void
-}
-
-type HomeworldSectorAccordionReadOnlyProps = HomeworldSectorAccordionSharedProps & {
-  mode: 'readOnly'
-}
-
-export type HomeworldSectorAccordionProps =
-  | HomeworldSectorAccordionInteractiveProps
-  | HomeworldSectorAccordionReadOnlyProps
-
 function SectorSection({
   section,
   isSelected,
   onToggleSelected,
-  defaultExpanded,
   children,
   compact,
 }: {
   section: HomeworldSectorPanelSection
   isSelected: boolean
   onToggleSelected: () => void
-  defaultExpanded: boolean
   children: ReactNode
   compact: boolean
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-  const candidateCount = section.candidates.length
-  const previousCandidateCountRef = useRef(candidateCount)
-
-  // When planet positions arrive after overlays, candidates move from Unassigned
-  // into sectors -- open the section so assert controls stay reachable.
-  useEffect(() => {
-    const previous = previousCandidateCountRef.current
-    previousCandidateCountRef.current = candidateCount
-    if (previous === 0 && candidateCount > 0) {
-      setExpanded(true)
-    }
-  }, [candidateCount])
+  // Session start: all player sectors collapsed; user expands explicitly.
+  const [expanded, setExpanded] = useState(false)
 
   return (
     <section
@@ -126,56 +95,32 @@ function SectorSection({
   )
 }
 
-function CandidateBlock(
-  props: HomeworldSectorAccordionProps & {
-    rows: readonly HomeworldCandidateRecord[]
-  }
-) {
-  const { rows, compact = false } = props
-  const shared = {
-    rows,
-    baselineDegraded: false,
-    baselineTurn: props.baselineTurn,
-    roster: props.roster,
-    selectedPlanetId: props.selectedPlanetId,
-    onSelectPlanet: props.onSelectPlanet,
-    compact,
-    showHeader: !compact,
-    emptyMessage: 'No candidates in this sector.',
-  }
-
-  if (props.mode === 'interactive') {
-    return (
-      <HomeworldCandidateRows
-        {...shared}
-        mode="interactive"
-        mutationPending={props.mutationPending}
-        resolveOwnershipTarget={props.resolveOwnershipTarget}
-        onAssertLocation={props.onAssertLocation}
-        onRevokeLocation={props.onRevokeLocation}
-        onAssertOwnership={props.onAssertOwnership}
-        onRevokeOwnership={props.onRevokeOwnership}
-      />
-    )
-  }
-
-  return <HomeworldCandidateRows {...shared} mode="readOnly" />
-}
-
 /**
  * Sector accordion: one collapsible section per homeworld sector, preferred-first
  * candidates, title multi-select chrome tied to region selection store.
  */
-export function HomeworldSectorAccordion(props: HomeworldSectorAccordionProps) {
-  const {
-    sections,
-    unassigned,
-    baselineDegraded,
+export function HomeworldSectorAccordion({
+  sections,
+  unassigned,
+  baselineDegraded,
+  baselineTurn,
+  roster,
+  selectedPlanetId,
+  onSelectPlanet,
+  selectedSectorIndexes,
+  onToggleSectorIndex,
+  compact = false,
+}: HomeworldSectorAccordionProps) {
+  const candidateRowsProps = {
+    baselineDegraded: false as const,
     baselineTurn,
-    compact = false,
-    selectedSectorIndexes,
-    onToggleSectorIndex,
-  } = props
+    roster,
+    selectedPlanetId,
+    onSelectPlanet,
+    compact,
+    showHeader: !compact,
+    emptyMessage: 'No candidates in this sector.',
+  }
 
   return (
     <div className={cn('flex flex-col', compact ? 'gap-1' : 'gap-2')}>
@@ -196,10 +141,15 @@ export function HomeworldSectorAccordion(props: HomeworldSectorAccordionProps) {
           section={section}
           isSelected={selectedSectorIndexes.has(section.sectorIndex)}
           onToggleSelected={() => onToggleSectorIndex(section.sectorIndex)}
-          defaultExpanded={section.candidates.length > 0}
           compact={compact}
         >
-          <CandidateBlock {...props} rows={section.candidates} />
+          <HomeworldCandidateRows
+            {...candidateRowsProps}
+            rows={section.candidates}
+            showOwnerColumn={false}
+            possibleOwners={section.overlay.possibleOwners}
+            ownershipWinningStrength={section.overlay.ownershipWinningStrength}
+          />
         </SectorSection>
       ))}
       {unassigned.length > 0 ? (
@@ -217,7 +167,7 @@ export function HomeworldSectorAccordion(props: HomeworldSectorAccordionProps) {
           >
             Unassigned
           </div>
-          <CandidateBlock {...props} rows={unassigned} />
+          <HomeworldCandidateRows {...candidateRowsProps} rows={unassigned} />
         </section>
       ) : null}
     </div>

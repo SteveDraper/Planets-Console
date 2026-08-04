@@ -33,7 +33,6 @@ describe('HomeworldCandidateRows', () => {
         rows={[candidateRow({ planetId: 12, perspective: 2 })]}
         baselineDegraded={false}
         baselineTurn={null}
-        mode="readOnly"
         roster={roster}
         selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
@@ -50,7 +49,6 @@ describe('HomeworldCandidateRows', () => {
         rows={[candidateRow({ planetId: 9, perspective: 3 })]}
         baselineDegraded={false}
         baselineTurn={null}
-        mode="readOnly"
         roster={[perspectiveRow(1, 'alice')]}
         selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
@@ -66,7 +64,6 @@ describe('HomeworldCandidateRows', () => {
         rows={[candidateRow({ planetId: 44, perspective: null })]}
         baselineDegraded={false}
         baselineTurn={null}
-        mode="readOnly"
         roster={[perspectiveRow(1, 'alice')]}
         selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
@@ -74,6 +71,52 @@ describe('HomeworldCandidateRows', () => {
     )
 
     expect(screen.getByText('Orphan')).toBeInTheDocument()
+  })
+
+  it('folds assertedCue into the Confidence cell', () => {
+    render(
+      <HomeworldCandidateRows
+        rows={[
+          candidateRow({ planetId: 1, confidenceTier: 'definite', assertedCue: true }),
+          candidateRow({
+            planetId: 2,
+            confidenceTier: 'possible',
+            isMostProbable: true,
+            assertedCue: true,
+          }),
+          candidateRow({ planetId: 3, confidenceTier: 'possible', assertedCue: false }),
+        ]}
+        baselineDegraded={false}
+        baselineTurn={null}
+        roster={[perspectiveRow(1, 'alice')]}
+        selectedPlanetId={null}
+        onSelectPlanet={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('Definite (asserted)')).toBeInTheDocument()
+    expect(screen.getByText('Possible (most probable, asserted)')).toBeInTheDocument()
+    expect(screen.getByText('Possible')).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Asserted' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /assert hw/i })).not.toBeInTheDocument()
+  })
+
+  it('omits Owner column when showOwnerColumn is false', () => {
+    render(
+      <HomeworldCandidateRows
+        rows={[candidateRow({ planetId: 12, perspective: 1 })]}
+        baselineDegraded={false}
+        baselineTurn={null}
+        roster={[perspectiveRow(1, 'alice', { raceName: 'The Federation' })]}
+        selectedPlanetId={null}
+        onSelectPlanet={vi.fn()}
+        showOwnerColumn={false}
+      />
+    )
+
+    expect(screen.getByText('12')).toBeInTheDocument()
+    expect(screen.queryByText('alice (The Federation)')).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Owner' })).not.toBeInTheDocument()
   })
 
   it('invokes onSelectPlanet when a candidate row is clicked', async () => {
@@ -84,7 +127,6 @@ describe('HomeworldCandidateRows', () => {
         rows={[candidateRow({ planetId: 55 })]}
         baselineDegraded={false}
         baselineTurn={null}
-        mode="readOnly"
         roster={[perspectiveRow(1, 'alice')]}
         selectedPlanetId={null}
         onSelectPlanet={onSelectPlanet}
