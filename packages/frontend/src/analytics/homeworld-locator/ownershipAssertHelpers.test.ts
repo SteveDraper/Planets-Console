@@ -5,8 +5,11 @@ import {
   parseHomeworldSectorIndex,
 } from './homeworldSectorIndex'
 import {
+  collectAssertedOwnerSlots,
+  findHomeworldSectorOverlayByIndex,
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
+  resolveOwnershipRevokeSlots,
 } from './resolveOwnershipAssertTarget'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 
@@ -83,5 +86,32 @@ describe('resolveOwnershipAssertTarget', () => {
       keying: 'sector',
       sectorIndex: 4,
     })
+  })
+})
+
+describe('resolveOwnershipRevokeSlots', () => {
+  it('collects asserted owner slots from sector overlays', () => {
+    const overlay = {
+      ...sectorOverlay(1),
+      possibleOwners: [
+        { ownerSlot: 1, provenanceKinds: ['asserted'] },
+        { ownerSlot: 2, provenanceKinds: ['ship_travel_envelope'] },
+      ],
+    }
+    expect(collectAssertedOwnerSlots(overlay)).toEqual([1])
+    expect(findHomeworldSectorOverlayByIndex([overlay], 1)?.id).toBe('homeworld-sector-1')
+    expect(
+      resolveOwnershipRevokeSlots([overlay], { keying: 'sector', sectorIndex: 1 })
+    ).toEqual([1])
+  })
+
+  it('prefers bound owner slot for planet menus', () => {
+    expect(
+      resolveOwnershipRevokeSlots(
+        [],
+        { keying: 'planet', planetId: 12 },
+        { boundOwnerSlot: 3 }
+      )
+    ).toEqual([3])
   })
 })

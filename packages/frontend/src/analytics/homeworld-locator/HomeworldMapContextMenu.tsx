@@ -20,13 +20,26 @@ import {
   findHomeworldSectorAtMapPoint,
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
+  resolveOwnershipRevokeSlots,
   type OwnershipAssertTarget,
 } from './resolveOwnershipAssertTarget'
 import { parseHomeworldSectorIndex } from './homeworldSectorIndex'
 import { useHomeworldLocatorAssertionMutation } from './useHomeworldLocatorMutations'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
+import type { HomeworldMapMarker } from './wireSchema'
 
 const PLANET_MENU_RADIUS_PX = 16
+
+function ownerSlotLabel(
+  ownerSlot: number,
+  roster: readonly PerspectiveRow[]
+): string {
+  const player = roster.find((row) => row.ordinal === ownerSlot)
+  if (player != null) {
+    return formatHomeworldOwnershipPickLabel(player.name, player.raceName)
+  }
+  return `Slot ${ownerSlot}`
+}
 
 type MenuTarget =
   | {
@@ -74,6 +87,7 @@ export type HomeworldMapContextMenuProps = {
   enabled: boolean
   /** Unfiltered map overlays for ownership assert keying (not display-mode paint lists). */
   ownershipRegionOverlays: readonly MapRegionOverlay[]
+  homeworldMarkers: readonly HomeworldMapMarker[]
   planetGrid: PlanetSpatialGrid | null
   planetMapNodes: readonly MapNode[]
   roster: readonly PerspectiveRow[]
@@ -83,6 +97,7 @@ export function HomeworldMapContextMenu({
   analyticScope,
   enabled,
   ownershipRegionOverlays,
+  homeworldMarkers,
   planetGrid,
   planetMapNodes,
   roster,
@@ -199,6 +214,18 @@ export function HomeworldMapContextMenu({
 
   if (!enabled || menu == null || analyticScope == null) return null
 
+  const boundOwnerSlot =
+    menu.kind === 'planet'
+      ? (homeworldMarkers.find((marker) => marker.planetId === menu.planetId)?.perspective ??
+        null)
+      : null
+  const revokeOwnerSlots =
+    menu.ownership != null
+      ? resolveOwnershipRevokeSlots(ownershipRegionOverlays, menu.ownership, {
+          boundOwnerSlot,
+        })
+      : []
+
   const runOwnership = (action: 'upsert' | 'revoke', ownerSlot: number, target: OwnershipAssertTarget) => {
     assertMutation.mutate({
       axis: 'ownership',
@@ -275,6 +302,25 @@ export function HomeworldMapContextMenu({
               onClick={() => runOwnership('upsert', player.ordinal, menu.ownership!)}
             >
               {formatHomeworldOwnershipPickLabel(player.name, player.raceName)}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {menu.ownership != null && revokeOwnerSlots.length > 0 ? (
+        <div className="mt-1 border-t border-[#52575d]/80 pt-1">
+          <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400">
+            Revoke owner
+          </div>
+          {revokeOwnerSlots.map((ownerSlot) => (
+            <button
+              key={`revoke-${ownerSlot}`}
+              type="button"
+              role="menuitem"
+              className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
+              disabled={assertMutation.isPending}
+              onClick={() => runOwnership('revoke', ownerSlot, menu.ownership!)}
+            >
+              {ownerSlotLabel(ownerSlot, roster)}
             </button>
           ))}
         </div>

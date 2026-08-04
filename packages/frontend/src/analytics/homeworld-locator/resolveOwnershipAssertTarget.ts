@@ -5,6 +5,7 @@
 
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { pointHitsMapRegionOverlay } from '../../lib/mapRegionOverlayHitTest'
+import { PROVENANCE_KIND_ASSERTED } from './constants'
 import { isHomeworldSectorOverlay } from './homeworldRegionDisplayMode'
 import {
   homeworldSectorsPresentOnMap,
@@ -58,4 +59,48 @@ export function resolveOwnershipAssertTargetForSector(
   const sectorIndex = parseHomeworldSectorIndex(overlay.id)
   if (sectorIndex == null) return null
   return { keying: 'sector', sectorIndex }
+}
+
+/** Homeworld sector overlay for a parsed sector index, if present. */
+export function findHomeworldSectorOverlayByIndex(
+  overlays: readonly MapRegionOverlay[],
+  sectorIndex: number
+): MapRegionOverlay | null {
+  const id = `homeworld-sector-${sectorIndex}`
+  for (const overlay of overlays) {
+    if (isHomeworldSectorOverlay(overlay) && overlay.id === id) {
+      return overlay
+    }
+  }
+  return null
+}
+
+/** Owner slots with user-asserted provenance on a sector overlay. */
+export function collectAssertedOwnerSlots(overlay: MapRegionOverlay): number[] {
+  const slots: number[] = []
+  for (const owner of overlay.possibleOwners ?? []) {
+    if (owner.provenanceKinds.some((kind) => kind === PROVENANCE_KIND_ASSERTED)) {
+      slots.push(owner.ownerSlot)
+    }
+  }
+  return slots
+}
+
+/**
+ * Owner slots to offer for ownership revoke on the map menu.
+ * Planet menus mirror the panel: revoke the bound owner when known.
+ * Sector menus revoke each asserted owner on the sector overlay.
+ */
+export function resolveOwnershipRevokeSlots(
+  overlays: readonly MapRegionOverlay[],
+  target: OwnershipAssertTarget,
+  options?: { boundOwnerSlot?: number | null }
+): number[] {
+  if (options?.boundOwnerSlot != null) {
+    return [options.boundOwnerSlot]
+  }
+  if (target.keying !== 'sector') return []
+  const overlay = findHomeworldSectorOverlayByIndex(overlays, target.sectorIndex)
+  if (overlay == null) return []
+  return collectAssertedOwnerSlots(overlay)
 }

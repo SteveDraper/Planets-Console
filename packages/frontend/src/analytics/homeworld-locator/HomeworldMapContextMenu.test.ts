@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { isEventInsideHomeworldMenu } from './HomeworldMapContextMenu'
 import { applyHomeworldRegionDisplayMode } from './homeworldRegionDisplayMode'
 import {
+  collectAssertedOwnerSlots,
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
+  resolveOwnershipRevokeSlots,
 } from './resolveOwnershipAssertTarget'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 
@@ -77,6 +79,65 @@ describe('homeworld map context menu target resolution', () => {
       sectorIndex: 1,
       planetId: 44,
     })
+  })
+
+  it('resolves ownership revoke slots from asserted sector owners', () => {
+    const sectorWithAssertedOwner: MapRegionOverlay = {
+      ...sector,
+      possibleOwners: [
+        {
+          ownerSlot: 2,
+          provenanceKinds: ['asserted'],
+          playerLabel: 'bob (The Lizards)',
+        },
+        {
+          ownerSlot: 3,
+          provenanceKinds: ['nearby_planet_ownership'],
+        },
+      ],
+    }
+    const target = resolveOwnershipAssertTargetForSector(sectorWithAssertedOwner)
+    expect(target).not.toBeNull()
+    if (target == null) return
+    expect(collectAssertedOwnerSlots(sectorWithAssertedOwner)).toEqual([2])
+    expect(resolveOwnershipRevokeSlots([sectorWithAssertedOwner], target)).toEqual([2])
+  })
+
+  it('planet menu revoke mirrors panel bound owner slot', () => {
+    const target = { keying: 'planet' as const, planetId: 9 }
+    expect(
+      resolveOwnershipRevokeSlots([], target, { boundOwnerSlot: 2 })
+    ).toEqual([2])
+    const revokeBody = {
+      axis: 'ownership' as const,
+      action: 'revoke' as const,
+      ownerSlot: 2,
+      planetId: target.planetId,
+      sectorIndex: null,
+    }
+    expect(revokeBody).toEqual({
+      axis: 'ownership',
+      action: 'revoke',
+      ownerSlot: 2,
+      planetId: 9,
+      sectorIndex: null,
+    })
+  })
+
+  it('sector-keyed planet menu revoke uses bound owner, not all sector asserts', () => {
+    const sectorWithAssertedOwner: MapRegionOverlay = {
+      ...sector,
+      possibleOwners: [
+        { ownerSlot: 1, provenanceKinds: ['asserted'] },
+        { ownerSlot: 2, provenanceKinds: ['asserted'] },
+      ],
+    }
+    const target = resolveOwnershipAssertTargetForPlanet([sectorWithAssertedOwner], 44, 5, 5)
+    expect(target).not.toBeNull()
+    if (target == null) return
+    expect(
+      resolveOwnershipRevokeSlots([sectorWithAssertedOwner], target, { boundOwnerSlot: 2 })
+    ).toEqual([2])
   })
 })
 

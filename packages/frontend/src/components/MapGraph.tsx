@@ -359,6 +359,7 @@ function MapGraphFlow({
         analyticScope={analyticScope}
         enabled={homeworldEnabled}
         ownershipRegionOverlays={ownershipRegionOverlays}
+        homeworldMarkers={data.homeworldMarkers}
         planetGrid={planetGrid}
         planetMapNodes={planetMapNodes}
         roster={roster}
