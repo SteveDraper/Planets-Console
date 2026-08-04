@@ -14,12 +14,14 @@ import {
   type PlanetSpatialGrid,
 } from '../../lib/planetSpatialGrid'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
+import { cn } from '../../lib/utils'
 import { clientToFlowPosition, safeZoomScale } from '../../components/map-graph/geometry'
 import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import {
   findHomeworldSectorAtMapPoint,
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
+  resolveOwnershipMenuSelectedSlots,
   resolveOwnershipRevokeSlots,
   type OwnershipAssertTarget,
 } from './resolveOwnershipAssertTarget'
@@ -39,17 +41,6 @@ import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocator
 import type { HomeworldMapMarker } from './wireSchema'
 
 const PLANET_MENU_RADIUS_PX = 16
-
-function ownerSlotLabel(
-  ownerSlot: number,
-  roster: readonly PerspectiveRow[]
-): string {
-  const player = roster.find((row) => row.ordinal === ownerSlot)
-  if (player != null) {
-    return formatHomeworldOwnershipPickLabel(player.name, player.raceName)
-  }
-  return `Slot ${ownerSlot}`
-}
 
 type MenuTarget =
   | {
@@ -76,16 +67,27 @@ export function isEventInsideHomeworldMenu(
   return menuElement.contains(target)
 }
 
-function AssertOwnerSubmenu({
+/**
+ * Shared Owner submenu for planet and sector menus.
+ * Roster picks upsert ownership; Unknown revokes asserted ownership for the target.
+ * Current selection is bold: asserted owners, else a single inferred owner, else Unknown.
+ */
+function OwnerSubmenu({
   roster,
   disabled,
-  onPick,
+  selectedOwnerSlots,
+  onPickOwner,
+  onPickUnknown,
 }: {
   roster: readonly PerspectiveRow[]
   disabled: boolean
-  onPick: (ownerSlot: number) => void
+  /** Asserted owner slots for this target; empty means Unknown is current. */
+  selectedOwnerSlots: readonly number[]
+  onPickOwner: (ownerSlot: number) => void
+  onPickUnknown: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const unknownSelected = selectedOwnerSlots.length === 0
 
   return (
     <div className="relative">
@@ -98,7 +100,7 @@ function AssertOwnerSubmenu({
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
       >
-        <span>Assert Owner</span>
+        <span>Owner</span>
         <span aria-hidden className="text-slate-400">
           ›
         </span>
@@ -108,18 +110,38 @@ function AssertOwnerSubmenu({
           className="absolute left-full top-0 z-[81] ml-0.5 min-w-[12rem] rounded border border-[#52575d] bg-[#2f3338] py-1 shadow-lg"
           role="menu"
         >
-          {roster.map((player) => (
-            <button
-              key={player.playerId}
-              type="button"
-              role="menuitem"
-              className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-              disabled={disabled}
-              onClick={() => onPick(player.ordinal)}
-            >
-              {formatHomeworldOwnershipPickLabel(player.name, player.raceName)}
-            </button>
-          ))}
+          <button
+            type="button"
+            role="menuitem"
+            aria-current={unknownSelected ? 'true' : undefined}
+            className={cn(
+              'block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40',
+              unknownSelected && 'font-bold'
+            )}
+            disabled={disabled}
+            onClick={onPickUnknown}
+          >
+            Unknown
+          </button>
+          {roster.map((player) => {
+            const selected = selectedOwnerSlots.includes(player.ordinal)
+            return (
+              <button
+                key={player.playerId}
+                type="button"
+                role="menuitem"
+                aria-current={selected ? 'true' : undefined}
+                className={cn(
+                  'block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40',
+                  selected && 'font-bold'
+                )}
+                disabled={disabled}
+                onClick={() => onPickOwner(player.ordinal)}
+              >
+                {formatHomeworldOwnershipPickLabel(player.name, player.raceName)}
+              </button>
+            )
+          })}
         </div>
       ) : null}
     </div>
@@ -266,9 +288,15 @@ export function HomeworldMapContextMenu({
       ? (homeworldMarkers.find((marker) => marker.planetId === menu.planetId)?.perspective ??
         null)
       : null
-  const revokeOwnerSlots =
+  const unknownRevokeSlots =
     menu.ownership != null
       ? resolveOwnershipRevokeSlots(ownershipRegionOverlays, menu.ownership, {
+          boundOwnerSlot,
+        })
+      : []
+  const selectedOwnerSlots =
+    menu.ownership != null
+      ? resolveOwnershipMenuSelectedSlots(ownershipRegionOverlays, menu.ownership, {
           boundOwnerSlot,
         })
       : []
@@ -280,11 +308,19 @@ export function HomeworldMapContextMenu({
         )
       : null
 
-  const runOwnership = (action: 'upsert' | 'revoke', ownerSlot: number, target: OwnershipAssertTarget) => {
+  const runOwnershipUpsert = (ownerSlot: number, target: OwnershipAssertTarget) => {
     assertMutation.mutate(
-      buildOwnershipAssertionBody(action, ownerSlot, target),
+      buildOwnershipAssertionBody('upsert', ownerSlot, target),
       dismissMenuOnAssertSuccess
     )
+  }
+
+  const runOwnershipUnknown = async (target: OwnershipAssertTarget) => {
+    // Clear asserted ownership for this target (planet: bound slot; sector: all asserted).
+    for (const ownerSlot of unknownRevokeSlots) {
+      await assertMutation.mutateAsync(buildOwnershipAssertionBody('revoke', ownerSlot, target))
+    }
+    setMenu(null)
   }
 
   return (
@@ -347,30 +383,15 @@ export function HomeworldMapContextMenu({
       )}
       {menu.ownership != null && roster.length > 0 ? (
         <div className="mt-1 border-t border-[#52575d]/80 pt-1">
-          <AssertOwnerSubmenu
+          <OwnerSubmenu
             roster={roster}
             disabled={assertPending}
-            onPick={(ownerSlot) => runOwnership('upsert', ownerSlot, menu.ownership!)}
+            selectedOwnerSlots={selectedOwnerSlots}
+            onPickOwner={(ownerSlot) => runOwnershipUpsert(ownerSlot, menu.ownership!)}
+            onPickUnknown={() => {
+              void runOwnershipUnknown(menu.ownership!)
+            }}
           />
-        </div>
-      ) : null}
-      {menu.ownership != null && revokeOwnerSlots.length > 0 ? (
-        <div className="mt-1 border-t border-[#52575d]/80 pt-1">
-          <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400">
-            Revoke owner
-          </div>
-          {revokeOwnerSlots.map((ownerSlot) => (
-            <button
-              key={`revoke-${ownerSlot}`}
-              type="button"
-              role="menuitem"
-              className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-              disabled={assertPending}
-              onClick={() => runOwnership('revoke', ownerSlot, menu.ownership!)}
-            >
-              {ownerSlotLabel(ownerSlot, roster)}
-            </button>
-          ))}
         </div>
       ) : null}
       {assertError != null ? (

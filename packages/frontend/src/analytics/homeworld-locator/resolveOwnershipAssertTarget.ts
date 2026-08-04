@@ -87,7 +87,48 @@ export function collectAssertedOwnerSlots(overlay: MapRegionOverlay): number[] {
 }
 
 /**
- * Owner slots to offer for ownership revoke on the map menu.
+ * Owner slots with user-asserted provenance for the ownership target.
+ */
+export function resolveOwnershipAssertedSlots(
+  overlays: readonly MapRegionOverlay[],
+  target: OwnershipAssertTarget
+): number[] {
+  if (target.keying !== 'sector') return []
+  const overlay = findHomeworldSectorOverlayByIndex(overlays, target.sectorIndex)
+  if (overlay == null) return []
+  return collectAssertedOwnerSlots(overlay)
+}
+
+/**
+ * Owner submenu current-selection slots for highlighting.
+ * Prefer asserted owners; otherwise a single inferred owner (sector
+ * ``possibleOwners.length === 1``, or candidate ``boundOwnerSlot``).
+ * Empty → highlight Unknown.
+ */
+export function resolveOwnershipMenuSelectedSlots(
+  overlays: readonly MapRegionOverlay[],
+  target: OwnershipAssertTarget,
+  options?: { boundOwnerSlot?: number | null }
+): number[] {
+  const asserted = resolveOwnershipAssertedSlots(overlays, target)
+  if (asserted.length > 0) return asserted
+
+  if (target.keying === 'sector') {
+    const overlay = findHomeworldSectorOverlayByIndex(overlays, target.sectorIndex)
+    const possibleOwners = overlay?.possibleOwners ?? []
+    if (possibleOwners.length === 1) {
+      return [possibleOwners[0]!.ownerSlot]
+    }
+  }
+
+  if (options?.boundOwnerSlot != null) {
+    return [options.boundOwnerSlot]
+  }
+  return []
+}
+
+/**
+ * Owner slots to clear when picking Unknown on the map Owner submenu.
  * Planet menus mirror the panel: revoke the bound owner when known.
  * Sector menus revoke each asserted owner on the sector overlay.
  */
@@ -99,8 +140,5 @@ export function resolveOwnershipRevokeSlots(
   if (options?.boundOwnerSlot != null) {
     return [options.boundOwnerSlot]
   }
-  if (target.keying !== 'sector') return []
-  const overlay = findHomeworldSectorOverlayByIndex(overlays, target.sectorIndex)
-  if (overlay == null) return []
-  return collectAssertedOwnerSlots(overlay)
+  return resolveOwnershipAssertedSlots(overlays, target)
 }

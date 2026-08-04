@@ -10,8 +10,10 @@ import {
 import {
   collectAssertedOwnerSlots,
   findHomeworldSectorOverlayByIndex,
+  resolveOwnershipAssertedSlots,
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
+  resolveOwnershipMenuSelectedSlots,
   resolveOwnershipRevokeSlots,
 } from './resolveOwnershipAssertTarget'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
@@ -116,6 +118,83 @@ describe('resolveOwnershipRevokeSlots', () => {
         { boundOwnerSlot: 3 }
       )
     ).toEqual([3])
+  })
+})
+
+describe('resolveOwnershipAssertedSlots', () => {
+  it('returns asserted slots for sector targets', () => {
+    const overlay = {
+      ...sectorOverlay(1),
+      possibleOwners: [
+        { ownerSlot: 2, provenanceKinds: ['asserted'] },
+        { ownerSlot: 3, provenanceKinds: ['nearby_planet_ownership'] },
+      ],
+    }
+    expect(
+      resolveOwnershipAssertedSlots([overlay], { keying: 'sector', sectorIndex: 1 })
+    ).toEqual([2])
+  })
+
+  it('returns empty for planet-keyed targets', () => {
+    expect(
+      resolveOwnershipAssertedSlots([], { keying: 'planet', planetId: 12 })
+    ).toEqual([])
+  })
+})
+
+describe('resolveOwnershipMenuSelectedSlots', () => {
+  it('prefers asserted slots over inferred possibles', () => {
+    const overlay = {
+      ...sectorOverlay(1),
+      possibleOwners: [
+        { ownerSlot: 2, provenanceKinds: ['asserted'] },
+        { ownerSlot: 3, provenanceKinds: ['nearby_planet_ownership'] },
+      ],
+    }
+    expect(
+      resolveOwnershipMenuSelectedSlots([overlay], { keying: 'sector', sectorIndex: 1 })
+    ).toEqual([2])
+  })
+
+  it('uses a single inferred sector owner when none are asserted', () => {
+    const overlay = {
+      ...sectorOverlay(1),
+      possibleOwners: [{ ownerSlot: 4, provenanceKinds: ['ship_travel_envelope'] }],
+    }
+    expect(
+      resolveOwnershipMenuSelectedSlots([overlay], { keying: 'sector', sectorIndex: 1 })
+    ).toEqual([4])
+  })
+
+  it('stays Unknown when multiple inferred owners and no assert', () => {
+    const overlay = {
+      ...sectorOverlay(1),
+      possibleOwners: [
+        { ownerSlot: 1, provenanceKinds: ['nearby_planet_ownership'] },
+        { ownerSlot: 2, provenanceKinds: ['ship_travel_envelope'] },
+      ],
+    }
+    expect(
+      resolveOwnershipMenuSelectedSlots([overlay], { keying: 'sector', sectorIndex: 1 })
+    ).toEqual([])
+  })
+
+  it('uses candidate bound owner when planet-keyed and nothing asserted', () => {
+    expect(
+      resolveOwnershipMenuSelectedSlots([], { keying: 'planet', planetId: 12 }, {
+        boundOwnerSlot: 3,
+      })
+    ).toEqual([3])
+  })
+
+  it('uses candidate bound owner when sector has no unique inferred owner', () => {
+    expect(
+      resolveOwnershipMenuSelectedSlots(
+        [sectorOverlay(1)],
+        { keying: 'sector', sectorIndex: 1, planetId: 12 },
+        { boundOwnerSlot: 5 }
+      )
+    ).toEqual([5])
   })
 })
 

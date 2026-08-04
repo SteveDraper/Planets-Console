@@ -117,7 +117,7 @@ describe('homeworld map context menu target resolution', () => {
     const ownership = resolveOwnershipAssertTargetForPlanet([sector], 44, 5, 5)
     expect(ownership).not.toBeNull()
     if (ownership == null) return
-    // Assert Owner submenu picks call runOwnership with player.ordinal.
+    // Owner submenu roster picks call upsert with player.ordinal.
     const body = buildOwnershipAssertionBody('upsert', player.ordinal, ownership)
     expect(body).toEqual({
       axis: 'ownership',
@@ -129,7 +129,34 @@ describe('homeworld map context menu target resolution', () => {
     expect(body.ownerSlot).not.toBe(player.playerId)
   })
 
-  it('sector-keyed planet menu revoke uses bound owner, not all sector asserts', () => {
+  it('Owner Unknown revokes bound planet owner slot', () => {
+    const target = { keying: 'planet' as const, planetId: 9 }
+    const slots = resolveOwnershipRevokeSlots([], target, { boundOwnerSlot: 2 })
+    expect(slots).toEqual([2])
+    expect(buildOwnershipAssertionBody('revoke', 2, target)).toEqual({
+      axis: 'ownership',
+      action: 'revoke',
+      ownerSlot: 2,
+      planetId: 9,
+      sectorIndex: null,
+    })
+  })
+
+  it('Owner Unknown revokes all asserted sector owners', () => {
+    const sectorWithAssertedOwner: MapRegionOverlay = {
+      ...sector,
+      possibleOwners: [
+        { ownerSlot: 1, provenanceKinds: ['asserted'] },
+        { ownerSlot: 2, provenanceKinds: ['asserted'] },
+      ],
+    }
+    const target = resolveOwnershipAssertTargetForSector(sectorWithAssertedOwner)
+    expect(target).not.toBeNull()
+    if (target == null) return
+    expect(resolveOwnershipRevokeSlots([sectorWithAssertedOwner], target)).toEqual([1, 2])
+  })
+
+  it('sector-keyed planet menu Unknown uses bound owner, not all sector asserts', () => {
     const sectorWithAssertedOwner: MapRegionOverlay = {
       ...sector,
       possibleOwners: [
