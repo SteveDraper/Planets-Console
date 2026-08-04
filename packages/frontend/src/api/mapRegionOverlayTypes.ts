@@ -77,6 +77,11 @@ export type MapRegionOverlayPaint = {
   strokeColor?: string
   strokeWidth?: number
   /**
+   * When set, the boundary path is stroked with each entry (under to over).
+   * Single-stroke overlays use ``strokeColor`` / ``strokeWidth`` instead.
+   */
+  boundaryStrokes?: readonly MapRegionDiskStrokePaint[]
+  /**
    * When set, boundary geometry disks are stroke-outlined with these styles
    * instead of filled disks.
    */

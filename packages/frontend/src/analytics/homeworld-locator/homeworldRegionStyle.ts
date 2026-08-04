@@ -38,6 +38,27 @@ export function homeworldSectorPaint(
     overlay.geometry.type === 'boundary' ? (overlay.geometry.disks ?? []) : []
   const hasAssertedOwnership = homeworldSectorHasAssertedOwnership(overlay)
   const isSelected = options?.isSelected === true
+  const diskStrokes = disks.map((disk) => ({
+    strokeColor: homeworldEnvelopeStrokeColor(disk.radius),
+    strokeWidth: HOMEWORLD_ENVELOPE_STROKE_WIDTH,
+  }))
+  if (isSelected && hasAssertedOwnership) {
+    return {
+      fillOpacity: 0,
+      boundaryStrokes: [
+        {
+          strokeColor: HOMEWORLD_ASSERTED_SECTOR_STROKE,
+          strokeWidth: HOMEWORLD_ASSERTED_SECTOR_STROKE_WIDTH,
+        },
+        {
+          strokeColor: HOMEWORLD_SELECTED_SECTOR_STROKE,
+          strokeWidth: 1.5,
+          strokeDasharray: '2 2',
+        },
+      ],
+      diskStrokes,
+    }
+  }
   let strokeColor =
     overlay.status === 'error' ? HOMEWORLD_ERROR_SECTOR_STROKE : HOMEWORLD_SECTOR_STROKE
   let strokeWidth = HOMEWORLD_SECTOR_STROKE_WIDTH
@@ -53,10 +74,7 @@ export function homeworldSectorPaint(
     fillOpacity: 0,
     strokeColor,
     strokeWidth,
-    diskStrokes: disks.map((disk) => ({
-      strokeColor: homeworldEnvelopeStrokeColor(disk.radius),
-      strokeWidth: HOMEWORLD_ENVELOPE_STROKE_WIDTH,
-    })),
+    diskStrokes,
   }
 }
 

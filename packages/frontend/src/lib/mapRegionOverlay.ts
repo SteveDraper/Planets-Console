@@ -46,6 +46,12 @@ export type MapRegionOverlayPatchShape = {
   imageDataUrl: string
 }
 
+export type MapRegionOverlayBoundaryStrokeShape = {
+  strokeColor: string
+  strokeWidth: number
+  strokeDasharray?: string
+}
+
 export type MapRegionOverlayPaneGroup = {
   key: string
   fillColor: string
@@ -53,6 +59,8 @@ export type MapRegionOverlayPaneGroup = {
   /** Optional path stroke (defaults to fillColor when omitted). */
   strokeColor?: string
   strokeWidth?: number
+  /** Layered boundary strokes (under to over); omit when using single stroke fields. */
+  boundaryStrokes?: readonly MapRegionOverlayBoundaryStrokeShape[]
   disks: MapRegionOverlayDiskShape[]
   /** Outline disks painted above the fill (not alpha-stacked fills). */
   strokeDisks: MapRegionOverlayStrokeDiskShape[]
@@ -324,12 +332,21 @@ function buildBoundaryGroup(
     }
   }
   if (boundaryPath == null && disks.length === 0 && strokeDisks.length === 0) return null
+  const boundaryStrokes = paint?.boundaryStrokes
   return {
     key: overlay.id,
     fillColor: overlay.fillColor,
     fillOpacity: paint?.fillOpacity ?? overlay.fillOpacity,
-    strokeColor: paint?.strokeColor,
-    strokeWidth: paint?.strokeWidth,
+    strokeColor: boundaryStrokes != null ? undefined : paint?.strokeColor,
+    strokeWidth: boundaryStrokes != null ? undefined : paint?.strokeWidth,
+    boundaryStrokes:
+      boundaryStrokes != null
+        ? boundaryStrokes.map((stroke) => ({
+            strokeColor: stroke.strokeColor,
+            strokeWidth: stroke.strokeWidth,
+            strokeDasharray: stroke.strokeDasharray,
+          }))
+        : undefined,
     disks,
     strokeDisks,
     patches: [],
