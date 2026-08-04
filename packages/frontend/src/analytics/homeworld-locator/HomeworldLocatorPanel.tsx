@@ -87,7 +87,6 @@ export function HomeworldLocatorPanel({
     if (!mapQuery.isSuccess) {
       return new Map<number, OwnershipAssertTarget>()
     }
-    const positions = planetPositionsFromBaseMap(baseMapQuery.data?.nodes ?? [])
     // When map settled with no sector overlays, planet-keyed targets for every table row.
     if (overlays.length === 0) {
       const rows = tableQuery.data?.rows ?? []
@@ -97,8 +96,19 @@ export function HomeworldLocatorPanel({
       }
       return map
     }
+    // Sector keying needs planet positions from the base map -- wait for that query.
+    if (!baseMapQuery.isSuccess) {
+      return new Map<number, OwnershipAssertTarget>()
+    }
+    const positions = planetPositionsFromBaseMap(baseMapQuery.data?.nodes ?? [])
     return buildPlanetOwnershipTargets(overlays, positions)
-  }, [mapQuery.isSuccess, overlays, baseMapQuery.data?.nodes, tableQuery.data?.rows])
+  }, [
+    mapQuery.isSuccess,
+    overlays,
+    baseMapQuery.isSuccess,
+    baseMapQuery.data?.nodes,
+    tableQuery.data?.rows,
+  ])
 
   const assertMutation = useHomeworldLocatorAssertionMutation(analyticScope)
   const assertPending = useHomeworldLocatorAssertionPending(analyticScope)
@@ -154,6 +164,11 @@ export function HomeworldLocatorPanel({
       {mutationError != null ? (
         <p className="text-[10px] text-red-400 break-words" role="alert">
           {errorDetailFromUnknown(mutationError)}
+        </p>
+      ) : null}
+      {needsBaseMap && baseMapQuery.error != null ? (
+        <p className="text-[10px] text-red-400 break-words" role="alert">
+          {errorDetailFromUnknown(baseMapQuery.error)}
         </p>
       ) : null}
       <HomeworldCandidateRows
