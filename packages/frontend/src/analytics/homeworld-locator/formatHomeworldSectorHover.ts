@@ -7,7 +7,7 @@ import type {
   MapRegionOverlay,
   MapRegionPossibleOwner,
 } from '../../api/mapRegionOverlayTypes'
-import { isHomeworldSectorOverlay } from './homeworldRegionDisplayMode'
+import { isHomeworldSectorOverlay } from './homeworldSectorIndex'
 
 function formatPossibleOwnerDisplay(owner: MapRegionPossibleOwner): string {
   if (owner.playerLabel != null && owner.playerLabel !== '') {

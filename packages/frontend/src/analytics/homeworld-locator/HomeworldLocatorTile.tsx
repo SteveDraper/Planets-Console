@@ -10,11 +10,11 @@ import { useShellStore } from '../../stores/shell'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import { homeworldInactiveHint } from './constants'
 import {
-  HOMEWORLD_REGION_DISPLAY_MODE_LABELS,
-  HOMEWORLD_REGION_DISPLAY_MODES,
-  type HomeworldRegionDisplayMode,
-} from './homeworldRegionDisplayMode'
-import { useHomeworldRegionDisplayStore } from '../../stores/homeworldRegionDisplay'
+  HOMEWORLD_REGION_SELECTION_PRESET_LABELS,
+  HOMEWORLD_REGION_SELECTION_PRESETS,
+  type HomeworldRegionSelectionPreset,
+} from './homeworldRegionSelection'
+import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelection'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
 
 const EMPTY_ROSTER: readonly PerspectiveRow[] = []
@@ -29,19 +29,19 @@ type HomeworldLocatorTileProps = {
   inactiveReason: string | null
 }
 
-function HomeworldRegionDisplayModeControl({
+function HomeworldRegionSelectionControl({
   value,
   onChange,
 }: {
-  value: HomeworldRegionDisplayMode
-  onChange: (mode: HomeworldRegionDisplayMode) => void
+  value: HomeworldRegionSelectionPreset
+  onChange: (preset: HomeworldRegionSelectionPreset) => void
 }) {
   return (
     <DisplayModeControl
-      label="Region overlays"
-      ariaLabel="Homeworld region display mode"
-      modes={HOMEWORLD_REGION_DISPLAY_MODES}
-      modeLabels={HOMEWORLD_REGION_DISPLAY_MODE_LABELS}
+      label="Region selection"
+      ariaLabel="Homeworld region selection"
+      modes={HOMEWORLD_REGION_SELECTION_PRESETS}
+      modeLabels={HOMEWORLD_REGION_SELECTION_PRESET_LABELS}
       value={value}
       onChange={onChange}
     />
@@ -50,7 +50,7 @@ function HomeworldRegionDisplayModeControl({
 
 /**
  * Sidebar enable toggle for Homeworld locator with expandable panel
- * (region display mode, candidate table, assert/revoke, refresh).
+ * (region selection, envelope overlays, candidate table, assert/revoke, refresh).
  */
 export function HomeworldLocatorTile({
   name,
@@ -67,8 +67,18 @@ export function HomeworldLocatorTile({
 
   const [expanded, setExpanded] = useState(false)
   const canExpand = canToggle && enabled
-  const regionDisplayMode = useHomeworldRegionDisplayStore((s) => s.regionDisplayMode)
-  const setRegionDisplayMode = useHomeworldRegionDisplayStore((s) => s.setRegionDisplayMode)
+  const regionSelectionPreset = useHomeworldRegionSelectionStore(
+    (s) => s.regionSelectionPreset
+  )
+  const setRegionSelectionPreset = useHomeworldRegionSelectionStore(
+    (s) => s.setRegionSelectionPreset
+  )
+  const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
+    (s) => s.showEnvelopeOverlays
+  )
+  const setShowEnvelopeOverlays = useHomeworldRegionSelectionStore(
+    (s) => s.setShowEnvelopeOverlays
+  )
 
   const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
@@ -157,9 +167,19 @@ export function HomeworldLocatorTile({
           className="flex min-w-0 flex-col gap-1.5 border-t border-[#52575d]/70 px-2 pb-2 pt-1.5 text-xs text-slate-300"
           onClick={(e) => e.stopPropagation()}
         >
-          <HomeworldRegionDisplayModeControl
-            value={regionDisplayMode}
-            onChange={setRegionDisplayMode}
+          <label className="flex cursor-pointer items-center gap-2 py-0.5">
+            <input
+              type="checkbox"
+              checked={showEnvelopeOverlays}
+              onChange={(e) => setShowEnvelopeOverlays(e.target.checked)}
+              aria-label="Show overlays"
+              className="h-4 w-4 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+            />
+            <span>Show overlays</span>
+          </label>
+          <HomeworldRegionSelectionControl
+            value={regionSelectionPreset}
+            onChange={setRegionSelectionPreset}
           />
           <HomeworldLocatorPanel
             analyticScope={analyticScope}

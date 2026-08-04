@@ -1,5 +1,5 @@
 import type { MapRegionOverlay, MapRegionOverlayPaint } from '../../api/mapRegionOverlayTypes'
-import { isHomeworldSectorOverlay } from './homeworldRegionDisplayMode'
+import { isHomeworldSectorOverlay } from './homeworldSectorIndex'
 import { collectAssertedOwnerSlots } from './resolveOwnershipAssertTarget'
 
 /** Homeworld cluster envelopes: distinct outline colors (81 vs 162 LY). */

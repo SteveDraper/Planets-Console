@@ -6,7 +6,7 @@
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { pointHitsMapRegionOverlay } from '../../lib/mapRegionOverlayHitTest'
 import { PROVENANCE_KIND_ASSERTED } from './constants'
-import { isHomeworldSectorOverlay } from './homeworldRegionDisplayMode'
+import { isHomeworldSectorOverlay } from './homeworldSectorIndex'
 import {
   homeworldSectorsPresentOnMap,
   parseHomeworldSectorIndex,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { buildMapRegionOverlayPaneShapes } from '../../lib/mapRegionOverlay'
-import { HOMEWORLD_SECTOR_KIND } from './homeworldRegionDisplayMode'
+import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 import { applyHomeworldRegionStyle, homeworldSectorPaint } from './homeworldRegionStyle'
 
 function sectorOverlay(overrides: Partial<MapRegionOverlay> = {}): MapRegionOverlay {

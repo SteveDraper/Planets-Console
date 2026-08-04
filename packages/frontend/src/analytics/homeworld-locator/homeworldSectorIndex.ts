@@ -2,9 +2,17 @@
  * Parse sector index from homeworld sector overlay ids (``homeworld-sector-{n}``).
  */
 
-import { HOMEWORLD_SECTOR_KIND } from './homeworldRegionDisplayMode'
+import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
+
+/** Kind emitted by Core for homeworld circular sector overlays. */
+export const HOMEWORLD_SECTOR_KIND = 'homeworld-sector'
 
 const SECTOR_ID_RE = /^homeworld-sector-(\d+)$/
+
+/** True when the overlay is a homeworld sector entry. */
+export function isHomeworldSectorOverlay(overlay: Pick<MapRegionOverlay, 'kind'>): boolean {
+  return overlay.kind === HOMEWORLD_SECTOR_KIND
+}
 
 /** Extract sector index from a homeworld-sector overlay id, or null if not applicable. */
 export function parseHomeworldSectorIndex(overlayId: string): number | null {

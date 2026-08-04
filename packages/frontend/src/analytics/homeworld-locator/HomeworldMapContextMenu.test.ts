@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { isEventInsideHomeworldMenu } from './HomeworldMapContextMenu'
-import { applyHomeworldRegionDisplayMode } from './homeworldRegionDisplayMode'
+import { applyHomeworldRegionSelection } from './homeworldRegionSelection'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
 import {
   collectAssertedOwnerSlots,
@@ -62,8 +62,8 @@ describe('homeworld map context menu target resolution', () => {
     })
   })
 
-  it('sector-keys from raw overlays when display mode off hides sectors from paint', () => {
-    const paintOverlays = applyHomeworldRegionDisplayMode([sector], 'off')
+  it('sector-keys from raw overlays when selection hides sectors from paint', () => {
+    const paintOverlays = applyHomeworldRegionSelection([sector], [], true)
     expect(paintOverlays).toHaveLength(0)
     expect(resolveOwnershipAssertTargetForPlanet(paintOverlays, 44, 5, 5)).toEqual({
       keying: 'planet',

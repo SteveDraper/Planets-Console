@@ -38,13 +38,17 @@ import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
-import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
+import {
+  allHomeworldSectorIndexes,
+  applyHomeworldRegionSelection,
+  sectorIndexesForPreset,
+} from '../analytics/homeworld-locator/homeworldRegionSelection'
 import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homeworldRegionStyle'
 import { resolveHomeworldSelectedSectorIndex } from '../analytics/homeworld-locator/resolveHomeworldSelectedSectorIndex'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
-import { useHomeworldRegionDisplayStore } from '../stores/homeworldRegionDisplay'
+import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelection'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
 import {
@@ -248,22 +252,46 @@ function MapGraphFlow({
     [frame, policy, wormholeLineRevealKey]
   )
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
-  const homeworldRegionDisplayMode = useHomeworldRegionDisplayStore(
-    (s) => s.regionDisplayMode
+  const regionSelectionPreset = useHomeworldRegionSelectionStore(
+    (s) => s.regionSelectionPreset
+  )
+  const selectedSectorIndexes = useHomeworldRegionSelectionStore(
+    (s) => s.selectedSectorIndexes
+  )
+  const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
+    (s) => s.showEnvelopeOverlays
+  )
+  const syncSelectionWithOverlays = useHomeworldRegionSelectionStore(
+    (s) => s.syncSelectionWithOverlays
   )
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
 
-  // Raw homeworld sector overlays for ownership assert keying (independent of display mode).
+  // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays
 
-  // Visibility prefs only mutate visibility kinds; homeworld display mode filters
-  // sectors; homeworld style adapter attaches paint metadata for shared blit.
+  useEffect(() => {
+    syncSelectionWithOverlays(data.regionOverlays)
+  }, [data.regionOverlays, regionSelectionPreset, syncSelectionWithOverlays])
+
+  // Visibility prefs only mutate visibility kinds; region selection filters
+  // sectors/envelopes; homeworld style adapter attaches paint metadata for shared blit.
   const regionOverlays = useMemo(() => {
-    const filtered = applyHomeworldRegionDisplayMode(
-      applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
-      homeworldRegionDisplayMode
+    const visibilityFiltered = applyVisibilityRegionPreferences(
+      data.regionOverlays,
+      visibilityKinds
+    )
+    const paintIndexes =
+      regionSelectionPreset === 'pinned' || regionSelectionPreset === 'unpinned'
+        ? sectorIndexesForPreset(visibilityFiltered, regionSelectionPreset)
+        : selectedSectorIndexes.length === 0
+          ? allHomeworldSectorIndexes(visibilityFiltered)
+          : selectedSectorIndexes
+    const filtered = applyHomeworldRegionSelection(
+      visibilityFiltered,
+      paintIndexes,
+      showEnvelopeOverlays
     )
     const selectedSectorIndex = resolveHomeworldSelectedSectorIndex(
       selection,
@@ -275,7 +303,9 @@ function MapGraphFlow({
     data.regionOverlays,
     data.homeworldMarkers,
     visibilityKinds,
-    homeworldRegionDisplayMode,
+    regionSelectionPreset,
+    selectedSectorIndexes,
+    showEnvelopeOverlays,
     selection,
   ])
 
