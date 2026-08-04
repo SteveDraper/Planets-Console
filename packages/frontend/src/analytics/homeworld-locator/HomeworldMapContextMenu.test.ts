@@ -117,7 +117,7 @@ describe('homeworld map context menu target resolution', () => {
     const ownership = resolveOwnershipAssertTargetForPlanet([sector], 44, 5, 5)
     expect(ownership).not.toBeNull()
     if (ownership == null) return
-    // HomeworldMapContextMenu roster buttons call runOwnership with player.ordinal.
+    // Assert Owner submenu picks call runOwnership with player.ordinal.
     const body = buildOwnershipAssertionBody('upsert', player.ordinal, ownership)
     expect(body).toEqual({
       axis: 'ownership',

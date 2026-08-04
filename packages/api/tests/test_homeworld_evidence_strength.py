@@ -6,6 +6,7 @@ from api.analytics.homeworld_locator.evidence_strength import (
     STRENGTH_ASSERTED,
     STRENGTH_STRONG,
     STRENGTH_WEAK,
+    location_has_asserted_strength,
     location_provenance_strength,
     ownership_provenance_strength,
     resolve_location_axis,
@@ -30,6 +31,19 @@ def test_location_kind_strength_mapping() -> None:
     assert location_provenance_strength(PROVENANCE_BASELINE_PROFILE) == STRENGTH_STRONG
     assert location_provenance_strength(EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD) == STRENGTH_STRONG
     assert location_provenance_strength(PROVENANCE_ASSERTED) == STRENGTH_ASSERTED
+
+
+def test_location_has_asserted_strength_ignores_machine_kinds() -> None:
+    machine_only = (
+        LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=10),
+    )
+    with_assert = (
+        *machine_only,
+        LocationProvenance(kind=PROVENANCE_ASSERTED, turn=5, planet_id=10),
+    )
+    assert location_has_asserted_strength(machine_only) is False
+    assert location_has_asserted_strength(with_assert) is True
+    assert location_has_asserted_strength(()) is False
 
 
 def test_ownership_kind_strength_mapping() -> None:

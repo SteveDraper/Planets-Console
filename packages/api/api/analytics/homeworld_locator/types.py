@@ -33,6 +33,8 @@ class HomeworldCandidateRecord:
     is_most_probable: bool = False
     asserted_cue: bool = False
     """Derived: asserted-strength provenance present on location and/or ownership."""
+    location_asserted: bool = False
+    """Derived: asserted-strength provenance present on the location axis only."""
 
 
 @dataclass(frozen=True)

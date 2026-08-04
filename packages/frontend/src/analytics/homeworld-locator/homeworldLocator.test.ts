@@ -185,7 +185,7 @@ describe('parseHomeworldLocatorPayload', () => {
     expect(parsed?.regionOverlays).toHaveLength(1)
   })
 
-  it('defaults isMostProbable and assertedCue when omitted', () => {
+  it('defaults isMostProbable, assertedCue, and locationAsserted when omitted', () => {
     const parsed = parseHomeworldLocatorPayload({
       analyticId: 'homeworld-locator',
       available: true,
@@ -201,9 +201,10 @@ describe('parseHomeworldLocatorPayload', () => {
     })
     expect(parsed?.rows?.[0]?.isMostProbable).toBe(false)
     expect(parsed?.rows?.[0]?.assertedCue).toBe(false)
+    expect(parsed?.rows?.[0]?.locationAsserted).toBe(false)
   })
 
-  it('parses assertedCue from the wire', () => {
+  it('parses assertedCue and locationAsserted from the wire', () => {
     const parsed = parseHomeworldLocatorPayload({
       analyticId: 'homeworld-locator',
       available: true,
@@ -215,6 +216,7 @@ describe('parseHomeworldLocatorPayload', () => {
           confidenceTier: 'definite',
           attribution: 'user_asserted',
           assertedCue: true,
+          locationAsserted: true,
         },
       ],
       rows: [
@@ -224,11 +226,14 @@ describe('parseHomeworldLocatorPayload', () => {
           confidenceTier: 'definite',
           attribution: 'user_asserted',
           assertedCue: true,
+          locationAsserted: false,
         },
       ],
     })
     expect(parsed?.markers?.[0]?.assertedCue).toBe(true)
+    expect(parsed?.markers?.[0]?.locationAsserted).toBe(true)
     expect(parsed?.rows?.[0]?.assertedCue).toBe(true)
+    expect(parsed?.rows?.[0]?.locationAsserted).toBe(false)
   })
 
   it('accepts isMostProbable on candidate rows and markers', () => {
@@ -290,6 +295,7 @@ describe('resolveHomeworldMarkerDisplays', () => {
           confidenceTier: 'possible',
           attribution: 'inferred',
           assertedCue: false,
+          locationAsserted: false,
           isMostProbable: false,
         },
         {
@@ -298,6 +304,7 @@ describe('resolveHomeworldMarkerDisplays', () => {
           confidenceTier: 'definite',
           attribution: 'inferred',
           assertedCue: false,
+          locationAsserted: true,
           isMostProbable: false,
         },
       ],
@@ -316,6 +323,7 @@ describe('resolveHomeworldMarkerDisplays', () => {
         perspective: null,
         attribution: 'inferred',
         assertedCue: false,
+        locationAsserted: false,
         isMostProbable: false,
       },
     ])

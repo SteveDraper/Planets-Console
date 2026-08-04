@@ -186,9 +186,11 @@ def test_upsert_location_assertion_persists_and_ensures_candidate(
     asserted_rows = [row for row in result["rows"] if row["planetId"] == 3]
     assert len(asserted_rows) == 1
     assert asserted_rows[0]["assertedCue"] is True
+    assert asserted_rows[0]["locationAsserted"] is True
     assert asserted_rows[0]["attribution"] == ATTRIBUTION_USER_ASSERTED
     markers = [m for m in result["markers"] if m["planetId"] == 3]
     assert markers[0]["assertedCue"] is True
+    assert markers[0]["locationAsserted"] is True
 
 
 def test_revoke_location_assertion_removes_assert_only(
@@ -227,9 +229,11 @@ def test_ownership_assert_planet_keyed_when_sectors_absent(
     owned_rows = [row for row in result["rows"] if row["planetId"] == 1]
     assert len(owned_rows) == 1
     assert owned_rows[0]["assertedCue"] is True
+    assert owned_rows[0]["locationAsserted"] is False
     assert owned_rows[0]["attribution"] == ATTRIBUTION_USER_ASSERTED
     owned_markers = [m for m in result["markers"] if m["planetId"] == 1]
     assert owned_markers[0]["assertedCue"] is True
+    assert owned_markers[0]["locationAsserted"] is False
     assert owned_markers[0]["attribution"] == ATTRIBUTION_USER_ASSERTED
 
 

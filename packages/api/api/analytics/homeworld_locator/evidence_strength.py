@@ -198,15 +198,22 @@ def resolve_ownership_axis(
     )
 
 
+def location_has_asserted_strength(
+    location_provenances: Sequence[LocationProvenance] = (),
+) -> bool:
+    """True when any location provenance has asserted strength."""
+    return any(
+        location_provenance_strength(row.kind) == STRENGTH_ASSERTED for row in location_provenances
+    )
+
+
 def provenance_has_asserted_strength(
     *,
     location_provenances: Sequence[LocationProvenance] = (),
     ownership_members: Sequence[SectorOwnerMember] = (),
 ) -> bool:
     """True when any provenance on either axis has asserted strength."""
-    if any(
-        location_provenance_strength(row.kind) == STRENGTH_ASSERTED for row in location_provenances
-    ):
+    if location_has_asserted_strength(location_provenances):
         return True
     for member in ownership_members:
         for provenance in member.provenances:
@@ -221,6 +228,7 @@ __all__ = [
     "STRENGTH_WEAK",
     "LocationAxisResolution",
     "OwnershipAxisResolution",
+    "location_has_asserted_strength",
     "location_provenance_strength",
     "ownership_provenance_strength",
     "provenance_has_asserted_strength",

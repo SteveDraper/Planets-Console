@@ -27,6 +27,10 @@ import { planetIdFromNodeId } from './planetIdFromMapNode'
 import { parseHomeworldSectorIndex } from './homeworldSectorIndex'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
 import {
+  isPlanetLocationAsserted,
+  locationAssertMenuActions,
+} from './homeworldMapMenuVisibility'
+import {
   useHomeworldLocatorAssertionError,
   useHomeworldLocatorAssertionMutation,
   useHomeworldLocatorAssertionPending,
@@ -70,6 +74,56 @@ export function isEventInsideHomeworldMenu(
 ): boolean {
   if (menuElement == null || !(target instanceof Node)) return false
   return menuElement.contains(target)
+}
+
+function AssertOwnerSubmenu({
+  roster,
+  disabled,
+  onPick,
+}: {
+  roster: readonly PerspectiveRow[]
+  disabled: boolean
+  onPick: (ownerSlot: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>Assert Owner</span>
+        <span aria-hidden className="text-slate-400">
+          ›
+        </span>
+      </button>
+      {open ? (
+        <div
+          className="absolute left-full top-0 z-[81] ml-0.5 min-w-[12rem] rounded border border-[#52575d] bg-[#2f3338] py-1 shadow-lg"
+          role="menu"
+        >
+          {roster.map((player) => (
+            <button
+              key={player.playerId}
+              type="button"
+              role="menuitem"
+              className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
+              disabled={disabled}
+              onClick={() => onPick(player.ordinal)}
+            >
+              {formatHomeworldOwnershipPickLabel(player.name, player.raceName)}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 export type HomeworldMapContextMenuProps = {
@@ -219,6 +273,13 @@ export function HomeworldMapContextMenu({
         })
       : []
 
+  const locationActions =
+    menu.kind === 'planet'
+      ? locationAssertMenuActions(
+          isPlanetLocationAsserted(homeworldMarkers, menu.planetId)
+        )
+      : null
+
   const runOwnership = (action: 'upsert' | 'revoke', ownerSlot: number, target: OwnershipAssertTarget) => {
     assertMutation.mutate(
       buildOwnershipAssertionBody(action, ownerSlot, target),
@@ -238,42 +299,46 @@ export function HomeworldMapContextMenu({
           <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400">
             Planet {menu.planetId}
           </div>
-          <button
-            type="button"
-            role="menuitem"
-            className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-            disabled={assertPending}
-            onClick={() => {
-              assertMutation.mutate(
-                {
-                  axis: 'location',
-                  action: 'upsert',
-                  planetId: menu.planetId,
-                },
-                dismissMenuOnAssertSuccess
-              )
-            }}
-          >
-            Assert as homeworld
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-            disabled={assertPending}
-            onClick={() => {
-              assertMutation.mutate(
-                {
-                  axis: 'location',
-                  action: 'revoke',
-                  planetId: menu.planetId,
-                },
-                dismissMenuOnAssertSuccess
-              )
-            }}
-          >
-            Revoke homeworld assert
-          </button>
+          {locationActions?.showAssertAsHomeworld ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
+              disabled={assertPending}
+              onClick={() => {
+                assertMutation.mutate(
+                  {
+                    axis: 'location',
+                    action: 'upsert',
+                    planetId: menu.planetId,
+                  },
+                  dismissMenuOnAssertSuccess
+                )
+              }}
+            >
+              Assert as homeworld
+            </button>
+          ) : null}
+          {locationActions?.showRevokeHomeworldAssert ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
+              disabled={assertPending}
+              onClick={() => {
+                assertMutation.mutate(
+                  {
+                    axis: 'location',
+                    action: 'revoke',
+                    planetId: menu.planetId,
+                  },
+                  dismissMenuOnAssertSuccess
+                )
+              }}
+            >
+              Revoke homeworld assert
+            </button>
+          ) : null}
         </>
       ) : (
         <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400">
@@ -282,21 +347,11 @@ export function HomeworldMapContextMenu({
       )}
       {menu.ownership != null && roster.length > 0 ? (
         <div className="mt-1 border-t border-[#52575d]/80 pt-1">
-          <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400">
-            Assert owner
-          </div>
-          {roster.map((player) => (
-            <button
-              key={player.playerId}
-              type="button"
-              role="menuitem"
-              className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-              disabled={assertPending}
-              onClick={() => runOwnership('upsert', player.ordinal, menu.ownership!)}
-            >
-              {formatHomeworldOwnershipPickLabel(player.name, player.raceName)}
-            </button>
-          ))}
+          <AssertOwnerSubmenu
+            roster={roster}
+            disabled={assertPending}
+            onPick={(ownerSlot) => runOwnership('upsert', ownerSlot, menu.ownership!)}
+          />
         </div>
       ) : null}
       {menu.ownership != null && revokeOwnerSlots.length > 0 ? (

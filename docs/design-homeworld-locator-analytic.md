@@ -333,6 +333,7 @@ perspective?              # derived homeworld owner slot when resolved (not shel
 confidence_tier           # derived: definite | possible
 is_most_probable          # view-time selection status (#36); not durable evidence
 asserted_cue?             # derived: asserted-strength provenance present on location and/or ownership
+location_asserted?        # derived: asserted-strength provenance present on the location axis only
 provenance_summary?       # optional counts / kinds for UI
 ```
 

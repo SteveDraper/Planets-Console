@@ -490,11 +490,51 @@ def test_derive_candidates_sets_definite_and_asserted_cue() -> None:
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[20].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[20].asserted_cue is True
+    assert by_planet[20].location_asserted is True
     assert by_planet[20].attribution == ATTRIBUTION_INFERRED
     assert by_planet[20].perspective == 7
     assert by_planet[10].confidence_tier == CONFIDENCE_POSSIBLE
     assert by_planet[10].asserted_cue is False
+    assert by_planet[10].location_asserted is False
     assert by_planet[10].attribution == ATTRIBUTION_INFERRED
+
+
+def test_derive_ownership_assert_sets_cue_without_location_asserted() -> None:
+    """Ownership asserted strength lights asserted_cue but not location_asserted."""
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+
+    candidates = (
+        HomeworldCandidateRecord(
+            planet_id=10,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+        ),
+    )
+    merged = MergedHomeworldEvidence(
+        location_provenances=(
+            LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=10),
+        ),
+        sector_owner_sets=(),
+        planet_owner_sets=(
+            (
+                10,
+                (
+                    SectorOwnerMember(
+                        owner_slot=3,
+                        provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=5),),
+                    ),
+                ),
+            ),
+        ),
+    )
+    derived = derive_candidates_from_merged_evidence(candidates, merged)
+    assert len(derived) == 1
+    assert derived[0].asserted_cue is True
+    assert derived[0].location_asserted is False
+    assert derived[0].perspective == 3
 
 
 def test_derive_asserted_wins_over_machine_strong_despite_prior_definite() -> None:
@@ -528,11 +568,10 @@ def test_derive_asserted_wins_over_machine_strong_despite_prior_definite() -> No
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[20].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[20].asserted_cue is True
+    assert by_planet[20].location_asserted is True
     assert by_planet[10].confidence_tier == CONFIDENCE_POSSIBLE
     assert by_planet[10].asserted_cue is False
-
-
-def test_derive_does_not_keep_prior_definite_without_planet_provenance() -> None:
+    assert by_planet[10].location_asserted is False
     """When the merged list is non-empty, prior_tier cannot keep a non-listed planet definite."""
     from api.analytics.homeworld_locator.materialize_from_provenances import (
         derive_candidates_from_merged_evidence,

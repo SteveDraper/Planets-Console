@@ -7,6 +7,7 @@ from dataclasses import replace
 
 from api.analytics.homeworld_locator.evidence_strength import (
     LocationAxisResolution,
+    location_has_asserted_strength,
     provenance_has_asserted_strength,
     resolve_location_axis,
     resolve_ownership_axis,
@@ -107,6 +108,7 @@ def derive_candidates_from_merged_evidence(
             if ownership_resolution.is_unique and perspective is None:
                 perspective = ownership_resolution.resolved_owner_slot
 
+        location_asserted = location_has_asserted_strength(planet_location)
         asserted_cue = provenance_has_asserted_strength(
             location_provenances=planet_location,
             ownership_members=ownership_for_cue,
@@ -117,6 +119,7 @@ def derive_candidates_from_merged_evidence(
                 confidence_tier=confidence,
                 perspective=perspective,
                 asserted_cue=asserted_cue,
+                location_asserted=location_asserted,
             )
         )
     return tuple(derived)

@@ -241,6 +241,7 @@ describe('combineMapData', () => {
           confidenceTier: 'definite',
           attribution: 'inferred',
           assertedCue: false,
+          locationAsserted: false,
           isMostProbable: false,
         },
       ],
@@ -384,6 +385,7 @@ describe('combineMapData', () => {
           confidenceTier: 'definite',
           attribution: 'inferred',
           assertedCue: false,
+          locationAsserted: false,
           isMostProbable: false,
         },
         {
@@ -392,6 +394,7 @@ describe('combineMapData', () => {
           confidenceTier: 'possible',
           attribution: 'inferred',
           assertedCue: false,
+          locationAsserted: false,
           isMostProbable: false,
         },
       ],
@@ -412,6 +415,7 @@ describe('combineMapData', () => {
         perspective: 1,
         attribution: 'inferred',
         assertedCue: false,
+        locationAsserted: false,
         isMostProbable: false,
       },
       {
@@ -422,6 +426,7 @@ describe('combineMapData', () => {
         perspective: null,
         attribution: 'inferred',
         assertedCue: false,
+        locationAsserted: false,
         isMostProbable: false,
       },
     ])
@@ -463,6 +468,7 @@ describe('combineMapData', () => {
           confidenceTier: 'definite',
           attribution: 'inferred',
           assertedCue: false,
+          locationAsserted: false,
           isMostProbable: false,
         },
       ],
