@@ -40,8 +40,7 @@ import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/Homeworl
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
 import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
 import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homeworldRegionStyle'
-import { findHomeworldSectorAtMapPoint } from '../analytics/homeworld-locator/resolveOwnershipAssertTarget'
-import { parseHomeworldSectorIndex } from '../analytics/homeworld-locator/homeworldSectorIndex'
+import { resolveHomeworldSelectedSectorIndex } from '../analytics/homeworld-locator/resolveHomeworldSelectedSectorIndex'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
@@ -266,17 +265,11 @@ function MapGraphFlow({
       applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
       homeworldRegionDisplayMode
     )
-    let selectedSectorIndex: number | null =
-      selection?.kind === 'sector' ? selection.sectorIndex : null
-    if (selection?.kind === 'planet') {
-      const marker = data.homeworldMarkers.find((m) => m.planetId === selection.planetId)
-      if (marker != null) {
-        const planetOverlay = findHomeworldSectorAtMapPoint(filtered, marker.x, marker.y)
-        if (planetOverlay != null) {
-          selectedSectorIndex = parseHomeworldSectorIndex(planetOverlay.id)
-        }
-      }
-    }
+    const selectedSectorIndex = resolveHomeworldSelectedSectorIndex(
+      selection,
+      data.homeworldMarkers,
+      filtered
+    )
     return applyHomeworldRegionStyle(filtered, { selectedSectorIndex })
   }, [
     data.regionOverlays,
