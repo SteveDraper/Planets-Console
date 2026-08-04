@@ -84,13 +84,27 @@ export function HomeworldLocatorPanel({
     return planetPositionsFromBaseMap(baseMapQuery.data?.nodes ?? [])
   }, [baseMapQuery.isSuccess, baseMapQuery.data?.nodes])
 
+  // Sector grouping needs planet positions from the base map. Until that query
+  // succeeds, do not build a sectors model (empty positions would dump every
+  // candidate into Unassigned).
+  const awaitingBaseMapForSectors = needsBaseMap && !baseMapQuery.isSuccess
+
   const panelModel = useMemo(() => {
     const rows: readonly HomeworldCandidateRecord[] = tableQuery.data?.rows ?? []
     if (!mapQuery.isSuccess) {
       return buildHomeworldSectorPanelModel(rows, EMPTY_OVERLAYS, EMPTY_POSITIONS)
     }
+    if (awaitingBaseMapForSectors) {
+      return null
+    }
     return buildHomeworldSectorPanelModel(rows, overlays, planetPositions)
-  }, [tableQuery.data?.rows, mapQuery.isSuccess, overlays, planetPositions])
+  }, [
+    tableQuery.data?.rows,
+    mapQuery.isSuccess,
+    awaitingBaseMapForSectors,
+    overlays,
+    planetPositions,
+  ])
 
   const refreshMutation = useHomeworldLocatorRefreshMutation(analyticScope)
 
@@ -146,7 +160,11 @@ export function HomeworldLocatorPanel({
           {errorDetailFromUnknown(baseMapQuery.error)}
         </p>
       ) : null}
-      {panelModel.kind === 'sectors' ? (
+      {awaitingBaseMapForSectors ? (
+        baseMapQuery.error != null ? null : (
+          <p className="px-0.5 text-[11px] text-slate-400">Loading…</p>
+        )
+      ) : panelModel?.kind === 'sectors' ? (
         <HomeworldSectorAccordion
           sections={panelModel.sections}
           unassigned={panelModel.unassigned}
@@ -159,7 +177,7 @@ export function HomeworldLocatorPanel({
           selectedSectorIndexes={selectedSectorIndexSet}
           onToggleSectorIndex={toggleSectorIndex}
         />
-      ) : (
+      ) : panelModel?.kind === 'flat' ? (
         <HomeworldCandidateRows
           rows={panelModel.candidates}
           baselineDegraded={data.baselineDegraded}
@@ -169,7 +187,7 @@ export function HomeworldLocatorPanel({
           onSelectPlanet={onSelectPlanet}
           compact
         />
-      )}
+      ) : null}
     </div>
   )
 }
