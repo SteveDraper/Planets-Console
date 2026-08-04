@@ -572,3 +572,64 @@ def test_possible_owners_emit_provenance_kind_counts(template_planet) -> None:
             },
         },
     ]
+    assert wire["ownershipWinningStrength"] == "strong"
+
+
+def test_sector_overlay_omits_ownership_winning_strength_when_ambiguous(
+    template_planet,
+) -> None:
+    """Ambiguous multi-owner sectors must not emit a sector-wide winning strength."""
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    orphan = _planet(template_planet, planet_id=2, x=0, y=550)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    sector_index = sector_index_for_angle(
+        math.atan2(orphan.y - center[1], orphan.x - center[0]),
+        player_count=4,
+        pin_angle=math.atan2(pin.y - center[1], pin.x - center[0]),
+    )
+    members = (
+        SectorOwnerMember(
+            owner_slot=3,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=5,
+                    ship_id=10,
+                    radius_ly=81.0,
+                ),
+            ),
+        ),
+        SectorOwnerMember(
+            owner_slot=7,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=6,
+                    ship_id=11,
+                    radius_ly=82.0,
+                ),
+            ),
+        ),
+    )
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin, orphan],
+        candidate_planet_ids=frozenset({pin.id, orphan.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        nebulas=(),
+        sector_owner_sets={sector_index: members},
+        possible_owner_label_by_slot={3: "enlar (The Privateers)", 7: "koshling (Lizards)"},
+    )
+    target = next(
+        overlay for overlay in overlays if overlay.id == f"homeworld-sector-{sector_index}"
+    )
+    assert target.ownership_winning_strength is None
+    wire = map_region_overlay_to_wire(target)
+    assert len(wire["possibleOwners"]) == 2
+    assert "ownershipWinningStrength" not in wire
