@@ -22,7 +22,9 @@ import {
   homeworldLocatorMapQueryKey,
 } from './mapAnalytic'
 import {
+  useHomeworldLocatorAssertionError,
   useHomeworldLocatorAssertionMutation,
+  useHomeworldLocatorAssertionPending,
   useHomeworldLocatorRefreshMutation,
 } from './useHomeworldLocatorMutations'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
@@ -99,8 +101,10 @@ export function HomeworldLocatorPanel({
   }, [mapQuery.isSuccess, overlays, baseMapQuery.data?.nodes, tableQuery.data?.rows])
 
   const assertMutation = useHomeworldLocatorAssertionMutation(analyticScope)
+  const assertPending = useHomeworldLocatorAssertionPending(analyticScope)
+  const assertError = useHomeworldLocatorAssertionError(analyticScope)
   const refreshMutation = useHomeworldLocatorRefreshMutation(analyticScope)
-  const mutationPending = assertMutation.isPending || refreshMutation.isPending
+  const mutationPending = assertPending || refreshMutation.isPending
 
   if (analyticScope == null) {
     return (
@@ -130,7 +134,7 @@ export function HomeworldLocatorPanel({
   }
 
   const rows: readonly HomeworldCandidateRecord[] = data.rows ?? []
-  const mutationError = assertMutation.error ?? refreshMutation.error
+  const mutationError = assertError ?? refreshMutation.error
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">

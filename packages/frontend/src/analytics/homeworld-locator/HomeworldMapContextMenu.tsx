@@ -26,7 +26,11 @@ import {
 import { planetIdFromNodeId } from './planetIdFromMapNode'
 import { parseHomeworldSectorIndex } from './homeworldSectorIndex'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
-import { useHomeworldLocatorAssertionMutation } from './useHomeworldLocatorMutations'
+import {
+  useHomeworldLocatorAssertionError,
+  useHomeworldLocatorAssertionMutation,
+  useHomeworldLocatorAssertionPending,
+} from './useHomeworldLocatorMutations'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import type { HomeworldMapMarker } from './wireSchema'
 
@@ -93,7 +97,10 @@ export function HomeworldMapContextMenu({
   const [menu, setMenu] = useState<MenuTarget | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const assertMutation = useHomeworldLocatorAssertionMutation(analyticScope)
+  const assertPending = useHomeworldLocatorAssertionPending(analyticScope)
+  const assertError = useHomeworldLocatorAssertionError(analyticScope)
   const setSelection = useHomeworldLocatorSelectionStore((s) => s.setSelection)
+  const dismissMenuOnAssertSuccess = { onSuccess: () => setMenu(null) }
 
   const planetById = useMemo(() => {
     const map = new Map<number, MapNode>()
@@ -213,8 +220,10 @@ export function HomeworldMapContextMenu({
       : []
 
   const runOwnership = (action: 'upsert' | 'revoke', ownerSlot: number, target: OwnershipAssertTarget) => {
-    assertMutation.mutate(buildOwnershipAssertionBody(action, ownerSlot, target))
-    setMenu(null)
+    assertMutation.mutate(
+      buildOwnershipAssertionBody(action, ownerSlot, target),
+      dismissMenuOnAssertSuccess
+    )
   }
 
   return (
@@ -233,14 +242,16 @@ export function HomeworldMapContextMenu({
             type="button"
             role="menuitem"
             className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-            disabled={assertMutation.isPending}
+            disabled={assertPending}
             onClick={() => {
-              assertMutation.mutate({
-                axis: 'location',
-                action: 'upsert',
-                planetId: menu.planetId,
-              })
-              setMenu(null)
+              assertMutation.mutate(
+                {
+                  axis: 'location',
+                  action: 'upsert',
+                  planetId: menu.planetId,
+                },
+                dismissMenuOnAssertSuccess
+              )
             }}
           >
             Assert as homeworld
@@ -249,14 +260,16 @@ export function HomeworldMapContextMenu({
             type="button"
             role="menuitem"
             className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-            disabled={assertMutation.isPending}
+            disabled={assertPending}
             onClick={() => {
-              assertMutation.mutate({
-                axis: 'location',
-                action: 'revoke',
-                planetId: menu.planetId,
-              })
-              setMenu(null)
+              assertMutation.mutate(
+                {
+                  axis: 'location',
+                  action: 'revoke',
+                  planetId: menu.planetId,
+                },
+                dismissMenuOnAssertSuccess
+              )
             }}
           >
             Revoke homeworld assert
@@ -278,7 +291,7 @@ export function HomeworldMapContextMenu({
               type="button"
               role="menuitem"
               className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-              disabled={assertMutation.isPending}
+              disabled={assertPending}
               onClick={() => runOwnership('upsert', player.ordinal, menu.ownership!)}
             >
               {formatHomeworldOwnershipPickLabel(player.name, player.raceName)}
@@ -297,7 +310,7 @@ export function HomeworldMapContextMenu({
               type="button"
               role="menuitem"
               className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
-              disabled={assertMutation.isPending}
+              disabled={assertPending}
               onClick={() => runOwnership('revoke', ownerSlot, menu.ownership!)}
             >
               {ownerSlotLabel(ownerSlot, roster)}
@@ -305,9 +318,9 @@ export function HomeworldMapContextMenu({
           ))}
         </div>
       ) : null}
-      {assertMutation.error != null ? (
+      {assertError != null ? (
         <p className="max-w-[16rem] px-3 py-1 text-[10px] text-red-400 break-words" role="alert">
-          {errorDetailFromUnknown(assertMutation.error)}
+          {errorDetailFromUnknown(assertError)}
         </p>
       ) : null}
     </div>
