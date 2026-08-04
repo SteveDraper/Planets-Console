@@ -14,15 +14,18 @@ describe('formatHomeworldOwnershipInferenceSummary', () => {
     ).toBeNull()
   })
 
-  it('expands inferred with ship and planet observation counts', () => {
+  it('expands ship and planet observation counts under winningStrength', () => {
     expect(
-      formatHomeworldOwnershipInferenceSummary({
-        provenanceKinds: ['nearby_planet_ownership', 'ship_travel_envelope'],
-        provenanceKindCounts: {
-          ship_travel_envelope: 2,
-          nearby_planet_ownership: 0,
+      formatHomeworldOwnershipInferenceSummary(
+        {
+          provenanceKinds: ['nearby_planet_ownership', 'ship_travel_envelope'],
+          provenanceKindCounts: {
+            ship_travel_envelope: 2,
+            nearby_planet_ownership: 0,
+          },
         },
-      })
+        { winningStrength: 'strong' }
+      )
     ).toBe('definite (ship observations: 2, planet observations: 0)')
   })
 
@@ -38,12 +41,30 @@ describe('formatHomeworldOwnershipInferenceSummary', () => {
     ).toBe('definite (ship observations: 0, planet observations: 1)')
   })
 
+  it('labels weak winningStrength as inferred even when ship envelope is present', () => {
+    expect(
+      formatHomeworldOwnershipInferenceSummary(
+        {
+          provenanceKinds: ['ship_travel_envelope', 'nearby_planet_ownership'],
+          provenanceKindCounts: {
+            ship_travel_envelope: 1,
+            nearby_planet_ownership: 1,
+          },
+        },
+        { winningStrength: 'weak' }
+      )
+    ).toBe('inferred (ship observations: 1, planet observations: 1)')
+  })
+
   it('counts preferred-candidate ownership as planet observations', () => {
     expect(
-      formatHomeworldOwnershipInferenceSummary({
-        provenanceKinds: ['preferred_candidate_ownership'],
-        provenanceKindCounts: { preferred_candidate_ownership: 1 },
-      })
+      formatHomeworldOwnershipInferenceSummary(
+        {
+          provenanceKinds: ['preferred_candidate_ownership'],
+          provenanceKindCounts: { preferred_candidate_ownership: 1 },
+        },
+        { winningStrength: 'weak' }
+      )
     ).toBe('inferred (ship observations: 0, planet observations: 1)')
   })
 
@@ -56,12 +77,44 @@ describe('formatHomeworldOwnershipInferenceSummary', () => {
     ).toBe('asserted')
   })
 
+  it('labels asserted via winningStrength without asserted kind', () => {
+    expect(
+      formatHomeworldOwnershipInferenceSummary(
+        {
+          provenanceKinds: ['ship_travel_envelope'],
+          provenanceKindCounts: { ship_travel_envelope: 1 },
+        },
+        { winningStrength: 'asserted' }
+      )
+    ).toBe('asserted')
+  })
+
   it('falls back to presence counts when kind counts are omitted', () => {
+    expect(
+      formatHomeworldOwnershipInferenceSummary(
+        {
+          provenanceKinds: ['ship_travel_envelope'],
+        },
+        { winningStrength: 'strong' }
+      )
+    ).toBe('definite (ship observations: 1, planet observations: 0)')
+  })
+
+  it('legacy: without winningStrength, ship envelope still labels definite', () => {
     expect(
       formatHomeworldOwnershipInferenceSummary({
         provenanceKinds: ['ship_travel_envelope'],
       })
     ).toBe('definite (ship observations: 1, planet observations: 0)')
+  })
+
+  it('legacy: without winningStrength, planet-only evidence labels inferred', () => {
+    expect(
+      formatHomeworldOwnershipInferenceSummary({
+        provenanceKinds: ['preferred_candidate_ownership'],
+        provenanceKindCounts: { preferred_candidate_ownership: 1 },
+      })
+    ).toBe('inferred (ship observations: 0, planet observations: 1)')
   })
 })
 

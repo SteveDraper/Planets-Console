@@ -68,11 +68,21 @@ export function formatHomeworldOwnershipInferenceSummary(
     observationCount(evidence, PROVENANCE_KIND_NEARBY_PLANET_OWNERSHIP) +
     observationCount(evidence, PROVENANCE_KIND_PREFERRED_CANDIDATE_OWNERSHIP)
 
-  const status =
-    options.winningStrength === 'strong' ||
-    evidence.provenanceKinds.includes(PROVENANCE_KIND_SHIP_TRAVEL_ENVELOPE)
+  // Prefer Core-emitted ownershipWinningStrength (ADR 0010) for definite vs
+  // inferred. Kind tags / counts are for observation tallies only -- do not
+  // re-derive strength from kinds when winningStrength is present.
+  let status: 'definite' | 'inferred'
+  if (options.winningStrength != null && options.winningStrength !== '') {
+    status = options.winningStrength === 'strong' ? 'definite' : 'inferred'
+  } else {
+    // Legacy wire without ownershipWinningStrength: ship envelope maps to
+    // Core strong (ownership_provenance_strength).
+    status = evidence.provenanceKinds.includes(
+      PROVENANCE_KIND_SHIP_TRAVEL_ENVELOPE
+    )
       ? 'definite'
       : 'inferred'
+  }
 
   return (
     `${status} (ship observations: ${shipObservations}, ` +
