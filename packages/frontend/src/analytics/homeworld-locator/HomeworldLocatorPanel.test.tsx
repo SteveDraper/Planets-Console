@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import { fetchAnalyticMap } from '../../api/bff'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
@@ -193,6 +194,86 @@ describe('HomeworldLocatorPanel', () => {
           ownerSlot: 2,
           planetId: 12,
           sectorIndex: null,
+        }
+      )
+    })
+  })
+
+  it('posts sector-keyed ownership upsert when sector overlays and planet position resolve', async () => {
+    const user = userEvent.setup()
+    const sectorOverlay = {
+      kind: 'homeworld-sector' as const,
+      id: 'homeworld-sector-2',
+      fillColor: '#f97316',
+      fillOpacity: 0,
+      geometry: {
+        type: 'boundary' as const,
+        vertices: [
+          { x: 0, y: 0 },
+          { x: 1, y: 0 },
+          { x: 1, y: 1 },
+          { x: 0, y: 1 },
+        ],
+        edges: [{ type: 'line' as const }, { type: 'line' as const }, { type: 'line' as const }, { type: 'line' as const }],
+      },
+    }
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [
+        {
+          planetId: 12,
+          perspective: 1,
+          confidenceTier: 'definite',
+          attribution: 'inferred',
+          assertedCue: false,
+          isMostProbable: false,
+        },
+      ],
+    })
+    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      baselineDegraded: false,
+      regionOverlays: [sectorOverlay],
+      markers: [],
+    })
+    vi.mocked(fetchAnalyticMap).mockResolvedValue({
+      analyticId: 'base-map',
+      nodes: [
+        {
+          id: 'base-map:p12',
+          label: '12',
+          x: 0.5,
+          y: 0.5,
+          planet: { id: 12 },
+        },
+      ],
+      edges: [],
+    })
+    vi.mocked(postHomeworldLocatorAssertion).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      baselineDegraded: false,
+      rows: [],
+    })
+
+    renderPanel()
+
+    const ownerSelect = await screen.findByLabelText(/assert ownership for planet 12/i)
+    await user.selectOptions(ownerSelect, '1')
+
+    await waitFor(() => {
+      expect(postHomeworldLocatorAssertion).toHaveBeenCalledWith(
+        expect.objectContaining({ gameId: '628580', turn: 5, perspective: 1 }),
+        {
+          axis: 'ownership',
+          action: 'upsert',
+          ownerSlot: 1,
+          planetId: 12,
+          sectorIndex: 2,
         }
       )
     })

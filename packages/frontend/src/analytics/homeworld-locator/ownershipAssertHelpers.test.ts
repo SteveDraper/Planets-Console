@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
+import { buildPlanetOwnershipTargets } from './buildPlanetOwnershipTargets'
 import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
+import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
 import {
   homeworldSectorsPresentOnMap,
   parseHomeworldSectorIndex,
@@ -113,5 +116,59 @@ describe('resolveOwnershipRevokeSlots', () => {
         { boundOwnerSlot: 3 }
       )
     ).toEqual([3])
+  })
+})
+
+describe('buildOwnershipAssertionBody', () => {
+  it('builds planet-keyed upsert bodies', () => {
+    expect(
+      buildOwnershipAssertionBody('upsert', 2, { keying: 'planet', planetId: 9 })
+    ).toEqual({
+      axis: 'ownership',
+      action: 'upsert',
+      ownerSlot: 2,
+      planetId: 9,
+      sectorIndex: null,
+    })
+  })
+
+  it('builds sector-keyed upsert bodies with optional planet id', () => {
+    expect(
+      buildOwnershipAssertionBody('upsert', 2, {
+        keying: 'sector',
+        sectorIndex: 1,
+        planetId: 44,
+      })
+    ).toEqual({
+      axis: 'ownership',
+      action: 'upsert',
+      ownerSlot: 2,
+      planetId: 44,
+      sectorIndex: 1,
+    })
+  })
+
+  it('uses perspective ordinal as ownerSlot when host playerId differs', () => {
+    const player = perspectiveRow(2, 'bob', { playerId: 847 })
+    const body = buildOwnershipAssertionBody('upsert', player.ordinal, {
+      keying: 'sector',
+      sectorIndex: 1,
+      planetId: 44,
+    })
+    expect(body.ownerSlot).toBe(2)
+    expect(body.ownerSlot).not.toBe(player.playerId)
+  })
+})
+
+describe('buildPlanetOwnershipTargets', () => {
+  it('maps planets inside sectors to sector-keyed targets', () => {
+    const overlays = [sectorOverlay(2)]
+    const positions = new Map([[12, { x: 0.5, y: 0.5 }]])
+    const targets = buildPlanetOwnershipTargets(overlays, positions)
+    expect(targets.get(12)).toEqual({
+      keying: 'sector',
+      sectorIndex: 2,
+      planetId: 12,
+    })
   })
 })

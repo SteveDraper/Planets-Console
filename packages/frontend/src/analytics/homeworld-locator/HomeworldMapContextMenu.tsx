@@ -24,6 +24,7 @@ import {
   type OwnershipAssertTarget,
 } from './resolveOwnershipAssertTarget'
 import { parseHomeworldSectorIndex } from './homeworldSectorIndex'
+import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
 import { useHomeworldLocatorAssertionMutation } from './useHomeworldLocatorMutations'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import type { HomeworldMapMarker } from './wireSchema'
@@ -227,13 +228,7 @@ export function HomeworldMapContextMenu({
       : []
 
   const runOwnership = (action: 'upsert' | 'revoke', ownerSlot: number, target: OwnershipAssertTarget) => {
-    assertMutation.mutate({
-      axis: 'ownership',
-      action,
-      ownerSlot,
-      planetId: target.keying === 'planet' ? target.planetId : (target.planetId ?? null),
-      sectorIndex: target.keying === 'sector' ? target.sectorIndex : null,
-    })
+    assertMutation.mutate(buildOwnershipAssertionBody(action, ownerSlot, target))
     setMenu(null)
   }
 

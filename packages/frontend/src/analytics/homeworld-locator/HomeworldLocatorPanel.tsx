@@ -25,6 +25,7 @@ import {
   useHomeworldLocatorAssertionMutation,
   useHomeworldLocatorRefreshMutation,
 } from './useHomeworldLocatorMutations'
+import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
 import type { OwnershipAssertTarget } from './resolveOwnershipAssertTarget'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
@@ -193,22 +194,10 @@ export function HomeworldLocatorPanel({
           })
         }
         onAssertOwnership={(target, ownerSlot) =>
-          assertMutation.mutate({
-            axis: 'ownership',
-            action: 'upsert',
-            ownerSlot,
-            planetId: target.keying === 'planet' ? target.planetId : (target.planetId ?? null),
-            sectorIndex: target.keying === 'sector' ? target.sectorIndex : null,
-          })
+          assertMutation.mutate(buildOwnershipAssertionBody('upsert', ownerSlot, target))
         }
         onRevokeOwnership={(target, ownerSlot) =>
-          assertMutation.mutate({
-            axis: 'ownership',
-            action: 'revoke',
-            ownerSlot,
-            planetId: target.keying === 'planet' ? target.planetId : (target.planetId ?? null),
-            sectorIndex: target.keying === 'sector' ? target.sectorIndex : null,
-          })
+          assertMutation.mutate(buildOwnershipAssertionBody('revoke', ownerSlot, target))
         }
       />
     </div>

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { isEventInsideHomeworldMenu } from './HomeworldMapContextMenu'
 import { applyHomeworldRegionDisplayMode } from './homeworldRegionDisplayMode'
+import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
 import {
   collectAssertedOwnerSlots,
   resolveOwnershipAssertTargetForPlanet,
@@ -51,14 +53,7 @@ describe('homeworld map context menu target resolution', () => {
     expect(ownership).not.toBeNull()
     if (ownership == null) return
     expect(ownership).toEqual({ keying: 'planet', planetId: 9 })
-    const body = {
-      axis: 'ownership' as const,
-      action: 'upsert' as const,
-      ownerSlot: 2,
-      planetId: ownership.keying === 'planet' ? ownership.planetId : null,
-      sectorIndex: ownership.keying === 'sector' ? ownership.sectorIndex : null,
-    }
-    expect(body).toEqual({
+    expect(buildOwnershipAssertionBody('upsert', 2, ownership)).toEqual({
       axis: 'ownership',
       action: 'upsert',
       ownerSlot: 2,
@@ -108,20 +103,30 @@ describe('homeworld map context menu target resolution', () => {
     expect(
       resolveOwnershipRevokeSlots([], target, { boundOwnerSlot: 2 })
     ).toEqual([2])
-    const revokeBody = {
-      axis: 'ownership' as const,
-      action: 'revoke' as const,
-      ownerSlot: 2,
-      planetId: target.planetId,
-      sectorIndex: null,
-    }
-    expect(revokeBody).toEqual({
+    expect(buildOwnershipAssertionBody('revoke', 2, target)).toEqual({
       axis: 'ownership',
       action: 'revoke',
       ownerSlot: 2,
       planetId: 9,
       sectorIndex: null,
     })
+  })
+
+  it('map menu ownership upsert uses roster ordinal, not host playerId', () => {
+    const player = perspectiveRow(2, 'bob', { playerId: 847 })
+    const ownership = resolveOwnershipAssertTargetForPlanet([sector], 44, 5, 5)
+    expect(ownership).not.toBeNull()
+    if (ownership == null) return
+    // HomeworldMapContextMenu roster buttons call runOwnership with player.ordinal.
+    const body = buildOwnershipAssertionBody('upsert', player.ordinal, ownership)
+    expect(body).toEqual({
+      axis: 'ownership',
+      action: 'upsert',
+      ownerSlot: 2,
+      planetId: 44,
+      sectorIndex: 1,
+    })
+    expect(body.ownerSlot).not.toBe(player.playerId)
   })
 
   it('sector-keyed planet menu revoke uses bound owner, not all sector asserts', () => {
