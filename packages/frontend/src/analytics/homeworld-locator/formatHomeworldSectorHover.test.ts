@@ -120,6 +120,59 @@ describe('formatHomeworldSectorHoverLine', () => {
     )
   })
 
+  it('ignores sector ownershipWinningStrength for ambiguous contenders', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          candidateCount: 2,
+          ownershipWinningStrength: 'strong',
+          possibleOwners: [
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['nearby_planet_ownership'],
+              provenanceKindCounts: { nearby_planet_ownership: 1 },
+            },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              playerLabel: 'bob (The Rebel Confederation)',
+              provenanceKindCounts: { preferred_candidate_ownership: 1 },
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'ambiguous · homeworld owners: slot 2 · ' +
+        'inferred (ship observations: 0, planet observations: 1), ' +
+        'bob (The Rebel Confederation) · ' +
+        'inferred (ship observations: 0, planet observations: 1) · ' +
+        '2 candidate homeworlds'
+    )
+  })
+
+  it('applies ownershipWinningStrength for a unique owner', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          candidateCount: 1,
+          ownershipWinningStrength: 'strong',
+          possibleOwners: [
+            {
+              ownerSlot: 3,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              playerLabel: 'alice (The Federation)',
+              provenanceKindCounts: { preferred_candidate_ownership: 1 },
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'homeworld owner: alice (The Federation) · ' +
+        'definite (ship observations: 0, planet observations: 1) · ' +
+        '1 candidate homeworld'
+    )
+  })
+
   it('keeps pinned player identity and appends ownership inference counts', () => {
     expect(
       formatHomeworldSectorHoverLine(

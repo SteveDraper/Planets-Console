@@ -74,4 +74,35 @@ describe('formatHomeworldPlanetHover', () => {
         'definite (ship observations: 2, planet observations: 0)'
     )
   })
+
+  it('ignores sector ownershipWinningStrength when possibleOwners are ambiguous', () => {
+    expect(
+      formatHomeworldPlanetHover(
+        candidate({
+          perspective: 3,
+          confidenceTier: 'possible',
+          attribution: 'inferred',
+        }),
+        [perspectiveRow(3, 'enlar', { raceName: 'The Privateers' })],
+        {
+          ownershipWinningStrength: 'strong',
+          possibleOwners: [
+            {
+              ownerSlot: 3,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              provenanceKindCounts: { preferred_candidate_ownership: 1 },
+            },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['nearby_planet_ownership'],
+              provenanceKindCounts: { nearby_planet_ownership: 1 },
+            },
+          ],
+        }
+      )
+    ).toBe(
+      'planet 12 · possible · owner: enlar (The Privateers) · ' +
+        'inferred (ship observations: 0, planet observations: 1)'
+    )
+  })
 })

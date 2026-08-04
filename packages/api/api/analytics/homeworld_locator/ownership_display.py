@@ -91,13 +91,21 @@ def ownership_winning_strength_for_members(
     *,
     location_definite_planet_ids: frozenset[int] = frozenset(),
 ) -> str | None:
-    """Winning ownership strength class for a projected member list, if any."""
+    """Winning ownership strength for a unique projected owner set, else None.
+
+    Sector ``ownershipWinningStrength`` is only meaningful when ``|set|=1``.
+    Ambiguous ties keep contenders but omit the field so clients cannot apply a
+    sector-wide max strength to every owner.
+    """
     if not members:
         return None
-    return resolve_ownership_axis(
+    resolution = resolve_ownership_axis(
         members,
         location_definite_planet_ids=location_definite_planet_ids,
-    ).winning_strength
+    )
+    if not resolution.is_unique:
+        return None
+    return resolution.winning_strength
 
 
 __all__ = [

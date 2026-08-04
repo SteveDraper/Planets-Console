@@ -11,6 +11,7 @@ from api.analytics.homeworld_locator.models import (
     SectorOwnerMember,
 )
 from api.analytics.homeworld_locator.ownership_display import (
+    ownership_winning_strength_for_members,
     project_sector_owner_sets_for_display,
 )
 
@@ -92,3 +93,40 @@ def test_asserted_settles_for_cross_sector_trim() -> None:
     }
     projected = project_sector_owner_sets_for_display(sets)
     assert [m.owner_slot for m in projected[1]] == [7]
+
+
+def test_winning_strength_emitted_only_when_unique() -> None:
+    unique = (_member(1, PROVENANCE_SHIP_TRAVEL_ENVELOPE),)
+    assert ownership_winning_strength_for_members(unique) == "strong"
+
+    ambiguous_strong = (
+        _member(2, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
+        _member(5, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
+    )
+    assert ownership_winning_strength_for_members(ambiguous_strong) is None
+
+    empty: tuple[SectorOwnerMember, ...] = ()
+    assert ownership_winning_strength_for_members(empty) is None
+
+
+def test_winning_strength_omitted_for_ambiguous_preferred_upgrade() -> None:
+    """Location-definite preferred can be strong, but ties must not emit a sector max."""
+    members = (
+        _member(3, PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP, planet_id=42),
+        _member(4, PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP, planet_id=43),
+    )
+    assert (
+        ownership_winning_strength_for_members(
+            members,
+            location_definite_planet_ids=frozenset({42, 43}),
+        )
+        is None
+    )
+    unique = (_member(3, PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP, planet_id=42),)
+    assert (
+        ownership_winning_strength_for_members(
+            unique,
+            location_definite_planet_ids=frozenset({42}),
+        )
+        == "strong"
+    )

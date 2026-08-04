@@ -54,8 +54,13 @@ export function formatHomeworldPlanetHover(
     options.possibleOwners,
     row.perspective
   )
+  // Sector winning strength applies only for a unique projected owner set.
+  const uniqueWinningStrength =
+    (options.possibleOwners?.length ?? 0) === 1
+      ? options.ownershipWinningStrength
+      : undefined
   const ownershipSummary = formatHomeworldOwnershipInferenceSummary(ownershipEvidence, {
-    winningStrength: options.ownershipWinningStrength,
+    winningStrength: uniqueWinningStrength,
   })
   if (ownershipSummary != null) {
     parts.push(ownershipSummary)

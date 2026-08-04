@@ -36,10 +36,15 @@ function appendOwnershipEvidenceParts(
 ): void {
   if (possibleOwners.length === 0) return
 
+  // Sector winning strength labels apply only when ``|set|=1`` (design §4.3.2).
+  // Ambiguous contenders use each member's kinds/counts, never the sector max.
+  const uniqueWinningStrength =
+    possibleOwners.length === 1 ? options.winningStrength : undefined
+
   if (!options.includeOwnerLabels) {
     if (possibleOwners.length === 1) {
       const summary = formatHomeworldOwnershipInferenceSummary(possibleOwners[0]!, {
-        winningStrength: options.winningStrength,
+        winningStrength: uniqueWinningStrength,
       })
       if (summary != null) parts.push(summary)
       return
@@ -47,7 +52,7 @@ function appendOwnershipEvidenceParts(
     parts.push('ambiguous')
     parts.push(
       `homeworld owners: ${possibleOwners
-        .map((owner) => formatPossibleOwnerDisplay(owner, options.winningStrength))
+        .map((owner) => formatPossibleOwnerDisplay(owner, uniqueWinningStrength))
         .join(', ')}`
     )
     return
@@ -57,7 +62,7 @@ function appendOwnershipEvidenceParts(
     parts.push(
       `homeworld owner: ${formatPossibleOwnerDisplay(
         possibleOwners[0]!,
-        options.winningStrength
+        uniqueWinningStrength
       )}`
     )
     return
@@ -65,7 +70,7 @@ function appendOwnershipEvidenceParts(
   parts.push('ambiguous')
   parts.push(
     `homeworld owners: ${possibleOwners
-      .map((owner) => formatPossibleOwnerDisplay(owner, options.winningStrength))
+      .map((owner) => formatPossibleOwnerDisplay(owner, uniqueWinningStrength))
       .join(', ')}`
   )
 }
