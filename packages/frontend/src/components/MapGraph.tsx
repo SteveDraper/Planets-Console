@@ -6,7 +6,7 @@ import {
 } from 'react'
 import { ReactFlow, useStore } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { CombinedMapData } from '../api/bff'
+import type { AnalyticShellScope, CombinedMapData } from '../api/bff'
 import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
 import {
   buildCartographyMapFrame,
@@ -43,12 +43,9 @@ import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homewo
 import { findHomeworldSectorAtMapPoint } from '../analytics/homeworld-locator/resolveOwnershipAssertTarget'
 import { parseHomeworldSectorIndex } from '../analytics/homeworld-locator/homeworldSectorIndex'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
-import { deriveAnalyticScope } from '../shell/shellContext'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
 import { useHomeworldRegionDisplayStore } from '../stores/homeworldRegionDisplay'
-import { useSessionStore } from '../stores/session'
-import { useShellStore } from '../stores/shell'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
 import {
@@ -68,11 +65,13 @@ import {
   ViewportZoomSync,
 } from './map-graph/viewportControls'
 
-const EMPTY_PERSPECTIVES: readonly PerspectiveRow[] = []
-
 type MapGraphProps = {
   data: CombinedMapData
   className?: string
+  /** Shell-owned scope; required for homeworld map context menu asserts. */
+  analyticScope: AnalyticShellScope
+  /** Shell-owned roster for homeworld ownership menu labels. */
+  roster: readonly PerspectiveRow[]
   /** Turns beyond latest stored game turn for ion storm overlay extrapolation. */
   futureTurnOffset?: number
   onMapZoomChange: (zoom: number) => void
@@ -89,6 +88,8 @@ const INITIAL_FIT_REVEAL_MS = 250
 export function MapGraph({
   data,
   className,
+  analyticScope,
+  roster,
   futureTurnOffset = 0,
   onMapZoomChange,
   onSetZoomReady,
@@ -142,6 +143,8 @@ export function MapGraph({
             waypointGrid={waypointGrid}
             labelSourceByNodeId={labelSourceByNodeId}
             planetLabelOptions={planetLabelOptions}
+            analyticScope={analyticScope}
+            roster={roster}
             cartography={cartography}
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
@@ -162,6 +165,8 @@ type MapGraphFlowProps = {
   waypointGrid: ReturnType<typeof buildPlanetSpatialGrid> | null
   labelSourceByNodeId: ReturnType<typeof buildLabelSourceByNodeId>
   planetLabelOptions: PlanetLabelOptions
+  analyticScope: AnalyticShellScope
+  roster: readonly PerspectiveRow[]
   cartography?: StellarCartographyMapContext
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
@@ -223,6 +228,8 @@ function MapGraphFlow({
   waypointGrid,
   labelSourceByNodeId,
   planetLabelOptions,
+  analyticScope,
+  roster,
   cartography,
   onMapZoomChange,
   onSetZoomReady,
@@ -248,25 +255,6 @@ function MapGraphFlow({
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
-  const selectedGameId = useShellStore((s) => s.selectedGameId)
-  const gameInfoContext = useShellStore((s) => s.gameInfoContext)
-  const selectedTurn = useShellStore((s) => s.selectedTurn)
-  const perspectiveOverrideOrdinal = useShellStore((s) => s.perspectiveOverrideOrdinal)
-  const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
-  const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
-  const loginName = useSessionStore((s) => s.name)
-  const roster = gameInfoContext?.perspectives ?? EMPTY_PERSPECTIVES
-  const analyticScope = deriveAnalyticScope({
-    selectedGameId,
-    gameInfoContext,
-    selectedTurn,
-    perspectiveOverrideOrdinal,
-    loginName,
-    storageOnlyLoad,
-    storageAvailablePerspectives,
-    viewedDataTurn: selectedTurn,
-    turnUsernamesByPlayerId: null,
-  })
 
   // Raw homeworld sector overlays for ownership assert keying (independent of display mode).
   const ownershipRegionOverlays = data.regionOverlays
