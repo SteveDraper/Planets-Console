@@ -6,12 +6,12 @@
 import { cn } from '../../lib/utils'
 import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
+import { homeworldBaselineDegradedMessage } from './constants'
 import {
-  CONFIDENCE_DEFINITE,
-  homeworldBaselineDegradedMessage,
-} from './constants'
+  formatHomeworldCandidateConfidenceLabel,
+  formatHomeworldCandidateOwnerSlotLabel,
+} from './formatHomeworldCandidateLabels'
 import { formatHomeworldPlanetHover } from './formatHomeworldPlanetHover'
-import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 export type HomeworldCandidateRowsProps = {
@@ -39,32 +39,6 @@ export type HomeworldCandidateRowsProps = {
   possibleOwners?: readonly MapRegionPossibleOwner[]
   /** Overlay winning ownership strength after display projection. */
   ownershipWinningStrength?: string | null
-}
-
-function confidenceLabel(row: HomeworldCandidateRecord): string {
-  let label: string
-  if (row.confidenceTier === CONFIDENCE_DEFINITE) {
-    label = 'Definite'
-  } else if (row.isMostProbable) {
-    label = 'Possible (most probable)'
-  } else {
-    label = 'Possible'
-  }
-  if (row.assertedCue === true) {
-    return label === 'Possible (most probable)'
-      ? 'Possible (most probable, asserted)'
-      : `${label} (asserted)`
-  }
-  return label
-}
-
-function slotLabel(perspective: number | null, roster: readonly PerspectiveRow[]): string {
-  if (perspective == null) return 'Orphan'
-  const player = roster.find((row) => row.ordinal === perspective)
-  if (player != null) {
-    return formatHomeworldOwnershipPickLabel(player.name, player.raceName)
-  }
-  return `Slot ${perspective}`
 }
 
 /** Candidate table for the homeworld locator sidebar panel (read-only). */
@@ -144,10 +118,12 @@ export function HomeworldCandidateRows({
                     <td className={cn(cellPad, 'text-slate-200 tabular-nums')}>{row.planetId}</td>
                     {showOwnerColumn ? (
                       <td className={cn(cellPad, 'text-slate-300')}>
-                        {slotLabel(row.perspective, roster)}
+                        {formatHomeworldCandidateOwnerSlotLabel(row.perspective, roster)}
                       </td>
                     ) : null}
-                    <td className={cn(cellPad, 'text-slate-300')}>{confidenceLabel(row)}</td>
+                    <td className={cn(cellPad, 'text-slate-300')}>
+                      {formatHomeworldCandidateConfidenceLabel(row, { includeAsserted: true })}
+                    </td>
                   </tr>
                 )
               })}

@@ -5,25 +5,15 @@
 
 import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
-import { CONFIDENCE_DEFINITE } from './constants'
+import {
+  formatHomeworldCandidateConfidenceLabel,
+  formatHomeworldCandidateOwnerSlotLabel,
+} from './formatHomeworldCandidateLabels'
 import {
   formatHomeworldOwnershipInferenceSummary,
   resolveOwnershipEvidenceForCandidate,
 } from './formatHomeworldOwnershipInference'
-import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import type { HomeworldCandidateRecord } from './wireSchema'
-
-function ownerSlotLabel(
-  perspective: number | null,
-  roster: readonly PerspectiveRow[]
-): string {
-  if (perspective == null) return 'orphan'
-  const player = roster.find((row) => row.ordinal === perspective)
-  if (player != null) {
-    return formatHomeworldOwnershipPickLabel(player.name, player.raceName)
-  }
-  return `slot ${perspective}`
-}
 
 export type FormatHomeworldPlanetHoverOptions = {
   /** Sector (or planet-keyed) ownership evidence for expanding ``inferred``. */
@@ -40,15 +30,13 @@ export function formatHomeworldPlanetHover(
 ): string {
   const parts: string[] = [`planet ${row.planetId}`]
 
-  if (row.confidenceTier === CONFIDENCE_DEFINITE) {
-    parts.push('definite')
-  } else if (row.isMostProbable) {
-    parts.push('possible (most probable)')
-  } else {
-    parts.push('possible')
-  }
+  parts.push(
+    formatHomeworldCandidateConfidenceLabel(row, { casing: 'lower' })
+  )
 
-  parts.push(`owner: ${ownerSlotLabel(row.perspective, roster)}`)
+  parts.push(
+    `owner: ${formatHomeworldCandidateOwnerSlotLabel(row.perspective, roster, { casing: 'lower' })}`
+  )
 
   const ownershipEvidence = resolveOwnershipEvidenceForCandidate(
     options.possibleOwners,
