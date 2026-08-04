@@ -13,6 +13,7 @@ from api.analytics.homeworld_locator.models import (
 from api.analytics.homeworld_locator.ownership_display import (
     ownership_winning_strength_for_members,
     project_sector_owner_sets_for_display,
+    settled_owner_homes_from_location_pins,
 )
 
 
@@ -67,6 +68,42 @@ def test_location_pin_settles_owner_for_cross_sector_trim() -> None:
     )
     assert projected[0] == ()
     assert [m.owner_slot for m in projected[1]] == [4]
+
+
+def test_settled_owner_homes_from_location_pins_unique_sector() -> None:
+    settled = settled_owner_homes_from_location_pins(
+        [[10, 11], [20], [30]],
+        location_definite_planet_ids=frozenset({20}),
+        perspective_by_planet_id={20: 2},
+    )
+    assert settled == {2: 1}
+
+
+def test_settled_owner_homes_from_location_pins_multi_sector_unsettled() -> None:
+    settled = settled_owner_homes_from_location_pins(
+        [[10], [20], []],
+        location_definite_planet_ids=frozenset({10, 20}),
+        perspective_by_planet_id={10: 2, 20: 2},
+    )
+    assert settled == {}
+
+
+def test_settled_owner_homes_from_location_pins_skips_missing_perspective() -> None:
+    settled = settled_owner_homes_from_location_pins(
+        [[10], [20]],
+        location_definite_planet_ids=frozenset({10, 20}),
+        perspective_by_planet_id={20: 3},
+    )
+    assert settled == {3: 1}
+
+
+def test_settled_owner_homes_from_location_pins_duplicate_same_sector() -> None:
+    settled = settled_owner_homes_from_location_pins(
+        [[10, 11], []],
+        location_definite_planet_ids=frozenset({10, 11}),
+        perspective_by_planet_id={10: 4, 11: 4},
+    )
+    assert settled == {4: 0}
 
 
 def test_preferred_upgrades_when_planet_location_definite() -> None:

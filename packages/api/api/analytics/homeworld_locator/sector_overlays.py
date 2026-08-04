@@ -24,6 +24,7 @@ from api.analytics.homeworld_locator.models import (
 from api.analytics.homeworld_locator.ownership_display import (
     ownership_winning_strength_for_members,
     project_sector_owner_sets_for_display,
+    settled_owner_homes_from_location_pins,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateView
 from api.analytics.turn_roster import players_by_id
@@ -518,20 +519,11 @@ def build_homeworld_sector_overlays(
         index = sector_index_for_angle(angle, pin_angle=pin_angle, player_count=player_count)
         candidates_by_sector[index].append(planet)
 
-    location_home_claims: dict[int, list[int]] = {}
-    for index, sector_planets in enumerate(candidates_by_sector):
-        for planet in sector_planets:
-            if planet.id not in location_definite_planet_ids:
-                continue
-            owner_slot = perspectives.get(planet.id)
-            if owner_slot is None:
-                continue
-            location_home_claims.setdefault(owner_slot, []).append(index)
-    settled_from_location = {
-        owner_slot: sectors[0]
-        for owner_slot, sectors in location_home_claims.items()
-        if len(set(sectors)) == 1
-    }
+    settled_from_location = settled_owner_homes_from_location_pins(
+        [[planet.id for planet in sector_planets] for sector_planets in candidates_by_sector],
+        location_definite_planet_ids=location_definite_planet_ids,
+        perspective_by_planet_id=perspectives,
+    )
 
     owner_sets = project_sector_owner_sets_for_display(
         dict(sector_owner_sets or ()),

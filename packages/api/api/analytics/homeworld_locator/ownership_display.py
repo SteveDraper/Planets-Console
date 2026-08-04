@@ -21,6 +21,38 @@ from api.analytics.homeworld_locator.models import SectorOwnerMember
 _SETTLED_STRENGTHS = frozenset({STRENGTH_STRONG, STRENGTH_ASSERTED})
 
 
+def settled_owner_homes_from_location_pins(
+    candidate_planet_ids_by_sector: Sequence[Sequence[int]],
+    *,
+    location_definite_planet_ids: frozenset[int],
+    perspective_by_planet_id: Mapping[int, int],
+) -> dict[int, int]:
+    """Map owner slots to a unique home sector from definite location pins.
+
+    A slot settles only when every location-definite, perspective-anchored
+    candidate for that slot falls in exactly one sector. Multi-sector claims
+    leave the slot unsettled so cross-sector trim does not fire.
+    """
+    if not location_definite_planet_ids or not perspective_by_planet_id:
+        return {}
+
+    location_home_claims: dict[int, list[int]] = {}
+    for sector_index, planet_ids in enumerate(candidate_planet_ids_by_sector):
+        for planet_id in planet_ids:
+            if planet_id not in location_definite_planet_ids:
+                continue
+            owner_slot = perspective_by_planet_id.get(planet_id)
+            if owner_slot is None:
+                continue
+            location_home_claims.setdefault(owner_slot, []).append(sector_index)
+
+    return {
+        owner_slot: sectors[0]
+        for owner_slot, sectors in location_home_claims.items()
+        if len(set(sectors)) == 1
+    }
+
+
 def project_sector_owner_sets_for_display(
     sector_owner_sets: Mapping[int, Sequence[SectorOwnerMember]],
     *,
@@ -111,4 +143,5 @@ def ownership_winning_strength_for_members(
 __all__ = [
     "ownership_winning_strength_for_members",
     "project_sector_owner_sets_for_display",
+    "settled_owner_homes_from_location_pins",
 ]
