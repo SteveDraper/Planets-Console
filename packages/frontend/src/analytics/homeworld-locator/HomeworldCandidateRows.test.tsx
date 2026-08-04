@@ -9,7 +9,7 @@ function candidateRow(
 ): HomeworldCandidateRecord {
   return {
     planetId: overrides.planetId,
-    perspective: overrides.perspective ?? 1,
+    perspective: 'perspective' in overrides ? overrides.perspective! : 1,
     confidenceTier: overrides.confidenceTier ?? 'definite',
     attribution: overrides.attribution ?? 'inferred',
     assertedCue: overrides.assertedCue ?? false,

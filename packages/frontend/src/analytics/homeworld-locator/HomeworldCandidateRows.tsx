@@ -15,23 +15,34 @@ import type { OwnershipAssertTarget } from './resolveOwnershipAssertTarget'
 
 export type HomeworldCandidateRowsMode = 'interactive' | 'readOnly'
 
-export type HomeworldCandidateRowsProps = {
+type HomeworldCandidateRowsSharedProps = {
   rows: readonly HomeworldCandidateRecord[]
   baselineDegraded: boolean
   baselineTurn: number | null | undefined
-  mode: HomeworldCandidateRowsMode
   roster: readonly PerspectiveRow[]
   selectedPlanetId: number | null
   onSelectPlanet: (planetId: number) => void
   /** Compact layout for the narrow sidebar panel. */
   compact?: boolean
-  mutationPending?: boolean
-  resolveOwnershipTarget?: (row: HomeworldCandidateRecord) => OwnershipAssertTarget | null
-  onAssertLocation?: (planetId: number) => void
-  onRevokeLocation?: (planetId: number) => void
-  onAssertOwnership?: (target: OwnershipAssertTarget, ownerSlot: number) => void
-  onRevokeOwnership?: (target: OwnershipAssertTarget, ownerSlot: number) => void
 }
+
+export type HomeworldCandidateRowsInteractiveProps = HomeworldCandidateRowsSharedProps & {
+  mode: 'interactive'
+  mutationPending?: boolean
+  resolveOwnershipTarget: (row: HomeworldCandidateRecord) => OwnershipAssertTarget | null
+  onAssertLocation: (planetId: number) => void
+  onRevokeLocation: (planetId: number) => void
+  onAssertOwnership: (target: OwnershipAssertTarget, ownerSlot: number) => void
+  onRevokeOwnership: (target: OwnershipAssertTarget, ownerSlot: number) => void
+}
+
+export type HomeworldCandidateRowsReadOnlyProps = HomeworldCandidateRowsSharedProps & {
+  mode: 'readOnly'
+}
+
+export type HomeworldCandidateRowsProps =
+  | HomeworldCandidateRowsInteractiveProps
+  | HomeworldCandidateRowsReadOnlyProps
 
 function confidenceLabel(row: HomeworldCandidateRecord): string {
   if (row.confidenceTier === CONFIDENCE_DEFINITE) return 'Definite'
@@ -51,22 +62,18 @@ function slotLabel(perspective: number | null, roster: readonly PerspectiveRow[]
 /**
  * Candidate table shared by sidebar panel and main-area tabular tile.
  */
-export function HomeworldCandidateRows({
-  rows,
-  baselineDegraded,
-  baselineTurn,
-  mode,
-  roster,
-  selectedPlanetId,
-  onSelectPlanet,
-  compact = false,
-  mutationPending = false,
-  resolveOwnershipTarget,
-  onAssertLocation,
-  onRevokeLocation,
-  onAssertOwnership,
-  onRevokeOwnership,
-}: HomeworldCandidateRowsProps) {
+export function HomeworldCandidateRows(props: HomeworldCandidateRowsProps) {
+  const {
+    rows,
+    baselineDegraded,
+    baselineTurn,
+    mode,
+    roster,
+    selectedPlanetId,
+    onSelectPlanet,
+    compact = false,
+  } = props
+  const mutationPending = mode === 'interactive' ? (props.mutationPending ?? false) : false
   const cellPad = compact ? 'px-1.5 py-1' : 'px-3 py-2'
   const textSize = compact ? 'text-[11px]' : 'text-sm'
 
@@ -116,7 +123,8 @@ export function HomeworldCandidateRows({
             <tbody>
               {rows.map((row) => {
                 const selected = selectedPlanetId === row.planetId
-                const ownershipTarget = resolveOwnershipTarget?.(row) ?? null
+                const ownershipTarget =
+                  props.mode === 'interactive' ? props.resolveOwnershipTarget(row) : null
                 return (
                   <tr
                     key={`${row.planetId}-${row.perspective ?? 'orphan'}-${row.confidenceTier}`}
@@ -139,7 +147,7 @@ export function HomeworldCandidateRows({
                     <td className={cn(cellPad, 'text-slate-300')}>
                       {row.assertedCue === true ? 'Yes' : '—'}
                     </td>
-                    {mode === 'interactive' ? (
+                    {props.mode === 'interactive' ? (
                       <td
                         className={cn(cellPad, 'text-slate-300')}
                         onClick={(event) => event.stopPropagation()}
@@ -150,7 +158,7 @@ export function HomeworldCandidateRows({
                               type="button"
                               className="rounded border border-[#52575d] px-1.5 py-0.5 text-[10px] text-slate-200 hover:bg-black/20 disabled:opacity-40"
                               disabled={mutationPending}
-                              onClick={() => onAssertLocation?.(row.planetId)}
+                              onClick={() => props.onAssertLocation(row.planetId)}
                             >
                               Assert HW
                             </button>
@@ -158,7 +166,7 @@ export function HomeworldCandidateRows({
                               type="button"
                               className="rounded border border-[#52575d] px-1.5 py-0.5 text-[10px] text-slate-200 hover:bg-black/20 disabled:opacity-40"
                               disabled={mutationPending}
-                              onClick={() => onRevokeLocation?.(row.planetId)}
+                              onClick={() => props.onRevokeLocation(row.planetId)}
                             >
                               Revoke HW
                             </button>
@@ -176,7 +184,7 @@ export function HomeworldCandidateRows({
                                   if (value === '') return
                                   const ownerSlot = Number.parseInt(value, 10)
                                   if (!Number.isFinite(ownerSlot)) return
-                                  onAssertOwnership?.(ownershipTarget, ownerSlot)
+                                  props.onAssertOwnership(ownershipTarget, ownerSlot)
                                   event.target.value = ''
                                 }}
                               >
@@ -196,7 +204,7 @@ export function HomeworldCandidateRows({
                                   className="self-start rounded border border-[#52575d] px-1.5 py-0.5 text-[10px] text-slate-200 hover:bg-black/20 disabled:opacity-40"
                                   disabled={mutationPending}
                                   onClick={() =>
-                                    onRevokeOwnership?.(ownershipTarget, row.perspective!)
+                                    props.onRevokeOwnership(ownershipTarget, row.perspective!)
                                   }
                                 >
                                   Revoke owner
