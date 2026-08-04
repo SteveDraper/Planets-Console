@@ -36,6 +36,7 @@ import {
   useMapPaneClientPos,
 } from './map-graph/RegionOverlayHoverPanel'
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
+import { HomeworldCandidateAttentionController } from './map-graph/HomeworldCandidateAttentionController'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
@@ -336,6 +337,7 @@ function MapGraphFlow({
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
+      <HomeworldCandidateAttentionController markers={data.homeworldMarkers} />
       <FixedSizeDotsOverlay
         planetGrid={planetGrid}
         planetLabelOptions={planetLabelOptions}

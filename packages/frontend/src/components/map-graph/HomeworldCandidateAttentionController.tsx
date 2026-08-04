@@ -1,0 +1,61 @@
+/**
+ * Inside React Flow: on candidate flash request, pan only when off-screen (no zoom change).
+ */
+
+import { useEffect, useRef } from 'react'
+import { useReactFlow, useStore } from '@xyflow/react'
+import {
+  resolveHomeworldCandidatePan,
+  type HomeworldCandidateAttentionMarker,
+} from '../../analytics/homeworld-locator/homeworldCandidateAttention'
+import { HOMEWORLD_CANDIDATE_FLASH_MS } from '../../analytics/homeworld-locator/constants'
+import { recenterViewportOnFlowPoint } from './geometry'
+import { useHomeworldCandidateFlashStore } from '../../stores/homeworldCandidateFlash'
+
+export function HomeworldCandidateAttentionController({
+  markers,
+}: {
+  markers: readonly HomeworldCandidateAttentionMarker[]
+}) {
+  const flashTarget = useHomeworldCandidateFlashStore((s) => s.flashTarget)
+  const clearFlash = useHomeworldCandidateFlashStore((s) => s.clearFlash)
+  const { getViewport, setViewport } = useReactFlow()
+  const domNode = useStore((s) => s.domNode ?? null)
+  const handledTokenRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (flashTarget == null) {
+      handledTokenRef.current = null
+      return
+    }
+    if (handledTokenRef.current === flashTarget.token) return
+    handledTokenRef.current = flashTarget.token
+    if (domNode == null) return
+
+    const rect = domNode.getBoundingClientRect()
+    const vp = getViewport()
+    const resolved = resolveHomeworldCandidatePan(flashTarget.planetId, markers, {
+      x: vp.x,
+      y: vp.y,
+      zoom: vp.zoom,
+      width: rect.width,
+      height: rect.height,
+    })
+    if (resolved == null || !resolved.needsPan) return
+    recenterViewportOnFlowPoint(
+      resolved.flowX,
+      resolved.flowY,
+      domNode,
+      getViewport,
+      setViewport
+    )
+  }, [flashTarget, markers, domNode, getViewport, setViewport])
+
+  useEffect(() => {
+    if (flashTarget == null) return
+    const timer = setTimeout(() => clearFlash(), HOMEWORLD_CANDIDATE_FLASH_MS)
+    return () => clearTimeout(timer)
+  }, [flashTarget, clearFlash])
+
+  return null
+}

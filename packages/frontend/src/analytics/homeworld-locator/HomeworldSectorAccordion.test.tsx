@@ -235,7 +235,8 @@ describe('HomeworldSectorAccordion', () => {
     )
 
     expect(screen.getByRole('status')).toHaveTextContent(/Baseline degraded/)
-    const sectionEl = document.querySelector('[data-sector-index="1"]')!
-    expect(within(sectionEl).getByRole('button', { name: /assert hw/i })).toBeInTheDocument()
+    const sectionEl = document.querySelector('[data-sector-index="1"]')
+    expect(sectionEl).toBeInstanceOf(HTMLElement)
+    expect(within(sectionEl as HTMLElement).getByRole('button', { name: /assert hw/i })).toBeInTheDocument()
   })
 })

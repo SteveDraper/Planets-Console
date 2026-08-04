@@ -69,3 +69,29 @@ export function recenterViewportOnFlowPoint(
   const z = clampMapZoom(Number(vp.zoom) || 0)
   setViewport({ x: w / 2 - flowX * z, y: h / 2 - flowY * z, zoom: z })
 }
+
+/** React Flow viewport translation + zoom with pane size in CSS pixels. */
+export type FlowViewportPane = {
+  x: number
+  y: number
+  zoom: number
+  width: number
+  height: number
+}
+
+/**
+ * True when a flow-space point projects outside the visible pane at the current zoom.
+ * Does not change zoom; callers use this to decide whether to pan.
+ */
+export function flowPointNeedsPan(
+  flowX: number,
+  flowY: number,
+  viewport: FlowViewportPane
+): boolean {
+  const width = Math.max(viewport.width, 1)
+  const height = Math.max(viewport.height, 1)
+  const z = clampMapZoom(Number(viewport.zoom) || 0)
+  const paneX = flowX * z + viewport.x
+  const paneY = flowY * z + viewport.y
+  return paneX < 0 || paneX >= width || paneY < 0 || paneY >= height
+}

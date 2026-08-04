@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { HomeworldCandidateRows } from './HomeworldCandidateRows'
@@ -73,5 +74,24 @@ describe('HomeworldCandidateRows', () => {
     )
 
     expect(screen.getByText('Orphan')).toBeInTheDocument()
+  })
+
+  it('invokes onSelectPlanet when a candidate row is clicked', async () => {
+    const user = userEvent.setup()
+    const onSelectPlanet = vi.fn()
+    render(
+      <HomeworldCandidateRows
+        rows={[candidateRow({ planetId: 55 })]}
+        baselineDegraded={false}
+        baselineTurn={null}
+        mode="readOnly"
+        roster={[perspectiveRow(1, 'alice')]}
+        selectedPlanetId={null}
+        onSelectPlanet={onSelectPlanet}
+      />
+    )
+
+    await user.click(screen.getByText('55'))
+    expect(onSelectPlanet).toHaveBeenCalledWith(55)
   })
 })

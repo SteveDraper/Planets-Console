@@ -9,6 +9,7 @@ import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import { homeworldInactiveHint } from './constants'
+import { selectHomeworldCandidateForMapAttention } from './homeworldCandidateAttention'
 import {
   HOMEWORLD_REGION_SELECTION_PRESET_LABELS,
   HOMEWORLD_REGION_SELECTION_PRESETS,
@@ -90,7 +91,7 @@ export function HomeworldLocatorTile({
   const perspectives = gameInfoContext?.perspectives
   const roster = perspectives ?? EMPTY_ROSTER
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
-  const setSelection = useHomeworldLocatorSelectionStore((s) => s.setSelection)
+  const selectedPlanetId = selection?.kind === 'planet' ? selection.planetId : null
 
   const analyticScope = deriveAnalyticScope({
     selectedGameId,
@@ -106,7 +107,6 @@ export function HomeworldLocatorTile({
 
   const showExpandedBody = canExpand && expanded
   const chevronPointsDown = showExpandedBody
-  const selectedPlanetId = selection?.kind === 'planet' ? selection.planetId : null
 
   return (
     <div
@@ -186,7 +186,7 @@ export function HomeworldLocatorTile({
             fetchEnabled={canExpand}
             roster={roster}
             selectedPlanetId={selectedPlanetId}
-            onSelectPlanet={(planetId) => setSelection({ kind: 'planet', planetId })}
+            onSelectPlanet={selectHomeworldCandidateForMapAttention}
           />
         </div>
       ) : null}

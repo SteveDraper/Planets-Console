@@ -1,6 +1,7 @@
 import { useStore } from '@xyflow/react'
 import { homeworldMarkerRings } from '../../analytics/homeworld-locator/homeworldMarkerRingStyle'
 import type { HomeworldMapMarkerDisplay } from '../../analytics/homeworld-locator/mapAnalytic'
+import { useHomeworldCandidateFlashStore } from '../../stores/homeworldCandidateFlash'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
@@ -11,7 +12,8 @@ const MARKER_DIAMETER_PX = 12
 /**
  * Homeworld locator planet decorations on the base map.
  * Solid ring = definite; dashed/lighter ring = possible; double dotted = most probable;
- * amber outer ring = asserted cue; cyan halo = panel/table selection.
+ * amber outer ring = asserted cue; cyan halo = panel/table selection;
+ * pulse = ephemeral flash after candidate row click.
  */
 export function HomeworldMarkersOverlay({
   markers,
@@ -22,6 +24,7 @@ export function HomeworldMarkersOverlay({
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
+  const flashTarget = useHomeworldCandidateFlashStore((s) => s.flashTarget)
 
   if (!transform || width <= 0 || height <= 0) return null
   if (markers.length === 0) return null
@@ -39,24 +42,35 @@ export function HomeworldMarkersOverlay({
           const paneY = cy * scale + ty
           const isSelected =
             selection?.kind === 'planet' && selection.planetId === marker.planetId
+          const isFlashing =
+            flashTarget != null && flashTarget.planetId === marker.planetId
           const rings = homeworldMarkerRings({
             ...marker,
             isSelected,
           })
           const markerKey = `hw-${marker.planetId}-${marker.perspective ?? 'o'}-${marker.confidenceTier}-${marker.assertedCue ? 'a' : 'n'}-${marker.isMostProbable ? 'mp' : 'n'}`
-          return rings.map((ring, ringIndex) => (
-            <circle
-              key={`${markerKey}-${ringIndex}`}
-              cx={paneX}
-              cy={paneY}
-              r={baseRadius * ring.radiusScale}
-              fill="none"
-              stroke={ring.stroke}
-              strokeWidth={ring.strokeWidth}
-              strokeDasharray={ring.strokeDasharray}
-              opacity={ring.opacity}
-            />
-          ))
+          return (
+            <g
+              key={isFlashing ? `${markerKey}-flash-${flashTarget.token}` : markerKey}
+              transform={`translate(${paneX} ${paneY})`}
+            >
+              <g className={isFlashing ? 'wormhole-recenter-pulse' : undefined}>
+                {rings.map((ring, ringIndex) => (
+                  <circle
+                    key={`${markerKey}-${ringIndex}`}
+                    cx={0}
+                    cy={0}
+                    r={baseRadius * ring.radiusScale}
+                    fill="none"
+                    stroke={ring.stroke}
+                    strokeWidth={ring.strokeWidth}
+                    strokeDasharray={ring.strokeDasharray}
+                    opacity={ring.opacity}
+                  />
+                ))}
+              </g>
+            </g>
+          )
         })}
       </svg>
     </div>
