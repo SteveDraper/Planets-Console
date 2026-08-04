@@ -25,6 +25,7 @@ import {
   resolveOwnershipRevokeSlots,
   type OwnershipAssertTarget,
 } from './resolveOwnershipAssertTarget'
+import { shouldOpenHomeworldPlanetMenu } from './mapNodeIsPlanetoid'
 import { planetIdFromNodeId } from './planetIdFromMapNode'
 import { parseHomeworldSectorIndex } from './homeworldSectorIndex'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
@@ -208,26 +209,28 @@ export function HomeworldMapContextMenu({
         if (closestId != null) {
           const planetId = planetIdFromNodeId(closestId, planetMapNodes)
           if (planetId != null) {
-            event.preventDefault()
             const node = planetById.get(planetId)
-            const ownership =
-              node != null
-                ? resolveOwnershipAssertTargetForPlanet(
-                    ownershipRegionOverlays,
-                    planetId,
-                    Number(node.x),
-                    Number(node.y)
-                  )
-                : null
-            setSelection({ kind: 'planet', planetId })
-            setMenu({
-              kind: 'planet',
-              planetId,
-              ownership,
-              clientX: event.clientX,
-              clientY: event.clientY,
-            })
-            return
+            if (shouldOpenHomeworldPlanetMenu(node)) {
+              event.preventDefault()
+              const ownership =
+                node != null
+                  ? resolveOwnershipAssertTargetForPlanet(
+                      ownershipRegionOverlays,
+                      planetId,
+                      Number(node.x),
+                      Number(node.y)
+                    )
+                  : null
+              setSelection({ kind: 'planet', planetId })
+              setMenu({
+                kind: 'planet',
+                planetId,
+                ownership,
+                clientX: event.clientX,
+                clientY: event.clientY,
+              })
+              return
+            }
           }
         }
       }
