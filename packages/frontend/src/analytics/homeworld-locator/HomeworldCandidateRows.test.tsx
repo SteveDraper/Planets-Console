@@ -8,12 +8,13 @@ function candidateRow(
   overrides: Partial<HomeworldCandidateRecord> & Pick<HomeworldCandidateRecord, 'planetId'>
 ): HomeworldCandidateRecord {
   return {
-    perspective: 1,
-    confidenceTier: 'definite',
-    attribution: 'inferred',
-    assertedCue: false,
-    isMostProbable: false,
-    ...overrides,
+    planetId: overrides.planetId,
+    perspective: overrides.perspective ?? 1,
+    confidenceTier: overrides.confidenceTier ?? 'definite',
+    attribution: overrides.attribution ?? 'inferred',
+    assertedCue: overrides.assertedCue ?? false,
+    locationAsserted: overrides.locationAsserted ?? false,
+    isMostProbable: overrides.isMostProbable ?? false,
   }
 }
 

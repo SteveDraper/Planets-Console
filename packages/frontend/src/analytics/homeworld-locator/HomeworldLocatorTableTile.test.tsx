@@ -42,6 +42,7 @@ describe('HomeworldLocatorTableTile', () => {
           confidenceTier: 'definite',
           attribution: 'inferred',
           assertedCue: false,
+          locationAsserted: false,
           isMostProbable: false,
         },
         {
@@ -50,6 +51,7 @@ describe('HomeworldLocatorTableTile', () => {
           confidenceTier: 'possible',
           attribution: 'inferred',
           assertedCue: false,
+          locationAsserted: false,
           isMostProbable: true,
         },
       ],
