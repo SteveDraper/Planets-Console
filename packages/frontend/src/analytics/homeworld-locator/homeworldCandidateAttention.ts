@@ -2,7 +2,7 @@
  * Panel candidate click → selection + map flash; conditional pan resolved on the map.
  */
 
-import { flowCenterFromMapNode, flowPointNeedsPan } from '../../components/map-graph/geometry'
+import { flowCenterFromMapNode, flowPointNeedsPan } from '../../lib/mapFlowGeometry'
 import { useHomeworldCandidateFlashStore } from '../../stores/homeworldCandidateFlash'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 

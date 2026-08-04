@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { CELL_CENTER_OFFSET } from '../../components/map-graph/geometry'
+import { CELL_CENTER_OFFSET } from '../../lib/mapFlowGeometry'
 import { useHomeworldCandidateFlashStore } from '../../stores/homeworldCandidateFlash'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import {
