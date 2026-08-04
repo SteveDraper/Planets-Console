@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import type { PerspectiveRow } from '../../lib/gameInfoShell'
+import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
 import {
   fetchHomeworldLocatorMap,
@@ -30,7 +32,7 @@ vi.mock('../../api/bff', async () => {
   }
 })
 
-function renderPanel() {
+function renderPanel(roster: readonly PerspectiveRow[] = [perspectiveRow(1, 'alice', { raceName: 'The Federation' })]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -39,15 +41,7 @@ function renderPanel() {
     <HomeworldLocatorPanel
       analyticScope={{ gameId: '628580', turn: 5, perspective: 1, username: 'alice' }}
       fetchEnabled
-      roster={[
-        {
-          ordinal: 1,
-          playerId: 1,
-          name: 'alice',
-          raceName: 'The Federation',
-          eliminationTurn: null,
-        },
-      ]}
+      roster={roster}
       selectedPlanetId={null}
       onSelectPlanet={() => undefined}
     />,
@@ -115,6 +109,52 @@ describe('HomeworldLocatorPanel', () => {
       expect(postHomeworldLocatorAssertion).toHaveBeenCalledWith(
         expect.objectContaining({ gameId: '628580', turn: 5, perspective: 1 }),
         { axis: 'location', action: 'upsert', planetId: 12 }
+      )
+    })
+  })
+
+  it('posts ownership upsert with perspective slot ordinal, not host playerId', async () => {
+    const user = userEvent.setup()
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [
+        {
+          planetId: 12,
+          perspective: 2,
+          confidenceTier: 'definite',
+          attribution: 'inferred',
+          assertedCue: false,
+          isMostProbable: false,
+        },
+      ],
+    })
+    vi.mocked(postHomeworldLocatorAssertion).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      baselineDegraded: false,
+      rows: [],
+    })
+
+    renderPanel([
+      perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
+    ])
+
+    const ownerSelect = await screen.findByLabelText(/assert ownership for planet 12/i)
+    await user.selectOptions(ownerSelect, '2')
+
+    await waitFor(() => {
+      expect(postHomeworldLocatorAssertion).toHaveBeenCalledWith(
+        expect.objectContaining({ gameId: '628580', turn: 5, perspective: 1 }),
+        {
+          axis: 'ownership',
+          action: 'upsert',
+          ownerSlot: 2,
+          planetId: 12,
+          sectorIndex: null,
+        }
       )
     })
   })

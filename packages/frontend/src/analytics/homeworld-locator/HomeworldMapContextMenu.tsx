@@ -271,7 +271,7 @@ export function HomeworldMapContextMenu({
               role="menuitem"
               className="block w-full px-3 py-1.5 text-left hover:bg-black/25 disabled:opacity-40"
               disabled={assertMutation.isPending}
-              onClick={() => runOwnership('upsert', player.playerId, menu.ownership!)}
+              onClick={() => runOwnership('upsert', player.ordinal, menu.ownership!)}
             >
               {formatHomeworldOwnershipPickLabel(player.name, player.raceName)}
             </button>

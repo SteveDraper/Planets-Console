@@ -182,7 +182,7 @@ export function HomeworldCandidateRows({
                               >
                                 <option value="">Assert owner…</option>
                                 {roster.map((player) => (
-                                  <option key={player.playerId} value={player.playerId}>
+                                  <option key={player.playerId} value={player.ordinal}>
                                     {formatHomeworldOwnershipPickLabel(
                                       player.name,
                                       player.raceName
