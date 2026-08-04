@@ -51,7 +51,8 @@ function HomeworldRegionSelectionControl({
 
 /**
  * Sidebar enable toggle for Homeworld locator with expandable panel
- * (region selection, envelope overlays, candidate table, assert/revoke, refresh).
+ * (region selection, envelope overlays, read-only candidates, refresh).
+ * Assert/revoke is map-context-menu only.
  */
 export function HomeworldLocatorTile({
   name,

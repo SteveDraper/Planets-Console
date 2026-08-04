@@ -302,7 +302,7 @@ Geometry / co-sector / definite-neighborhood culls do not mint provenances.
 - Location assert may target any traditional (non-planetoid) planet, creating a candidate if needed
 - Ownership **sector-keyed** when sectors exist (planet menu resolves sector); **planet-keyed** only when sectors do not exist
 - **Homeworld locator refresh:** clear inferred game-global candidates + evidence aggregates for the shell perspective (baseline through shell), ensure / `force_fresh` rebuild; asserts preserved
-- UI: **homeworld locator panel** + map context menus (planet markers and sector overlays) + refresh; map-only (`supports_table=False` -- no main-area tabular tile)
+- UI: **homeworld locator panel** (sector accordion, **homeworld region selection**, **homeworld envelope overlay toggle**, read-only candidates, refresh) + map context menus for **homeworld assertion** (planet markers and sector overlays); map-only (`supports_table=False` -- no main-area tabular tile)
 
 ---
 
@@ -402,8 +402,8 @@ Map-only analytic (`supports_table=False`): sidebar **homeworld locator panel** 
 | **Homeworld map marker** | Decorates on **base map** node -- solid = definite; dashed/light = possible; **most probable** = stronger possible (double-layer dotted ring) via `isMostProbable` |
 | **Asserted cue** | Distinct marker/overlay cue when an **asserted**-strength provenance is present (location and/or ownership) |
 | **Homeworld region overlay** | Shared **map region overlay** boundary sectors (+ optional envelopes) for Circular round; outlines follow **homeworld region selection**; envelopes follow **homeworld envelope overlay toggle** on selected sectors |
-| **Homeworld locator panel** | Per-sector collapsible sections (clockwise from northernmost; title = known owner label else Unknown); preferred-first candidates; thin FE hover evidence; sector title multi-select (thicker border) drives outline visibility; refresh + degraded baseline warning; ownership/location assert + revoke (#37). Candidate click flashes the map marker and pans only if off-screen (#283) |
-| Map context menu | Quick **homeworld assertion** on planet markers and sector overlays |
+| **Homeworld locator panel** | Per-sector collapsible sections (clockwise from northernmost; title = known owner label else Unknown); read-only preferred-first candidates; thin FE hover evidence; sector title multi-select (thicker border) drives outline visibility; refresh + degraded baseline warning. Candidate click flashes the map marker and pans only if off-screen (#283) |
+| Map context menu | **Homeworld assertion** only: ownership/location assert + revoke (#37) on planet markers and sector overlays |
 | **Homeworld region selection** | Sidebar control (Cartography sticky preference): preset **Pinned / Unpinned / Selected** (default Selected). Presets rewrite the selected-sector set; direct tile toggles force Selected. Initial selected set = **all** sectors |
 | **Homeworld envelope overlay toggle** | **Show overlays** checkbox above Region selection; when on, paint 81/162 LY disks for selected sectors only |
 
