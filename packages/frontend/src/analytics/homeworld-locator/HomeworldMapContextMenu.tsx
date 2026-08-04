@@ -25,7 +25,10 @@ import {
   resolveOwnershipRevokeSlots,
   type OwnershipAssertTarget,
 } from './resolveOwnershipAssertTarget'
-import { shouldOpenHomeworldPlanetMenu } from './mapNodeIsPlanetoid'
+import {
+  shouldOpenHomeworldPlanetMenu,
+  shouldSuppressHomeworldMenusForPlanetHit,
+} from './mapNodeIsPlanetoid'
 import { planetIdFromNodeId } from './planetIdFromMapNode'
 import { parseHomeworldSectorIndex } from './homeworldSectorIndex'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
@@ -208,29 +211,32 @@ export function HomeworldMapContextMenu({
         const closestId = findClosestPlanetWithinRadius(planetGrid, px, py, radiusPlanet)
         if (closestId != null) {
           const planetId = planetIdFromNodeId(closestId, planetMapNodes)
-          if (planetId != null) {
-            const node = planetById.get(planetId)
-            if (shouldOpenHomeworldPlanetMenu(node)) {
-              event.preventDefault()
-              const ownership =
-                node != null
-                  ? resolveOwnershipAssertTargetForPlanet(
-                      ownershipRegionOverlays,
-                      planetId,
-                      Number(node.x),
-                      Number(node.y)
-                    )
-                  : null
-              setSelection({ kind: 'planet', planetId })
-              setMenu({
-                kind: 'planet',
-                planetId,
-                ownership,
-                clientX: event.clientX,
-                clientY: event.clientY,
-              })
-              return
-            }
+          const node =
+            planetMapNodes.find((row) => row.id === closestId) ??
+            (planetId != null ? planetById.get(planetId) : undefined)
+          // Planetoid under cursor: no planet menu and no sector fall-through.
+          if (shouldSuppressHomeworldMenusForPlanetHit(node)) {
+            event.preventDefault()
+            setMenu(null)
+            return
+          }
+          if (planetId != null && node != null && shouldOpenHomeworldPlanetMenu(node)) {
+            event.preventDefault()
+            const ownership = resolveOwnershipAssertTargetForPlanet(
+              ownershipRegionOverlays,
+              planetId,
+              Number(node.x),
+              Number(node.y)
+            )
+            setSelection({ kind: 'planet', planetId })
+            setMenu({
+              kind: 'planet',
+              planetId,
+              ownership,
+              clientX: event.clientX,
+              clientY: event.clientY,
+            })
+            return
           }
         }
       }
