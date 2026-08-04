@@ -33,15 +33,15 @@ describe('homeworldRegionSelection store', () => {
     localStorage.removeItem('planets-console-homeworld-region-display')
     useHomeworldRegionSelectionStore.setState({
       regionSelectionPreset: defaultHomeworldRegionSelectionPreset(),
-      selectedSectorIndexes: [],
+      selectedSectorIndexes: null,
       showEnvelopeOverlays: true,
     })
   })
 
-  it('defaults to selected preset, empty indexes, envelopes on', () => {
+  it('defaults to selected preset, uninitialized indexes, envelopes on', () => {
     const state = useHomeworldRegionSelectionStore.getState()
     expect(state.regionSelectionPreset).toBe('selected')
-    expect(state.selectedSectorIndexes).toEqual([])
+    expect(state.selectedSectorIndexes).toBeNull()
     expect(state.showEnvelopeOverlays).toBe(true)
   })
 
@@ -63,10 +63,18 @@ describe('homeworldRegionSelection store', () => {
     expect(state.selectedSectorIndexes).toEqual([2])
   })
 
-  it('seeds empty selection to all sector indexes on sync', () => {
+  it('seeds uninitialized selection to all sector indexes on sync', () => {
     const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-3', false)]
+    useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: null })
     useHomeworldRegionSelectionStore.getState().syncSelectionWithOverlays(overlays)
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0, 3])
+  })
+
+  it('preserves explicit empty selection on sync', () => {
+    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-3', false)]
+    useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: [] })
+    useHomeworldRegionSelectionStore.getState().syncSelectionWithOverlays(overlays)
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
   })
 
   it('re-applies pinned rewrite on sync when preset is pinned', () => {
@@ -106,10 +114,16 @@ describe('homeworldRegionSelection store', () => {
       JSON.stringify({ state: { regionDisplayMode: 'all' }, version: 1 })
     )
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('selected')
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toBeNull()
     expect(localStorage.getItem('planets-console-homeworld-region-display')).toContain(
       'regionDisplayMode'
     )
+  })
+
+  it('persists explicit empty selection across reload', () => {
+    useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: [] })
+    const raw = localStorage.getItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)
+    expect(raw).toContain('"selectedSectorIndexes":[]')
   })
 
   it('ignores invalid preset values', () => {

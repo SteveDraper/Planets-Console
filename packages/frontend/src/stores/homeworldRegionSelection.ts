@@ -18,11 +18,12 @@ const homeworldRegionSelectionPersistStorage = createLocalStorageOrMemoryStateSt
 export const HOMEWORLD_REGION_SELECTION_STORAGE_KEY =
   'planets-console-homeworld-region-selection'
 
-const PERSIST_VERSION = 1
+const PERSIST_VERSION = 2
 
 type HomeworldRegionSelectionState = {
   regionSelectionPreset: HomeworldRegionSelectionPreset
-  selectedSectorIndexes: number[]
+  /** ``null`` = never seeded (sync fills all once); ``[]`` = user cleared every sector. */
+  selectedSectorIndexes: number[] | null
   showEnvelopeOverlays: boolean
   setRegionSelectionPreset: (
     preset: HomeworldRegionSelectionPreset,
@@ -32,7 +33,7 @@ type HomeworldRegionSelectionState = {
   toggleSectorIndex: (sectorIndex: number) => void
   /**
    * When overlays are known: rewrite pinned/unpinned selection from overlay facts,
-   * or seed empty selected set to all sector indexes.
+   * or seed uninitialized selection to all sector indexes once.
    */
   syncSelectionWithOverlays: (overlays: readonly MapRegionOverlay[]) => void
 }
@@ -42,8 +43,10 @@ type HomeworldRegionSelectionPersisted = Pick<
   'regionSelectionPreset' | 'selectedSectorIndexes' | 'showEnvelopeOverlays'
 >
 
-function parseSelectedSectorIndexes(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
+function parseSelectedSectorIndexes(value: unknown): number[] | null {
+  if (value === null || value === undefined) return null
+  if (!Array.isArray(value)) return null
+  if (value.length === 0) return []
   const indexes: number[] = []
   for (const entry of value) {
     if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < 0) continue
@@ -52,17 +55,25 @@ function parseSelectedSectorIndexes(value: unknown): number[] {
   return [...new Set(indexes)].sort((a, b) => a - b)
 }
 
-function migratePersistedState(persisted: unknown): HomeworldRegionSelectionPersisted {
+function migratePersistedState(
+  persisted: unknown,
+  version: number
+): HomeworldRegionSelectionPersisted {
   const raw = (persisted ?? {}) as {
     regionSelectionPreset?: unknown
     selectedSectorIndexes?: unknown
     showEnvelopeOverlays?: unknown
   }
+  let selectedSectorIndexes = parseSelectedSectorIndexes(raw.selectedSectorIndexes)
+  // v1 conflated uninitialized with ``[]``; upgrade treats legacy empty as never seeded.
+  if (version < PERSIST_VERSION && selectedSectorIndexes?.length === 0) {
+    selectedSectorIndexes = null
+  }
   return {
     regionSelectionPreset: isHomeworldRegionSelectionPreset(raw.regionSelectionPreset)
       ? raw.regionSelectionPreset
       : defaultHomeworldRegionSelectionPreset(),
-    selectedSectorIndexes: parseSelectedSectorIndexes(raw.selectedSectorIndexes),
+    selectedSectorIndexes,
     showEnvelopeOverlays:
       typeof raw.showEnvelopeOverlays === 'boolean'
         ? raw.showEnvelopeOverlays
@@ -74,7 +85,7 @@ export const useHomeworldRegionSelectionStore = create<HomeworldRegionSelectionS
   persist(
     (set, get) => ({
       regionSelectionPreset: defaultHomeworldRegionSelectionPreset(),
-      selectedSectorIndexes: [],
+      selectedSectorIndexes: null,
       showEnvelopeOverlays: defaultShowEnvelopeOverlays(),
       setRegionSelectionPreset: (preset, overlays) => {
         if (!isHomeworldRegionSelectionPreset(preset)) return
@@ -99,7 +110,7 @@ export const useHomeworldRegionSelectionStore = create<HomeworldRegionSelectionS
         set({
           regionSelectionPreset: 'selected',
           selectedSectorIndexes: toggleSectorIndexInSelection(
-            get().selectedSectorIndexes,
+            get().selectedSectorIndexes ?? [],
             sectorIndex
           ),
         })
@@ -112,7 +123,7 @@ export const useHomeworldRegionSelectionStore = create<HomeworldRegionSelectionS
           })
           return
         }
-        if (selectedSectorIndexes.length === 0) {
+        if (selectedSectorIndexes === null) {
           const all = allHomeworldSectorIndexes(overlays)
           if (all.length > 0) {
             set({ selectedSectorIndexes: all })
@@ -129,7 +140,7 @@ export const useHomeworldRegionSelectionStore = create<HomeworldRegionSelectionS
         selectedSectorIndexes: state.selectedSectorIndexes,
         showEnvelopeOverlays: state.showEnvelopeOverlays,
       }),
-      migrate: (persisted) => migratePersistedState(persisted),
+      migrate: (persisted, version) => migratePersistedState(persisted, version),
     }
   )
 )

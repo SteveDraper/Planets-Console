@@ -15,8 +15,8 @@ import {
 export type HomeworldRegionPaintInput = {
   /** Overlays after visibility-kind preferences (homeworld sectors pass through). */
   overlays: readonly MapRegionOverlay[]
-  /** Multi-select outline set from homeworld region selection store. */
-  selectedSectorIndexes: readonly number[]
+  /** Multi-select outline set from homeworld region selection store. ``null`` = not yet seeded. */
+  selectedSectorIndexes: readonly number[] | null
   /** Show overlays checkbox: 81/162 disks for selected sectors only. */
   showEnvelopeOverlays: boolean
   /**
@@ -40,7 +40,7 @@ export function buildHomeworldRegionOverlaysForPaint(
 ): MapRegionOverlay[] {
   const filtered = applyHomeworldRegionSelection(
     input.overlays,
-    input.selectedSectorIndexes,
+    input.selectedSectorIndexes ?? [],
     input.showEnvelopeOverlays
   )
   const assertFocusSectorIndex = resolveHomeworldSelectedSectorIndex(

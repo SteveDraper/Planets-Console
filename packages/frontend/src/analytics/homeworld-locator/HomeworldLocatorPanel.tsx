@@ -75,7 +75,7 @@ export function HomeworldLocatorPanel({
   const toggleSectorIndex = useHomeworldRegionSelectionStore((s) => s.toggleSectorIndex)
 
   const selectedSectorIndexSet = useMemo(
-    () => new Set(selectedSectorIndexes),
+    () => new Set(selectedSectorIndexes ?? []),
     [selectedSectorIndexes]
   )
 

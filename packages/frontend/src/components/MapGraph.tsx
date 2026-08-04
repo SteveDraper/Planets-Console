@@ -268,7 +268,7 @@ function MapGraphFlow({
   const ownershipRegionOverlays = data.regionOverlays
 
   // Sole owner of region-selection sync: preset rewrites (Pinned/Unpinned) and
-  // empty→all seed land in ``selectedSectorIndexes`` before paint. Tile may call
+  // uninitialized→all seed land in ``selectedSectorIndexes`` before paint. Tile may call
   // ``setRegionSelectionPreset`` without overlays; this effect rewrites when
   // ``regionSelectionPreset`` changes.
   useLayoutEffect(() => {
