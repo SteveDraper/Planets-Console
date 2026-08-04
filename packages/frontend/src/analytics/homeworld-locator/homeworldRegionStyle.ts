@@ -1,6 +1,6 @@
 import type { MapRegionOverlay, MapRegionOverlayPaint } from '../../api/mapRegionOverlayTypes'
-import { PROVENANCE_KIND_ASSERTED } from './constants'
 import { isHomeworldSectorOverlay } from './homeworldRegionDisplayMode'
+import { collectAssertedOwnerSlots } from './resolveOwnershipAssertTarget'
 
 /** Homeworld cluster envelopes: distinct outline colors (81 vs 162 LY). */
 const HOMEWORLD_ENVELOPE_STROKE_BY_RADIUS_LY: Record<number, string> = {
@@ -23,10 +23,7 @@ function homeworldEnvelopeStrokeColor(radiusLy: number): string {
 
 /** True when any possible-owner member carries an asserted provenance kind. */
 export function homeworldSectorHasAssertedOwnership(overlay: MapRegionOverlay): boolean {
-  const owners = overlay.possibleOwners ?? []
-  return owners.some((owner) =>
-    owner.provenanceKinds.some((kind) => kind === PROVENANCE_KIND_ASSERTED)
-  )
+  return collectAssertedOwnerSlots(overlay).length > 0
 }
 
 /** Paint metadata for one homeworld sector overlay (stroke-only sectors + envelopes). */
