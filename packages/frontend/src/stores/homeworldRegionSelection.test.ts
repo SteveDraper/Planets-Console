@@ -79,6 +79,17 @@ describe('homeworldRegionSelection store', () => {
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
   })
 
+  it('defers pinned rewrite until sync when preset is set without overlays', () => {
+    useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: [9] })
+    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-1', false)]
+    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('pinned')
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([9])
+
+    useHomeworldRegionSelectionStore.getState().syncSelectionWithOverlays(overlays)
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
+  })
+
   it('persists preference fields to localStorage', () => {
     useHomeworldRegionSelectionStore.getState().setShowEnvelopeOverlays(false)
     useHomeworldRegionSelectionStore.getState().toggleSectorIndex(4)

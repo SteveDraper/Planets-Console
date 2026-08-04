@@ -3,7 +3,7 @@
  * Assert/revoke is map-context-menu only -- panel rows are read-only.
  */
 
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AnalyticShellScope } from '../../api/bff'
 import { fetchAnalyticMap } from '../../api/bff'
@@ -73,14 +73,6 @@ export function HomeworldLocatorPanel({
     (s) => s.selectedSectorIndexes
   )
   const toggleSectorIndex = useHomeworldRegionSelectionStore((s) => s.toggleSectorIndex)
-  const syncSelectionWithOverlays = useHomeworldRegionSelectionStore(
-    (s) => s.syncSelectionWithOverlays
-  )
-
-  useEffect(() => {
-    if (!mapQuery.isSuccess || overlays.length === 0) return
-    syncSelectionWithOverlays(overlays)
-  }, [mapQuery.isSuccess, overlays, syncSelectionWithOverlays])
 
   const selectedSectorIndexSet = useMemo(
     () => new Set(selectedSectorIndexes),

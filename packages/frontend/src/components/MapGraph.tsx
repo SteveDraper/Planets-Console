@@ -267,8 +267,10 @@ function MapGraphFlow({
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays
 
-  // Sync before paint so preset rewrites (Pinned/Unpinned) and initial all-seed
-  // land in ``selectedSectorIndexes`` without MapGraph re-deriving paint indexes.
+  // Sole owner of region-selection sync: preset rewrites (Pinned/Unpinned) and
+  // empty→all seed land in ``selectedSectorIndexes`` before paint. Tile may call
+  // ``setRegionSelectionPreset`` without overlays; this effect rewrites when
+  // ``regionSelectionPreset`` changes.
   useLayoutEffect(() => {
     syncSelectionWithOverlays(data.regionOverlays)
   }, [data.regionOverlays, regionSelectionPreset, syncSelectionWithOverlays])
