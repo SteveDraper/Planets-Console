@@ -14,7 +14,14 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     SmoothedMetricDistribution,
 )
-from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
+from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_DEFINITE,
+    CONFIDENCE_POSSIBLE,
+    PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+    PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+    OwnershipProvenance,
+    SectorOwnerMember,
+)
 from api.analytics.homeworld_locator.sector_overlays import (
     ENVELOPE_RADII_LY,
     KIND_HOMEWORLD_SECTOR,
@@ -499,13 +506,6 @@ def test_for_turn_emits_when_gate_passes_and_empty_without_pin(
 
 def test_possible_owners_emit_provenance_kind_counts(template_planet) -> None:
     """Ownership hover needs per-kind multiplicity, not only unique kind tags."""
-    from api.analytics.homeworld_locator.models import (
-        OwnershipProvenance,
-        PROVENANCE_NEARBY_PLANET_OWNERSHIP,
-        PROVENANCE_SHIP_TRAVEL_ENVELOPE,
-        SectorOwnerMember,
-    )
-
     center = (0.0, 0.0)
     pin = _planet(template_planet, planet_id=1, x=550, y=0)
     orphan = _planet(template_planet, planet_id=2, x=0, y=550)

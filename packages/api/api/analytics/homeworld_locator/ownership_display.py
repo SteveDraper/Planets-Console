@@ -62,9 +62,7 @@ def project_sector_owner_sets_for_display(
             slot_claims[resolution.resolved_owner_slot].append(sector_index)
 
     settled_home = {
-        owner_slot: sectors[0]
-        for owner_slot, sectors in slot_claims.items()
-        if len(sectors) == 1
+        owner_slot: sectors[0] for owner_slot, sectors in slot_claims.items() if len(sectors) == 1
     }
     for owner_slot, home_sector in dict(settled_owner_home_by_slot or ()).items():
         prior = settled_home.get(owner_slot)

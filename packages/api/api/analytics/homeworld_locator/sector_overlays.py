@@ -665,9 +665,7 @@ def build_homeworld_sector_overlays_for_turn(
         row.planet_id for row in view.candidates if row.confidence_tier == CONFIDENCE_DEFINITE
     )
     perspective_by_planet = {
-        row.planet_id: row.perspective
-        for row in view.candidates
-        if row.perspective is not None
+        row.planet_id: row.perspective for row in view.candidates if row.perspective is not None
     }
     resolved_game_id = game_id if game_id is not None else turn.settings.id
     labels = pinned_player_labels_for_view(
