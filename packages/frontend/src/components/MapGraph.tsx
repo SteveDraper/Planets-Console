@@ -268,6 +268,9 @@ function MapGraphFlow({
     turnUsernamesByPlayerId: null,
   })
 
+  // Raw homeworld sector overlays for ownership assert keying (independent of display mode).
+  const ownershipRegionOverlays = data.regionOverlays
+
   // Visibility prefs only mutate visibility kinds; homeworld display mode filters
   // sectors; homeworld style adapter attaches paint metadata for shared blit.
   const regionOverlays = useMemo(() => {
@@ -355,7 +358,7 @@ function MapGraphFlow({
       <HomeworldMapContextMenu
         analyticScope={analyticScope}
         enabled={homeworldEnabled}
-        regionOverlays={regionOverlays}
+        ownershipRegionOverlays={ownershipRegionOverlays}
         planetGrid={planetGrid}
         planetMapNodes={planetMapNodes}
         roster={roster}

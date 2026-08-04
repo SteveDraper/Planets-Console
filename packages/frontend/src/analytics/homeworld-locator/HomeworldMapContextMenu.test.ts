@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isEventInsideHomeworldMenu } from './HomeworldMapContextMenu'
+import { applyHomeworldRegionDisplayMode } from './homeworldRegionDisplayMode'
 import {
   resolveOwnershipAssertTargetForPlanet,
   resolveOwnershipAssertTargetForSector,
@@ -61,6 +62,20 @@ describe('homeworld map context menu target resolution', () => {
       ownerSlot: 2,
       planetId: 9,
       sectorIndex: null,
+    })
+  })
+
+  it('sector-keys from raw overlays when display mode off hides sectors from paint', () => {
+    const paintOverlays = applyHomeworldRegionDisplayMode([sector], 'off')
+    expect(paintOverlays).toHaveLength(0)
+    expect(resolveOwnershipAssertTargetForPlanet(paintOverlays, 44, 5, 5)).toEqual({
+      keying: 'planet',
+      planetId: 44,
+    })
+    expect(resolveOwnershipAssertTargetForPlanet([sector], 44, 5, 5)).toEqual({
+      keying: 'sector',
+      sectorIndex: 1,
+      planetId: 44,
     })
   })
 })

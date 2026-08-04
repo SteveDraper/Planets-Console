@@ -72,7 +72,8 @@ export function isEventInsideHomeworldMenu(
 export type HomeworldMapContextMenuProps = {
   analyticScope: AnalyticShellScope | null
   enabled: boolean
-  regionOverlays: readonly MapRegionOverlay[]
+  /** Unfiltered map overlays for ownership assert keying (not display-mode paint lists). */
+  ownershipRegionOverlays: readonly MapRegionOverlay[]
   planetGrid: PlanetSpatialGrid | null
   planetMapNodes: readonly MapNode[]
   roster: readonly PerspectiveRow[]
@@ -81,7 +82,7 @@ export type HomeworldMapContextMenuProps = {
 export function HomeworldMapContextMenu({
   analyticScope,
   enabled,
-  regionOverlays,
+  ownershipRegionOverlays,
   planetGrid,
   planetMapNodes,
   roster,
@@ -126,7 +127,7 @@ export function HomeworldMapContextMenu({
             const ownership =
               node != null
                 ? resolveOwnershipAssertTargetForPlanet(
-                    regionOverlays,
+                    ownershipRegionOverlays,
                     planetId,
                     Number(node.x),
                     Number(node.y)
@@ -145,7 +146,7 @@ export function HomeworldMapContextMenu({
         }
       }
 
-      const sector = findHomeworldSectorAtMapPoint(regionOverlays, px, py)
+      const sector = findHomeworldSectorAtMapPoint(ownershipRegionOverlays, px, py)
       if (sector != null) {
         const ownership = resolveOwnershipAssertTargetForSector(sector)
         const sectorIndex = parseHomeworldSectorIndex(sector.id)
@@ -192,7 +193,7 @@ export function HomeworldMapContextMenu({
     planetGrid,
     planetMapNodes,
     planetById,
-    regionOverlays,
+    ownershipRegionOverlays,
     setSelection,
   ])
 
