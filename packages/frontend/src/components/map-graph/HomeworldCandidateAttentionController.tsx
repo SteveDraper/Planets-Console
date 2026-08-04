@@ -57,5 +57,11 @@ export function HomeworldCandidateAttentionController({
     return () => clearTimeout(timer)
   }, [flashTarget, clearFlash])
 
+  useEffect(() => {
+    return () => {
+      clearFlash()
+    }
+  }, [clearFlash])
+
   return null
 }
