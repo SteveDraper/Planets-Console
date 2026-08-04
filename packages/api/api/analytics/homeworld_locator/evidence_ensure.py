@@ -7,7 +7,7 @@ Multi-turn gap-fill is owned by export/orchestrator DAG unwind
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
@@ -23,6 +23,10 @@ from api.analytics.homeworld_locator.evidence_refine_report import (
 )
 from api.analytics.homeworld_locator.evidence_refine_timing_history import (
     record_evidence_refine_report,
+)
+from api.analytics.homeworld_locator.location_evidence import (
+    baseline_profile_location_provenances,
+    definite_candidate_planet_ids,
 )
 from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -71,17 +75,26 @@ def evidence_refined_through_shell(
 
 def _floor_prior_for_algorithm_rewrite(
     floor: HomeworldEvidenceAggregate,
+    *,
+    definite_planet_ids: Sequence[int],
 ) -> HomeworldEvidenceAggregate:
-    """Clear sticky ownership so algo bumps recompute from empty sets.
+    """Clear sticky ownership and remint baseline-profile location provenances.
 
     OD / single-SB upserts are idempotent on re-refine; ownership intersections are
     not -- intersecting a loosened envelope into a prior narrowed set cannot restore
     wrongly excluded sectors.
+
+    Legacy floors may lack ``baseline_profile`` rows; remint from game-global
+    definites so a later weak OD mint cannot demote baseline pins at derive time.
     """
     return replace(
         floor,
         sector_owner_sets=(),
         owner_possible_sectors=(),
+        location_provenances=baseline_profile_location_provenances(
+            baseline_turn=floor.baseline_turn,
+            definite_planet_ids=definite_planet_ids,
+        ),
     )
 
 
@@ -125,7 +138,10 @@ def ensure_evidence_floor_algorithm_current(
     candidate_ids = candidate_planet_ids_from_records(state.candidates)
     planets_by_id = {planet.id: planet for planet in turn.planets}
     computed = refine_homeworld_evidence_aggregate(
-        _floor_prior_for_algorithm_rewrite(floor),
+        _floor_prior_for_algorithm_rewrite(
+            floor,
+            definite_planet_ids=definite_candidate_planet_ids(state.candidates),
+        ),
         turn=turn,
         candidates=state.candidates,
         candidate_planet_ids_set=candidate_ids,

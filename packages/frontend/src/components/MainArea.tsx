@@ -33,6 +33,10 @@ import { enabledTableAnalyticIds } from '../lib/enabledModeAnalyticIds'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 import { useStellarCartographyMapContext } from '../lib/useStellarCartographyMapContext'
+import type { PerspectiveRow } from '../lib/gameInfoShell'
+import { useShellStore } from '../stores/shell'
+
+const EMPTY_PERSPECTIVES: readonly PerspectiveRow[] = []
 
 type ViewMode = 'tabular' | 'map'
 
@@ -230,11 +234,8 @@ type MapMainAreaProps = {
 type MapShellContentBaseProps = Omit<MapShellContentProps, 'cartography'>
 
 /** Subscribes to live Stellar Cartography UI when that analytic is enabled on the map. */
-function MapShellContentWithCartography({
-  analyticScope,
-  ...props
-}: MapShellContentBaseProps & { analyticScope: AnalyticShellScope }) {
-  const cartography = useStellarCartographyMapContext(analyticScope)
+function MapShellContentWithCartography(props: MapShellContentBaseProps) {
+  const cartography = useStellarCartographyMapContext(props.analyticScope)
   return <MapShellContent {...props} cartography={cartography} />
 }
 
@@ -253,6 +254,8 @@ const MapMainArea = memo(function MapMainArea({
   onSetZoomReady,
 }: MapMainAreaProps) {
   const analyticFetchEnabled = analyticScope != null && turnDataReady
+  const roster =
+    useShellStore((s) => s.gameInfoContext?.perspectives) ?? EMPTY_PERSPECTIVES
   const mapQueries = useMapAnalyticQueries({
     enabledAnalyticIds,
     analytics,
@@ -297,6 +300,8 @@ const MapMainArea = memo(function MapMainArea({
 
   const shellProps: MapShellContentBaseProps = {
     mapShellView,
+    analyticScope,
+    roster,
     futureTurnOffset,
     planetLabelOptions,
     onPlanetLabelOptionsChange,
@@ -305,7 +310,7 @@ const MapMainArea = memo(function MapMainArea({
   }
 
   if (isStellarCartographyMapEnabled(enabledMapIds)) {
-    return <MapShellContentWithCartography {...shellProps} analyticScope={analyticScope} />
+    return <MapShellContentWithCartography {...shellProps} />
   }
 
   return <MapShellContent {...shellProps} cartography={undefined} />

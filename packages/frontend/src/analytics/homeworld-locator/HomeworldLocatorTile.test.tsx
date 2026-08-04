@@ -1,12 +1,31 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
 import { defaultHomeworldRegionDisplayMode } from './homeworldRegionDisplayMode'
 import { HomeworldLocatorTile } from './HomeworldLocatorTile'
 import {
   HOMEWORLD_REGION_DISPLAY_STORAGE_KEY,
   useHomeworldRegionDisplayStore,
 } from '../../stores/homeworldRegionDisplay'
+import { fetchHomeworldLocatorMap, fetchHomeworldLocatorTable } from './api'
+
+vi.mock('./api', () => ({
+  fetchHomeworldLocatorTable: vi.fn(),
+  fetchHomeworldLocatorMap: vi.fn(),
+  postHomeworldLocatorAssertion: vi.fn(),
+  postHomeworldLocatorRefresh: vi.fn(),
+}))
+
+function renderTile(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  })
+}
 
 describe('HomeworldLocatorTile', () => {
   beforeEach(() => {
@@ -14,10 +33,23 @@ describe('HomeworldLocatorTile', () => {
     useHomeworldRegionDisplayStore.setState({
       regionDisplayMode: defaultHomeworldRegionDisplayMode(),
     })
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      baselineDegraded: false,
+      rows: [],
+    })
+    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      baselineDegraded: false,
+      regionOverlays: [],
+      markers: [],
+    })
   })
 
   it('disables the toggle and shows an inactive hint when unavailable', () => {
-    render(
+    renderTile(
       <HomeworldLocatorTile
         name="Homeworld locator"
         enabled={false}
@@ -34,7 +66,7 @@ describe('HomeworldLocatorTile', () => {
   })
 
   it('shows unchecked when persisted enabled but inactive', () => {
-    render(
+    renderTile(
       <HomeworldLocatorTile
         name="Homeworld locator"
         enabled
@@ -50,7 +82,7 @@ describe('HomeworldLocatorTile', () => {
   })
 
   it('allows enabling when available and mode is supported', () => {
-    render(
+    renderTile(
       <HomeworldLocatorTile
         name="Homeworld locator"
         enabled={false}
@@ -63,9 +95,9 @@ describe('HomeworldLocatorTile', () => {
     expect(screen.getByRole('checkbox')).not.toBeDisabled()
   })
 
-  it('expands to expose region display mode and persists changes', async () => {
+  it('expands to expose region display mode, panel, and persists overlay changes', async () => {
     const user = userEvent.setup()
-    render(
+    renderTile(
       <HomeworldLocatorTile
         name="Homeworld locator"
         enabled
@@ -78,6 +110,7 @@ describe('HomeworldLocatorTile', () => {
 
     await user.click(screen.getByRole('button', { name: /expand homeworld/i }))
     expect(screen.getByRole('radiogroup', { name: /homeworld region display mode/i })).toBeInTheDocument()
+    expect(screen.getByText(/load game info and choose a turn/i)).toBeInTheDocument()
 
     await user.click(screen.getByRole('radio', { name: 'All' }))
     expect(useHomeworldRegionDisplayStore.getState().regionDisplayMode).toBe('all')

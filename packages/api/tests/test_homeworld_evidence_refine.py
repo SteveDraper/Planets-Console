@@ -20,8 +20,8 @@ from api.analytics.homeworld_locator.constants import (
     HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
 )
 from api.analytics.homeworld_locator.evidence_refine import (
+    apply_definite_keyed_candidate_culls,
     cull_definite_neighborhood_candidates,
-    materialize_evidence_adjusted_candidates,
 )
 from api.analytics.homeworld_locator.exports import EXPORT_CATALOG
 from api.analytics.homeworld_locator.models import (
@@ -555,18 +555,34 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
 
 
 def test_origin_distance_observations_do_not_promote_to_definite() -> None:
+    from api.analytics.homeworld_locator.location_evidence import (
+        collect_machine_location_provenances,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+
     turn = _load_turn()
-    aggregate = HomeworldEvidenceAggregate(
-        turn=5,
-        baseline_turn=1,
-        origin_distance_observations=(
-            OriginDistanceObservation(turn=2, x=100, y=200, matched_planet_ids=(10,)),
-            OriginDistanceObservation(turn=3, x=110, y=210, matched_planet_ids=(10,)),
+    observations = (
+        OriginDistanceObservation(turn=2, x=100, y=200, matched_planet_ids=(10,)),
+        OriginDistanceObservation(turn=3, x=110, y=210, matched_planet_ids=(10,)),
+    )
+    location_provenances = collect_machine_location_provenances(
+        origin_distance_observations=observations,
+    )
+    derived = derive_candidates_from_merged_evidence(
+        (_candidate(10),),
+        MergedHomeworldEvidence(
+            location_provenances=location_provenances,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
         ),
     )
-    candidates = materialize_evidence_adjusted_candidates(
-        (_candidate(10),),
-        aggregate,
+    assert derived[0].confidence_tier == CONFIDENCE_POSSIBLE
+    # OD-only lists do not feed definite-keyed culls as a promote path either.
+    candidates = apply_definite_keyed_candidate_culls(
+        derived,
         planets=turn.planets,
         settings_turn=turn,
         player_count=11,
@@ -575,16 +591,30 @@ def test_origin_distance_observations_do_not_promote_to_definite() -> None:
 
 
 def test_single_starbase_promotion_materializes_without_owner_assignment() -> None:
+    from api.analytics.homeworld_locator.location_evidence import (
+        collect_machine_location_provenances,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+
     turn = _load_turn()
     orphan = _candidate(10, perspective=None)
-    aggregate = HomeworldEvidenceAggregate(
-        turn=5,
-        baseline_turn=1,
-        single_starbase_promotions=(HomeworldSingleStarbasePromotion(planet_id=10, turn=5),),
+    promotions = (HomeworldSingleStarbasePromotion(planet_id=10, turn=5),)
+    location_provenances = collect_machine_location_provenances(
+        single_starbase_promotions=promotions,
     )
-    candidates = materialize_evidence_adjusted_candidates(
+    derived = derive_candidates_from_merged_evidence(
         (orphan,),
-        aggregate,
+        MergedHomeworldEvidence(
+            location_provenances=location_provenances,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    candidates = apply_definite_keyed_candidate_culls(
+        derived,
         planets=turn.planets,
         settings_turn=turn,
         player_count=11,
@@ -615,6 +645,224 @@ def test_definite_neighborhood_cull_uses_support_min(template_planet) -> None:
     assert [row.planet_id for row in culled] == [1, 3]
 
 
+def test_neighborhood_cull_preserves_durable_assert_location_shell(template_planet) -> None:
+    """Assert shells without asserted_cue survive neighborhood cull via durable keys."""
+    from api.analytics.homeworld_locator.models import PROVENANCE_ASSERTED, LocationProvenance
+    from api.analytics.homeworld_locator.types import ensure_candidates_for_asserted_locations
+
+    definite = _planet(template_planet, planet_id=1, x=0, y=0)
+    assert_shell = _planet(template_planet, planet_id=2, x=100, y=0)
+    planets_by_id = {1: definite, 2: assert_shell}
+    asserted = (LocationProvenance(kind=PROVENANCE_ASSERTED, turn=3, planet_id=2),)
+    seeded = ensure_candidates_for_asserted_locations(
+        inferred=(
+            HomeworldCandidateRecord(
+                planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE
+            ),
+        ),
+        asserted_location_provenances=asserted,
+    )
+    assert next(row for row in seeded if row.planet_id == 2).asserted_cue is False
+
+    without_keys = cull_definite_neighborhood_candidates(
+        seeded,
+        planets_by_id,
+        min_separation_ly=430.0,
+    )
+    assert [row.planet_id for row in without_keys] == [1]
+
+    with_keys = cull_definite_neighborhood_candidates(
+        seeded,
+        planets_by_id,
+        min_separation_ly=430.0,
+        protected_planet_ids=frozenset(row.planet_id for row in asserted),
+    )
+    assert [row.planet_id for row in with_keys] == [1, 2]
+
+
+def test_culls_after_strength_resolve_drop_demoted_machine_near_assert(
+    template_planet, sample_settings
+) -> None:
+    """Assert demotes nearby machine definite; post-derive culls must drop the machine pin.
+
+    Pre-resolution culls keep both (machine definite + protected assert shell). After
+    derive the machine is only possible beside an asserted definite -- illegal unless
+    co-sector / neighborhood culls run on strength-resolved tiers.
+    """
+    from api.analytics.homeworld_locator.layout_distributions_asset import (
+        CategoryLayoutDistributions,
+        LayoutDistributionsAsset,
+        SmoothedMetricDistribution,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_ASSERTED,
+        PROVENANCE_BASELINE_PROFILE,
+        LocationProvenance,
+    )
+    from api.analytics.homeworld_locator.types import ensure_candidates_for_asserted_locations
+    from api.concepts.homeworld_layout import HW_DISTRIBUTION_CIRCULAR, MAP_SHAPE_ROUND
+
+    machine = _planet(template_planet, planet_id=1, x=500, y=0)
+    asserted_planet = _planet(template_planet, planet_id=2, x=550, y=20)
+    planets = [machine, asserted_planet]
+    asserted = (LocationProvenance(kind=PROVENANCE_ASSERTED, turn=5, planet_id=2),)
+    protected = frozenset({2})
+    seeded = ensure_candidates_for_asserted_locations(
+        inferred=(
+            HomeworldCandidateRecord(
+                planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE
+            ),
+        ),
+        asserted_location_provenances=asserted,
+    )
+    turn = replace(
+        _load_turn(),
+        planets=planets,
+        settings=replace(
+            sample_settings,
+            hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+            mapshape=MAP_SHAPE_ROUND,
+            turn=5,
+        ),
+    )
+    neighbor = SmoothedMetricDistribution(
+        sample_count=10,
+        support_min=430.0,
+        support_max=600.0,
+        mean=500.0,
+        std=30.0,
+    )
+    layout_asset = LayoutDistributionsAsset(
+        schema_version=2,
+        bin_width_ly=10.0,
+        cost_model="normal_neg_log_density",
+        categories={
+            "epic": CategoryLayoutDistributions(
+                center_distance=neighbor, neighbor_separation=neighbor
+            ),
+            "standard": CategoryLayoutDistributions(
+                center_distance=neighbor, neighbor_separation=neighbor
+            ),
+        },
+        source={},
+    )
+
+    pre_resolve = apply_definite_keyed_candidate_culls(
+        seeded,
+        planets=planets,
+        settings_turn=turn,
+        player_count=11,
+        layout_asset=layout_asset,
+        protected_planet_ids=protected,
+    )
+    assert {row.planet_id for row in pre_resolve} == {1, 2}
+
+    derived = derive_candidates_from_merged_evidence(
+        pre_resolve,
+        MergedHomeworldEvidence(
+            location_provenances=(
+                LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=1),
+                LocationProvenance(kind=PROVENANCE_ASSERTED, turn=5, planet_id=2),
+            ),
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    by_planet = {row.planet_id: row for row in derived}
+    assert by_planet[2].confidence_tier == CONFIDENCE_DEFINITE
+    assert by_planet[1].confidence_tier == CONFIDENCE_POSSIBLE
+
+    post_resolve = apply_definite_keyed_candidate_culls(
+        derived,
+        planets=planets,
+        settings_turn=turn,
+        player_count=11,
+        layout_asset=layout_asset,
+        protected_planet_ids=protected,
+    )
+    assert [row.planet_id for row in post_resolve] == [2]
+    assert post_resolve[0].confidence_tier == CONFIDENCE_DEFINITE
+    assert post_resolve[0].asserted_cue is True
+
+
+def test_materialize_homeworld_candidates_culls_after_assert_wins(
+    template_planet, sample_settings, persistence, monkeypatch
+) -> None:
+    """Full shell materialize must not leave demoted machine pins near asserted definites."""
+    from api.analytics.homeworld_locator.baseline_ensure import materialize_homeworld_candidates
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_ASSERTED,
+        PROVENANCE_BASELINE_PROFILE,
+        LocationProvenance,
+    )
+    from api.concepts.homeworld_layout import HW_DISTRIBUTION_CIRCULAR, MAP_SHAPE_ROUND
+
+    machine = _planet(template_planet, planet_id=1, x=500, y=0)
+    asserted_planet = _planet(template_planet, planet_id=2, x=550, y=20)
+    planets = [machine, asserted_planet]
+    shell_turn = replace(
+        _load_turn(),
+        planets=planets,
+        settings=replace(
+            sample_settings,
+            hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+            mapshape=MAP_SHAPE_ROUND,
+            turn=5,
+        ),
+    )
+    game_state = HomeworldLocatorGameState(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=False,
+        asserted_location_provenances=(
+            LocationProvenance(kind=PROVENANCE_ASSERTED, turn=5, planet_id=2),
+        ),
+    )
+    aggregate = HomeworldEvidenceAggregate(
+        turn=5,
+        baseline_turn=1,
+        location_provenances=(
+            LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=1),
+        ),
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+    )
+    monkeypatch.setattr(
+        "api.analytics.homeworld_locator.baseline_ensure.apply_layout_prior_most_probable",
+        lambda candidates, **_kwargs: tuple(candidates),
+    )
+    monkeypatch.setattr(
+        "api.analytics.homeworld_locator.baseline_ensure._previous_turn_most_probable_planet_ids",
+        lambda *_args, **_kwargs: frozenset(),
+    )
+    # Sample turn roster is not 11 players; force neighborhood support so the
+    # assert-vs-nearby-machine failure mode is observable without roster padding.
+    monkeypatch.setattr(
+        "api.analytics.homeworld_locator.evidence_refine.neighbor_separation_support_min",
+        lambda *_args, **_kwargs: 430.0,
+    )
+    services = _services(persistence, {5: shell_turn})
+    materialized = materialize_homeworld_candidates(
+        services,
+        candidates=game_state.candidates,
+        aggregate=aggregate,
+        game_state=game_state,
+        shell_turn=shell_turn,
+        baseline_turn=1,
+        baseline_degraded=False,
+    )
+    assert [row.planet_id for row in materialized] == [2]
+    assert materialized[0].confidence_tier == CONFIDENCE_DEFINITE
+    assert materialized[0].asserted_cue is True
+
+
 def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sample_settings) -> None:
     from api.concepts.homeworld_layout import HW_DISTRIBUTION_RANDOM_SPACED
 
@@ -628,8 +876,7 @@ def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sampl
     )
     definite = _planet(template_planet, planet_id=1, x=0, y=0)
     nearby = _planet(template_planet, planet_id=2, x=50, y=0)
-    aggregate = HomeworldEvidenceAggregate(turn=5, baseline_turn=1)
-    candidates = materialize_evidence_adjusted_candidates(
+    candidates = apply_definite_keyed_candidate_culls(
         (
             HomeworldCandidateRecord(
                 planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE
@@ -638,7 +885,6 @@ def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sampl
                 planet_id=2, perspective=None, confidence_tier=CONFIDENCE_POSSIBLE
             ),
         ),
-        aggregate,
         planets=[definite, nearby],
         settings_turn=turn,
         player_count=11,
@@ -820,6 +1066,82 @@ def test_floor_algorithm_rewrite_clears_sticky_ownership(persistence) -> None:
     # baseline turn has no ships to re-pin (empty ownership after clear+re-accumulate).
     assert stored.sector_owner_sets == ()
     assert stored.owner_possible_sectors == ()
+
+
+def test_floor_algorithm_rewrite_backfills_baseline_profile_before_od_demotion(
+    persistence,
+) -> None:
+    """Stale empty-profile floor + OD mint must not demote game-global baseline pins."""
+    from api.analytics.homeworld_locator.evidence_ensure import (
+        ensure_evidence_floor_algorithm_current,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_BASELINE_PROFILE,
+        PROVENANCE_ORIGIN_DISTANCE,
+        LocationProvenance,
+    )
+
+    turn_one = replace(_load_turn(), settings=replace(_load_turn().settings, turn=1))
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    definite = HomeworldCandidateRecord(
+        planet_id=10,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    possible = HomeworldCandidateRecord(
+        planet_id=20,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    # Legacy floor: algo version stale, no baseline_profile rows, but OD already
+    # recorded (the production demotion path after mint without profiles).
+    persistence.put_baseline(
+        628580,
+        1,
+        _baseline_state(turn_one.settings, definite, possible),
+        HomeworldEvidenceAggregate(
+            turn=1,
+            baseline_turn=1,
+            evidence_algorithm_version=0,
+            origin_distance_observations=(
+                OriginDistanceObservation(turn=1, x=1, y=2, matched_planet_ids=(20,)),
+            ),
+            location_provenances=(
+                LocationProvenance(kind=PROVENANCE_ORIGIN_DISTANCE, turn=1, planet_id=20),
+            ),
+        ),
+    )
+    assert (
+        ensure_evidence_floor_algorithm_current(
+            services,
+            baseline_turn=1,
+            fleet_built_turns={},
+        )
+        is True
+    )
+    stored = persistence.get_evidence_aggregate(628580, 1, 1)
+    assert stored is not None
+    assert stored.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+    kinds = {(row.kind, row.planet_id) for row in stored.location_provenances}
+    assert (PROVENANCE_BASELINE_PROFILE, 10) in kinds
+    assert (PROVENANCE_ORIGIN_DISTANCE, 20) in kinds
+
+    derived = derive_candidates_from_merged_evidence(
+        (definite, possible),
+        MergedHomeworldEvidence(
+            location_provenances=stored.location_provenances,
+            sector_owner_sets=(),
+            planet_owner_sets=(),
+        ),
+    )
+    by_planet = {row.planet_id: row for row in derived}
+    assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
+    assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE
 
 
 def test_fleet_built_turns_from_final_ledgers_merges_known_ages(sample_turn) -> None:

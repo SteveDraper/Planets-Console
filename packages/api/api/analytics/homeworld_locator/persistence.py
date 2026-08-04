@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import threading
 
-from api.analytics.homeworld_locator.constants import (
-    ANALYTIC_ID,
-    ATTRIBUTION_USER_ASSERTED,
-)
+from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.serialization import (
     homeworld_evidence_aggregate_from_json,
     homeworld_evidence_aggregate_to_json,
@@ -17,6 +14,7 @@ from api.analytics.homeworld_locator.serialization import (
 from api.analytics.homeworld_locator.types import (
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
+    ensure_candidates_for_asserted_locations,
 )
 from api.analytics.persistence_paths import (
     game_global_analytic_document_key,
@@ -122,26 +120,35 @@ class HomeworldLocatorPersistenceService:
         self.put_evidence_aggregate(game_id, perspective, floor_aggregate)
 
     def invalidate_inferred_game_state(self, game_id: int) -> HomeworldLocatorGameState | None:
-        """Drop inferred game-global candidates; preserve user-asserted rows when present."""
+        """Drop inferred game-global candidates; preserve asserted provenances when present."""
         existing = self.get_game_state(game_id)
         if existing is None:
             return None
-        preserved = tuple(
-            row for row in existing.candidates if row.attribution == ATTRIBUTION_USER_ASSERTED
+        has_asserts = bool(
+            existing.asserted_location_provenances
+            or existing.asserted_sector_ownership
+            or existing.asserted_planet_ownership
         )
-        if not preserved:
+        if not has_asserts:
             try:
                 self._storage.delete(self.game_global_document_key(game_id))
             except NotFoundError:
                 pass
             self._bump_generations_for_game(game_id)
             return None
+        retained_candidates = ensure_candidates_for_asserted_locations(
+            inferred=(),
+            asserted_location_provenances=existing.asserted_location_provenances,
+        )
         retained = HomeworldLocatorGameState(
-            candidates=preserved,
+            candidates=retained_candidates,
             baseline_turn=existing.baseline_turn,
             baseline_degraded=existing.baseline_degraded,
             settings_fingerprint=(),
             baseline_algorithm_version=existing.baseline_algorithm_version,
+            asserted_location_provenances=existing.asserted_location_provenances,
+            asserted_sector_ownership=existing.asserted_sector_ownership,
+            asserted_planet_ownership=existing.asserted_planet_ownership,
         )
         self.put_game_state(game_id, retained)
         self._bump_generations_for_game(game_id)

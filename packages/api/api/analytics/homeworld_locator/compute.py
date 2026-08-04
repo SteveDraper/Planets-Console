@@ -7,18 +7,28 @@ from collections.abc import Callable
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
 from api.analytics.homeworld_locator.baseline_ensure import materialize_homeworld_candidate_view
 from api.analytics.homeworld_locator.compute_services import resolve_homeworld_services
-from api.analytics.homeworld_locator.constants import ANALYTIC_ID
+from api.analytics.homeworld_locator.constants import (
+    ANALYTIC_ID,
+    ATTRIBUTION_INFERRED,
+    ATTRIBUTION_USER_ASSERTED,
+)
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
+from api.analytics.homeworld_locator.merge_above_read import merge_homeworld_evidence_above_read
 from api.analytics.homeworld_locator.ownership_refine import sector_owner_sets_to_dict
 from api.analytics.homeworld_locator.sector_overlays import (
     build_homeworld_sector_overlays_for_turn,
 )
 from api.analytics.homeworld_locator.serialization import homeworld_candidate_record_to_json
-from api.analytics.homeworld_locator.types import HomeworldCandidateView
+from api.analytics.homeworld_locator.types import HomeworldCandidateRecord, HomeworldCandidateView
 from api.analytics.options import TurnAnalyticsOptions
 from api.concepts.homeworld_layout import homeworld_locator_inactive_reason
 from api.concepts.map_region_coverage import map_region_overlay_to_wire
 from api.models.game import TurnInfo
+
+
+def _wire_attribution(row: HomeworldCandidateRecord) -> str:
+    """FE-compat wire field derived from ``asserted_cue`` (not durable authority)."""
+    return ATTRIBUTION_USER_ASSERTED if row.asserted_cue else ATTRIBUTION_INFERRED
 
 
 def _view_to_wire(
@@ -31,7 +41,9 @@ def _view_to_wire(
             "planetId": row.planet_id,
             "perspective": row.perspective,
             "confidenceTier": row.confidence_tier,
-            "attribution": row.attribution,
+            "attribution": _wire_attribution(row),
+            "assertedCue": row.asserted_cue,
+            "locationAsserted": row.location_asserted,
             "isMostProbable": row.is_most_probable,
         }
         for row in view.candidates
@@ -39,6 +51,9 @@ def _view_to_wire(
     rows = [
         {
             **homeworld_candidate_record_to_json(row),
+            "attribution": _wire_attribution(row),
+            "assertedCue": row.asserted_cue,
+            "locationAsserted": row.location_asserted,
             "isMostProbable": row.is_most_probable,
         }
         for row in view.candidates
@@ -76,13 +91,18 @@ def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
     state = services.persistence.get_game_state(services.game_id)
     sector_owner_sets = None
     if state is not None:
+        # Same merge-above-read as materialize: overlays must not re-open the
+        # game-global vs aggregate storage split (ADR 0010).
         aggregate = evidence_aggregate_at_shell_turn(
             services,
             baseline_turn=state.baseline_turn,
             shell_turn=ctx.turn.settings.turn,
         )
-        if aggregate is not None:
-            sector_owner_sets = sector_owner_sets_to_dict(aggregate.sector_owner_sets)
+        merged = merge_homeworld_evidence_above_read(
+            game_state=state,
+            aggregate=aggregate,
+        )
+        sector_owner_sets = sector_owner_sets_to_dict(merged.sector_owner_sets)
     overlays = build_homeworld_sector_overlays_for_turn(
         ctx.turn,
         view,

@@ -17,6 +17,7 @@ import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
 import { withoutInactiveHomeworldLocator } from './analytics/homeworld-locator/homeworldAvailability'
+import { useClearHomeworldLocatorSelectionOnShellChange } from './analytics/homeworld-locator/useClearHomeworldLocatorSelectionOnShellChange'
 import {
   applyShellGameBootstrapResult,
   fetchShellGameBootstrap,
@@ -90,6 +91,12 @@ function ConsoleShell() {
     setTurn,
     stepTurn,
   } = useShellContext({ reportShellError: addShellError })
+
+  useClearHomeworldLocatorSelectionOnShellChange({
+    gameId: selectedGameId,
+    turn: selectedTurn,
+    perspective: shellSelectedViewpointOrdinal,
+  })
 
   const {
     loadAllProgress,

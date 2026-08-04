@@ -1,10 +1,17 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import type { AnalyticShellScope } from '../../api/bff'
+import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { DEFAULT_PLANET_LABEL_OPTIONS } from '../planetMapLabelModel'
 import { MapShellContent } from './MapShellContent'
 
+const mapGraphPropsSpy = vi.fn()
+
 vi.mock('../MapGraph', () => ({
-  MapGraph: () => <div data-testid="map-graph" />,
+  MapGraph: (props: Record<string, unknown>) => {
+    mapGraphPropsSpy(props)
+    return <div data-testid="map-graph" />
+  },
 }))
 
 vi.mock('../MapPaneWithDisplayControls', () => ({
@@ -17,6 +24,23 @@ vi.mock('../PlanetMapInfoControls', () => ({
   PlanetMapInfoControls: () => null,
 }))
 
+const sampleScope: AnalyticShellScope = {
+  gameId: '628580',
+  turn: 5,
+  perspective: 1,
+  username: 'alice',
+}
+
+const sampleRoster: readonly PerspectiveRow[] = [
+  {
+    ordinal: 1,
+    playerId: 1,
+    name: 'alice',
+    raceName: 'Federation',
+    eliminationTurn: null,
+  },
+]
+
 const displayMapData = {
   nodes: [{ id: 'base-map:1', label: 'A', x: 1, y: 2 }],
   edges: [],
@@ -27,65 +51,71 @@ const displayMapData = {
   homeworldMarkers: [],
 }
 
+function renderShowingMap(
+  mapShellView: Parameters<typeof MapShellContent>[0]['mapShellView']
+) {
+  return render(
+    <MapShellContent
+      mapShellView={mapShellView}
+      analyticScope={sampleScope}
+      roster={sampleRoster}
+      futureTurnOffset={0}
+      planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
+      onPlanetLabelOptionsChange={vi.fn()}
+      onMapZoomChange={vi.fn()}
+      onSetZoomReady={vi.fn()}
+    />
+  )
+}
+
 describe('MapShellContent', () => {
   it('renders the map graph in showing-map phase', () => {
-    render(
-      <MapShellContent
-        mapShellView={{
-          phase: 'showing-map',
-          displayMapData,
-          showDeferredPending: false,
-        }}
-        futureTurnOffset={0}
-        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
-        onPlanetLabelOptionsChange={vi.fn()}
-        onMapZoomChange={vi.fn()}
-        onSetZoomReady={vi.fn()}
-      />
-    )
+    renderShowingMap({
+      phase: 'showing-map',
+      displayMapData,
+      showDeferredPending: false,
+    })
 
     expect(screen.getByTestId('map-graph')).toBeInTheDocument()
   })
 
-  it('shows baseline degraded note when combined map data is degraded', () => {
-    render(
-      <MapShellContent
-        mapShellView={{
-          phase: 'showing-map',
-          displayMapData: {
-            ...displayMapData,
-            baselineDegraded: true,
-            baselineTurn: 4,
-          },
-          showDeferredPending: false,
-        }}
-        futureTurnOffset={0}
-        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
-        onPlanetLabelOptionsChange={vi.fn()}
-        onMapZoomChange={vi.fn()}
-        onSetZoomReady={vi.fn()}
-      />
+  it('forwards shell analyticScope and roster to MapGraph', () => {
+    mapGraphPropsSpy.mockClear()
+    renderShowingMap({
+      phase: 'showing-map',
+      displayMapData,
+      showDeferredPending: false,
+    })
+
+    expect(mapGraphPropsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        analyticScope: sampleScope,
+        roster: sampleRoster,
+      })
     )
+  })
+
+  it('shows baseline degraded note when combined map data is degraded', () => {
+    renderShowingMap({
+      phase: 'showing-map',
+      displayMapData: {
+        ...displayMapData,
+        baselineDegraded: true,
+        baselineTurn: 4,
+      },
+      showDeferredPending: false,
+    })
 
     expect(screen.getByRole('status')).toHaveTextContent(/Baseline degraded/)
     expect(screen.getByRole('status')).toHaveTextContent(/using turn 4/)
   })
 
   it('does not show baseline degraded note when not degraded', () => {
-    render(
-      <MapShellContent
-        mapShellView={{
-          phase: 'showing-map',
-          displayMapData,
-          showDeferredPending: false,
-        }}
-        futureTurnOffset={0}
-        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
-        onPlanetLabelOptionsChange={vi.fn()}
-        onMapZoomChange={vi.fn()}
-        onSetZoomReady={vi.fn()}
-      />
-    )
+    renderShowingMap({
+      phase: 'showing-map',
+      displayMapData,
+      showDeferredPending: false,
+    })
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
@@ -95,6 +125,8 @@ describe('MapShellContent', () => {
     render(
       <MapShellContent
         mapShellView={{ phase: 'error', error: err }}
+        analyticScope={sampleScope}
+        roster={sampleRoster}
         futureTurnOffset={0}
         planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
         onPlanetLabelOptionsChange={vi.fn()}
@@ -108,23 +140,14 @@ describe('MapShellContent', () => {
   })
 
   it('shows layer error banner text while map still renders', () => {
-    render(
-      <MapShellContent
-        mapShellView={{
-          phase: 'showing-map',
-          displayMapData,
-          showDeferredPending: false,
-          layerError: new Error(
-            'Homeworld locator: turn 59 is not stored (evidence chain requires contiguous turns)'
-          ),
-        }}
-        futureTurnOffset={0}
-        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
-        onPlanetLabelOptionsChange={vi.fn()}
-        onMapZoomChange={vi.fn()}
-        onSetZoomReady={vi.fn()}
-      />
-    )
+    renderShowingMap({
+      phase: 'showing-map',
+      displayMapData,
+      showDeferredPending: false,
+      layerError: new Error(
+        'Homeworld locator: turn 59 is not stored (evidence chain requires contiguous turns)'
+      ),
+    })
 
     expect(screen.getByTestId('map-graph')).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent(/Homeworld locator/i)
@@ -132,25 +155,16 @@ describe('MapShellContent', () => {
   })
 
   it('stacks the degraded baseline note and the layer error instead of overlapping them', () => {
-    render(
-      <MapShellContent
-        mapShellView={{
-          phase: 'showing-map',
-          displayMapData: {
-            ...displayMapData,
-            baselineDegraded: true,
-            baselineTurn: 4,
-          },
-          showDeferredPending: false,
-          layerError: new Error('Homeworld locator: turn 59 is not stored'),
-        }}
-        futureTurnOffset={0}
-        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
-        onPlanetLabelOptionsChange={vi.fn()}
-        onMapZoomChange={vi.fn()}
-        onSetZoomReady={vi.fn()}
-      />
-    )
+    renderShowingMap({
+      phase: 'showing-map',
+      displayMapData: {
+        ...displayMapData,
+        baselineDegraded: true,
+        baselineTurn: 4,
+      },
+      showDeferredPending: false,
+      layerError: new Error('Homeworld locator: turn 59 is not stored'),
+    })
 
     const degraded = screen.getByRole('status')
     const layerError = screen.getByRole('alert')

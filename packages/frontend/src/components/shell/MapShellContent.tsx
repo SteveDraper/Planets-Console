@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { homeworldBaselineDegradedMessage } from '../../analytics/homeworld-locator/constants'
+import type { AnalyticShellScope } from '../../api/bff'
 import type { StellarCartographyMapContext } from '../../analytics/stellar-cartography/mapUiConfig'
+import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import { MapGraph } from '../MapGraph'
 import { MapPaneWithDisplayControls } from '../MapPaneWithDisplayControls'
@@ -11,6 +13,10 @@ import type { MapShellView } from '../../lib/mapDisplayRetention'
 
 export type MapShellContentProps = {
   mapShellView: MapShellView
+  /** Shell-derived scope already owned by MapMainArea; forwarded to map feature menus. */
+  analyticScope: AnalyticShellScope
+  /** Game roster for homeworld ownership menu labels; owned at the shell boundary. */
+  roster: readonly PerspectiveRow[]
   /** Turns beyond latest stored game turn; applied at cartography display time. */
   futureTurnOffset: number
   planetLabelOptions: PlanetLabelOptions
@@ -23,6 +29,8 @@ export type MapShellContentProps = {
 /** Renders map shell phases (loading, error, or live map with optional deferred pending banner). */
 export function MapShellContent({
   mapShellView,
+  analyticScope,
+  roster,
   futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
@@ -45,6 +53,8 @@ export function MapShellContent({
       return (
         <MapShellShowingMap
           mapShellView={mapShellView}
+          analyticScope={analyticScope}
+          roster={roster}
           futureTurnOffset={futureTurnOffset}
           planetLabelOptions={planetLabelOptions}
           onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
@@ -58,6 +68,8 @@ export function MapShellContent({
 
 function MapShellShowingMap({
   mapShellView,
+  analyticScope,
+  roster,
   futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
@@ -78,6 +90,8 @@ function MapShellShowingMap({
         <MapGraph
           data={mapShellView.displayMapData}
           className="h-full w-full min-h-0"
+          analyticScope={analyticScope}
+          roster={roster}
           futureTurnOffset={futureTurnOffset}
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}

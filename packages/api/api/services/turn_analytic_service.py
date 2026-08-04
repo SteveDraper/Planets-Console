@@ -19,6 +19,7 @@ from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import LoginCredentialsRequiredError, NotFoundError, UpstreamPlanetsError
 from api.models.game import TurnInfo
 from api.planets_nu import PlanetsNuClient
+from api.services.homeworld_assertion_service import HomeworldAssertionService
 from api.services.inference_hull_catalog_service import InferenceHullCatalogService
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -26,6 +27,10 @@ from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
 from api.transport.connections_options import FlareConnectionMode
 from api.transport.game_info_update import RefreshGameInfoParams
+from api.transport.homeworld_assertions import (
+    HomeworldAssertionAction,
+    HomeworldAssertionAxis,
+)
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
@@ -511,3 +516,57 @@ class TurnAnalyticService:
             turn_number,
         )
         return scheduler.global_pause_status(scope)
+
+    def _homeworld_assertion_service(
+        self,
+        game_id: int,
+        perspective: int,
+    ):
+        load_turn = self._load_scoreboard_turn(game_id, perspective)
+
+        def rematerialize(turn_number: int) -> dict:
+            return self.get_turn_analytics(
+                game_id,
+                perspective,
+                turn_number,
+                HOMEWORLD_ANALYTIC_ID,
+            )
+
+        return HomeworldAssertionService(
+            persistence=self._homeworld_persistence,
+            load_turn=load_turn,
+            game_id=game_id,
+            perspective=perspective,
+            rematerialize=rematerialize,
+        )
+
+    def apply_homeworld_assertion(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        axis: HomeworldAssertionAxis,
+        action: HomeworldAssertionAction,
+        planet_id: int | None = None,
+        sector_index: int | None = None,
+        owner_slot: int | None = None,
+    ) -> dict:
+        return self._homeworld_assertion_service(game_id, perspective).apply_assertion(
+            axis=axis,
+            action=action,
+            turn_number=turn_number,
+            planet_id=planet_id,
+            sector_index=sector_index,
+            owner_slot=owner_slot,
+        )
+
+    def refresh_homeworld_locator(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> dict:
+        return self._homeworld_assertion_service(game_id, perspective).refresh(
+            turn_number=turn_number,
+        )

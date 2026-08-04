@@ -31,11 +31,12 @@ from bff.diagnostics_dep import (
     optional_request_root,
     with_timed_child,
 )
-from bff.routers import fleet_table_stream, scores_inference
+from bff.routers import fleet_table_stream, homeworld_locator, scores_inference
 
 router = APIRouter()
 router.include_router(scores_inference.router, prefix="/scores")
 router.include_router(fleet_table_stream.router, prefix="/fleet")
+router.include_router(homeworld_locator.router, prefix="/homeworld-locator")
 
 
 def _turn_analytics_from_core(

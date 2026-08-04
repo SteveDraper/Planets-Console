@@ -30,6 +30,7 @@ from api.transport.connections_options import (
 )
 from api.transport.fleet_table_stream import stream_fleet_table_ndjson
 from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInfoParams
+from api.transport.homeworld_assertions import HomeworldAssertionRequest
 from api.transport.inference_hull_catalog import InferenceHullCatalogMaskUpdateRequest
 from api.transport.inference_stream import stream_inference_ndjson
 from api.transport.load_all_turns import (
@@ -295,6 +296,42 @@ def post_scores_inference_recompute(
 ) -> dict[str, object]:
     """Clear host-turn inference persistence and reschedule all scoreboard rows."""
     return analytics.recompute_scores_inference(
+        game_id,
+        perspective,
+        turn_number,
+    )
+
+
+@router.post("/{game_id}/{perspective}/turns/{turn_number}/analytics/homeworld-locator/assertions")
+def post_homeworld_locator_assertion(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    body: HomeworldAssertionRequest,
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict:
+    """Upsert or revoke a homeworld location or ownership assertion (#37)."""
+    return analytics.apply_homeworld_assertion(
+        game_id,
+        perspective,
+        turn_number,
+        axis=body.axis,
+        action=body.action,
+        planet_id=body.planet_id,
+        sector_index=body.sector_index,
+        owner_slot=body.owner_slot,
+    )
+
+
+@router.post("/{game_id}/{perspective}/turns/{turn_number}/analytics/homeworld-locator/refresh")
+def post_homeworld_locator_refresh(
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
+) -> dict:
+    """Wipe machine homeworld state and rebuild via ensure (asserts preserved)."""
+    return analytics.refresh_homeworld_locator(
         game_id,
         perspective,
         turn_number,

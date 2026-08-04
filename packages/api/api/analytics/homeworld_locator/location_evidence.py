@@ -6,8 +6,10 @@ from collections.abc import Mapping, Sequence
 
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
-    CONFIDENCE_POSSIBLE,
+    PROVENANCE_BASELINE_PROFILE,
+    PROVENANCE_ORIGIN_DISTANCE,
     HomeworldSingleStarbasePromotion,
+    LocationProvenance,
     OriginDistanceObservation,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
@@ -213,28 +215,6 @@ def single_starbase_new_build_implicated_planet_id(
     return implicated[0]
 
 
-def promote_candidate_to_definite(
-    candidates: Sequence[HomeworldCandidateRecord],
-    *,
-    planet_id: int,
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Promote one existing possible candidate to definite without changing homeworld owner."""
-    promoted: list[HomeworldCandidateRecord] = []
-    for row in candidates:
-        if row.planet_id == planet_id and row.confidence_tier == CONFIDENCE_POSSIBLE:
-            promoted.append(
-                HomeworldCandidateRecord(
-                    planet_id=row.planet_id,
-                    perspective=row.perspective,
-                    confidence_tier=CONFIDENCE_DEFINITE,
-                    attribution=row.attribution,
-                )
-            )
-        else:
-            promoted.append(row)
-    return tuple(promoted)
-
-
 def record_single_starbase_promotion(
     existing_promotions: Sequence[HomeworldSingleStarbasePromotion],
     *,
@@ -250,3 +230,71 @@ def record_single_starbase_promotion(
         *existing_promotions,
         HomeworldSingleStarbasePromotion(planet_id=planet_id, turn=turn),
     )
+
+
+def definite_candidate_planet_ids(
+    candidates: Sequence[HomeworldCandidateRecord],
+) -> tuple[int, ...]:
+    """Planet ids whose durable candidate row is currently definite (baseline pins)."""
+    return tuple(row.planet_id for row in candidates if row.confidence_tier == CONFIDENCE_DEFINITE)
+
+
+def baseline_profile_location_provenances(
+    *,
+    baseline_turn: int,
+    definite_planet_ids: Sequence[int],
+) -> tuple[LocationProvenance, ...]:
+    """Mint strong baseline-profile location provenances for definite baseline pins."""
+    return tuple(
+        LocationProvenance(
+            kind=PROVENANCE_BASELINE_PROFILE,
+            turn=baseline_turn,
+            planet_id=planet_id,
+        )
+        for planet_id in sorted(set(definite_planet_ids))
+    )
+
+
+def collect_machine_location_provenances(
+    *,
+    prior_location_provenances: Sequence[LocationProvenance] = (),
+    origin_distance_observations: Sequence[OriginDistanceObservation] = (),
+    single_starbase_promotions: Sequence[HomeworldSingleStarbasePromotion] = (),
+    baseline_turn: int | None = None,
+    baseline_definite_planet_ids: Sequence[int] = (),
+) -> tuple[LocationProvenance, ...]:
+    """Rebuild machine location provenances from durable evidence facts.
+
+    Baseline-profile rows are carried from *prior* (minted at floor write) and
+    backfilled from *baseline_definite_planet_ids* when missing so legacy
+    aggregates without profiles cannot lose baseline pins to weak OD-only lists.
+    Origin-distance and single-starbase rows are derived from the observation /
+    promotion collections so refine stays the single write path for those kinds.
+    """
+    rows: list[LocationProvenance] = [
+        row for row in prior_location_provenances if row.kind == PROVENANCE_BASELINE_PROFILE
+    ]
+    seen: set[tuple[str, int, int]] = {(row.kind, row.turn, row.planet_id) for row in rows}
+
+    def _add(kind: str, turn: int, planet_id: int) -> None:
+        key = (kind, turn, planet_id)
+        if key in seen:
+            return
+        seen.add(key)
+        rows.append(LocationProvenance(kind=kind, turn=turn, planet_id=planet_id))
+
+    if baseline_turn is not None and baseline_definite_planet_ids:
+        for seed in baseline_profile_location_provenances(
+            baseline_turn=baseline_turn,
+            definite_planet_ids=baseline_definite_planet_ids,
+        ):
+            _add(seed.kind, seed.turn, seed.planet_id)
+
+    for observation in origin_distance_observations:
+        for planet_id in observation.matched_planet_ids:
+            _add(PROVENANCE_ORIGIN_DISTANCE, observation.turn, planet_id)
+
+    for promotion in single_starbase_promotions:
+        _add(promotion.kind, promotion.turn, promotion.planet_id)
+
+    return tuple(rows)

@@ -62,11 +62,14 @@ class HomeworldSingleStarbasePromotion:
     kind: str = EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD
 
 
-# --- Ownership evidence (#269) ---
+# --- Dual-axis provenances (#269 ownership; #37 location + asserts) ---
 
 PROVENANCE_SHIP_TRAVEL_ENVELOPE = "ship_travel_envelope"
 PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP = "preferred_candidate_ownership"
 PROVENANCE_NEARBY_PLANET_OWNERSHIP = "nearby_planet_ownership"
+PROVENANCE_ORIGIN_DISTANCE = "origin_distance"
+PROVENANCE_BASELINE_PROFILE = "baseline_profile"
+PROVENANCE_ASSERTED = "asserted"
 
 AGE_SOURCE_FLEET_BUILT_TURN = "fleet_built_turn"
 AGE_SOURCE_SHIP_ID_SCOREBOARD = "ship_id_scoreboard"
@@ -74,7 +77,7 @@ AGE_SOURCE_SHIP_ID_SCOREBOARD = "ship_id_scoreboard"
 
 @dataclass(frozen=True)
 class OwnershipProvenance:
-    """One machine-fact reason a slot is in a sector's possible-owner set."""
+    """One reason a slot is in a possible-owner set (machine or asserted)."""
 
     kind: str
     turn: int
@@ -91,3 +94,12 @@ class SectorOwnerMember:
 
     owner_slot: int
     provenances: tuple[OwnershipProvenance, ...]
+
+
+@dataclass(frozen=True)
+class LocationProvenance:
+    """One reason a planet is / may be the homeworld location (machine or asserted)."""
+
+    kind: str
+    turn: int
+    planet_id: int

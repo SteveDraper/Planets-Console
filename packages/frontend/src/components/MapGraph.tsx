@@ -6,7 +6,7 @@ import {
 } from 'react'
 import { ReactFlow, useStore } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { CombinedMapData } from '../api/bff'
+import type { AnalyticShellScope, CombinedMapData } from '../api/bff'
 import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
 import {
   buildCartographyMapFrame,
@@ -36,11 +36,17 @@ import {
 } from './map-graph/RegionOverlayHoverPanel'
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
+import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
+import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
 import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
 import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homeworldRegionStyle'
+import { resolveHomeworldSelectedSectorIndex } from '../analytics/homeworld-locator/resolveHomeworldSelectedSectorIndex'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
+import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
+import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
 import { useHomeworldRegionDisplayStore } from '../stores/homeworldRegionDisplay'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
+import type { PerspectiveRow } from '../lib/gameInfoShell'
 import {
   WormholeInteractionProvider,
   useWormholeInteractionState,
@@ -61,6 +67,10 @@ import {
 type MapGraphProps = {
   data: CombinedMapData
   className?: string
+  /** Shell-owned scope; required for homeworld map context menu asserts. */
+  analyticScope: AnalyticShellScope
+  /** Shell-owned roster for homeworld ownership menu labels. */
+  roster: readonly PerspectiveRow[]
   /** Turns beyond latest stored game turn for ion storm overlay extrapolation. */
   futureTurnOffset?: number
   onMapZoomChange: (zoom: number) => void
@@ -77,6 +87,8 @@ const INITIAL_FIT_REVEAL_MS = 250
 export function MapGraph({
   data,
   className,
+  analyticScope,
+  roster,
   futureTurnOffset = 0,
   onMapZoomChange,
   onSetZoomReady,
@@ -130,6 +142,8 @@ export function MapGraph({
             waypointGrid={waypointGrid}
             labelSourceByNodeId={labelSourceByNodeId}
             planetLabelOptions={planetLabelOptions}
+            analyticScope={analyticScope}
+            roster={roster}
             cartography={cartography}
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
@@ -150,6 +164,8 @@ type MapGraphFlowProps = {
   waypointGrid: ReturnType<typeof buildPlanetSpatialGrid> | null
   labelSourceByNodeId: ReturnType<typeof buildLabelSourceByNodeId>
   planetLabelOptions: PlanetLabelOptions
+  analyticScope: AnalyticShellScope
+  roster: readonly PerspectiveRow[]
   cartography?: StellarCartographyMapContext
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
@@ -211,6 +227,8 @@ function MapGraphFlow({
   waypointGrid,
   labelSourceByNodeId,
   planetLabelOptions,
+  analyticScope,
+  roster,
   cartography,
   onMapZoomChange,
   onSetZoomReady,
@@ -233,18 +251,33 @@ function MapGraphFlow({
   const homeworldRegionDisplayMode = useHomeworldRegionDisplayStore(
     (s) => s.regionDisplayMode
   )
+  const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
+  const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
+  const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
+
+  // Raw homeworld sector overlays for ownership assert keying (independent of display mode).
+  const ownershipRegionOverlays = data.regionOverlays
+
   // Visibility prefs only mutate visibility kinds; homeworld display mode filters
   // sectors; homeworld style adapter attaches paint metadata for shared blit.
-  const regionOverlays = useMemo(
-    () =>
-      applyHomeworldRegionStyle(
-        applyHomeworldRegionDisplayMode(
-          applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
-          homeworldRegionDisplayMode
-        )
-      ),
-    [data.regionOverlays, visibilityKinds, homeworldRegionDisplayMode]
-  )
+  const regionOverlays = useMemo(() => {
+    const filtered = applyHomeworldRegionDisplayMode(
+      applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
+      homeworldRegionDisplayMode
+    )
+    const selectedSectorIndex = resolveHomeworldSelectedSectorIndex(
+      selection,
+      data.homeworldMarkers,
+      filtered
+    )
+    return applyHomeworldRegionStyle(filtered, { selectedSectorIndex })
+  }, [
+    data.regionOverlays,
+    data.homeworldMarkers,
+    visibilityKinds,
+    homeworldRegionDisplayMode,
+    selection,
+  ])
 
   return (
     <ReactFlow
@@ -302,6 +335,15 @@ function MapGraphFlow({
         blockedByPlanetHover={blockedByPlanetHover}
         cartography={cartography}
         wormholeHoverLines={wormholeHoverLines}
+      />
+      <HomeworldMapContextMenu
+        analyticScope={analyticScope}
+        enabled={homeworldEnabled}
+        ownershipRegionOverlays={ownershipRegionOverlays}
+        homeworldMarkers={data.homeworldMarkers}
+        planetGrid={planetGrid}
+        planetMapNodes={planetMapNodes}
+        roster={roster}
       />
     </ReactFlow>
   )

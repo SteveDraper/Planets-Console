@@ -1,17 +1,16 @@
-"""Refine homeworld location evidence aggregates and materialize promotions."""
+"""Refine homeworld location evidence aggregates and materialize cull helpers."""
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence, Set
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.baseline import apply_co_sector_candidate_cull
 from api.analytics.homeworld_locator.constants import (
-    ATTRIBUTION_USER_ASSERTED,
     HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
 )
-from api.analytics.homeworld_locator.cull_candidates import TCullable
+from api.analytics.homeworld_locator.cull_candidates import TCullable, candidate_is_assert_protected
 from api.analytics.homeworld_locator.evidence_refine_report import (
     EvidenceRefineCounts,
     EvidenceRefineInnerTimingMs,
@@ -22,8 +21,9 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
 )
 from api.analytics.homeworld_locator.location_evidence import (
     candidate_planet_ids,
+    collect_machine_location_provenances,
+    definite_candidate_planet_ids,
     origin_distance_candidate_planet_ids,
-    promote_candidate_to_definite,
     record_single_starbase_promotion,
     ship_gravitonic_movement,
     single_starbase_new_build_implicated_planet_id,
@@ -148,6 +148,14 @@ def refine_homeworld_evidence_aggregate(
         load_turn=load_turn,
     )
 
+    location_provenances = collect_machine_location_provenances(
+        prior_location_provenances=prior.location_provenances,
+        origin_distance_observations=observations,
+        single_starbase_promotions=promotions,
+        baseline_turn=prior.baseline_turn,
+        baseline_definite_planet_ids=definite_candidate_planet_ids(candidates),
+    )
+
     aggregate = HomeworldEvidenceAggregate(
         turn=turn_number,
         baseline_turn=prior.baseline_turn,
@@ -156,6 +164,7 @@ def refine_homeworld_evidence_aggregate(
         origin_distance_evidence_through_turn=through_turn,
         sector_owner_sets=sector_owner_sets,
         owner_possible_sectors=owner_possible_sectors,
+        location_provenances=location_provenances,
         evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
     total_ms = (time.perf_counter() - total_t0) * 1000.0
@@ -179,22 +188,12 @@ def refine_homeworld_evidence_aggregate(
     )
 
 
-def apply_recorded_single_starbase_promotions(
-    candidates: Sequence[HomeworldCandidateRecord],
-    promotions: Sequence[HomeworldSingleStarbasePromotion],
-) -> tuple[HomeworldCandidateRecord, ...]:
-    """Apply immediate single-starbase promotions recorded in the evidence aggregate."""
-    promoted: tuple[HomeworldCandidateRecord, ...] = tuple(candidates)
-    for promotion in promotions:
-        promoted = promote_candidate_to_definite(promoted, planet_id=promotion.planet_id)
-    return promoted
-
-
 def cull_definite_neighborhood_candidates(
     candidates: Sequence[TCullable],
     planets_by_id: Mapping[int, Planet],
     *,
     min_separation_ly: float,
+    protected_planet_ids: Set[int] = frozenset(),
 ) -> tuple[TCullable, ...]:
     """Drop inferred possibles closer than *min_separation_ly* to any definite homeworld."""
     if min_separation_ly <= 0 or not candidates:
@@ -212,7 +211,7 @@ def cull_definite_neighborhood_candidates(
 
     kept: list[TCullable] = []
     for row in candidates:
-        if row.attribution == ATTRIBUTION_USER_ASSERTED:
+        if candidate_is_assert_protected(row, protected_planet_ids=protected_planet_ids):
             kept.append(row)
             continue
         if row.confidence_tier == CONFIDENCE_DEFINITE:
@@ -246,33 +245,31 @@ def neighbor_separation_support_min(
     return asset.for_category(category).neighbor_separation.support_min
 
 
-def materialize_evidence_adjusted_candidates(
+def apply_definite_keyed_candidate_culls(
     candidates: Sequence[HomeworldCandidateRecord],
-    aggregate: HomeworldEvidenceAggregate,
     *,
     planets: Sequence[Planet],
     settings_turn: TurnInfo,
     player_count: int,
     layout_asset: LayoutDistributionsAsset | None = None,
+    protected_planet_ids: Set[int] = frozenset(),
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Single-SB promote then co-sector cull then definite-neighborhood cull.
+    """Co-sector then definite-neighborhood cull using current confidence tiers.
 
-    Origin-distance hits do not change confidence tier. The only automatic
-    possible→definite path here is recorded single-starbase new-build.
-    These are the pre-ownership / pre-layout-prior steps of the §4.3.1
-    materialize ladder. Shell map/table serving uses
-    ``materialize_homeworld_candidates``, which owns ownership apply and
-    layout-prior annotation.
+    Callers that resolve location strength (derive) must run this *after* that
+    resolution so culls key off the strength-derived definite set. Asserted
+    location planets stay via ``protected_planet_ids`` and/or ``asserted_cue``.
+
+    Shell map/table serving uses ``materialize_homeworld_candidates``, which
+    derives strength-resolved tiers then applies these culls so post-assert
+    demotions are dropped.
     """
-    adjusted = apply_recorded_single_starbase_promotions(
-        candidates,
-        aggregate.single_starbase_promotions,
-    )
     adjusted = apply_co_sector_candidate_cull(
-        adjusted,
+        candidates,
         planets,
         settings=settings_turn.settings,
         player_count=player_count,
+        protected_planet_ids=protected_planet_ids,
     )
     min_separation = neighbor_separation_support_min(
         settings_turn,
@@ -285,6 +282,7 @@ def materialize_evidence_adjusted_candidates(
             adjusted,
             planets_by_id,
             min_separation_ly=min_separation,
+            protected_planet_ids=protected_planet_ids,
         )
     return adjusted
 

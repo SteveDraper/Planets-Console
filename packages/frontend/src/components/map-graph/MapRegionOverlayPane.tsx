@@ -84,14 +84,28 @@ export function MapRegionOverlayPane({
           return (
             <g key={group.key}>
               {group.boundaryPath != null ? (
-                <path
-                  d={group.boundaryPath}
-                  fill={group.fillOpacity > 0 ? group.fillColor : 'none'}
-                  fillOpacity={group.fillOpacity > 0 ? group.fillOpacity : undefined}
-                  stroke={group.strokeColor ?? group.fillColor}
-                  strokeOpacity={group.strokeColor != null ? 0.85 : group.fillOpacity}
-                  strokeWidth={group.strokeWidth ?? 1}
-                />
+                group.boundaryStrokes != null ? (
+                  group.boundaryStrokes.map((stroke, strokeIndex) => (
+                    <path
+                      key={`${group.key}-boundary-stroke-${strokeIndex}`}
+                      d={group.boundaryPath}
+                      fill="none"
+                      stroke={stroke.strokeColor}
+                      strokeOpacity={0.85}
+                      strokeWidth={stroke.strokeWidth}
+                      strokeDasharray={stroke.strokeDasharray}
+                    />
+                  ))
+                ) : (
+                  <path
+                    d={group.boundaryPath}
+                    fill={group.fillOpacity > 0 ? group.fillColor : 'none'}
+                    fillOpacity={group.fillOpacity > 0 ? group.fillOpacity : undefined}
+                    stroke={group.strokeColor ?? group.fillColor}
+                    strokeOpacity={group.strokeColor != null ? 0.85 : group.fillOpacity}
+                    strokeWidth={group.strokeWidth ?? 1}
+                  />
+                )
               ) : null}
               {group.disks.length > 0 ? (
                 <g opacity={group.fillOpacity}>

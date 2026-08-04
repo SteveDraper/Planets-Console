@@ -84,6 +84,23 @@ def homeworld_layout_asset_category(
     return None
 
 
+def homeworld_sector_geometry_eligible(
+    turn: TurnInfo,
+    *,
+    player_count: int | None = None,
+) -> bool:
+    """True when circular sector geometry applies (no viewpoint pin required).
+
+    Gates on at least two players plus an epic|standard layout asset category
+    (circular + round). Ownership API keying and overlay emission both use this;
+    emission additionally requires a resolved pin.
+    """
+    resolved_count = player_count if player_count is not None else len(players_by_id(turn))
+    if resolved_count < 2:
+        return False
+    return homeworld_layout_asset_category(turn, player_count=resolved_count) is not None
+
+
 def homeworld_sector_emission_eligible(
     turn: TurnInfo,
     *,
@@ -93,10 +110,7 @@ def homeworld_sector_emission_eligible(
     """True when Core should emit homeworld sector ``regionOverlays``."""
     if pin is None:
         return False
-    resolved_count = player_count if player_count is not None else len(players_by_id(turn))
-    if resolved_count < 2:
-        return False
-    return homeworld_layout_asset_category(turn, player_count=resolved_count) is not None
+    return homeworld_sector_geometry_eligible(turn, player_count=player_count)
 
 
 def resolve_viewpoint_pin_planet(

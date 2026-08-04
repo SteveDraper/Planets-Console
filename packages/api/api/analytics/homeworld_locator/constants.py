@@ -3,6 +3,8 @@
 ANALYTIC_ID = "homeworld-locator"
 
 ATTRIBUTION_INFERRED = "inferred"
+# Wire/FE-compat only: derive at emit from ``asserted_cue``. Not durable authority
+# (ADR 0010); do not store as parallel to asserted location provenances.
 ATTRIBUTION_USER_ASSERTED = "user_asserted"
 
 # Bump when baseline candidacy policy changes (cluster FoW density credit, orphan
@@ -14,10 +16,10 @@ HOMEWORLD_BASELINE_ALGORITHM_VERSION = 1
 # origin-distance / single-SB rules that rewrite aggregates). Checked in
 # evidence_refined_through_shell so shell ensure re-runs the chain after deploys.
 # 0 on disk = pre-version / legacy aggregates.
-HOMEWORLD_EVIDENCE_ALGORITHM_VERSION = 3
+HOMEWORLD_EVIDENCE_ALGORITHM_VERSION = 4
 
 # Bump when layout-prior cost, caps, stand-in policy, tie-break, or default
-# solver identity changes (e.g. soft evidence family, anneal default). Post-promote/cull
+# solver identity changes (e.g. soft evidence family, anneal default). Post-derive/cull
 # candidate-set, soft-evidence λ, and OD observation identity invalidate via
 # inputFingerprint + evidenceLambda + evidenceFingerprint on layoutPriorSelection;
 # evidence refine rewrites clear the selection block (defense in depth).
