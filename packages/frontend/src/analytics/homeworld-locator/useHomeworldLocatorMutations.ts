@@ -35,14 +35,20 @@ export function useHomeworldLocatorAssertionPending(scope: AnalyticShellScope | 
 }
 
 export function useHomeworldLocatorAssertionError(scope: AnalyticShellScope | null): unknown {
-  const errors = useMutationState({
+  // Latest mutation by submittedAt for this key; surface error only when that latest is error.
+  const states = useMutationState({
     filters: {
       mutationKey: homeworldLocatorAssertionMutationKey(scope),
-      status: 'error',
     },
-    select: (mutation) => mutation.state.error,
+    select: (mutation) => mutation.state,
   })
-  return errors.at(-1) ?? null
+  let latest: (typeof states)[number] | undefined
+  for (const state of states) {
+    if (latest == null || state.submittedAt >= latest.submittedAt) {
+      latest = state
+    }
+  }
+  return latest?.status === 'error' ? latest.error : null
 }
 
 export function useHomeworldLocatorAssertionMutation(scope: AnalyticShellScope | null) {

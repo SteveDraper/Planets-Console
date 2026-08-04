@@ -6,9 +6,19 @@ import type { AnalyticShellScope } from '../../api/bff'
 import { postHomeworldLocatorAssertion } from './api'
 import {
   homeworldLocatorAssertionMutationKey,
+  useHomeworldLocatorAssertionError,
   useHomeworldLocatorAssertionMutation,
   useHomeworldLocatorAssertionPending,
 } from './useHomeworldLocatorMutations'
+import type { HomeworldLocatorPayload } from './wireSchema'
+
+const emptyPayload: HomeworldLocatorPayload = {
+  analyticId: 'homeworld-locator',
+  available: true,
+  baselineDegraded: false,
+  markers: [],
+  rows: [],
+}
 
 vi.mock('./api', () => ({
   postHomeworldLocatorAssertion: vi.fn(),
@@ -72,6 +82,95 @@ describe('useHomeworldLocatorAssertionMutation', () => {
     await waitFor(() => {
       expect(hookA.result.current.pending).toBe(true)
       expect(hookB.result.current.pending).toBe(true)
+    })
+  })
+
+  it('clears shared error after a later success on another mutation instance', async () => {
+    const fail = new Error('assert failed')
+    vi.mocked(postHomeworldLocatorAssertion)
+      .mockRejectedValueOnce(fail)
+      .mockResolvedValueOnce(emptyPayload)
+
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const wrapper = createWrapper(client)
+
+    const hookA = renderHook(() => useHomeworldLocatorAssertionMutation(scope), { wrapper })
+    const hookB = renderHook(() => useHomeworldLocatorAssertionMutation(scope), { wrapper })
+    const errorHook = renderHook(() => useHomeworldLocatorAssertionError(scope), { wrapper })
+
+    await act(async () => {
+      try {
+        await hookA.result.current.mutateAsync({
+          axis: 'location',
+          action: 'upsert',
+          planetId: 12,
+        })
+      } catch {
+        // expected failure
+      }
+    })
+
+    await waitFor(() => {
+      expect(errorHook.result.current).toBe(fail)
+    })
+
+    await act(async () => {
+      await hookB.result.current.mutateAsync({
+        axis: 'location',
+        action: 'upsert',
+        planetId: 12,
+      })
+    })
+
+    await waitFor(() => {
+      expect(errorHook.result.current).toBeNull()
+    })
+  })
+
+  it('surfaces the latest in-flight failure as the shared error', async () => {
+    const firstFail = new Error('first fail')
+    const secondFail = new Error('second fail')
+    vi.mocked(postHomeworldLocatorAssertion)
+      .mockRejectedValueOnce(firstFail)
+      .mockRejectedValueOnce(secondFail)
+
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const wrapper = createWrapper(client)
+
+    const hookA = renderHook(() => useHomeworldLocatorAssertionMutation(scope), { wrapper })
+    const hookB = renderHook(() => useHomeworldLocatorAssertionMutation(scope), { wrapper })
+    const errorHook = renderHook(() => useHomeworldLocatorAssertionError(scope), { wrapper })
+
+    await act(async () => {
+      try {
+        await hookA.result.current.mutateAsync({
+          axis: 'location',
+          action: 'upsert',
+          planetId: 12,
+        })
+      } catch {
+        // expected
+      }
+    })
+
+    await waitFor(() => {
+      expect(errorHook.result.current).toBe(firstFail)
+    })
+
+    await act(async () => {
+      try {
+        await hookB.result.current.mutateAsync({
+          axis: 'location',
+          action: 'upsert',
+          planetId: 13,
+        })
+      } catch {
+        // expected
+      }
+    })
+
+    await waitFor(() => {
+      expect(errorHook.result.current).toBe(secondFail)
     })
   })
 })
