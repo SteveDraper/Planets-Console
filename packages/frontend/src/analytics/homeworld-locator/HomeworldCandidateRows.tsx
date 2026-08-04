@@ -41,7 +41,7 @@ function confidenceLabel(row: HomeworldCandidateRecord): string {
 
 function slotLabel(perspective: number | null, roster: readonly PerspectiveRow[]): string {
   if (perspective == null) return 'Orphan'
-  const player = roster.find((row) => row.playerId === perspective || row.ordinal === perspective)
+  const player = roster.find((row) => row.ordinal === perspective)
   if (player != null) {
     return formatHomeworldOwnershipPickLabel(player.name, player.raceName)
   }
