@@ -29,8 +29,10 @@ export function HomeworldCandidateAttentionController({
       return
     }
     if (handledTokenRef.current === flashTarget.token) return
-    handledTokenRef.current = flashTarget.token
+    // Wait for React Flow's domNode before consuming the token so a late pane
+    // can still pan for this flash (re-run when domNode appears).
     if (domNode == null) return
+    handledTokenRef.current = flashTarget.token
 
     const rect = domNode.getBoundingClientRect()
     const vp = getViewport()

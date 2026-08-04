@@ -7,22 +7,30 @@ import { HomeworldCandidateAttentionController } from './HomeworldCandidateAtten
 const setViewport = vi.fn()
 const getViewport = vi.fn(() => ({ x: 0, y: 0, zoom: 1 }))
 
+const mockPane = {
+  getBoundingClientRect: () => ({ width: 800, height: 600, x: 0, y: 0 }),
+} as HTMLElement
+
+let mockDomNode: HTMLElement | null = mockPane
+
 vi.mock('@xyflow/react', () => ({
   useReactFlow: () => ({ getViewport, setViewport }),
   useStore: (selector: (s: { domNode: HTMLElement | null }) => unknown) =>
     selector({
-      domNode: {
-        getBoundingClientRect: () => ({ width: 800, height: 600, x: 0, y: 0 }),
-      } as HTMLElement,
+      domNode: mockDomNode,
     }),
 }))
+
+const offScreenMarkers = [{ planetId: 42, x: 10_000, y: 10_000 }] as const
 
 describe('HomeworldCandidateAttentionController', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     useHomeworldCandidateFlashStore.setState({ flashTarget: null })
+    mockDomNode = mockPane
     setViewport.mockClear()
     getViewport.mockClear()
+    getViewport.mockReturnValue({ x: 0, y: 0, zoom: 1 })
   })
 
   afterEach(() => {
@@ -61,5 +69,36 @@ describe('HomeworldCandidateAttentionController', () => {
     })
 
     expect(useHomeworldCandidateFlashStore.getState().flashTarget?.planetId).toBe(2)
+  })
+
+  it('pans when domNode becomes available after the flash token was set', () => {
+    mockDomNode = null
+    const { rerender } = render(
+      <HomeworldCandidateAttentionController markers={offScreenMarkers} />
+    )
+
+    act(() => {
+      useHomeworldCandidateFlashStore.getState().flashPlanet(42)
+    })
+    expect(setViewport).not.toHaveBeenCalled()
+
+    mockDomNode = mockPane
+    rerender(<HomeworldCandidateAttentionController markers={offScreenMarkers} />)
+
+    expect(setViewport).toHaveBeenCalledTimes(1)
+  })
+
+  it('pans only once per flash token after domNode is available', () => {
+    const { rerender } = render(
+      <HomeworldCandidateAttentionController markers={offScreenMarkers} />
+    )
+
+    act(() => {
+      useHomeworldCandidateFlashStore.getState().flashPlanet(42)
+    })
+    expect(setViewport).toHaveBeenCalledTimes(1)
+
+    rerender(<HomeworldCandidateAttentionController markers={offScreenMarkers} />)
+    expect(setViewport).toHaveBeenCalledTimes(1)
   })
 })
