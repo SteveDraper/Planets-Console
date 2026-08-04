@@ -20,7 +20,7 @@ describe('mapNodeIsPlanetoid', () => {
   it('is false for traditional planets (debrisdisk 0 or absent)', () => {
     expect(mapNodeIsPlanetoid(mapNode(0))).toBe(false)
     expect(mapNodeIsPlanetoid(mapNode())).toBe(false)
-    expect(mapNodeIsPlanetoid({ id: 'base:p1', label: 'p1', x: 0, y: 0 })).toBe(false)
+    expect(mapNodeIsPlanetoid({})).toBe(false)
   })
 
   it('is true only when debrisdisk is exactly 1', () => {
