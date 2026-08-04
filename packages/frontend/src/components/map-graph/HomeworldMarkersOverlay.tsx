@@ -13,7 +13,7 @@ const MARKER_DIAMETER_PX = 12
  * Homeworld locator planet decorations on the base map.
  * Solid ring = definite; dashed/lighter ring = possible; double dotted = most probable;
  * amber outer ring = asserted cue; cyan halo = panel/table selection;
- * pulse = ephemeral flash after candidate row click.
+ * pulse = ephemeral in-place ring scale flash after candidate row click.
  */
 export function HomeworldMarkersOverlay({
   markers,
@@ -54,7 +54,7 @@ export function HomeworldMarkersOverlay({
               key={isFlashing ? `${markerKey}-flash-${flashTarget.token}` : markerKey}
               transform={`translate(${paneX} ${paneY})`}
             >
-              <g className={isFlashing ? 'wormhole-recenter-pulse' : undefined}>
+              <g className={isFlashing ? 'homeworld-marker-pulse' : undefined}>
                 {rings.map((ring, ringIndex) => (
                   <circle
                     key={`${markerKey}-${ringIndex}`}

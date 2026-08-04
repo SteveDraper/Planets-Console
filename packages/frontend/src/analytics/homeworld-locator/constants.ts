@@ -1,7 +1,7 @@
 /** Canonical id for the Homeworld locator turn analytic. */
 export const HOMEWORLD_LOCATOR_ANALYTIC_ID = 'homeworld-locator'
 
-/** Duration of the candidate-row map marker flash (matches wormhole recenter pulse). */
+/** Duration of the candidate-row map marker flash (0.75s x 4 pulses). */
 export const HOMEWORLD_CANDIDATE_FLASH_MS = 3000
 
 export const CONFIDENCE_DEFINITE = 'definite' as const
