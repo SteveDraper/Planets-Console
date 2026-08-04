@@ -34,9 +34,7 @@ def test_location_kind_strength_mapping() -> None:
 
 
 def test_location_has_asserted_strength_ignores_machine_kinds() -> None:
-    machine_only = (
-        LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=10),
-    )
+    machine_only = (LocationProvenance(kind=PROVENANCE_BASELINE_PROFILE, turn=1, planet_id=10),)
     with_assert = (
         *machine_only,
         LocationProvenance(kind=PROVENANCE_ASSERTED, turn=5, planet_id=10),
