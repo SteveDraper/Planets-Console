@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useHomeworldCandidateFlashStore } from '../../stores/homeworldCandidateFlash'
+import { useMapAttentionRequestStore } from '../../stores/mapAttentionRequest'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 
 /** Shell fields that invalidate homeworld locator UI selection when any changes. */
@@ -10,18 +10,18 @@ export type HomeworldLocatorShellIdentity = {
 }
 
 /**
- * Clears ephemeral homeworld locator selection and candidate flash when game, turn,
+ * Clears ephemeral homeworld locator selection and map attention when game, turn,
  * or viewpoint changes. Mount once at the shell level (e.g. ConsoleShell).
  */
 export function useClearHomeworldLocatorSelectionOnShellChange(
   identity: HomeworldLocatorShellIdentity
 ): void {
   const clearSelection = useHomeworldLocatorSelectionStore((s) => s.clearSelection)
-  const clearFlash = useHomeworldCandidateFlashStore((s) => s.clearFlash)
+  const clearAttention = useMapAttentionRequestStore((s) => s.clearAttention)
   const { gameId, turn, perspective } = identity
 
   useEffect(() => {
     clearSelection()
-    clearFlash()
-  }, [gameId, turn, perspective, clearSelection, clearFlash])
+    clearAttention()
+  }, [gameId, turn, perspective, clearSelection, clearAttention])
 }

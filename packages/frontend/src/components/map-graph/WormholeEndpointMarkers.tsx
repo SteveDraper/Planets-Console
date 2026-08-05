@@ -1,5 +1,4 @@
 import { useContext } from 'react'
-import { useReactFlow, useStore } from '@xyflow/react'
 import type { StellarCartographyOverlayWormholeMarkerShape } from '../../lib/cartography/stellarCartographyOverlay'
 import { WormholeEndpointIconMark } from '../../lib/wormholeEndpointIcon'
 import {
@@ -8,30 +7,29 @@ import {
   wormholeEndpointRecenterGameCoords,
   wormholeMapCellKey,
 } from '../../lib/wormholeEndpointHover'
+import { isWormholeCellAttention } from '../../lib/mapAttention'
+import {
+  requestMapAttention,
+  useMapAttentionRequestStore,
+} from '../../stores/mapAttentionRequest'
 import {
   WormholeHoverContext,
   WormholeLineRevealContext,
-  WormholeRecenterPulseContext,
-  type WormholeRecenterPulseTarget,
-  recenterMapOnWormholeGameCell,
 } from './stellarCartographyWormholeInteraction'
 
 export function WormholeEndpointMarkers({
   markers,
   wormholeEndpointHoverByCell,
-  wormholeRecenterPulseTarget,
   blockedByPlanetHover,
 }: {
   markers: StellarCartographyOverlayWormholeMarkerShape[]
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
-  wormholeRecenterPulseTarget: WormholeRecenterPulseTarget | null
   blockedByPlanetHover: boolean
 }) {
-  const { setViewport, getViewport } = useReactFlow()
   const setWormholeHover = useContext(WormholeHoverContext)
-  const pulseWormholeAt = useContext(WormholeRecenterPulseContext)
   const lineReveal = useContext(WormholeLineRevealContext)
-  const domNode = useStore((s) => s.domNode ?? null)
+  const pending = useMapAttentionRequestStore((s) => s.pending)
+  const pulseTarget = isWormholeCellAttention(pending) ? pending : null
 
   if (markers.length === 0) return null
 
@@ -43,9 +41,9 @@ export function WormholeEndpointMarkers({
         const recenterGame =
           hoverInfo != null ? wormholeEndpointRecenterGameCoords(hoverInfo) : null
         const isPulseTarget =
-          wormholeRecenterPulseTarget != null &&
-          wormholeRecenterPulseTarget.mapX === mapX &&
-          wormholeRecenterPulseTarget.mapY === mapY
+          pulseTarget != null &&
+          pulseTarget.mapX === mapX &&
+          pulseTarget.mapY === mapY
         return (
           <div
             key={key}
@@ -68,19 +66,17 @@ export function WormholeEndpointMarkers({
             }}
             onClick={(e) => {
               if (recenterGame == null) return
-              recenterMapOnWormholeGameCell(
-                recenterGame.x,
-                recenterGame.y,
-                domNode,
-                getViewport,
-                setViewport,
-                pulseWormholeAt
-              )
+              requestMapAttention({
+                kind: 'wormhole-cell',
+                mapX: recenterGame.x,
+                mapY: recenterGame.y,
+                pan: 'always',
+              })
               e.stopPropagation()
             }}
           >
             <div
-              key={isPulseTarget ? `pulse-${wormholeRecenterPulseTarget.token}` : 'idle'}
+              key={isPulseTarget ? `pulse-${pulseTarget.token}` : 'idle'}
               className={`h-full w-full${isPulseTarget ? ' wormhole-recenter-pulse' : ''}`}
             >
               <WormholeEndpointIconMark />

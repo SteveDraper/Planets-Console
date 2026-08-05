@@ -1,7 +1,8 @@
 import { useStore } from '@xyflow/react'
 import { homeworldMarkerRings } from '../../analytics/homeworld-locator/homeworldMarkerRingStyle'
 import type { HomeworldMapMarkerDisplay } from '../../analytics/homeworld-locator/mapAnalytic'
-import { useHomeworldCandidateFlashStore } from '../../stores/homeworldCandidateFlash'
+import { isHomeworldPlanetAttention } from '../../lib/mapAttention'
+import { useMapAttentionRequestStore } from '../../stores/mapAttentionRequest'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
@@ -24,7 +25,8 @@ export function HomeworldMarkersOverlay({
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
-  const flashTarget = useHomeworldCandidateFlashStore((s) => s.flashTarget)
+  const pending = useMapAttentionRequestStore((s) => s.pending)
+  const flashTarget = isHomeworldPlanetAttention(pending) ? pending : null
 
   if (!transform || width <= 0 || height <= 0) return null
   if (markers.length === 0) return null

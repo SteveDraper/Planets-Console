@@ -1,41 +1,19 @@
 /**
- * Panel candidate click → selection + map flash; conditional pan resolved on the map.
+ * Panel candidate click → assert-focus selection + shared map attention request.
  */
 
-import { flowCenterFromMapNode, flowPointNeedsPan } from '../../lib/mapFlowGeometry'
-import { useHomeworldCandidateFlashStore } from '../../stores/homeworldCandidateFlash'
+import { requestMapAttention } from '../../stores/mapAttentionRequest'
 import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 
-export type HomeworldCandidateAttentionMarker = {
-  planetId: number
-  x: number
-  y: number
-}
-
 /**
- * Select a candidate planet for assert-focus and request a map marker flash.
- * Pan is decided later inside the React Flow tree (viewport-aware).
+ * Select a candidate planet for assert-focus and request map pulse / conditional pan.
+ * Pan and pulse lifetime are owned by ``MapAttentionOrchestrator``.
  */
 export function selectHomeworldCandidateForMapAttention(planetId: number): void {
   useHomeworldLocatorSelectionStore.getState().setSelection({ kind: 'planet', planetId })
-  useHomeworldCandidateFlashStore.getState().flashPlanet(planetId)
-}
-
-/**
- * Resolve whether a flashing candidate needs a viewport pan (zoom unchanged).
- * Returns null when the planet has no map marker.
- */
-export function resolveHomeworldCandidatePan(
-  planetId: number,
-  markers: readonly HomeworldCandidateAttentionMarker[],
-  viewport: { x: number; y: number; zoom: number; width: number; height: number }
-): { flowX: number; flowY: number; needsPan: boolean } | null {
-  const marker = markers.find((entry) => entry.planetId === planetId)
-  if (marker == null) return null
-  const { cx, cy } = flowCenterFromMapNode(marker)
-  return {
-    flowX: cx,
-    flowY: cy,
-    needsPan: flowPointNeedsPan(cx, cy, viewport),
-  }
+  requestMapAttention({
+    kind: 'homeworld-planet',
+    planetId,
+    pan: 'if-offscreen',
+  })
 }
