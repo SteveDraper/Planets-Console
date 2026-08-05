@@ -21,10 +21,6 @@ import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
 import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
 import { planetPositionsFromBaseMap } from './planetPositionsFromBaseMap'
-import {
-  fetchHomeworldLocatorMapDataResponse,
-  homeworldLocatorMapQueryKey,
-} from './mapAnalytic'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
@@ -39,6 +35,12 @@ export type HomeworldLocatorPanelProps = {
   /** Region selection from Tile (single selection-API owner under the sidebar). */
   selectedSectorIndexes: ReadonlySet<number>
   onToggleSectorIndex: (sectorIndex: number) => void
+  /**
+   * Overlays from Tile's ``useHomeworldRegionSelection`` -- Panel must not
+   * declare its own homeworld map query (shared cache must stay MapDataResponse).
+   */
+  overlays: readonly MapRegionOverlay[]
+  overlaysReady: boolean
 }
 
 export function HomeworldLocatorPanel({
@@ -49,23 +51,14 @@ export function HomeworldLocatorPanel({
   onSelectPlanet,
   selectedSectorIndexes,
   onToggleSectorIndex,
+  overlays,
+  overlaysReady,
 }: HomeworldLocatorPanelProps) {
   const tableQuery = useQuery({
     queryKey: ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'table', analyticScope] as const,
     queryFn: () => fetchHomeworldLocatorTable(analyticScope!),
     enabled: fetchEnabled && analyticScope != null,
   })
-  const mapQuery = useQuery({
-    // Same key + MapDataResponse shape as ``homeworldLocatorMapAnalytic`` -- do not
-    // return a partial payload here or markers disappear from the map layer cache.
-    queryKey: homeworldLocatorMapQueryKey(analyticScope),
-    queryFn: () => fetchHomeworldLocatorMapDataResponse(analyticScope!),
-    enabled: fetchEnabled && analyticScope != null,
-  })
-  const overlays = useMemo(
-    () => mapQuery.data?.regionOverlays ?? EMPTY_OVERLAYS,
-    [mapQuery.data?.regionOverlays]
-  )
   const needsBaseMap = overlays.length > 0
   const baseMapQuery = useQuery({
     queryKey: ['analytic', BASE_MAP_ANALYTIC_ID, 'map', analyticScope] as const,
@@ -85,7 +78,7 @@ export function HomeworldLocatorPanel({
 
   const panelModel = useMemo(() => {
     const rows: readonly HomeworldCandidateRecord[] = tableQuery.data?.rows ?? []
-    if (!mapQuery.isSuccess) {
+    if (!overlaysReady) {
       return buildHomeworldSectorPanelModel(rows, EMPTY_OVERLAYS, EMPTY_POSITIONS)
     }
     if (awaitingBaseMapForSectors) {
@@ -94,7 +87,7 @@ export function HomeworldLocatorPanel({
     return buildHomeworldSectorPanelModel(rows, overlays, planetPositions)
   }, [
     tableQuery.data?.rows,
-    mapQuery.isSuccess,
+    overlaysReady,
     awaitingBaseMapForSectors,
     overlays,
     planetPositions,

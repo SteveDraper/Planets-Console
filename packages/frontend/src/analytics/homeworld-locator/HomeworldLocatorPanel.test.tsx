@@ -4,11 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { fetchAnalyticMap } from '../../api/bff'
+import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
 import {
-  fetchHomeworldLocatorMap,
   fetchHomeworldLocatorTable,
   postHomeworldLocatorRefresh,
 } from './api'
@@ -32,7 +32,7 @@ vi.mock('../../api/bff', async () => {
   }
 })
 
-const SECTOR_OVERLAY = {
+const SECTOR_OVERLAY: MapRegionOverlay = {
   kind: 'homeworld-sector' as const,
   id: 'homeworld-sector-2',
   fillColor: '#f97316',
@@ -65,10 +65,16 @@ const CANDIDATE_ROW = {
   isMostProbable: false,
 }
 
+const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
+
 function renderPanel(
   roster: readonly PerspectiveRow[] = [
     perspectiveRow(1, 'alice', { raceName: 'The Federation' }),
-  ]
+  ],
+  options: {
+    overlays?: readonly MapRegionOverlay[]
+    overlaysReady?: boolean
+  } = {}
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -83,6 +89,8 @@ function renderPanel(
       onSelectPlanet={() => undefined}
       selectedSectorIndexes={new Set()}
       onToggleSectorIndex={() => undefined}
+      overlays={options.overlays ?? EMPTY_OVERLAYS}
+      overlaysReady={options.overlaysReady ?? true}
     />,
     { wrapper }
   )
@@ -91,16 +99,8 @@ function renderPanel(
 describe('HomeworldLocatorPanel', () => {
   beforeEach(() => {
     vi.mocked(fetchHomeworldLocatorTable).mockReset()
-    vi.mocked(fetchHomeworldLocatorMap).mockReset()
     vi.mocked(postHomeworldLocatorRefresh).mockReset()
     vi.mocked(fetchAnalyticMap).mockReset()
-    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      regionOverlays: [],
-      markers: [],
-    })
     vi.mocked(fetchAnalyticMap).mockResolvedValue({
       analyticId: 'base-map',
       nodes: [],
@@ -143,16 +143,12 @@ describe('HomeworldLocatorPanel', () => {
       baselineDegraded: false,
       rows: [CANDIDATE_ROW],
     })
-    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      regionOverlays: [SECTOR_OVERLAY],
-      markers: [],
-    })
     vi.mocked(fetchAnalyticMap).mockReturnValue(baseMapPending as never)
 
-    renderPanel()
+    renderPanel(undefined, {
+      overlays: [SECTOR_OVERLAY],
+      overlaysReady: true,
+    })
 
     // Table ready (Refresh visible); overlays ready but base map still pending → hold.
     expect(await screen.findByRole('button', { name: /^refresh$/i })).toBeInTheDocument()
@@ -187,16 +183,12 @@ describe('HomeworldLocatorPanel', () => {
       baselineDegraded: false,
       rows: [CANDIDATE_ROW],
     })
-    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      regionOverlays: [SECTOR_OVERLAY],
-      markers: [],
-    })
     vi.mocked(fetchAnalyticMap).mockRejectedValue(new Error('base map unavailable'))
 
-    renderPanel()
+    renderPanel(undefined, {
+      overlays: [SECTOR_OVERLAY],
+      overlaysReady: true,
+    })
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/base map unavailable/i)
     expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()

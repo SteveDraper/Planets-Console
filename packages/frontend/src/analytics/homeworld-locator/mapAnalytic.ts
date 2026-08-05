@@ -62,8 +62,9 @@ function regionOverlaysFromPayload(payload: HomeworldLocatorPayload): MapRegionO
 
 /**
  * Shared map-layer queryFn for the homeworld locator TanStack cache entry.
- * Panel and map registration MUST use this exact shape -- a partial return under the
- * same ``homeworldLocatorMapQueryKey`` would overwrite markers and blank the map cues.
+ * Selection hook and map registration MUST use this exact shape -- a partial return
+ * under the same ``homeworldLocatorMapQueryKey`` would overwrite markers and blank
+ * the map cues. Panel consumes overlays via props; it must not write this cache.
  */
 export async function fetchHomeworldLocatorMapDataResponse(
   analyticScope: NonNullable<MapAnalyticQueryContext['analyticScope']>
