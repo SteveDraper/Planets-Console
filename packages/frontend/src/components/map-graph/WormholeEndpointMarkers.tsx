@@ -70,7 +70,6 @@ export function WormholeEndpointMarkers({
                 kind: 'wormhole-cell',
                 mapX: recenterGame.x,
                 mapY: recenterGame.y,
-                pan: 'always',
               })
               e.stopPropagation()
             }}

@@ -56,7 +56,6 @@ describe('useClearHomeworldLocatorSelectionOnShellChange', () => {
     useMapAttentionRequestStore.getState().requestAttention({
       kind: 'homeworld-planet',
       planetId: 7,
-      pan: 'if-offscreen',
     })
     expect(useHomeworldLocatorSelectionStore.getState().selection).not.toBeNull()
     expect(useMapAttentionRequestStore.getState().pending).not.toBeNull()

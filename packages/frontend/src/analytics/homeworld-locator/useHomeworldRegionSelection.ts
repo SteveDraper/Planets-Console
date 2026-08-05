@@ -1,8 +1,12 @@
 /**
  * Owns homeworld region-selection overlay reads and selection writes for Tile/Panel.
- * Materialize effects (``all`` → selected, pinned/unpinned sync) are owned solely by
+ * Materialize effects (``all`` → selected) are owned solely by
  * ``useHomeworldRegionSelectionMaterialize`` -- call that once from MapGraph, fed from
  * homeworld sectors already present on combined ``data.regionOverlays``.
+ *
+ * Pinned/unpinned outline sets are derived at read time via
+ * ``effectiveSelectedSectorIndexes``; do not continuously rewrite stored indexes
+ * while those presets are active.
  */
 
 import { useCallback, useEffect, useMemo } from 'react'
@@ -15,7 +19,6 @@ import {
   isHomeworldRegionSelectionUiPreset,
   materializeSectorIndexesForPreset,
   regionSelectionPresetForUi,
-  sectorIndexListsEqual,
   toggleSectorIndexInSelection,
   type HomeworldRegionSelectionUiPreset,
 } from '../../lib/homeworldRegionSelection'
@@ -36,6 +39,9 @@ export type UseHomeworldRegionSelectionOptions = {
  * Sole owner of region-selection materialize writes. Mount once from MapGraph
  * with homeworld sectors from combined map ``regionOverlays`` (not a second
  * selection-hook fetch).
+ *
+ * Only init-only ``all`` → Selected + explicit full list once overlays are known.
+ * Pinned/unpinned stay derive-at-read (no continuous store sync).
  */
 export function useHomeworldRegionSelectionMaterialize(
   overlays: readonly MapRegionOverlay[],
@@ -44,14 +50,10 @@ export function useHomeworldRegionSelectionMaterialize(
   const regionSelectionPreset = useHomeworldRegionSelectionStore(
     (s) => s.regionSelectionPreset
   )
-  const storedSelectedSectorIndexes = useHomeworldRegionSelectionStore(
-    (s) => s.selectedSectorIndexes
-  )
   const setRegionSelectionState = useHomeworldRegionSelectionStore(
     (s) => s.setRegionSelectionState
   )
 
-  // Init-only ``all`` → Selected + explicit full list once overlays are known.
   useEffect(() => {
     if (!overlaysReady) return
     if (regionSelectionPreset !== 'all') return
@@ -63,23 +65,6 @@ export function useHomeworldRegionSelectionMaterialize(
     overlaysReady,
     regionSelectionPreset,
     overlays,
-    setRegionSelectionState,
-  ])
-
-  // Keep pinned/unpinned stored indexes aligned with overlay facts.
-  useEffect(() => {
-    if (!overlaysReady) return
-    if (regionSelectionPreset !== 'pinned' && regionSelectionPreset !== 'unpinned') {
-      return
-    }
-    const next = materializeSectorIndexesForPreset(overlays, regionSelectionPreset)
-    if (sectorIndexListsEqual(storedSelectedSectorIndexes, next)) return
-    setRegionSelectionState(regionSelectionPreset, next)
-  }, [
-    overlaysReady,
-    regionSelectionPreset,
-    overlays,
-    storedSelectedSectorIndexes,
     setRegionSelectionState,
   ])
 }

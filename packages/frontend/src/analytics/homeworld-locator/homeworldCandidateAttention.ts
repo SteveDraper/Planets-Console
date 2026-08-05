@@ -14,6 +14,5 @@ export function selectHomeworldCandidateForMapAttention(planetId: number): void 
   requestMapAttention({
     kind: 'homeworld-planet',
     planetId,
-    pan: 'if-offscreen',
   })
 }

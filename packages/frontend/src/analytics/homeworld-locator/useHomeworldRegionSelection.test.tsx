@@ -110,37 +110,21 @@ describe('useHomeworldRegionSelectionMaterialize', () => {
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
   })
 
-  it('keeps pinned stored indexes aligned with overlay facts', async () => {
+  it('does not rewrite stored indexes while preset is pinned', () => {
     useHomeworldRegionSelectionStore.setState({
       regionSelectionPreset: 'pinned',
       selectedSectorIndexes: [0, 1],
       showEnvelopeOverlays: true,
     })
 
-    const { rerender } = renderHook(
-      ({ overlays }: { overlays: readonly MapRegionOverlay[] }) =>
-        useHomeworldRegionSelectionMaterialize(overlays, true),
-      { initialProps: { overlays: SECTOR_OVERLAYS } }
+    renderHook(() => useHomeworldRegionSelectionMaterialize(SECTOR_OVERLAYS, true))
+
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
+      'pinned'
     )
-
-    await waitFor(() => {
-      expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([
-        0,
-      ])
-    })
-
-    rerender({
-      overlays: [
-        sector('homeworld-sector-0', false),
-        sector('homeworld-sector-1', true),
-      ],
-    })
-
-    await waitFor(() => {
-      expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([
-        1,
-      ])
-    })
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([
+      0, 1,
+    ])
   })
 })
 
@@ -178,7 +162,7 @@ describe('useHomeworldRegionSelection', () => {
     expect(result.current.uiPreset).toBe('selected')
   })
 
-  it('materializes pinned on UI preset change and rematerializes on overlay facts', async () => {
+  it('materializes pinned on UI preset change; Selected snapshots the effective set', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(() => useTileSelectionWithMapMaterialize(true), {
       wrapper: createWrapper(client),
@@ -196,6 +180,7 @@ describe('useHomeworldRegionSelection', () => {
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
     expect(result.current.uiPreset).toBe('pinned')
+    expect(result.current.selectedSectorIndexes).toEqual([0])
 
     act(() => {
       result.current.setUiPreset('selected')

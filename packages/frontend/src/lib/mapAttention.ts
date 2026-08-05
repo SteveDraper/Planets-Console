@@ -18,12 +18,10 @@ export type MapAttentionSpec =
       kind: 'wormhole-cell'
       mapX: number
       mapY: number
-      pan: 'always'
     }
   | {
       kind: 'homeworld-planet'
       planetId: number
-      pan: 'if-offscreen'
     }
 
 export type MapAttentionRequest = MapAttentionSpec & { token: number }
@@ -40,6 +38,7 @@ export function mapAttentionPulseMs(_kind: MapAttentionSpec['kind']): number {
 
 /**
  * Resolve flow target + whether to pan for a pending attention request.
+ * Pan policy is implied by kind (wormhole always; homeworld if off-screen).
  * Returns null when the request cannot be resolved yet (e.g. missing marker).
  */
 export function resolveMapAttentionTarget(

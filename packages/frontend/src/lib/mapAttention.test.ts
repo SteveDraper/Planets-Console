@@ -13,7 +13,7 @@ describe('resolveMapAttentionTarget', () => {
   it('returns null when a homeworld planet has no marker', () => {
     expect(
       resolveMapAttentionTarget(
-        { kind: 'homeworld-planet', planetId: 99, pan: 'if-offscreen', token: 1 },
+        { kind: 'homeworld-planet', planetId: 99, token: 1 },
         { homeworldMarkers: markers, viewport }
       )
     ).toBeNull()
@@ -21,7 +21,7 @@ describe('resolveMapAttentionTarget', () => {
 
   it('reports needsPan false when the homeworld marker is on-screen', () => {
     const resolved = resolveMapAttentionTarget(
-      { kind: 'homeworld-planet', planetId: 10, pan: 'if-offscreen', token: 1 },
+      { kind: 'homeworld-planet', planetId: 10, token: 1 },
       { homeworldMarkers: markers, viewport }
     )
     expect(resolved).not.toBeNull()
@@ -32,7 +32,7 @@ describe('resolveMapAttentionTarget', () => {
 
   it('reports needsPan true when the homeworld marker is off-screen', () => {
     const resolved = resolveMapAttentionTarget(
-      { kind: 'homeworld-planet', planetId: 10, pan: 'if-offscreen', token: 1 },
+      { kind: 'homeworld-planet', planetId: 10, token: 1 },
       {
         homeworldMarkers: markers,
         viewport: { ...viewport, x: -10_000, y: -10_000 },
@@ -43,7 +43,7 @@ describe('resolveMapAttentionTarget', () => {
 
   it('always pans for wormhole-cell attention', () => {
     const resolved = resolveMapAttentionTarget(
-      { kind: 'wormhole-cell', mapX: 5, mapY: 7, pan: 'always', token: 1 },
+      { kind: 'wormhole-cell', mapX: 5, mapY: 7, token: 1 },
       { homeworldMarkers: [], viewport }
     )
     expect(resolved).not.toBeNull()
@@ -56,14 +56,12 @@ describe('attention kind guards', () => {
     const homeworld = {
       kind: 'homeworld-planet' as const,
       planetId: 1,
-      pan: 'if-offscreen' as const,
       token: 1,
     }
     const wormhole = {
       kind: 'wormhole-cell' as const,
       mapX: 0,
       mapY: 0,
-      pan: 'always' as const,
       token: 2,
     }
     expect(isHomeworldPlanetAttention(homeworld)).toBe(true)

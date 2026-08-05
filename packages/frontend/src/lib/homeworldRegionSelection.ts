@@ -122,7 +122,7 @@ export function materializeSectorIndexesForPreset(
  * Resolve the outline multi-select set for paint / panel chrome.
  *
  * - ``all``: every current homeworld sector (until materialize writes ``selected``).
- * - ``pinned`` / ``unpinned``: derive from overlay facts (hook also writes these).
+ * - ``pinned`` / ``unpinned``: derive from overlay facts (no continuous store sync).
  * - ``selected``: stored concrete multi-select (including ``[]`` = none).
  */
 export function effectiveSelectedSectorIndexes(
@@ -153,15 +153,4 @@ export function toggleSectorIndexInSelection(
     set.add(sectorIndex)
   }
   return [...set].sort((a, b) => a - b)
-}
-
-export function sectorIndexListsEqual(
-  a: readonly number[],
-  b: readonly number[]
-): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false
-  }
-  return true
 }

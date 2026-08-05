@@ -44,7 +44,6 @@ describe('MapAttentionOrchestrator', () => {
     requestMapAttention({
       kind: 'homeworld-planet',
       planetId: 42,
-      pan: 'if-offscreen',
     })
     const { unmount } = render(<MapAttentionOrchestrator homeworldMarkers={[]} />)
     expect(useMapAttentionRequestStore.getState().pending).not.toBeNull()
@@ -60,7 +59,6 @@ describe('MapAttentionOrchestrator', () => {
       requestMapAttention({
         kind: 'homeworld-planet',
         planetId: 7,
-        pan: 'if-offscreen',
       })
     })
     expect(useMapAttentionRequestStore.getState().pending).not.toBeNull()
@@ -78,7 +76,6 @@ describe('MapAttentionOrchestrator', () => {
       requestMapAttention({
         kind: 'homeworld-planet',
         planetId: 42,
-        pan: 'if-offscreen',
       })
     })
     expect(setViewport).not.toHaveBeenCalled()
@@ -98,7 +95,6 @@ describe('MapAttentionOrchestrator', () => {
       requestMapAttention({
         kind: 'homeworld-planet',
         planetId: 42,
-        pan: 'if-offscreen',
       })
     })
     expect(setViewport).not.toHaveBeenCalled()
@@ -116,7 +112,6 @@ describe('MapAttentionOrchestrator', () => {
       requestMapAttention({
         kind: 'homeworld-planet',
         planetId: 42,
-        pan: 'if-offscreen',
       })
     })
     rerender(<MapAttentionOrchestrator homeworldMarkers={offScreenMarkers} />)
@@ -134,7 +129,6 @@ describe('MapAttentionOrchestrator', () => {
         kind: 'wormhole-cell',
         mapX: 100,
         mapY: 200,
-        pan: 'always',
       })
     })
 

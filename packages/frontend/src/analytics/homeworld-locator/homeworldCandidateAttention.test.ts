@@ -22,7 +22,6 @@ describe('selectHomeworldCandidateForMapAttention', () => {
     expect(pending).toMatchObject({
       kind: 'homeworld-planet',
       planetId: 42,
-      pan: 'if-offscreen',
     })
     expect(typeof pending?.token).toBe('number')
   })
@@ -46,13 +45,11 @@ describe('requestMapAttention', () => {
       kind: 'wormhole-cell',
       mapX: 10,
       mapY: 20,
-      pan: 'always',
     })
     expect(useMapAttentionRequestStore.getState().pending).toMatchObject({
       kind: 'wormhole-cell',
       mapX: 10,
       mapY: 20,
-      pan: 'always',
     })
   })
 })
