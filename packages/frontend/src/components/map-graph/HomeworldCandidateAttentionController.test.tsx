@@ -71,6 +71,21 @@ describe('HomeworldCandidateAttentionController', () => {
     expect(useHomeworldCandidateFlashStore.getState().flashTarget?.planetId).toBe(2)
   })
 
+  it('pans when markers become available after the flash token was set', () => {
+    const { rerender } = render(
+      <HomeworldCandidateAttentionController markers={[]} />
+    )
+
+    act(() => {
+      useHomeworldCandidateFlashStore.getState().flashPlanet(42)
+    })
+    expect(setViewport).not.toHaveBeenCalled()
+
+    rerender(<HomeworldCandidateAttentionController markers={offScreenMarkers} />)
+
+    expect(setViewport).toHaveBeenCalledTimes(1)
+  })
+
   it('pans when domNode becomes available after the flash token was set', () => {
     mockDomNode = null
     const { rerender } = render(
@@ -85,6 +100,23 @@ describe('HomeworldCandidateAttentionController', () => {
     mockDomNode = mockPane
     rerender(<HomeworldCandidateAttentionController markers={offScreenMarkers} />)
 
+    expect(setViewport).toHaveBeenCalledTimes(1)
+  })
+
+  it('pans only once per flash token after markers are available', () => {
+    const { rerender } = render(
+      <HomeworldCandidateAttentionController markers={[]} />
+    )
+
+    act(() => {
+      useHomeworldCandidateFlashStore.getState().flashPlanet(42)
+    })
+    expect(setViewport).not.toHaveBeenCalled()
+
+    rerender(<HomeworldCandidateAttentionController markers={offScreenMarkers} />)
+    expect(setViewport).toHaveBeenCalledTimes(1)
+
+    rerender(<HomeworldCandidateAttentionController markers={offScreenMarkers} />)
     expect(setViewport).toHaveBeenCalledTimes(1)
   })
 

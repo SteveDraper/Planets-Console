@@ -32,7 +32,6 @@ export function HomeworldCandidateAttentionController({
     // Wait for React Flow's domNode before consuming the token so a late pane
     // can still pan for this flash (re-run when domNode appears).
     if (domNode == null) return
-    handledTokenRef.current = flashTarget.token
 
     const rect = domNode.getBoundingClientRect()
     const vp = getViewport()
@@ -43,7 +42,12 @@ export function HomeworldCandidateAttentionController({
       width: rect.width,
       height: rect.height,
     })
-    if (resolved == null || !resolved.needsPan) return
+    // Wait for the marker before consuming the token so late-arriving markers
+    // can still pan for this flash (re-run when markers populate).
+    if (resolved == null) return
+
+    handledTokenRef.current = flashTarget.token
+    if (!resolved.needsPan) return
     recenterViewportOnFlowPoint(
       resolved.flowX,
       resolved.flowY,
