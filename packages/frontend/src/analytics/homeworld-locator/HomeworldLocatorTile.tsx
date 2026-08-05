@@ -108,10 +108,7 @@ export function HomeworldLocatorTile({
     setShowEnvelopeOverlays,
     selectedSectorIndexSet,
     toggleSectorIndex,
-  } = useHomeworldRegionSelection({
-    overlays,
-    overlaysReady,
-  })
+  } = useHomeworldRegionSelection({ overlays })
 
   const needsPlanetPositions = overlays.length > 0
   const { planetPositions, positionsReady, positionsError } = useBaseMapPlanetPositions({

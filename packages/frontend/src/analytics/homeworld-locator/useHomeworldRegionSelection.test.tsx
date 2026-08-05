@@ -46,10 +46,7 @@ function useTileSelectionWithMapMaterialize(
   overlays: readonly MapRegionOverlay[],
   overlaysReady: boolean
 ) {
-  const selection = useHomeworldRegionSelection({
-    overlays,
-    overlaysReady,
-  })
+  const selection = useHomeworldRegionSelection({ overlays })
   useHomeworldRegionSelectionMaterialize(overlays, overlaysReady)
   return selection
 }
@@ -211,10 +208,7 @@ describe('useHomeworldRegionSelection', () => {
 
   it('does not materialize when only the read hook is mounted', () => {
     const { result } = renderHook(() =>
-      useHomeworldRegionSelection({
-        overlays: SECTOR_OVERLAYS,
-        overlaysReady: true,
-      })
+      useHomeworldRegionSelection({ overlays: SECTOR_OVERLAYS })
     )
 
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('all')

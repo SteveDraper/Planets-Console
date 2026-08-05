@@ -29,8 +29,6 @@ import {
 export type UseHomeworldRegionSelectionOptions = {
   /** Sector overlays from ``useHomeworldLocatorMapOverlays`` (shared map-layer cache). */
   overlays: readonly MapRegionOverlay[]
-  /** True when the shared homeworld map query settled successfully. */
-  overlaysReady: boolean
 }
 
 /**
@@ -110,7 +108,6 @@ export function useHomeworldRegionSelectionMaterialize(
 
 export function useHomeworldRegionSelection({
   overlays,
-  overlaysReady,
 }: UseHomeworldRegionSelectionOptions) {
   const regionSelectionPreset = useHomeworldRegionSelectionStore(
     (s) => s.regionSelectionPreset
@@ -165,7 +162,5 @@ export function useHomeworldRegionSelection({
     setUiPreset,
     setShowEnvelopeOverlays,
     toggleSectorIndex,
-    overlays,
-    overlaysReady,
   }
 }
