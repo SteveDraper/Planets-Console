@@ -2,8 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import { fetchAnalyticMap } from '../../api/bff'
+import type { ReactElement, ReactNode } from 'react'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
@@ -19,18 +18,6 @@ vi.mock('./api', () => ({
   postHomeworldLocatorAssertion: vi.fn(),
   postHomeworldLocatorRefresh: vi.fn(),
 }))
-
-vi.mock('../../api/bff', async () => {
-  const actual = await vi.importActual<typeof import('../../api/bff')>('../../api/bff')
-  return {
-    ...actual,
-    fetchAnalyticMap: vi.fn().mockResolvedValue({
-      analyticId: 'base-map',
-      nodes: [],
-      edges: [],
-    }),
-  }
-})
 
 const SECTOR_OVERLAY: MapRegionOverlay = {
   kind: 'homeworld-sector' as const,
@@ -66,21 +53,25 @@ const CANDIDATE_ROW = {
 }
 
 const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
+const EMPTY_POSITIONS: ReadonlyMap<number, { x: number; y: number }> = new Map()
 
-function renderPanel(
-  roster: readonly PerspectiveRow[] = [
-    perspectiveRow(1, 'alice', { raceName: 'The Federation' }),
-  ],
-  options: {
-    overlays?: readonly MapRegionOverlay[]
-    overlaysReady?: boolean
-  } = {}
-) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  )
-  return render(
+const DEFAULT_ROSTER: readonly PerspectiveRow[] = [
+  perspectiveRow(1, 'alice', { raceName: 'The Federation' }),
+]
+
+type PanelOptions = {
+  overlays?: readonly MapRegionOverlay[]
+  overlaysReady?: boolean
+  planetPositions?: ReadonlyMap<number, { x: number; y: number }>
+  positionsReady?: boolean
+  positionsError?: unknown | null
+}
+
+function panelElement(
+  roster: readonly PerspectiveRow[],
+  options: PanelOptions = {}
+): ReactElement {
+  return (
     <HomeworldLocatorPanel
       analyticScope={{ gameId: '628580', turn: 5, perspective: 1, username: 'alice' }}
       fetchEnabled
@@ -91,21 +82,25 @@ function renderPanel(
       onToggleSectorIndex={() => undefined}
       overlays={options.overlays ?? EMPTY_OVERLAYS}
       overlaysReady={options.overlaysReady ?? true}
-    />,
-    { wrapper }
+      planetPositions={options.planetPositions ?? EMPTY_POSITIONS}
+      positionsReady={options.positionsReady ?? true}
+      positionsError={options.positionsError ?? null}
+    />
   )
+}
+
+function renderPanel(roster: readonly PerspectiveRow[] = DEFAULT_ROSTER, options: PanelOptions = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  )
+  return render(panelElement(roster, options), { wrapper })
 }
 
 describe('HomeworldLocatorPanel', () => {
   beforeEach(() => {
     vi.mocked(fetchHomeworldLocatorTable).mockReset()
     vi.mocked(postHomeworldLocatorRefresh).mockReset()
-    vi.mocked(fetchAnalyticMap).mockReset()
-    vi.mocked(fetchAnalyticMap).mockResolvedValue({
-      analyticId: 'base-map',
-      nodes: [],
-      edges: [],
-    })
   })
 
   it('renders read-only candidate rows without assert controls', async () => {
@@ -126,16 +121,7 @@ describe('HomeworldLocatorPanel', () => {
     expect(screen.queryByLabelText(/assert ownership/i)).not.toBeInTheDocument()
   })
 
-  it('holds sector accordion on Loading… while base map is pending', async () => {
-    let resolveBaseMap: (value: {
-      analyticId: string
-      nodes: { id: string; label: string; x: number; y: number; planet: { id: number } }[]
-      edges: never[]
-    }) => void = () => undefined
-    const baseMapPending = new Promise<Parameters<typeof resolveBaseMap>[0]>((resolve) => {
-      resolveBaseMap = resolve
-    })
-
+  it('holds sector accordion on Loading… while planet positions are pending', async () => {
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
@@ -143,14 +129,15 @@ describe('HomeworldLocatorPanel', () => {
       baselineDegraded: false,
       rows: [CANDIDATE_ROW],
     })
-    vi.mocked(fetchAnalyticMap).mockReturnValue(baseMapPending as never)
 
-    renderPanel(undefined, {
+    const { rerender } = renderPanel(undefined, {
       overlays: [SECTOR_OVERLAY],
       overlaysReady: true,
+      positionsReady: false,
+      planetPositions: EMPTY_POSITIONS,
     })
 
-    // Table ready (Refresh visible); overlays ready but base map still pending → hold.
+    // Table ready (Refresh visible); overlays ready but positions still pending → hold.
     expect(await screen.findByRole('button', { name: /^refresh$/i })).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByText('Loading…')).toBeInTheDocument()
@@ -159,11 +146,15 @@ describe('HomeworldLocatorPanel', () => {
       expect(screen.queryByText('Sector Two')).not.toBeInTheDocument()
     })
 
-    resolveBaseMap({
-      analyticId: 'base-map',
-      nodes: [{ id: 'base-map:p12', label: 'p12', x: 50, y: 50, planet: { id: 12 } }],
-      edges: [],
-    })
+    rerender(
+      panelElement(DEFAULT_ROSTER, {
+        overlays: [SECTOR_OVERLAY],
+        overlaysReady: true,
+        planetPositions: new Map([[12, { x: 50, y: 50 }]]),
+        positionsReady: true,
+        positionsError: null,
+      })
+    )
 
     expect(await screen.findByText('Sector Two')).toBeInTheDocument()
     expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()
@@ -175,7 +166,7 @@ describe('HomeworldLocatorPanel', () => {
     expect(screen.getByText('12')).toBeInTheDocument()
   })
 
-  it('surfaces base-map query failure without a false Unassigned dump', async () => {
+  it('surfaces planet-positions failure without a false Unassigned dump', async () => {
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
@@ -183,11 +174,12 @@ describe('HomeworldLocatorPanel', () => {
       baselineDegraded: false,
       rows: [CANDIDATE_ROW],
     })
-    vi.mocked(fetchAnalyticMap).mockRejectedValue(new Error('base map unavailable'))
 
     renderPanel(undefined, {
       overlays: [SECTOR_OVERLAY],
       overlaysReady: true,
+      positionsReady: false,
+      positionsError: new Error('base map unavailable'),
     })
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/base map unavailable/i)

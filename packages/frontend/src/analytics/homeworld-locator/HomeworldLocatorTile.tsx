@@ -15,6 +15,7 @@ import {
   HOMEWORLD_REGION_SELECTION_UI_PRESETS,
   type HomeworldRegionSelectionUiPreset,
 } from '../../lib/homeworldRegionSelection'
+import { useBaseMapPlanetPositions } from './useBaseMapPlanetPositions'
 import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
 
@@ -108,6 +109,12 @@ export function HomeworldLocatorTile({
     fetchEnabled: canExpand,
   })
 
+  const needsPlanetPositions = overlays.length > 0
+  const { planetPositions, positionsReady, positionsError } = useBaseMapPlanetPositions({
+    analyticScope,
+    fetchEnabled: canExpand && needsPlanetPositions,
+  })
+
   const showExpandedBody = canExpand && expanded
   const chevronPointsDown = showExpandedBody
 
@@ -194,6 +201,9 @@ export function HomeworldLocatorTile({
             onToggleSectorIndex={toggleSectorIndex}
             overlays={overlays}
             overlaysReady={overlaysReady}
+            planetPositions={planetPositions}
+            positionsReady={positionsReady}
+            positionsError={positionsError}
           />
         </div>
       ) : null}

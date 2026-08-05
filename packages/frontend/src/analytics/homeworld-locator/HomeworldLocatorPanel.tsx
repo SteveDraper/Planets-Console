@@ -6,11 +6,9 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AnalyticShellScope } from '../../api/bff'
-import { fetchAnalyticMap } from '../../api/bff'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
-import { BASE_MAP_ANALYTIC_ID } from '../mapAnalyticIds'
 import { fetchHomeworldLocatorTable } from './api'
 import {
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
@@ -20,7 +18,6 @@ import { HomeworldCandidateRows } from './HomeworldCandidateRows'
 import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
 import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
-import { planetPositionsFromBaseMap } from './planetPositionsFromBaseMap'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
@@ -41,6 +38,13 @@ export type HomeworldLocatorPanelProps = {
    */
   overlays: readonly MapRegionOverlay[]
   overlaysReady: boolean
+  /**
+   * Planet positions from Tile's ``useBaseMapPlanetPositions`` (same base-map
+   * query as the map shell). Panel must not declare its own base-map fetch.
+   */
+  planetPositions: ReadonlyMap<number, { x: number; y: number }>
+  positionsReady: boolean
+  positionsError: unknown | null
 }
 
 export function HomeworldLocatorPanel({
@@ -53,28 +57,19 @@ export function HomeworldLocatorPanel({
   onToggleSectorIndex,
   overlays,
   overlaysReady,
+  planetPositions,
+  positionsReady,
+  positionsError,
 }: HomeworldLocatorPanelProps) {
   const tableQuery = useQuery({
     queryKey: ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'table', analyticScope] as const,
     queryFn: () => fetchHomeworldLocatorTable(analyticScope!),
     enabled: fetchEnabled && analyticScope != null,
   })
+  // Sector grouping needs planet positions. Until they are ready, do not build
+  // a sectors model (empty positions would dump every candidate into Unassigned).
   const needsBaseMap = overlays.length > 0
-  const baseMapQuery = useQuery({
-    queryKey: ['analytic', BASE_MAP_ANALYTIC_ID, 'map', analyticScope] as const,
-    queryFn: () => fetchAnalyticMap(BASE_MAP_ANALYTIC_ID, analyticScope!),
-    enabled: fetchEnabled && analyticScope != null && needsBaseMap,
-  })
-
-  const planetPositions = useMemo(() => {
-    if (!baseMapQuery.isSuccess) return EMPTY_POSITIONS
-    return planetPositionsFromBaseMap(baseMapQuery.data?.nodes ?? [])
-  }, [baseMapQuery.isSuccess, baseMapQuery.data?.nodes])
-
-  // Sector grouping needs planet positions from the base map. Until that query
-  // succeeds, do not build a sectors model (empty positions would dump every
-  // candidate into Unassigned).
-  const awaitingBaseMapForSectors = needsBaseMap && !baseMapQuery.isSuccess
+  const awaitingBaseMapForSectors = needsBaseMap && !positionsReady
 
   const panelModel = useMemo(() => {
     const rows: readonly HomeworldCandidateRecord[] = tableQuery.data?.rows ?? []
@@ -142,13 +137,13 @@ export function HomeworldLocatorPanel({
           {errorDetailFromUnknown(refreshMutation.error)}
         </p>
       ) : null}
-      {needsBaseMap && baseMapQuery.error != null ? (
+      {needsBaseMap && positionsError != null ? (
         <p className="text-[10px] text-red-400 break-words" role="alert">
-          {errorDetailFromUnknown(baseMapQuery.error)}
+          {errorDetailFromUnknown(positionsError)}
         </p>
       ) : null}
       {awaitingBaseMapForSectors ? (
-        baseMapQuery.error != null ? null : (
+        positionsError != null ? null : (
           <p className="px-0.5 text-[11px] text-slate-400">Loading…</p>
         )
       ) : panelModel?.kind === 'sectors' ? (

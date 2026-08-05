@@ -146,11 +146,7 @@ describe('map analytic registry', () => {
 
 describe('defaultMapAnalyticQuerySpec', () => {
   it('does not enable the query when scope is null', () => {
-    const spec = defaultMapAnalyticQuerySpec(BASE_MAP_ANALYTIC_ID, {
-      analyticScope: null,
-      analyticFetchEnabled: true,
-      connectionsMapParams: defaultConnectionsParams,
-    })
+    const spec = defaultMapAnalyticQuerySpec(BASE_MAP_ANALYTIC_ID, null, true)
 
     expect(spec.enabled).toBe(false)
   })
