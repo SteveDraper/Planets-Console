@@ -15,7 +15,7 @@ import {
 } from '../../lib/planetSpatialGrid'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import { cn } from '../../lib/utils'
-import { clientToFlowPosition, safeZoomScale } from '../../components/map-graph/geometry'
+import { clientToFlowPosition, safeZoomScale } from '../../lib/mapFlowGeometry'
 import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import {
   findHomeworldSectorAtMapPoint,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { formatHomeworldSectorHoverLine } from './formatHomeworldSectorHover'
-import { HOMEWORLD_SECTOR_KIND } from './homeworldRegionDisplayMode'
+import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 
 function sector(overrides: Partial<MapRegionOverlay> = {}): MapRegionOverlay {
   return {
@@ -41,7 +41,7 @@ describe('formatHomeworldSectorHoverLine', () => {
           candidateCount: 1,
         })
       )
-    ).toBe('player: koshling (The Lizard Alliance) · 1 candidate homeworld')
+    ).toBe('player: koshling (The Lizard Alliance) · definite · 1 candidate homeworld')
   })
 
   it('formats incomplete scan and plural candidates', () => {
@@ -63,7 +63,7 @@ describe('formatHomeworldSectorHoverLine', () => {
       formatHomeworldSectorHoverLine(
         sector({ isPinned: true, candidateCount: 1, playerLabel: undefined })
       )
-    ).toBe('player known · 1 candidate homeworld')
+    ).toBe('player known · definite · 1 candidate homeworld')
   })
 
   it('formats unique ownership evidence owner', () => {
@@ -76,11 +76,19 @@ describe('formatHomeworldSectorHoverLine', () => {
               ownerSlot: 3,
               provenanceKinds: ['ship_travel_envelope'],
               playerLabel: 'alice (The Federation)',
+              provenanceKindCounts: {
+                ship_travel_envelope: 2,
+                nearby_planet_ownership: 0,
+              },
             },
           ],
         })
       )
-    ).toBe('homeworld owner: alice (The Federation) · 2 candidate homeworlds')
+    ).toBe(
+      'homeworld owner: alice (The Federation) · ' +
+        'definite (ship observations: 2, planet observations: 0) · ' +
+        '2 candidate homeworlds'
+    )
   })
 
   it('formats ambiguous ownership evidence owners', () => {
@@ -89,21 +97,119 @@ describe('formatHomeworldSectorHoverLine', () => {
         sector({
           candidateCount: 3,
           possibleOwners: [
-            { ownerSlot: 2, provenanceKinds: ['nearby_planet_ownership'] },
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['nearby_planet_ownership'],
+              provenanceKindCounts: { nearby_planet_ownership: 1 },
+            },
             {
               ownerSlot: 5,
               provenanceKinds: ['preferred_candidate_ownership'],
               playerLabel: 'bob (The Rebel Confederation)',
+              provenanceKindCounts: { preferred_candidate_ownership: 1 },
             },
           ],
         })
       )
     ).toBe(
-      'ambiguous · homeworld owners: slot 2, bob (The Rebel Confederation) · 3 candidate homeworlds'
+      'ambiguous · homeworld owners: slot 2 · ' +
+        'inferred (ship observations: 0, planet observations: 1), ' +
+        'bob (The Rebel Confederation) · ' +
+        'inferred (ship observations: 0, planet observations: 1) · ' +
+        '3 candidate homeworlds'
     )
   })
 
-  it('prefers pinned player over possibleOwners to avoid duplicate owner text', () => {
+  it('ignores sector ownershipWinningStrength for ambiguous contenders', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          candidateCount: 2,
+          ownershipWinningStrength: 'strong',
+          possibleOwners: [
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['nearby_planet_ownership'],
+              provenanceKindCounts: { nearby_planet_ownership: 1 },
+            },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              playerLabel: 'bob (The Rebel Confederation)',
+              provenanceKindCounts: { preferred_candidate_ownership: 1 },
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'ambiguous · homeworld owners: slot 2 · ' +
+        'inferred (ship observations: 0, planet observations: 1), ' +
+        'bob (The Rebel Confederation) · ' +
+        'inferred (ship observations: 0, planet observations: 1) · ' +
+        '2 candidate homeworlds'
+    )
+  })
+
+  it('does not label ambiguous ship-envelope contenders definite without ownershipWinningStrength', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          candidateCount: 2,
+          possibleOwners: [
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['ship_travel_envelope'],
+              playerLabel: 'alice (The Federation)',
+              provenanceKindCounts: {
+                ship_travel_envelope: 2,
+                nearby_planet_ownership: 0,
+              },
+            },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['ship_travel_envelope'],
+              playerLabel: 'bob (The Rebel Confederation)',
+              provenanceKindCounts: {
+                ship_travel_envelope: 1,
+                nearby_planet_ownership: 0,
+              },
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'ambiguous · homeworld owners: alice (The Federation) · ' +
+        'inferred (ship observations: 2, planet observations: 0), ' +
+        'bob (The Rebel Confederation) · ' +
+        'inferred (ship observations: 1, planet observations: 0) · ' +
+        '2 candidate homeworlds'
+    )
+  })
+
+  it('applies ownershipWinningStrength for a unique owner', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          candidateCount: 1,
+          ownershipWinningStrength: 'strong',
+          possibleOwners: [
+            {
+              ownerSlot: 3,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              playerLabel: 'alice (The Federation)',
+              provenanceKindCounts: { preferred_candidate_ownership: 1 },
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'homeworld owner: alice (The Federation) · ' +
+        'definite (ship observations: 0, planet observations: 1) · ' +
+        '1 candidate homeworld'
+    )
+  })
+
+  it('keeps pinned player identity and appends ownership inference counts', () => {
     expect(
       formatHomeworldSectorHoverLine(
         sector({
@@ -113,13 +219,64 @@ describe('formatHomeworldSectorHoverLine', () => {
           possibleOwners: [
             {
               ownerSlot: 1,
-              provenanceKinds: ['preferred_candidate_ownership'],
+              provenanceKinds: ['ship_travel_envelope'],
               playerLabel: 'koshling (The Lizard Alliance)',
+              provenanceKindCounts: {
+                ship_travel_envelope: 2,
+                nearby_planet_ownership: 0,
+              },
             },
           ],
         })
       )
-    ).toBe('player: koshling (The Lizard Alliance) · 1 candidate homeworld')
+    ).toBe(
+      'player: koshling (The Lizard Alliance) · ' +
+        'definite (ship observations: 2, planet observations: 0) · ' +
+        '1 candidate homeworld'
+    )
+  })
+
+  it('formats pinned ambiguous ownership without repeating determined player as owner prefix', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          isPinned: true,
+          playerLabel: 'koshling (The Lizard Alliance)',
+          candidateCount: 2,
+          possibleOwners: [
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['nearby_planet_ownership'],
+              provenanceKindCounts: { nearby_planet_ownership: 1 },
+            },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              playerLabel: 'bob (The Rebel Confederation)',
+              provenanceKindCounts: { preferred_candidate_ownership: 1 },
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'player: koshling (The Lizard Alliance) · ambiguous · homeworld owners: slot 2 · ' +
+        'inferred (ship observations: 0, planet observations: 1), ' +
+        'bob (The Rebel Confederation) · ' +
+        'inferred (ship observations: 0, planet observations: 1) · ' +
+        '2 candidate homeworlds'
+    )
+  })
+
+  it('labels pinned sectors without ownership evidence as definite', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          isPinned: true,
+          playerLabel: 'koshling (The Lizard Alliance)',
+          candidateCount: 1,
+        })
+      )
+    ).toBe('player: koshling (The Lizard Alliance) · definite · 1 candidate homeworld')
   })
 
   it('returns null for non-homeworld kinds', () => {

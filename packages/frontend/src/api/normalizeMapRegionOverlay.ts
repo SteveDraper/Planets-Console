@@ -245,7 +245,42 @@ export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null
     return null
   }
   if (possibleOwners !== undefined) overlay.possibleOwners = possibleOwners
+  const winningStrength = normalizeOptionalString(
+    o.ownershipWinningStrength ?? o.ownership_winning_strength
+  )
+  if (
+    (o.ownershipWinningStrength !== undefined ||
+      o.ownership_winning_strength !== undefined) &&
+    winningStrength === undefined
+  ) {
+    return null
+  }
+  if (winningStrength !== undefined) {
+    if (
+      winningStrength !== 'weak' &&
+      winningStrength !== 'strong' &&
+      winningStrength !== 'asserted'
+    ) {
+      return null
+    }
+    overlay.ownershipWinningStrength = winningStrength
+  }
   return overlay
+}
+
+function normalizeProvenanceKindCounts(
+  raw: unknown
+): Record<string, number> | undefined {
+  if (raw === undefined) return undefined
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const counts: Record<string, number> = {}
+  for (const [kind, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (kind === '') return undefined
+    const count = parseJsonInteger(value)
+    if (count == null || count < 0) return undefined
+    counts[kind] = count
+  }
+  return counts
 }
 
 function normalizePossibleOwners(raw: unknown): MapRegionPossibleOwner[] | undefined {
@@ -273,6 +308,17 @@ function normalizePossibleOwners(raw: unknown): MapRegionPossibleOwner[] | undef
       return undefined
     }
     if (label !== undefined) owner.playerLabel = label
+    const counts = normalizeProvenanceKindCounts(
+      row.provenanceKindCounts ?? row.provenance_kind_counts
+    )
+    if (
+      (row.provenanceKindCounts !== undefined ||
+        row.provenance_kind_counts !== undefined) &&
+      counts === undefined
+    ) {
+      return undefined
+    }
+    if (counts !== undefined) owner.provenanceKindCounts = counts
     owners.push(owner)
   }
   return owners

@@ -35,16 +35,21 @@ import {
   useMapPaneClientPos,
 } from './map-graph/RegionOverlayHoverPanel'
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
+import { MapAttentionOrchestrator } from './map-graph/MapAttentionOrchestrator'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
-import { applyHomeworldRegionDisplayMode } from '../analytics/homeworld-locator/homeworldRegionDisplayMode'
-import { applyHomeworldRegionStyle } from '../analytics/homeworld-locator/homeworldRegionStyle'
-import { resolveHomeworldSelectedSectorIndex } from '../analytics/homeworld-locator/resolveHomeworldSelectedSectorIndex'
+import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
+import {
+  useEffectiveHomeworldSectorIndexes,
+  useHomeworldRegionSelectionMaterialize,
+} from '../analytics/homeworld-locator/useHomeworldRegionSelection'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
+import { homeworldOverlaysReadyForMaterialize } from '../lib/homeworldRegionSelection'
+import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
-import { useHomeworldRegionDisplayStore } from '../stores/homeworldRegionDisplay'
+import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
 import {
@@ -67,6 +72,22 @@ import {
 type MapGraphProps = {
   data: CombinedMapData
   className?: string
+  /**
+   * True while any enabled map-layer query is still pending (shell deferred-pending).
+   * Part of homeworld region materialize readiness (loading race).
+   */
+  mapLayersPending?: boolean
+  /**
+   * True when the homeworld-locator map query settled successfully.
+   * Required so failure-empty overlays do not consume init-only ``all``.
+   */
+  homeworldMapLayerSucceeded?: boolean
+  /**
+   * True when ``data`` is the live query frame; false when showing a retained
+   * prior-turn frame. Required so materialize does not consume overlays from
+   * a stale retained map while live queries catch up.
+   */
+  displayMapFrameIsLive?: boolean
   /** Shell-owned scope; required for homeworld map context menu asserts. */
   analyticScope: AnalyticShellScope
   /** Shell-owned roster for homeworld ownership menu labels. */
@@ -87,6 +108,9 @@ const INITIAL_FIT_REVEAL_MS = 250
 export function MapGraph({
   data,
   className,
+  mapLayersPending = false,
+  homeworldMapLayerSucceeded = false,
+  displayMapFrameIsLive = true,
   analyticScope,
   roster,
   futureTurnOffset = 0,
@@ -145,6 +169,9 @@ export function MapGraph({
             analyticScope={analyticScope}
             roster={roster}
             cartography={cartography}
+            mapLayersPending={mapLayersPending}
+            homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
+            displayMapFrameIsLive={displayMapFrameIsLive}
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
             onInitialFitDone={onInitialFitDone}
@@ -167,6 +194,9 @@ type MapGraphFlowProps = {
   analyticScope: AnalyticShellScope
   roster: readonly PerspectiveRow[]
   cartography?: StellarCartographyMapContext
+  mapLayersPending: boolean
+  homeworldMapLayerSucceeded: boolean
+  displayMapFrameIsLive: boolean
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   onInitialFitDone: () => void
@@ -230,6 +260,9 @@ function MapGraphFlow({
   analyticScope,
   roster,
   cartography,
+  mapLayersPending,
+  homeworldMapLayerSucceeded,
+  displayMapFrameIsLive,
   onMapZoomChange,
   onSetZoomReady,
   onInitialFitDone,
@@ -237,7 +270,6 @@ function MapGraphFlow({
   const {
     wormholeLineRevealKey,
     wormholeHoverLines,
-    wormholeRecenterPulseTarget,
     blockedByPlanetHover,
     onPlanetLabelHoverActiveChange,
   } = useWormholeInteractionState()
@@ -248,36 +280,60 @@ function MapGraphFlow({
     [frame, policy, wormholeLineRevealKey]
   )
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
-  const homeworldRegionDisplayMode = useHomeworldRegionDisplayStore(
-    (s) => s.regionDisplayMode
-  )
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
+  const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
+    (s) => s.showEnvelopeOverlays
+  )
 
-  // Raw homeworld sector overlays for ownership assert keying (independent of display mode).
+  // Homeworld sectors already merged into combined map data by the map analytic.
+  const homeworldSectorOverlays = useMemo(
+    () => data.regionOverlays.filter(isHomeworldSectorOverlay),
+    [data.regionOverlays]
+  )
+  // Success (not merely !pending): failure-empty must not consume init-only ``all``.
+  // Live frame only: retained prior-turn overlays must not consume ``all``.
+  // Sole materialize-effect owner (Tile uses shared map-overlay observer + selection hook).
+  useHomeworldRegionSelectionMaterialize(
+    homeworldSectorOverlays,
+    homeworldOverlaysReadyForMaterialize({
+      homeworldEnabled,
+      mapLayersPending,
+      homeworldMapLayerSucceeded,
+      displayMapFrameIsLive,
+    })
+  )
+  // Shared store→effective indexes (same hook as sidebar selection).
+  const { selectedSectorIndexes } = useEffectiveHomeworldSectorIndexes(
+    homeworldSectorOverlays
+  )
+
+  // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays
 
-  // Visibility prefs only mutate visibility kinds; homeworld display mode filters
-  // sectors; homeworld style adapter attaches paint metadata for shared blit.
-  const regionOverlays = useMemo(() => {
-    const filtered = applyHomeworldRegionDisplayMode(
-      applyVisibilityRegionPreferences(data.regionOverlays, visibilityKinds),
-      homeworldRegionDisplayMode
-    )
-    const selectedSectorIndex = resolveHomeworldSelectedSectorIndex(
-      selection,
+  // Visibility prefs → region selection + envelope toggle → assert-focus.
+  const regionOverlays = useMemo(
+    () =>
+      buildHomeworldRegionOverlaysForPaint({
+        overlays: applyVisibilityRegionPreferences(
+          data.regionOverlays,
+          visibilityKinds
+        ),
+        effectiveSelectedSectorIndexes: selectedSectorIndexes,
+        showEnvelopeOverlays,
+        assertFocusSelection: selection,
+        homeworldMarkers: data.homeworldMarkers,
+      }),
+    [
+      data.regionOverlays,
       data.homeworldMarkers,
-      filtered
-    )
-    return applyHomeworldRegionStyle(filtered, { selectedSectorIndex })
-  }, [
-    data.regionOverlays,
-    data.homeworldMarkers,
-    visibilityKinds,
-    homeworldRegionDisplayMode,
-    selection,
-  ])
+      visibilityKinds,
+      selectedSectorIndexes,
+      showEnvelopeOverlays,
+      selection,
+    ]
+  )
 
   return (
     <ReactFlow
@@ -312,7 +368,6 @@ function MapGraphFlow({
           wormholeEndpoints={frame.wormholeEndpoints}
           cartographyConfig={cartography.config}
           wormholeEndpointHoverByCell={frame.wormholeEndpointHoverByCell}
-          wormholeRecenterPulseTarget={wormholeRecenterPulseTarget}
           blockedByPlanetHover={blockedByPlanetHover}
           nuIonStorms={data.nuIonStorms}
         />
@@ -320,6 +375,7 @@ function MapGraphFlow({
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
+      <MapAttentionOrchestrator homeworldMarkers={data.homeworldMarkers} />
       <FixedSizeDotsOverlay
         planetGrid={planetGrid}
         planetLabelOptions={planetLabelOptions}

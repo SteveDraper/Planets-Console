@@ -93,7 +93,18 @@ export type MapRegionPossibleOwner = {
   provenanceKinds: string[]
   /** Roster identity ``username (race)`` when Core resolved the slot. */
   playerLabel?: string
+  /**
+   * Per-kind ownership observation multiplicity (machine tags → counts).
+   * Clients format hover copy; Core emits structured facts only.
+   */
+  provenanceKindCounts?: Record<string, number>
 }
+
+/**
+ * Winning ownership strength class for a unique projected ``possibleOwners`` set
+ * (ADR 0010). Omitted on the wire when ownership is ambiguous.
+ */
+export type OwnershipWinningStrength = 'weak' | 'strong' | 'asserted'
 
 export type MapRegionOverlay = {
   kind: string
@@ -103,12 +114,16 @@ export type MapRegionOverlay = {
   geometry: MapRegionOverlayGeometry
   isPinned?: boolean
   status?: string
-  /** Domain hover fact: candidate planets in this region (homeworld sectors). */
+  /** Domain fact: candidate planets in this region (homeworld sectors). */
   candidateCount?: number
   /** Roster identity for a pinned owner (e.g. ``username (race)``), not UI prose. */
   playerLabel?: string
   /** Ownership-evidence possible homeworld owners for this sector. */
   possibleOwners?: MapRegionPossibleOwner[]
+  /**
+   * Winning ownership strength for projected ``possibleOwners`` when ``|set|=1``.
+   */
+  ownershipWinningStrength?: OwnershipWinningStrength
   /** Optional client paint policy (analytic adapters; not Core wire). */
   paint?: MapRegionOverlayPaint
 }

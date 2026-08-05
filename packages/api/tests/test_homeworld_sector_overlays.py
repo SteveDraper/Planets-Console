@@ -14,7 +14,15 @@ from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     SmoothedMetricDistribution,
 )
-from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, CONFIDENCE_POSSIBLE
+from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_DEFINITE,
+    CONFIDENCE_POSSIBLE,
+    PROVENANCE_ASSERTED,
+    PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+    PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+    OwnershipProvenance,
+    SectorOwnerMember,
+)
 from api.analytics.homeworld_locator.sector_overlays import (
     ENVELOPE_RADII_LY,
     KIND_HOMEWORLD_SECTOR,
@@ -495,3 +503,307 @@ def test_for_turn_emits_when_gate_passes_and_empty_without_pin(
         )
         == ()
     )
+
+
+def test_possible_owners_emit_provenance_kind_counts(template_planet) -> None:
+    """Ownership hover needs per-kind multiplicity, not only unique kind tags."""
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    orphan = _planet(template_planet, planet_id=2, x=0, y=550)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    sector_index = sector_index_for_angle(
+        math.atan2(orphan.y - center[1], orphan.x - center[0]),
+        player_count=4,
+        pin_angle=math.atan2(pin.y - center[1], pin.x - center[0]),
+    )
+    members = (
+        SectorOwnerMember(
+            owner_slot=3,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=5,
+                    ship_id=10,
+                    radius_ly=81.0,
+                ),
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=6,
+                    ship_id=11,
+                    radius_ly=82.0,
+                ),
+                OwnershipProvenance(
+                    kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                    turn=6,
+                    planet_id=99,
+                    distance_ly=40.0,
+                ),
+            ),
+        ),
+    )
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin, orphan],
+        candidate_planet_ids=frozenset({pin.id, orphan.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        nebulas=(),
+        sector_owner_sets={sector_index: members},
+        possible_owner_label_by_slot={3: "enlar (The Privateers)"},
+    )
+    target = next(
+        overlay for overlay in overlays if overlay.id == f"homeworld-sector-{sector_index}"
+    )
+    wire = map_region_overlay_to_wire(target)
+    assert wire["possibleOwners"] == [
+        {
+            "ownerSlot": 3,
+            "provenanceKinds": [
+                PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+            ],
+            "playerLabel": "enlar (The Privateers)",
+            "provenanceKindCounts": {
+                PROVENANCE_NEARBY_PLANET_OWNERSHIP: 1,
+                PROVENANCE_SHIP_TRAVEL_ENVELOPE: 2,
+            },
+        },
+    ]
+    assert wire["ownershipWinningStrength"] == "strong"
+
+
+def test_sector_overlay_omits_ownership_winning_strength_when_ambiguous(
+    template_planet,
+) -> None:
+    """Ambiguous multi-owner sectors must not emit a sector-wide winning strength."""
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    orphan = _planet(template_planet, planet_id=2, x=0, y=550)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    sector_index = sector_index_for_angle(
+        math.atan2(orphan.y - center[1], orphan.x - center[0]),
+        player_count=4,
+        pin_angle=math.atan2(pin.y - center[1], pin.x - center[0]),
+    )
+    members = (
+        SectorOwnerMember(
+            owner_slot=3,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=5,
+                    ship_id=10,
+                    radius_ly=81.0,
+                ),
+            ),
+        ),
+        SectorOwnerMember(
+            owner_slot=7,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=6,
+                    ship_id=11,
+                    radius_ly=82.0,
+                ),
+            ),
+        ),
+    )
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin, orphan],
+        candidate_planet_ids=frozenset({pin.id, orphan.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        nebulas=(),
+        sector_owner_sets={sector_index: members},
+        possible_owner_label_by_slot={3: "enlar (The Privateers)", 7: "koshling (Lizards)"},
+    )
+    target = next(
+        overlay for overlay in overlays if overlay.id == f"homeworld-sector-{sector_index}"
+    )
+    assert target.ownership_winning_strength is None
+    wire = map_region_overlay_to_wire(target)
+    assert len(wire["possibleOwners"]) == 2
+    assert "ownershipWinningStrength" not in wire
+
+
+def test_cross_sector_trim_applied_through_overlay_builder(template_planet) -> None:
+    """Builder must project ownership: unique strong settles, weaker duplicates drop."""
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    orphan = _planet(template_planet, planet_id=2, x=0, y=550)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    settled_sector = sector_index_for_angle(
+        math.atan2(pin.y - center[1], pin.x - center[0]),
+        player_count=4,
+        pin_angle=math.atan2(pin.y - center[1], pin.x - center[0]),
+    )
+    weaker_sector = sector_index_for_angle(
+        math.atan2(orphan.y - center[1], orphan.x - center[0]),
+        player_count=4,
+        pin_angle=math.atan2(pin.y - center[1], pin.x - center[0]),
+    )
+    assert settled_sector != weaker_sector
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin, orphan],
+        candidate_planet_ids=frozenset({pin.id, orphan.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        nebulas=(),
+        sector_owner_sets={
+            settled_sector: (
+                SectorOwnerMember(
+                    owner_slot=3,
+                    provenances=(
+                        OwnershipProvenance(
+                            kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                            turn=5,
+                            ship_id=10,
+                            radius_ly=81.0,
+                        ),
+                    ),
+                ),
+            ),
+            weaker_sector: (
+                SectorOwnerMember(
+                    owner_slot=3,
+                    provenances=(
+                        OwnershipProvenance(
+                            kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                            turn=6,
+                            planet_id=50,
+                            distance_ly=40.0,
+                        ),
+                    ),
+                ),
+                SectorOwnerMember(
+                    owner_slot=5,
+                    provenances=(
+                        OwnershipProvenance(
+                            kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                            turn=6,
+                            planet_id=51,
+                            distance_ly=41.0,
+                        ),
+                    ),
+                ),
+            ),
+        },
+        possible_owner_label_by_slot={
+            3: "enlar (The Privateers)",
+            5: "koshling (Lizards)",
+        },
+    )
+    settled = next(
+        overlay for overlay in overlays if overlay.id == f"homeworld-sector-{settled_sector}"
+    )
+    weaker = next(
+        overlay for overlay in overlays if overlay.id == f"homeworld-sector-{weaker_sector}"
+    )
+    settled_wire = map_region_overlay_to_wire(settled)
+    weaker_wire = map_region_overlay_to_wire(weaker)
+    assert [owner["ownerSlot"] for owner in settled_wire["possibleOwners"]] == [3]
+    assert settled_wire["ownershipWinningStrength"] == "strong"
+    assert [owner["ownerSlot"] for owner in weaker_wire["possibleOwners"]] == [5]
+    assert weaker_wire["ownershipWinningStrength"] == "weak"
+
+
+def test_possible_owners_emit_asserted_winning_strength(template_planet) -> None:
+    """Unique asserted ownership must surface as ownershipWinningStrength on the wire."""
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    orphan = _planet(template_planet, planet_id=2, x=0, y=550)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    sector_index = sector_index_for_angle(
+        math.atan2(orphan.y - center[1], orphan.x - center[0]),
+        player_count=4,
+        pin_angle=math.atan2(pin.y - center[1], pin.x - center[0]),
+    )
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin, orphan],
+        candidate_planet_ids=frozenset({pin.id, orphan.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        nebulas=(),
+        sector_owner_sets={
+            sector_index: (
+                SectorOwnerMember(
+                    owner_slot=3,
+                    provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=5),),
+                ),
+            ),
+        },
+        possible_owner_label_by_slot={3: "enlar (The Privateers)"},
+    )
+    target = next(
+        overlay for overlay in overlays if overlay.id == f"homeworld-sector-{sector_index}"
+    )
+    wire = map_region_overlay_to_wire(target)
+    assert [owner["ownerSlot"] for owner in wire["possibleOwners"]] == [3]
+    assert wire["ownershipWinningStrength"] == "asserted"
+
+
+def test_possible_owners_emit_weak_winning_strength(template_planet) -> None:
+    """Unique weak ownership must surface as ownershipWinningStrength on the wire."""
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    orphan = _planet(template_planet, planet_id=2, x=0, y=550)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    sector_index = sector_index_for_angle(
+        math.atan2(orphan.y - center[1], orphan.x - center[0]),
+        player_count=4,
+        pin_angle=math.atan2(pin.y - center[1], pin.x - center[0]),
+    )
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin, orphan],
+        candidate_planet_ids=frozenset({pin.id, orphan.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        nebulas=(),
+        sector_owner_sets={
+            sector_index: (
+                SectorOwnerMember(
+                    owner_slot=3,
+                    provenances=(
+                        OwnershipProvenance(
+                            kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                            turn=6,
+                            planet_id=99,
+                            distance_ly=40.0,
+                        ),
+                    ),
+                ),
+            ),
+        },
+        possible_owner_label_by_slot={3: "enlar (The Privateers)"},
+    )
+    target = next(
+        overlay for overlay in overlays if overlay.id == f"homeworld-sector-{sector_index}"
+    )
+    wire = map_region_overlay_to_wire(target)
+    assert [owner["ownerSlot"] for owner in wire["possibleOwners"]] == [3]
+    assert wire["ownershipWinningStrength"] == "weak"

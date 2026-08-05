@@ -725,8 +725,8 @@ def test_registration_in_catalog() -> None:
     from api.compute.registry import COMPUTE_REGISTRY
 
     entry = catalog_entry(ANALYTIC_ID)
+    assert entry.supports_table is False
     assert entry.supports_map is True
-    assert entry.supports_table is True
     assert ANALYTIC_ID in TURN_ANALYTICS
     assert ANALYTIC_ID in COMPUTE_REGISTRY
 

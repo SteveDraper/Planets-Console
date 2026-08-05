@@ -2,15 +2,13 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
-import { fetchAnalyticMap } from '../../api/bff'
+import type { ReactElement, ReactNode } from 'react'
+import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
 import {
-  fetchHomeworldLocatorMap,
   fetchHomeworldLocatorTable,
-  postHomeworldLocatorAssertion,
   postHomeworldLocatorRefresh,
 } from './api'
 
@@ -21,403 +19,237 @@ vi.mock('./api', () => ({
   postHomeworldLocatorRefresh: vi.fn(),
 }))
 
-vi.mock('../../api/bff', async () => {
-  const actual = await vi.importActual<typeof import('../../api/bff')>('../../api/bff')
-  return {
-    ...actual,
-    fetchAnalyticMap: vi.fn().mockResolvedValue({
-      analyticId: 'base-map',
-      nodes: [],
-      edges: [],
-    }),
-  }
-})
+const SECTOR_OVERLAY: MapRegionOverlay = {
+  kind: 'homeworld-sector' as const,
+  id: 'homeworld-sector-2',
+  fillColor: '#f97316',
+  fillOpacity: 0,
+  playerLabel: 'Sector Two',
+  geometry: {
+    type: 'boundary' as const,
+    vertices: [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ],
+    edges: [
+      { type: 'line' as const },
+      { type: 'line' as const },
+      { type: 'line' as const },
+      { type: 'line' as const },
+    ],
+  },
+}
 
-function renderPanel(roster: readonly PerspectiveRow[] = [perspectiveRow(1, 'alice', { raceName: 'The Federation' })]) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  )
-  return render(
+const CANDIDATE_ROW = {
+  planetId: 12,
+  perspective: 1,
+  confidenceTier: 'definite' as const,
+  attribution: 'inferred' as const,
+  assertedCue: false,
+  locationAsserted: false,
+  isMostProbable: false,
+}
+
+const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
+const EMPTY_POSITIONS: ReadonlyMap<number, { x: number; y: number }> = new Map()
+
+const DEFAULT_ROSTER: readonly PerspectiveRow[] = [
+  perspectiveRow(1, 'alice', { raceName: 'The Federation' }),
+]
+
+type PanelOptions = {
+  overlays?: readonly MapRegionOverlay[]
+  homeworldMapOverlaysQuerySucceeded?: boolean
+  overlaysError?: unknown | null
+  planetPositions?: ReadonlyMap<number, { x: number; y: number }>
+  positionsReady?: boolean
+  positionsError?: unknown | null
+}
+
+function panelElement(
+  roster: readonly PerspectiveRow[],
+  options: PanelOptions = {}
+): ReactElement {
+  return (
     <HomeworldLocatorPanel
       analyticScope={{ gameId: '628580', turn: 5, perspective: 1, username: 'alice' }}
       fetchEnabled
       roster={roster}
       selectedPlanetId={null}
       onSelectPlanet={() => undefined}
-    />,
-    { wrapper }
+      selectedSectorIndexes={new Set()}
+      onToggleSectorIndex={() => undefined}
+      overlays={options.overlays ?? EMPTY_OVERLAYS}
+      homeworldMapOverlaysQuerySucceeded={
+        options.homeworldMapOverlaysQuerySucceeded ?? true
+      }
+      overlaysError={options.overlaysError ?? null}
+      planetPositions={options.planetPositions ?? EMPTY_POSITIONS}
+      positionsReady={options.positionsReady ?? true}
+      positionsError={options.positionsError ?? null}
+    />
   )
+}
+
+function renderPanel(roster: readonly PerspectiveRow[] = DEFAULT_ROSTER, options: PanelOptions = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  )
+  return render(panelElement(roster, options), { wrapper })
 }
 
 describe('HomeworldLocatorPanel', () => {
   beforeEach(() => {
     vi.mocked(fetchHomeworldLocatorTable).mockReset()
-    vi.mocked(fetchHomeworldLocatorMap).mockReset()
-    vi.mocked(postHomeworldLocatorAssertion).mockReset()
     vi.mocked(postHomeworldLocatorRefresh).mockReset()
-    vi.mocked(fetchAnalyticMap).mockReset()
-    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      regionOverlays: [],
-      markers: [],
-    })
-    vi.mocked(fetchAnalyticMap).mockResolvedValue({
-      analyticId: 'base-map',
-      nodes: [],
-      edges: [],
-    })
   })
 
-  it('renders interactive assert controls and posts location upsert', async () => {
-    const user = userEvent.setup()
+  it('renders read-only candidate rows without assert controls', async () => {
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
       inactiveReason: null,
       baselineDegraded: true,
       baselineTurn: 4,
-      rows: [
-        {
-          planetId: 12,
-          perspective: 1,
-          confidenceTier: 'definite',
-          attribution: 'inferred',
-          assertedCue: false,
-          locationAsserted: false,
-          isMostProbable: false,
-        },
-      ],
-    })
-    vi.mocked(postHomeworldLocatorAssertion).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: true,
-      baselineTurn: 4,
-      rows: [
-        {
-          planetId: 12,
-          perspective: 1,
-          confidenceTier: 'definite',
-          attribution: 'user_asserted',
-          assertedCue: true,
-          locationAsserted: true,
-          isMostProbable: false,
-        },
-      ],
+      rows: [CANDIDATE_ROW],
     })
 
     renderPanel()
     expect(await screen.findByRole('status')).toHaveTextContent(/Baseline degraded/)
-    expect(screen.getByRole('option', { name: 'alice (The Federation)' })).toBeInTheDocument()
+    expect(screen.getByText('12')).toBeInTheDocument()
+    expect(screen.getByText('alice (The Federation)')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /assert hw/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/assert ownership/i)).not.toBeInTheDocument()
+  })
 
-    await user.click(screen.getByRole('button', { name: /assert hw/i }))
+  it('holds sector accordion on Loading… while overlays are not ready', async () => {
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [CANDIDATE_ROW],
+    })
+
+    const { rerender } = renderPanel(undefined, {
+      overlays: EMPTY_OVERLAYS,
+      homeworldMapOverlaysQuerySucceeded: false,
+      positionsReady: true,
+      planetPositions: EMPTY_POSITIONS,
+    })
+
+    expect(await screen.findByRole('button', { name: /^refresh$/i })).toBeInTheDocument()
     await waitFor(() => {
-      expect(postHomeworldLocatorAssertion).toHaveBeenCalledWith(
-        expect.objectContaining({ gameId: '628580', turn: 5, perspective: 1 }),
-        { axis: 'location', action: 'upsert', planetId: 12 }
-      )
+      expect(screen.getByText('Loading…')).toBeInTheDocument()
+      expect(screen.queryByText('12')).not.toBeInTheDocument()
+      expect(screen.queryByText('Sector Two')).not.toBeInTheDocument()
     })
+
+    rerender(
+      panelElement(DEFAULT_ROSTER, {
+        overlays: [SECTOR_OVERLAY],
+        homeworldMapOverlaysQuerySucceeded: true,
+        planetPositions: new Map([[12, { x: 50, y: 50 }]]),
+        positionsReady: true,
+        positionsError: null,
+      })
+    )
+
+    expect(await screen.findByText('Sector Two')).toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
   })
 
-  it('hides ownership controls until map query succeeds', async () => {
-    let resolveMap!: (value: Awaited<ReturnType<typeof fetchHomeworldLocatorMap>>) => void
-    const mapDeferred = new Promise<Awaited<ReturnType<typeof fetchHomeworldLocatorMap>>>((resolve) => {
-      resolveMap = resolve
-    })
+  it('holds sector accordion on Loading… while planet positions are pending', async () => {
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
       inactiveReason: null,
       baselineDegraded: false,
-      rows: [
-        {
-          planetId: 12,
-          perspective: 1,
-          confidenceTier: 'definite',
-          attribution: 'inferred',
-          assertedCue: false,
-          locationAsserted: false,
-          isMostProbable: false,
-        },
-      ],
-    })
-    vi.mocked(fetchHomeworldLocatorMap).mockReturnValue(mapDeferred)
-
-    renderPanel()
-
-    expect(await screen.findByText('12')).toBeInTheDocument()
-    expect(screen.queryByLabelText(/assert ownership for planet 12/i)).not.toBeInTheDocument()
-
-    resolveMap({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      regionOverlays: [],
-      markers: [],
+      rows: [CANDIDATE_ROW],
     })
 
-    expect(await screen.findByLabelText(/assert ownership for planet 12/i)).toBeInTheDocument()
+    const { rerender } = renderPanel(undefined, {
+      overlays: [SECTOR_OVERLAY],
+      homeworldMapOverlaysQuerySucceeded: true,
+      positionsReady: false,
+      planetPositions: EMPTY_POSITIONS,
+    })
+
+    // Table ready (Refresh visible); overlays ready but positions still pending → hold.
+    expect(await screen.findByRole('button', { name: /^refresh$/i })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Loading…')).toBeInTheDocument()
+      expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()
+      expect(screen.queryByText('12')).not.toBeInTheDocument()
+      expect(screen.queryByText('Sector Two')).not.toBeInTheDocument()
+    })
+
+    rerender(
+      panelElement(DEFAULT_ROSTER, {
+        overlays: [SECTOR_OVERLAY],
+        homeworldMapOverlaysQuerySucceeded: true,
+        planetPositions: new Map([[12, { x: 50, y: 50 }]]),
+        positionsReady: true,
+        positionsError: null,
+      })
+    )
+
+    expect(await screen.findByText('Sector Two')).toBeInTheDocument()
+    expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /expand sector Sector Two/i })
+    )
+    expect(screen.getByText('12')).toBeInTheDocument()
   })
 
-  it('hides ownership controls until base-map query succeeds when sectors exist', async () => {
-    let resolveBaseMap!: (value: Awaited<ReturnType<typeof fetchAnalyticMap>>) => void
-    const baseMapDeferred = new Promise<Awaited<ReturnType<typeof fetchAnalyticMap>>>((resolve) => {
-      resolveBaseMap = resolve
-    })
-    const sectorOverlay = {
-      kind: 'homeworld-sector' as const,
-      id: 'homeworld-sector-2',
-      fillColor: '#f97316',
-      fillOpacity: 0,
-      geometry: {
-        type: 'boundary' as const,
-        vertices: [
-          { x: 0, y: 0 },
-          { x: 1, y: 0 },
-          { x: 1, y: 1 },
-          { x: 0, y: 1 },
-        ],
-        edges: [
-          { type: 'line' as const },
-          { type: 'line' as const },
-          { type: 'line' as const },
-          { type: 'line' as const },
-        ],
-      },
-    }
+  it('surfaces planet-positions failure without a false Unassigned dump', async () => {
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
       inactiveReason: null,
       baselineDegraded: false,
-      rows: [
-        {
-          planetId: 12,
-          perspective: 1,
-          confidenceTier: 'definite',
-          attribution: 'inferred',
-          assertedCue: false,
-          locationAsserted: false,
-          isMostProbable: false,
-        },
-      ],
-    })
-    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      regionOverlays: [sectorOverlay],
-      markers: [],
-    })
-    vi.mocked(fetchAnalyticMap).mockReturnValue(baseMapDeferred)
-
-    renderPanel()
-
-    expect(await screen.findByText('12')).toBeInTheDocument()
-    expect(screen.queryByLabelText(/assert ownership for planet 12/i)).not.toBeInTheDocument()
-
-    resolveBaseMap({
-      analyticId: 'base-map',
-      nodes: [
-        {
-          id: 'base-map:p12',
-          label: '12',
-          x: 0.5,
-          y: 0.5,
-          planet: { id: 12 },
-        },
-      ],
-      edges: [],
+      rows: [CANDIDATE_ROW],
     })
 
-    expect(await screen.findByLabelText(/assert ownership for planet 12/i)).toBeInTheDocument()
-  })
-
-  it('surfaces base-map query failure when sector overlays require positions', async () => {
-    const sectorOverlay = {
-      kind: 'homeworld-sector' as const,
-      id: 'homeworld-sector-2',
-      fillColor: '#f97316',
-      fillOpacity: 0,
-      geometry: {
-        type: 'boundary' as const,
-        vertices: [
-          { x: 0, y: 0 },
-          { x: 1, y: 0 },
-          { x: 1, y: 1 },
-          { x: 0, y: 1 },
-        ],
-        edges: [
-          { type: 'line' as const },
-          { type: 'line' as const },
-          { type: 'line' as const },
-          { type: 'line' as const },
-        ],
-      },
-    }
-    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      inactiveReason: null,
-      baselineDegraded: false,
-      rows: [
-        {
-          planetId: 12,
-          perspective: 1,
-          confidenceTier: 'definite',
-          attribution: 'inferred',
-          assertedCue: false,
-          locationAsserted: false,
-          isMostProbable: false,
-        },
-      ],
+    renderPanel(undefined, {
+      overlays: [SECTOR_OVERLAY],
+      homeworldMapOverlaysQuerySucceeded: true,
+      positionsReady: false,
+      positionsError: new Error('base map unavailable'),
     })
-    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      regionOverlays: [sectorOverlay],
-      markers: [],
-    })
-    vi.mocked(fetchAnalyticMap).mockRejectedValue(new Error('base map unavailable'))
-
-    renderPanel()
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/base map unavailable/i)
-    expect(screen.queryByLabelText(/assert ownership for planet 12/i)).not.toBeInTheDocument()
-    // Location asserts still work without base-map positions.
-    expect(screen.getByRole('button', { name: /assert hw/i })).toBeInTheDocument()
+    expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()
+    expect(screen.queryByText('12')).not.toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
   })
 
-  it('posts ownership upsert with perspective slot ordinal, not host playerId', async () => {
-    const user = userEvent.setup()
+  it('surfaces homeworld map overlays failure without perpetual Loading…', async () => {
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
       inactiveReason: null,
       baselineDegraded: false,
-      rows: [
-        {
-          planetId: 12,
-          perspective: 2,
-          confidenceTier: 'definite',
-          attribution: 'inferred',
-          assertedCue: false,
-          locationAsserted: false,
-          isMostProbable: false,
-        },
-      ],
-    })
-    vi.mocked(postHomeworldLocatorAssertion).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      rows: [],
+      rows: [CANDIDATE_ROW],
     })
 
-    renderPanel([
-      perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
-    ])
-
-    const ownerSelect = await screen.findByLabelText(/assert ownership for planet 12/i)
-    await user.selectOptions(ownerSelect, '2')
-
-    await waitFor(() => {
-      expect(postHomeworldLocatorAssertion).toHaveBeenCalledWith(
-        expect.objectContaining({ gameId: '628580', turn: 5, perspective: 1 }),
-        {
-          axis: 'ownership',
-          action: 'upsert',
-          ownerSlot: 2,
-          planetId: 12,
-          sectorIndex: null,
-        }
-      )
-    })
-  })
-
-  it('posts sector-keyed ownership upsert when sector overlays and planet position resolve', async () => {
-    const user = userEvent.setup()
-    const sectorOverlay = {
-      kind: 'homeworld-sector' as const,
-      id: 'homeworld-sector-2',
-      fillColor: '#f97316',
-      fillOpacity: 0,
-      geometry: {
-        type: 'boundary' as const,
-        vertices: [
-          { x: 0, y: 0 },
-          { x: 1, y: 0 },
-          { x: 1, y: 1 },
-          { x: 0, y: 1 },
-        ],
-        edges: [{ type: 'line' as const }, { type: 'line' as const }, { type: 'line' as const }, { type: 'line' as const }],
-      },
-    }
-    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      inactiveReason: null,
-      baselineDegraded: false,
-      rows: [
-        {
-          planetId: 12,
-          perspective: 1,
-          confidenceTier: 'definite',
-          attribution: 'inferred',
-          assertedCue: false,
-          locationAsserted: false,
-          isMostProbable: false,
-        },
-      ],
-    })
-    vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      regionOverlays: [sectorOverlay],
-      markers: [],
-    })
-    vi.mocked(fetchAnalyticMap).mockResolvedValue({
-      analyticId: 'base-map',
-      nodes: [
-        {
-          id: 'base-map:p12',
-          label: '12',
-          x: 0.5,
-          y: 0.5,
-          planet: { id: 12 },
-        },
-      ],
-      edges: [],
-    })
-    vi.mocked(postHomeworldLocatorAssertion).mockResolvedValue({
-      analyticId: 'homeworld-locator',
-      available: true,
-      baselineDegraded: false,
-      rows: [],
+    renderPanel(undefined, {
+      overlays: EMPTY_OVERLAYS,
+      homeworldMapOverlaysQuerySucceeded: false,
+      overlaysError: new Error('homeworld map unavailable'),
+      positionsReady: true,
+      planetPositions: EMPTY_POSITIONS,
     })
 
-    renderPanel()
-
-    const ownerSelect = await screen.findByLabelText(/assert ownership for planet 12/i)
-    await user.selectOptions(ownerSelect, '1')
-
-    await waitFor(() => {
-      expect(postHomeworldLocatorAssertion).toHaveBeenCalledWith(
-        expect.objectContaining({ gameId: '628580', turn: 5, perspective: 1 }),
-        {
-          axis: 'ownership',
-          action: 'upsert',
-          ownerSlot: 1,
-          planetId: 12,
-          sectorIndex: 2,
-        }
-      )
-    })
+    expect(await screen.findByRole('button', { name: /^refresh$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/homeworld map unavailable/i)
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+    expect(screen.queryByText('Sector Two')).not.toBeInTheDocument()
   })
 
   it('posts refresh and keeps the refresh control available', async () => {

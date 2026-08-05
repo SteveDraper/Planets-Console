@@ -43,6 +43,26 @@ body {
   transform-origin: center center;
 }
 
+/*
+ * Homeworld candidate flash: same timing/scale envelope as wormhole-recenter-pulse,
+ * but origin must stay at the marker's local (0,0). SVG ``center`` resolves against
+ * the viewport and makes rings fly toward screen center.
+ */
+@keyframes homeworld-marker-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.4);
+  }
+}
+
+.homeworld-marker-pulse {
+  animation: homeworld-marker-pulse 0.75s ease-in-out 4;
+  transform-origin: 0 0;
+}
+
 @keyframes inference-border-traverse {
   0%,
   100% {

@@ -66,6 +66,7 @@ describe('deriveMapShellView', () => {
       phase: 'showing-map',
       displayMapData: sampleMap,
       showDeferredPending: false,
+      displayMapFrameIsLive: true,
     })
   })
 
@@ -79,6 +80,7 @@ describe('deriveMapShellView', () => {
       phase: 'showing-map',
       displayMapData: sampleMap,
       showDeferredPending: true,
+      displayMapFrameIsLive: true,
     })
   })
 
@@ -108,6 +110,7 @@ describe('deriveMapShellView', () => {
       phase: 'showing-map',
       displayMapData: sampleMap,
       showDeferredPending: false,
+      displayMapFrameIsLive: false,
     })
   })
 
@@ -126,6 +129,7 @@ describe('deriveMapShellView', () => {
       phase: 'showing-map',
       displayMapData: sampleMap,
       showDeferredPending: false,
+      displayMapFrameIsLive: false,
       layerError: err,
     })
   })
@@ -175,6 +179,7 @@ describe('deriveMapShellView', () => {
       phase: 'showing-map',
       displayMapData: sampleMap,
       showDeferredPending: false,
+      displayMapFrameIsLive: true,
       layerError: err,
     })
   })
@@ -193,6 +198,7 @@ describe('deriveMapShellView', () => {
       phase: 'showing-map',
       displayMapData: sampleMap,
       showDeferredPending: false,
+      displayMapFrameIsLive: false,
     })
   })
 

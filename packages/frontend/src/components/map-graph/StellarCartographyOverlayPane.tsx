@@ -10,14 +10,12 @@ import { useOverlayPaneSize } from './useOverlayPaneSize'
 import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverlay'
 import { WormholeEndpointMarkers } from './WormholeEndpointMarkers'
 import type { WormholeEndpointHoverInfo } from '../../lib/wormholeEndpointHover'
-import type { WormholeRecenterPulseTarget } from './stellarCartographyWormholeInteraction'
 
 export function StellarCartographyOverlayPane({
   overlayCircles,
   wormholeEndpoints,
   cartographyConfig,
   wormholeEndpointHoverByCell,
-  wormholeRecenterPulseTarget,
   blockedByPlanetHover,
   nuIonStorms,
 }: {
@@ -25,7 +23,6 @@ export function StellarCartographyOverlayPane({
   wormholeEndpoints: { x: number; y: number }[]
   cartographyConfig: StellarCartographyMapUiConfig
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
-  wormholeRecenterPulseTarget: WormholeRecenterPulseTarget | null
   blockedByPlanetHover: boolean
   nuIonStorms?: boolean
 }) {
@@ -62,7 +59,6 @@ export function StellarCartographyOverlayPane({
       <WormholeEndpointMarkers
         markers={shapes.wormholeMarkers}
         wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
-        wormholeRecenterPulseTarget={wormholeRecenterPulseTarget}
         blockedByPlanetHover={blockedByPlanetHover}
       />
     </div>

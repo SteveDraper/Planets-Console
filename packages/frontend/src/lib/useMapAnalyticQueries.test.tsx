@@ -8,6 +8,8 @@ import {
   sampleScope,
 } from './mapAnalyticQueryTestFixtures'
 import { useMapAnalyticQueries, type UseMapAnalyticQueriesInput } from './useMapAnalyticQueries'
+import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
+import type { AnalyticItem } from '../api/bff'
 
 vi.mock('../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/bff')>()
@@ -21,7 +23,15 @@ vi.mock('../api/bff', async (importOriginal) => {
   }
 })
 
+vi.mock('../analytics/homeworld-locator/api', () => ({
+  fetchHomeworldLocatorMap: vi.fn(),
+  fetchHomeworldLocatorTable: vi.fn(),
+  postHomeworldLocatorAssertion: vi.fn(),
+  postHomeworldLocatorRefresh: vi.fn(),
+}))
+
 import { fetchAnalyticMap } from '../api/bff'
+import { fetchHomeworldLocatorMap } from '../analytics/homeworld-locator/api'
 import { combineMapData } from '../analytics/mapLayers'
 
 vi.mock('../analytics/mapLayers', async (importOriginal) => {
@@ -300,5 +310,109 @@ describe('useMapAnalyticQueries', () => {
     expect(result.current.combined.nodes.length).toBeGreaterThan(0)
     expect(result.current.hasAnyData).toBe(true)
     expect(String(result.current.mapError)).toMatch(/stellar cartography map failed/i)
+  })
+
+  describe('homeworldMapLayerSucceeded', () => {
+    const analyticsWithHomeworld: AnalyticItem[] = [
+      ...sampleAnalytics,
+      {
+        id: HOMEWORLD_LOCATOR_ANALYTIC_ID,
+        name: 'Homeworld locator',
+        supportsTable: true,
+        supportsMap: true,
+        type: 'selectable',
+      },
+    ]
+
+    it('is false when homeworld is not in the fetch set', async () => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const { result } = renderHook(() => useMapAnalyticQueries(defaultHookInput()), {
+        wrapper: createWrapper(client),
+      })
+
+      await waitFor(() => {
+        expect(result.current.hasAnyData).toBe(true)
+      })
+      expect(result.current.homeworldMapLayerSucceeded).toBe(false)
+    })
+
+    it('is true after homeworld map success (including empty overlays)', async () => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      vi.mocked(fetchAnalyticMap).mockImplementation(async (analyticId) => {
+        if (analyticId === 'base-map') {
+          return {
+            analyticId: 'base-map',
+            nodes: [{ id: 'p1', label: 'p1', x: 1, y: 2 }],
+            edges: [],
+          }
+        }
+        if (analyticId === 'connections') {
+          return { analyticId: 'connections', nodes: [], edges: [], routes: [] }
+        }
+        throw new Error(`unexpected analytic ${analyticId}`)
+      })
+      vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
+        analyticId: HOMEWORLD_LOCATOR_ANALYTIC_ID,
+        available: true,
+        baselineDegraded: false,
+        regionOverlays: [],
+        markers: [],
+      })
+
+      const { result } = renderHook(
+        () =>
+          useMapAnalyticQueries(
+            defaultHookInput({
+              enabledAnalyticIds: ['connections', HOMEWORLD_LOCATOR_ANALYTIC_ID],
+              analytics: analyticsWithHomeworld,
+            })
+          ),
+        { wrapper: createWrapper(client) }
+      )
+
+      await waitFor(() => {
+        expect(result.current.pending).toBe(false)
+        expect(result.current.homeworldMapLayerSucceeded).toBe(true)
+      })
+      expect(result.current.hasError).toBe(false)
+    })
+
+    it('is false when the homeworld map layer errors (failure-empty)', async () => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      vi.mocked(fetchAnalyticMap).mockImplementation(async (analyticId) => {
+        if (analyticId === 'base-map') {
+          return {
+            analyticId: 'base-map',
+            nodes: [{ id: 'p1', label: 'p1', x: 1, y: 2 }],
+            edges: [],
+          }
+        }
+        if (analyticId === 'connections') {
+          return { analyticId: 'connections', nodes: [], edges: [], routes: [] }
+        }
+        throw new Error(`unexpected analytic ${analyticId}`)
+      })
+      vi.mocked(fetchHomeworldLocatorMap).mockRejectedValue(
+        new Error('homeworld turn gap')
+      )
+
+      const { result } = renderHook(
+        () =>
+          useMapAnalyticQueries(
+            defaultHookInput({
+              enabledAnalyticIds: ['connections', HOMEWORLD_LOCATOR_ANALYTIC_ID],
+              analytics: analyticsWithHomeworld,
+            })
+          ),
+        { wrapper: createWrapper(client) }
+      )
+
+      await waitFor(() => {
+        expect(result.current.pending).toBe(false)
+        expect(result.current.hasError).toBe(true)
+      })
+      expect(result.current.homeworldMapLayerSucceeded).toBe(false)
+      expect(result.current.combined.regionOverlays).toEqual([])
+    })
   })
 })

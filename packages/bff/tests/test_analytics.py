@@ -289,7 +289,7 @@ def test_list_analytics_includes_homeworld_locator_analytic():
     assert homeworld == {
         "id": "homeworld-locator",
         "name": "Homeworld locator",
-        "supportsTable": True,
+        "supportsTable": False,
         "supportsMap": True,
         "type": "selectable",
     }

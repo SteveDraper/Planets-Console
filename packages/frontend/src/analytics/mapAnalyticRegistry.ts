@@ -151,18 +151,19 @@ export function mapLayerMergerFor(analyticId: string): MapLayerMerger {
 
 export function defaultMapAnalyticQuerySpec(
   analyticId: string,
-  context: MapAnalyticQueryContext
+  analyticScope: AnalyticShellScope | null,
+  analyticFetchEnabled: boolean
 ): MapAnalyticQuerySpec {
   return {
     // 'planet-v2' namespaces the cache to the current planet-map wire shape; bump it when that shape changes.
-    queryKey: ['analytic', analyticId, 'map', context.analyticScope, 'planet-v2'] as const,
+    queryKey: ['analytic', analyticId, 'map', analyticScope, 'planet-v2'] as const,
     queryFn: () => {
-      if (context.analyticScope == null) {
+      if (analyticScope == null) {
         throw new Error('Map analytic query requires analytic scope')
       }
-      return fetchAnalyticMap(analyticId, context.analyticScope, undefined)
+      return fetchAnalyticMap(analyticId, analyticScope, undefined)
     },
-    enabled: context.analyticFetchEnabled && context.analyticScope != null,
+    enabled: analyticFetchEnabled && analyticScope != null,
   }
 }
 
@@ -171,5 +172,8 @@ export function mapAnalyticQuerySpecFor(
   context: MapAnalyticQueryContext
 ): MapAnalyticQuerySpec {
   const registration = mapAnalyticRegistrationFor(analyticId)
-  return registration.buildQuerySpec?.(context) ?? defaultMapAnalyticQuerySpec(analyticId, context)
+  return (
+    registration.buildQuerySpec?.(context) ??
+    defaultMapAnalyticQuerySpec(analyticId, context.analyticScope, context.analyticFetchEnabled)
+  )
 }

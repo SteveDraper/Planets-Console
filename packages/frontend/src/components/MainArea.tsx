@@ -16,7 +16,6 @@ import { scoresTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
 import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
-import { HomeworldLocatorTableTile } from '../analytics/homeworld-locator/HomeworldLocatorTableTile'
 import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
 import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
@@ -189,6 +188,15 @@ function TableTile({
       />
     )
   }
+  // Generic column/row grid only. Analytics with custom table payloads (or map-only
+  // analytics still enabled under a stale catalog) must not reach this path.
+  if (!Array.isArray(data.columns) || !Array.isArray(data.rows)) {
+    return (
+      <div className="p-4 text-sm text-gray-400">
+        This analytic has no tabular grid view.
+      </div>
+    )
+  }
   return (
     <div className="overflow-auto">
       <table className="min-w-full border-collapse text-sm">
@@ -271,6 +279,7 @@ const MapMainArea = memo(function MapMainArea({
     hasError,
     hasAnyData,
     mapError,
+    homeworldMapLayerSucceeded,
   } = mapQueries
 
   const { mapShellView } = useRetainedMapDisplay({
@@ -302,6 +311,7 @@ const MapMainArea = memo(function MapMainArea({
     mapShellView,
     analyticScope,
     roster,
+    homeworldMapLayerSucceeded,
     futureTurnOffset,
     planetLabelOptions,
     onPlanetLabelOptionsChange,
@@ -384,11 +394,6 @@ export function MainArea({
             >
               {id === 'fleet' ? (
                 <FleetAnalyticTableTile analyticScope={analyticScope} fetchEnabled={fetchEnabled} />
-              ) : id === 'homeworld-locator' ? (
-                <HomeworldLocatorTableTile
-                  analyticScope={analyticScope}
-                  fetchEnabled={fetchEnabled}
-                />
               ) : (
                 <TableTile
                   analyticId={id}

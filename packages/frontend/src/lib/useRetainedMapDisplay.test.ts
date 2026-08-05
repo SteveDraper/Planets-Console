@@ -15,12 +15,14 @@ import { useRetainedMapDisplay } from './useRetainedMapDisplay'
 
 function showingMap(
   displayMapData: CombinedMapData,
-  showDeferredPending = false
+  showDeferredPending = false,
+  displayMapFrameIsLive = true
 ) {
   return {
     phase: 'showing-map' as const,
     displayMapData,
     showDeferredPending,
+    displayMapFrameIsLive,
   }
 }
 
@@ -90,7 +92,7 @@ describe('useRetainedMapDisplay', () => {
       mapHasAnyData: false,
     })
 
-    expect(result.current.mapShellView).toEqual(showingMap(sampleMap))
+    expect(result.current.mapShellView).toEqual(showingMap(sampleMap, false, false))
   })
 
   it('retains across turn step when game and perspective are unchanged', () => {
@@ -140,7 +142,7 @@ describe('useRetainedMapDisplay', () => {
       mapPending: true,
       mapHasAnyData: false,
     })
-    expect(result.current.mapShellView).toEqual(showingMap(sampleMap))
+    expect(result.current.mapShellView).toEqual(showingMap(sampleMap, false, false))
 
     rerender({
       combined: turnTwoMap,
@@ -215,7 +217,7 @@ describe('useRetainedMapDisplay', () => {
       mapPending: true,
       mapHasAnyData: false,
     })
-    expect(result.current.mapShellView).toEqual(showingMap(otherGameMap))
+    expect(result.current.mapShellView).toEqual(showingMap(otherGameMap, false, false))
   })
 
   it('clears retention after gameId changes', () => {

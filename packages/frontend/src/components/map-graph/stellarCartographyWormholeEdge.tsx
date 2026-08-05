@@ -1,16 +1,15 @@
 import { useCallback, useContext } from 'react'
-import { BaseEdge, getStraightPath, useReactFlow, useStore, type EdgeProps } from '@xyflow/react'
+import { BaseEdge, getStraightPath, useStore, type EdgeProps } from '@xyflow/react'
 import { shallow } from 'zustand/shallow'
 import {
   WORMHOLE_EDGE_OPACITY,
   WORMHOLE_LINE_STROKE,
 } from '../../lib/cartography/stellarCartographyTheme'
+import { requestMapAttention } from '../../stores/mapAttentionRequest'
 import { NODE_SIZE_FLOW, clientToFlowPosition, safeZoomScale } from './geometry'
 import {
   WormholeHoverContext,
   WormholeLineRevealContext,
-  WormholeRecenterPulseContext,
-  recenterMapOnWormholeGameCell,
 } from './stellarCartographyWormholeInteraction'
 
 export type WormholeEdgeData = {
@@ -42,7 +41,6 @@ export function wormholeHoverLabel(
 
 /** Stellar Cartography wormhole edge: sky line, mono arrowhead, click recenter, hover label. */
 export function WormholeEdgeOnePixel(props: EdgeProps) {
-  const { setViewport, getViewport } = useReactFlow()
   const { sourceNode, targetNode, zoom, domNode, transform } = useStore(
     (s) => ({
       sourceNode: s.nodeLookup.get(props.source),
@@ -68,7 +66,6 @@ export function WormholeEdgeOnePixel(props: EdgeProps) {
   const data = props.data as WormholeEdgeData | undefined
   const isBidirectional = data?.isBidirectional !== false
   const setWormholeHover = useContext(WormholeHoverContext)
-  const pulseWormholeAt = useContext(WormholeRecenterPulseContext)
   const lineReveal = useContext(WormholeLineRevealContext)
 
   const handlePointer = useCallback(
@@ -127,14 +124,11 @@ export function WormholeEdgeOnePixel(props: EdgeProps) {
           const ty = data?.targetGameY
           if (sx == null || sy == null || tx == null || ty == null) return
           const recenterGame = nearSource ? { x: tx, y: ty } : { x: sx, y: sy }
-          recenterMapOnWormholeGameCell(
-            recenterGame.x,
-            recenterGame.y,
-            domNode,
-            getViewport,
-            setViewport,
-            pulseWormholeAt
-          )
+          requestMapAttention({
+            kind: 'wormhole-cell',
+            mapX: recenterGame.x,
+            mapY: recenterGame.y,
+          })
           e.stopPropagation()
         }}
       />

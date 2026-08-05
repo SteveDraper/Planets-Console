@@ -3,12 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { defaultHomeworldRegionDisplayMode } from './homeworldRegionDisplayMode'
+import { defaultHomeworldRegionSelectionPreset } from '../../lib/homeworldRegionSelection'
 import { HomeworldLocatorTile } from './HomeworldLocatorTile'
 import {
-  HOMEWORLD_REGION_DISPLAY_STORAGE_KEY,
-  useHomeworldRegionDisplayStore,
-} from '../../stores/homeworldRegionDisplay'
+  HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
+  useHomeworldRegionSelectionStore,
+} from '../../stores/homeworldRegionSelectionStore'
 import { fetchHomeworldLocatorMap, fetchHomeworldLocatorTable } from './api'
 
 vi.mock('./api', () => ({
@@ -29,9 +29,11 @@ function renderTile(ui: ReactNode) {
 
 describe('HomeworldLocatorTile', () => {
   beforeEach(() => {
-    localStorage.removeItem(HOMEWORLD_REGION_DISPLAY_STORAGE_KEY)
-    useHomeworldRegionDisplayStore.setState({
-      regionDisplayMode: defaultHomeworldRegionDisplayMode(),
+    localStorage.removeItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: defaultHomeworldRegionSelectionPreset(),
+      selectedSectorIndexes: [],
+      showEnvelopeOverlays: true,
     })
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
@@ -95,7 +97,7 @@ describe('HomeworldLocatorTile', () => {
     expect(screen.getByRole('checkbox')).not.toBeDisabled()
   })
 
-  it('expands to expose region display mode, panel, and persists overlay changes', async () => {
+  it('expands to expose region selection, show overlays, panel, and persists changes', async () => {
     const user = userEvent.setup()
     renderTile(
       <HomeworldLocatorTile
@@ -109,11 +111,20 @@ describe('HomeworldLocatorTile', () => {
     )
 
     await user.click(screen.getByRole('button', { name: /expand homeworld/i }))
-    expect(screen.getByRole('radiogroup', { name: /homeworld region display mode/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole('radiogroup', { name: /homeworld region selection/i })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /show overlays/i })).toBeChecked()
     expect(screen.getByText(/load game info and choose a turn/i)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('radio', { name: 'All' }))
-    expect(useHomeworldRegionDisplayStore.getState().regionDisplayMode).toBe('all')
-    expect(localStorage.getItem(HOMEWORLD_REGION_DISPLAY_STORAGE_KEY)).toContain('all')
+    await user.click(screen.getByRole('radio', { name: 'Pinned' }))
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
+    expect(localStorage.getItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)).toContain('pinned')
+
+    await user.click(screen.getByRole('checkbox', { name: /show overlays/i }))
+    expect(useHomeworldRegionSelectionStore.getState().showEnvelopeOverlays).toBe(false)
+    expect(localStorage.getItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)).toContain(
+      '"showEnvelopeOverlays":false'
+    )
   })
 })

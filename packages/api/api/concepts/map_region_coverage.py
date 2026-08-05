@@ -201,11 +201,17 @@ MapRegionOverlayGeometry = MapRegionCoverageGeometry | MapRegionBoundaryGeometry
 
 @dataclass(frozen=True)
 class MapRegionPossibleOwner:
-    """One possible homeworld owner slot with provenance kind tags for map overlays."""
+    """One possible homeworld owner slot with provenance kind tags for map overlays.
+
+    ``provenance_kinds`` is the unique sorted kind set (style / assert gates).
+    ``provenance_kind_counts`` is per-kind observation multiplicity when known
+    (machine fact for client formatting); omit when the emitter only has unique tags.
+    """
 
     owner_slot: int
     provenance_kinds: tuple[str, ...]
     player_label: str | None = None
+    provenance_kind_counts: tuple[tuple[str, int], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -215,8 +221,9 @@ class MapRegionOverlay:
     Geometry is discriminated: ``coverage`` (disks+patches) or ``boundary``
     (ordered vertices + line|arc edges, optional envelope disks). Optional
     annotations are shared domain/machine facts (``is_pinned``, ``status``,
-    ``candidate_count``, ``player_label``) -- not UI copy. Clients format
-    hover/display strings. Analytics that do not use annotations omit them.
+    ``candidate_count``, ``player_label``, ownership evidence) -- not UI copy.
+    Clients format hover/display strings. Analytics that do not use annotations
+    omit them.
     """
 
     kind: str
@@ -228,7 +235,10 @@ class MapRegionOverlay:
     status: str | None = None
     candidate_count: int | None = None
     player_label: str | None = None
+    # Ownership-evidence members after overlay projection (ADR 0010).
     possible_owners: tuple[MapRegionPossibleOwner, ...] | None = None
+    # Max-strength class for projected possible_owners (weak|strong|asserted).
+    ownership_winning_strength: str | None = None
 
 
 def default_effective_range(base_range: float, density: float) -> float:
@@ -535,7 +545,11 @@ def map_region_overlay_to_wire(overlay: MapRegionOverlay) -> dict:
             }
             if owner.player_label is not None:
                 entry["playerLabel"] = owner.player_label
+            if owner.provenance_kind_counts is not None:
+                entry["provenanceKindCounts"] = dict(owner.provenance_kind_counts)
             wire["possibleOwners"].append(entry)
+    if overlay.ownership_winning_strength is not None:
+        wire["ownershipWinningStrength"] = overlay.ownership_winning_strength
     return wire
 
 
@@ -574,6 +588,7 @@ def boundary_to_overlay(
     candidate_count: int | None = None,
     player_label: str | None = None,
     possible_owners: Sequence[MapRegionPossibleOwner] | None = None,
+    ownership_winning_strength: str | None = None,
 ) -> MapRegionOverlay:
     """Wrap a closed boundary path (and optional envelope disks) for the wire.
 
@@ -603,6 +618,7 @@ def boundary_to_overlay(
         candidate_count=candidate_count,
         player_label=player_label,
         possible_owners=None if possible_owners is None else tuple(possible_owners),
+        ownership_winning_strength=ownership_winning_strength,
     )
 
 
