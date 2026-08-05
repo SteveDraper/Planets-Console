@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { defaultHomeworldRegionSelectionPreset } from '../analytics/homeworld-locator/homeworldRegionSelection'
+import { defaultHomeworldRegionSelectionPreset } from '../lib/homeworldRegionSelection'
 import {
   HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
   useHomeworldRegionSelectionStore,

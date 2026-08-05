@@ -14,7 +14,7 @@ import {
   HOMEWORLD_REGION_SELECTION_PRESET_LABELS,
   HOMEWORLD_REGION_SELECTION_UI_PRESETS,
   type HomeworldRegionSelectionUiPreset,
-} from './homeworldRegionSelection'
+} from '../../lib/homeworldRegionSelection'
 import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
 

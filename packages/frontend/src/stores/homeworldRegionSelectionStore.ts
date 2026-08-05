@@ -6,7 +6,7 @@ import {
   defaultShowEnvelopeOverlays,
   isHomeworldRegionSelectionPreset,
   type HomeworldRegionSelectionPreset,
-} from '../analytics/homeworld-locator/homeworldRegionSelection'
+} from '../lib/homeworldRegionSelection'
 
 const homeworldRegionSelectionPersistStorage = createLocalStorageOrMemoryStateStorage()
 

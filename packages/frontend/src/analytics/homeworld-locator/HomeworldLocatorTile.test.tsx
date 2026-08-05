@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { defaultHomeworldRegionSelectionPreset } from './homeworldRegionSelection'
+import { defaultHomeworldRegionSelectionPreset } from '../../lib/homeworldRegionSelection'
 import { HomeworldLocatorTile } from './HomeworldLocatorTile'
 import {
   HOMEWORLD_REGION_SELECTION_STORAGE_KEY,

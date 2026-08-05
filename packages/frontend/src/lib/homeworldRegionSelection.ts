@@ -4,11 +4,12 @@
  *
  * Internal preset ``all`` is init-only (UI shows Selected). Overlays-ready materialize
  * writes ``selected`` + an explicit index list via ``useHomeworldRegionSelection``.
+ *
+ * Lives under ``lib/`` so the selection store does not import from analytics.
  */
 
-import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
+import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import {
-  HOMEWORLD_SECTOR_KIND,
   isHomeworldSectorOverlay,
   parseHomeworldSectorIndex,
 } from './homeworldSectorIndex'
@@ -164,5 +165,3 @@ export function sectorIndexListsEqual(
   }
   return true
 }
-
-export { HOMEWORLD_SECTOR_KIND, isHomeworldSectorOverlay }

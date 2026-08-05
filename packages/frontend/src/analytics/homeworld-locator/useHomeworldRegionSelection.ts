@@ -16,7 +16,7 @@ import {
   sectorIndexListsEqual,
   toggleSectorIndexInSelection,
   type HomeworldRegionSelectionUiPreset,
-} from './homeworldRegionSelection'
+} from '../../lib/homeworldRegionSelection'
 import {
   fetchHomeworldLocatorMapDataResponse,
   homeworldLocatorMapQueryKey,

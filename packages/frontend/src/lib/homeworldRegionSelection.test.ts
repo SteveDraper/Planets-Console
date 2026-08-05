@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
+import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 import {
   allHomeworldSectorIndexes,

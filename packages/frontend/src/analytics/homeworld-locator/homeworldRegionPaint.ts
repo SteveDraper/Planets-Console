@@ -8,7 +8,7 @@ import type { HomeworldLocatorSelection } from '../../stores/homeworldLocatorSel
 import {
   effectiveSelectedSectorIndexes,
   type HomeworldRegionSelectionPreset,
-} from './homeworldRegionSelection'
+} from '../../lib/homeworldRegionSelection'
 import {
   isHomeworldSectorOverlay,
   parseHomeworldSectorIndex,
