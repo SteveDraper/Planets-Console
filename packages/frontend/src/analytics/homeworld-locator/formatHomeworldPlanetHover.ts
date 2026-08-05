@@ -3,7 +3,10 @@
  * Composed from existing wire fields only -- no backend presentation payloads.
  */
 
-import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
+import type {
+  MapRegionPossibleOwner,
+  OwnershipWinningStrength,
+} from '../../api/mapRegionOverlayTypes'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import {
   formatHomeworldCandidateConfidenceLabel,
@@ -12,14 +15,15 @@ import {
 import {
   formatHomeworldOwnershipInferenceSummary,
   resolveOwnershipEvidenceForCandidate,
+  uniqueOwnershipWinningStrength,
 } from './formatHomeworldOwnershipInference'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 export type FormatHomeworldPlanetHoverOptions = {
   /** Sector (or planet-keyed) ownership evidence for expanding ``inferred``. */
   possibleOwners?: readonly MapRegionPossibleOwner[]
-  /** Overlay winning ownership strength after display projection. */
-  ownershipWinningStrength?: string | null
+  /** Overlay winning ownership strength after overlay projection. */
+  ownershipWinningStrength?: OwnershipWinningStrength | null
 }
 
 /** Single-line tooltip summarizing candidate location/status evidence. */
@@ -42,13 +46,11 @@ export function formatHomeworldPlanetHover(
     options.possibleOwners,
     row.perspective
   )
-  // Sector winning strength applies only for a unique projected owner set.
-  const uniqueWinningStrength =
-    (options.possibleOwners?.length ?? 0) === 1
-      ? options.ownershipWinningStrength
-      : undefined
   const ownershipSummary = formatHomeworldOwnershipInferenceSummary(ownershipEvidence, {
-    winningStrength: uniqueWinningStrength,
+    winningStrength: uniqueOwnershipWinningStrength(
+      options.possibleOwners,
+      options.ownershipWinningStrength
+    ),
   })
   if (ownershipSummary != null) {
     parts.push(ownershipSummary)

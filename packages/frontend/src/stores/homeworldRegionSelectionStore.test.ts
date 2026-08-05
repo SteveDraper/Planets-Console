@@ -3,7 +3,7 @@ import { defaultHomeworldRegionSelectionPreset } from '../analytics/homeworld-lo
 import {
   HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
   useHomeworldRegionSelectionStore,
-} from './homeworldRegionSelection'
+} from './homeworldRegionSelectionStore'
 
 describe('homeworldRegionSelection store', () => {
   beforeEach(() => {

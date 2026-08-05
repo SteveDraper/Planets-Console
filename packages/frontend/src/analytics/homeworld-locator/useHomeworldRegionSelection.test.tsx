@@ -7,7 +7,7 @@ import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import {
   HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
   useHomeworldRegionSelectionStore,
-} from '../../stores/homeworldRegionSelection'
+} from '../../stores/homeworldRegionSelectionStore'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 import { fetchHomeworldLocatorMap } from './api'
 import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'

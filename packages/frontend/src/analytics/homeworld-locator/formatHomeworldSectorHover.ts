@@ -6,13 +6,17 @@
 import type {
   MapRegionOverlay,
   MapRegionPossibleOwner,
+  OwnershipWinningStrength,
 } from '../../api/mapRegionOverlayTypes'
-import { formatHomeworldOwnershipInferenceSummary } from './formatHomeworldOwnershipInference'
+import {
+  formatHomeworldOwnershipInferenceSummary,
+  uniqueOwnershipWinningStrength,
+} from './formatHomeworldOwnershipInference'
 import { isHomeworldSectorOverlay } from './homeworldSectorIndex'
 
 function formatPossibleOwnerDisplay(
   owner: MapRegionPossibleOwner,
-  winningStrength: string | null | undefined
+  winningStrength: OwnershipWinningStrength | null | undefined
 ): string {
   const label =
     owner.playerLabel != null && owner.playerLabel !== ''
@@ -32,14 +36,17 @@ function formatPossibleOwnerDisplay(
 function appendOwnershipEvidenceParts(
   parts: string[],
   possibleOwners: readonly MapRegionPossibleOwner[],
-  options: { includeOwnerLabels: boolean; winningStrength?: string | null }
+  options: {
+    includeOwnerLabels: boolean
+    winningStrength?: OwnershipWinningStrength | null
+  }
 ): void {
   if (possibleOwners.length === 0) return
 
-  // Sector winning strength labels apply only when ``|set|=1`` (design §4.3.2).
-  // Ambiguous contenders use each member's kinds/counts, never the sector max.
-  const uniqueWinningStrength =
-    possibleOwners.length === 1 ? options.winningStrength : undefined
+  const uniqueWinningStrength = uniqueOwnershipWinningStrength(
+    possibleOwners,
+    options.winningStrength
+  )
 
   if (!options.includeOwnerLabels) {
     if (possibleOwners.length === 1) {

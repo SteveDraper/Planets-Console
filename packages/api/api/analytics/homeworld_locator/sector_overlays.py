@@ -21,9 +21,9 @@ from api.analytics.homeworld_locator.models import (
     OwnershipProvenance,
     SectorOwnerMember,
 )
-from api.analytics.homeworld_locator.ownership_display import (
-    SectorOwnerDisplayProjection,
-    project_sector_owner_sets_for_display,
+from api.analytics.homeworld_locator.ownership_projection import (
+    SectorOwnerOverlayProjection,
+    project_sector_owner_sets_for_overlays,
     settled_owner_homes_from_location_pins,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateView
@@ -286,7 +286,7 @@ def closest_unobserved_band_point(
 
 @dataclass(frozen=True)
 class _SectorOverlayDecision:
-    """Per-sector status, envelope, color, and hover facts for one overlay emission."""
+    """Per-sector status, envelope, color, and ownership facts for one overlay emission."""
 
     is_pinned: bool
     envelope_center: tuple[float, float] | None
@@ -426,7 +426,7 @@ def _decide_sector_overlay(
 def _provenance_kind_counts(
     provenances: Sequence[OwnershipProvenance],
 ) -> tuple[tuple[str, int], ...]:
-    """Per-kind multiplicity for ownership hover (sorted by kind)."""
+    """Per-kind multiplicity for ownership evidence (sorted by kind)."""
     counts: dict[str, int] = {}
     for row in provenances:
         counts[row.kind] = counts.get(row.kind, 0) + 1
@@ -487,7 +487,7 @@ def build_homeworld_sector_overlays(
     center on those when present so disks align with most-probable markers.
 
     ``location_definite_planet_ids`` upgrades preferred-candidate ownership
-    strength for display projection (ADR 0010). Sector ``possibleOwners`` are
+    strength for overlay projection (ADR 0010). Sector ``possibleOwners`` are
     projected (winning-strength + cross-sector settled trim) -- not raw durable
     membership. ``perspective_by_planet_id`` supplies slot-anchored owner slots
     so definite location pins also settle owners for cross-sector trim.
@@ -525,7 +525,7 @@ def build_homeworld_sector_overlays(
         perspective_by_planet_id=perspectives,
     )
 
-    owner_sets = project_sector_owner_sets_for_display(
+    owner_sets = project_sector_owner_sets_for_overlays(
         dict(sector_owner_sets or ()),
         location_definite_planet_ids=location_definite_planet_ids,
         settled_owner_home_by_slot=settled_from_location,
@@ -590,7 +590,7 @@ def build_homeworld_sector_overlays(
         )
         projection = owner_sets.get(
             index,
-            SectorOwnerDisplayProjection(members=(), winning_strength=None),
+            SectorOwnerOverlayProjection(members=(), winning_strength=None),
         )
         overlays.append(
             boundary_to_overlay(

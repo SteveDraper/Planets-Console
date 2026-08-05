@@ -154,43 +154,6 @@ export function toggleSectorIndexInSelection(
   return [...set].sort((a, b) => a - b)
 }
 
-/**
- * Filter ``regionOverlays`` for map paint by selected sector indexes and
- * envelope toggle (``filterHomeworldSectorsForPaint`` semantics).
- * Non-homeworld overlays pass through unchanged.
- * Selected homeworld sectors keep outlines; envelope disks remain only when
- * ``showEnvelopeOverlays`` is true. Unselected homeworld sectors are omitted.
- */
-export function applyHomeworldRegionSelection(
-  overlays: readonly MapRegionOverlay[],
-  selectedSectorIndexes: readonly number[],
-  showEnvelopeOverlays: boolean
-): MapRegionOverlay[] {
-  const selected = new Set(selectedSectorIndexes)
-  const result: MapRegionOverlay[] = []
-  for (const overlay of overlays) {
-    if (!isHomeworldSectorOverlay(overlay)) {
-      result.push(overlay)
-      continue
-    }
-    const index = parseHomeworldSectorIndex(overlay.id)
-    if (index == null || !selected.has(index)) continue
-    if (showEnvelopeOverlays || overlay.geometry.type !== 'boundary') {
-      result.push(overlay)
-      continue
-    }
-    result.push({
-      ...overlay,
-      geometry: {
-        type: 'boundary',
-        vertices: overlay.geometry.vertices,
-        edges: overlay.geometry.edges,
-      },
-    })
-  }
-  return result
-}
-
 export function sectorIndexListsEqual(
   a: readonly number[],
   b: readonly number[]

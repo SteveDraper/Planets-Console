@@ -4,7 +4,10 @@
  * (ADR 0008).
  */
 
-import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
+import type {
+  MapRegionPossibleOwner,
+  OwnershipWinningStrength,
+} from '../../api/mapRegionOverlayTypes'
 import { PROVENANCE_KIND_ASSERTED } from './constants'
 
 /** Core machine kind for ship travel-envelope ownership evidence. */
@@ -23,8 +26,20 @@ export type OwnershipInferenceEvidence = Pick<
 >
 
 export type FormatOwnershipInferenceOptions = {
-  /** Overlay ``ownershipWinningStrength`` after display projection. */
-  winningStrength?: string | null
+  /** Overlay ``ownershipWinningStrength`` after overlay projection. */
+  winningStrength?: OwnershipWinningStrength | null
+}
+
+/**
+ * Sector ``ownershipWinningStrength`` applies only when the projected owner set
+ * is unique (design §4.3.2). Ambiguous contenders must not inherit a sector max.
+ */
+export function uniqueOwnershipWinningStrength(
+  possibleOwners: readonly unknown[] | undefined,
+  ownershipWinningStrength: OwnershipWinningStrength | null | undefined
+): OwnershipWinningStrength | undefined {
+  if ((possibleOwners?.length ?? 0) !== 1) return undefined
+  return ownershipWinningStrength ?? undefined
 }
 
 function observationCount(
@@ -72,7 +87,7 @@ export function formatHomeworldOwnershipInferenceSummary(
   // inferred. Kind tags / counts are for observation tallies only -- do not
   // re-derive strength from kinds when winningStrength is present.
   let status: 'definite' | 'inferred'
-  if (options.winningStrength != null && options.winningStrength !== '') {
+  if (options.winningStrength != null) {
     status = options.winningStrength === 'strong' ? 'definite' : 'inferred'
   } else {
     // Legacy wire without ownershipWinningStrength: ship envelope maps to

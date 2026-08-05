@@ -8,7 +8,7 @@ import { HomeworldLocatorTile } from './HomeworldLocatorTile'
 import {
   HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
   useHomeworldRegionSelectionStore,
-} from '../../stores/homeworldRegionSelection'
+} from '../../stores/homeworldRegionSelectionStore'
 import { fetchHomeworldLocatorMap, fetchHomeworldLocatorTable } from './api'
 
 vi.mock('./api', () => ({

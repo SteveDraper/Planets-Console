@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { buildMapRegionOverlayPaneShapes } from '../../lib/mapRegionOverlay'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
-import { buildHomeworldRegionOverlaysForPaint } from './homeworldRegionPaint'
+import { buildHomeworldRegionOverlaysForPaint, applyHomeworldRegionSelection } from './homeworldRegionPaint'
 
 function sector(
   id: string,
@@ -58,6 +58,22 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
     { x: 150, y: 50, radius: 81 },
     { x: 150, y: 50, radius: 162 },
   ]
+
+  it('filters outlines by selected indexes via applyHomeworldRegionSelection', () => {
+    const overlays = [
+      sector('homeworld-sector-0', { isPinned: true, disks }),
+      sector('homeworld-sector-2', { disks: [{ x: 1, y: 1, radius: 81 }] }),
+      visibilityOverlay(),
+    ]
+    expect(applyHomeworldRegionSelection(overlays, [0, 2], true).map((o) => o.id)).toEqual([
+      'homeworld-sector-0',
+      'homeworld-sector-2',
+      'vis-1',
+    ])
+    expect(applyHomeworldRegionSelection(overlays, [], true).map((o) => o.id)).toEqual([
+      'vis-1',
+    ])
+  })
 
   it('paints outlines only for selected sector indexes', () => {
     const overlays = [

@@ -4,7 +4,10 @@
  */
 
 import { cn } from '../../lib/utils'
-import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
+import type {
+  MapRegionPossibleOwner,
+  OwnershipWinningStrength,
+} from '../../api/mapRegionOverlayTypes'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { homeworldBaselineDegradedMessage } from './constants'
 import {
@@ -37,8 +40,8 @@ export type HomeworldCandidateRowsProps = {
    * ``inferred`` with observation counts.
    */
   possibleOwners?: readonly MapRegionPossibleOwner[]
-  /** Overlay winning ownership strength after display projection. */
-  ownershipWinningStrength?: string | null
+  /** Overlay winning ownership strength after overlay projection. */
+  ownershipWinningStrength?: OwnershipWinningStrength | null
 }
 
 /** Candidate table for the homeworld locator sidebar panel (read-only). */

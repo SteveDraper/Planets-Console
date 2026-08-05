@@ -1,9 +1,9 @@
-"""Display-time projection of sector possible-owner sets (ADR 0010).
+"""Overlay-wire projection of sector possible-owner sets (ADR 0010).
 
-Durable ownership evidence keeps full provenance membership. Overlay / panel
-display derives winning-strength contenders and trims slots that are already
-uniquely settled (strong or asserted) on exactly one other sector -- so assert
-changes cannot leave sticky durable holes.
+Durable ownership evidence keeps full provenance membership. Overlay emission
+derives winning-strength contenders and trims slots that are already uniquely
+settled (strong or asserted) on exactly one other sector -- so assert changes
+cannot leave sticky durable holes.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import NamedTuple
 from api.analytics.homeworld_locator.evidence_strength import (
     STRENGTH_ASSERTED,
     STRENGTH_STRONG,
+    OwnershipAxisResolution,
     resolve_ownership_axis,
 )
 from api.analytics.homeworld_locator.models import SectorOwnerMember
@@ -22,7 +23,7 @@ from api.analytics.homeworld_locator.models import SectorOwnerMember
 _SETTLED_STRENGTHS = frozenset({STRENGTH_STRONG, STRENGTH_ASSERTED})
 
 
-class SectorOwnerDisplayProjection(NamedTuple):
+class SectorOwnerOverlayProjection(NamedTuple):
     members: tuple[SectorOwnerMember, ...]
     winning_strength: str | None
 
@@ -59,13 +60,13 @@ def settled_owner_homes_from_location_pins(
     }
 
 
-def project_sector_owner_sets_for_display(
+def project_sector_owner_sets_for_overlays(
     sector_owner_sets: Mapping[int, Sequence[SectorOwnerMember]],
     *,
     location_definite_planet_ids: frozenset[int] = frozenset(),
     settled_owner_home_by_slot: Mapping[int, int] | None = None,
-) -> dict[int, SectorOwnerDisplayProjection]:
-    """Project durable sector owner sets for wire / hover / title.
+) -> dict[int, SectorOwnerOverlayProjection]:
+    """Project durable sector owner sets for overlay wire facts.
 
     1. Keep only max-strength contenders per sector (ADR 0010).
     2. When a slot is uniquely settled on exactly one sector -- via strong/asserted
@@ -73,14 +74,15 @@ def project_sector_owner_sets_for_display(
        (definite slot-anchored candidate) -- drop that slot from every other
        sector's projected set.
 
-    Returns projected members plus ``winning_strength`` resolved once on the
-    final projected set (``None`` when ownership is ambiguous).
+    Returns projected members plus ``winning_strength`` for unique sets
+    (``None`` when ownership is ambiguous). Reuses the first-pass axis resolution
+    when cross-sector trim does not change contender membership.
     """
     if not sector_owner_sets:
         return {}
 
     strength_filtered: dict[int, tuple[SectorOwnerMember, ...]] = {}
-    resolutions = {}
+    resolutions: dict[int, OwnershipAxisResolution] = {}
     for sector_index, members in sector_owner_sets.items():
         member_tuple = tuple(members)
         resolution = resolve_ownership_axis(
@@ -114,40 +116,48 @@ def project_sector_owner_sets_for_display(
             del settled_home[owner_slot]
 
     if not settled_home:
-        return _with_winning_strength(
-            strength_filtered,
-            location_definite_planet_ids=location_definite_planet_ids,
-        )
+        projected = strength_filtered
+    else:
+        projected = {
+            sector_index: tuple(
+                member
+                for member in members
+                if member.owner_slot not in settled_home
+                or settled_home[member.owner_slot] == sector_index
+            )
+            for sector_index, members in strength_filtered.items()
+        }
 
-    projected: dict[int, tuple[SectorOwnerMember, ...]] = {}
-    for sector_index, members in strength_filtered.items():
-        projected[sector_index] = tuple(
-            member
-            for member in members
-            if member.owner_slot not in settled_home
-            or settled_home[member.owner_slot] == sector_index
-        )
-    return _with_winning_strength(
-        projected,
-        location_definite_planet_ids=location_definite_planet_ids,
-    )
-
-
-def _with_winning_strength(
-    sector_members: Mapping[int, tuple[SectorOwnerMember, ...]],
-    *,
-    location_definite_planet_ids: frozenset[int],
-) -> dict[int, SectorOwnerDisplayProjection]:
     return {
-        sector_index: SectorOwnerDisplayProjection(
+        sector_index: SectorOwnerOverlayProjection(
             members=members,
-            winning_strength=ownership_winning_strength_for_members(
+            winning_strength=_winning_strength_for_projected(
                 members,
                 location_definite_planet_ids=location_definite_planet_ids,
+                prior_resolution=resolutions.get(sector_index),
             ),
         )
-        for sector_index, members in sector_members.items()
+        for sector_index, members in projected.items()
     }
+
+
+def _winning_strength_for_projected(
+    members: tuple[SectorOwnerMember, ...],
+    *,
+    location_definite_planet_ids: frozenset[int],
+    prior_resolution: OwnershipAxisResolution | None,
+) -> str | None:
+    if not members:
+        return None
+    if prior_resolution is not None:
+        prior_slots = frozenset(prior_resolution.contending_owner_slots)
+        member_slots = frozenset(member.owner_slot for member in members)
+        if member_slots == prior_slots:
+            return prior_resolution.winning_strength if prior_resolution.is_unique else None
+    return ownership_winning_strength_for_members(
+        members,
+        location_definite_planet_ids=location_definite_planet_ids,
+    )
 
 
 def ownership_winning_strength_for_members(
@@ -173,8 +183,8 @@ def ownership_winning_strength_for_members(
 
 
 __all__ = [
-    "SectorOwnerDisplayProjection",
+    "SectorOwnerOverlayProjection",
     "ownership_winning_strength_for_members",
-    "project_sector_owner_sets_for_display",
+    "project_sector_owner_sets_for_overlays",
     "settled_owner_homes_from_location_pins",
 ]

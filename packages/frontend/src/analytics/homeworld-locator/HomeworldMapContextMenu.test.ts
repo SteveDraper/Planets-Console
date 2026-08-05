@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { isEventInsideHomeworldMenu } from './HomeworldMapContextMenu'
-import { applyHomeworldRegionSelection } from './homeworldRegionSelection'
+import { applyHomeworldRegionSelection } from './homeworldRegionPaint'
 import { buildOwnershipAssertionBody } from './ownershipAssertionBody'
 import {
   collectAssertedOwnerSlots,

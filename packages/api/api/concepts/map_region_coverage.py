@@ -205,7 +205,7 @@ class MapRegionPossibleOwner:
 
     ``provenance_kinds`` is the unique sorted kind set (style / assert gates).
     ``provenance_kind_counts`` is per-kind observation multiplicity when known
-    (SPA ownership hover); omit when the emitter only has unique tags.
+    (machine fact for client formatting); omit when the emitter only has unique tags.
     """
 
     owner_slot: int
@@ -221,8 +221,9 @@ class MapRegionOverlay:
     Geometry is discriminated: ``coverage`` (disks+patches) or ``boundary``
     (ordered vertices + line|arc edges, optional envelope disks). Optional
     annotations are shared domain/machine facts (``is_pinned``, ``status``,
-    ``candidate_count``, ``player_label``) -- not UI copy. Clients format
-    hover/display strings. Analytics that do not use annotations omit them.
+    ``candidate_count``, ``player_label``, ownership evidence) -- not UI copy.
+    Clients format hover/display strings. Analytics that do not use annotations
+    omit them.
     """
 
     kind: str
@@ -234,7 +235,7 @@ class MapRegionOverlay:
     status: str | None = None
     candidate_count: int | None = None
     player_label: str | None = None
-    # Ownership-evidence members after display projection (ADR 0010).
+    # Ownership-evidence members after overlay projection (ADR 0010).
     possible_owners: tuple[MapRegionPossibleOwner, ...] | None = None
     # Max-strength class for projected possible_owners (weak|strong|asserted).
     ownership_winning_strength: str | None = None

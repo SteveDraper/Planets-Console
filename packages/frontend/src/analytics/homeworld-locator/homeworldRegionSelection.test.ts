@@ -3,7 +3,6 @@ import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 import {
   allHomeworldSectorIndexes,
-  applyHomeworldRegionSelection,
   defaultHomeworldRegionSelectionPreset,
   defaultShowEnvelopeOverlays,
   effectiveSelectedSectorIndexes,
@@ -118,35 +117,5 @@ describe('homeworldRegionSelection', () => {
   it('toggles sector indexes uniquely and sorted', () => {
     expect(toggleSectorIndexInSelection([1, 3], 2)).toEqual([1, 2, 3])
     expect(toggleSectorIndexInSelection([1, 2, 3], 2)).toEqual([1, 3])
-  })
-
-  it('filters outlines by selected indexes and strips envelopes when off', () => {
-    const pinned = sector('homeworld-sector-0', true, [
-      { x: 0, y: 0, radius: 81 },
-      { x: 0, y: 0, radius: 162 },
-    ])
-    const unpinned = sector('homeworld-sector-2', false, [{ x: 1, y: 1, radius: 81 }])
-    const visibility = visibilityOverlay()
-    const all = [pinned, unpinned, visibility]
-
-    expect(applyHomeworldRegionSelection(all, [0, 2], true).map((o) => o.id)).toEqual([
-      'homeworld-sector-0',
-      'homeworld-sector-2',
-      'vis-1',
-    ])
-    expect(applyHomeworldRegionSelection(all, [0], true).map((o) => o.id)).toEqual([
-      'homeworld-sector-0',
-      'vis-1',
-    ])
-    expect(applyHomeworldRegionSelection(all, [], true).map((o) => o.id)).toEqual(['vis-1'])
-
-    const withoutEnvelopes = applyHomeworldRegionSelection(all, [0], false)
-    const painted = withoutEnvelopes.find((o) => o.id === 'homeworld-sector-0')
-    expect(painted).toBeDefined()
-    expect(painted!.geometry.type).toBe('boundary')
-    if (painted!.geometry.type === 'boundary') {
-      expect(painted!.geometry.disks).toBeUndefined()
-    }
-    expect(withoutEnvelopes.map((o) => o.id)).toEqual(['homeworld-sector-0', 'vis-1'])
   })
 })

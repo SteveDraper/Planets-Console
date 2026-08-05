@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AnalyticShellScope } from '../../api/bff'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelection'
+import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelectionStore'
 import {
   effectiveSelectedSectorIndexes,
   isHomeworldRegionSelectionUiPreset,

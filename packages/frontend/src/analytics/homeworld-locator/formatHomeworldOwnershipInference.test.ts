@@ -3,7 +3,21 @@ import type { MapRegionPossibleOwner } from '../../api/mapRegionOverlayTypes'
 import {
   formatHomeworldOwnershipInferenceSummary,
   resolveOwnershipEvidenceForCandidate,
+  uniqueOwnershipWinningStrength,
 } from './formatHomeworldOwnershipInference'
+
+describe('uniqueOwnershipWinningStrength', () => {
+  it('returns strength only for a unique owner set', () => {
+    expect(uniqueOwnershipWinningStrength([{ ownerSlot: 1 }], 'strong')).toBe(
+      'strong'
+    )
+    expect(
+      uniqueOwnershipWinningStrength([{ ownerSlot: 1 }, { ownerSlot: 2 }], 'strong')
+    ).toBeUndefined()
+    expect(uniqueOwnershipWinningStrength([], 'strong')).toBeUndefined()
+    expect(uniqueOwnershipWinningStrength(undefined, 'strong')).toBeUndefined()
+  })
+})
 
 describe('formatHomeworldOwnershipInferenceSummary', () => {
   it('returns null when evidence is missing or empty', () => {

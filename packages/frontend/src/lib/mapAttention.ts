@@ -51,11 +51,7 @@ export function resolveMapAttentionTarget(
 ): { flowX: number; flowY: number; needsPan: boolean } | null {
   if (request.kind === 'wormhole-cell') {
     const { cx, cy } = gameMapCellCenterToFlow(request.mapX, request.mapY)
-    return {
-      flowX: cx,
-      flowY: cy,
-      needsPan: request.pan === 'always' || flowPointNeedsPan(cx, cy, options.viewport),
-    }
+    return { flowX: cx, flowY: cy, needsPan: true }
   }
 
   const marker = options.homeworldMarkers.find(
@@ -66,8 +62,7 @@ export function resolveMapAttentionTarget(
   return {
     flowX: cx,
     flowY: cy,
-    needsPan:
-      request.pan === 'always' || flowPointNeedsPan(cx, cy, options.viewport),
+    needsPan: flowPointNeedsPan(cx, cy, options.viewport),
   }
 }
 
