@@ -56,14 +56,32 @@ export function MapAttentionOrchestrator({
     )
   }, [pending, homeworldMarkers, domNode, getViewport, setViewport])
 
+  // Pulse lifetime starts when the target is resolvable (markers / pane ready),
+  // matching pan retry -- not when the bus request is first posted.
   useEffect(() => {
     if (pending == null) return
+    if (domNode == null) return
+
+    const rect = domNode.getBoundingClientRect()
+    const vp = getViewport()
+    const resolved = resolveMapAttentionTarget(pending, {
+      homeworldMarkers,
+      viewport: {
+        x: vp.x,
+        y: vp.y,
+        zoom: vp.zoom,
+        width: rect.width,
+        height: rect.height,
+      },
+    })
+    if (resolved == null) return
+
     const timer = setTimeout(
       () => clearAttention(),
       mapAttentionPulseMs(pending.kind)
     )
     return () => clearTimeout(timer)
-  }, [pending, clearAttention])
+  }, [pending, homeworldMarkers, domNode, getViewport, clearAttention])
 
   useEffect(() => {
     return () => {

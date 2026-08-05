@@ -12,11 +12,14 @@ type MapAttentionRequestState = {
   clearAttention: () => void
 }
 
+/** Monotonic token so same-ms clicks never collide. */
+let nextAttentionToken = 0
+
 export const useMapAttentionRequestStore = create<MapAttentionRequestState>()((set) => ({
   pending: null,
   requestAttention: (spec) =>
     set({
-      pending: { ...spec, token: Date.now() },
+      pending: { ...spec, token: ++nextAttentionToken },
     }),
   clearAttention: () => set({ pending: null }),
 }))

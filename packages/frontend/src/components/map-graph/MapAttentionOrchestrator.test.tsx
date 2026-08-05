@@ -52,8 +52,10 @@ describe('MapAttentionOrchestrator', () => {
     expect(useMapAttentionRequestStore.getState().pending).toBeNull()
   })
 
-  it('auto-clears attention after MAP_ATTENTION_PULSE_MS', () => {
-    render(<MapAttentionOrchestrator homeworldMarkers={[]} />)
+  it('auto-clears attention after MAP_ATTENTION_PULSE_MS once resolvable', () => {
+    getViewport.mockReturnValue({ x: 400, y: 300, zoom: 1 })
+    const onScreenMarkers = [{ planetId: 7, x: 100, y: 200 }] as const
+    render(<MapAttentionOrchestrator homeworldMarkers={onScreenMarkers} />)
 
     act(() => {
       requestMapAttention({
@@ -62,6 +64,29 @@ describe('MapAttentionOrchestrator', () => {
       })
     })
     expect(useMapAttentionRequestStore.getState().pending).not.toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(MAP_ATTENTION_PULSE_MS)
+    })
+    expect(useMapAttentionRequestStore.getState().pending).toBeNull()
+  })
+
+  it('does not start pulse timer until homeworld markers are resolvable', () => {
+    const { rerender } = render(<MapAttentionOrchestrator homeworldMarkers={[]} />)
+
+    act(() => {
+      requestMapAttention({
+        kind: 'homeworld-planet',
+        planetId: 42,
+      })
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(MAP_ATTENTION_PULSE_MS)
+    })
+    expect(useMapAttentionRequestStore.getState().pending).not.toBeNull()
+
+    rerender(<MapAttentionOrchestrator homeworldMarkers={offScreenMarkers} />)
 
     act(() => {
       vi.advanceTimersByTime(MAP_ATTENTION_PULSE_MS)
