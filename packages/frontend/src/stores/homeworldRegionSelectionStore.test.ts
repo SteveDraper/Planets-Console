@@ -115,6 +115,45 @@ describe('homeworldRegionSelection store', () => {
     ])
   })
 
+  it('migrates pinned with stale indexes to empty indexes', async () => {
+    localStorage.setItem(
+      HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          regionSelectionPreset: 'pinned',
+          selectedSectorIndexes: [0, 2],
+          showEnvelopeOverlays: true,
+        },
+        version: 3,
+      })
+    )
+    await useHomeworldRegionSelectionStore.persist.rehydrate()
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
+      'pinned'
+    )
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
+  })
+
+  it('migrates unpinned with stale indexes to empty indexes', async () => {
+    localStorage.setItem(
+      HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          regionSelectionPreset: 'unpinned',
+          selectedSectorIndexes: [1, 3],
+          showEnvelopeOverlays: false,
+        },
+        version: 3,
+      })
+    )
+    await useHomeworldRegionSelectionStore.persist.rehydrate()
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
+      'unpinned'
+    )
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
+    expect(useHomeworldRegionSelectionStore.getState().showEnvelopeOverlays).toBe(false)
+  })
+
   it('ignores invalid preset values on setRegionSelectionState', () => {
     useHomeworldRegionSelectionStore.getState().setRegionSelectionState('pinned', [0])
     useHomeworldRegionSelectionStore

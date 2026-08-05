@@ -88,7 +88,14 @@ function migratePersistedState(
     selectedSectorIndexes = parseSelectedSectorIndexes(raw.selectedSectorIndexes)
   }
 
-  if (regionSelectionPreset === 'all') {
+  // ``all`` / ``pinned`` / ``unpinned`` never persist a concrete list -- derive
+  // at read (or materialize later for ``all``). Clear stale indexes from older
+  // writes that violated the invariant.
+  if (
+    regionSelectionPreset === 'all' ||
+    regionSelectionPreset === 'pinned' ||
+    regionSelectionPreset === 'unpinned'
+  ) {
     selectedSectorIndexes = []
   }
 
