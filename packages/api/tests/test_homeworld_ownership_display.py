@@ -38,7 +38,7 @@ def test_strength_filter_drops_weaker_members() -> None:
         ),
     }
     projected = project_sector_owner_sets_for_display(sets)
-    assert [m.owner_slot for m in projected[0]] == [1]
+    assert [m.owner_slot for m in projected[0].members] == [1]
 
 
 def test_cross_sector_trim_removes_settled_owner_elsewhere() -> None:
@@ -50,8 +50,8 @@ def test_cross_sector_trim_removes_settled_owner_elsewhere() -> None:
         ),
     }
     projected = project_sector_owner_sets_for_display(sets)
-    assert [m.owner_slot for m in projected[0]] == [3]
-    assert [m.owner_slot for m in projected[1]] == [5]
+    assert [m.owner_slot for m in projected[0].members] == [3]
+    assert [m.owner_slot for m in projected[1].members] == [5]
 
 
 def test_location_pin_settles_owner_for_cross_sector_trim() -> None:
@@ -66,8 +66,8 @@ def test_location_pin_settles_owner_for_cross_sector_trim() -> None:
         sets,
         settled_owner_home_by_slot={2: 0},
     )
-    assert projected[0] == ()
-    assert [m.owner_slot for m in projected[1]] == [4]
+    assert projected[0].members == ()
+    assert [m.owner_slot for m in projected[1].members] == [4]
 
 
 def test_settled_owner_homes_from_location_pins_unique_sector() -> None:
@@ -117,7 +117,7 @@ def test_preferred_upgrades_when_planet_location_definite() -> None:
         sets,
         location_definite_planet_ids=frozenset({42}),
     )
-    assert [m.owner_slot for m in projected[0]] == [3]
+    assert [m.owner_slot for m in projected[0].members] == [3]
 
 
 def test_asserted_settles_for_cross_sector_trim() -> None:
@@ -129,19 +129,26 @@ def test_asserted_settles_for_cross_sector_trim() -> None:
         ),
     }
     projected = project_sector_owner_sets_for_display(sets)
-    assert [m.owner_slot for m in projected[1]] == [7]
+    assert [m.owner_slot for m in projected[1].members] == [7]
 
 
 def test_winning_strength_emitted_only_when_unique() -> None:
     unique = (_member(1, PROVENANCE_SHIP_TRAVEL_ENVELOPE),)
-    assert ownership_winning_strength_for_members(unique) == "strong"
+    projected = project_sector_owner_sets_for_display({0: unique})
+    assert projected[0].winning_strength == "strong"
 
     ambiguous_strong = (
         _member(2, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
         _member(5, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
     )
-    assert ownership_winning_strength_for_members(ambiguous_strong) is None
+    projected = project_sector_owner_sets_for_display({0: ambiguous_strong})
+    assert projected[0].winning_strength is None
 
+    projected = project_sector_owner_sets_for_display({0: ()})
+    assert projected[0].winning_strength is None
+
+    assert ownership_winning_strength_for_members(unique) == "strong"
+    assert ownership_winning_strength_for_members(ambiguous_strong) is None
     empty: tuple[SectorOwnerMember, ...] = ()
     assert ownership_winning_strength_for_members(empty) is None
 
@@ -152,6 +159,17 @@ def test_winning_strength_omitted_for_ambiguous_preferred_upgrade() -> None:
         _member(3, PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP, planet_id=42),
         _member(4, PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP, planet_id=43),
     )
+    projected = project_sector_owner_sets_for_display(
+        {0: members},
+        location_definite_planet_ids=frozenset({42, 43}),
+    )
+    assert projected[0].winning_strength is None
+    unique = (_member(3, PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP, planet_id=42),)
+    projected = project_sector_owner_sets_for_display(
+        {0: unique},
+        location_definite_planet_ids=frozenset({42}),
+    )
+    assert projected[0].winning_strength == "strong"
     assert (
         ownership_winning_strength_for_members(
             members,
@@ -159,7 +177,6 @@ def test_winning_strength_omitted_for_ambiguous_preferred_upgrade() -> None:
         )
         is None
     )
-    unique = (_member(3, PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP, planet_id=42),)
     assert (
         ownership_winning_strength_for_members(
             unique,

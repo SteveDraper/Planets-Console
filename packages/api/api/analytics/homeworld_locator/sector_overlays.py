@@ -22,7 +22,7 @@ from api.analytics.homeworld_locator.models import (
     SectorOwnerMember,
 )
 from api.analytics.homeworld_locator.ownership_display import (
-    ownership_winning_strength_for_members,
+    SectorOwnerDisplayProjection,
     project_sector_owner_sets_for_display,
     settled_owner_homes_from_location_pins,
 )
@@ -588,7 +588,10 @@ def build_homeworld_sector_overlays(
             r_inner=r_inner,
             r_outer=r_outer,
         )
-        projected_members = owner_sets.get(index, ())
+        projection = owner_sets.get(
+            index,
+            SectorOwnerDisplayProjection(members=(), winning_strength=None),
+        )
         overlays.append(
             boundary_to_overlay(
                 kind=KIND_HOMEWORLD_SECTOR,
@@ -603,13 +606,10 @@ def build_homeworld_sector_overlays(
                 candidate_count=decision.candidate_count,
                 player_label=decision.player_label,
                 possible_owners=_possible_owners_for_sector(
-                    projected_members,
+                    projection.members,
                     label_by_slot=owner_labels,
                 ),
-                ownership_winning_strength=ownership_winning_strength_for_members(
-                    projected_members,
-                    location_definite_planet_ids=location_definite_planet_ids,
-                ),
+                ownership_winning_strength=projection.winning_strength,
             )
         )
 
