@@ -99,6 +99,8 @@ export function HomeworldLocatorTile({
     showEnvelopeOverlays,
     setUiPreset,
     setShowEnvelopeOverlays,
+    selectedSectorIndexSet,
+    toggleSectorIndex,
   } = useHomeworldRegionSelection({
     analyticScope,
     fetchEnabled: canExpand,
@@ -186,6 +188,8 @@ export function HomeworldLocatorTile({
             roster={roster}
             selectedPlanetId={selectedPlanetId}
             onSelectPlanet={selectHomeworldCandidateForMapAttention}
+            selectedSectorIndexes={selectedSectorIndexSet}
+            onToggleSectorIndex={toggleSectorIndex}
           />
         </div>
       ) : null}

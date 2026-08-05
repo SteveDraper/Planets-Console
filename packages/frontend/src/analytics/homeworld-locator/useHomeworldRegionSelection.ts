@@ -1,6 +1,7 @@
 /**
- * Owns homeworld region-selection overlay reads and materialize writes.
- * Store stays dumb (preset + indexes); Tile / Panel / MapGraph share this hook.
+ * Owns homeworld region-selection overlay reads and selection writes.
+ * Materialize effects (``all`` → selected, pinned/unpinned sync) are owned solely by
+ * ``useHomeworldRegionSelectionMaterialize`` -- call that once from MapGraph.
  */
 
 import { useCallback, useEffect, useMemo } from 'react'
@@ -26,8 +27,59 @@ const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
 
 export type UseHomeworldRegionSelectionOptions = {
   analyticScope: AnalyticShellScope | null
-  /** When false, skip overlay fetch and materialize effects. */
+  /** When false, skip overlay fetch. */
   fetchEnabled: boolean
+}
+
+/**
+ * Sole owner of region-selection materialize writes. Mount once (MapGraph) while
+ * homeworld overlays are being fetched for paint.
+ */
+export function useHomeworldRegionSelectionMaterialize(
+  overlays: readonly MapRegionOverlay[],
+  overlaysReady: boolean
+): void {
+  const regionSelectionPreset = useHomeworldRegionSelectionStore(
+    (s) => s.regionSelectionPreset
+  )
+  const storedSelectedSectorIndexes = useHomeworldRegionSelectionStore(
+    (s) => s.selectedSectorIndexes
+  )
+  const setRegionSelectionState = useHomeworldRegionSelectionStore(
+    (s) => s.setRegionSelectionState
+  )
+
+  // Init-only ``all`` → Selected + explicit full list once overlays are known.
+  useEffect(() => {
+    if (!overlaysReady) return
+    if (regionSelectionPreset !== 'all') return
+    setRegionSelectionState(
+      'selected',
+      materializeSectorIndexesForPreset(overlays, 'all')
+    )
+  }, [
+    overlaysReady,
+    regionSelectionPreset,
+    overlays,
+    setRegionSelectionState,
+  ])
+
+  // Keep pinned/unpinned stored indexes aligned with overlay facts.
+  useEffect(() => {
+    if (!overlaysReady) return
+    if (regionSelectionPreset !== 'pinned' && regionSelectionPreset !== 'unpinned') {
+      return
+    }
+    const next = materializeSectorIndexesForPreset(overlays, regionSelectionPreset)
+    if (sectorIndexListsEqual(storedSelectedSectorIndexes, next)) return
+    setRegionSelectionState(regionSelectionPreset, next)
+  }, [
+    overlaysReady,
+    regionSelectionPreset,
+    overlays,
+    storedSelectedSectorIndexes,
+    setRegionSelectionState,
+  ])
 }
 
 export function useHomeworldRegionSelection({
@@ -61,38 +113,6 @@ export function useHomeworldRegionSelection({
   )
 
   const overlaysReady = fetchEnabled && mapQuery.isSuccess
-
-  // Init-only ``all`` → Selected + explicit full list once overlays are known.
-  useEffect(() => {
-    if (!overlaysReady) return
-    if (regionSelectionPreset !== 'all') return
-    setRegionSelectionState(
-      'selected',
-      materializeSectorIndexesForPreset(overlays, 'all')
-    )
-  }, [
-    overlaysReady,
-    regionSelectionPreset,
-    overlays,
-    setRegionSelectionState,
-  ])
-
-  // Keep pinned/unpinned stored indexes aligned with overlay facts.
-  useEffect(() => {
-    if (!overlaysReady) return
-    if (regionSelectionPreset !== 'pinned' && regionSelectionPreset !== 'unpinned') {
-      return
-    }
-    const next = materializeSectorIndexesForPreset(overlays, regionSelectionPreset)
-    if (sectorIndexListsEqual(storedSelectedSectorIndexes, next)) return
-    setRegionSelectionState(regionSelectionPreset, next)
-  }, [
-    overlaysReady,
-    regionSelectionPreset,
-    overlays,
-    storedSelectedSectorIndexes,
-    setRegionSelectionState,
-  ])
 
   const selectedSectorIndexes = useMemo(
     () =>

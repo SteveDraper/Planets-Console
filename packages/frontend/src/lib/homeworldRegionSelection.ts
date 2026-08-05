@@ -3,7 +3,7 @@
  * Replaces the superseded four-way region display mode.
  *
  * Internal preset ``all`` is init-only (UI shows Selected). Overlays-ready materialize
- * writes ``selected`` + an explicit index list via ``useHomeworldRegionSelection``.
+ * writes ``selected`` + an explicit index list via ``useHomeworldRegionSelectionMaterialize``.
  *
  * Lives under ``lib/`` so the selection store does not import from analytics.
  */

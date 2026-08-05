@@ -20,7 +20,6 @@ import { HomeworldCandidateRows } from './HomeworldCandidateRows'
 import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
 import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
-import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'
 import { planetPositionsFromBaseMap } from './planetPositionsFromBaseMap'
 import {
   fetchHomeworldLocatorMapDataResponse,
@@ -37,6 +36,9 @@ export type HomeworldLocatorPanelProps = {
   roster: readonly PerspectiveRow[]
   selectedPlanetId: number | null
   onSelectPlanet: (planetId: number) => void
+  /** Region selection from Tile (single selection-API owner under the sidebar). */
+  selectedSectorIndexes: ReadonlySet<number>
+  onToggleSectorIndex: (sectorIndex: number) => void
 }
 
 export function HomeworldLocatorPanel({
@@ -45,6 +47,8 @@ export function HomeworldLocatorPanel({
   roster,
   selectedPlanetId,
   onSelectPlanet,
+  selectedSectorIndexes,
+  onToggleSectorIndex,
 }: HomeworldLocatorPanelProps) {
   const tableQuery = useQuery({
     queryKey: ['analytic', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'table', analyticScope] as const,
@@ -67,11 +71,6 @@ export function HomeworldLocatorPanel({
     queryKey: ['analytic', BASE_MAP_ANALYTIC_ID, 'map', analyticScope] as const,
     queryFn: () => fetchAnalyticMap(BASE_MAP_ANALYTIC_ID, analyticScope!),
     enabled: fetchEnabled && analyticScope != null && needsBaseMap,
-  })
-
-  const { selectedSectorIndexSet, toggleSectorIndex } = useHomeworldRegionSelection({
-    analyticScope,
-    fetchEnabled,
   })
 
   const planetPositions = useMemo(() => {
@@ -169,8 +168,8 @@ export function HomeworldLocatorPanel({
           selectedPlanetId={selectedPlanetId}
           onSelectPlanet={onSelectPlanet}
           compact
-          selectedSectorIndexes={selectedSectorIndexSet}
-          onToggleSectorIndex={toggleSectorIndex}
+          selectedSectorIndexes={selectedSectorIndexes}
+          onToggleSectorIndex={onToggleSectorIndex}
         />
       ) : panelModel?.kind === 'flat' ? (
         <HomeworldCandidateRows

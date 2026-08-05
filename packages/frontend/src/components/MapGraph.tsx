@@ -41,7 +41,10 @@ import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/Homeworl
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
 import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
-import { useHomeworldRegionSelection } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
+import {
+  useHomeworldRegionSelection,
+  useHomeworldRegionSelectionMaterialize,
+} from '../analytics/homeworld-locator/useHomeworldRegionSelection'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
@@ -253,10 +256,17 @@ function MapGraphFlow({
     regionSelectionPreset,
     selectedSectorIndexes,
     showEnvelopeOverlays,
+    overlays: homeworldSelectionOverlays,
+    overlaysReady: homeworldSelectionOverlaysReady,
   } = useHomeworldRegionSelection({
     analyticScope,
     fetchEnabled: homeworldEnabled,
   })
+  // Sole materialize-effect owner (Tile/Panel only read + user actions).
+  useHomeworldRegionSelectionMaterialize(
+    homeworldSelectionOverlays,
+    homeworldSelectionOverlaysReady
+  )
 
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays

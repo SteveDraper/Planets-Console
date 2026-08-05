@@ -81,6 +81,8 @@ function renderPanel(
       roster={roster}
       selectedPlanetId={null}
       onSelectPlanet={() => undefined}
+      selectedSectorIndexes={new Set()}
+      onToggleSectorIndex={() => undefined}
     />,
     { wrapper }
   )

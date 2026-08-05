@@ -10,7 +10,10 @@ import {
 } from '../../stores/homeworldRegionSelectionStore'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 import { fetchHomeworldLocatorMap } from './api'
-import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'
+import {
+  useHomeworldRegionSelection,
+  useHomeworldRegionSelectionMaterialize,
+} from './useHomeworldRegionSelection'
 
 vi.mock('./api', () => ({
   fetchHomeworldLocatorMap: vi.fn(),
@@ -52,6 +55,16 @@ function createWrapper(client: QueryClient) {
   }
 }
 
+/** Selection read/actions + sole materialize owner (mirrors MapGraph wiring). */
+function useSelectionWithMaterialize(fetchEnabled: boolean) {
+  const selection = useHomeworldRegionSelection({
+    analyticScope: scope,
+    fetchEnabled,
+  })
+  useHomeworldRegionSelectionMaterialize(selection.overlays, selection.overlaysReady)
+  return selection
+}
+
 describe('useHomeworldRegionSelection', () => {
   beforeEach(() => {
     localStorage.removeItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)
@@ -74,10 +87,9 @@ describe('useHomeworldRegionSelection', () => {
 
   it('materializes all to selected + full indexes when overlays are ready', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const { result } = renderHook(
-      () => useHomeworldRegionSelection({ analyticScope: scope, fetchEnabled: true }),
-      { wrapper: createWrapper(client) }
-    )
+    const { result } = renderHook(() => useSelectionWithMaterialize(true), {
+      wrapper: createWrapper(client),
+    })
 
     expect(result.current.uiPreset).toBe('selected')
 
@@ -93,12 +105,28 @@ describe('useHomeworldRegionSelection', () => {
     expect(result.current.selectedSectorIndexes).toEqual([0, 1])
   })
 
-  it('materializes pinned on UI preset change and rematerializes on overlay facts', async () => {
+  it('does not materialize when only the read hook is mounted', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(
       () => useHomeworldRegionSelection({ analyticScope: scope, fetchEnabled: true }),
       { wrapper: createWrapper(client) }
     )
+
+    await waitFor(() => {
+      expect(result.current.overlaysReady).toBe(true)
+    })
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('all')
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
+    // Effective selection still reflects ``all`` overlays without a store write.
+    expect(result.current.selectedSectorIndexes).toEqual([0, 1])
+    expect(result.current.uiPreset).toBe('selected')
+  })
+
+  it('materializes pinned on UI preset change and rematerializes on overlay facts', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useSelectionWithMaterialize(true), {
+      wrapper: createWrapper(client),
+    })
 
     await waitFor(() => {
       expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
@@ -121,10 +149,9 @@ describe('useHomeworldRegionSelection', () => {
 
   it('forces selected and toggles against the effective set', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const { result } = renderHook(
-      () => useHomeworldRegionSelection({ analyticScope: scope, fetchEnabled: true }),
-      { wrapper: createWrapper(client) }
-    )
+    const { result } = renderHook(() => useSelectionWithMaterialize(true), {
+      wrapper: createWrapper(client),
+    })
 
     await waitFor(() => {
       expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([
