@@ -129,6 +129,7 @@ describe('homeworldRegionSelection', () => {
           homeworldEnabled: true,
           mapLayersPending: true,
           homeworldMapLayerSucceeded: false,
+          displayMapFrameIsLive: true,
         })
       ).toBe(false)
       expect(
@@ -137,6 +138,7 @@ describe('homeworldRegionSelection', () => {
           mapLayersPending: true,
           // Even if a stale success bit were true, pending still blocks.
           homeworldMapLayerSucceeded: true,
+          displayMapFrameIsLive: true,
         })
       ).toBe(false)
     })
@@ -147,18 +149,31 @@ describe('homeworldRegionSelection', () => {
           homeworldEnabled: true,
           mapLayersPending: false,
           homeworldMapLayerSucceeded: false,
+          displayMapFrameIsLive: true,
         })
       ).toBe(false)
     })
 
-    it('is true on settled success (including success-empty overlays)', () => {
+    it('is true on settled live success (including success-empty overlays)', () => {
       expect(
         homeworldOverlaysReadyForMaterialize({
           homeworldEnabled: true,
           mapLayersPending: false,
           homeworldMapLayerSucceeded: true,
+          displayMapFrameIsLive: true,
         })
       ).toBe(true)
+    })
+
+    it('is false on a retained frame even when homeworld succeeded and not pending', () => {
+      expect(
+        homeworldOverlaysReadyForMaterialize({
+          homeworldEnabled: true,
+          mapLayersPending: false,
+          homeworldMapLayerSucceeded: true,
+          displayMapFrameIsLive: false,
+        })
+      ).toBe(false)
     })
 
     it('is false when the homeworld analytic is disabled', () => {
@@ -167,6 +182,7 @@ describe('homeworldRegionSelection', () => {
           homeworldEnabled: false,
           mapLayersPending: false,
           homeworldMapLayerSucceeded: true,
+          displayMapFrameIsLive: true,
         })
       ).toBe(false)
     })

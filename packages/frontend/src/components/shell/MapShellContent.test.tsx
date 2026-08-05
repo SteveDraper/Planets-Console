@@ -74,12 +74,13 @@ describe('MapShellContent', () => {
       phase: 'showing-map',
       displayMapData,
       showDeferredPending: false,
+      displayMapFrameIsLive: true,
     })
 
     expect(screen.getByTestId('map-graph')).toBeInTheDocument()
   })
 
-  it('forwards shell analyticScope, roster, mapLayersPending, and homeworldMapLayerSucceeded to MapGraph', () => {
+  it('forwards shell analyticScope, roster, mapLayersPending, homeworldMapLayerSucceeded, and displayMapFrameIsLive to MapGraph', () => {
     mapGraphPropsSpy.mockClear()
     render(
       <MapShellContent
@@ -87,6 +88,7 @@ describe('MapShellContent', () => {
           phase: 'showing-map',
           displayMapData,
           showDeferredPending: true,
+          displayMapFrameIsLive: true,
         }}
         analyticScope={sampleScope}
         roster={sampleRoster}
@@ -105,6 +107,24 @@ describe('MapShellContent', () => {
         roster: sampleRoster,
         mapLayersPending: true,
         homeworldMapLayerSucceeded: true,
+        displayMapFrameIsLive: true,
+      })
+    )
+  })
+
+  it('forwards displayMapFrameIsLive false when showing a retained frame', () => {
+    mapGraphPropsSpy.mockClear()
+    renderShowingMap({
+      phase: 'showing-map',
+      displayMapData,
+      showDeferredPending: false,
+      displayMapFrameIsLive: false,
+    })
+
+    expect(mapGraphPropsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayMapFrameIsLive: false,
+        mapLayersPending: false,
       })
     )
   })
@@ -115,6 +135,7 @@ describe('MapShellContent', () => {
       phase: 'showing-map',
       displayMapData,
       showDeferredPending: false,
+      displayMapFrameIsLive: true,
     })
 
     expect(mapGraphPropsSpy).toHaveBeenCalledWith(
@@ -132,6 +153,7 @@ describe('MapShellContent', () => {
         baselineTurn: 4,
       },
       showDeferredPending: false,
+      displayMapFrameIsLive: true,
     })
 
     expect(screen.getByRole('status')).toHaveTextContent(/Baseline degraded/)
@@ -143,6 +165,7 @@ describe('MapShellContent', () => {
       phase: 'showing-map',
       displayMapData,
       showDeferredPending: false,
+      displayMapFrameIsLive: true,
     })
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
@@ -172,6 +195,7 @@ describe('MapShellContent', () => {
       phase: 'showing-map',
       displayMapData,
       showDeferredPending: false,
+      displayMapFrameIsLive: true,
       layerError: new Error(
         'Homeworld locator: turn 59 is not stored (evidence chain requires contiguous turns)'
       ),
@@ -191,6 +215,7 @@ describe('MapShellContent', () => {
         baselineTurn: 4,
       },
       showDeferredPending: false,
+      displayMapFrameIsLive: true,
       layerError: new Error('Homeworld locator: turn 59 is not stored'),
     })
 

@@ -99,6 +99,7 @@ function MapShellShowingMap({
           data={mapShellView.displayMapData}
           mapLayersPending={mapShellView.showDeferredPending}
           homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
+          displayMapFrameIsLive={mapShellView.displayMapFrameIsLive}
           className="h-full w-full min-h-0"
           analyticScope={analyticScope}
           roster={roster}

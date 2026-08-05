@@ -82,6 +82,12 @@ type MapGraphProps = {
    * Required so failure-empty overlays do not consume init-only ``all``.
    */
   homeworldMapLayerSucceeded?: boolean
+  /**
+   * True when ``data`` is the live query frame; false when showing a retained
+   * prior-turn frame. Required so materialize does not consume overlays from
+   * a stale retained map while live queries catch up.
+   */
+  displayMapFrameIsLive?: boolean
   /** Shell-owned scope; required for homeworld map context menu asserts. */
   analyticScope: AnalyticShellScope
   /** Shell-owned roster for homeworld ownership menu labels. */
@@ -104,6 +110,7 @@ export function MapGraph({
   className,
   mapLayersPending = false,
   homeworldMapLayerSucceeded = false,
+  displayMapFrameIsLive = true,
   analyticScope,
   roster,
   futureTurnOffset = 0,
@@ -164,6 +171,7 @@ export function MapGraph({
             cartography={cartography}
             mapLayersPending={mapLayersPending}
             homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
+            displayMapFrameIsLive={displayMapFrameIsLive}
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
             onInitialFitDone={onInitialFitDone}
@@ -188,6 +196,7 @@ type MapGraphFlowProps = {
   cartography?: StellarCartographyMapContext
   mapLayersPending: boolean
   homeworldMapLayerSucceeded: boolean
+  displayMapFrameIsLive: boolean
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   onInitialFitDone: () => void
@@ -253,6 +262,7 @@ function MapGraphFlow({
   cartography,
   mapLayersPending,
   homeworldMapLayerSucceeded,
+  displayMapFrameIsLive,
   onMapZoomChange,
   onSetZoomReady,
   onInitialFitDone,
@@ -283,6 +293,7 @@ function MapGraphFlow({
     [data.regionOverlays]
   )
   // Success (not merely !pending): failure-empty must not consume init-only ``all``.
+  // Live frame only: retained prior-turn overlays must not consume ``all``.
   // Sole materialize-effect owner (Tile uses shared map-overlay observer + selection hook).
   useHomeworldRegionSelectionMaterialize(
     homeworldSectorOverlays,
@@ -290,6 +301,7 @@ function MapGraphFlow({
       homeworldEnabled,
       mapLayersPending,
       homeworldMapLayerSucceeded,
+      displayMapFrameIsLive,
     })
   )
   // Shared store→effective indexes (same hook as sidebar selection).

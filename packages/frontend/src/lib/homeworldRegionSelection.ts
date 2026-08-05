@@ -166,14 +166,18 @@ export function toggleSectorIndexInSelection(
  * Failure-empty (errored layer omitted from combined) must not consume ``all``.
  * Success-empty (zero sectors / non-circular) may still materialize to ``selected`` + ``[]``.
  * ``mapLayersPending`` continues to block the base-map-only loading race.
+ * ``displayMapFrameIsLive`` blocks materialize while the shell shows a retained
+ * prior-turn frame (deferred pending is forced false on retained frames).
  */
 export function homeworldOverlaysReadyForMaterialize(input: {
   homeworldEnabled: boolean
   mapLayersPending: boolean
   homeworldMapLayerSucceeded: boolean
+  displayMapFrameIsLive: boolean
 }): boolean {
   return (
     input.homeworldEnabled &&
+    input.displayMapFrameIsLive &&
     !input.mapLayersPending &&
     input.homeworldMapLayerSucceeded
   )

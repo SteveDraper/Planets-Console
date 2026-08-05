@@ -18,6 +18,11 @@ export type MapShellView =
       phase: 'showing-map'
       displayMapData: CombinedMapData
       showDeferredPending: boolean
+      /**
+       * True when ``displayMapData`` is the live query result; false when showing a
+       * retained prior frame (``showDeferredPending`` is forced false on retained).
+       */
+      displayMapFrameIsLive: boolean
       /** Present when at least one map analytic failed while others still display. */
       layerError?: unknown
     }
@@ -65,12 +70,14 @@ export function hasDisplayableMapData(data: CombinedMapData | null | undefined):
 function showingMapView(
   displayMapData: CombinedMapData,
   showDeferredPending: boolean,
+  displayMapFrameIsLive: boolean,
   layerError?: unknown
 ): MapShellView {
   return {
     phase: 'showing-map',
     displayMapData,
     showDeferredPending,
+    displayMapFrameIsLive,
     ...(layerError !== undefined ? { layerError } : {}),
   }
 }
@@ -99,7 +106,12 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
   } = input
 
   if (frame.source === 'retained') {
-    return showingMapView(frame.data, false, mapHasError ? mapError : undefined)
+    return showingMapView(
+      frame.data,
+      false,
+      false,
+      mapHasError ? mapError : undefined
+    )
   }
 
   const turnEnsureLoading = deriveTurnEnsureLoadingView({
@@ -129,6 +141,7 @@ export function deriveMapShellView(input: DeriveMapShellViewInput): MapShellView
   return showingMapView(
     frame.data,
     mapPending,
+    true,
     mapHasError ? mapError : undefined
   )
 }
