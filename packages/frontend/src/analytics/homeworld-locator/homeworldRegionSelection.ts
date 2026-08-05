@@ -1,6 +1,9 @@
 /**
  * Homeworld region selection: sticky preset + selected sector indexes + envelope toggle.
  * Replaces the superseded four-way region display mode.
+ *
+ * Internal preset ``all`` is init-only (UI shows Selected). Overlays-ready materialize
+ * writes ``selected`` + an explicit index list via ``useHomeworldRegionSelection``.
  */
 
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
@@ -10,16 +13,17 @@ import {
   parseHomeworldSectorIndex,
 } from './homeworldSectorIndex'
 
-export type HomeworldRegionSelectionPreset = 'pinned' | 'unpinned' | 'selected'
+/** Full persisted / internal preset set (includes init-only ``all``). */
+export type HomeworldRegionSelectionPreset = 'all' | 'pinned' | 'unpinned' | 'selected'
 
-export const HOMEWORLD_REGION_SELECTION_PRESETS: readonly HomeworldRegionSelectionPreset[] = [
-  'pinned',
-  'unpinned',
-  'selected',
-] as const
+/** Presets exposed on the Region selection control (never ``all``). */
+export type HomeworldRegionSelectionUiPreset = 'pinned' | 'unpinned' | 'selected'
+
+export const HOMEWORLD_REGION_SELECTION_UI_PRESETS: readonly HomeworldRegionSelectionUiPreset[] =
+  ['pinned', 'unpinned', 'selected'] as const
 
 export const HOMEWORLD_REGION_SELECTION_PRESET_LABELS: Record<
-  HomeworldRegionSelectionPreset,
+  HomeworldRegionSelectionUiPreset,
   string
 > = {
   pinned: 'Pinned',
@@ -27,8 +31,9 @@ export const HOMEWORLD_REGION_SELECTION_PRESET_LABELS: Record<
   selected: 'Selected',
 }
 
+/** Fresh install / migrated default: init-only ``all`` until overlays materialize. */
 export function defaultHomeworldRegionSelectionPreset(): HomeworldRegionSelectionPreset {
-  return 'selected'
+  return 'all'
 }
 
 export function defaultShowEnvelopeOverlays(): boolean {
@@ -38,7 +43,25 @@ export function defaultShowEnvelopeOverlays(): boolean {
 export function isHomeworldRegionSelectionPreset(
   value: unknown
 ): value is HomeworldRegionSelectionPreset {
+  return (
+    value === 'all' ||
+    value === 'pinned' ||
+    value === 'unpinned' ||
+    value === 'selected'
+  )
+}
+
+export function isHomeworldRegionSelectionUiPreset(
+  value: unknown
+): value is HomeworldRegionSelectionUiPreset {
   return value === 'pinned' || value === 'unpinned' || value === 'selected'
+}
+
+/** Map internal preset to the Region selection control value (``all`` → Selected). */
+export function regionSelectionPresetForUi(
+  preset: HomeworldRegionSelectionPreset
+): HomeworldRegionSelectionUiPreset {
+  return preset === 'all' ? 'selected' : preset
 }
 
 /** True when the sector is pinned (determined HW + known owner). Missing flag = unpinned. */
@@ -61,7 +84,7 @@ export function allHomeworldSectorIndexes(
 
 /**
  * Sector indexes matching a rewrite preset.
- * ``pinned`` / ``unpinned`` only; ``selected`` does not rewrite from overlays.
+ * ``pinned`` / ``unpinned`` only; ``selected`` / ``all`` use other helpers.
  */
 export function sectorIndexesForPreset(
   overlays: readonly MapRegionOverlay[],
@@ -79,23 +102,40 @@ export function sectorIndexesForPreset(
 }
 
 /**
+ * Materialize the outline multi-select set for a preset rewrite.
+ * ``selected`` keeps ``currentIndexes`` (caller supplies the prior effective set).
+ */
+export function materializeSectorIndexesForPreset(
+  overlays: readonly MapRegionOverlay[],
+  preset: HomeworldRegionSelectionPreset,
+  currentIndexes: readonly number[] = []
+): number[] {
+  if (preset === 'all') return allHomeworldSectorIndexes(overlays)
+  if (preset === 'pinned' || preset === 'unpinned') {
+    return sectorIndexesForPreset(overlays, preset)
+  }
+  return [...currentIndexes]
+}
+
+/**
  * Resolve the outline multi-select set for paint / panel chrome.
  *
- * - ``pinned`` / ``unpinned``: derive from overlay facts (controller does not store indexes).
- * - ``selected`` + ``null`` stored: all current homeworld sector indexes (session default).
- * - ``selected`` + array: explicit multi-select (including ``[]`` = none).
+ * - ``all``: every current homeworld sector (until materialize writes ``selected``).
+ * - ``pinned`` / ``unpinned``: derive from overlay facts (hook also writes these).
+ * - ``selected``: stored concrete multi-select (including ``[]`` = none).
  */
 export function effectiveSelectedSectorIndexes(
   overlays: readonly MapRegionOverlay[],
   preset: HomeworldRegionSelectionPreset,
-  storedSelectedSectorIndexes: readonly number[] | null
+  storedSelectedSectorIndexes: readonly number[]
 ): number[] {
+  if (preset === 'all') {
+    return allHomeworldSectorIndexes(overlays)
+  }
   if (preset === 'pinned' || preset === 'unpinned') {
     return sectorIndexesForPreset(overlays, preset)
   }
-  return storedSelectedSectorIndexes != null
-    ? [...storedSelectedSectorIndexes]
-    : allHomeworldSectorIndexes(overlays)
+  return [...storedSelectedSectorIndexes]
 }
 
 /**
@@ -149,6 +189,17 @@ export function applyHomeworldRegionSelection(
     })
   }
   return result
+}
+
+export function sectorIndexListsEqual(
+  a: readonly number[],
+  b: readonly number[]
+): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
 }
 
 export { HOMEWORLD_SECTOR_KIND, isHomeworldSectorOverlay }

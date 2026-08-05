@@ -10,7 +10,6 @@ import { fetchAnalyticMap } from '../../api/bff'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
-import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelection'
 import { BASE_MAP_ANALYTIC_ID } from '../mapAnalyticIds'
 import { fetchHomeworldLocatorTable } from './api'
 import {
@@ -19,9 +18,9 @@ import {
 } from './constants'
 import { HomeworldCandidateRows } from './HomeworldCandidateRows'
 import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
-import { effectiveSelectedSectorIndexes } from './homeworldRegionSelection'
 import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
+import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'
 import { planetPositionsFromBaseMap } from './planetPositionsFromBaseMap'
 import {
   fetchHomeworldLocatorMapDataResponse,
@@ -70,25 +69,10 @@ export function HomeworldLocatorPanel({
     enabled: fetchEnabled && analyticScope != null && needsBaseMap,
   })
 
-  const regionSelectionPreset = useHomeworldRegionSelectionStore(
-    (s) => s.regionSelectionPreset
-  )
-  const storedSelectedSectorIndexes = useHomeworldRegionSelectionStore(
-    (s) => s.selectedSectorIndexes
-  )
-  const toggleSectorIndex = useHomeworldRegionSelectionStore((s) => s.toggleSectorIndex)
-
-  const selectedSectorIndexSet = useMemo(
-    () =>
-      new Set(
-        effectiveSelectedSectorIndexes(
-          overlays,
-          regionSelectionPreset,
-          storedSelectedSectorIndexes
-        )
-      ),
-    [overlays, regionSelectionPreset, storedSelectedSectorIndexes]
-  )
+  const { selectedSectorIndexSet, toggleSectorIndex } = useHomeworldRegionSelection({
+    analyticScope,
+    fetchEnabled,
+  })
 
   const planetPositions = useMemo(() => {
     if (!baseMapQuery.isSuccess) return EMPTY_POSITIONS
@@ -186,9 +170,7 @@ export function HomeworldLocatorPanel({
           onSelectPlanet={onSelectPlanet}
           compact
           selectedSectorIndexes={selectedSectorIndexSet}
-          onToggleSectorIndex={(sectorIndex) =>
-            toggleSectorIndex(sectorIndex, overlays)
-          }
+          onToggleSectorIndex={toggleSectorIndex}
         />
       ) : panelModel?.kind === 'flat' ? (
         <HomeworldCandidateRows

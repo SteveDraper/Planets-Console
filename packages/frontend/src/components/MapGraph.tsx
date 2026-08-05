@@ -41,9 +41,9 @@ import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/Homeworl
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
 import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
+import { useHomeworldRegionSelection } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
-import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelection'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
 import {
@@ -247,23 +247,22 @@ function MapGraphFlow({
     [frame, policy, wormholeLineRevealKey]
   )
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
-  const regionSelectionPreset = useHomeworldRegionSelectionStore(
-    (s) => s.regionSelectionPreset
-  )
-  const selectedSectorIndexes = useHomeworldRegionSelectionStore(
-    (s) => s.selectedSectorIndexes
-  )
-  const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
-    (s) => s.showEnvelopeOverlays
-  )
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
+  const {
+    regionSelectionPreset,
+    selectedSectorIndexes,
+    showEnvelopeOverlays,
+  } = useHomeworldRegionSelection({
+    analyticScope,
+    fetchEnabled: homeworldEnabled,
+  })
 
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays
 
-  // Visibility prefs → region selection (derive at paint) + envelope toggle → assert-focus.
+  // Visibility prefs → region selection + envelope toggle → assert-focus.
   const regionOverlays = useMemo(
     () =>
       buildHomeworldRegionOverlaysForPaint({

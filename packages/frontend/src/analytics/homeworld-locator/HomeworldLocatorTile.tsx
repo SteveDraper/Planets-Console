@@ -1,5 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
@@ -13,18 +12,11 @@ import { homeworldInactiveHint } from './constants'
 import { selectHomeworldCandidateForMapAttention } from './homeworldCandidateAttention'
 import {
   HOMEWORLD_REGION_SELECTION_PRESET_LABELS,
-  HOMEWORLD_REGION_SELECTION_PRESETS,
-  type HomeworldRegionSelectionPreset,
+  HOMEWORLD_REGION_SELECTION_UI_PRESETS,
+  type HomeworldRegionSelectionUiPreset,
 } from './homeworldRegionSelection'
-import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelection'
+import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
-import {
-  fetchHomeworldLocatorMapDataResponse,
-  homeworldLocatorMapQueryKey,
-} from './mapAnalytic'
-
-const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
 
 const EMPTY_ROSTER: readonly PerspectiveRow[] = []
 
@@ -42,14 +34,14 @@ function HomeworldRegionSelectionControl({
   value,
   onChange,
 }: {
-  value: HomeworldRegionSelectionPreset
-  onChange: (preset: HomeworldRegionSelectionPreset) => void
+  value: HomeworldRegionSelectionUiPreset
+  onChange: (preset: HomeworldRegionSelectionUiPreset) => void
 }) {
   return (
     <DisplayModeControl
       label="Region selection"
       ariaLabel="Homeworld region selection"
-      modes={HOMEWORLD_REGION_SELECTION_PRESETS}
+      modes={HOMEWORLD_REGION_SELECTION_UI_PRESETS}
       modeLabels={HOMEWORLD_REGION_SELECTION_PRESET_LABELS}
       value={value}
       onChange={onChange}
@@ -77,18 +69,6 @@ export function HomeworldLocatorTile({
 
   const [expanded, setExpanded] = useState(false)
   const canExpand = canToggle && enabled
-  const regionSelectionPreset = useHomeworldRegionSelectionStore(
-    (s) => s.regionSelectionPreset
-  )
-  const setRegionSelectionPreset = useHomeworldRegionSelectionStore(
-    (s) => s.setRegionSelectionPreset
-  )
-  const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
-    (s) => s.showEnvelopeOverlays
-  )
-  const setShowEnvelopeOverlays = useHomeworldRegionSelectionStore(
-    (s) => s.setShowEnvelopeOverlays
-  )
 
   const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
@@ -114,21 +94,15 @@ export function HomeworldLocatorTile({
     turnUsernamesByPlayerId: null,
   })
 
-  const mapQuery = useQuery({
-    queryKey: homeworldLocatorMapQueryKey(analyticScope),
-    queryFn: () => fetchHomeworldLocatorMapDataResponse(analyticScope!),
-    enabled: canExpand && analyticScope != null,
+  const {
+    uiPreset,
+    showEnvelopeOverlays,
+    setUiPreset,
+    setShowEnvelopeOverlays,
+  } = useHomeworldRegionSelection({
+    analyticScope,
+    fetchEnabled: canExpand,
   })
-  const regionOverlays = useMemo(
-    () => mapQuery.data?.regionOverlays ?? EMPTY_OVERLAYS,
-    [mapQuery.data?.regionOverlays]
-  )
-  const handleRegionSelectionPresetChange = useCallback(
-    (preset: HomeworldRegionSelectionPreset) => {
-      setRegionSelectionPreset(preset, regionOverlays)
-    },
-    [regionOverlays, setRegionSelectionPreset]
-  )
 
   const showExpandedBody = canExpand && expanded
   const chevronPointsDown = showExpandedBody
@@ -203,8 +177,8 @@ export function HomeworldLocatorTile({
             <span>Show overlays</span>
           </label>
           <HomeworldRegionSelectionControl
-            value={regionSelectionPreset}
-            onChange={handleRegionSelectionPresetChange}
+            value={uiPreset}
+            onChange={setUiPreset}
           />
           <HomeworldLocatorPanel
             analyticScope={analyticScope}

@@ -22,10 +22,11 @@ export type HomeworldRegionPaintInput = {
   /** Region selection preset from the homeworld region selection store. */
   regionSelectionPreset: HomeworldRegionSelectionPreset
   /**
-   * Explicit multi-select when preset is ``selected`` (``null`` = all sectors).
-   * Ignored for pinned/unpinned (derived from overlay facts).
+   * Stored multi-select indexes. Under ``all`` / pinned / unpinned, paint still
+   * resolves via ``effectiveSelectedSectorIndexes`` until the selection hook
+   * materializes a concrete ``selected`` list.
    */
-  selectedSectorIndexes: readonly number[] | null
+  selectedSectorIndexes: readonly number[]
   /** Show overlays checkbox: 81/162 disks for selected sectors only. */
   showEnvelopeOverlays: boolean
   /**

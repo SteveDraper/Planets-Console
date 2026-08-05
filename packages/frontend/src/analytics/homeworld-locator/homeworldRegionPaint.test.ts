@@ -76,15 +76,15 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
     expect(painted.map((o) => o.id)).toEqual(['homeworld-sector-0', 'vis-1'])
   })
 
-  it('treats selected + null stored as all homeworld sectors', () => {
+  it('treats all preset as every homeworld sector until materialized', () => {
     const painted = buildHomeworldRegionOverlaysForPaint({
       overlays: [
         sector('homeworld-sector-0', { disks }),
         sector('homeworld-sector-2', { disks }),
         visibilityOverlay(),
       ],
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: null,
+      regionSelectionPreset: 'all',
+      selectedSectorIndexes: [],
       showEnvelopeOverlays: true,
       assertFocusSelection: null,
       homeworldMarkers: [],
@@ -104,7 +104,7 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
         visibilityOverlay(),
       ],
       regionSelectionPreset: 'pinned',
-      selectedSectorIndexes: null,
+      selectedSectorIndexes: [],
       showEnvelopeOverlays: true,
       assertFocusSelection: null,
       homeworldMarkers: [],

@@ -8,7 +8,10 @@ import {
   defaultShowEnvelopeOverlays,
   effectiveSelectedSectorIndexes,
   isHomeworldRegionSelectionPreset,
+  isHomeworldRegionSelectionUiPreset,
   isHomeworldSectorPinned,
+  materializeSectorIndexesForPreset,
+  regionSelectionPresetForUi,
   sectorIndexesForPreset,
   toggleSectorIndexInSelection,
 } from './homeworldRegionSelection'
@@ -58,18 +61,24 @@ function visibilityOverlay(): MapRegionOverlay {
 }
 
 describe('homeworldRegionSelection', () => {
-  it('defaults preset to selected and envelopes on', () => {
-    expect(defaultHomeworldRegionSelectionPreset()).toBe('selected')
+  it('defaults to init-only all and envelopes on', () => {
+    expect(defaultHomeworldRegionSelectionPreset()).toBe('all')
     expect(defaultShowEnvelopeOverlays()).toBe(true)
   })
 
-  it('recognizes valid preset strings', () => {
+  it('recognizes internal and UI preset strings', () => {
+    expect(isHomeworldRegionSelectionPreset('all')).toBe(true)
     expect(isHomeworldRegionSelectionPreset('pinned')).toBe(true)
     expect(isHomeworldRegionSelectionPreset('unpinned')).toBe(true)
     expect(isHomeworldRegionSelectionPreset('selected')).toBe(true)
     expect(isHomeworldRegionSelectionPreset('off')).toBe(false)
-    expect(isHomeworldRegionSelectionPreset('all')).toBe(false)
-    expect(isHomeworldRegionSelectionPreset(null)).toBe(false)
+    expect(isHomeworldRegionSelectionUiPreset('selected')).toBe(true)
+    expect(isHomeworldRegionSelectionUiPreset('all')).toBe(false)
+  })
+
+  it('maps all to Selected for the UI control', () => {
+    expect(regionSelectionPresetForUi('all')).toBe('selected')
+    expect(regionSelectionPresetForUi('pinned')).toBe('pinned')
   })
 
   it('treats missing isPinned as unpinned', () => {
@@ -87,6 +96,9 @@ describe('homeworldRegionSelection', () => {
     expect(allHomeworldSectorIndexes(all)).toEqual([0, 2])
     expect(sectorIndexesForPreset(all, 'pinned')).toEqual([0])
     expect(sectorIndexesForPreset(all, 'unpinned')).toEqual([2])
+    expect(materializeSectorIndexesForPreset(all, 'all')).toEqual([0, 2])
+    expect(materializeSectorIndexesForPreset(all, 'pinned')).toEqual([0])
+    expect(materializeSectorIndexesForPreset(all, 'selected', [2])).toEqual([2])
   })
 
   it('resolves effective selection from preset and stored indexes', () => {
@@ -95,10 +107,10 @@ describe('homeworldRegionSelection', () => {
       sector('homeworld-sector-2', false),
       visibilityOverlay(),
     ]
-    expect(effectiveSelectedSectorIndexes(overlays, 'selected', null)).toEqual([0, 2])
+    expect(effectiveSelectedSectorIndexes(overlays, 'all', [])).toEqual([0, 2])
     expect(effectiveSelectedSectorIndexes(overlays, 'selected', [])).toEqual([])
     expect(effectiveSelectedSectorIndexes(overlays, 'selected', [2])).toEqual([2])
-    expect(effectiveSelectedSectorIndexes(overlays, 'pinned', null)).toEqual([0])
+    expect(effectiveSelectedSectorIndexes(overlays, 'pinned', [])).toEqual([0])
     expect(effectiveSelectedSectorIndexes(overlays, 'pinned', [2])).toEqual([0])
     expect(effectiveSelectedSectorIndexes(overlays, 'unpinned', [0])).toEqual([2])
   })

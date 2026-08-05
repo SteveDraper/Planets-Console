@@ -32,7 +32,7 @@ describe('HomeworldLocatorTile', () => {
     localStorage.removeItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)
     useHomeworldRegionSelectionStore.setState({
       regionSelectionPreset: defaultHomeworldRegionSelectionPreset(),
-      selectedSectorIndexes: null,
+      selectedSectorIndexes: [],
       showEnvelopeOverlays: true,
     })
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
