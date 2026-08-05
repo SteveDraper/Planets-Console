@@ -79,18 +79,19 @@ describe('MapShellContent', () => {
     expect(screen.getByTestId('map-graph')).toBeInTheDocument()
   })
 
-  it('forwards shell analyticScope and roster to MapGraph', () => {
+  it('forwards shell analyticScope, roster, and mapLayersPending to MapGraph', () => {
     mapGraphPropsSpy.mockClear()
     renderShowingMap({
       phase: 'showing-map',
       displayMapData,
-      showDeferredPending: false,
+      showDeferredPending: true,
     })
 
     expect(mapGraphPropsSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         analyticScope: sampleScope,
         roster: sampleRoster,
+        mapLayersPending: true,
       })
     )
   })

@@ -40,13 +40,13 @@ import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
 import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
+import { useHomeworldRegionSelectionMaterialize } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
-import {
-  useHomeworldRegionSelection,
-  useHomeworldRegionSelectionMaterialize,
-} from '../analytics/homeworld-locator/useHomeworldRegionSelection'
+import { effectiveSelectedSectorIndexes } from '../lib/homeworldRegionSelection'
+import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
+import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
 import {
@@ -69,6 +69,12 @@ import {
 type MapGraphProps = {
   data: CombinedMapData
   className?: string
+  /**
+   * True while any enabled map-layer query is still pending (shell deferred-pending).
+   * Gates homeworld region materialize so we do not write ``selected`` + ``[]`` from a
+   * base-map-only combined frame before the homeworld layer merges.
+   */
+  mapLayersPending?: boolean
   /** Shell-owned scope; required for homeworld map context menu asserts. */
   analyticScope: AnalyticShellScope
   /** Shell-owned roster for homeworld ownership menu labels. */
@@ -89,6 +95,7 @@ const INITIAL_FIT_REVEAL_MS = 250
 export function MapGraph({
   data,
   className,
+  mapLayersPending = false,
   analyticScope,
   roster,
   futureTurnOffset = 0,
@@ -147,6 +154,7 @@ export function MapGraph({
             analyticScope={analyticScope}
             roster={roster}
             cartography={cartography}
+            mapLayersPending={mapLayersPending}
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
             onInitialFitDone={onInitialFitDone}
@@ -169,6 +177,7 @@ type MapGraphFlowProps = {
   analyticScope: AnalyticShellScope
   roster: readonly PerspectiveRow[]
   cartography?: StellarCartographyMapContext
+  mapLayersPending: boolean
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   onInitialFitDone: () => void
@@ -232,6 +241,7 @@ function MapGraphFlow({
   analyticScope,
   roster,
   cartography,
+  mapLayersPending,
   onMapZoomChange,
   onSetZoomReady,
   onInitialFitDone,
@@ -252,19 +262,42 @@ function MapGraphFlow({
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
-  const {
-    selectedSectorIndexes,
-    showEnvelopeOverlays,
-    overlays: homeworldSelectionOverlays,
-    overlaysReady: homeworldSelectionOverlaysReady,
-  } = useHomeworldRegionSelection({
-    analyticScope,
-    fetchEnabled: homeworldEnabled,
-  })
-  // Sole materialize-effect owner (Tile/Panel only read + user actions).
+  const regionSelectionPreset = useHomeworldRegionSelectionStore(
+    (s) => s.regionSelectionPreset
+  )
+  const storedSelectedSectorIndexes = useHomeworldRegionSelectionStore(
+    (s) => s.selectedSectorIndexes
+  )
+  const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
+    (s) => s.showEnvelopeOverlays
+  )
+
+  // Homeworld sectors already merged into combined map data by the map analytic.
+  const homeworldSectorOverlays = useMemo(
+    () => data.regionOverlays.filter(isHomeworldSectorOverlay),
+    [data.regionOverlays]
+  )
+  // Wait for enabled map layers to settle so a pending homeworld fetch cannot
+  // materialize ``selected`` + ``[]`` from a base-map-only combined frame.
+  const homeworldOverlaysReady = homeworldEnabled && !mapLayersPending
+  // Sole materialize-effect owner (Tile keeps useHomeworldRegionSelection for panel).
   useHomeworldRegionSelectionMaterialize(
-    homeworldSelectionOverlays,
-    homeworldSelectionOverlaysReady
+    homeworldSectorOverlays,
+    homeworldOverlaysReady
+  )
+
+  const selectedSectorIndexes = useMemo(
+    () =>
+      effectiveSelectedSectorIndexes(
+        homeworldSectorOverlays,
+        regionSelectionPreset,
+        storedSelectedSectorIndexes
+      ),
+    [
+      homeworldSectorOverlays,
+      regionSelectionPreset,
+      storedSelectedSectorIndexes,
+    ]
   )
 
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).

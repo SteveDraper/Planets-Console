@@ -1,7 +1,8 @@
 /**
- * Owns homeworld region-selection overlay reads and selection writes.
+ * Owns homeworld region-selection overlay reads and selection writes for Tile/Panel.
  * Materialize effects (``all`` → selected, pinned/unpinned sync) are owned solely by
- * ``useHomeworldRegionSelectionMaterialize`` -- call that once from MapGraph.
+ * ``useHomeworldRegionSelectionMaterialize`` -- call that once from MapGraph, fed from
+ * homeworld sectors already present on combined ``data.regionOverlays``.
  */
 
 import { useCallback, useEffect, useMemo } from 'react'
@@ -32,8 +33,9 @@ export type UseHomeworldRegionSelectionOptions = {
 }
 
 /**
- * Sole owner of region-selection materialize writes. Mount once (MapGraph) while
- * homeworld overlays are being fetched for paint.
+ * Sole owner of region-selection materialize writes. Mount once from MapGraph
+ * with homeworld sectors from combined map ``regionOverlays`` (not a second
+ * selection-hook fetch).
  */
 export function useHomeworldRegionSelectionMaterialize(
   overlays: readonly MapRegionOverlay[],

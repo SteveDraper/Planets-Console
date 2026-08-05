@@ -89,6 +89,7 @@ function MapShellShowingMap({
       >
         <MapGraph
           data={mapShellView.displayMapData}
+          mapLayersPending={mapShellView.showDeferredPending}
           className="h-full w-full min-h-0"
           analyticScope={analyticScope}
           roster={roster}
