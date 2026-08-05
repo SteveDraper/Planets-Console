@@ -7,6 +7,7 @@ import {
 } from '../../stores/homeworldRegionSelectionStore'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 import {
+  useEffectiveHomeworldSectorIndexes,
   useHomeworldRegionSelection,
   useHomeworldRegionSelectionMaterialize,
 } from './useHomeworldRegionSelection'
@@ -119,6 +120,61 @@ describe('useHomeworldRegionSelectionMaterialize', () => {
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([
       0, 1,
     ])
+  })
+})
+
+describe('useEffectiveHomeworldSectorIndexes', () => {
+  beforeEach(() => {
+    localStorage.removeItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: 'all',
+      selectedSectorIndexes: [],
+      showEnvelopeOverlays: true,
+    })
+  })
+
+  it('derives all homeworld indexes while preset is init-only all', () => {
+    const { result } = renderHook(() =>
+      useEffectiveHomeworldSectorIndexes(SECTOR_OVERLAYS)
+    )
+    expect(result.current.selectedSectorIndexes).toEqual([0, 1])
+    expect([...result.current.selectedSectorIndexSet]).toEqual([0, 1])
+  })
+
+  it('derives pinned/unpinned from overlays and ignores stored indexes', () => {
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: 'pinned',
+      selectedSectorIndexes: [1],
+      showEnvelopeOverlays: true,
+    })
+    const { result, rerender } = renderHook(
+      ({ overlays }) => useEffectiveHomeworldSectorIndexes(overlays),
+      { initialProps: { overlays: SECTOR_OVERLAYS } }
+    )
+    expect(result.current.selectedSectorIndexes).toEqual([0])
+
+    act(() => {
+      useHomeworldRegionSelectionStore.setState({
+        regionSelectionPreset: 'unpinned',
+        selectedSectorIndexes: [0],
+      })
+    })
+    rerender({ overlays: SECTOR_OVERLAYS })
+    expect(result.current.selectedSectorIndexes).toEqual([1])
+  })
+
+  it('returns stored indexes for selected preset', () => {
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: 'selected',
+      selectedSectorIndexes: [1],
+      showEnvelopeOverlays: true,
+    })
+    const { result } = renderHook(() =>
+      useEffectiveHomeworldSectorIndexes(SECTOR_OVERLAYS)
+    )
+    expect(result.current.selectedSectorIndexes).toEqual([1])
+    expect(result.current.selectedSectorIndexSet.has(1)).toBe(true)
+    expect(result.current.selectedSectorIndexSet.has(0)).toBe(false)
   })
 })
 

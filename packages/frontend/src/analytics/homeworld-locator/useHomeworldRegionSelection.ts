@@ -7,9 +7,11 @@
  * ``useHomeworldRegionSelectionMaterialize`` -- call that once from MapGraph, fed from
  * homeworld sectors already present on combined ``data.regionOverlays``.
  *
- * Pinned/unpinned outline sets are derived at read time via
- * ``effectiveSelectedSectorIndexes``; do not continuously rewrite stored indexes
- * while those presets are active.
+ * Effective outline indexes (store preset + overlays → concrete list) are owned by
+ * ``useEffectiveHomeworldSectorIndexes`` -- MapGraph and this hook both use it.
+ *
+ * Pinned/unpinned outline sets are derived at read time; do not continuously
+ * rewrite stored indexes while those presets are active.
  */
 
 import { useCallback, useEffect, useMemo } from 'react'
@@ -29,6 +31,42 @@ export type UseHomeworldRegionSelectionOptions = {
   overlays: readonly MapRegionOverlay[]
   /** True when the shared homeworld map query settled successfully. */
   overlaysReady: boolean
+}
+
+/**
+ * Sole owner of store → effective sector-index derivation for a given overlays
+ * array. MapGraph (combined homeworld sectors) and the sidebar selection hook
+ * both use this -- no parallel useMemo wiring.
+ */
+export function useEffectiveHomeworldSectorIndexes(
+  overlays: readonly MapRegionOverlay[]
+): {
+  selectedSectorIndexes: number[]
+  selectedSectorIndexSet: ReadonlySet<number>
+} {
+  const regionSelectionPreset = useHomeworldRegionSelectionStore(
+    (s) => s.regionSelectionPreset
+  )
+  const storedSelectedSectorIndexes = useHomeworldRegionSelectionStore(
+    (s) => s.selectedSectorIndexes
+  )
+
+  const selectedSectorIndexes = useMemo(
+    () =>
+      effectiveSelectedSectorIndexes(
+        overlays,
+        regionSelectionPreset,
+        storedSelectedSectorIndexes
+      ),
+    [overlays, regionSelectionPreset, storedSelectedSectorIndexes]
+  )
+
+  const selectedSectorIndexSet = useMemo(
+    () => new Set(selectedSectorIndexes),
+    [selectedSectorIndexes]
+  )
+
+  return { selectedSectorIndexes, selectedSectorIndexSet }
 }
 
 /**
@@ -72,9 +110,6 @@ export function useHomeworldRegionSelection({
   const regionSelectionPreset = useHomeworldRegionSelectionStore(
     (s) => s.regionSelectionPreset
   )
-  const storedSelectedSectorIndexes = useHomeworldRegionSelectionStore(
-    (s) => s.selectedSectorIndexes
-  )
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays
   )
@@ -85,20 +120,8 @@ export function useHomeworldRegionSelection({
     (s) => s.setShowEnvelopeOverlays
   )
 
-  const selectedSectorIndexes = useMemo(
-    () =>
-      effectiveSelectedSectorIndexes(
-        overlays,
-        regionSelectionPreset,
-        storedSelectedSectorIndexes
-      ),
-    [overlays, regionSelectionPreset, storedSelectedSectorIndexes]
-  )
-
-  const selectedSectorIndexSet = useMemo(
-    () => new Set(selectedSectorIndexes),
-    [selectedSectorIndexes]
-  )
+  const { selectedSectorIndexes, selectedSectorIndexSet } =
+    useEffectiveHomeworldSectorIndexes(overlays)
 
   const uiPreset = regionSelectionPresetForUi(regionSelectionPreset)
 
@@ -108,44 +131,24 @@ export function useHomeworldRegionSelection({
       if (preset === 'selected') {
         // Snapshot the current effective outline set (may re-derive from overlays
         // when leaving pinned/unpinned).
-        const current = effectiveSelectedSectorIndexes(
-          overlays,
-          regionSelectionPreset,
-          storedSelectedSectorIndexes
-        )
-        setRegionSelectionState('selected', current)
+        setRegionSelectionState('selected', selectedSectorIndexes)
         return
       }
       // pinned / unpinned: derive-at-read; do not persist concrete indexes.
       setRegionSelectionState(preset, [])
     },
-    [
-      overlays,
-      regionSelectionPreset,
-      storedSelectedSectorIndexes,
-      setRegionSelectionState,
-    ]
+    [selectedSectorIndexes, setRegionSelectionState]
   )
 
   const toggleSectorIndex = useCallback(
     (sectorIndex: number) => {
       if (!Number.isInteger(sectorIndex) || sectorIndex < 0) return
-      const current = effectiveSelectedSectorIndexes(
-        overlays,
-        regionSelectionPreset,
-        storedSelectedSectorIndexes
-      )
       setRegionSelectionState(
         'selected',
-        toggleSectorIndexInSelection(current, sectorIndex)
+        toggleSectorIndexInSelection(selectedSectorIndexes, sectorIndex)
       )
     },
-    [
-      overlays,
-      regionSelectionPreset,
-      storedSelectedSectorIndexes,
-      setRegionSelectionState,
-    ]
+    [selectedSectorIndexes, setRegionSelectionState]
   )
 
   return {

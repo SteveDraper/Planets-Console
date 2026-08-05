@@ -40,12 +40,12 @@ import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
 import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
-import { useHomeworldRegionSelectionMaterialize } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
-import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import {
-  effectiveSelectedSectorIndexes,
-  homeworldOverlaysReadyForMaterialize,
-} from '../lib/homeworldRegionSelection'
+  useEffectiveHomeworldSectorIndexes,
+  useHomeworldRegionSelectionMaterialize,
+} from '../analytics/homeworld-locator/useHomeworldRegionSelection'
+import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
+import { homeworldOverlaysReadyForMaterialize } from '../lib/homeworldRegionSelection'
 import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
@@ -273,12 +273,6 @@ function MapGraphFlow({
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
-  const regionSelectionPreset = useHomeworldRegionSelectionStore(
-    (s) => s.regionSelectionPreset
-  )
-  const storedSelectedSectorIndexes = useHomeworldRegionSelectionStore(
-    (s) => s.selectedSectorIndexes
-  )
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays
   )
@@ -299,19 +293,9 @@ function MapGraphFlow({
     homeworldSectorOverlays,
     homeworldOverlaysReady
   )
-
-  const selectedSectorIndexes = useMemo(
-    () =>
-      effectiveSelectedSectorIndexes(
-        homeworldSectorOverlays,
-        regionSelectionPreset,
-        storedSelectedSectorIndexes
-      ),
-    [
-      homeworldSectorOverlays,
-      regionSelectionPreset,
-      storedSelectedSectorIndexes,
-    ]
+  // Shared store→effective indexes (same hook as sidebar selection).
+  const { selectedSectorIndexes } = useEffectiveHomeworldSectorIndexes(
+    homeworldSectorOverlays
   )
 
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
