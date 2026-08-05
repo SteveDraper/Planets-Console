@@ -35,7 +35,8 @@ export type HomeworldLocatorPanelProps = {
    * own homeworld map fetch.
    */
   overlays: readonly MapRegionOverlay[]
-  overlaysReady: boolean
+  /** True when Tile's homeworld map-layer query succeeded (not materialize readiness). */
+  homeworldMapOverlaysQuerySucceeded: boolean
   /**
    * Planet positions from Tile's ``useBaseMapPlanetPositions`` (same base-map
    * query as the map shell). Panel must not declare its own base-map fetch.
@@ -54,7 +55,7 @@ export function HomeworldLocatorPanel({
   selectedSectorIndexes,
   onToggleSectorIndex,
   overlays,
-  overlaysReady,
+  homeworldMapOverlaysQuerySucceeded,
   planetPositions,
   positionsReady,
   positionsError,
@@ -66,10 +67,10 @@ export function HomeworldLocatorPanel({
   })
   // Hold until overlays are known -- building with empty overlays flashes a flat
   // list before the sector accordion appears on circular maps.
-  const awaitingOverlays = !overlaysReady
+  const awaitingOverlays = !homeworldMapOverlaysQuerySucceeded
   // Sector grouping needs planet positions. Until they are ready, do not build
   // a sectors model (empty positions would dump every candidate into Unassigned).
-  const needsBaseMap = overlaysReady && overlays.length > 0
+  const needsBaseMap = homeworldMapOverlaysQuerySucceeded && overlays.length > 0
   const awaitingBaseMapForSectors = needsBaseMap && !positionsReady
   const awaitingSectorModel = awaitingOverlays || awaitingBaseMapForSectors
 

@@ -77,7 +77,7 @@ export function useEffectiveHomeworldSectorIndexes(
  */
 export function useHomeworldRegionSelectionMaterialize(
   overlays: readonly MapRegionOverlay[],
-  overlaysReady: boolean
+  homeworldOverlaysReadyForMaterialize: boolean
 ): void {
   // Subscribe so the effect re-runs when preset leaves ``all`` (e.g. user toggle).
   // Read preset from getState() inside the effect so a same-frame toggle that
@@ -90,7 +90,7 @@ export function useHomeworldRegionSelectionMaterialize(
   )
 
   useEffect(() => {
-    if (!overlaysReady) return
+    if (!homeworldOverlaysReadyForMaterialize) return
     if (useHomeworldRegionSelectionStore.getState().regionSelectionPreset !== 'all') {
       return
     }
@@ -99,7 +99,7 @@ export function useHomeworldRegionSelectionMaterialize(
       materializeSectorIndexesForPreset(overlays, 'all')
     )
   }, [
-    overlaysReady,
+    homeworldOverlaysReadyForMaterialize,
     regionSelectionPreset,
     overlays,
     setRegionSelectionState,

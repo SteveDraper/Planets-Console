@@ -96,7 +96,7 @@ export function HomeworldLocatorTile({
     turnUsernamesByPlayerId: null,
   })
 
-  const { overlays, overlaysReady } = useHomeworldLocatorMapOverlays({
+  const { overlays, homeworldMapOverlaysQuerySucceeded } = useHomeworldLocatorMapOverlays({
     analyticScope,
     fetchEnabled: canExpand,
   })
@@ -201,7 +201,7 @@ export function HomeworldLocatorTile({
             selectedSectorIndexes={selectedSectorIndexSet}
             onToggleSectorIndex={toggleSectorIndex}
             overlays={overlays}
-            overlaysReady={overlaysReady}
+            homeworldMapOverlaysQuerySucceeded={homeworldMapOverlaysQuerySucceeded}
             planetPositions={planetPositions}
             positionsReady={positionsReady}
             positionsError={positionsError}

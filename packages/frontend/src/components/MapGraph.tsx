@@ -283,15 +283,14 @@ function MapGraphFlow({
     [data.regionOverlays]
   )
   // Success (not merely !pending): failure-empty must not consume init-only ``all``.
-  const homeworldOverlaysReady = homeworldOverlaysReadyForMaterialize({
-    homeworldEnabled,
-    mapLayersPending,
-    homeworldMapLayerSucceeded,
-  })
   // Sole materialize-effect owner (Tile uses shared map-overlay observer + selection hook).
   useHomeworldRegionSelectionMaterialize(
     homeworldSectorOverlays,
-    homeworldOverlaysReady
+    homeworldOverlaysReadyForMaterialize({
+      homeworldEnabled,
+      mapLayersPending,
+      homeworldMapLayerSucceeded,
+    })
   )
   // Shared store→effective indexes (same hook as sidebar selection).
   const { selectedSectorIndexes } = useEffectiveHomeworldSectorIndexes(

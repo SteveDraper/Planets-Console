@@ -34,7 +34,7 @@ export function useHomeworldLocatorMapOverlays({
 
   return {
     overlays,
-    overlaysReady: fetchEnabled && query.isSuccess,
+    homeworldMapOverlaysQuerySucceeded: fetchEnabled && query.isSuccess,
     overlaysError: query.error ?? null,
   }
 }

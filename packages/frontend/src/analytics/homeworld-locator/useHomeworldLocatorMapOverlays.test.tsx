@@ -77,7 +77,7 @@ describe('useHomeworldLocatorMapOverlays', () => {
     const { client, result } = renderOverlaysHook(true)
 
     await waitFor(() => {
-      expect(result.current.overlaysReady).toBe(true)
+      expect(result.current.homeworldMapOverlaysQuerySucceeded).toBe(true)
     })
 
     expect(fetchHomeworldLocatorMap).toHaveBeenCalledWith(scope)
@@ -92,7 +92,7 @@ describe('useHomeworldLocatorMapOverlays', () => {
 
   it('does not fetch when disabled', () => {
     const { result } = renderOverlaysHook(false)
-    expect(result.current.overlaysReady).toBe(false)
+    expect(result.current.homeworldMapOverlaysQuerySucceeded).toBe(false)
     expect(result.current.overlays).toEqual([])
     expect(fetchHomeworldLocatorMap).not.toHaveBeenCalled()
   })
@@ -105,7 +105,7 @@ describe('useHomeworldLocatorMapOverlays', () => {
     await waitFor(() => {
       expect(result.current.overlaysError).toBeTruthy()
     })
-    expect(result.current.overlaysReady).toBe(false)
+    expect(result.current.homeworldMapOverlaysQuerySucceeded).toBe(false)
     expect(errorMessage(result.current.overlaysError)).toMatch(/homeworld map unavailable/i)
   })
 })

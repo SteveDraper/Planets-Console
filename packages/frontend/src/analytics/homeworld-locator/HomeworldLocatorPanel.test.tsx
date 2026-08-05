@@ -61,7 +61,7 @@ const DEFAULT_ROSTER: readonly PerspectiveRow[] = [
 
 type PanelOptions = {
   overlays?: readonly MapRegionOverlay[]
-  overlaysReady?: boolean
+  homeworldMapOverlaysQuerySucceeded?: boolean
   planetPositions?: ReadonlyMap<number, { x: number; y: number }>
   positionsReady?: boolean
   positionsError?: unknown | null
@@ -81,7 +81,9 @@ function panelElement(
       selectedSectorIndexes={new Set()}
       onToggleSectorIndex={() => undefined}
       overlays={options.overlays ?? EMPTY_OVERLAYS}
-      overlaysReady={options.overlaysReady ?? true}
+      homeworldMapOverlaysQuerySucceeded={
+        options.homeworldMapOverlaysQuerySucceeded ?? true
+      }
       planetPositions={options.planetPositions ?? EMPTY_POSITIONS}
       positionsReady={options.positionsReady ?? true}
       positionsError={options.positionsError ?? null}
@@ -132,7 +134,7 @@ describe('HomeworldLocatorPanel', () => {
 
     const { rerender } = renderPanel(undefined, {
       overlays: EMPTY_OVERLAYS,
-      overlaysReady: false,
+      homeworldMapOverlaysQuerySucceeded: false,
       positionsReady: true,
       planetPositions: EMPTY_POSITIONS,
     })
@@ -147,7 +149,7 @@ describe('HomeworldLocatorPanel', () => {
     rerender(
       panelElement(DEFAULT_ROSTER, {
         overlays: [SECTOR_OVERLAY],
-        overlaysReady: true,
+        homeworldMapOverlaysQuerySucceeded: true,
         planetPositions: new Map([[12, { x: 50, y: 50 }]]),
         positionsReady: true,
         positionsError: null,
@@ -169,7 +171,7 @@ describe('HomeworldLocatorPanel', () => {
 
     const { rerender } = renderPanel(undefined, {
       overlays: [SECTOR_OVERLAY],
-      overlaysReady: true,
+      homeworldMapOverlaysQuerySucceeded: true,
       positionsReady: false,
       planetPositions: EMPTY_POSITIONS,
     })
@@ -186,7 +188,7 @@ describe('HomeworldLocatorPanel', () => {
     rerender(
       panelElement(DEFAULT_ROSTER, {
         overlays: [SECTOR_OVERLAY],
-        overlaysReady: true,
+        homeworldMapOverlaysQuerySucceeded: true,
         planetPositions: new Map([[12, { x: 50, y: 50 }]]),
         positionsReady: true,
         positionsError: null,
@@ -214,7 +216,7 @@ describe('HomeworldLocatorPanel', () => {
 
     renderPanel(undefined, {
       overlays: [SECTOR_OVERLAY],
-      overlaysReady: true,
+      homeworldMapOverlaysQuerySucceeded: true,
       positionsReady: false,
       positionsError: new Error('base map unavailable'),
     })
