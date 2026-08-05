@@ -147,6 +147,7 @@ describe('MainArea map hook mounting', () => {
       hasError: false,
       hasAnyData: false,
       mapError: null,
+      homeworldMapLayerSucceeded: false,
       mapQueries: [],
     })
     vi.mocked(useRetainedMapDisplay).mockReturnValue({
@@ -201,6 +202,7 @@ describe('MainArea map hook mounting', () => {
       hasError: false,
       hasAnyData: false,
       mapError: null,
+      homeworldMapLayerSucceeded: false,
       mapQueries: [],
     })
 
