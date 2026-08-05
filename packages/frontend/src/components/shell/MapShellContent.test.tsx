@@ -79,23 +79,50 @@ describe('MapShellContent', () => {
     expect(screen.getByTestId('map-graph')).toBeInTheDocument()
   })
 
-  it('forwards shell analyticScope, roster, and mapLayersPending to MapGraph', () => {
+  it('forwards shell analyticScope, roster, mapLayersPending, and homeworldMapLayerSucceeded to MapGraph', () => {
     mapGraphPropsSpy.mockClear()
-    renderShowingMap({
-      phase: 'showing-map',
-      displayMapData,
-      showDeferredPending: true,
-    })
+    render(
+      <MapShellContent
+        mapShellView={{
+          phase: 'showing-map',
+          displayMapData,
+          showDeferredPending: true,
+        }}
+        analyticScope={sampleScope}
+        roster={sampleRoster}
+        homeworldMapLayerSucceeded={true}
+        futureTurnOffset={0}
+        planetLabelOptions={DEFAULT_PLANET_LABEL_OPTIONS}
+        onPlanetLabelOptionsChange={vi.fn()}
+        onMapZoomChange={vi.fn()}
+        onSetZoomReady={vi.fn()}
+      />
+    )
 
     expect(mapGraphPropsSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         analyticScope: sampleScope,
         roster: sampleRoster,
         mapLayersPending: true,
+        homeworldMapLayerSucceeded: true,
       })
     )
   })
 
+  it('defaults homeworldMapLayerSucceeded to false when omitted', () => {
+    mapGraphPropsSpy.mockClear()
+    renderShowingMap({
+      phase: 'showing-map',
+      displayMapData,
+      showDeferredPending: false,
+    })
+
+    expect(mapGraphPropsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeworldMapLayerSucceeded: false,
+      })
+    )
+  })
   it('shows baseline degraded note when combined map data is degraded', () => {
     renderShowingMap({
       phase: 'showing-map',

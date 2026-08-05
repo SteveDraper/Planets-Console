@@ -11,6 +11,7 @@ import {
   mapAnalyticQuerySpecFor,
   type MapAnalyticQueryContext,
 } from '../analytics/mapAnalyticRegistry'
+import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import {
   combineMapDataFromAnalyticQueries,
   enabledMapAnalyticIds,
@@ -37,6 +38,11 @@ export type UseMapAnalyticQueriesResult = {
   hasError: boolean
   hasAnyData: boolean
   mapError: unknown
+  /**
+   * True when the homeworld-locator map query is in the fetch set and ``isSuccess``.
+   * False when absent, pending, or errored (combined omits failed layers).
+   */
+  homeworldMapLayerSucceeded: boolean
   mapQueries: UseQueryResult<MapDataResponse, Error>[]
 }
 
@@ -89,6 +95,7 @@ export function useMapAnalyticQueries({
           error: result.error,
         })
       }
+      const homeworldIndex = mapIds.indexOf(HOMEWORLD_LOCATOR_ANALYTIC_ID)
       return {
         mapQueries: results,
         // TanStack Query retains prior successful `data` when a refetch fails (`isError`).
@@ -103,12 +110,22 @@ export function useMapAnalyticQueries({
         hasAnyData: results.some((q) => !q.isError && q.data != null),
         mapError:
           failures.length > 0 ? new Error(formatMapLayerErrorBanner(failures)) : null,
+        homeworldMapLayerSucceeded:
+          homeworldIndex >= 0 && results[homeworldIndex]?.isSuccess === true,
       }
     },
     [mapIds, liveConnectionsParams, analytics]
   )
 
-  const { mapQueries, combined, pending, hasError, hasAnyData, mapError } = useQueries({
+  const {
+    mapQueries,
+    combined,
+    pending,
+    hasError,
+    hasAnyData,
+    mapError,
+    homeworldMapLayerSucceeded,
+  } = useQueries({
     queries: mapIds.map((analyticId) => mapAnalyticQuerySpecFor(analyticId, queryContext)),
     combine: combineMapQueries,
   })
@@ -121,6 +138,7 @@ export function useMapAnalyticQueries({
     hasError,
     hasAnyData,
     mapError,
+    homeworldMapLayerSucceeded,
     mapQueries,
   }
 }

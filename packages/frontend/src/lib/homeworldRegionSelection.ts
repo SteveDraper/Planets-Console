@@ -154,3 +154,23 @@ export function toggleSectorIndexInSelection(
   }
   return [...set].sort((a, b) => a - b)
 }
+
+/**
+ * Whether MapGraph may run init-only ``all`` → selected materialize.
+ *
+ * Requires the homeworld map layer to have **succeeded** -- not merely ``!pending``.
+ * Failure-empty (errored layer omitted from combined) must not consume ``all``.
+ * Success-empty (zero sectors / non-circular) may still materialize to ``selected`` + ``[]``.
+ * ``mapLayersPending`` continues to block the base-map-only loading race.
+ */
+export function homeworldOverlaysReadyForMaterialize(input: {
+  homeworldEnabled: boolean
+  mapLayersPending: boolean
+  homeworldMapLayerSucceeded: boolean
+}): boolean {
+  return (
+    input.homeworldEnabled &&
+    !input.mapLayersPending &&
+    input.homeworldMapLayerSucceeded
+  )
+}

@@ -6,6 +6,7 @@ import {
   defaultHomeworldRegionSelectionPreset,
   defaultShowEnvelopeOverlays,
   effectiveSelectedSectorIndexes,
+  homeworldOverlaysReadyForMaterialize,
   isHomeworldRegionSelectionPreset,
   isHomeworldRegionSelectionUiPreset,
   isHomeworldSectorPinned,
@@ -117,5 +118,55 @@ describe('homeworldRegionSelection', () => {
   it('toggles sector indexes uniquely and sorted', () => {
     expect(toggleSectorIndexInSelection([1, 3], 2)).toEqual([1, 2, 3])
     expect(toggleSectorIndexInSelection([1, 2, 3], 2)).toEqual([1, 3])
+  })
+
+  describe('homeworldOverlaysReadyForMaterialize', () => {
+    it('is false while map layers are pending (loading race)', () => {
+      expect(
+        homeworldOverlaysReadyForMaterialize({
+          homeworldEnabled: true,
+          mapLayersPending: true,
+          homeworldMapLayerSucceeded: false,
+        })
+      ).toBe(false)
+      expect(
+        homeworldOverlaysReadyForMaterialize({
+          homeworldEnabled: true,
+          mapLayersPending: true,
+          // Even if a stale success bit were true, pending still blocks.
+          homeworldMapLayerSucceeded: true,
+        })
+      ).toBe(false)
+    })
+
+    it('is false when the homeworld layer failed (failure-empty must not materialize)', () => {
+      expect(
+        homeworldOverlaysReadyForMaterialize({
+          homeworldEnabled: true,
+          mapLayersPending: false,
+          homeworldMapLayerSucceeded: false,
+        })
+      ).toBe(false)
+    })
+
+    it('is true on settled success (including success-empty overlays)', () => {
+      expect(
+        homeworldOverlaysReadyForMaterialize({
+          homeworldEnabled: true,
+          mapLayersPending: false,
+          homeworldMapLayerSucceeded: true,
+        })
+      ).toBe(true)
+    })
+
+    it('is false when the homeworld analytic is disabled', () => {
+      expect(
+        homeworldOverlaysReadyForMaterialize({
+          homeworldEnabled: false,
+          mapLayersPending: false,
+          homeworldMapLayerSucceeded: true,
+        })
+      ).toBe(false)
+    })
   })
 })

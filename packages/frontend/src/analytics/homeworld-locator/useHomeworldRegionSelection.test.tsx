@@ -102,6 +102,17 @@ describe('useHomeworldRegionSelectionMaterialize', () => {
     })
   })
 
+  it('materializes all to selected + [] when overlays are ready but empty (success-empty)', async () => {
+    renderHook(() => useHomeworldRegionSelectionMaterialize([], true))
+
+    await waitFor(() => {
+      expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
+        'selected'
+      )
+      expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
+    })
+  })
+
   it('does not materialize when overlaysReady is false', () => {
     renderHook(() =>
       useHomeworldRegionSelectionMaterialize(SECTOR_OVERLAYS, false)
@@ -110,6 +121,13 @@ describe('useHomeworldRegionSelectionMaterialize', () => {
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
   })
 
+  it('does not materialize failure-empty overlays while still on init-only all', () => {
+    // overlaysReady false stands for failed/pending homeworld layer; empty overlays
+    // alone must not be treated as success-empty.
+    renderHook(() => useHomeworldRegionSelectionMaterialize([], false))
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('all')
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
+  })
   it('does not rewrite stored indexes while preset is pinned', () => {
     useHomeworldRegionSelectionStore.setState({
       regionSelectionPreset: 'pinned',

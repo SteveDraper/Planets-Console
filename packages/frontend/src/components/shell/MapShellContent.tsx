@@ -17,6 +17,11 @@ export type MapShellContentProps = {
   analyticScope: AnalyticShellScope
   /** Game roster for homeworld ownership menu labels; owned at the shell boundary. */
   roster: readonly PerspectiveRow[]
+  /**
+   * Homeworld map query ``isSuccess`` from shell map queries; gates region materialize.
+   * Defaults false so missing wiring cannot consume init-only ``all`` on empty overlays.
+   */
+  homeworldMapLayerSucceeded?: boolean
   /** Turns beyond latest stored game turn; applied at cartography display time. */
   futureTurnOffset: number
   planetLabelOptions: PlanetLabelOptions
@@ -31,6 +36,7 @@ export function MapShellContent({
   mapShellView,
   analyticScope,
   roster,
+  homeworldMapLayerSucceeded = false,
   futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
@@ -55,6 +61,7 @@ export function MapShellContent({
           mapShellView={mapShellView}
           analyticScope={analyticScope}
           roster={roster}
+          homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
           futureTurnOffset={futureTurnOffset}
           planetLabelOptions={planetLabelOptions}
           onPlanetLabelOptionsChange={onPlanetLabelOptionsChange}
@@ -70,6 +77,7 @@ function MapShellShowingMap({
   mapShellView,
   analyticScope,
   roster,
+  homeworldMapLayerSucceeded = false,
   futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
@@ -90,6 +98,7 @@ function MapShellShowingMap({
         <MapGraph
           data={mapShellView.displayMapData}
           mapLayersPending={mapShellView.showDeferredPending}
+          homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
           className="h-full w-full min-h-0"
           analyticScope={analyticScope}
           roster={roster}

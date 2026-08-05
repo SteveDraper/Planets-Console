@@ -42,7 +42,10 @@ import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/co
 import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
 import { useHomeworldRegionSelectionMaterialize } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
-import { effectiveSelectedSectorIndexes } from '../lib/homeworldRegionSelection'
+import {
+  effectiveSelectedSectorIndexes,
+  homeworldOverlaysReadyForMaterialize,
+} from '../lib/homeworldRegionSelection'
 import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
@@ -71,10 +74,14 @@ type MapGraphProps = {
   className?: string
   /**
    * True while any enabled map-layer query is still pending (shell deferred-pending).
-   * Gates homeworld region materialize so we do not write ``selected`` + ``[]`` from a
-   * base-map-only combined frame before the homeworld layer merges.
+   * Part of homeworld region materialize readiness (loading race).
    */
   mapLayersPending?: boolean
+  /**
+   * True when the homeworld-locator map query settled successfully.
+   * Required so failure-empty overlays do not consume init-only ``all``.
+   */
+  homeworldMapLayerSucceeded?: boolean
   /** Shell-owned scope; required for homeworld map context menu asserts. */
   analyticScope: AnalyticShellScope
   /** Shell-owned roster for homeworld ownership menu labels. */
@@ -96,6 +103,7 @@ export function MapGraph({
   data,
   className,
   mapLayersPending = false,
+  homeworldMapLayerSucceeded = false,
   analyticScope,
   roster,
   futureTurnOffset = 0,
@@ -155,6 +163,7 @@ export function MapGraph({
             roster={roster}
             cartography={cartography}
             mapLayersPending={mapLayersPending}
+            homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
             onInitialFitDone={onInitialFitDone}
@@ -178,6 +187,7 @@ type MapGraphFlowProps = {
   roster: readonly PerspectiveRow[]
   cartography?: StellarCartographyMapContext
   mapLayersPending: boolean
+  homeworldMapLayerSucceeded: boolean
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   onInitialFitDone: () => void
@@ -242,6 +252,7 @@ function MapGraphFlow({
   roster,
   cartography,
   mapLayersPending,
+  homeworldMapLayerSucceeded,
   onMapZoomChange,
   onSetZoomReady,
   onInitialFitDone,
@@ -277,9 +288,12 @@ function MapGraphFlow({
     () => data.regionOverlays.filter(isHomeworldSectorOverlay),
     [data.regionOverlays]
   )
-  // Wait for enabled map layers to settle so a pending homeworld fetch cannot
-  // materialize ``selected`` + ``[]`` from a base-map-only combined frame.
-  const homeworldOverlaysReady = homeworldEnabled && !mapLayersPending
+  // Success (not merely !pending): failure-empty must not consume init-only ``all``.
+  const homeworldOverlaysReady = homeworldOverlaysReadyForMaterialize({
+    homeworldEnabled,
+    mapLayersPending,
+    homeworldMapLayerSucceeded,
+  })
   // Sole materialize-effect owner (Tile keeps useHomeworldRegionSelection for panel).
   useHomeworldRegionSelectionMaterialize(
     homeworldSectorOverlays,

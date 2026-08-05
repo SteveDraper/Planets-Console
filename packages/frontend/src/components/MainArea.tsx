@@ -279,6 +279,7 @@ const MapMainArea = memo(function MapMainArea({
     hasError,
     hasAnyData,
     mapError,
+    homeworldMapLayerSucceeded,
   } = mapQueries
 
   const { mapShellView } = useRetainedMapDisplay({
@@ -310,6 +311,7 @@ const MapMainArea = memo(function MapMainArea({
     mapShellView,
     analyticScope,
     roster,
+    homeworldMapLayerSucceeded,
     futureTurnOffset,
     planetLabelOptions,
     onPlanetLabelOptionsChange,
