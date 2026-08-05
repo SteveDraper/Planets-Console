@@ -28,6 +28,38 @@ function formatPossibleOwnerDisplay(
   return inference != null ? `${label} · ${inference}` : label
 }
 
+/** Single-owner hover fragment; null when pinned and inference summary is empty. */
+function formatSingleOwnerLine(
+  owner: MapRegionPossibleOwner,
+  options: {
+    includeOwnerLabels: boolean
+    winningStrength: OwnershipWinningStrength | null | undefined
+  }
+): string | null {
+  if (options.includeOwnerLabels) {
+    return `homeworld owner: ${formatPossibleOwnerDisplay(
+      owner,
+      options.winningStrength
+    )}`
+  }
+  return formatHomeworldOwnershipInferenceSummary(owner, {
+    winningStrength: options.winningStrength,
+  })
+}
+
+/** Ambiguous multi-owner hover fragments (status label + owners list). */
+function formatAmbiguousOwners(
+  possibleOwners: readonly MapRegionPossibleOwner[],
+  winningStrength: OwnershipWinningStrength | null | undefined
+): string[] {
+  return [
+    'ambiguous',
+    `homeworld owners: ${possibleOwners
+      .map((owner) => formatPossibleOwnerDisplay(owner, winningStrength))
+      .join(', ')}`,
+  ]
+}
+
 /**
  * Append ownership-evidence hover parts.
  * When ``includeOwnerLabels`` is false (pinned sectors), only the inference
@@ -48,38 +80,16 @@ function appendOwnershipEvidenceParts(
     options.winningStrength
   )
 
-  if (!options.includeOwnerLabels) {
-    if (possibleOwners.length === 1) {
-      const summary = formatHomeworldOwnershipInferenceSummary(possibleOwners[0]!, {
-        winningStrength: uniqueWinningStrength,
-      })
-      if (summary != null) parts.push(summary)
-      return
-    }
-    parts.push('ambiguous')
-    parts.push(
-      `homeworld owners: ${possibleOwners
-        .map((owner) => formatPossibleOwnerDisplay(owner, uniqueWinningStrength))
-        .join(', ')}`
-    )
+  if (possibleOwners.length === 1) {
+    const line = formatSingleOwnerLine(possibleOwners[0]!, {
+      includeOwnerLabels: options.includeOwnerLabels,
+      winningStrength: uniqueWinningStrength,
+    })
+    if (line != null) parts.push(line)
     return
   }
 
-  if (possibleOwners.length === 1) {
-    parts.push(
-      `homeworld owner: ${formatPossibleOwnerDisplay(
-        possibleOwners[0]!,
-        uniqueWinningStrength
-      )}`
-    )
-    return
-  }
-  parts.push('ambiguous')
-  parts.push(
-    `homeworld owners: ${possibleOwners
-      .map((owner) => formatPossibleOwnerDisplay(owner, uniqueWinningStrength))
-      .join(', ')}`
-  )
+  parts.push(...formatAmbiguousOwners(possibleOwners, uniqueWinningStrength))
 }
 
 /** Format one homeworld-sector overlay into a tooltip line, or null if not applicable. */

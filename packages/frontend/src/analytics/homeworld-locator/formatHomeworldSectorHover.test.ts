@@ -200,6 +200,37 @@ describe('formatHomeworldSectorHoverLine', () => {
     )
   })
 
+  it('formats pinned ambiguous ownership without repeating determined player as owner prefix', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          isPinned: true,
+          playerLabel: 'koshling (The Lizard Alliance)',
+          candidateCount: 2,
+          possibleOwners: [
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['nearby_planet_ownership'],
+              provenanceKindCounts: { nearby_planet_ownership: 1 },
+            },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['preferred_candidate_ownership'],
+              playerLabel: 'bob (The Rebel Confederation)',
+              provenanceKindCounts: { preferred_candidate_ownership: 1 },
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'player: koshling (The Lizard Alliance) · ambiguous · homeworld owners: slot 2 · ' +
+        'inferred (ship observations: 0, planet observations: 1), ' +
+        'bob (The Rebel Confederation) · ' +
+        'inferred (ship observations: 0, planet observations: 1) · ' +
+        '2 candidate homeworlds'
+    )
+  })
+
   it('labels pinned sectors without ownership evidence as definite', () => {
     expect(
       formatHomeworldSectorHoverLine(
