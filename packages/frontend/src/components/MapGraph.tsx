@@ -253,7 +253,6 @@ function MapGraphFlow({
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const {
-    regionSelectionPreset,
     selectedSectorIndexes,
     showEnvelopeOverlays,
     overlays: homeworldSelectionOverlays,
@@ -279,8 +278,7 @@ function MapGraphFlow({
           data.regionOverlays,
           visibilityKinds
         ),
-        regionSelectionPreset,
-        selectedSectorIndexes,
+        effectiveSelectedSectorIndexes: selectedSectorIndexes,
         showEnvelopeOverlays,
         assertFocusSelection: selection,
         homeworldMarkers: data.homeworldMarkers,
@@ -289,7 +287,6 @@ function MapGraphFlow({
       data.regionOverlays,
       data.homeworldMarkers,
       visibilityKinds,
-      regionSelectionPreset,
       selectedSectorIndexes,
       showEnvelopeOverlays,
       selection,

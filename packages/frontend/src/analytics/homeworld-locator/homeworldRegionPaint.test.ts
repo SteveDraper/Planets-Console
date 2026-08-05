@@ -83,8 +83,7 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
     ]
     const painted = buildHomeworldRegionOverlaysForPaint({
       overlays,
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: [0],
+      effectiveSelectedSectorIndexes: [0],
       showEnvelopeOverlays: true,
       assertFocusSelection: null,
       homeworldMarkers: [],
@@ -92,15 +91,14 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
     expect(painted.map((o) => o.id)).toEqual(['homeworld-sector-0', 'vis-1'])
   })
 
-  it('treats all preset as every homeworld sector until materialized', () => {
+  it('paints every effective index without re-deriving from preset', () => {
     const painted = buildHomeworldRegionOverlaysForPaint({
       overlays: [
         sector('homeworld-sector-0', { disks }),
         sector('homeworld-sector-2', { disks }),
         visibilityOverlay(),
       ],
-      regionSelectionPreset: 'all',
-      selectedSectorIndexes: [],
+      effectiveSelectedSectorIndexes: [0, 2],
       showEnvelopeOverlays: true,
       assertFocusSelection: null,
       homeworldMarkers: [],
@@ -112,27 +110,10 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
     ])
   })
 
-  it('derives pinned outlines from overlay facts without stored indexes', () => {
-    const painted = buildHomeworldRegionOverlaysForPaint({
-      overlays: [
-        sector('homeworld-sector-0', { isPinned: true, disks }),
-        sector('homeworld-sector-2', { disks }),
-        visibilityOverlay(),
-      ],
-      regionSelectionPreset: 'pinned',
-      selectedSectorIndexes: [],
-      showEnvelopeOverlays: true,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
-    })
-    expect(painted.map((o) => o.id)).toEqual(['homeworld-sector-0', 'vis-1'])
-  })
-
   it('omits all homeworld outlines when the selected set is empty', () => {
     const painted = buildHomeworldRegionOverlaysForPaint({
       overlays: [sector('homeworld-sector-0', { disks }), visibilityOverlay()],
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: [],
+      effectiveSelectedSectorIndexes: [],
       showEnvelopeOverlays: true,
       assertFocusSelection: null,
       homeworldMarkers: [],
@@ -143,8 +124,7 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
   it('strips envelope disks when Show overlays is off; keeps outlines for selected', () => {
     const painted = buildHomeworldRegionOverlaysForPaint({
       overlays: [sector('homeworld-sector-0', { disks }), visibilityOverlay()],
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: [0],
+      effectiveSelectedSectorIndexes: [0],
       showEnvelopeOverlays: false,
       assertFocusSelection: null,
       homeworldMarkers: [],
@@ -163,8 +143,7 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
   it('keeps 81/162 envelope rings when Show overlays is on for selected sectors', () => {
     const painted = buildHomeworldRegionOverlaysForPaint({
       overlays: [sector('homeworld-sector-0', { disks })],
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: [0],
+      effectiveSelectedSectorIndexes: [0],
       showEnvelopeOverlays: true,
       assertFocusSelection: null,
       homeworldMarkers: [],
@@ -179,8 +158,7 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
         sector('homeworld-sector-0', { disks }),
         sector('homeworld-sector-1', { disks }),
       ],
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: [1],
+      effectiveSelectedSectorIndexes: [1],
       showEnvelopeOverlays: true,
       assertFocusSelection: null,
       homeworldMarkers: [],
@@ -194,8 +172,7 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
         sector('homeworld-sector-0', { disks }),
         sector('homeworld-sector-1', { disks }),
       ],
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: [0, 1],
+      effectiveSelectedSectorIndexes: [0, 1],
       showEnvelopeOverlays: false,
       assertFocusSelection: { kind: 'sector', sectorIndex: 1 },
       homeworldMarkers: [],
@@ -212,8 +189,7 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
         sector('homeworld-sector-0', { disks }),
         sector('homeworld-sector-1', { disks }),
       ],
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: [0],
+      effectiveSelectedSectorIndexes: [0],
       showEnvelopeOverlays: true,
       assertFocusSelection: { kind: 'sector', sectorIndex: 1 },
       homeworldMarkers: [],
@@ -241,8 +217,7 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
     }
     const painted = buildHomeworldRegionOverlaysForPaint({
       overlays: [boxSector],
-      regionSelectionPreset: 'selected',
-      selectedSectorIndexes: [0],
+      effectiveSelectedSectorIndexes: [0],
       showEnvelopeOverlays: true,
       assertFocusSelection: { kind: 'planet', planetId: 42 },
       homeworldMarkers: [{ planetId: 42, x: 5, y: 5 }],
