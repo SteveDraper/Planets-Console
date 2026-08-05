@@ -5,7 +5,11 @@ import type {
 } from '../../api/bff'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { normalizeMapRegionOverlays } from '../../api/normalizeMapRegionOverlay'
-import type { MapAnalyticQueryContext, MapAnalyticRegistration } from '../mapAnalyticRegistry'
+import type {
+  MapAnalyticQueryContext,
+  MapAnalyticQuerySpec,
+  MapAnalyticRegistration,
+} from '../mapAnalyticRegistry'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from './constants'
 import { fetchHomeworldLocatorMap } from './api'
 import { planetIdFromMapNode } from './planetIdFromMapNode'
@@ -61,10 +65,9 @@ function regionOverlaysFromPayload(payload: HomeworldLocatorPayload): MapRegionO
 }
 
 /**
- * Shared map-layer queryFn for the homeworld locator TanStack cache entry.
- * Selection hook and map registration MUST use this exact shape -- a partial return
- * under the same ``homeworldLocatorMapQueryKey`` would overwrite markers and blank
- * the map cues. Panel consumes overlays via props; it must not write this cache.
+ * Map-layer queryFn for the homeworld locator TanStack cache entry.
+ * Always return a full ``MapDataResponse`` (markers + overlays); a partial write
+ * under ``homeworldLocatorMapQueryKey`` would blank map cues for other observers.
  */
 export async function fetchHomeworldLocatorMapDataResponse(
   analyticScope: NonNullable<MapAnalyticQueryContext['analyticScope']>
@@ -84,21 +87,36 @@ export async function fetchHomeworldLocatorMapDataResponse(
 }
 
 /**
+ * Sole owner of the homeworld map-layer query key + queryFn + enabled flag.
+ * Map registration and ``useHomeworldLocatorMapOverlays`` both use this so panel
+ * and map share one TanStack cache entry (same pattern as base-map positions).
+ */
+export function homeworldLocatorMapQuerySpec(
+  analyticScope: MapAnalyticQueryContext['analyticScope'],
+  analyticFetchEnabled: boolean
+): MapAnalyticQuerySpec {
+  return {
+    queryKey: homeworldLocatorMapQueryKey(analyticScope),
+    queryFn: async (): Promise<MapDataResponse> => {
+      if (analyticScope == null) {
+        throw new Error('Homeworld locator map query requires analytic scope')
+      }
+      return fetchHomeworldLocatorMapDataResponse(analyticScope)
+    },
+    enabled: analyticFetchEnabled && analyticScope != null,
+  }
+}
+
+/**
  * Homeworld locator: fetch candidate markers and sector ``regionOverlays``,
  * then merge into combined map data. Display-mode filtering is render-time.
  */
 export const homeworldLocatorMapAnalytic: MapAnalyticRegistration = {
   buildQuerySpec(context: MapAnalyticQueryContext) {
-    return {
-      queryKey: homeworldLocatorMapQueryKey(context.analyticScope),
-      queryFn: async (): Promise<MapDataResponse> => {
-        if (context.analyticScope == null) {
-          throw new Error('Homeworld locator map query requires analytic scope')
-        }
-        return fetchHomeworldLocatorMapDataResponse(context.analyticScope)
-      },
-      enabled: context.analyticFetchEnabled && context.analyticScope != null,
-    }
+    return homeworldLocatorMapQuerySpec(
+      context.analyticScope,
+      context.analyticFetchEnabled
+    )
   },
   mergeLayer(data, context) {
     if (data.baselineDegraded != null) {

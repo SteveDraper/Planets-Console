@@ -16,6 +16,7 @@ import {
   type HomeworldRegionSelectionUiPreset,
 } from '../../lib/homeworldRegionSelection'
 import { useBaseMapPlanetPositions } from './useBaseMapPlanetPositions'
+import { useHomeworldLocatorMapOverlays } from './useHomeworldLocatorMapOverlays'
 import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'
 import { HomeworldLocatorPanel } from './HomeworldLocatorPanel'
 
@@ -95,6 +96,11 @@ export function HomeworldLocatorTile({
     turnUsernamesByPlayerId: null,
   })
 
+  const { overlays, overlaysReady } = useHomeworldLocatorMapOverlays({
+    analyticScope,
+    fetchEnabled: canExpand,
+  })
+
   const {
     uiPreset,
     showEnvelopeOverlays,
@@ -102,11 +108,9 @@ export function HomeworldLocatorTile({
     setShowEnvelopeOverlays,
     selectedSectorIndexSet,
     toggleSectorIndex,
+  } = useHomeworldRegionSelection({
     overlays,
     overlaysReady,
-  } = useHomeworldRegionSelection({
-    analyticScope,
-    fetchEnabled: canExpand,
   })
 
   const needsPlanetPositions = overlays.length > 0

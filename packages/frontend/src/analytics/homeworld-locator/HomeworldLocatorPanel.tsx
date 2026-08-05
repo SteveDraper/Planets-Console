@@ -33,8 +33,9 @@ export type HomeworldLocatorPanelProps = {
   selectedSectorIndexes: ReadonlySet<number>
   onToggleSectorIndex: (sectorIndex: number) => void
   /**
-   * Overlays from Tile's ``useHomeworldRegionSelection`` -- Panel must not
-   * declare its own homeworld map query (shared cache must stay MapDataResponse).
+   * Sector overlays from Tile's ``useHomeworldLocatorMapOverlays`` (same
+   * homeworld map-layer query as the map shell). Panel must not declare its
+   * own homeworld map fetch.
    */
   overlays: readonly MapRegionOverlay[]
   overlaysReady: boolean

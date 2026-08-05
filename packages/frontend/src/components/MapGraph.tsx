@@ -294,7 +294,7 @@ function MapGraphFlow({
     mapLayersPending,
     homeworldMapLayerSucceeded,
   })
-  // Sole materialize-effect owner (Tile keeps useHomeworldRegionSelection for panel).
+  // Sole materialize-effect owner (Tile uses shared map-overlay observer + selection hook).
   useHomeworldRegionSelectionMaterialize(
     homeworldSectorOverlays,
     homeworldOverlaysReady

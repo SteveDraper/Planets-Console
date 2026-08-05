@@ -1,5 +1,8 @@
 /**
- * Owns homeworld region-selection overlay reads and selection writes for Tile/Panel.
+ * Owns homeworld region-selection writes and effective-index derivation for
+ * Tile/Panel. Overlay bytes come from ``useHomeworldLocatorMapOverlays``
+ * (same map-layer query as MapGraph registration) -- this hook does not fetch.
+ *
  * Materialize effects (``all`` → selected) are owned solely by
  * ``useHomeworldRegionSelectionMaterialize`` -- call that once from MapGraph, fed from
  * homeworld sectors already present on combined ``data.regionOverlays``.
@@ -10,8 +13,6 @@
  */
 
 import { useCallback, useEffect, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import type { AnalyticShellScope } from '../../api/bff'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelectionStore'
 import {
@@ -22,17 +23,12 @@ import {
   toggleSectorIndexInSelection,
   type HomeworldRegionSelectionUiPreset,
 } from '../../lib/homeworldRegionSelection'
-import {
-  fetchHomeworldLocatorMapDataResponse,
-  homeworldLocatorMapQueryKey,
-} from './mapAnalytic'
-
-const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
 
 export type UseHomeworldRegionSelectionOptions = {
-  analyticScope: AnalyticShellScope | null
-  /** When false, skip overlay fetch. */
-  fetchEnabled: boolean
+  /** Sector overlays from ``useHomeworldLocatorMapOverlays`` (shared map-layer cache). */
+  overlays: readonly MapRegionOverlay[]
+  /** True when the shared homeworld map query settled successfully. */
+  overlaysReady: boolean
 }
 
 /**
@@ -70,19 +66,9 @@ export function useHomeworldRegionSelectionMaterialize(
 }
 
 export function useHomeworldRegionSelection({
-  analyticScope,
-  fetchEnabled,
+  overlays,
+  overlaysReady,
 }: UseHomeworldRegionSelectionOptions) {
-  const mapQuery = useQuery({
-    queryKey: homeworldLocatorMapQueryKey(analyticScope),
-    queryFn: () => fetchHomeworldLocatorMapDataResponse(analyticScope!),
-    enabled: fetchEnabled && analyticScope != null,
-  })
-  const overlays = useMemo(
-    () => mapQuery.data?.regionOverlays ?? EMPTY_OVERLAYS,
-    [mapQuery.data?.regionOverlays]
-  )
-
   const regionSelectionPreset = useHomeworldRegionSelectionStore(
     (s) => s.regionSelectionPreset
   )
@@ -98,8 +84,6 @@ export function useHomeworldRegionSelection({
   const setShowEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.setShowEnvelopeOverlays
   )
-
-  const overlaysReady = fetchEnabled && mapQuery.isSuccess
 
   const selectedSectorIndexes = useMemo(
     () =>
