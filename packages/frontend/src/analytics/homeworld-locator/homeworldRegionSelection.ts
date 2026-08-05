@@ -79,6 +79,26 @@ export function sectorIndexesForPreset(
 }
 
 /**
+ * Resolve the outline multi-select set for paint / panel chrome.
+ *
+ * - ``pinned`` / ``unpinned``: derive from overlay facts (controller does not store indexes).
+ * - ``selected`` + ``null`` stored: all current homeworld sector indexes (session default).
+ * - ``selected`` + array: explicit multi-select (including ``[]`` = none).
+ */
+export function effectiveSelectedSectorIndexes(
+  overlays: readonly MapRegionOverlay[],
+  preset: HomeworldRegionSelectionPreset,
+  storedSelectedSectorIndexes: readonly number[] | null
+): number[] {
+  if (preset === 'pinned' || preset === 'unpinned') {
+    return sectorIndexesForPreset(overlays, preset)
+  }
+  return storedSelectedSectorIndexes != null
+    ? [...storedSelectedSectorIndexes]
+    : allHomeworldSectorIndexes(overlays)
+}
+
+/**
  * Toggle one sector index in a selected set; returns a new sorted unique array.
  */
 export function toggleSectorIndexInSelection(

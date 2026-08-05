@@ -6,6 +6,7 @@ import {
   applyHomeworldRegionSelection,
   defaultHomeworldRegionSelectionPreset,
   defaultShowEnvelopeOverlays,
+  effectiveSelectedSectorIndexes,
   isHomeworldRegionSelectionPreset,
   isHomeworldSectorPinned,
   sectorIndexesForPreset,
@@ -86,6 +87,20 @@ describe('homeworldRegionSelection', () => {
     expect(allHomeworldSectorIndexes(all)).toEqual([0, 2])
     expect(sectorIndexesForPreset(all, 'pinned')).toEqual([0])
     expect(sectorIndexesForPreset(all, 'unpinned')).toEqual([2])
+  })
+
+  it('resolves effective selection from preset and stored indexes', () => {
+    const overlays = [
+      sector('homeworld-sector-0', true),
+      sector('homeworld-sector-2', false),
+      visibilityOverlay(),
+    ]
+    expect(effectiveSelectedSectorIndexes(overlays, 'selected', null)).toEqual([0, 2])
+    expect(effectiveSelectedSectorIndexes(overlays, 'selected', [])).toEqual([])
+    expect(effectiveSelectedSectorIndexes(overlays, 'selected', [2])).toEqual([2])
+    expect(effectiveSelectedSectorIndexes(overlays, 'pinned', null)).toEqual([0])
+    expect(effectiveSelectedSectorIndexes(overlays, 'pinned', [2])).toEqual([0])
+    expect(effectiveSelectedSectorIndexes(overlays, 'unpinned', [0])).toEqual([2])
   })
 
   it('toggles sector indexes uniquely and sorted', () => {

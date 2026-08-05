@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useState,
 } from 'react'
@@ -257,9 +256,6 @@ function MapGraphFlow({
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays
   )
-  const syncSelectionWithOverlays = useHomeworldRegionSelectionStore(
-    (s) => s.syncSelectionWithOverlays
-  )
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
@@ -267,15 +263,7 @@ function MapGraphFlow({
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays
 
-  // Sole owner of region-selection sync: preset rewrites (Pinned/Unpinned) and
-  // uninitialized→all seed land in ``selectedSectorIndexes`` before paint. Tile may call
-  // ``setRegionSelectionPreset`` without overlays; this effect rewrites when
-  // ``regionSelectionPreset`` changes.
-  useLayoutEffect(() => {
-    syncSelectionWithOverlays(data.regionOverlays)
-  }, [data.regionOverlays, regionSelectionPreset, syncSelectionWithOverlays])
-
-  // Visibility prefs → region selection filter + envelope toggle → assert-focus style.
+  // Visibility prefs → region selection (derive at paint) + envelope toggle → assert-focus.
   const regionOverlays = useMemo(
     () =>
       buildHomeworldRegionOverlaysForPaint({
@@ -283,6 +271,7 @@ function MapGraphFlow({
           data.regionOverlays,
           visibilityKinds
         ),
+        regionSelectionPreset,
         selectedSectorIndexes,
         showEnvelopeOverlays,
         assertFocusSelection: selection,
@@ -292,6 +281,7 @@ function MapGraphFlow({
       data.regionOverlays,
       data.homeworldMarkers,
       visibilityKinds,
+      regionSelectionPreset,
       selectedSectorIndexes,
       showEnvelopeOverlays,
       selection,

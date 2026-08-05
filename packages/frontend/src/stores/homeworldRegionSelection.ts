@@ -3,11 +3,10 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { createLocalStorageOrMemoryStateStorage } from '../lib/browserPersistStorage'
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import {
-  allHomeworldSectorIndexes,
   defaultHomeworldRegionSelectionPreset,
   defaultShowEnvelopeOverlays,
+  effectiveSelectedSectorIndexes,
   isHomeworldRegionSelectionPreset,
-  sectorIndexesForPreset,
   toggleSectorIndexInSelection,
   type HomeworldRegionSelectionPreset,
 } from '../analytics/homeworld-locator/homeworldRegionSelection'
@@ -18,24 +17,27 @@ const homeworldRegionSelectionPersistStorage = createLocalStorageOrMemoryStateSt
 export const HOMEWORLD_REGION_SELECTION_STORAGE_KEY =
   'planets-console-homeworld-region-selection'
 
-const PERSIST_VERSION = 2
+const PERSIST_VERSION = 3
 
 type HomeworldRegionSelectionState = {
   regionSelectionPreset: HomeworldRegionSelectionPreset
-  /** ``null`` = never seeded (sync fills all once); ``[]`` = user cleared every sector. */
+  /**
+   * Meaningful only when preset is ``selected``.
+   * ``null`` = all current homeworld sectors; ``number[]`` = explicit multi-select
+   * (including ``[]`` = none). Ignored while preset is pinned/unpinned (derived at read).
+   */
   selectedSectorIndexes: number[] | null
   showEnvelopeOverlays: boolean
-  setRegionSelectionPreset: (
-    preset: HomeworldRegionSelectionPreset,
-    overlays?: readonly MapRegionOverlay[]
-  ) => void
+  setRegionSelectionPreset: (preset: HomeworldRegionSelectionPreset) => void
   setShowEnvelopeOverlays: (show: boolean) => void
-  toggleSectorIndex: (sectorIndex: number) => void
   /**
-   * When overlays are known: rewrite pinned/unpinned selection from overlay facts,
-   * or seed uninitialized selection to all sector indexes once.
+   * Force ``selected`` and toggle one sector against the effective current set
+   * (pinned/unpinned derived, or stored/all for selected).
    */
-  syncSelectionWithOverlays: (overlays: readonly MapRegionOverlay[]) => void
+  toggleSectorIndex: (
+    sectorIndex: number,
+    overlays: readonly MapRegionOverlay[]
+  ) => void
 }
 
 type HomeworldRegionSelectionPersisted = Pick<
@@ -65,8 +67,14 @@ function migratePersistedState(
     showEnvelopeOverlays?: unknown
   }
   let selectedSectorIndexes = parseSelectedSectorIndexes(raw.selectedSectorIndexes)
-  // v1 conflated uninitialized with ``[]``; upgrade treats legacy empty as never seeded.
-  if (version < PERSIST_VERSION && selectedSectorIndexes?.length === 0) {
+  // v1 conflated uninitialized with ``[]``; upgrade treats legacy empty as default-all.
+  if (version < 2 && selectedSectorIndexes?.length === 0) {
+    selectedSectorIndexes = null
+  }
+  // v2 wrote concrete indexes when applying Pinned/Unpinned (and MapGraph sync).
+  // Those arrays stuck under Selected after switching presets. v3 drops them so
+  // Selected + null again means all current sectors.
+  if (version < PERSIST_VERSION) {
     selectedSectorIndexes = null
   }
   return {
@@ -87,48 +95,25 @@ export const useHomeworldRegionSelectionStore = create<HomeworldRegionSelectionS
       regionSelectionPreset: defaultHomeworldRegionSelectionPreset(),
       selectedSectorIndexes: null,
       showEnvelopeOverlays: defaultShowEnvelopeOverlays(),
-      setRegionSelectionPreset: (preset, overlays) => {
+      setRegionSelectionPreset: (preset) => {
         if (!isHomeworldRegionSelectionPreset(preset)) return
-        if (preset === 'selected') {
-          set({ regionSelectionPreset: 'selected' })
-          return
-        }
-        if (overlays == null) {
-          set({ regionSelectionPreset: preset })
-          return
-        }
-        set({
-          regionSelectionPreset: preset,
-          selectedSectorIndexes: sectorIndexesForPreset(overlays, preset),
-        })
+        set({ regionSelectionPreset: preset })
       },
       setShowEnvelopeOverlays: (show) => {
         set({ showEnvelopeOverlays: show })
       },
-      toggleSectorIndex: (sectorIndex) => {
+      toggleSectorIndex: (sectorIndex, overlays) => {
         if (!Number.isInteger(sectorIndex) || sectorIndex < 0) return
+        const { regionSelectionPreset, selectedSectorIndexes } = get()
+        const current = effectiveSelectedSectorIndexes(
+          overlays,
+          regionSelectionPreset,
+          selectedSectorIndexes
+        )
         set({
           regionSelectionPreset: 'selected',
-          selectedSectorIndexes: toggleSectorIndexInSelection(
-            get().selectedSectorIndexes ?? [],
-            sectorIndex
-          ),
+          selectedSectorIndexes: toggleSectorIndexInSelection(current, sectorIndex),
         })
-      },
-      syncSelectionWithOverlays: (overlays) => {
-        const { regionSelectionPreset, selectedSectorIndexes } = get()
-        if (regionSelectionPreset === 'pinned' || regionSelectionPreset === 'unpinned') {
-          set({
-            selectedSectorIndexes: sectorIndexesForPreset(overlays, regionSelectionPreset),
-          })
-          return
-        }
-        if (selectedSectorIndexes === null) {
-          const all = allHomeworldSectorIndexes(overlays)
-          if (all.length > 0) {
-            set({ selectedSectorIndexes: all })
-          }
-        }
       },
     }),
     {

@@ -19,6 +19,7 @@ import {
 } from './constants'
 import { HomeworldCandidateRows } from './HomeworldCandidateRows'
 import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
+import { effectiveSelectedSectorIndexes } from './homeworldRegionSelection'
 import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
 import { planetPositionsFromBaseMap } from './planetPositionsFromBaseMap'
@@ -69,14 +70,24 @@ export function HomeworldLocatorPanel({
     enabled: fetchEnabled && analyticScope != null && needsBaseMap,
   })
 
-  const selectedSectorIndexes = useHomeworldRegionSelectionStore(
+  const regionSelectionPreset = useHomeworldRegionSelectionStore(
+    (s) => s.regionSelectionPreset
+  )
+  const storedSelectedSectorIndexes = useHomeworldRegionSelectionStore(
     (s) => s.selectedSectorIndexes
   )
   const toggleSectorIndex = useHomeworldRegionSelectionStore((s) => s.toggleSectorIndex)
 
   const selectedSectorIndexSet = useMemo(
-    () => new Set(selectedSectorIndexes ?? []),
-    [selectedSectorIndexes]
+    () =>
+      new Set(
+        effectiveSelectedSectorIndexes(
+          overlays,
+          regionSelectionPreset,
+          storedSelectedSectorIndexes
+        )
+      ),
+    [overlays, regionSelectionPreset, storedSelectedSectorIndexes]
   )
 
   const planetPositions = useMemo(() => {
@@ -175,7 +186,9 @@ export function HomeworldLocatorPanel({
           onSelectPlanet={onSelectPlanet}
           compact
           selectedSectorIndexes={selectedSectorIndexSet}
-          onToggleSectorIndex={toggleSectorIndex}
+          onToggleSectorIndex={(sectorIndex) =>
+            toggleSectorIndex(sectorIndex, overlays)
+          }
         />
       ) : panelModel?.kind === 'flat' ? (
         <HomeworldCandidateRows

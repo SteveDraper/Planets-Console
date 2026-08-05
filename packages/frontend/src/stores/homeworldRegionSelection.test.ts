@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { HOMEWORLD_SECTOR_KIND } from '../analytics/homeworld-locator/homeworldSectorIndex'
-import { defaultHomeworldRegionSelectionPreset } from '../analytics/homeworld-locator/homeworldRegionSelection'
+import {
+  defaultHomeworldRegionSelectionPreset,
+  effectiveSelectedSectorIndexes,
+} from '../analytics/homeworld-locator/homeworldRegionSelection'
 import {
   HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
   useHomeworldRegionSelectionStore,
@@ -38,74 +41,87 @@ describe('homeworldRegionSelection store', () => {
     })
   })
 
-  it('defaults to selected preset, uninitialized indexes, envelopes on', () => {
+  it('defaults to selected preset, null indexes (all), envelopes on', () => {
     const state = useHomeworldRegionSelectionStore.getState()
     expect(state.regionSelectionPreset).toBe('selected')
     expect(state.selectedSectorIndexes).toBeNull()
     expect(state.showEnvelopeOverlays).toBe(true)
   })
 
-  it('rewrites selected indexes when applying pinned/unpinned with overlays', () => {
+  it('updates preset only without rewriting stored indexes', () => {
     const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-1', false)]
-    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('pinned', overlays)
-    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
-
-    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('unpinned', overlays)
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([1])
-  })
-
-  it('forces selected preset on manual sector toggle', () => {
-    useHomeworldRegionSelectionStore.setState({ regionSelectionPreset: 'pinned' })
-    useHomeworldRegionSelectionStore.getState().toggleSectorIndex(2)
-    const state = useHomeworldRegionSelectionStore.getState()
-    expect(state.regionSelectionPreset).toBe('selected')
-    expect(state.selectedSectorIndexes).toEqual([2])
-  })
-
-  it('seeds uninitialized selection to all sector indexes on sync', () => {
-    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-3', false)]
-    useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: null })
-    useHomeworldRegionSelectionStore.getState().syncSelectionWithOverlays(overlays)
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0, 3])
-  })
-
-  it('preserves explicit empty selection on sync', () => {
-    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-3', false)]
-    useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: [] })
-    useHomeworldRegionSelectionStore.getState().syncSelectionWithOverlays(overlays)
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
-  })
-
-  it('re-applies pinned rewrite on sync when preset is pinned', () => {
-    useHomeworldRegionSelectionStore.setState({
-      regionSelectionPreset: 'pinned',
-      selectedSectorIndexes: [9],
-    })
-    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-1', false)]
-    useHomeworldRegionSelectionStore.getState().syncSelectionWithOverlays(overlays)
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
-  })
-
-  it('defers pinned rewrite until sync when preset is set without overlays', () => {
-    useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: [9] })
-    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-1', false)]
+    useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: [1] })
     useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('pinned')
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([9])
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([1])
+    expect(
+      effectiveSelectedSectorIndexes(
+        overlays,
+        useHomeworldRegionSelectionStore.getState().regionSelectionPreset,
+        useHomeworldRegionSelectionStore.getState().selectedSectorIndexes
+      )
+    ).toEqual([0])
 
-    useHomeworldRegionSelectionStore.getState().syncSelectionWithOverlays(overlays)
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
+    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('unpinned')
+    expect(
+      effectiveSelectedSectorIndexes(
+        overlays,
+        useHomeworldRegionSelectionStore.getState().regionSelectionPreset,
+        useHomeworldRegionSelectionStore.getState().selectedSectorIndexes
+      )
+    ).toEqual([1])
+  })
+
+  it('toggles from default-all against overlays, not empty', () => {
+    const overlays = [
+      sector('homeworld-sector-0', true),
+      sector('homeworld-sector-2', false),
+      sector('homeworld-sector-3', false),
+    ]
+    useHomeworldRegionSelectionStore.getState().toggleSectorIndex(2, overlays)
+    const state = useHomeworldRegionSelectionStore.getState()
+    expect(state.regionSelectionPreset).toBe('selected')
+    expect(state.selectedSectorIndexes).toEqual([0, 3])
+  })
+
+  it('forces selected preset on manual sector toggle from pinned', () => {
+    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-2', false)]
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: 'pinned',
+      selectedSectorIndexes: null,
+    })
+    useHomeworldRegionSelectionStore.getState().toggleSectorIndex(0, overlays)
+    const state = useHomeworldRegionSelectionStore.getState()
+    expect(state.regionSelectionPreset).toBe('selected')
+    // Effective pinned was [0]; toggle removes it.
+    expect(state.selectedSectorIndexes).toEqual([])
+  })
+
+  it('preserves explicit empty selection under selected preset', () => {
+    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-3', false)]
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: 'selected',
+      selectedSectorIndexes: [],
+    })
+    expect(
+      effectiveSelectedSectorIndexes(
+        overlays,
+        'selected',
+        useHomeworldRegionSelectionStore.getState().selectedSectorIndexes
+      )
+    ).toEqual([])
   })
 
   it('persists preference fields to localStorage', () => {
+    const overlays = [sector('homeworld-sector-4', false)]
     useHomeworldRegionSelectionStore.getState().setShowEnvelopeOverlays(false)
-    useHomeworldRegionSelectionStore.getState().toggleSectorIndex(4)
+    useHomeworldRegionSelectionStore.getState().toggleSectorIndex(4, overlays)
     const raw = localStorage.getItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)
     expect(raw).toBeTruthy()
     expect(raw).toContain('"showEnvelopeOverlays":false')
     expect(raw).toContain('"selected"')
-    expect(raw).toContain('4')
+    // Default-all was [4]; toggle removes 4 → explicit empty.
+    expect(raw).toContain('"selectedSectorIndexes":[]')
   })
 
   it('ignores the old display-mode storage key', () => {
@@ -124,6 +140,28 @@ describe('homeworldRegionSelection store', () => {
     useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: [] })
     const raw = localStorage.getItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)
     expect(raw).toContain('"selectedSectorIndexes":[]')
+  })
+
+  it('migrates v2 explicit indexes to null (default-all under Selected)', async () => {
+    localStorage.setItem(
+      HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          regionSelectionPreset: 'selected',
+          selectedSectorIndexes: [0, 1, 2, 5],
+          showEnvelopeOverlays: true,
+        },
+        version: 2,
+      })
+    )
+    // Re-import persist by resetting and triggering rehydrate via a fresh read path:
+    // zustand persist migrates on create; simulate migrate helper via setState after
+    // clearing and re-applying storage through the store's persist API.
+    await useHomeworldRegionSelectionStore.persist.rehydrate()
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
+      'selected'
+    )
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toBeNull()
   })
 
   it('ignores invalid preset values', () => {
