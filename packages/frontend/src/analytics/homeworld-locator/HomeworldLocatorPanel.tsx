@@ -37,6 +37,8 @@ export type HomeworldLocatorPanelProps = {
   overlays: readonly MapRegionOverlay[]
   /** True when Tile's homeworld map-layer query succeeded (not materialize readiness). */
   homeworldMapOverlaysQuerySucceeded: boolean
+  /** Settled failure from Tile's homeworld map-layer query (null while pending/success). */
+  overlaysError: unknown | null
   /**
    * Planet positions from Tile's ``useBaseMapPlanetPositions`` (same base-map
    * query as the map shell). Panel must not declare its own base-map fetch.
@@ -56,6 +58,7 @@ export function HomeworldLocatorPanel({
   onToggleSectorIndex,
   overlays,
   homeworldMapOverlaysQuerySucceeded,
+  overlaysError,
   planetPositions,
   positionsReady,
   positionsError,
@@ -66,8 +69,10 @@ export function HomeworldLocatorPanel({
     enabled: fetchEnabled && analyticScope != null,
   })
   // Hold until overlays are known -- building with empty overlays flashes a flat
-  // list before the sector accordion appears on circular maps.
-  const awaitingOverlays = !homeworldMapOverlaysQuerySucceeded
+  // list before the sector accordion appears on circular maps. Settled failure
+  // is not "awaiting" (surface overlaysError instead of perpetual Loading).
+  const awaitingOverlays =
+    !homeworldMapOverlaysQuerySucceeded && overlaysError == null
   // Sector grouping needs planet positions. Until they are ready, do not build
   // a sectors model (empty positions would dump every candidate into Unassigned).
   const needsBaseMap = homeworldMapOverlaysQuerySucceeded && overlays.length > 0
@@ -132,6 +137,11 @@ export function HomeworldLocatorPanel({
       {refreshMutation.error != null ? (
         <p className="text-[10px] text-red-400 break-words" role="alert">
           {errorDetailFromUnknown(refreshMutation.error)}
+        </p>
+      ) : null}
+      {overlaysError != null ? (
+        <p className="text-[10px] text-red-400 break-words" role="alert">
+          {errorDetailFromUnknown(overlaysError)}
         </p>
       ) : null}
       {needsBaseMap && positionsError != null ? (

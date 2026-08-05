@@ -62,6 +62,7 @@ const DEFAULT_ROSTER: readonly PerspectiveRow[] = [
 type PanelOptions = {
   overlays?: readonly MapRegionOverlay[]
   homeworldMapOverlaysQuerySucceeded?: boolean
+  overlaysError?: unknown | null
   planetPositions?: ReadonlyMap<number, { x: number; y: number }>
   positionsReady?: boolean
   positionsError?: unknown | null
@@ -84,6 +85,7 @@ function panelElement(
       homeworldMapOverlaysQuerySucceeded={
         options.homeworldMapOverlaysQuerySucceeded ?? true
       }
+      overlaysError={options.overlaysError ?? null}
       planetPositions={options.planetPositions ?? EMPTY_POSITIONS}
       positionsReady={options.positionsReady ?? true}
       positionsError={options.positionsError ?? null}
@@ -225,6 +227,29 @@ describe('HomeworldLocatorPanel', () => {
     expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()
     expect(screen.queryByText('12')).not.toBeInTheDocument()
     expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+  })
+
+  it('surfaces homeworld map overlays failure without perpetual Loading…', async () => {
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [CANDIDATE_ROW],
+    })
+
+    renderPanel(undefined, {
+      overlays: EMPTY_OVERLAYS,
+      homeworldMapOverlaysQuerySucceeded: false,
+      overlaysError: new Error('homeworld map unavailable'),
+      positionsReady: true,
+      planetPositions: EMPTY_POSITIONS,
+    })
+
+    expect(await screen.findByRole('button', { name: /^refresh$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/homeworld map unavailable/i)
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+    expect(screen.queryByText('Sector Two')).not.toBeInTheDocument()
   })
 
   it('posts refresh and keeps the refresh control available', async () => {
