@@ -20,12 +20,13 @@ const PERSIST_VERSION = 4
 type HomeworldRegionSelectionState = {
   regionSelectionPreset: HomeworldRegionSelectionPreset
   /**
-   * Concrete outline multi-select. Meaningful after materialize; empty under
-   * ``all`` until overlays-ready writes ``selected`` + full list.
+   * Concrete outline multi-select under ``selected`` (including ``[]`` = none).
+   * Empty under init-only ``all`` until overlays-ready materialize, and under
+   * ``pinned`` / ``unpinned`` (those presets derive indexes at read time).
    */
   selectedSectorIndexes: number[]
   showEnvelopeOverlays: boolean
-  /** Replace preset + indexes together (callers materialize; store stays dumb). */
+  /** Replace preset + indexes together (callers decide indexes; store stays dumb). */
   setRegionSelectionState: (
     preset: HomeworldRegionSelectionPreset,
     selectedSectorIndexes: readonly number[]

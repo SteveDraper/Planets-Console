@@ -84,8 +84,8 @@ export function allHomeworldSectorIndexes(
 }
 
 /**
- * Sector indexes matching a rewrite preset.
- * ``pinned`` / ``unpinned`` only; ``selected`` / ``all`` use other helpers.
+ * Sector indexes matching a pinned/unpinned filter (derive-at-read).
+ * Used by ``effectiveSelectedSectorIndexes``; not persisted under those presets.
  */
 export function sectorIndexesForPreset(
   overlays: readonly MapRegionOverlay[],
@@ -103,8 +103,12 @@ export function sectorIndexesForPreset(
 }
 
 /**
- * Materialize the outline multi-select set for a preset rewrite.
- * ``selected`` keeps ``currentIndexes`` (caller supplies the prior effective set).
+ * Indexes to persist when rewriting the store for a preset.
+ *
+ * - ``all``: every current homeworld sector (init-only materialize → ``selected``).
+ * - ``pinned`` / ``unpinned``: ``[]`` -- paint derives via
+ *   ``effectiveSelectedSectorIndexes``; do not store a concrete list.
+ * - ``selected``: keeps ``currentIndexes`` (caller supplies the prior effective set).
  */
 export function materializeSectorIndexesForPreset(
   overlays: readonly MapRegionOverlay[],
@@ -113,7 +117,7 @@ export function materializeSectorIndexesForPreset(
 ): number[] {
   if (preset === 'all') return allHomeworldSectorIndexes(overlays)
   if (preset === 'pinned' || preset === 'unpinned') {
-    return sectorIndexesForPreset(overlays, preset)
+    return []
   }
   return [...currentIndexes]
 }

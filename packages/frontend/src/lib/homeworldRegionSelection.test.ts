@@ -97,7 +97,9 @@ describe('homeworldRegionSelection', () => {
     expect(sectorIndexesForPreset(all, 'pinned')).toEqual([0])
     expect(sectorIndexesForPreset(all, 'unpinned')).toEqual([2])
     expect(materializeSectorIndexesForPreset(all, 'all')).toEqual([0, 2])
-    expect(materializeSectorIndexesForPreset(all, 'pinned')).toEqual([0])
+    // pinned/unpinned persist empty; derive-at-read uses sectorIndexesForPreset.
+    expect(materializeSectorIndexesForPreset(all, 'pinned')).toEqual([])
+    expect(materializeSectorIndexesForPreset(all, 'unpinned')).toEqual([])
     expect(materializeSectorIndexesForPreset(all, 'selected', [2])).toEqual([2])
   })
 

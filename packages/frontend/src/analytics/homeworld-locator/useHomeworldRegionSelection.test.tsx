@@ -147,7 +147,7 @@ describe('useHomeworldRegionSelection', () => {
     expect(result.current.uiPreset).toBe('selected')
   })
 
-  it('materializes pinned on UI preset change; Selected snapshots the effective set', async () => {
+  it('stores empty indexes for pinned/unpinned; Selected snapshots the effective set', async () => {
     const { result } = renderHook(() =>
       useTileSelectionWithMapMaterialize(SECTOR_OVERLAYS, true)
     )
@@ -162,14 +162,32 @@ describe('useHomeworldRegionSelection', () => {
       result.current.setUiPreset('pinned')
     })
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
-    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
     expect(result.current.uiPreset).toBe('pinned')
+    // Effective set still derives from overlays (ignore empty store).
     expect(result.current.selectedSectorIndexes).toEqual([0])
 
     act(() => {
       result.current.setUiPreset('selected')
     })
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
+      'selected'
+    )
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
+
+    act(() => {
+      result.current.setUiPreset('unpinned')
+    })
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
+      'unpinned'
+    )
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
+    expect(result.current.selectedSectorIndexes).toEqual([1])
+
+    act(() => {
+      result.current.setUiPreset('selected')
+    })
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([1])
   })
 
   it('forces selected and toggles against the effective set', async () => {

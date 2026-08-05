@@ -106,6 +106,8 @@ export function useHomeworldRegionSelection({
     (preset: HomeworldRegionSelectionUiPreset) => {
       if (!isHomeworldRegionSelectionUiPreset(preset)) return
       if (preset === 'selected') {
+        // Snapshot the current effective outline set (may re-derive from overlays
+        // when leaving pinned/unpinned).
         const current = effectiveSelectedSectorIndexes(
           overlays,
           regionSelectionPreset,
@@ -114,10 +116,8 @@ export function useHomeworldRegionSelection({
         setRegionSelectionState('selected', current)
         return
       }
-      setRegionSelectionState(
-        preset,
-        materializeSectorIndexesForPreset(overlays, preset)
-      )
+      // pinned / unpinned: derive-at-read; do not persist concrete indexes.
+      setRegionSelectionState(preset, [])
     },
     [
       overlays,
