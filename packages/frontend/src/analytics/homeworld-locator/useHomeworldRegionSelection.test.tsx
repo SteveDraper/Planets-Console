@@ -105,6 +105,27 @@ describe('useHomeworldRegionSelectionMaterialize', () => {
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('all')
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([])
   })
+
+  it('does not clobber a sector toggle that landed before the materialize effect ran', () => {
+    const { result, rerender } = renderHook(
+      ({ ready }) => useTileSelectionWithMapMaterialize(SECTOR_OVERLAYS, ready),
+      { initialProps: { ready: false } }
+    )
+
+    // Same act: overlays become ready (schedules materialize with closed-over ``all``),
+    // then the user toggles a sector (writes ``selected`` + subset). Effect must read
+    // getState() so it does not rewrite the full index list.
+    act(() => {
+      rerender({ ready: true })
+      result.current.toggleSectorIndex(1)
+    })
+
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe(
+      'selected'
+    )
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
+  })
+
   it('does not rewrite stored indexes while preset is pinned', () => {
     useHomeworldRegionSelectionStore.setState({
       regionSelectionPreset: 'pinned',

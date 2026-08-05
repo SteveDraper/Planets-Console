@@ -121,6 +121,43 @@ describe('HomeworldLocatorPanel', () => {
     expect(screen.queryByLabelText(/assert ownership/i)).not.toBeInTheDocument()
   })
 
+  it('holds sector accordion on Loading… while overlays are not ready', async () => {
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [CANDIDATE_ROW],
+    })
+
+    const { rerender } = renderPanel(undefined, {
+      overlays: EMPTY_OVERLAYS,
+      overlaysReady: false,
+      positionsReady: true,
+      planetPositions: EMPTY_POSITIONS,
+    })
+
+    expect(await screen.findByRole('button', { name: /^refresh$/i })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Loading…')).toBeInTheDocument()
+      expect(screen.queryByText('12')).not.toBeInTheDocument()
+      expect(screen.queryByText('Sector Two')).not.toBeInTheDocument()
+    })
+
+    rerender(
+      panelElement(DEFAULT_ROSTER, {
+        overlays: [SECTOR_OVERLAY],
+        overlaysReady: true,
+        planetPositions: new Map([[12, { x: 50, y: 50 }]]),
+        positionsReady: true,
+        positionsError: null,
+      })
+    )
+
+    expect(await screen.findByText('Sector Two')).toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+  })
+
   it('holds sector accordion on Loading… while planet positions are pending', async () => {
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',

@@ -20,9 +20,6 @@ import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
-const EMPTY_OVERLAYS: readonly MapRegionOverlay[] = []
-const EMPTY_POSITIONS: ReadonlyMap<number, { x: number; y: number }> = new Map()
-
 export type HomeworldLocatorPanelProps = {
   analyticScope: AnalyticShellScope | null
   fetchEnabled: boolean
@@ -67,24 +64,22 @@ export function HomeworldLocatorPanel({
     queryFn: () => fetchHomeworldLocatorTable(analyticScope!),
     enabled: fetchEnabled && analyticScope != null,
   })
+  // Hold until overlays are known -- building with empty overlays flashes a flat
+  // list before the sector accordion appears on circular maps.
+  const awaitingOverlays = !overlaysReady
   // Sector grouping needs planet positions. Until they are ready, do not build
   // a sectors model (empty positions would dump every candidate into Unassigned).
-  const needsBaseMap = overlays.length > 0
+  const needsBaseMap = overlaysReady && overlays.length > 0
   const awaitingBaseMapForSectors = needsBaseMap && !positionsReady
+  const awaitingSectorModel = awaitingOverlays || awaitingBaseMapForSectors
 
   const panelModel = useMemo(() => {
+    if (awaitingSectorModel) return null
     const rows: readonly HomeworldCandidateRecord[] = tableQuery.data?.rows ?? []
-    if (!overlaysReady) {
-      return buildHomeworldSectorPanelModel(rows, EMPTY_OVERLAYS, EMPTY_POSITIONS)
-    }
-    if (awaitingBaseMapForSectors) {
-      return null
-    }
     return buildHomeworldSectorPanelModel(rows, overlays, planetPositions)
   }, [
     tableQuery.data?.rows,
-    overlaysReady,
-    awaitingBaseMapForSectors,
+    awaitingSectorModel,
     overlays,
     planetPositions,
   ])
@@ -143,8 +138,8 @@ export function HomeworldLocatorPanel({
           {errorDetailFromUnknown(positionsError)}
         </p>
       ) : null}
-      {awaitingBaseMapForSectors ? (
-        positionsError != null ? null : (
+      {awaitingSectorModel ? (
+        awaitingBaseMapForSectors && positionsError != null ? null : (
           <p className="px-0.5 text-[11px] text-slate-400">Loading…</p>
         )
       ) : panelModel?.kind === 'sectors' ? (

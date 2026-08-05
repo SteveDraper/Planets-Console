@@ -2,6 +2,9 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
+import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
+import { useMapAttentionRequestStore } from '../../stores/mapAttentionRequest'
+import { selectHomeworldCandidateForMapAttention } from './homeworldCandidateAttention'
 import { HomeworldCandidateRows } from './HomeworldCandidateRows'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
@@ -135,5 +138,33 @@ describe('HomeworldCandidateRows', () => {
 
     await user.click(screen.getByText('55'))
     expect(onSelectPlanet).toHaveBeenCalledWith(55)
+  })
+
+  it('wires row click through selectHomeworldCandidateForMapAttention', async () => {
+    const user = userEvent.setup()
+    useHomeworldLocatorSelectionStore.getState().clearSelection()
+    useMapAttentionRequestStore.getState().clearAttention()
+
+    render(
+      <HomeworldCandidateRows
+        rows={[candidateRow({ planetId: 55 })]}
+        baselineDegraded={false}
+        baselineTurn={null}
+        roster={[perspectiveRow(1, 'alice')]}
+        selectedPlanetId={null}
+        onSelectPlanet={selectHomeworldCandidateForMapAttention}
+      />
+    )
+
+    await user.click(screen.getByText('55'))
+
+    expect(useHomeworldLocatorSelectionStore.getState().selection).toEqual({
+      kind: 'planet',
+      planetId: 55,
+    })
+    expect(useMapAttentionRequestStore.getState().pending).toMatchObject({
+      kind: 'homeworld-planet',
+      planetId: 55,
+    })
   })
 })

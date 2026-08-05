@@ -81,6 +81,9 @@ export function useHomeworldRegionSelectionMaterialize(
   overlays: readonly MapRegionOverlay[],
   overlaysReady: boolean
 ): void {
+  // Subscribe so the effect re-runs when preset leaves ``all`` (e.g. user toggle).
+  // Read preset from getState() inside the effect so a same-frame toggle that
+  // already wrote ``selected`` is not clobbered by a stale ``all`` closure.
   const regionSelectionPreset = useHomeworldRegionSelectionStore(
     (s) => s.regionSelectionPreset
   )
@@ -90,7 +93,9 @@ export function useHomeworldRegionSelectionMaterialize(
 
   useEffect(() => {
     if (!overlaysReady) return
-    if (regionSelectionPreset !== 'all') return
+    if (useHomeworldRegionSelectionStore.getState().regionSelectionPreset !== 'all') {
+      return
+    }
     setRegionSelectionState(
       'selected',
       materializeSectorIndexesForPreset(overlays, 'all')

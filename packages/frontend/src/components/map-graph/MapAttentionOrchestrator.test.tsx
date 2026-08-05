@@ -121,6 +121,28 @@ describe('MapAttentionOrchestrator', () => {
     expect(setViewport).toHaveBeenCalledTimes(1)
   })
 
+  it('does not pan when the homeworld marker is already on-screen', () => {
+    // Viewport translation matches mapAttention unit tests: marker at (100, 200)
+    // projects into an 800×600 pane.
+    getViewport.mockReturnValue({ x: 400, y: 300, zoom: 1 })
+    const onScreenMarkers = [{ planetId: 42, x: 100, y: 200 }] as const
+
+    render(<MapAttentionOrchestrator homeworldMarkers={onScreenMarkers} />)
+
+    act(() => {
+      requestMapAttention({
+        kind: 'homeworld-planet',
+        planetId: 42,
+      })
+    })
+
+    expect(useMapAttentionRequestStore.getState().pending).toMatchObject({
+      kind: 'homeworld-planet',
+      planetId: 42,
+    })
+    expect(setViewport).not.toHaveBeenCalled()
+  })
+
   it('always pans for wormhole-cell attention when the pane is ready', () => {
     render(<MapAttentionOrchestrator homeworldMarkers={[]} />)
 
