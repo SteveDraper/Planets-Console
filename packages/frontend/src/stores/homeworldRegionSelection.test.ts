@@ -51,7 +51,7 @@ describe('homeworldRegionSelection store', () => {
   it('updates preset only without rewriting stored indexes', () => {
     const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-1', false)]
     useHomeworldRegionSelectionStore.setState({ selectedSectorIndexes: [1] })
-    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('pinned')
+    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('pinned', overlays)
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([1])
     expect(
@@ -62,7 +62,7 @@ describe('homeworldRegionSelection store', () => {
       )
     ).toEqual([0])
 
-    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('unpinned')
+    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('unpinned', overlays)
     expect(
       effectiveSelectedSectorIndexes(
         overlays,
@@ -164,11 +164,43 @@ describe('homeworldRegionSelection store', () => {
     expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toBeNull()
   })
 
+  it('materializes pinned effective set when switching to selected', () => {
+    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-1', false)]
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: 'pinned',
+      selectedSectorIndexes: null,
+    })
+    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('selected', overlays)
+    expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('selected')
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
+  })
+
+  it('materializes unpinned effective set when switching to selected', () => {
+    const overlays = [sector('homeworld-sector-0', true), sector('homeworld-sector-1', false)]
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: 'unpinned',
+      selectedSectorIndexes: null,
+    })
+    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('selected', overlays)
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([1])
+  })
+
+  it('leaves stored indexes unchanged when switching selected to selected', () => {
+    const overlays = [sector('homeworld-sector-0', true)]
+    useHomeworldRegionSelectionStore.setState({
+      regionSelectionPreset: 'selected',
+      selectedSectorIndexes: [0],
+    })
+    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('selected', overlays)
+    expect(useHomeworldRegionSelectionStore.getState().selectedSectorIndexes).toEqual([0])
+  })
+
   it('ignores invalid preset values', () => {
-    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('pinned')
+    const overlays = [sector('homeworld-sector-0', true)]
+    useHomeworldRegionSelectionStore.getState().setRegionSelectionPreset('pinned', overlays)
     useHomeworldRegionSelectionStore
       .getState()
-      .setRegionSelectionPreset('off' as 'selected')
+      .setRegionSelectionPreset('off' as 'selected', overlays)
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
   })
 })

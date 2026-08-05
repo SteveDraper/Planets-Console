@@ -28,7 +28,10 @@ type HomeworldRegionSelectionState = {
    */
   selectedSectorIndexes: number[] | null
   showEnvelopeOverlays: boolean
-  setRegionSelectionPreset: (preset: HomeworldRegionSelectionPreset) => void
+  setRegionSelectionPreset: (
+    preset: HomeworldRegionSelectionPreset,
+    overlays: readonly MapRegionOverlay[]
+  ) => void
   setShowEnvelopeOverlays: (show: boolean) => void
   /**
    * Force ``selected`` and toggle one sector against the effective current set
@@ -95,8 +98,23 @@ export const useHomeworldRegionSelectionStore = create<HomeworldRegionSelectionS
       regionSelectionPreset: defaultHomeworldRegionSelectionPreset(),
       selectedSectorIndexes: null,
       showEnvelopeOverlays: defaultShowEnvelopeOverlays(),
-      setRegionSelectionPreset: (preset) => {
+      setRegionSelectionPreset: (preset, overlays) => {
         if (!isHomeworldRegionSelectionPreset(preset)) return
+        const { regionSelectionPreset, selectedSectorIndexes } = get()
+        if (
+          preset === 'selected' &&
+          (regionSelectionPreset === 'pinned' || regionSelectionPreset === 'unpinned')
+        ) {
+          set({
+            regionSelectionPreset: preset,
+            selectedSectorIndexes: effectiveSelectedSectorIndexes(
+              overlays,
+              regionSelectionPreset,
+              selectedSectorIndexes
+            ),
+          })
+          return
+        }
         set({ regionSelectionPreset: preset })
       },
       setShowEnvelopeOverlays: (show) => {
