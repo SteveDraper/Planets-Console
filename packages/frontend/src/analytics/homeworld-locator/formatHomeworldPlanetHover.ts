@@ -46,11 +46,14 @@ export function formatHomeworldPlanetHover(
     options.possibleOwners,
     row.perspective
   )
+  const ownerCount = options.possibleOwners?.length ?? 0
   const ownershipSummary = formatHomeworldOwnershipInferenceSummary(ownershipEvidence, {
     winningStrength: uniqueOwnershipWinningStrength(
       options.possibleOwners,
       options.ownershipWinningStrength
     ),
+    // Legacy ship→definite only for unique-owner wires (ambiguous omits strength).
+    allowLegacyShipDefinite: ownerCount <= 1,
   })
   if (ownershipSummary != null) {
     parts.push(ownershipSummary)

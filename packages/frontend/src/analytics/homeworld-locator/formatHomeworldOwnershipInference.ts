@@ -28,6 +28,13 @@ export type OwnershipInferenceEvidence = Pick<
 export type FormatOwnershipInferenceOptions = {
   /** Overlay ``ownershipWinningStrength`` after overlay projection. */
   winningStrength?: OwnershipWinningStrength | null
+  /**
+   * When true (default), missing ``winningStrength`` maps ship_travel_envelope
+   * to definite (legacy unique-owner wires without the field). Pass false for
+   * ambiguous multi-owner contenders so ship evidence cannot contradict
+   * sector ambiguity.
+   */
+  allowLegacyShipDefinite?: boolean
 }
 
 /**
@@ -89,14 +96,15 @@ export function formatHomeworldOwnershipInferenceSummary(
   let status: 'definite' | 'inferred'
   if (options.winningStrength != null) {
     status = options.winningStrength === 'strong' ? 'definite' : 'inferred'
+  } else if (
+    (options.allowLegacyShipDefinite ?? true) &&
+    evidence.provenanceKinds.includes(PROVENANCE_KIND_SHIP_TRAVEL_ENVELOPE)
+  ) {
+    // Legacy unique-owner wire without ownershipWinningStrength: ship envelope
+    // maps to Core strong (ownership_provenance_strength).
+    status = 'definite'
   } else {
-    // Legacy wire without ownershipWinningStrength: ship envelope maps to
-    // Core strong (ownership_provenance_strength).
-    status = evidence.provenanceKinds.includes(
-      PROVENANCE_KIND_SHIP_TRAVEL_ENVELOPE
-    )
-      ? 'definite'
-      : 'inferred'
+    status = 'inferred'
   }
 
   return (

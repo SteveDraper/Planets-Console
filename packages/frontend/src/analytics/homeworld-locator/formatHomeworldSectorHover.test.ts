@@ -150,6 +150,42 @@ describe('formatHomeworldSectorHoverLine', () => {
     )
   })
 
+  it('does not label ambiguous ship-envelope contenders definite without ownershipWinningStrength', () => {
+    expect(
+      formatHomeworldSectorHoverLine(
+        sector({
+          candidateCount: 2,
+          possibleOwners: [
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['ship_travel_envelope'],
+              playerLabel: 'alice (The Federation)',
+              provenanceKindCounts: {
+                ship_travel_envelope: 2,
+                nearby_planet_ownership: 0,
+              },
+            },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['ship_travel_envelope'],
+              playerLabel: 'bob (The Rebel Confederation)',
+              provenanceKindCounts: {
+                ship_travel_envelope: 1,
+                nearby_planet_ownership: 0,
+              },
+            },
+          ],
+        })
+      )
+    ).toBe(
+      'ambiguous · homeworld owners: alice (The Federation) · ' +
+        'inferred (ship observations: 2, planet observations: 0), ' +
+        'bob (The Rebel Confederation) · ' +
+        'inferred (ship observations: 1, planet observations: 0) · ' +
+        '2 candidate homeworlds'
+    )
+  })
+
   it('applies ownershipWinningStrength for a unique owner', () => {
     expect(
       formatHomeworldSectorHoverLine(

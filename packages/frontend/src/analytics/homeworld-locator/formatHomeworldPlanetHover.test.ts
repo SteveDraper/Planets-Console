@@ -105,4 +105,34 @@ describe('formatHomeworldPlanetHover', () => {
         'inferred (ship observations: 0, planet observations: 1)'
     )
   })
+
+  it('does not label matched ship-envelope owner definite under ambiguous owners', () => {
+    expect(
+      formatHomeworldPlanetHover(
+        candidate({
+          perspective: 3,
+          confidenceTier: 'possible',
+          attribution: 'inferred',
+        }),
+        [perspectiveRow(3, 'enlar', { raceName: 'The Privateers' })],
+        {
+          possibleOwners: [
+            {
+              ownerSlot: 3,
+              provenanceKinds: ['ship_travel_envelope'],
+              provenanceKindCounts: { ship_travel_envelope: 2 },
+            },
+            {
+              ownerSlot: 5,
+              provenanceKinds: ['ship_travel_envelope'],
+              provenanceKindCounts: { ship_travel_envelope: 1 },
+            },
+          ],
+        }
+      )
+    ).toBe(
+      'planet 12 · possible · owner: enlar (The Privateers) · ' +
+        'inferred (ship observations: 2, planet observations: 0)'
+    )
+  })
 })

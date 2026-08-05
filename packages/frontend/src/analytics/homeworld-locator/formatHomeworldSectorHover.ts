@@ -16,14 +16,18 @@ import { isHomeworldSectorOverlay } from './homeworldSectorIndex'
 
 function formatPossibleOwnerDisplay(
   owner: MapRegionPossibleOwner,
-  winningStrength: OwnershipWinningStrength | null | undefined
+  options: {
+    winningStrength: OwnershipWinningStrength | null | undefined
+    allowLegacyShipDefinite?: boolean
+  }
 ): string {
   const label =
     owner.playerLabel != null && owner.playerLabel !== ''
       ? owner.playerLabel
       : `slot ${owner.ownerSlot}`
   const inference = formatHomeworldOwnershipInferenceSummary(owner, {
-    winningStrength,
+    winningStrength: options.winningStrength,
+    allowLegacyShipDefinite: options.allowLegacyShipDefinite,
   })
   return inference != null ? `${label} · ${inference}` : label
 }
@@ -37,10 +41,9 @@ function formatSingleOwnerLine(
   }
 ): string | null {
   if (options.includeOwnerLabels) {
-    return `homeworld owner: ${formatPossibleOwnerDisplay(
-      owner,
-      options.winningStrength
-    )}`
+    return `homeworld owner: ${formatPossibleOwnerDisplay(owner, {
+      winningStrength: options.winningStrength,
+    })}`
   }
   return formatHomeworldOwnershipInferenceSummary(owner, {
     winningStrength: options.winningStrength,
@@ -55,7 +58,13 @@ function formatAmbiguousOwners(
   return [
     'ambiguous',
     `homeworld owners: ${possibleOwners
-      .map((owner) => formatPossibleOwnerDisplay(owner, winningStrength))
+      .map((owner) =>
+        formatPossibleOwnerDisplay(owner, {
+          winningStrength,
+          // Ambiguous contenders must not inherit legacy unique-owner ship→definite.
+          allowLegacyShipDefinite: false,
+        })
+      )
       .join(', ')}`,
   ]
 }

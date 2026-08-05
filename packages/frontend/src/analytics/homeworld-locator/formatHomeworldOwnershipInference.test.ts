@@ -130,6 +130,18 @@ describe('formatHomeworldOwnershipInferenceSummary', () => {
       })
     ).toBe('inferred (ship observations: 0, planet observations: 1)')
   })
+
+  it('disables legacy ship→definite when allowLegacyShipDefinite is false', () => {
+    expect(
+      formatHomeworldOwnershipInferenceSummary(
+        {
+          provenanceKinds: ['ship_travel_envelope'],
+          provenanceKindCounts: { ship_travel_envelope: 2 },
+        },
+        { allowLegacyShipDefinite: false }
+      )
+    ).toBe('inferred (ship observations: 2, planet observations: 0)')
+  })
 })
 
 describe('resolveOwnershipEvidenceForCandidate', () => {
