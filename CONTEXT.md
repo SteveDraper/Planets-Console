@@ -613,8 +613,8 @@ The **map layer** contribution of the **fleet analytic** for one shell turn. Pro
 _Avoid_: per-ship **fleet map node** markers as the primary v1 paint, duplicate ship graph separate from base-map planets, blocking map GET as the live data path
 
 **Fleet location ring**:
-Map overlay at an exact last-seen `(x, y)` stacking all visible players' **active** ships that share that coordinate. Near-fixed small outer diameter (slight log bump by total ship count, hard-capped). Arc length ∝ that player's ship-count share; stroke opacity (optional slight width) encodes approximate **fleet ship military estimate** for the stack. Multi-player stacks are arc-segmented by player; colors come from the shared **player color** palette.
-_Avoid_: diameter-as-primary strength encoding, merge-by-planet-id instead of exact `(x, y)`
+Map overlay at an exact last-seen `(x, y)` stacking all visible players' **active** ships that share that coordinate. Screen-fixed outer diameter `min(20, 12 + 2 * floor(log2(max(1, shipCount))))` px. Arc length ∝ that player's ship-count share; stroke opacity `clamp(0.40 + 0.55 * (E / Emax), 0.40, 0.95)` where `E` is sum of host mil points in the stack and `Emax` is the max `E` among drawn stacks. Multi-player stacks are arc-segmented by player; colors come from the shared **player color** palette.
+_Avoid_: diameter-as-primary strength encoding, merge-by-planet-id instead of exact `(x, y)`, map-LY-scaled ring radii
 
 **Fleet ship military estimate**:
 Approximate construction military contribution for one **fleet ship record**, computed by calling the same Core ship-build military helper used by **military score build inference** (hull + engine + beams + tubes; loaded ammo excluded). Known components from the display-default **fleet build option set** (or locked fields); unknown beam/tube slots treated as **full** at minimal-tech parts (cheapest tech-1 beam/tube in catalog); unknown engine filled the same way for API uniformity with that helper. Whether engines affect the numeric result is owned entirely by the shared military-score calculation -- fleet map must not special-case engine contribution. Used to weight **fleet location ring** opacity and tooltip lines -- not a durable ledger field and not scoreboard truth.
@@ -633,7 +633,7 @@ Single NDJSON connection for all **fleet player visibility**-enabled players on 
 _Avoid_: per-player HTTP connections, admission-order wire drain, separate map NDJSON protocol, map-mode `GET …/fleet/map` as the live SPA path, treating the stream as table-only
 
 **Player color**:
-Shared SPA identity color for a **Player**, used by any analytic or chrome that needs per-player paint (including **fleet location ring**s). Read API and defaults live in a shared module (deterministic hash of `playerId` → fixed preset hues). Persistable overrides use a storage abstraction the Settings UI can later wire without changing callers. Overrides are global localStorage, not inside one analytic sidebar.
+Shared SPA identity color for a **Player**, used by any analytic or chrome that needs per-player paint (including **fleet location ring**s). Read API and defaults live in a shared module: `colorForPlayerId(playerId)` uses `playerId % 16` into this preset table (dark-map friendly): `#38bdf8 #f472b6 #a78bfa #34d399 #fbbf24 #fb7185 #22d3ee #a3e635 #f97316 #818cf8 #2dd4bf #e879f9 #60a5fa #f43f5e #c084fc #84cc16`. Persistable overrides use a storage abstraction the Settings UI ([#289](https://github.com/SteveDraper/Planets-Console/issues/289)) can later wire without changing callers. Overrides are global localStorage, not inside one analytic sidebar.
 _Avoid_: fleet-only color store, relying on often-empty host `Relation.color` as the sole source, baking Settings UI into every consumer
 
 **Military score build inference**:

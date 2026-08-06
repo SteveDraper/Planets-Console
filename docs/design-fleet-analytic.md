@@ -330,12 +330,15 @@ Client projects **fleet player visibility**-filtered **`active`** rows with know
 
 ### 8.2 Map (fleet stream → location rings)
 
-- Own the **fleet stream** session above table vs map **view mode** (table tiles and map are projections)
-- Register in `mapAnalyticRegistry.ts`; merge **fleet location ring** overlay (not per-ship planet dots)
-- Ring encoding: near-fixed small diameter (slight log bump by ship count, capped); arc length ∝ per-player ship count; stroke opacity from stack **fleet ship military estimate**; colors from shared **player color** module
-- Hover: per-player header, then indented ship lines (hull icon, id, hull name, mil-score in host points). Hull icons share non-analytic resolution with the scoreboard (`hullImageUrl` / shared icon component)
-- Region overlays deferred
-- Heading / speed trails deferred to [#290](https://github.com/SteveDraper/Planets-Console/issues/290)
+- Own the **fleet stream** session above table vs map **view mode** (call site survives `viewMode` toggles -- e.g. shell main area -- not only inside the table tile)
+- Keep registry map analytic registration for enablement; paint via a dedicated **screen-fixed** overlay pane (homeworld-markers pattern), not `mergeLayer` planet nodes and not map-LY-scaled disks
+- **Fleet location ring** encoding (AFK constants for #128):
+  - Outer diameter (px): `min(20, 12 + 2 * floor(log2(max(1, shipCount))))` (1 ship → 12px; hard cap 20px)
+  - Arc length ∝ that player's ship count / stack total
+  - Stroke opacity: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `Emax` = max `E` among drawn stacks (or 1); `opacity = clamp(0.40 + 0.55 * (E / Emax), 0.40, 0.95)`
+  - Stroke width ~2.5px; colors from **player color** module
+- Hover: per-player header, then indented ship lines (shared hull icon, id, hull name, mil-score host points). Omit alibi / possibly-lost on map tooltip (table owns status)
+- Region overlays deferred; heading trails → [#290](https://github.com/SteveDraper/Planets-Console/issues/290)
 
 ### 8.3 Table (same stream, tabular projection)
 
