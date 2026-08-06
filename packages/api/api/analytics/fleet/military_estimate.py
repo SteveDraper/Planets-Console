@@ -39,7 +39,7 @@ from api.models.game import TurnInfo
 
 
 @dataclass(frozen=True, slots=True)
-class ResolvedShipConstructionFit:
+class _ResolvedShipConstructionFit:
     """Catalog parts and counts ready for ``ship_build_military_score_delta_2x``."""
 
     hull: Hull
@@ -89,31 +89,6 @@ def fleet_ship_military_estimate_2x(
     )
 
 
-def resolve_ship_construction_fit(
-    record: FleetShipRecord,
-    *,
-    turn: TurnInfo,
-) -> ResolvedShipConstructionFit | None:
-    """Resolve catalog construction inputs for a military estimate.
-
-    Returns ``None`` when not estimable, including the generic-freighter sentinel
-    (callers that need score ``0`` for that sentinel should use
-    :func:`fleet_ship_military_estimate_2x`).
-    """
-    option_set = resolve_display_default_build_option_set(record)
-    locks = observation_locks_from_record(record)
-    hull_id = _resolve_hull_id(locks=locks, option_set=option_set)
-    if hull_id is None or is_generic_freighter_sentinel_hull_id(hull_id):
-        return None
-    return _resolve_fit_for_hull(
-        record,
-        turn=turn,
-        hull_id=hull_id,
-        option_set=option_set,
-        locks=locks,
-    )
-
-
 def _resolve_fit_for_hull(
     record: FleetShipRecord,
     *,
@@ -121,7 +96,7 @@ def _resolve_fit_for_hull(
     hull_id: int,
     option_set: FleetBuildOptionSet | None,
     locks: ObservationComponentLocks,
-) -> ResolvedShipConstructionFit | None:
+) -> _ResolvedShipConstructionFit | None:
     turn_hulls = hulls_by_id(turn)
     turn_engines = engines_by_id(turn)
     turn_beams = beams_by_id(turn)
@@ -173,7 +148,7 @@ def _resolve_fit_for_hull(
     if launcher_count is None:
         return None
 
-    return ResolvedShipConstructionFit(
+    return _ResolvedShipConstructionFit(
         hull=hull,
         engine=engine,
         beam=beam,

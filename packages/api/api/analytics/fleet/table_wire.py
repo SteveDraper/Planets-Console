@@ -52,20 +52,6 @@ def strip_fleet_acquisition_ledger_for_table_wire(
     return shaped
 
 
-def fleet_ship_record_to_table_wire_json(
-    record: dict[str, object],
-    *,
-    turn: TurnInfo,
-) -> dict[str, object]:
-    """Shape one core ship record dict for the SPA table wire (no evidence events)."""
-    from api.analytics.fleet.serialization import fleet_ship_record_from_json
-
-    return fleet_ship_record_to_table_wire(
-        fleet_ship_record_from_json(record),
-        turn=turn,
-    )
-
-
 def fleet_ship_record_to_table_wire(
     record: FleetShipRecord,
     *,
