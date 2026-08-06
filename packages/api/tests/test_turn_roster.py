@@ -5,7 +5,12 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from api.analytics.turn_roster import iter_turn_players, player_by_id, players_by_id
+from api.analytics.turn_roster import (
+    iter_turn_players,
+    player_by_id,
+    players_by_id,
+    race_id_by_owner_slot,
+)
 from api.serialization.turn import turn_info_from_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -37,6 +42,16 @@ def test_players_by_id_dedupes_perspective_record(sample_turn):
     turn = replace(sample_turn, players=[*sample_turn.players, duplicate_in_roster])
     roster = players_by_id(turn)
     assert roster[sample_turn.player.id].username == sample_turn.player.username
+
+
+def test_race_id_by_owner_slot_maps_roster_raceids(sample_turn):
+    race_map = race_id_by_owner_slot(sample_turn)
+    roster = players_by_id(sample_turn)
+    assert race_map == {
+        player_id: player.raceid for player_id, player in roster.items()
+    }
+    assert sample_turn.player.id in race_map
+    assert race_map[sample_turn.player.id] == sample_turn.player.raceid
 
 
 def test_player_by_id_raises_for_unknown_id(sample_turn):

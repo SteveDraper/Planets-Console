@@ -27,7 +27,7 @@ from api.analytics.homeworld_locator.ownership_projection import (
     settled_owner_homes_from_location_pins,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateView
-from api.analytics.turn_roster import players_by_id
+from api.analytics.turn_roster import players_by_id, race_id_by_owner_slot
 from api.concepts.game_category import GameCategory
 from api.concepts.homeworld_layout import (
     CLOSE_PLANETS_MAX_LY,
@@ -678,10 +678,6 @@ def build_homeworld_sector_overlays_for_turn(
         game_info=game_info,
         game_id=resolved_game_id,
     )
-    race_id_by_owner_slot = {
-        player_id: player.raceid for player_id, player in players_by_id(turn).items()
-    }
-
     return build_homeworld_sector_overlays(
         center=center,
         pin=pin,
@@ -699,7 +695,7 @@ def build_homeworld_sector_overlays_for_turn(
         possible_owner_label_by_slot=owner_slot_labels,
         location_definite_planet_ids=location_definite_ids,
         perspective_by_planet_id=perspective_by_planet,
-        race_id_by_owner_slot=race_id_by_owner_slot,
+        race_id_by_owner_slot=race_id_by_owner_slot(turn),
     )
 
 
