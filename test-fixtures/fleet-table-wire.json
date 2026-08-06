@@ -13,7 +13,9 @@
               "hostTurn": 111,
               "activeRowCount": 2,
               "scoreboardImpliedCount": 1,
-              "reportRefs": ["report:host:111:player:8"]
+              "reportRefs": [
+                "report:host:111:player:8"
+              ]
             },
             "records": [
               {
@@ -31,16 +33,44 @@
                   }
                 },
                 "fields": {
-                  "shipId": { "kind": "bounded", "operator": "lte", "value": 318 },
-                  "hull": { "kind": "known", "value": 13 },
-                  "engine": { "kind": "known", "value": 9 },
-                  "beams": { "kind": "options", "values": [3, 5] },
-                  "launchers": { "kind": "unknown" },
-                  "builtTurn": { "kind": "known", "value": 4 },
+                  "shipId": {
+                    "kind": "bounded",
+                    "operator": "lte",
+                    "value": 318
+                  },
+                  "hull": {
+                    "kind": "known",
+                    "value": 24
+                  },
+                  "engine": {
+                    "kind": "known",
+                    "value": 1
+                  },
+                  "beams": {
+                    "kind": "options",
+                    "values": [
+                      2,
+                      3
+                    ]
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "known",
+                    "value": 4
+                  },
                   "location": {
                     "kind": "region",
-                    "planetIds": [55],
-                    "starbaseCoords": [{ "x": 1000, "y": 2000 }],
+                    "planetIds": [
+                      55
+                    ],
+                    "starbaseCoords": [
+                      {
+                        "x": 1000,
+                        "y": 2000
+                      }
+                    ],
                     "overlayId": "sb-region-1"
                   }
                 },
@@ -49,21 +79,28 @@
                     "comboId": "combo_a",
                     "label": "Option A",
                     "solutionRankWeight": 10,
-                    "hullId": 13,
-                    "engineId": 9,
-                    "beamCount": 8,
-                    "launcherCount": 6
+                    "hullId": 24,
+                    "engineId": 1,
+                    "beamCount": 2,
+                    "launcherCount": 0
                   }
                 ],
                 "displayDefaultOptionSetIndex": 0,
-                "lastSeen": { "turn": 9, "x": 1200, "y": 800, "planetId": 55 },
+                "lastSeen": {
+                  "turn": 9,
+                  "x": 1200,
+                  "y": 800,
+                  "planetId": 55
+                },
                 "events": [
                   {
                     "eventId": "evt-1",
                     "kind": "sighting",
                     "turn": 9,
                     "source": "turnInfo.ships",
-                    "payload": { "shipId": 301 }
+                    "payload": {
+                      "shipId": 301
+                    }
                   }
                 ]
               },
@@ -72,13 +109,28 @@
                 "disposition": "lost",
                 "qualifiers": {},
                 "fields": {
-                  "shipId": { "kind": "known", "value": 42 },
-                  "hull": { "kind": "unknown" },
-                  "engine": { "kind": "unknown" },
-                  "beams": { "kind": "unknown" },
-                  "launchers": { "kind": "unknown" },
-                  "builtTurn": { "kind": "unknown" },
-                  "location": { "kind": "unknown" }
+                  "shipId": {
+                    "kind": "known",
+                    "value": 42
+                  },
+                  "hull": {
+                    "kind": "unknown"
+                  },
+                  "engine": {
+                    "kind": "unknown"
+                  },
+                  "beams": {
+                    "kind": "unknown"
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "unknown"
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
                 },
                 "buildOptionSets": [],
                 "events": []
@@ -99,12 +151,6 @@
           {
             "playerId": 8,
             "playerName": "koshling",
-            "discrepancy": {
-              "hostTurn": 111,
-              "activeRowCount": 2,
-              "scoreboardImpliedCount": 1,
-              "reportRefs": ["report:host:111:player:8"]
-            },
             "records": [
               {
                 "recordId": "rec-active",
@@ -121,49 +167,106 @@
                   }
                 },
                 "fields": {
-                  "shipId": { "kind": "bounded", "operator": "lte", "value": 318 },
-                  "hull": { "kind": "known", "value": 13 },
-                  "engine": { "kind": "known", "value": 9 },
-                  "beams": { "kind": "options", "values": [3, 5] },
-                  "launchers": { "kind": "unknown" },
-                  "builtTurn": { "kind": "known", "value": 4 },
+                  "shipId": {
+                    "kind": "bounded",
+                    "operator": "lte",
+                    "value": 318
+                  },
+                  "hull": {
+                    "kind": "known",
+                    "value": 24
+                  },
+                  "engine": {
+                    "kind": "known",
+                    "value": 1
+                  },
+                  "beams": {
+                    "kind": "options",
+                    "values": [
+                      2,
+                      3
+                    ]
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "known",
+                    "value": 4
+                  },
                   "location": {
                     "kind": "region",
-                    "planetIds": [55],
-                    "starbaseCoords": [{ "x": 1000, "y": 2000 }],
+                    "planetIds": [
+                      55
+                    ],
+                    "starbaseCoords": [
+                      {
+                        "x": 1000,
+                        "y": 2000
+                      }
+                    ],
                     "overlayId": "sb-region-1"
                   }
                 },
                 "buildOptionSets": [
                   {
-                    "comboId": "combo_a",
                     "label": "Option A",
                     "solutionRankWeight": 10,
-                    "hullId": 13,
-                    "engineId": 9,
-                    "beamCount": 8,
-                    "launcherCount": 6
+                    "beamCount": 2,
+                    "launcherCount": 0,
+                    "comboId": "combo_a",
+                    "hullId": 24,
+                    "engineId": 1
                   }
                 ],
                 "displayDefaultOptionSetIndex": 0,
-                "lastSeen": { "turn": 9, "x": 1200, "y": 800, "planetId": 55 }
+                "lastSeen": {
+                  "turn": 9,
+                  "x": 1200,
+                  "y": 800,
+                  "planetId": 55
+                },
+                "militaryEstimate2x": 696
               },
               {
                 "recordId": "rec-lost",
                 "disposition": "lost",
                 "qualifiers": {},
                 "fields": {
-                  "shipId": { "kind": "known", "value": 42 },
-                  "hull": { "kind": "unknown" },
-                  "engine": { "kind": "unknown" },
-                  "beams": { "kind": "unknown" },
-                  "launchers": { "kind": "unknown" },
-                  "builtTurn": { "kind": "unknown" },
-                  "location": { "kind": "unknown" }
+                  "shipId": {
+                    "kind": "known",
+                    "value": 42
+                  },
+                  "hull": {
+                    "kind": "unknown"
+                  },
+                  "engine": {
+                    "kind": "unknown"
+                  },
+                  "beams": {
+                    "kind": "unknown"
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "unknown"
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
                 },
                 "buildOptionSets": []
               }
-            ]
+            ],
+            "discrepancy": {
+              "hostTurn": 111,
+              "activeRowCount": 2,
+              "scoreboardImpliedCount": 1,
+              "reportRefs": [
+                "report:host:111:player:8"
+              ]
+            }
           },
           {
             "playerId": 3,
@@ -187,13 +290,27 @@
                 "disposition": "active",
                 "qualifiers": {},
                 "fields": {
-                  "shipId": { "kind": "unknown" },
-                  "hull": { "kind": "unknown" },
-                  "engine": { "kind": "unknown" },
-                  "beams": { "kind": "unknown" },
-                  "launchers": { "kind": "unknown" },
-                  "builtTurn": { "kind": "unknown" },
-                  "location": { "kind": "unknown" }
+                  "shipId": {
+                    "kind": "unknown"
+                  },
+                  "hull": {
+                    "kind": "unknown"
+                  },
+                  "engine": {
+                    "kind": "unknown"
+                  },
+                  "beams": {
+                    "kind": "unknown"
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "unknown"
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
                 },
                 "buildOptionSets": []
               }
@@ -214,13 +331,27 @@
                 "disposition": "active",
                 "qualifiers": {},
                 "fields": {
-                  "shipId": { "kind": "unknown" },
-                  "hull": { "kind": "unknown" },
-                  "engine": { "kind": "unknown" },
-                  "beams": { "kind": "unknown" },
-                  "launchers": { "kind": "unknown" },
-                  "builtTurn": { "kind": "unknown" },
-                  "location": { "kind": "unknown" }
+                  "shipId": {
+                    "kind": "unknown"
+                  },
+                  "hull": {
+                    "kind": "unknown"
+                  },
+                  "engine": {
+                    "kind": "unknown"
+                  },
+                  "beams": {
+                    "kind": "unknown"
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "unknown"
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
                 },
                 "buildOptionSets": []
               }
@@ -243,13 +374,31 @@
                 "disposition": "active",
                 "qualifiers": {},
                 "fields": {
-                  "shipId": { "kind": "known", "value": 99 },
-                  "hull": { "kind": "known", "value": 1 },
-                  "engine": { "kind": "known", "value": 2 },
-                  "beams": { "kind": "unknown" },
-                  "launchers": { "kind": "unknown" },
-                  "builtTurn": { "kind": "known", "value": 3 },
-                  "location": { "kind": "unknown" }
+                  "shipId": {
+                    "kind": "known",
+                    "value": 99
+                  },
+                  "hull": {
+                    "kind": "known",
+                    "value": 1
+                  },
+                  "engine": {
+                    "kind": "known",
+                    "value": 2
+                  },
+                  "beams": {
+                    "kind": "unknown"
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "known",
+                    "value": 3
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
                 },
                 "buildOptionSets": [
                   {
@@ -277,13 +426,31 @@
                 "disposition": "active",
                 "qualifiers": {},
                 "fields": {
-                  "shipId": { "kind": "known", "value": 99 },
-                  "hull": { "kind": "known", "value": 1 },
-                  "engine": { "kind": "known", "value": 2 },
-                  "beams": { "kind": "unknown" },
-                  "launchers": { "kind": "unknown" },
-                  "builtTurn": { "kind": "known", "value": 3 },
-                  "location": { "kind": "unknown" }
+                  "shipId": {
+                    "kind": "known",
+                    "value": 99
+                  },
+                  "hull": {
+                    "kind": "known",
+                    "value": 1
+                  },
+                  "engine": {
+                    "kind": "known",
+                    "value": 2
+                  },
+                  "beams": {
+                    "kind": "unknown"
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "known",
+                    "value": 3
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
                 },
                 "buildOptionSets": [
                   {
@@ -292,7 +459,8 @@
                     "beamCount": 0,
                     "launcherCount": 0
                   }
-                ]
+                ],
+                "militaryEstimate2x": 0
               }
             ]
           }
@@ -300,8 +468,7 @@
       }
     },
     {
-      "name": "omits optional record keys absent from core; defaults disposition only",
-      "zodParseable": false,
+      "name": "strips events and defaults disposition; attaches estimate when estimable",
       "coreInput": {
         "analyticId": "fleet",
         "players": [
@@ -311,13 +478,82 @@
             "records": [
               {
                 "recordId": "rec-minimal",
-                "events": [{ "eventId": "evt-strip", "kind": "sighting", "turn": 1 }]
+                "events": [
+                  {
+                    "eventId": "evt-strip",
+                    "kind": "sighting",
+                    "turn": 1,
+                    "source": "turnInfo.ships"
+                  }
+                ],
+                "fields": {
+                  "shipId": {
+                    "kind": "unknown"
+                  },
+                  "hull": {
+                    "kind": "known",
+                    "value": 24
+                  },
+                  "engine": {
+                    "kind": "known",
+                    "value": 1
+                  },
+                  "beams": {
+                    "kind": "known",
+                    "value": 1
+                  },
+                  "launchers": {
+                    "kind": "known",
+                    "value": 0
+                  },
+                  "builtTurn": {
+                    "kind": "unknown"
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
+                },
+                "buildOptionSets": [
+                  {
+                    "comboId": "combo_min",
+                    "label": "Minimal Serpent",
+                    "solutionRankWeight": 1,
+                    "hullId": 24,
+                    "engineId": 1,
+                    "beamId": 1,
+                    "beamCount": 2,
+                    "launcherCount": 0
+                  }
+                ],
+                "displayDefaultOptionSetIndex": 0
               },
               {
                 "recordId": "rec-explicit-lost",
                 "disposition": "lost",
                 "qualifiers": {},
-                "fields": {},
+                "fields": {
+                  "shipId": {
+                    "kind": "unknown"
+                  },
+                  "hull": {
+                    "kind": "unknown"
+                  },
+                  "engine": {
+                    "kind": "unknown"
+                  },
+                  "beams": {
+                    "kind": "unknown"
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "unknown"
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
+                },
                 "buildOptionSets": []
               }
             ]
@@ -334,13 +570,77 @@
             "records": [
               {
                 "recordId": "rec-minimal",
-                "disposition": "active"
+                "disposition": "active",
+                "qualifiers": {},
+                "fields": {
+                  "shipId": {
+                    "kind": "unknown"
+                  },
+                  "hull": {
+                    "kind": "known",
+                    "value": 24
+                  },
+                  "engine": {
+                    "kind": "known",
+                    "value": 1
+                  },
+                  "beams": {
+                    "kind": "known",
+                    "value": 1
+                  },
+                  "launchers": {
+                    "kind": "known",
+                    "value": 0
+                  },
+                  "builtTurn": {
+                    "kind": "unknown"
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
+                },
+                "buildOptionSets": [
+                  {
+                    "label": "Minimal Serpent",
+                    "solutionRankWeight": 1,
+                    "beamCount": 2,
+                    "launcherCount": 0,
+                    "comboId": "combo_min",
+                    "hullId": 24,
+                    "engineId": 1,
+                    "beamId": 1
+                  }
+                ],
+                "displayDefaultOptionSetIndex": 0,
+                "militaryEstimate2x": 696
               },
               {
                 "recordId": "rec-explicit-lost",
                 "disposition": "lost",
                 "qualifiers": {},
-                "fields": {},
+                "fields": {
+                  "shipId": {
+                    "kind": "unknown"
+                  },
+                  "hull": {
+                    "kind": "unknown"
+                  },
+                  "engine": {
+                    "kind": "unknown"
+                  },
+                  "beams": {
+                    "kind": "unknown"
+                  },
+                  "launchers": {
+                    "kind": "unknown"
+                  },
+                  "builtTurn": {
+                    "kind": "unknown"
+                  },
+                  "location": {
+                    "kind": "unknown"
+                  }
+                },
                 "buildOptionSets": []
               }
             ]

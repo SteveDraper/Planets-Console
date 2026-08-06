@@ -175,13 +175,15 @@ def test_estimate_omitted_when_hull_unknown(sample_turn):
     assert fleet_ship_military_estimate_2x(record, turn=sample_turn) is None
 
 
-def test_table_wire_attaches_estimate_when_turn_provided(sample_turn):
+def test_table_wire_attaches_estimate_and_durable_omits(sample_turn):
+    from api.analytics.fleet.table_wire import strip_fleet_ship_record_for_table_wire
+
     record = _serpent_record(beam_id=1, beam_count=2, engine_id=1)
     durable = fleet_ship_record_to_json(record)
     assert "militaryEstimate2x" not in durable
 
-    without_turn = fleet_ship_record_to_table_wire(record)
-    assert "militaryEstimate2x" not in without_turn
+    stripped = strip_fleet_ship_record_for_table_wire(durable)
+    assert "militaryEstimate2x" not in stripped
 
     with_turn = fleet_ship_record_to_table_wire(record, turn=sample_turn)
     assert with_turn["militaryEstimate2x"] == fleet_ship_military_estimate_2x(

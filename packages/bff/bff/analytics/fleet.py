@@ -19,7 +19,7 @@ ANALYTIC_ID = "fleet"
 def _shape_table_player(
     player: dict[str, object],
     *,
-    turn: TurnInfo | None = None,
+    turn: TurnInfo,
 ) -> dict[str, object]:
     return fleet_acquisition_ledger_to_table_wire_json(player, turn=turn)
 
@@ -37,8 +37,8 @@ def component_catalog_wire(turn: TurnInfo) -> dict[str, dict[str, str]]:
 def table_from_core(
     core_data: dict,
     *,
+    turn: TurnInfo,
     component_catalog: dict[str, dict[str, str]] | None = None,
-    turn: TurnInfo | None = None,
 ) -> dict:
     """Shape Core fleet compute output for GET /bff/analytics/fleet/table."""
     payload: dict[str, object] = {

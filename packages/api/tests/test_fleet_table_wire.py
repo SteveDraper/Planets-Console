@@ -17,7 +17,7 @@ from api.analytics.fleet.types import (
 )
 
 
-def test_table_wire_record_omits_evidence_events():
+def test_table_wire_record_omits_evidence_events(sample_turn):
     record = FleetShipRecord(
         record_id="rec-1",
         disposition="active",
@@ -26,7 +26,7 @@ def test_table_wire_record_omits_evidence_events():
     core_record = fleet_ship_record_to_json(record)
     assert core_record["events"] == []
 
-    table_record = fleet_ship_record_to_table_wire(record)
+    table_record = fleet_ship_record_to_table_wire(record, turn=sample_turn)
     assert "events" not in table_record
     assert table_record["recordId"] == "rec-1"
 
@@ -34,11 +34,42 @@ def test_table_wire_record_omits_evidence_events():
 def test_table_wire_ledger_matches_bff_player_shape(sample_turn):
     baseline = ensure_fleet_baseline(628580, 1, sample_turn)
     ledger = baseline.players[0]
-    table_wire = fleet_acquisition_ledger_to_table_wire(ledger)
+    table_wire = fleet_acquisition_ledger_to_table_wire(ledger, turn=sample_turn)
     assert table_wire["playerId"] == ledger.player_id
     assert len(table_wire["records"]) == len(ledger.records)
     for record in table_wire["records"]:
         assert "events" not in record
+
+
+def test_strip_table_wire_omits_events_without_estimates():
+    from api.analytics.fleet.table_wire import (
+        strip_fleet_acquisition_ledger_for_table_wire,
+        strip_fleet_ship_record_for_table_wire,
+    )
+
+    stripped = strip_fleet_ship_record_for_table_wire(
+        {
+            "recordId": "rec-minimal",
+            "events": [{"eventId": "evt-strip", "kind": "sighting", "turn": 1}],
+        }
+    )
+    assert stripped == {"recordId": "rec-minimal", "disposition": "active"}
+    assert "militaryEstimate2x" not in stripped
+
+    ledger = strip_fleet_acquisition_ledger_for_table_wire(
+        {
+            "playerId": 1,
+            "playerName": "minimal",
+            "records": [
+                {
+                    "recordId": "rec-minimal",
+                    "events": [{"eventId": "evt-strip", "kind": "sighting", "turn": 1}],
+                }
+            ],
+        }
+    )
+    assert ledger["records"] == [stripped]
+    assert "militaryEstimate2x" not in ledger["records"][0]
 
 
 def test_cached_stream_events_use_table_wire(sample_turn):
