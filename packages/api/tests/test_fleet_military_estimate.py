@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from api.analytics.fleet.display_default_option_set import (
     resolve_display_default_build_option_set,
 )
@@ -25,6 +27,15 @@ from api.concepts.turn_component_catalog import (
     hulls_by_id,
     torpedos_by_id,
 )
+from api.models.game import TurnInfo
+
+
+def _turn_with_replaced_hull(sample_turn: TurnInfo, hull_id: int, **changes) -> TurnInfo:
+    """Copy ``sample_turn`` with one catalog hull replaced (fighterbays/tubes absent in sample)."""
+    hulls = [
+        replace(hull, **changes) if hull.id == hull_id else hull for hull in sample_turn.hulls
+    ]
+    return replace(sample_turn, hulls=hulls)
 
 
 def _serpent_record(
@@ -133,6 +144,90 @@ def test_estimate_known_zero_beams_scores_zero_for_non_fighter_hull(sample_turn)
     record.fields.beams = FleetFieldKnown(0)
     estimate = fleet_ship_military_estimate_2x(record, turn=sample_turn)
     assert estimate == 0
+
+
+def test_estimate_fighter_bay_hull_scores_without_beams_or_launchers(sample_turn):
+    """Empty fighter-bay hulls still score hull construction via the shared scorer."""
+    turn = _turn_with_replaced_hull(
+        sample_turn, 24, fighterbays=5, beams=0, launchers=0
+    )
+    record = FleetShipRecord(
+        record_id="rec-carrier",
+        fields=FleetShipRecordFields(
+            hull=FleetFieldKnown(24),
+            engine=FleetFieldKnown(1),
+            beams=FleetFieldKnown(0),
+            launchers=FleetFieldKnown(0),
+        ),
+        build_option_sets=[
+            FleetBuildOptionSet(
+                combo_id="combo_carrier",
+                label="Carrier",
+                hull_id=24,
+                engine_id=1,
+                beam_count=0,
+                launcher_count=0,
+            )
+        ],
+        display_default_option_set_index=0,
+    )
+    estimate = fleet_ship_military_estimate_2x(record, turn=turn)
+    hull = hulls_by_id(turn)[24]
+    engine = engines_by_id(turn)[1]
+    expected = ship_build_military_score_delta_2x(
+        hull,
+        engine,
+        None,
+        None,
+        beam_count=0,
+        launcher_count=0,
+    )
+    assert estimate == expected
+    assert estimate > 0
+
+
+def test_estimate_fills_unknown_launchers_full_at_default_components(sample_turn):
+    turn = _turn_with_replaced_hull(sample_turn, 24, launchers=3)
+    record = FleetShipRecord(
+        record_id="rec-tubes",
+        fields=FleetShipRecordFields(
+            hull=FleetFieldKnown(24),
+            engine=FleetFieldUnknown(),
+            beams=FleetFieldKnown(0),
+            launchers=FleetFieldUnknown(),
+        ),
+        build_option_sets=[
+            FleetBuildOptionSet(
+                combo_id="combo_tubes",
+                hull_id=24,
+                engine_id=None,
+                beam_id=None,
+                beam_count=0,
+                torp_id=None,
+                launcher_count=None,
+            )
+        ],
+        display_default_option_set_index=0,
+    )
+    estimate = fleet_ship_military_estimate_2x(record, turn=turn)
+    hull = hulls_by_id(turn)[24]
+    defaults = default_build_components(
+        engines_by_id=engines_by_id(turn),
+        beams_by_id=beams_by_id(turn),
+        torpedos_by_id=torpedos_by_id(turn),
+    )
+    assert defaults.engine is not None
+    assert defaults.torpedo is not None
+    expected = ship_build_military_score_delta_2x(
+        hull,
+        defaults.engine,
+        None,
+        defaults.torpedo,
+        beam_count=0,
+        launcher_count=hull.launchers,
+    )
+    assert estimate == expected
+    assert estimate > 0
 
 
 def test_estimate_generic_freighter_is_zero(sample_turn):

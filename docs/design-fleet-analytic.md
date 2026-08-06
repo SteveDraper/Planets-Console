@@ -304,8 +304,11 @@ Export tree mirrors ledger: per-player records, discrepancies, `meta.searchStatu
 players[]:
   playerId, playerName, discrepancy?, records[]
 records[]:
-  recordId, disposition, qualifiers, fields{...}, buildOptionSets[], displayDefaultOptionSetIndex?
+  recordId, disposition, qualifiers, fields{...}, buildOptionSets[], displayDefaultOptionSetIndex?,
+  militaryEstimate2x?
 ```
+
+Optional `militaryEstimate2x` is Core-attached on table/stream wire only (not durable ledger). Same fill policy as §7.2: unknown beam/tube slots at minimal-tech catalog parts via the shared ship-build military helper.
 
 Default consumer filter: `disposition == active`.
 
