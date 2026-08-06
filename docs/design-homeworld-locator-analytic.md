@@ -236,7 +236,7 @@ Strengthens **homeworld owner** attribution for **homeworld sectors** (whose HW 
 | Hyperdrive | **Ignore** HYP-capable hulls for envelopes (hull ability / known HYP hull set -- not FC=`HYP` alone) |
 | Chunnel / tow / wormhole | No special handling in v1 (envelope is the naive warp budget) |
 
-**Sector reduction (ship → owner):** For ship of `ownerid` *X* at (*x*,*y*) with envelope radius *R*, the reachable **homeworld sectors** are those whose **preferred sector HW position** (definite planet if any; else most-probable; else closest-to-mid candidate; else sector annular mid when no candidates) lies within *R* of the ship. Intersect that reachable set into owner *X*'s remaining possible-sector set (initialized to all eligible sectors). When owner *X*'s possible-sector set shrinks to a single sector, add *X* to that sector's possible-owner set with a **ship-travel-envelope** provenance summary (ship id, turn, radius, age source).
+**Sector reduction (ship → owner):** For ship of `ownerid` *X* at (*x*,*y*) with envelope radius *R*, the reachable **homeworld sectors** are those whose **preferred sector HW position** (definite planet if any; else most-probable; else closest-to-mid candidate; else sector annular mid when no candidates) lies within *R* of the ship. Intersect that reachable set into owner *X*'s remaining possible-sector set (initialized to all eligible sectors). When owner *X*'s possible-sector set shrinks to a single sector, add *X* to that sector's possible-owner set with a **ship-travel-envelope** provenance summary (ship id, turn, radius, age source). Strength of that provenance is **strong** for non-Privateer owners and **weak** for Privateer owners (`raceid` 5): Rob + tow-capture can place Privateer-owned ships near foreign homeworlds without travel from the Privateer HW (Crystal tow-capture is deliberately out of scope).
 
 **Planetary ownership sightings:**
 
@@ -288,8 +288,8 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 | Location | Origin-distance observation | weak |
 | Location | Baseline profile match; single-starbase new-build | strong |
 | Location | UI “this planet is the HW” | asserted |
-| Ownership | `nearby_planet_ownership`; `preferred_candidate_ownership` (preferred not yet location-definite) | weak |
-| Ownership | `preferred_candidate_ownership` when preferred is location-**definite**; `ship_travel_envelope` | strong |
+| Ownership | `nearby_planet_ownership`; `preferred_candidate_ownership` (preferred not yet location-definite); `ship_travel_envelope` for **Privateer** owners (Rob + tow-capture can relocate owned ships) | weak |
+| Ownership | `preferred_candidate_ownership` when preferred is location-**definite**; `ship_travel_envelope` for non-Privateer owners | strong |
 | Ownership | UI owner assert | asserted |
 
 Geometry / co-sector / definite-neighborhood culls do not mint provenances.
@@ -536,3 +536,4 @@ Grill locks: §4.2 FE display row, §10 (this doc). CONTEXT: **homeworld region 
 | 2026-08-03 | #37 grill: dual-axis tiered provenances (weak/strong/asserted); game-global asserts + merge-above-read; positive location only; no race annotation; refresh = full machine wipe; ADR 0010; §4.4 / §11.6 |
 | 2026-08-03 | #283: sector accordion panel + region selection (Pinned/Unpinned/Selected, default Selected, initial set = all) + Show overlays checkbox; thin FE hovers; candidate flash/pan; replaces #35 display mode; §4.2 / §10 / §11.7 |
 | 2026-08-05 | #283 docs: region selection ownership -- Pinned/Unpinned derive-at-read (empty persist); MapGraph-only materialize; Tile overlay query + read/action selection hook (§4.2 / §10 / CONTEXT) |
+| 2026-08-06 | Ownership: Privateer `ship_travel_envelope` strength demoted to weak (Rob/tow-capture); Crystal tow-capture left strong by product choice |

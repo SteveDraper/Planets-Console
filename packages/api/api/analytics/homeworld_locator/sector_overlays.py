@@ -470,6 +470,7 @@ def build_homeworld_sector_overlays(
     possible_owner_label_by_slot: Mapping[int, str] | None = None,
     location_definite_planet_ids: frozenset[int] = frozenset(),
     perspective_by_planet_id: Mapping[int, int] | None = None,
+    race_id_by_owner_slot: Mapping[int, int] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Build one boundary overlay per equal angular sector.
 
@@ -529,6 +530,7 @@ def build_homeworld_sector_overlays(
         dict(sector_owner_sets or ()),
         location_definite_planet_ids=location_definite_planet_ids,
         settled_owner_home_by_slot=settled_from_location,
+        race_id_by_owner_slot=race_id_by_owner_slot,
     )
 
     pin_sector = sector_index_for_angle(pin_angle, pin_angle=pin_angle, player_count=player_count)
@@ -674,6 +676,9 @@ def build_homeworld_sector_overlays_for_turn(
         game_info=game_info,
         game_id=resolved_game_id,
     )
+    race_id_by_owner_slot = {
+        player_id: player.raceid for player_id, player in players_by_id(turn).items()
+    }
 
     return build_homeworld_sector_overlays(
         center=center,
@@ -692,6 +697,7 @@ def build_homeworld_sector_overlays_for_turn(
         possible_owner_label_by_slot=owner_slot_labels,
         location_definite_planet_ids=location_definite_ids,
         perspective_by_planet_id=perspective_by_planet,
+        race_id_by_owner_slot=race_id_by_owner_slot,
     )
 
 

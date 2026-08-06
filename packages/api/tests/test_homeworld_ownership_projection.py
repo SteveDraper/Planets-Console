@@ -15,6 +15,7 @@ from api.analytics.homeworld_locator.ownership_projection import (
     project_sector_owner_sets_for_overlays,
     settled_owner_homes_from_location_pins,
 )
+from api.concepts.races import PRIVATEER_RACE_ID
 
 
 def _member(slot: int, *kinds: str, planet_id: int | None = None) -> SectorOwnerMember:
@@ -39,6 +40,29 @@ def test_strength_filter_drops_weaker_members() -> None:
     }
     projected = project_sector_owner_sets_for_overlays(sets)
     assert [m.owner_slot for m in projected[0].members] == [1]
+
+
+def test_privateer_envelope_does_not_outrank_nearby_planet_ownership() -> None:
+    """Privateer Rob/tow-capture makes ship envelopes weak -- stay ambiguous with nearby."""
+    sets = {
+        0: (
+            _member(5, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
+            _member(2, PROVENANCE_NEARBY_PLANET_OWNERSHIP, planet_id=45),
+        ),
+    }
+    projected = project_sector_owner_sets_for_overlays(
+        sets,
+        race_id_by_owner_slot={5: PRIVATEER_RACE_ID, 2: 2},
+    )
+    assert [m.owner_slot for m in projected[0].members] == [5, 2]
+    assert projected[0].winning_strength is None
+
+    alone = project_sector_owner_sets_for_overlays(
+        {0: (_member(5, PROVENANCE_SHIP_TRAVEL_ENVELOPE),)},
+        race_id_by_owner_slot={5: PRIVATEER_RACE_ID},
+    )
+    assert [m.owner_slot for m in alone[0].members] == [5]
+    assert alone[0].winning_strength == "weak"
 
 
 def test_cross_sector_trim_removes_settled_owner_elsewhere() -> None:

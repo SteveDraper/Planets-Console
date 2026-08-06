@@ -350,6 +350,9 @@ def materialize_homeworld_candidates(
         planet_sector_index=(
             dict(partition.planet_sector_index) if partition is not None else None
         ),
+        race_id_by_owner_slot={
+            player_id: player.raceid for player_id, player in players_by_id(shell_turn).items()
+        },
     )
     adjusted = apply_definite_keyed_candidate_culls(
         adjusted,

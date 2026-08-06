@@ -4,12 +4,20 @@ from api.concepts.races import (
     CRYSTAL_DESERT_PREFERRED_HOMEWORLD_TEMP_W,
     CRYSTAL_RACE_ID,
     DEFAULT_PREFERRED_HOMEWORLD_TEMP_W,
+    PRIVATEER_RACE_ID,
+    is_privateer,
     preferred_homeworld_temp_w,
 )
 
 
 def test_crystal_race_id_is_seven() -> None:
     assert CRYSTAL_RACE_ID == 7
+
+
+def test_privateer_race_id_is_five() -> None:
+    assert PRIVATEER_RACE_ID == 5
+    assert is_privateer(5) is True
+    assert is_privateer(7) is False
 
 
 def test_preferred_homeworld_temp_crystal_defaults_to_desert_peak() -> None:

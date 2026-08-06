@@ -65,6 +65,7 @@ def project_sector_owner_sets_for_overlays(
     *,
     location_definite_planet_ids: frozenset[int] = frozenset(),
     settled_owner_home_by_slot: Mapping[int, int] | None = None,
+    race_id_by_owner_slot: Mapping[int, int] | None = None,
 ) -> dict[int, SectorOwnerOverlayProjection]:
     """Project durable sector owner sets for overlay wire facts.
 
@@ -81,6 +82,7 @@ def project_sector_owner_sets_for_overlays(
     if not sector_owner_sets:
         return {}
 
+    race_by_slot = race_id_by_owner_slot or {}
     strength_filtered: dict[int, tuple[SectorOwnerMember, ...]] = {}
     resolutions: dict[int, OwnershipAxisResolution] = {}
     for sector_index, members in sector_owner_sets.items():
@@ -88,6 +90,7 @@ def project_sector_owner_sets_for_overlays(
         resolution = resolve_ownership_axis(
             member_tuple,
             location_definite_planet_ids=location_definite_planet_ids,
+            race_id_by_owner_slot=race_by_slot,
         )
         resolutions[sector_index] = resolution
         contenders = frozenset(resolution.contending_owner_slots)
@@ -134,6 +137,7 @@ def project_sector_owner_sets_for_overlays(
             winning_strength=_winning_strength_for_projected(
                 members,
                 location_definite_planet_ids=location_definite_planet_ids,
+                race_id_by_owner_slot=race_by_slot,
                 prior_resolution=resolutions.get(sector_index),
             ),
         )
@@ -145,6 +149,7 @@ def _winning_strength_for_projected(
     members: tuple[SectorOwnerMember, ...],
     *,
     location_definite_planet_ids: frozenset[int],
+    race_id_by_owner_slot: Mapping[int, int],
     prior_resolution: OwnershipAxisResolution | None,
 ) -> str | None:
     if not members:
@@ -157,6 +162,7 @@ def _winning_strength_for_projected(
     return ownership_winning_strength_for_members(
         members,
         location_definite_planet_ids=location_definite_planet_ids,
+        race_id_by_owner_slot=race_id_by_owner_slot,
     )
 
 
@@ -164,6 +170,7 @@ def ownership_winning_strength_for_members(
     members: Sequence[SectorOwnerMember],
     *,
     location_definite_planet_ids: frozenset[int] = frozenset(),
+    race_id_by_owner_slot: Mapping[int, int] | None = None,
 ) -> str | None:
     """Winning ownership strength for a unique projected owner set, else None.
 
@@ -176,6 +183,7 @@ def ownership_winning_strength_for_members(
     resolution = resolve_ownership_axis(
         members,
         location_definite_planet_ids=location_definite_planet_ids,
+        race_id_by_owner_slot=race_id_by_owner_slot,
     )
     if not resolution.is_unique:
         return None
