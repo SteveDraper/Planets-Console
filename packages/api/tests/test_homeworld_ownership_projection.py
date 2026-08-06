@@ -177,8 +177,7 @@ def test_winning_strength_emitted_only_when_unique() -> None:
 
     assert ownership_winning_strength_for_members(unique, race_id_by_owner_slot={}) == "strong"
     assert (
-        ownership_winning_strength_for_members(ambiguous_strong, race_id_by_owner_slot={})
-        is None
+        ownership_winning_strength_for_members(ambiguous_strong, race_id_by_owner_slot={}) is None
     )
     empty: tuple[SectorOwnerMember, ...] = ()
     assert ownership_winning_strength_for_members(empty, race_id_by_owner_slot={}) is None

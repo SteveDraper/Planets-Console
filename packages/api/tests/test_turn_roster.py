@@ -47,9 +47,7 @@ def test_players_by_id_dedupes_perspective_record(sample_turn):
 def test_race_id_by_owner_slot_maps_roster_raceids(sample_turn):
     race_map = race_id_by_owner_slot(sample_turn)
     roster = players_by_id(sample_turn)
-    assert race_map == {
-        player_id: player.raceid for player_id, player in roster.items()
-    }
+    assert race_map == {player_id: player.raceid for player_id, player in roster.items()}
     assert sample_turn.player.id in race_map
     assert race_map[sample_turn.player.id] == sample_turn.player.raceid
 

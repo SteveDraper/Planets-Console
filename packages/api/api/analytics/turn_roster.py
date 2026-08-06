@@ -23,9 +23,7 @@ def players_by_id(turn: TurnInfo) -> dict[int, Player]:
 
 def race_id_by_owner_slot(turn: TurnInfo) -> dict[int, int]:
     """Map owner slot (player id) to race id from the turn roster."""
-    return {
-        player_id: player.raceid for player_id, player in players_by_id(turn).items()
-    }
+    return {player_id: player.raceid for player_id, player in players_by_id(turn).items()}
 
 
 def player_by_id(turn: TurnInfo, player_id: int) -> Player:
