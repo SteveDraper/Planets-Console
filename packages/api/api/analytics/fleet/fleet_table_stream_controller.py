@@ -101,6 +101,7 @@ class FleetTableStreamController(
             perspective=self.fleet_services.perspective,
             turn_number=self.turn.settings.turn,
             player_id=player_id,
+            turn=self.turn,
             force_schedule=force_schedule,
         )
 

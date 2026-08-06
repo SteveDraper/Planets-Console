@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord
+    from api.models.game import TurnInfo
 
 
-def fleet_ship_record_to_table_wire_json(record: dict[str, object]) -> dict[str, object]:
-    """Shape one core ship record dict for the SPA table wire (no evidence events)."""
+def _strip_ship_record_dict(record: dict[str, object]) -> dict[str, object]:
+    """Copy SPA table fields from a core record dict (no evidence events)."""
     shaped: dict[str, object] = {
         "recordId": record.get("recordId"),
         "disposition": record.get("disposition", "active"),
@@ -24,25 +25,78 @@ def fleet_ship_record_to_table_wire_json(record: dict[str, object]) -> dict[str,
         shaped["displayDefaultOptionSetIndex"] = record["displayDefaultOptionSetIndex"]
     if "lastSeen" in record:
         shaped["lastSeen"] = record["lastSeen"]
+    if "militaryEstimate2x" in record:
+        shaped["militaryEstimate2x"] = record["militaryEstimate2x"]
     return shaped
 
 
-def fleet_ship_record_to_table_wire(record: FleetShipRecord) -> dict[str, object]:
+def fleet_ship_record_to_table_wire_json(
+    record: dict[str, object],
+    *,
+    turn: TurnInfo | None = None,
+) -> dict[str, object]:
+    """Shape one core ship record dict for the SPA table wire (no evidence events)."""
+    if turn is not None:
+        from api.analytics.fleet.serialization import fleet_ship_record_from_json
+
+        return fleet_ship_record_to_table_wire(
+            fleet_ship_record_from_json(record),
+            turn=turn,
+        )
+    return _strip_ship_record_dict(record)
+
+
+def fleet_ship_record_to_table_wire(
+    record: FleetShipRecord,
+    *,
+    turn: TurnInfo | None = None,
+) -> dict[str, object]:
     """Shape one ship record for the SPA table wire (no evidence events)."""
+    from api.analytics.fleet.military_estimate import fleet_ship_military_estimate_2x
     from api.analytics.fleet.serialization import fleet_ship_record_to_json
 
-    return fleet_ship_record_to_table_wire_json(fleet_ship_record_to_json(record))
+    shaped = _strip_ship_record_dict(fleet_ship_record_to_json(record))
+    if turn is not None:
+        estimate = fleet_ship_military_estimate_2x(record, turn=turn)
+        if estimate is not None:
+            shaped["militaryEstimate2x"] = estimate
+    return shaped
 
 
-def fleet_acquisition_ledger_to_table_wire(ledger: FleetAcquisitionLedger) -> dict[str, object]:
+def fleet_acquisition_ledger_to_table_wire(
+    ledger: FleetAcquisitionLedger,
+    *,
+    turn: TurnInfo | None = None,
+) -> dict[str, object]:
     """Shape one player ledger for the SPA table wire."""
-    from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
+    from api.analytics.fleet.serialization import fleet_count_discrepancy_to_json
 
-    return fleet_acquisition_ledger_to_table_wire_json(fleet_acquisition_ledger_to_json(ledger))
+    shaped: dict[str, object] = {
+        "playerId": ledger.player_id,
+        "playerName": ledger.player_name,
+        "records": [
+            fleet_ship_record_to_table_wire(record, turn=turn) for record in ledger.records
+        ],
+    }
+    if ledger.discrepancy is not None:
+        shaped["discrepancy"] = fleet_count_discrepancy_to_json(ledger.discrepancy)
+    return shaped
 
 
-def fleet_acquisition_ledger_to_table_wire_json(player: dict[str, object]) -> dict[str, object]:
+def fleet_acquisition_ledger_to_table_wire_json(
+    player: dict[str, object],
+    *,
+    turn: TurnInfo | None = None,
+) -> dict[str, object]:
     """Shape one core player ledger dict for the SPA table wire."""
+    if turn is not None:
+        from api.analytics.fleet.serialization import fleet_acquisition_ledger_from_json
+
+        return fleet_acquisition_ledger_to_table_wire(
+            fleet_acquisition_ledger_from_json(player),
+            turn=turn,
+        )
+
     shaped: dict[str, object] = {
         "playerId": player.get("playerId"),
         "playerName": player.get("playerName", ""),

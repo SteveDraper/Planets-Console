@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from api.analytics.fleet.chain import ensure_fleet_baseline
 from api.analytics.fleet.fleet_table_player_run import wire_cached_player_events
+from api.analytics.fleet.military_estimate import fleet_ship_military_estimate_2x
 from api.analytics.fleet.serialization import fleet_ship_record_to_json
 from api.analytics.fleet.table_wire import (
     fleet_acquisition_ledger_to_table_wire,
@@ -50,7 +51,7 @@ def test_cached_stream_events_use_table_wire(sample_turn):
             prior_ledger_at_n_minus_1=True,
         ),
     )
-    events = wire_cached_player_events(persisted)
+    events = wire_cached_player_events(persisted, turn=sample_turn)
     ledger_event = events[0]
     assert ledger_event["type"] == "ledger_updated"
     ledger_wire = ledger_event["ledger"]
@@ -58,3 +59,9 @@ def test_cached_stream_events_use_table_wire(sample_turn):
     for record in ledger_wire.get("records", []):
         assert isinstance(record, dict)
         assert "events" not in record
+        domain = next(r for r in ledger.records if r.record_id == record["recordId"])
+        estimate = fleet_ship_military_estimate_2x(domain, turn=sample_turn)
+        if estimate is None:
+            assert "militaryEstimate2x" not in record
+        else:
+            assert record["militaryEstimate2x"] == estimate

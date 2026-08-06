@@ -52,6 +52,7 @@ class FleetTableStreamConnectPolicy:
             perspective=self.perspective,
             turn_number=self.turn_number,
             player_id=player_id,
+            turn=self.controller.turn,
         )
 
     def dispatch_admission(
