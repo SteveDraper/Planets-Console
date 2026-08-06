@@ -32,9 +32,7 @@ from api.models.game import TurnInfo
 
 def _turn_with_replaced_hull(sample_turn: TurnInfo, hull_id: int, **changes) -> TurnInfo:
     """Copy ``sample_turn`` with one catalog hull replaced (fighterbays/tubes absent in sample)."""
-    hulls = [
-        replace(hull, **changes) if hull.id == hull_id else hull for hull in sample_turn.hulls
-    ]
+    hulls = [replace(hull, **changes) if hull.id == hull_id else hull for hull in sample_turn.hulls]
     return replace(sample_turn, hulls=hulls)
 
 
@@ -148,9 +146,7 @@ def test_estimate_known_zero_beams_scores_zero_for_non_fighter_hull(sample_turn)
 
 def test_estimate_fighter_bay_hull_scores_without_beams_or_launchers(sample_turn):
     """Empty fighter-bay hulls still score hull construction via the shared scorer."""
-    turn = _turn_with_replaced_hull(
-        sample_turn, 24, fighterbays=5, beams=0, launchers=0
-    )
+    turn = _turn_with_replaced_hull(sample_turn, 24, fighterbays=5, beams=0, launchers=0)
     record = FleetShipRecord(
         record_id="rec-carrier",
         fields=FleetShipRecordFields(

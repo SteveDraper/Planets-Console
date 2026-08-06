@@ -37,6 +37,7 @@ from api.concepts.turn_component_catalog import (
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 
+
 @dataclass(frozen=True, slots=True)
 class ResolvedShipConstructionFit:
     """Catalog parts and counts ready for ``ship_build_military_score_delta_2x``."""
