@@ -23,7 +23,7 @@ Players need a consolidated view of each **Player**'s fleet -- not only ships vi
 2. Combines **fleet observed ship** evidence from `TurnInfo.ships` (turns `1..T` at shell **perspective** `P`)
 3. Adds **fleet inferred acquisition** rows from **military score build inference** (`shipBuilds` on host turns in the same range)
 4. Represents partial knowledge with structured **fleet field constraint** values and **fleet build option set** lists (consistent tuples, not per-field Cartesian products)
-5. Exposes **map** layers (per-player ship nodes at known positions) and **tabular** tiles (one per enabled **Player**)
+5. Exposes **map** layers (**fleet location ring**s from the **fleet stream**) and **tabular** tiles (one per enabled **Player**)
 6. Participates in the **analytic export** graph (`fleet@N` <-> `scores@N` / `scores@N-1` ensure chain)
 
 **Not in scope for v1:** omniscient merge across perspectives; guessed disposition changes on ship-count decreases; user-facing **fleet reconciliation correction** UI; report parsing; homeworld-derived starbase regions on map.
@@ -309,21 +309,13 @@ records[]:
 
 Default consumer filter: `disposition == active`.
 
-### 7.2 Map (`GET /bff/analytics/fleet/map`)
+### 7.2 Map live path (fleet stream projection)
 
-Per **Player** (client filters by **fleet player visibility**):
+SPA map does **not** use `GET …/fleet/map` as the live path ([ADR 0011](adr/0011-fleet-stream-behind-table-and-map.md)). Progressive ledger state comes from the **fleet stream** (same NDJSON session as table). Each record already carries `lastSeen` / fields / option sets; Core also attaches **fleet ship military estimate** (`militaryEstimate2x`) on table/stream records via the shared ship-build military helper (unknown beam/tube slots filled at minimal tech; engines passed for API uniformity -- contribution rules stay inside that helper).
 
-```text
-players[]:
-  playerId, nodes[], overlayCircles? (v1 often empty)
-nodes[]:
-  id: fleet:{playerId}:{recordId}
-  x, y, label, hullSummary, qualifiers
-```
+Client projects **fleet player visibility**-filtered **`active`** rows with known `lastSeen` `(x, y)` into **fleet location ring**s (exact coordinate stacks). Region overlays remain deferred.
 
-Only **active** rows with known point position in v1. Region-only rows omitted until overlay ticket.
-
-Types: Zod module under `packages/frontend/src/analytics/fleet/` (not central OpenAPI codegen).
+`GET …/fleet/map` may remain a no-op scaffold for catalog symmetry; it is not required for the console map layer ([#126](https://github.com/SteveDraper/Planets-Console/issues/126) superseded).
 
 ---
 
@@ -336,20 +328,21 @@ Types: Zod module under `packages/frontend/src/analytics/fleet/` (not central Op
 - Default: all **Players** on until the user toggles an override
 - Persisted globally (not per game), same pattern as **Cartography layer**
 
-### 8.2 Map (deliverable separate from table)
+### 8.2 Map (fleet stream → location rings)
 
-- Register in `mapAnalyticRegistry.ts`
-- Merge **fleet map node**s with player color
-- Tooltips: spec constraints, **fleet alibi** / **fleet possibly lost** icons
+- Own the **fleet stream** session above table vs map **view mode** (table tiles and map are projections)
+- Register in `mapAnalyticRegistry.ts`; merge **fleet location ring** overlay (not per-ship planet dots)
+- Ring encoding: near-fixed small diameter (slight log bump by ship count, capped); arc length ∝ per-player ship count; stroke opacity from stack **fleet ship military estimate**; colors from shared **player color** module
+- Hover: per-player header, then indented ship lines (hull icon, id, hull name, mil-score in host points). Hull icons share non-analytic resolution with the scoreboard (`hullImageUrl` / shared icon component)
+- Region overlays deferred
+- Heading / speed trails deferred to [#290](https://github.com/SteveDraper/Planets-Console/issues/290)
 
-### 8.3 Table (deliverable separate from map)
+### 8.3 Table (same stream, tabular projection)
 
 - One **fleet table tile** per visible **Player** in tabular **view mode**
 - Columns: id, hull, engine, beams, launchers, built, last seen, status icons
 - Row expander for **fleet build option set** alternates
 - Tile header: **fleet count discrepancy** banner
-
-**MVP vertical slice:** Core + BFF table for viewpoint player before map ships.
 
 ---
 
@@ -372,16 +365,18 @@ flowchart TB
   end
   subgraph bff [BFF]
     TBL[table handler]
-    MAP[map handler]
+    STR[fleet stream]
     EXP --> TBL
-    EXP --> MAP
+    EXP --> STR
   end
   subgraph spa [Frontend]
     VIS[fleet player visibility]
+    SES[fleet stream session]
     TILE[fleet table tiles]
     LAYER[fleet map layer]
-    TBL --> TILE
-    MAP --> LAYER
+    STR --> SES
+    SES --> TILE
+    SES --> LAYER
     VIS --> TILE
     VIS --> LAYER
   end
@@ -421,8 +416,8 @@ F0.2 registration uses a single `api/analytics/fleet.py` module (same pattern as
 | Reconciliation | Exact known id vs id-bound + lock-compatible option sets; max rank weight then builtTurn; event append immutability; bounds before observation; count collapse (#259) |
 | Discrepancy | Player flag without disposition change; alibi excludes possibly-lost |
 | Exports | Ensure deps; materialize shape; scores edge registration |
-| BFF | Table/map wire golden fixtures |
-| Frontend | Player visibility persistence; tile filter; map node merge |
+| BFF | Table wire golden fixtures; stream events |
+| Frontend | Player visibility persistence; tile filter; location-ring merge; stream session shared across view modes |
 
 ---
 
@@ -434,7 +429,7 @@ F0.2 registration uses a single `api/analytics/fleet.py` module (same pattern as
 | **1** | Domain types + snapshot persistence + observation ingest | [#116](https://github.com/SteveDraper/Planets-Console/issues/116)--[#118](https://github.com/SteveDraper/Planets-Console/issues/118) |
 | **2** | Scores integration + reconciliation + exports | [#119](https://github.com/SteveDraper/Planets-Console/issues/119)--[#121](https://github.com/SteveDraper/Planets-Console/issues/121) |
 | **3** | Discrepancy + qualifiers + report hook stub | [#122](https://github.com/SteveDraper/Planets-Console/issues/122)--[#124](https://github.com/SteveDraper/Planets-Console/issues/124) |
-| **4** | BFF table/map wire | [#125](https://github.com/SteveDraper/Planets-Console/issues/125), [#126](https://github.com/SteveDraper/Planets-Console/issues/126) |
+| **4** | BFF table wire (+ map REST superseded) | [#125](https://github.com/SteveDraper/Planets-Console/issues/125); [#126](https://github.com/SteveDraper/Planets-Console/issues/126) closed (ADR 0011) |
 | **5** | Frontend sidebar, map layer, table tiles | [#127](https://github.com/SteveDraper/Planets-Console/issues/127)--[#128](https://github.com/SteveDraper/Planets-Console/issues/128) |
 | **6** | Follow-ons | [#129](https://github.com/SteveDraper/Planets-Console/issues/129)--[#134](https://github.com/SteveDraper/Planets-Console/issues/134) |
 
@@ -467,6 +462,8 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 | **Fleet gap-fill coordinator** ([#161](https://github.com/SteveDraper/Planets-Console/issues/161), scope [#179](https://github.com/SteveDraper/Planets-Console/issues/179)) | Singleflight per `(gameId, perspective, playerId)`; forward unwind; see section 5.1 |
 | **Fleet F7** (ADR 0004) | Per-player persistence, provenance, table stream -- [#163](https://github.com/SteveDraper/Planets-Console/issues/163) epic; section 15 |
 | **#143** | Neutral scores-inference revision for fleet refetch; superseded for refinement updates once F7 stream ships |
+| **Player color Settings** [#289](https://github.com/SteveDraper/Planets-Console/issues/289) | Settings UI for **player color** overrides; #128 ships defaults + storage seam only |
+| **Fleet heading trails** [#290](https://github.com/SteveDraper/Planets-Console/issues/290) | Map rays for known heading/speed (observed ships); optional multi-turn forward/back opacity ramp; stream wire enrichment |
 
 ### `$.composition` export branch (#154)
 

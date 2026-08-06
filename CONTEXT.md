@@ -609,20 +609,32 @@ _Avoid_: perspective-wide single ledger file as ensure-final, recompute 1..T on 
 _Avoid_: neutral fleet priors (scores vocabulary)
 
 **Fleet map layer**:
-The **map layer** contribution of the **fleet analytic** -- ship markers and optional region geometry for one shell turn. **Known position:** a ship **fleet map node** at last sighted `x/y` (stable id `fleet:{playerId}:{recordId}`). **Region only:** optional **overlayCircles** or starbase markers when **fleet field constraint** **region** is populated (v1 may omit). **No position:** excluded from map payload. Only **`active`** rows with known point or region appear in v1.
-_Avoid_: duplicate ship graph (separate from base map planets)
+The **map layer** contribution of the **fleet analytic** for one shell turn. Projects **fleet player visibility**-enabled **`active`** **fleet ship record**s that have a known last-seen point into **fleet location ring**s (not one marker per ship). Region-only geometry (**fleet field constraint** **region** / starbase overlays) remains deferred. Rows with no known `x/y` are excluded.
+_Avoid_: per-ship **fleet map node** markers as the primary v1 paint, duplicate ship graph separate from base-map planets, blocking map GET as the live data path
+
+**Fleet location ring**:
+Map overlay at an exact last-seen `(x, y)` stacking all visible players' **active** ships that share that coordinate. Near-fixed small outer diameter (slight log bump by total ship count, hard-capped). Arc length ∝ that player's ship-count share; stroke opacity (optional slight width) encodes approximate **fleet ship military estimate** for the stack. Multi-player stacks are arc-segmented by player; colors come from the shared **player color** palette.
+_Avoid_: diameter-as-primary strength encoding, merge-by-planet-id instead of exact `(x, y)`
+
+**Fleet ship military estimate**:
+Approximate construction military contribution for one **fleet ship record**, computed by calling the same Core ship-build military helper used by **military score build inference** (hull + engine + beams + tubes; loaded ammo excluded). Known components from the display-default **fleet build option set** (or locked fields); unknown beam/tube slots treated as **full** at minimal-tech parts (cheapest tech-1 beam/tube in catalog); unknown engine filled the same way for API uniformity with that helper. Whether engines affect the numeric result is owned entirely by the shared military-score calculation -- fleet map must not special-case engine contribution. Used to weight **fleet location ring** opacity and tooltip lines -- not a durable ledger field and not scoreboard truth.
+_Avoid_: treating estimate as exact scoreboard military, including loaded fighters/torps in the ring weight, forking a second military formula in the SPA or fleet map code
 
 **Fleet player visibility**:
-Single per-**Player** enablement preference (localStorage, global) controlling whether that **Player**'s fleet appears in both **view mode**s -- one **fleet table tile** and the same player's **fleet map layer** ships and region overlays. Default on for viewpoint **Player**; others off until toggled in the **fleet analytic** sidebar. Same **client preference** pattern as **Cartography layer** toggles.
-_Avoid_: separate map-only and table-only player toggles (v1), per-player analytic id
+Single per-**Player** enablement preference (localStorage, global) controlling whether that **Player**'s fleet appears in both **view mode**s -- one **fleet table tile** and the same player's **fleet map layer** rings. Default **on for every Player** until the user toggles an override in the **fleet analytic** sidebar (same rule for viewpoint and others). Same **client preference** pattern as **Cartography layer** toggles.
+_Avoid_: separate map-only and table-only player toggles (v1), per-player analytic id, viewpoint-only default
 
 **Fleet table tile**:
 One tabular sub-tile per **fleet player visibility**-enabled **Player** in **view mode** tabular -- TanStack Table of **`active`** **fleet ship record** rows with columns for id, hull, engine, beams, launchers, built turn, last seen, and status icons (**fleet alibi**, **fleet possibly lost**). Ambiguous fit shows default **fleet build option set** in row cells; row expander lists alternates. Tile header carries **fleet count discrepancy** banner when set. Viewpoint **Player** tile first, then **GameInfo** player order.
 _Avoid_: master fleet table (all players one grid), scores table reuse
 
-**Fleet table stream**:
-Single NDJSON connection for all **fleet player visibility**-enabled players on one game / turn / **perspective** scope (`GET .../fleet/table-stream`). Connect admits every requested player (cached final ledgers may replay immediately), then multiplexes per-player scheduler queues onto one wire; the frontend demuxes on `playerId`. Progress (`ledger_updated`, `record_refined`, `provenance`) from any admitted player reaches the SPA as gap-fill legs complete -- not serialized behind the prior player's host-turn `complete`. Fairness "one submission per player" is orchestrator submit grain only. Shares the [table-stream session framework](docs/adr/0004-addendum-table-stream-session-framework.md) with **inference table stream**.
-_Avoid_: per-player HTTP connections, admission-order wire drain (one player to complete before the next is multiplexed)
+**Fleet stream** (aka **fleet table stream**; HTTP path may still say `table-stream`):
+Single NDJSON connection for all **fleet player visibility**-enabled players on one game / turn / **perspective** scope. Owns progressive ledger materialization **behind** tabular vs map **view mode**s -- both **fleet table tile**s and the **fleet map layer** are projections of the same demuxed per-player state. Connect admits every requested player (cached final ledgers may replay immediately), then multiplexes per-player scheduler queues onto one wire; the frontend demuxes on `playerId`. Progress (`ledger_updated`, `record_refined`, `provenance`) from any admitted player reaches the SPA as gap-fill legs complete -- not serialized behind the prior player's host-turn `complete`. Fairness "one submission per player" is orchestrator submit grain only. Shares the [table-stream session framework](docs/adr/0004-addendum-table-stream-session-framework.md) with **inference table stream**.
+_Avoid_: per-player HTTP connections, admission-order wire drain, separate map NDJSON protocol, map-mode `GET …/fleet/map` as the live SPA path, treating the stream as table-only
+
+**Player color**:
+Shared SPA identity color for a **Player**, used by any analytic or chrome that needs per-player paint (including **fleet location ring**s). Read API and defaults live in a shared module (deterministic hash of `playerId` → fixed preset hues). Persistable overrides use a storage abstraction the Settings UI can later wire without changing callers. Overrides are global localStorage, not inside one analytic sidebar.
+_Avoid_: fleet-only color store, relying on often-empty host `Relation.color` as the sole source, baking Settings UI into every consumer
 
 **Military score build inference**:
 Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row** with top-K **20**. No fixed row time budget once **#71** ships -- SPA runs continue until the ladder finishes, **inference global pause** freezes them, or the stream is **cancelled** (scope change, disable build inference, explicit cancel/recompute -- **not** disconnect). Disconnect is detach-only; see **Inference stream cancellation**. See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
