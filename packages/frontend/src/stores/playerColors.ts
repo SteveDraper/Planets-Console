@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import {
-  colorForPlayerId as resolveColorForPlayerId,
+  colorForPlayerId,
+  colorFromOverrideOrDefault,
   playerColorOverrideStorageKey,
   setPlayerColorOverrideStore,
   type PlayerColorOverrides,
@@ -37,7 +38,11 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
             },
           }
         }),
-      colorForPlayerId: (playerId) => resolveColorForPlayerId(playerId, get().overrides),
+      colorForPlayerId: (playerId) =>
+        colorFromOverrideOrDefault(
+          playerId,
+          get().overrides[playerColorOverrideStorageKey(playerId)]
+        ),
     }),
     {
       name: PLAYER_COLORS_STORAGE_KEY,
@@ -47,7 +52,11 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
   )
 )
 
-/** Bind zustand overrides into the shared {@link colorForPlayerId} storage port. */
+/**
+ * Bind zustand overrides into the shared {@link colorForPlayerId} storage port.
+ * Settings (or another always-mounted shell module) must import this module so
+ * the port is installed and persisted overrides rehydrate.
+ */
 export function installPlayerColorsStorePort(): void {
   setPlayerColorOverrideStore({
     getOverride: (playerId) =>
@@ -56,3 +65,15 @@ export function installPlayerColorsStorePort(): void {
 }
 
 installPlayerColorsStorePort()
+
+/**
+ * Reactive player color for map/table paint. Subscribes to override changes so
+ * Settings updates re-render; resolution still goes through {@link colorForPlayerId}.
+ */
+export function usePlayerColor(playerId: number): string {
+  // Subscribe so Settings override edits re-render; hex still comes from the port.
+  usePlayerColorsStore(
+    (state) => state.overrides[playerColorOverrideStorageKey(playerId)] ?? null
+  )
+  return colorForPlayerId(playerId)
+}

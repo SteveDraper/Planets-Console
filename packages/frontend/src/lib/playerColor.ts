@@ -1,6 +1,6 @@
 /**
  * Shared player identity colors for map/table paint.
- * Settings UI (#289) wires overrides into the storage port without changing callers.
+ * Settings wires overrides into the storage port without changing callers.
  */
 
 export const PLAYER_COLOR_PRESET = [
@@ -24,7 +24,7 @@ export const PLAYER_COLOR_PRESET = [
 
 export type PlayerColorOverrides = Readonly<Record<string, string>>
 
-/** Storage port for per-player color overrides (Settings #289). */
+/** Storage port for per-player color overrides. */
 export type PlayerColorOverrideStore = {
   getOverride: (playerId: number) => string | undefined
 }
@@ -55,24 +55,23 @@ export function defaultColorForPlayerId(playerId: number): string {
   return PLAYER_COLOR_PRESET[index]!
 }
 
-/**
- * Resolve a player's paint color: override store (or explicit overrides), else preset.
- * Callers of rings/tooltips should use this entry point so #289 can swap the store.
- */
-export function colorForPlayerId(
+/** Non-empty override wins; otherwise the preset default. */
+export function colorFromOverrideOrDefault(
   playerId: number,
-  overrides?: PlayerColorOverrides
+  override: string | undefined
 ): string {
-  if (overrides != null) {
-    const override = overrides[playerColorOverrideStorageKey(playerId)]
-    if (override != null && override.length > 0) {
-      return override
-    }
-    return defaultColorForPlayerId(playerId)
-  }
-  const fromStore = activeOverrideStore.getOverride(playerId)
-  if (fromStore != null && fromStore.length > 0) {
-    return fromStore
+  if (override != null && override.length > 0) {
+    return override
   }
   return defaultColorForPlayerId(playerId)
+}
+
+/**
+ * Resolve a player's paint color from the override port, else the preset.
+ * Non-React callers and render helpers use this entry point. React paint that
+ * must update when Settings changes overrides should use `usePlayerColor`
+ * from `stores/playerColors` (subscribes, then resolves through this function).
+ */
+export function colorForPlayerId(playerId: number): string {
+  return colorFromOverrideOrDefault(playerId, activeOverrideStore.getOverride(playerId))
 }

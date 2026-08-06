@@ -35,12 +35,4 @@ describe('playerColor', () => {
     expect(colorForPlayerId(8)).toBe('#ffffff')
     expect(colorForPlayerId(9)).toBe(defaultColorForPlayerId(9))
   })
-
-  it('prefers explicit overrides map when provided', () => {
-    setPlayerColorOverrideStore({
-      getOverride: () => '#000000',
-    })
-    expect(colorForPlayerId(8, { '8': '#abcdef' })).toBe('#abcdef')
-    expect(colorForPlayerId(9, { '8': '#abcdef' })).toBe(defaultColorForPlayerId(9))
-  })
 })

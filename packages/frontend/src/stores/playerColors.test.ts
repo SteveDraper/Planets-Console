@@ -1,10 +1,15 @@
+import { renderHook, act } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   colorForPlayerId,
   defaultColorForPlayerId,
   resetPlayerColorOverrideStore,
 } from '../lib/playerColor'
-import { installPlayerColorsStorePort, usePlayerColorsStore } from './playerColors'
+import {
+  installPlayerColorsStorePort,
+  usePlayerColor,
+  usePlayerColorsStore,
+} from './playerColors'
 
 describe('usePlayerColorsStore', () => {
   beforeEach(() => {
@@ -28,5 +33,20 @@ describe('usePlayerColorsStore', () => {
 
     usePlayerColorsStore.getState().setPlayerColorOverride(3, null)
     expect(colorForPlayerId(3)).toBe(defaultColorForPlayerId(3))
+  })
+
+  it('usePlayerColor re-renders when the player override changes', () => {
+    const { result } = renderHook(() => usePlayerColor(3))
+    expect(result.current).toBe(defaultColorForPlayerId(3))
+
+    act(() => {
+      usePlayerColorsStore.getState().setPlayerColorOverride(3, '#abcdef')
+    })
+    expect(result.current).toBe('#abcdef')
+
+    act(() => {
+      usePlayerColorsStore.getState().setPlayerColorOverride(3, null)
+    })
+    expect(result.current).toBe(defaultColorForPlayerId(3))
   })
 })
