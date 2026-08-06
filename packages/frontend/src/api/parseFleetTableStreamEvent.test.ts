@@ -54,6 +54,72 @@ describe('parseFleetTableStreamEvent', () => {
     expect(event?.type).toBe('ledger_updated')
   })
 
+  it('parses ledger_updated records that include militaryEstimate2x', () => {
+    const event = parseFleetTableStreamEvent(
+      JSON.stringify({
+        type: 'ledger_updated',
+        playerId: 8,
+        ledger: {
+          playerId: 8,
+          playerName: 'Alice',
+          records: [
+            {
+              recordId: 'rec-1',
+              disposition: 'active',
+              qualifiers: {},
+              fields: {
+                shipId: { kind: 'bounded', operator: 'lte', value: 100 },
+                hull: { kind: 'unknown' },
+                engine: { kind: 'unknown' },
+                beams: { kind: 'unknown' },
+                launchers: { kind: 'unknown' },
+                builtTurn: { kind: 'unknown' },
+                location: { kind: 'unknown' },
+              },
+              buildOptionSets: [],
+              militaryEstimate2x: 84,
+            },
+          ],
+        },
+      })
+    )
+
+    expect(event?.type).toBe('ledger_updated')
+    if (event?.type === 'ledger_updated') {
+      expect(event.ledger.records[0]!.militaryEstimate2x).toBe(84)
+    }
+  })
+
+  it('parses record_refined events that include militaryEstimate2x', () => {
+    const event = parseFleetTableStreamEvent(
+      JSON.stringify({
+        type: 'record_refined',
+        playerId: 8,
+        record: {
+          recordId: 'rec-1',
+          disposition: 'active',
+          qualifiers: {},
+          fields: {
+            shipId: { kind: 'bounded', operator: 'lte', value: 100 },
+            hull: { kind: 'unknown' },
+            engine: { kind: 'unknown' },
+            beams: { kind: 'unknown' },
+            launchers: { kind: 'unknown' },
+            builtTurn: { kind: 'unknown' },
+            location: { kind: 'unknown' },
+          },
+          buildOptionSets: [],
+          militaryEstimate2x: 12,
+        },
+      })
+    )
+
+    expect(event?.type).toBe('record_refined')
+    if (event?.type === 'record_refined') {
+      expect(event.record.militaryEstimate2x).toBe(12)
+    }
+  })
+
   it('rejects ledger_updated records that still carry core-only evidence events', () => {
     expect(() =>
       parseFleetTableStreamEvent(

@@ -48,6 +48,42 @@ describe('fleetTableWireSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('accepts optional militaryEstimate2x on records', () => {
+    expect(primaryGolden).toBeDefined()
+    const withEstimate = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    withEstimate.players[0]!.records[0]!.militaryEstimate2x = 42
+
+    const result = fleetTableWireSchema.safeParse(withEstimate)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.players[0]!.records[0]!.militaryEstimate2x).toBe(42)
+    }
+  })
+
+  it('rejects non-integer militaryEstimate2x', () => {
+    expect(primaryGolden).toBeDefined()
+    const withFloat = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    withFloat.players[0]!.records[0]!.militaryEstimate2x = 42.5
+
+    const result = fleetTableWireSchema.safeParse(withFloat)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects unrelated unknown keys on records', () => {
+    expect(primaryGolden).toBeDefined()
+    const withUnknown = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    withUnknown.players[0]!.records[0]!.notAWireField = true
+
+    const result = fleetTableWireSchema.safeParse(withUnknown)
+    expect(result.success).toBe(false)
+  })
+
   it('rejects missing defaultActiveOnly', () => {
     expect(primaryGolden).toBeDefined()
     const withoutDefault = structuredClone(primaryGolden) as Record<string, unknown>

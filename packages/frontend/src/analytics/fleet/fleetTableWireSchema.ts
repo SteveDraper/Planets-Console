@@ -47,6 +47,7 @@ export const fleetTableRecordSchema = z
     buildOptionSets: z.array(fleetBuildOptionSetSchema),
     displayDefaultOptionSetIndex: z.number().int().min(0).optional(),
     lastSeen: fleetLastSeenSchema.optional(),
+    militaryEstimate2x: z.number().int().optional(),
   })
   .strict()
   .superRefine((record, ctx) => {
