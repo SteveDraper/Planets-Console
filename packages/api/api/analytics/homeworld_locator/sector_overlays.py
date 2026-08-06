@@ -463,6 +463,7 @@ def build_homeworld_sector_overlays(
     candidate_planet_ids: frozenset[int],
     slot_anchored_planet_ids: frozenset[int],
     scan_origins: Sequence[CoverageOrigin],
+    race_id_by_owner_slot: Mapping[int, int],
     nebulas: Sequence[NebulaCenter] = (),
     pinned_player_label_by_planet_id: Mapping[int, str] | None = None,
     most_probable_planet_ids: frozenset[int] = frozenset(),
@@ -470,7 +471,6 @@ def build_homeworld_sector_overlays(
     possible_owner_label_by_slot: Mapping[int, str] | None = None,
     location_definite_planet_ids: frozenset[int] = frozenset(),
     perspective_by_planet_id: Mapping[int, int] | None = None,
-    race_id_by_owner_slot: Mapping[int, int] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Build one boundary overlay per equal angular sector.
 
@@ -492,6 +492,8 @@ def build_homeworld_sector_overlays(
     projected (winning-strength + cross-sector settled trim) -- not raw durable
     membership. ``perspective_by_planet_id`` supplies slot-anchored owner slots
     so definite location pins also settle owners for cross-sector trim.
+    ``race_id_by_owner_slot`` is required for ownership strength projection
+    (empty map allowed when no race context).
     """
     if player_count < 2:
         return ()
@@ -528,9 +530,9 @@ def build_homeworld_sector_overlays(
 
     owner_sets = project_sector_owner_sets_for_overlays(
         dict(sector_owner_sets or ()),
+        race_id_by_owner_slot=race_id_by_owner_slot,
         location_definite_planet_ids=location_definite_planet_ids,
         settled_owner_home_by_slot=settled_from_location,
-        race_id_by_owner_slot=race_id_by_owner_slot,
     )
 
     pin_sector = sector_index_for_angle(pin_angle, pin_angle=pin_angle, player_count=player_count)

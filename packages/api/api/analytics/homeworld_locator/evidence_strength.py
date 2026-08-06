@@ -72,8 +72,8 @@ def ownership_provenance_strength(
     ``ship_travel_envelope`` stays strong for non-Privateer owners; Privateer
     owners (``owner_race_id``) demote to weak because Rob/tow-capture can put
     owned ships near foreign homeworlds without travel from the Privateer HW.
-    Missing ``owner_race_id`` keeps the default strong mapping (callers that
-    have a turn roster should pass race ids).
+    Missing ``owner_race_id`` keeps the default strong mapping (``resolve_ownership_axis``
+    looks up race from the required ``race_id_by_owner_slot`` map).
     """
     if kind == PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP and preferred_location_definite:
         return STRENGTH_STRONG
@@ -175,12 +175,17 @@ def _member_winning_strength(
 def resolve_ownership_axis(
     members: Sequence[SectorOwnerMember],
     *,
+    race_id_by_owner_slot: Mapping[int, int],
     location_definite_planet_ids: frozenset[int] | None = None,
-    race_id_by_owner_slot: Mapping[int, int] | None = None,
 ) -> OwnershipAxisResolution:
-    """Resolve ownership from member provenances: max strength wins; ties stay ambiguous."""
+    """Resolve ownership from member provenances: max strength wins; ties stay ambiguous.
+
+    ``race_id_by_owner_slot`` is required so race-sensitive kinds (Privateer
+    ``ship_travel_envelope``) cannot silently stay strong via omitted race context.
+    Empty maps are allowed when the caller has no roster (e.g. tests without
+    race-sensitive members); unknown slots still resolve as non-Privateer.
+    """
     definite_ids = location_definite_planet_ids or frozenset()
-    race_by_slot = race_id_by_owner_slot or {}
     if not members:
         return OwnershipAxisResolution(
             winning_strength=None,
@@ -193,7 +198,7 @@ def resolve_ownership_axis(
         strength = _member_winning_strength(
             member,
             location_definite_planet_ids=definite_ids,
-            race_id_by_owner_slot=race_by_slot,
+            race_id_by_owner_slot=race_id_by_owner_slot,
         )
         if strength is None:
             continue

@@ -198,7 +198,7 @@ def test_resolve_ownership_asserted_wins_over_strong() -> None:
             provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=5),),
         ),
     )
-    resolved = resolve_ownership_axis(members)
+    resolved = resolve_ownership_axis(members, race_id_by_owner_slot={})
     assert resolved.winning_strength == STRENGTH_ASSERTED
     assert resolved.resolved_owner_slot == 2
     assert resolved.is_unique is True
@@ -215,7 +215,7 @@ def test_resolve_ownership_same_strength_conflict_stays_ambiguous() -> None:
             provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=6),),
         ),
     )
-    resolved = resolve_ownership_axis(members)
+    resolved = resolve_ownership_axis(members, race_id_by_owner_slot={})
     assert resolved.winning_strength == STRENGTH_ASSERTED
     assert resolved.resolved_owner_slot is None
     assert resolved.is_unique is False
@@ -246,11 +246,19 @@ def test_resolve_ownership_preferred_strong_when_planet_location_definite() -> N
             ),
         ),
     )
-    weak = resolve_ownership_axis(members, location_definite_planet_ids=frozenset())
+    weak = resolve_ownership_axis(
+        members,
+        race_id_by_owner_slot={},
+        location_definite_planet_ids=frozenset(),
+    )
     assert weak.winning_strength == STRENGTH_WEAK
     assert weak.contending_owner_slots == (3, 4)
 
-    strong = resolve_ownership_axis(members, location_definite_planet_ids=frozenset({42}))
+    strong = resolve_ownership_axis(
+        members,
+        race_id_by_owner_slot={},
+        location_definite_planet_ids=frozenset({42}),
+    )
     assert strong.winning_strength == STRENGTH_STRONG
     assert strong.resolved_owner_slot == 3
     assert strong.is_unique is True

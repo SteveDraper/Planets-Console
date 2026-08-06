@@ -55,8 +55,8 @@ def derive_candidates_from_merged_evidence(
     candidates: Sequence[HomeworldCandidateRecord],
     merged: MergedHomeworldEvidence,
     *,
+    race_id_by_owner_slot: Mapping[int, int],
     planet_sector_index: Mapping[int, int] | None = None,
-    race_id_by_owner_slot: Mapping[int, int] | None = None,
 ) -> tuple[HomeworldCandidateRecord, ...]:
     """Apply location strength resolution and asserted cues onto candidate rows.
 
@@ -64,6 +64,7 @@ def derive_candidates_from_merged_evidence(
     merged sets. Otherwise planet-keyed asserted ownership is used. Unique
     ownership binds ``perspective`` only when the row is still unbound
     (``perspective is None``) -- both keying modes share that preserve policy.
+    ``race_id_by_owner_slot`` is required (empty map allowed when no race context).
     """
     has_location_provenances = bool(merged.location_provenances)
     location_resolution = resolve_location_axis(merged.location_provenances)
@@ -72,7 +73,6 @@ def derive_candidates_from_merged_evidence(
         if location_resolution.is_definite and location_resolution.resolved_planet_id is not None
         else frozenset()
     )
-    race_by_slot = race_id_by_owner_slot or {}
     sector_members: dict[int, tuple[SectorOwnerMember, ...]] = dict(merged.sector_owner_sets)
     planet_members: dict[int, tuple[SectorOwnerMember, ...]] = dict(merged.planet_owner_sets)
 
@@ -97,8 +97,8 @@ def derive_candidates_from_merged_evidence(
                 ownership_for_cue = sector_members.get(sector_index, ())
                 ownership_resolution = resolve_ownership_axis(
                     ownership_for_cue,
+                    race_id_by_owner_slot=race_id_by_owner_slot,
                     location_definite_planet_ids=definite_ids,
-                    race_id_by_owner_slot=race_by_slot,
                 )
                 if ownership_resolution.is_unique and perspective is None:
                     perspective = ownership_resolution.resolved_owner_slot
@@ -106,8 +106,8 @@ def derive_candidates_from_merged_evidence(
             ownership_for_cue = planet_members[row.planet_id]
             ownership_resolution = resolve_ownership_axis(
                 ownership_for_cue,
+                race_id_by_owner_slot=race_id_by_owner_slot,
                 location_definite_planet_ids=definite_ids,
-                race_id_by_owner_slot=race_by_slot,
             )
             if ownership_resolution.is_unique and perspective is None:
                 perspective = ownership_resolution.resolved_owner_slot

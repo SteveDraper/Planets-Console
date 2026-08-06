@@ -278,6 +278,7 @@ def test_single_starbase_provenance_derives_possible_to_definite() -> None:
             sector_owner_sets=(),
             planet_owner_sets=(),
         ),
+        race_id_by_owner_slot={},
     )
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
@@ -391,6 +392,7 @@ def test_single_starbase_promotion_does_not_assign_homeworld_owner_from_ship_own
             sector_owner_sets=(),
             planet_owner_sets=(),
         ),
+        race_id_by_owner_slot={},
     )
     assert derived[0].confidence_tier == CONFIDENCE_DEFINITE
     assert derived[0].perspective is None
@@ -523,6 +525,7 @@ def test_collect_backfills_baseline_profile_when_prior_empty_and_od_present() ->
             sector_owner_sets=(),
             planet_owner_sets=(),
         ),
+        race_id_by_owner_slot={},
     )
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
@@ -536,5 +539,6 @@ def test_collect_backfills_baseline_profile_when_prior_empty_and_od_present() ->
             sector_owner_sets=(),
             planet_owner_sets=(),
         ),
+        race_id_by_owner_slot={},
     )
     assert {row.planet_id: row.confidence_tier for row in demoted}[10] == CONFIDENCE_POSSIBLE
