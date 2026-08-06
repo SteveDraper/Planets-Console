@@ -6,7 +6,8 @@ import type { AnalyticShellScope } from '../../api/bff'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
-import { seedShellViewpoint } from './fleetTestShell'
+import { pendingFleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
+import { seedShellViewpoint, FLEET_TEST_SHELL_PLAYERS } from './fleetTestShell'
 
 vi.mock('../../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bff')>()
@@ -24,6 +25,15 @@ const sampleScope: AnalyticShellScope = {
   gameId: '628580',
   turn: 5,
   perspective: 1,
+}
+
+function pendingStreamPlayersById() {
+  return new Map(
+    FLEET_TEST_SHELL_PLAYERS.map((player) => [
+      player.playerId,
+      pendingFleetPlayerStreamSlice(),
+    ])
+  )
 }
 
 function createWrapper(client: QueryClient) {
@@ -63,7 +73,11 @@ describe('FleetAnalyticTableTile', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     render(
-      <FleetAnalyticTableTile analyticScope={sampleScope} fetchEnabled />,
+      <FleetAnalyticTableTile
+        analyticScope={sampleScope}
+        fetchEnabled
+        streamPlayersById={pendingStreamPlayersById()}
+      />,
       { wrapper: createWrapper(client) }
     )
 
@@ -73,16 +87,20 @@ describe('FleetAnalyticTableTile', () => {
     expect(screen.getAllByText('Waiting for fleet records.')).toHaveLength(2)
   })
 
-  it('does not call monolithic fleet table REST', async () => {
+  it('loads component catalog without owning the fleet stream connect', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     render(
-      <FleetAnalyticTableTile analyticScope={sampleScope} fetchEnabled />,
+      <FleetAnalyticTableTile
+        analyticScope={sampleScope}
+        fetchEnabled
+        streamPlayersById={pendingStreamPlayersById()}
+      />,
       { wrapper: createWrapper(client) }
     )
 
     await screen.findByRole('region', { name: 'Alice fleet table' })
     expect(fetchFleetComponentCatalog).toHaveBeenCalled()
-    expect(fetchFleetTableStream).toHaveBeenCalled()
+    expect(fetchFleetTableStream).not.toHaveBeenCalled()
   })
 })

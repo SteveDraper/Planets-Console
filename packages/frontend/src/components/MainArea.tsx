@@ -16,6 +16,8 @@ import { scoresTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
 import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
+import { useFleetTableStream } from '../analytics/fleet/useFleetTableStream'
+import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
 import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
 import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
@@ -351,6 +353,15 @@ export function MainArea({
   const tableAnalyticIds =
     viewMode === 'tabular' ? enabledTableAnalyticIds(enabledAnalyticIds, analytics) : []
 
+  // Own the fleet stream above table/map so view-mode toggles do not tear down the session.
+  const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
+  const fleetStreamEnabled =
+    fleetEnabled && analyticFetchEnabled && !turnBlockedNoLogin
+  const { streamPlayersById: fleetStreamPlayersById } = useFleetTableStream(
+    analyticScope,
+    fleetStreamEnabled
+  )
+
   if (viewMode === 'tabular' && tableAnalyticIds.length === 0) {
     return <ShellCenterPane message="Enable at least one analytic in the left bar." />
   }
@@ -392,8 +403,12 @@ export function MainArea({
               key={id}
               title={analytics.find((a) => a.id === id)?.name ?? id}
             >
-              {id === 'fleet' ? (
-                <FleetAnalyticTableTile analyticScope={analyticScope} fetchEnabled={fetchEnabled} />
+              {id === FLEET_ANALYTIC_ID ? (
+                <FleetAnalyticTableTile
+                  analyticScope={analyticScope}
+                  fetchEnabled={fetchEnabled}
+                  streamPlayersById={fleetStreamPlayersById}
+                />
               ) : (
                 <TableTile
                   analyticId={id}

@@ -1,8 +1,6 @@
 import type { ScoresInferenceSolutionShipBuild } from '../../api/bff'
-import {
-  GENERIC_FREIGHTER_HULL_ID,
-  hullImageUrl,
-} from '../../concepts/hullImageUrl'
+import { HullIcon } from '../../components/HullIcon'
+import { GENERIC_FREIGHTER_HULL_ID } from '../../concepts/hullImageUrl'
 import { inferenceActionAggregateIcon } from './inferenceActionFamily'
 import type { MilitaryScoreLineItem } from './inferenceConstraints'
 
@@ -55,14 +53,7 @@ export function InferenceSolutionLineIcon({
   const hullId = resolveHullIdForLine(line, shipBuild)
 
   if (hullId != null) {
-    return (
-      <img
-        src={hullImageUrl(hullId)}
-        alt=""
-        className="h-8 w-8 object-contain"
-        loading="lazy"
-      />
-    )
+    return <HullIcon hullId={hullId} className="h-8 w-8" />
   }
 
   const Icon = inferenceActionAggregateIcon(line.actionId)
