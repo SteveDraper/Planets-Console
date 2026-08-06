@@ -1,9 +1,28 @@
-"""Ship hull classification and construction score helpers for build inference."""
+"""Host-aligned ship-build military score helpers.
+
+Shared by fleet wire estimates and military-score inference. Construction value
+follows AutoScore (megacredits + 5 * minerals); military deltas are scaled 2x.
+"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 
-from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
+from api.concepts.hulls import hull_has_weapon_slots
 from api.models.components import Beam, Engine, Hull, Torpedo
+
+
+def construction_value(megacredits: int, minerals: int) -> int:
+    """AutoScore-style construction value: megacredits plus five times minerals."""
+    return megacredits + 5 * minerals
+
+
+def ship_construction_score_delta_2x(
+    construction_megacredits: int,
+    construction_minerals: int,
+) -> int:
+    """Scaled military-score delta for one ship hull plus fitted components."""
+    return 2 * construction_value(construction_megacredits, construction_minerals)
 
 
 @dataclass(frozen=True)
@@ -14,8 +33,6 @@ class DefaultBuildComponents:
 
 
 def is_military_hull(hull: Hull) -> bool:
-    from api.concepts.hulls import hull_has_weapon_slots
-
     return hull_has_weapon_slots(hull)
 
 

@@ -15,7 +15,7 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
     FleetShipRecordFields,
 )
-from api.analytics.military_score_inference.ship_build_scoring import (
+from api.concepts.ship_build_military import (
     default_build_components,
     ship_build_military_score_delta_2x,
 )

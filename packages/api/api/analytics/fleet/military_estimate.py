@@ -12,12 +12,11 @@ from api.analytics.fleet.types import (
     FleetFieldKnown,
     FleetShipRecord,
 )
-from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
-from api.analytics.military_score_inference.ship_build_scoring import (
+from api.concepts.hulls import is_generic_freighter_sentinel_hull_id
+from api.concepts.ship_build_military import (
     default_build_components,
     ship_build_military_score_delta_2x,
 )
-from api.concepts.hulls import is_generic_freighter_sentinel_hull_id
 from api.concepts.turn_component_catalog import (
     beams_by_id,
     engines_by_id,
@@ -64,13 +63,8 @@ def fleet_ship_military_estimate_2x(
 
     hull_id = locks.hull_id
     if hull_id is None and option_set is not None and option_set.hull_id is not None:
+        # Includes GENERIC_FREIGHTER_SENTINEL_HULL_ID (0) on freighter option sets.
         hull_id = option_set.hull_id
-    if (
-        hull_id is None
-        and option_set is not None
-        and option_set.combo_id == GENERIC_FREIGHTER_COMBO_ID
-    ):
-        hull_id = 0
 
     if hull_id is None:
         return None

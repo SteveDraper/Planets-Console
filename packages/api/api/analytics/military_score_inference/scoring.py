@@ -1,23 +1,12 @@
 """Scaled military-score contribution helpers for build inference."""
 
+from api.concepts.ship_build_military import construction_value
+
 LOADED_SHIP_FIGHTER_SCORE_DELTA_2X = 250
 LOADED_TORPEDO_AMMO_MINERALS = 3
 STARBASE_FIGHTER_SCORE_DELTA_2X = 125
 STARBASE_DEFENSE_POST_SCORE_DELTA_2X = 15
 PLANET_DEFENSE_POST_SCORE_DELTA_2X = 11
-
-
-def construction_value(megacredits: int, minerals: int) -> int:
-    """AutoScore-style construction value: megacredits plus five times minerals."""
-    return megacredits + 5 * minerals
-
-
-def ship_construction_score_delta_2x(
-    construction_megacredits: int,
-    construction_minerals: int,
-) -> int:
-    """Scaled military-score delta for one ship hull plus fitted components."""
-    return 2 * construction_value(construction_megacredits, construction_minerals)
 
 
 def loaded_ship_fighter_score_delta_2x(count: int = 1) -> int:

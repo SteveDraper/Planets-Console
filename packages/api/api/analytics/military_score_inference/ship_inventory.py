@@ -9,9 +9,7 @@ from api.analytics.military_score_inference.ship_build_combos import (
     GENERIC_FREIGHTER_COMBO_ID,
     ship_build_combo_id,
 )
-from api.analytics.military_score_inference.ship_build_scoring import (
-    ship_build_has_zero_military_score,
-)
+from api.concepts.ship_build_military import ship_build_has_zero_military_score
 from api.concepts.turn_component_catalog import (
     beams_by_id,
     engines_by_id,

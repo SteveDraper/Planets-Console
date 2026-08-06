@@ -18,7 +18,6 @@ from api.analytics.military_score_inference.component_eligibility import (
     turn_catalog_context_for_policy_step,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
-from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import (
     GENERIC_FREIGHTER_COMBO_ID,
     GENERIC_ZERO_MILITARY_SCORE_LABEL,
@@ -26,17 +25,18 @@ from api.analytics.military_score_inference.ship_build_combos import (
     is_generic_zero_military_score_combo_id,
     ship_build_combo_id,
 )
-from api.analytics.military_score_inference.ship_build_scoring import (
-    ship_build_counts_as_warship,
-    ship_build_military_score_delta_2x,
-    ship_build_score_delta_2x,
-)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_TIME_LIMITED,
     solve_inference_problem,
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.concepts.ship_build_military import (
+    ship_build_counts_as_warship,
+    ship_build_military_score_delta_2x,
+    ship_build_score_delta_2x,
+    ship_construction_score_delta_2x,
+)
 from api.serialization.turn import turn_info_from_json
 
 from tests.fixtures.military_score_inference import _observation

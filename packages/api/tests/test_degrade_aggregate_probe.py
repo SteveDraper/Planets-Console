@@ -18,16 +18,14 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.scoring import (
-    loaded_ship_torpedo_score_delta_2x,
-    ship_construction_score_delta_2x,
-)
+from api.analytics.military_score_inference.scoring import loaded_ship_torpedo_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import (
     ship_build_combo_id,
     ship_build_combo_label,
 )
-from api.analytics.military_score_inference.ship_build_scoring import (
+from api.concepts.ship_build_military import (
     ship_build_military_score_delta_2x,
+    ship_construction_score_delta_2x,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo

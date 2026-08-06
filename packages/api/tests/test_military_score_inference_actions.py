@@ -20,16 +20,14 @@ from api.analytics.military_score_inference.component_eligibility import (
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
 )
-from api.analytics.military_score_inference.scoring import (
-    STARBASE_FIGHTER_SCORE_DELTA_2X,
-    ship_construction_score_delta_2x,
-)
-from api.analytics.military_score_inference.ship_build_scoring import (
-    ship_build_military_score_delta_2x,
-    ship_build_score_delta_2x,
-)
+from api.analytics.military_score_inference.scoring import STARBASE_FIGHTER_SCORE_DELTA_2X
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.concepts.races import evil_empire_free_starbase_fighters_per_host_turn
+from api.concepts.ship_build_military import (
+    ship_build_military_score_delta_2x,
+    ship_build_score_delta_2x,
+    ship_construction_score_delta_2x,
+)
 from api.serialization.game import game_info_from_json
 from api.serialization.turn import turn_info_from_json
 
