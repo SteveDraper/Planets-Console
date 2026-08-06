@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { homeworldBaselineDegradedMessage } from '../../analytics/homeworld-locator/constants'
 import type { AnalyticShellScope } from '../../api/bff'
+import type { FleetPlayerStreamSlice } from '../../analytics/fleet/fleetTablePlayerStreamState'
 import type { StellarCartographyMapContext } from '../../analytics/stellar-cartography/mapUiConfig'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { errorDetailFromUnknown } from '../../lib/queryRetry'
@@ -29,6 +30,8 @@ export type MapShellContentProps = {
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   cartography?: StellarCartographyMapContext
+  /** Shared fleet stream demux state for location rings (view-mode-independent). */
+  fleetStreamPlayersById?: ReadonlyMap<number, FleetPlayerStreamSlice>
 }
 
 /** Renders map shell phases (loading, error, or live map with optional deferred pending banner). */
@@ -43,6 +46,7 @@ export function MapShellContent({
   onMapZoomChange,
   onSetZoomReady,
   cartography,
+  fleetStreamPlayersById,
 }: MapShellContentProps) {
   switch (mapShellView.phase) {
     case 'full-loading':
@@ -68,6 +72,7 @@ export function MapShellContent({
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}
           cartography={cartography}
+          fleetStreamPlayersById={fleetStreamPlayersById}
         />
       )
   }
@@ -84,6 +89,7 @@ function MapShellShowingMap({
   onMapZoomChange,
   onSetZoomReady,
   cartography,
+  fleetStreamPlayersById,
 }: MapShellContentProps & { mapShellView: Extract<MapShellView, { phase: 'showing-map' }> }) {
   return (
     <main className="relative flex min-h-0 flex-1 flex-col bg-black">
@@ -108,6 +114,7 @@ function MapShellShowingMap({
           onSetZoomReady={onSetZoomReady}
           planetLabelOptions={planetLabelOptions}
           cartography={cartography}
+          fleetStreamPlayersById={fleetStreamPlayersById}
         />
       </MapPaneWithDisplayControls>
       <div

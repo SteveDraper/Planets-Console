@@ -17,6 +17,7 @@ import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromT
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
 import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
 import { useFleetTableStream } from '../analytics/fleet/useFleetTableStream'
+import type { FleetPlayerStreamSlice } from '../analytics/fleet/fleetTablePlayerStreamState'
 import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
 import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
@@ -239,6 +240,7 @@ type MapMainAreaProps = {
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
+  fleetStreamPlayersById: Map<number, FleetPlayerStreamSlice>
 }
 
 type MapShellContentBaseProps = Omit<MapShellContentProps, 'cartography'>
@@ -262,6 +264,7 @@ const MapMainArea = memo(function MapMainArea({
   onPlanetLabelOptionsChange,
   onMapZoomChange,
   onSetZoomReady,
+  fleetStreamPlayersById,
 }: MapMainAreaProps) {
   const analyticFetchEnabled = analyticScope != null && turnDataReady
   const roster =
@@ -319,6 +322,7 @@ const MapMainArea = memo(function MapMainArea({
     onPlanetLabelOptionsChange,
     onMapZoomChange,
     onSetZoomReady,
+    fleetStreamPlayersById,
   }
 
   if (isStellarCartographyMapEnabled(enabledMapIds)) {
@@ -438,6 +442,7 @@ export function MainArea({
       onPlanetLabelOptionsChange={setPlanetLabelOptions}
       onMapZoomChange={onMapZoomChange}
       onSetZoomReady={onSetZoomReady}
+      fleetStreamPlayersById={fleetStreamPlayersById}
     />
   )
 }

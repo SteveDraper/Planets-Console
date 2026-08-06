@@ -26,6 +26,7 @@ vi.mock('../api/bff', async (importOriginal) => {
 })
 
 import { fetchFleetTableStream, fetchFleetComponentCatalog } from '../api/bff'
+import { useFleetTableStream } from '../analytics/fleet/useFleetTableStream'
 vi.mock('../lib/useMapAnalyticQueries', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/useMapAnalyticQueries')>()
   return {
@@ -44,6 +45,12 @@ vi.mock('../lib/useStellarCartographyMapContext', () => ({
 
 vi.mock('./shell/MapShellContent', () => ({
   MapShellContent: () => <div data-testid="map-shell-content" />,
+}))
+
+const stableFleetStreamPlayersById = new Map()
+
+vi.mock('../analytics/fleet/useFleetTableStream', () => ({
+  useFleetTableStream: vi.fn(() => ({ streamPlayersById: stableFleetStreamPlayersById })),
 }))
 
 const defaultConnectionsParams: ConnectionsMapParams = {
@@ -321,7 +328,7 @@ describe('MainArea tabular analytic sections', () => {
     expect(fetchAnalyticTable).not.toHaveBeenCalled()
   })
 
-  it('keeps one fleet stream connect across tabular and map view-mode toggles', async () => {
+  it('owns the fleet stream above view mode so tabular/map toggles keep the session', async () => {
     useFleetPlayerVisibilityStore.setState({ overrides: {} })
     seedShellViewpoint(1)
     vi.mocked(fetchFleetComponentCatalog).mockResolvedValue({
@@ -330,7 +337,7 @@ describe('MainArea tabular analytic sections', () => {
       beams: {},
       torpedoes: {},
     })
-    vi.mocked(fetchFleetTableStream).mockImplementation(async () => new Promise(() => {}))
+    vi.mocked(useFleetTableStream).mockClear()
 
     const { rerender } = render(
       <MainArea
@@ -341,7 +348,7 @@ describe('MainArea tabular analytic sections', () => {
     )
 
     await screen.findByRole('button', { name: 'Collapse Fleet' })
-    expect(fetchFleetTableStream).toHaveBeenCalledTimes(1)
+    expect(useFleetTableStream).toHaveBeenCalledWith(sampleScope, true)
 
     rerender(
       <MainArea
@@ -350,7 +357,7 @@ describe('MainArea tabular analytic sections', () => {
       />
     )
     expect(screen.getByTestId('map-shell-content')).toBeInTheDocument()
-    expect(fetchFleetTableStream).toHaveBeenCalledTimes(1)
+    expect(useFleetTableStream).toHaveBeenCalledWith(sampleScope, true)
 
     rerender(
       <MainArea
@@ -359,6 +366,7 @@ describe('MainArea tabular analytic sections', () => {
       />
     )
     await screen.findByRole('button', { name: 'Collapse Fleet' })
-    expect(fetchFleetTableStream).toHaveBeenCalledTimes(1)
+    expect(useFleetTableStream).toHaveBeenCalledWith(sampleScope, true)
+    expect(fetchFleetTableStream).not.toHaveBeenCalled()
   })
 })

@@ -37,8 +37,11 @@ import {
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { MapAttentionOrchestrator } from './map-graph/MapAttentionOrchestrator'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
+import { FleetLocationRingsOverlay } from './map-graph/FleetLocationRingsOverlay'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
+import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
+import type { FleetPlayerStreamSlice } from '../analytics/fleet/fleetTablePlayerStreamState'
 import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
 import {
   useEffectiveHomeworldSectorIndexes,
@@ -100,6 +103,8 @@ type MapGraphProps = {
   planetLabelOptions?: PlanetLabelOptions
   /** Set when Stellar Cartography is enabled; drives overlays, wormholes, and hover sampling. */
   cartography?: StellarCartographyMapContext
+  /** Demuxed fleet stream owned above view mode; rings project from this when fleet is enabled. */
+  fleetStreamPlayersById?: ReadonlyMap<number, FleetPlayerStreamSlice>
 }
 
 /** Max time to wait for initial viewport fit before showing the map anyway (avoids staying invisible if fit never runs). */
@@ -118,6 +123,7 @@ export function MapGraph({
   onSetZoomReady,
   planetLabelOptions = DEFAULT_PLANET_LABEL_OPTIONS,
   cartography,
+  fleetStreamPlayersById,
 }: MapGraphProps) {
   const [initialFitDone, setInitialFitDone] = useState(false)
   const onInitialFitDone = useCallback(() => setInitialFitDone(true), [])
@@ -175,6 +181,7 @@ export function MapGraph({
             onMapZoomChange={onMapZoomChange}
             onSetZoomReady={onSetZoomReady}
             onInitialFitDone={onInitialFitDone}
+            fleetStreamPlayersById={fleetStreamPlayersById}
           />
         </WormholeInteractionProvider>
       </div>
@@ -200,6 +207,7 @@ type MapGraphFlowProps = {
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   onInitialFitDone: () => void
+  fleetStreamPlayersById?: ReadonlyMap<number, FleetPlayerStreamSlice>
 }
 
 type MapHoverStackProps = {
@@ -266,6 +274,7 @@ function MapGraphFlow({
   onMapZoomChange,
   onSetZoomReady,
   onInitialFitDone,
+  fleetStreamPlayersById,
 }: MapGraphFlowProps) {
   const {
     wormholeLineRevealKey,
@@ -283,6 +292,7 @@ function MapGraphFlow({
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
+  const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays
   )
@@ -375,6 +385,13 @@ function MapGraphFlow({
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
+      {fleetStreamPlayersById != null ? (
+        <FleetLocationRingsOverlay
+          analyticScope={analyticScope}
+          streamPlayersById={fleetStreamPlayersById}
+          enabled={fleetEnabled}
+        />
+      ) : null}
       <MapAttentionOrchestrator homeworldMarkers={data.homeworldMarkers} />
       <FixedSizeDotsOverlay
         planetGrid={planetGrid}
