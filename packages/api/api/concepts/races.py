@@ -9,6 +9,7 @@ from api.models.game import GameSettings
 EVIL_EMPIRE_RACE_ID = 8
 HORWASP_RACE_ID = 12
 SOLAR_FEDERATION_RACE_ID = 1
+PRIVATEER_RACE_ID = 5
 CRYSTAL_RACE_ID = 7
 
 EVIL_EMPIRE_FREE_STARBASE_FIGHTERS_BASE = 5
@@ -28,6 +29,11 @@ def is_horwasp(race_id: int) -> bool:
 def is_solar_federation(race_id: int) -> bool:
     """Solar Federation (raceid 1) -- Super Refit can arm unarmed military hulls later."""
     return race_id == SOLAR_FEDERATION_RACE_ID
+
+
+def is_privateer(race_id: int) -> bool:
+    """The Privateer Bands (raceid 5) -- Rob + tow-capture can relocate owned ships."""
+    return race_id == PRIVATEER_RACE_ID
 
 
 def is_crystal(race_id: int) -> bool:

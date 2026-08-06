@@ -27,7 +27,7 @@ from api.analytics.homeworld_locator.ownership_projection import (
     settled_owner_homes_from_location_pins,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateView
-from api.analytics.turn_roster import players_by_id
+from api.analytics.turn_roster import players_by_id, race_id_by_owner_slot
 from api.concepts.game_category import GameCategory
 from api.concepts.homeworld_layout import (
     CLOSE_PLANETS_MAX_LY,
@@ -463,6 +463,7 @@ def build_homeworld_sector_overlays(
     candidate_planet_ids: frozenset[int],
     slot_anchored_planet_ids: frozenset[int],
     scan_origins: Sequence[CoverageOrigin],
+    race_id_by_owner_slot: Mapping[int, int],
     nebulas: Sequence[NebulaCenter] = (),
     pinned_player_label_by_planet_id: Mapping[int, str] | None = None,
     most_probable_planet_ids: frozenset[int] = frozenset(),
@@ -491,6 +492,8 @@ def build_homeworld_sector_overlays(
     projected (winning-strength + cross-sector settled trim) -- not raw durable
     membership. ``perspective_by_planet_id`` supplies slot-anchored owner slots
     so definite location pins also settle owners for cross-sector trim.
+    ``race_id_by_owner_slot`` is required for ownership strength projection
+    (empty map allowed when no race context).
     """
     if player_count < 2:
         return ()
@@ -527,6 +530,7 @@ def build_homeworld_sector_overlays(
 
     owner_sets = project_sector_owner_sets_for_overlays(
         dict(sector_owner_sets or ()),
+        race_id_by_owner_slot=race_id_by_owner_slot,
         location_definite_planet_ids=location_definite_planet_ids,
         settled_owner_home_by_slot=settled_from_location,
     )
@@ -674,7 +678,6 @@ def build_homeworld_sector_overlays_for_turn(
         game_info=game_info,
         game_id=resolved_game_id,
     )
-
     return build_homeworld_sector_overlays(
         center=center,
         pin=pin,
@@ -692,6 +695,7 @@ def build_homeworld_sector_overlays_for_turn(
         possible_owner_label_by_slot=owner_slot_labels,
         location_definite_planet_ids=location_definite_ids,
         perspective_by_planet_id=perspective_by_planet,
+        race_id_by_owner_slot=race_id_by_owner_slot(turn),
     )
 
 

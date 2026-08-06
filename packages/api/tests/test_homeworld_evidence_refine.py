@@ -578,6 +578,7 @@ def test_origin_distance_observations_do_not_promote_to_definite() -> None:
             sector_owner_sets=(),
             planet_owner_sets=(),
         ),
+        race_id_by_owner_slot={},
     )
     assert derived[0].confidence_tier == CONFIDENCE_POSSIBLE
     # OD-only lists do not feed definite-keyed culls as a promote path either.
@@ -612,6 +613,7 @@ def test_single_starbase_promotion_materializes_without_owner_assignment() -> No
             sector_owner_sets=(),
             planet_owner_sets=(),
         ),
+        race_id_by_owner_slot={},
     )
     candidates = apply_definite_keyed_candidate_culls(
         derived,
@@ -771,6 +773,7 @@ def test_culls_after_strength_resolve_drop_demoted_machine_near_assert(
             sector_owner_sets=(),
             planet_owner_sets=(),
         ),
+        race_id_by_owner_slot={},
     )
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[2].confidence_tier == CONFIDENCE_DEFINITE
@@ -1138,6 +1141,7 @@ def test_floor_algorithm_rewrite_backfills_baseline_profile_before_od_demotion(
             sector_owner_sets=(),
             planet_owner_sets=(),
         ),
+        race_id_by_owner_slot={},
     )
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE

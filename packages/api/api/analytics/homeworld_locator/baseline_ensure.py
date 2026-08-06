@@ -49,7 +49,7 @@ from api.analytics.homeworld_locator.types import (
     empty_candidate_view,
     ensure_candidates_for_asserted_locations,
 )
-from api.analytics.turn_roster import players_by_id
+from api.analytics.turn_roster import players_by_id, race_id_by_owner_slot
 from api.concepts.homeworld_layout import (
     homeworld_locator_inactive_reason,
     homeworld_settings_fingerprint,
@@ -347,6 +347,7 @@ def materialize_homeworld_candidates(
     adjusted = derive_candidates_from_merged_evidence(
         adjusted,
         merged,
+        race_id_by_owner_slot=race_id_by_owner_slot(shell_turn),
         planet_sector_index=(
             dict(partition.planet_sector_index) if partition is not None else None
         ),

@@ -15,6 +15,7 @@ from api.analytics.homeworld_locator.ownership_projection import (
     project_sector_owner_sets_for_overlays,
     settled_owner_homes_from_location_pins,
 )
+from api.concepts.races import PRIVATEER_RACE_ID
 
 
 def _member(slot: int, *kinds: str, planet_id: int | None = None) -> SectorOwnerMember:
@@ -37,8 +38,31 @@ def test_strength_filter_drops_weaker_members() -> None:
             _member(2, PROVENANCE_NEARBY_PLANET_OWNERSHIP, planet_id=99),
         ),
     }
-    projected = project_sector_owner_sets_for_overlays(sets)
+    projected = project_sector_owner_sets_for_overlays(sets, race_id_by_owner_slot={})
     assert [m.owner_slot for m in projected[0].members] == [1]
+
+
+def test_privateer_envelope_does_not_outrank_nearby_planet_ownership() -> None:
+    """Privateer Rob/tow-capture makes ship envelopes weak -- stay ambiguous with nearby."""
+    sets = {
+        0: (
+            _member(5, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
+            _member(2, PROVENANCE_NEARBY_PLANET_OWNERSHIP, planet_id=45),
+        ),
+    }
+    projected = project_sector_owner_sets_for_overlays(
+        sets,
+        race_id_by_owner_slot={5: PRIVATEER_RACE_ID, 2: 2},
+    )
+    assert [m.owner_slot for m in projected[0].members] == [5, 2]
+    assert projected[0].winning_strength is None
+
+    alone = project_sector_owner_sets_for_overlays(
+        {0: (_member(5, PROVENANCE_SHIP_TRAVEL_ENVELOPE),)},
+        race_id_by_owner_slot={5: PRIVATEER_RACE_ID},
+    )
+    assert [m.owner_slot for m in alone[0].members] == [5]
+    assert alone[0].winning_strength == "weak"
 
 
 def test_cross_sector_trim_removes_settled_owner_elsewhere() -> None:
@@ -49,7 +73,7 @@ def test_cross_sector_trim_removes_settled_owner_elsewhere() -> None:
             _member(5, PROVENANCE_NEARBY_PLANET_OWNERSHIP, planet_id=51),
         ),
     }
-    projected = project_sector_owner_sets_for_overlays(sets)
+    projected = project_sector_owner_sets_for_overlays(sets, race_id_by_owner_slot={})
     assert [m.owner_slot for m in projected[0].members] == [3]
     assert [m.owner_slot for m in projected[1].members] == [5]
 
@@ -64,6 +88,7 @@ def test_location_pin_settles_owner_for_cross_sector_trim() -> None:
     }
     projected = project_sector_owner_sets_for_overlays(
         sets,
+        race_id_by_owner_slot={},
         settled_owner_home_by_slot={2: 0},
     )
     assert projected[0].members == ()
@@ -115,6 +140,7 @@ def test_preferred_upgrades_when_planet_location_definite() -> None:
     }
     projected = project_sector_owner_sets_for_overlays(
         sets,
+        race_id_by_owner_slot={},
         location_definite_planet_ids=frozenset({42}),
     )
     assert [m.owner_slot for m in projected[0].members] == [3]
@@ -128,29 +154,33 @@ def test_asserted_settles_for_cross_sector_trim() -> None:
             _member(7, PROVENANCE_NEARBY_PLANET_OWNERSHIP, planet_id=10),
         ),
     }
-    projected = project_sector_owner_sets_for_overlays(sets)
+    projected = project_sector_owner_sets_for_overlays(sets, race_id_by_owner_slot={})
     assert [m.owner_slot for m in projected[1].members] == [7]
 
 
 def test_winning_strength_emitted_only_when_unique() -> None:
     unique = (_member(1, PROVENANCE_SHIP_TRAVEL_ENVELOPE),)
-    projected = project_sector_owner_sets_for_overlays({0: unique})
+    projected = project_sector_owner_sets_for_overlays({0: unique}, race_id_by_owner_slot={})
     assert projected[0].winning_strength == "strong"
 
     ambiguous_strong = (
         _member(2, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
         _member(5, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
     )
-    projected = project_sector_owner_sets_for_overlays({0: ambiguous_strong})
+    projected = project_sector_owner_sets_for_overlays(
+        {0: ambiguous_strong}, race_id_by_owner_slot={}
+    )
     assert projected[0].winning_strength is None
 
-    projected = project_sector_owner_sets_for_overlays({0: ()})
+    projected = project_sector_owner_sets_for_overlays({0: ()}, race_id_by_owner_slot={})
     assert projected[0].winning_strength is None
 
-    assert ownership_winning_strength_for_members(unique) == "strong"
-    assert ownership_winning_strength_for_members(ambiguous_strong) is None
+    assert ownership_winning_strength_for_members(unique, race_id_by_owner_slot={}) == "strong"
+    assert (
+        ownership_winning_strength_for_members(ambiguous_strong, race_id_by_owner_slot={}) is None
+    )
     empty: tuple[SectorOwnerMember, ...] = ()
-    assert ownership_winning_strength_for_members(empty) is None
+    assert ownership_winning_strength_for_members(empty, race_id_by_owner_slot={}) is None
 
 
 def test_winning_strength_omitted_for_ambiguous_preferred_upgrade() -> None:
@@ -161,18 +191,21 @@ def test_winning_strength_omitted_for_ambiguous_preferred_upgrade() -> None:
     )
     projected = project_sector_owner_sets_for_overlays(
         {0: members},
+        race_id_by_owner_slot={},
         location_definite_planet_ids=frozenset({42, 43}),
     )
     assert projected[0].winning_strength is None
     unique = (_member(3, PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP, planet_id=42),)
     projected = project_sector_owner_sets_for_overlays(
         {0: unique},
+        race_id_by_owner_slot={},
         location_definite_planet_ids=frozenset({42}),
     )
     assert projected[0].winning_strength == "strong"
     assert (
         ownership_winning_strength_for_members(
             members,
+            race_id_by_owner_slot={},
             location_definite_planet_ids=frozenset({42, 43}),
         )
         is None
@@ -180,6 +213,7 @@ def test_winning_strength_omitted_for_ambiguous_preferred_upgrade() -> None:
     assert (
         ownership_winning_strength_for_members(
             unique,
+            race_id_by_owner_slot={},
             location_definite_planet_ids=frozenset({42}),
         )
         == "strong"

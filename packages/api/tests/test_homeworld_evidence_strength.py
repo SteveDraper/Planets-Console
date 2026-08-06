@@ -24,6 +24,7 @@ from api.analytics.homeworld_locator.models import (
     OwnershipProvenance,
     SectorOwnerMember,
 )
+from api.concepts.races import PRIVATEER_RACE_ID
 
 
 def test_location_kind_strength_mapping() -> None:
@@ -61,7 +62,96 @@ def test_ownership_kind_strength_mapping() -> None:
         == STRENGTH_STRONG
     )
     assert ownership_provenance_strength(PROVENANCE_SHIP_TRAVEL_ENVELOPE) == STRENGTH_STRONG
+    assert (
+        ownership_provenance_strength(
+            PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+            owner_race_id=1,
+        )
+        == STRENGTH_STRONG
+    )
+    assert (
+        ownership_provenance_strength(
+            PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+            owner_race_id=PRIVATEER_RACE_ID,
+        )
+        == STRENGTH_WEAK
+    )
     assert ownership_provenance_strength(PROVENANCE_ASSERTED) == STRENGTH_ASSERTED
+
+
+def test_resolve_ownership_privateer_envelope_is_weak_not_definite() -> None:
+    """Privateer ship envelopes stay in the set but cannot win at strong strength."""
+    members = (
+        SectorOwnerMember(
+            owner_slot=5,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                    turn=10,
+                    ship_id=39,
+                    radius_ly=82.0,
+                ),
+            ),
+        ),
+    )
+    alone = resolve_ownership_axis(
+        members,
+        race_id_by_owner_slot={5: PRIVATEER_RACE_ID},
+    )
+    assert alone.winning_strength == STRENGTH_WEAK
+    assert alone.is_unique is True
+    assert alone.resolved_owner_slot == 5
+
+    with_nearby = (
+        *members,
+        SectorOwnerMember(
+            owner_slot=2,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                    turn=10,
+                    planet_id=45,
+                    distance_ly=50.0,
+                ),
+            ),
+        ),
+    )
+    ambiguous = resolve_ownership_axis(
+        with_nearby,
+        race_id_by_owner_slot={5: PRIVATEER_RACE_ID, 2: 2},
+    )
+    assert ambiguous.winning_strength == STRENGTH_WEAK
+    assert ambiguous.is_unique is False
+    assert ambiguous.contending_owner_slots == (2, 5)
+
+
+def test_resolve_ownership_non_privateer_envelope_stays_strong() -> None:
+    members = (
+        SectorOwnerMember(
+            owner_slot=3,
+            provenances=(
+                OwnershipProvenance(kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE, turn=4, ship_id=9),
+            ),
+        ),
+        SectorOwnerMember(
+            owner_slot=2,
+            provenances=(
+                OwnershipProvenance(
+                    kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+                    turn=4,
+                    planet_id=10,
+                    distance_ly=40.0,
+                ),
+            ),
+        ),
+    )
+    resolved = resolve_ownership_axis(
+        members,
+        race_id_by_owner_slot={3: 4, 2: 2},
+    )
+    assert resolved.winning_strength == STRENGTH_STRONG
+    assert resolved.is_unique is True
+    assert resolved.resolved_owner_slot == 3
 
 
 def test_resolve_location_asserted_wins_over_strong() -> None:
@@ -108,7 +198,7 @@ def test_resolve_ownership_asserted_wins_over_strong() -> None:
             provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=5),),
         ),
     )
-    resolved = resolve_ownership_axis(members)
+    resolved = resolve_ownership_axis(members, race_id_by_owner_slot={})
     assert resolved.winning_strength == STRENGTH_ASSERTED
     assert resolved.resolved_owner_slot == 2
     assert resolved.is_unique is True
@@ -125,7 +215,7 @@ def test_resolve_ownership_same_strength_conflict_stays_ambiguous() -> None:
             provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=6),),
         ),
     )
-    resolved = resolve_ownership_axis(members)
+    resolved = resolve_ownership_axis(members, race_id_by_owner_slot={})
     assert resolved.winning_strength == STRENGTH_ASSERTED
     assert resolved.resolved_owner_slot is None
     assert resolved.is_unique is False
@@ -156,11 +246,19 @@ def test_resolve_ownership_preferred_strong_when_planet_location_definite() -> N
             ),
         ),
     )
-    weak = resolve_ownership_axis(members, location_definite_planet_ids=frozenset())
+    weak = resolve_ownership_axis(
+        members,
+        race_id_by_owner_slot={},
+        location_definite_planet_ids=frozenset(),
+    )
     assert weak.winning_strength == STRENGTH_WEAK
     assert weak.contending_owner_slots == (3, 4)
 
-    strong = resolve_ownership_axis(members, location_definite_planet_ids=frozenset({42}))
+    strong = resolve_ownership_axis(
+        members,
+        race_id_by_owner_slot={},
+        location_definite_planet_ids=frozenset({42}),
+    )
     assert strong.winning_strength == STRENGTH_STRONG
     assert strong.resolved_owner_slot == 3
     assert strong.is_unique is True

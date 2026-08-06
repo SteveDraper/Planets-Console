@@ -4,6 +4,8 @@ Kind → ``weak`` < ``strong`` < ``asserted``. Decision/display state uses only
 provenances at the highest present class; same-strength conflicts stay unresolved.
 ``preferred_candidate_ownership`` is strong only when its planet is already
 location-definite (caller supplies that context at resolve time).
+``ship_travel_envelope`` is weak for Privateer owners (Rob + tow-capture can
+place ships outside a true travel path from their homeworld).
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from api.analytics.homeworld_locator.models import (
     LocationProvenance,
     SectorOwnerMember,
 )
+from api.concepts.races import is_privateer
 
 STRENGTH_WEAK = "weak"
 STRENGTH_STRONG = "strong"
@@ -60,14 +63,26 @@ def ownership_provenance_strength(
     kind: str,
     *,
     preferred_location_definite: bool = False,
+    owner_race_id: int | None = None,
 ) -> str:
     """Map an ownership provenance kind to its homeworld evidence strength class.
 
     ``preferred_candidate_ownership`` upgrades to strong when the preferred
     candidate is already definite on the location axis.
+    ``ship_travel_envelope`` stays strong for non-Privateer owners; Privateer
+    owners (``owner_race_id``) demote to weak because Rob/tow-capture can put
+    owned ships near foreign homeworlds without travel from the Privateer HW.
+    Missing ``owner_race_id`` keeps the default strong mapping (``resolve_ownership_axis``
+    looks up race from the required ``race_id_by_owner_slot`` map).
     """
     if kind == PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP and preferred_location_definite:
         return STRENGTH_STRONG
+    if (
+        kind == PROVENANCE_SHIP_TRAVEL_ENVELOPE
+        and owner_race_id is not None
+        and is_privateer(owner_race_id)
+    ):
+        return STRENGTH_WEAK
     strength = _OWNERSHIP_KIND_STRENGTH.get(kind)
     if strength is None:
         raise ValueError(f"unknown homeworld ownership provenance kind: {kind!r}")
@@ -137,8 +152,10 @@ def _member_winning_strength(
     member: SectorOwnerMember,
     *,
     location_definite_planet_ids: frozenset[int],
+    race_id_by_owner_slot: Mapping[int, int],
 ) -> str | None:
     strengths: list[str] = []
+    owner_race_id = race_id_by_owner_slot.get(member.owner_slot)
     for provenance in member.provenances:
         preferred_definite = (
             provenance.kind == PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP
@@ -149,6 +166,7 @@ def _member_winning_strength(
             ownership_provenance_strength(
                 provenance.kind,
                 preferred_location_definite=preferred_definite,
+                owner_race_id=owner_race_id,
             )
         )
     return _max_strength(strengths)
@@ -157,9 +175,16 @@ def _member_winning_strength(
 def resolve_ownership_axis(
     members: Sequence[SectorOwnerMember],
     *,
+    race_id_by_owner_slot: Mapping[int, int],
     location_definite_planet_ids: frozenset[int] | None = None,
 ) -> OwnershipAxisResolution:
-    """Resolve ownership from member provenances: max strength wins; ties stay ambiguous."""
+    """Resolve ownership from member provenances: max strength wins; ties stay ambiguous.
+
+    ``race_id_by_owner_slot`` is required so race-sensitive kinds (Privateer
+    ``ship_travel_envelope``) cannot silently stay strong via omitted race context.
+    Empty maps are allowed when the caller has no roster (e.g. tests without
+    race-sensitive members); unknown slots still resolve as non-Privateer.
+    """
     definite_ids = location_definite_planet_ids or frozenset()
     if not members:
         return OwnershipAxisResolution(
@@ -173,6 +198,7 @@ def resolve_ownership_axis(
         strength = _member_winning_strength(
             member,
             location_definite_planet_ids=definite_ids,
+            race_id_by_owner_slot=race_id_by_owner_slot,
         )
         if strength is None:
             continue

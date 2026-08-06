@@ -485,6 +485,7 @@ def test_derive_candidates_sets_definite_and_asserted_cue() -> None:
     derived = derive_candidates_from_merged_evidence(
         candidates,
         merged,
+        race_id_by_owner_slot={},
         planet_sector_index={20: 0},
     )
     by_planet = {row.planet_id: row for row in derived}
@@ -530,7 +531,7 @@ def test_derive_ownership_assert_sets_cue_without_location_asserted() -> None:
             ),
         ),
     )
-    derived = derive_candidates_from_merged_evidence(candidates, merged)
+    derived = derive_candidates_from_merged_evidence(candidates, merged, race_id_by_owner_slot={})
     assert len(derived) == 1
     assert derived[0].asserted_cue is True
     assert derived[0].location_asserted is False
@@ -564,7 +565,7 @@ def test_derive_asserted_wins_over_machine_strong_despite_prior_definite() -> No
         sector_owner_sets=(),
         planet_owner_sets=(),
     )
-    derived = derive_candidates_from_merged_evidence(candidates, merged)
+    derived = derive_candidates_from_merged_evidence(candidates, merged, race_id_by_owner_slot={})
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[20].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[20].asserted_cue is True
@@ -595,7 +596,7 @@ def test_derive_asserted_wins_over_machine_strong_despite_prior_definite() -> No
         sector_owner_sets=(),
         planet_owner_sets=(),
     )
-    derived = derive_candidates_from_merged_evidence(candidates, merged)
+    derived = derive_candidates_from_merged_evidence(candidates, merged, race_id_by_owner_slot={})
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[20].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[10].confidence_tier == CONFIDENCE_POSSIBLE
@@ -625,7 +626,7 @@ def test_derive_empty_location_list_keeps_prior_tier() -> None:
         sector_owner_sets=(),
         planet_owner_sets=(),
     )
-    derived = derive_candidates_from_merged_evidence(candidates, merged)
+    derived = derive_candidates_from_merged_evidence(candidates, merged, race_id_by_owner_slot={})
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE
@@ -673,6 +674,7 @@ def test_derive_unique_ownership_bind_preserves_existing_perspective(
         derived = derive_candidates_from_merged_evidence(
             candidates,
             merged,
+            race_id_by_owner_slot={},
             planet_sector_index={20: 0},
         )
     else:
@@ -681,7 +683,9 @@ def test_derive_unique_ownership_bind_preserves_existing_perspective(
             sector_owner_sets=(),
             planet_owner_sets=((20, unique_owner),),
         )
-        derived = derive_candidates_from_merged_evidence(candidates, merged)
+        derived = derive_candidates_from_merged_evidence(
+            candidates, merged, race_id_by_owner_slot={}
+        )
 
     assert len(derived) == 1
     assert derived[0].perspective == expected_perspective

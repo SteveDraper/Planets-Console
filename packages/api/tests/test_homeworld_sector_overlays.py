@@ -196,6 +196,7 @@ def test_build_overlays_sector_count_band_and_pin(template_planet) -> None:
         candidate_planet_ids=frozenset(candidate_ids),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
         pinned_player_label_by_planet_id={pin.id: "koshling (The Lizard Alliance)"},
     )
@@ -245,6 +246,7 @@ def test_fully_observed_zero_candidates_error_no_disks(template_planet) -> None:
         candidate_planet_ids=frozenset({pin.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
     )
     assert len(overlays) == 4
@@ -293,6 +295,7 @@ def test_incomplete_observation_uses_unobserved_point(template_planet) -> None:
         candidate_planet_ids=frozenset({pin.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
     )
     opposite = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-2")
@@ -345,6 +348,7 @@ def test_envelope_center_closest_candidate_to_sector_mid(template_planet) -> Non
         candidate_planet_ids=frozenset({pin.id, inner.id, mid.id, outer.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
     )
     sector_one = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-1")
@@ -373,6 +377,7 @@ def test_envelope_center_prefers_most_probable_over_sector_mid(template_planet) 
         candidate_planet_ids=frozenset({pin.id, mid.id, most_probable.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
         most_probable_planet_ids=frozenset({most_probable.id}),
     )
@@ -400,6 +405,7 @@ def test_incomplete_with_candidates_prefers_candidate_center(template_planet) ->
         candidate_planet_ids=frozenset({pin.id, orphan.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
     )
     sector_one = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-1")
@@ -551,6 +557,7 @@ def test_possible_owners_emit_provenance_kind_counts(template_planet) -> None:
         candidate_planet_ids=frozenset({pin.id, orphan.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
         sector_owner_sets={sector_index: members},
         possible_owner_label_by_slot={3: "enlar (The Privateers)"},
@@ -623,6 +630,7 @@ def test_sector_overlay_omits_ownership_winning_strength_when_ambiguous(
         candidate_planet_ids=frozenset({pin.id, orphan.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
         sector_owner_sets={sector_index: members},
         possible_owner_label_by_slot={3: "enlar (The Privateers)", 7: "koshling (Lizards)"},
@@ -663,6 +671,7 @@ def test_cross_sector_trim_applied_through_overlay_builder(template_planet) -> N
         candidate_planet_ids=frozenset({pin.id, orphan.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
         sector_owner_sets={
             settled_sector: (
@@ -743,6 +752,7 @@ def test_possible_owners_emit_asserted_winning_strength(template_planet) -> None
         candidate_planet_ids=frozenset({pin.id, orphan.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
         sector_owner_sets={
             sector_index: (
@@ -783,6 +793,7 @@ def test_possible_owners_emit_weak_winning_strength(template_planet) -> None:
         candidate_planet_ids=frozenset({pin.id, orphan.id}),
         slot_anchored_planet_ids=frozenset({pin.id}),
         scan_origins=origins,
+        race_id_by_owner_slot={},
         nebulas=(),
         sector_owner_sets={
             sector_index: (
