@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from api.analytics.fleet.military_estimate import (
-    fleet_ship_military_estimate_2x,
+from api.analytics.fleet.display_default_option_set import (
     resolve_display_default_build_option_set,
 )
+from api.analytics.fleet.military_estimate import fleet_ship_military_estimate_2x
 from api.analytics.fleet.serialization import fleet_ship_record_to_json
 from api.analytics.fleet.table_wire import fleet_ship_record_to_table_wire
 from api.analytics.fleet.types import (
