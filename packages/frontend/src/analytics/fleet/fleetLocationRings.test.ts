@@ -75,17 +75,21 @@ describe('fleetLocationRingOpacity', () => {
 })
 
 describe('fleetLocationRingStrokeWidthPx', () => {
-  it('keeps a minimum stroke for weak stacks and fills to center at full strength', () => {
-    expect(fleetLocationRingStrokeWidthPx(8, 0)).toBe(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX)
-    expect(fleetLocationRingStrokeWidthPx(8, 1)).toBe(4)
-    expect(fleetLocationRingStrokeWidthPx(20, 0.5)).toBe(5)
+  it('keeps a minimum stroke for weak stacks and leaves a 3px hole at full strength', () => {
+    // Diameter 8 → R=4; max stroke = 1 to keep inner ≥ 3 (hole floor wins over 2.5 min stroke).
+    expect(fleetLocationRingStrokeWidthPx(8, 0)).toBe(1)
+    expect(fleetLocationRingStrokeWidthPx(8, 1)).toBe(1)
+    // Diameter 20 → R=10; max stroke = 7; weak keeps 2.5; mid t uses t * maxStroke.
+    expect(fleetLocationRingStrokeWidthPx(20, 0)).toBe(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX)
+    expect(fleetLocationRingStrokeWidthPx(20, 0.5)).toBe(3.5)
+    expect(fleetLocationRingStrokeWidthPx(20, 1)).toBe(7)
   })
 })
 
 describe('fleetLocationRingPaintRadiusPx', () => {
   it('keeps the outer edge at diameter/2', () => {
-    expect(fleetLocationRingPaintRadiusPx(8, 2.5)).toBeCloseTo(2.75)
-    expect(fleetLocationRingPaintRadiusPx(8, 4)).toBe(2)
+    expect(fleetLocationRingPaintRadiusPx(8, 1)).toBe(3.5)
+    expect(fleetLocationRingPaintRadiusPx(20, 7)).toBe(6.5)
   })
 })
 
@@ -154,7 +158,8 @@ describe('buildFleetLocationRingStacks', () => {
     expect(stacked.diameterPx).toBe(10)
     expect(stacked.strengthFraction).toBe(0.5)
     expect(stacked.opacity).toBeCloseTo(0.675)
-    expect(stacked.strokeWidthPx).toBe(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX)
+    // Diameter 10 → R=5; maxStroke=2; t=0.5 → hole floor caps below the 2.5 min stroke.
+    expect(stacked.strokeWidthPx).toBe(2)
     expect(stacked.arcs).toHaveLength(2)
     expect(stacked.arcs[0]).toMatchObject({
       playerId: 8,
@@ -194,7 +199,8 @@ describe('buildFleetLocationRingStacks', () => {
     const [stack] = buildFleetLocationRingStacks(ships)
     expect(stack!.strengthFraction).toBe(1)
     expect(stack!.opacity).toBe(0.95)
-    expect(stack!.strokeWidthPx).toBe(4)
+    // Diameter 8 → max stroke 1 so the inner hole stays ≥ 3px.
+    expect(stack!.strokeWidthPx).toBe(1)
   })
 
   it('excludes records without lastSeen or lastSeen on another turn', () => {

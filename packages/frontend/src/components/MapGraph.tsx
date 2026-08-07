@@ -37,7 +37,9 @@ import {
 import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { MapAttentionOrchestrator } from './map-graph/MapAttentionOrchestrator'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
-import { FleetLocationRingsOverlay } from './map-graph/FleetLocationRingsOverlay'
+import { FleetLocationRingsOverlay, planetCoordKeysFromMapNodes } from './map-graph/FleetLocationRingsOverlay'
+import { FleetLocationRingStacksProvider } from '../analytics/fleet/FleetLocationRingStacksContext'
+import { useFleetLocationRingStacks } from '../analytics/fleet/useFleetLocationRingStacks'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
 import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
@@ -70,6 +72,7 @@ import {
   SliderZoomControl,
   ViewportZoomSync,
 } from './map-graph/viewportControls'
+import { planetLabelOptionsShowAnyLabel } from './planetMapLabelModel'
 
 type MapGraphProps = {
   data: CombinedMapData
@@ -286,6 +289,12 @@ function MapGraphFlow({
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
+  const fleetStacks = useFleetLocationRingStacks(analyticScope, fleetEnabled)
+  const planetCoordKeys = useMemo(
+    () => planetCoordKeysFromMapNodes(planetMapNodes),
+    [planetMapNodes]
+  )
+  const planetLabelsEnabled = planetLabelOptionsShowAnyLabel(planetLabelOptions)
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays
   )
@@ -339,6 +348,7 @@ function MapGraphFlow({
   )
 
   return (
+    <FleetLocationRingStacksProvider stacks={fleetStacks}>
     <ReactFlow
       nodes={nodes}
       edges={edges}
@@ -378,7 +388,11 @@ function MapGraphFlow({
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
-      <FleetLocationRingsOverlay analyticScope={analyticScope} enabled={fleetEnabled} />
+      <FleetLocationRingsOverlay
+        stacks={fleetStacks}
+        planetCoordKeys={planetCoordKeys}
+        planetLabelsEnabled={planetLabelsEnabled}
+      />
       <MapAttentionOrchestrator homeworldMarkers={data.homeworldMarkers} />
       <FixedSizeDotsOverlay
         planetGrid={planetGrid}
@@ -406,5 +420,6 @@ function MapGraphFlow({
         roster={roster}
       />
     </ReactFlow>
+    </FleetLocationRingStacksProvider>
   )
 }

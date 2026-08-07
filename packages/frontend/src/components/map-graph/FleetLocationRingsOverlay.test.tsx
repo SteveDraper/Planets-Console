@@ -1,169 +1,154 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { AnalyticShellScope } from '../../api/bff'
 import { FleetLocationRingsOverlay } from './FleetLocationRingsOverlay'
-import { FleetStreamPlayersProvider } from '../../analytics/fleet/FleetStreamPlayersContext'
-import type { FleetPlayerStreamSlice } from '../../analytics/fleet/fleetTablePlayerStreamState'
-import { seedShellViewpoint } from '../../analytics/fleet/fleetTestShell'
-import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import {
   installPlayerColorsStorePort,
   usePlayerColorsStore,
 } from '../../stores/playerColors'
-import { useShellStore } from '../../stores/shell'
 import { defaultColorForPlayerId, resetPlayerColorOverrideStore } from '../../lib/playerColor'
+import type { FleetLocationRingStack } from '../../analytics/fleet/fleetLocationRings'
+
+const clientPosRef = vi.hoisted(() => ({
+  current: null as { x: number; y: number } | null,
+}))
 
 vi.mock('@xyflow/react', () => ({
-  useStore: (selector: (state: { domNode: HTMLElement; transform: [number, number, number] }) => unknown) =>
-    selector({
-      domNode: document.createElement('div'),
+  useStore: (selector: (state: { domNode: HTMLElement; transform: [number, number, number] }) => unknown) => {
+    const domNode = document.createElement('div')
+    domNode.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        width: 800,
+        height: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect
+    return selector({
+      domNode,
       transform: [0, 0, 1],
-    }),
+    })
+  },
 }))
 
 vi.mock('./useOverlayPaneSize', () => ({
   useOverlayPaneSize: () => ({ width: 800, height: 600 }),
 }))
 
-vi.mock('../../api/bff', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../api/bff')>()
+vi.mock('./RegionOverlayHoverPanel', () => ({
+  useMapPaneClientPos: () => ({
+    clientPos: clientPosRef.current,
+    domNode: document.createElement('div'),
+  }),
+}))
+
+function sampleStack(overrides: Partial<FleetLocationRingStack> = {}): FleetLocationRingStack {
   return {
-    ...actual,
-    fetchFleetComponentCatalog: vi.fn().mockResolvedValue({
-      hulls: { '13': 'Cruiser A' },
-      engines: {},
-      beams: {},
-      torpedoes: {},
-    }),
-  }
-})
-
-const scope: AnalyticShellScope = {
-  gameId: '628580',
-  turn: 9,
-  perspective: 1,
-}
-
-function createWrapper(
-  client: QueryClient,
-  streamPlayersById: Map<number, FleetPlayerStreamSlice> = new Map()
-) {
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={client}>
-        <FleetStreamPlayersProvider streamPlayersById={streamPlayersById}>
-          {children}
-        </FleetStreamPlayersProvider>
-      </QueryClientProvider>
-    )
-  }
-}
-
-function stackedStreamPlayersById(): Map<number, FleetPlayerStreamSlice> {
-  return new Map<number, FleetPlayerStreamSlice>([
-    [
-      8,
+    key: '1000,2000',
+    x: 1000,
+    y: 2000,
+    shipCount: 2,
+    hostMilitaryPointsSum: 30,
+    strengthFraction: 0.003,
+    diameterPx: 10,
+    opacity: 0.4,
+    strokeWidthPx: 2.5,
+    arcs: [
       {
+        playerId: 8,
         playerName: 'Alice',
-        records: [
+        shipCount: 1,
+        share: 0.5,
+        ships: [
           {
             recordId: 'a1',
-            disposition: 'active',
-            qualifiers: {
-              possiblyLost: { sinceTurn: 7, source: 'scoreboard' },
-              alibi: { afterTurn: 7, sightingTurn: 9, source: 'turnInfo.ships' },
-            },
-            fields: {
-              shipId: { kind: 'known', value: 101 },
-              hull: { kind: 'known', value: 13 },
-              engine: { kind: 'unknown' },
-              beams: { kind: 'unknown' },
-              launchers: { kind: 'unknown' },
-              builtTurn: { kind: 'unknown' },
-              location: { kind: 'unknown' },
-            },
-            buildOptionSets: [],
-            lastSeen: { turn: 9, x: 1000, y: 2000 },
-            militaryEstimate2x: 40,
+            playerId: 8,
+            playerName: 'Alice',
+            shipIdLabel: '101',
+            hullId: 13,
+            hullLabel: 'Cruiser A',
+            hostMilitaryPoints: 20,
+            x: 1000,
+            y: 2000,
           },
         ],
-        discrepancyOverlay: 'inherit',
-        isComplete: true,
-        isFinal: true,
-        isPending: false,
-        summary: 'ok',
-        error: null,
       },
-    ],
-    [
-      9,
       {
+        playerId: 9,
         playerName: 'Bob',
-        records: [
+        shipCount: 1,
+        share: 0.5,
+        ships: [
           {
             recordId: 'b1',
-            disposition: 'active',
-            qualifiers: {},
-            fields: {
-              shipId: { kind: 'known', value: 202 },
-              hull: { kind: 'known', value: 13 },
-              engine: { kind: 'unknown' },
-              beams: { kind: 'unknown' },
-              launchers: { kind: 'unknown' },
-              builtTurn: { kind: 'unknown' },
-              location: { kind: 'unknown' },
-            },
-            buildOptionSets: [],
-            lastSeen: { turn: 9, x: 1000, y: 2000 },
-            militaryEstimate2x: 20,
+            playerId: 9,
+            playerName: 'Bob',
+            shipIdLabel: '202',
+            hullId: 13,
+            hullLabel: 'Cruiser A',
+            hostMilitaryPoints: 10,
+            x: 1000,
+            y: 2000,
           },
         ],
-        discrepancyOverlay: 'inherit',
-        isComplete: true,
-        isFinal: true,
-        isPending: false,
-        summary: 'ok',
-        error: null,
       },
     ],
-  ])
+    ships: [],
+    ...overrides,
+  }
+}
+
+function wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
 describe('FleetLocationRingsOverlay', () => {
   beforeEach(() => {
-    useFleetPlayerVisibilityStore.setState({ overrides: {} })
+    clientPosRef.current = null
     usePlayerColorsStore.setState({ overrides: {} })
     resetPlayerColorOverrideStore()
     installPlayerColorsStorePort()
-    useShellStore.setState({
-      selectedGameId: null,
-      gameInfoContext: null,
-      selectedTurn: null,
-      perspectiveOverrideOrdinal: null,
-      storageOnlyLoad: false,
-      storageAvailablePerspectives: null,
-    })
-    seedShellViewpoint(1)
   })
 
-  it('renders nothing when disabled', () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  it('renders nothing when stacks are empty', () => {
     const { container } = render(
-      <FleetLocationRingsOverlay analyticScope={scope} enabled={false} />,
-      { wrapper: createWrapper(client) }
+      <FleetLocationRingsOverlay
+        stacks={[]}
+        planetCoordKeys={new Set()}
+        planetLabelsEnabled
+      />,
+      { wrapper }
     )
     expect(container.querySelector('svg')).toBeNull()
   })
 
-  it('paints stacked arcs and shows hull/mil tooltip without alibi or possibly-lost', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const streamPlayersById = stackedStreamPlayersById()
+  it('paints arcs and shows standalone tooltip from pane hit-test when not on a planet', async () => {
+    const stack = sampleStack()
+    // flow center (1000.5, -2000.5) at identity transform
+    clientPosRef.current = { x: 1000.5, y: -2000.5 }
 
-    const { container } = render(
-      <FleetLocationRingsOverlay analyticScope={scope} enabled />,
-      { wrapper: createWrapper(client, streamPlayersById) }
+    const { container, rerender } = render(
+      <FleetLocationRingsOverlay
+        stacks={[stack]}
+        planetCoordKeys={new Set()}
+        planetLabelsEnabled
+      />,
+      { wrapper }
+    )
+
+    // Remount with clientPos already set (hook reads ref each render via mock).
+    rerender(
+      <FleetLocationRingsOverlay
+        stacks={[stack]}
+        planetCoordKeys={new Set()}
+        planetLabelsEnabled
+      />
     )
 
     const strokes = [...container.querySelectorAll('circle[stroke]')].map((el) =>
@@ -171,15 +156,11 @@ describe('FleetLocationRingsOverlay', () => {
     )
     expect(strokes).toContain(defaultColorForPlayerId(8))
     expect(strokes).toContain(defaultColorForPlayerId(9))
-
-    const hit = container.querySelector('circle.pointer-events-auto')
-    expect(hit).not.toBeNull()
-    fireEvent.mouseEnter(hit!)
+    expect(container.querySelector('circle.pointer-events-auto')).toBeNull()
 
     const tooltip = await screen.findByRole('tooltip')
-    expect(tooltip).toBeInTheDocument()
-    expect(screen.getByText('Alice')).toBeInTheDocument()
-    expect(screen.getByText('Bob')).toBeInTheDocument()
+    expect(tooltip.textContent).toMatch(/Alice/)
+    expect(tooltip.textContent).toMatch(/Bob/)
     expect(tooltip.textContent).toMatch(/101/)
     expect(tooltip.textContent).toMatch(/202/)
     expect(tooltip.textContent).toMatch(/20 mil/)
@@ -187,11 +168,30 @@ describe('FleetLocationRingsOverlay', () => {
     expect(tooltip.textContent).not.toMatch(/alibi|possibly/i)
   })
 
+  it('omits standalone tooltip when the stack sits on a planet with labels enabled', () => {
+    const stack = sampleStack()
+    clientPosRef.current = { x: 1000.5, y: -2000.5 }
+
+    render(
+      <FleetLocationRingsOverlay
+        stacks={[stack]}
+        planetCoordKeys={new Set(['1000,2000'])}
+        planetLabelsEnabled
+      />,
+      { wrapper }
+    )
+
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
   it('re-paints arc strokes when a player color override changes', () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { container } = render(
-      <FleetLocationRingsOverlay analyticScope={scope} enabled />,
-      { wrapper: createWrapper(client, stackedStreamPlayersById()) }
+      <FleetLocationRingsOverlay
+        stacks={[sampleStack()]}
+        planetCoordKeys={new Set()}
+        planetLabelsEnabled={false}
+      />,
+      { wrapper }
     )
 
     expect(

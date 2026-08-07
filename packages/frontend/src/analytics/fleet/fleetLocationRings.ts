@@ -12,6 +12,8 @@ import type { FleetTableRecord } from './fleetTableWireSchema'
 
 /** Minimum inward stroke width (px) when strength fraction is 0. */
 export const FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX = 2.5
+/** Minimum clear hole radius (px); stroke never grows past outerRadius - this. */
+export const FLEET_LOCATION_RING_MIN_INNER_RADIUS_PX = 3
 export const FLEET_LOCATION_RING_MIN_DIAMETER_PX = 8
 export const FLEET_LOCATION_RING_MAX_DIAMETER_PX = 20
 /** Absolute host-mil-points scale for location-ring strength fraction (AFK constant). */
@@ -52,7 +54,8 @@ export type FleetLocationRingStack = {
   opacity: number
   /**
    * SVG stroke width whose outer edge stays at diameter/2 (paint at
-   * radius - strokeWidth/2). Grows with strength toward a filled disk.
+   * radius - strokeWidth/2). Grows with strength toward a thick annulus,
+   * never closing the center past {@link FLEET_LOCATION_RING_MIN_INNER_RADIUS_PX}.
    */
   strokeWidthPx: number
   arcs: readonly FleetLocationRingPlayerArc[]
@@ -93,17 +96,29 @@ export function fleetLocationRingOpacity(strengthFraction: number): number {
 }
 
 /**
+ * Max inward stroke that leaves at least {@link FLEET_LOCATION_RING_MIN_INNER_RADIUS_PX}
+ * of clear hole inside outer radius R.
+ */
+export function fleetLocationRingMaxStrokeWidthPx(diameterPx: number): number {
+  const radius = diameterPx / 2
+  return Math.max(0, radius - FLEET_LOCATION_RING_MIN_INNER_RADIUS_PX)
+}
+
+/**
  * Inward annulus stroke width for outer radius R and strength fraction t.
- * Weak stacks keep MIN stroke; t → 1 fills to the center (strokeWidth → R).
+ * Weak stacks keep MIN stroke when the hole budget allows; t → 1 reaches the
+ * max stroke that still leaves {@link FLEET_LOCATION_RING_MIN_INNER_RADIUS_PX}.
+ * When the ring is too small for both floors, the inner-hole floor wins.
  */
 export function fleetLocationRingStrokeWidthPx(
   diameterPx: number,
   strengthFraction: number
 ): number {
-  const radius = diameterPx / 2
+  const maxStroke = fleetLocationRingMaxStrokeWidthPx(diameterPx)
   const t = Math.min(1, Math.max(0, strengthFraction))
-  const fromStrength = t * radius
-  return Math.min(radius, Math.max(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX, fromStrength))
+  const fromStrength = t * maxStroke
+  const withMinStroke = Math.max(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX, fromStrength)
+  return Math.min(maxStroke, withMinStroke)
 }
 
 /** SVG circle radius so a stroke of strokeWidthPx has its outer edge at diameter/2. */

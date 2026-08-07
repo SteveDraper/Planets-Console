@@ -340,7 +340,7 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
   - Arc length ∝ that player's ship count / stack total
   - Strength fraction: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `scale` = `FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE` (`10000`, frontend AFK constant); `t = clamp(E / scale, 0, 1)`
   - Stroke opacity: `clamp(0.40 + 0.55 * t, 0.40, 0.95)`
-  - Annulus stroke width (inward from outer radius `R`): `max(2.5px, t * R)` capped at `R` (full strength fills to center); SVG paint radius `R - strokeWidth/2` keeps the outer edge fixed
+  - Annulus stroke width (inward from outer radius `R`): `maxStroke = max(0, R - 3)` (min inner hole radius 3px); stroke `min(maxStroke, max(2.5px, t * maxStroke))` (when the ring is too small for both floors, the hole floor wins); SVG paint radius `R - strokeWidth/2` keeps the outer edge fixed
   - Colors from **player color** module
 - Hover: per-player header, then indented ship lines (shared hull icon, id, hull name, mil-score host points). Omit alibi / possibly-lost on map tooltip (table owns status)
 - Region overlays deferred; heading trails → [#290](https://github.com/SteveDraper/Planets-Console/issues/290)

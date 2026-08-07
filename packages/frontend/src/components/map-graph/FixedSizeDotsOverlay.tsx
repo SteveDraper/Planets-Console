@@ -12,6 +12,8 @@ import {
   planetLabelOptionsShowAnyLabel,
   type PlanetLabelOptions,
 } from '../planetMapLabelModel'
+import { FleetLocationRingTooltipBody } from '../../analytics/fleet/FleetLocationRingTooltipBody'
+import { useFleetLocationRingStackAt } from '../../analytics/fleet/FleetLocationRingStacksContext'
 import {
   clientToFlowPosition,
   flowCenterFromMapNode,
@@ -387,7 +389,7 @@ export function FixedSizeDotsOverlay({
               }}
               onClick={isPinned ? (e) => e.stopPropagation() : undefined}
             >
-              <PlanetMapLabel
+              <PlanetMapLabelWithFleetFooter
                 options={planetLabelOptions}
                 nodeId={mapNode.id}
                 planet={labelSrc?.planet}
@@ -400,5 +402,37 @@ export function FixedSizeDotsOverlay({
         })}
       </div>
     </div>
+  )
+}
+
+/** Planet label plus co-located fleet stack ships (separator inside PlanetMapLabel). */
+function PlanetMapLabelWithFleetFooter({
+  options,
+  nodeId,
+  planet,
+  ownerName,
+  planetX,
+  planetY,
+}: {
+  options: PlanetLabelOptions
+  nodeId: string
+  planet: MapNodeLabelSource['planet']
+  ownerName: string | null | undefined
+  planetX: number
+  planetY: number
+}) {
+  const fleetStack = useFleetLocationRingStackAt(planetX, planetY)
+  return (
+    <PlanetMapLabel
+      options={options}
+      nodeId={nodeId}
+      planet={planet}
+      ownerName={ownerName}
+      planetX={planetX}
+      planetY={planetY}
+      footer={
+        fleetStack != null ? <FleetLocationRingTooltipBody stack={fleetStack} /> : null
+      }
+    />
   )
 }
