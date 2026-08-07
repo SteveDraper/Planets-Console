@@ -35,7 +35,10 @@ def _reset():
 def test_shell_bootstrap_null_when_unconfigured():
     response = client.get("/shell/bootstrap")
     assert response.status_code == 200
-    assert response.json() == {"showInitialGame": None, "computeDiagnosticsEnabled": False}
+    assert response.json() == {
+        "showInitialGame": None,
+        "computeDiagnosticsEnabled": False,
+    }
 
 
 def test_shell_bootstrap_returns_trimmed_game_id():

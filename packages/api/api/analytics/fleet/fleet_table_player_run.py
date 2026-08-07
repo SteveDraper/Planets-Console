@@ -123,10 +123,14 @@ def wire_ledger_progress_events(
         prior = before_records.get(record_id)
         if prior is not None and _record_refined(prior, record):
             events.append(
-                fleet_record_refined_event(record=fleet_ship_record_to_table_wire(record))
+                fleet_record_refined_event(
+                    record=fleet_ship_record_to_table_wire(record, turn=host_turn)
+                )
             )
     events.append(
-        fleet_ledger_updated_event(ledger=fleet_acquisition_ledger_to_table_wire(host_shaped))
+        fleet_ledger_updated_event(
+            ledger=fleet_acquisition_ledger_to_table_wire(host_shaped, turn=host_turn)
+        )
     )
     events.append(_wire_provenance(persisted))
     return tuple(events)
@@ -146,10 +150,16 @@ def wire_materialized_complete_event(
     )
 
 
-def wire_cached_player_events(persisted: PersistedFleetLedger) -> tuple[dict[str, object], ...]:
+def wire_cached_player_events(
+    persisted: PersistedFleetLedger,
+    *,
+    turn: TurnInfo,
+) -> tuple[dict[str, object], ...]:
     """Replay terminal stream events for an ensure-final cached ledger."""
     return (
-        fleet_ledger_updated_event(ledger=fleet_acquisition_ledger_to_table_wire(persisted.ledger)),
+        fleet_ledger_updated_event(
+            ledger=fleet_acquisition_ledger_to_table_wire(persisted.ledger, turn=turn)
+        ),
         _wire_provenance(persisted),
         fleet_complete_event(
             is_final=True,

@@ -16,8 +16,12 @@ from bff.analytics.models import (
 ANALYTIC_ID = "fleet"
 
 
-def _shape_table_player(player: dict[str, object]) -> dict[str, object]:
-    return fleet_acquisition_ledger_to_table_wire_json(player)
+def _shape_table_player(
+    player: dict[str, object],
+    *,
+    turn: TurnInfo,
+) -> dict[str, object]:
+    return fleet_acquisition_ledger_to_table_wire_json(player, turn=turn)
 
 
 def component_catalog_wire(turn: TurnInfo) -> dict[str, dict[str, str]]:
@@ -33,6 +37,7 @@ def component_catalog_wire(turn: TurnInfo) -> dict[str, dict[str, str]]:
 def table_from_core(
     core_data: dict,
     *,
+    turn: TurnInfo,
     component_catalog: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     """Shape Core fleet compute output for GET /bff/analytics/fleet/table."""
@@ -40,7 +45,7 @@ def table_from_core(
         "analyticId": ANALYTIC_ID,
         "defaultActiveOnly": True,
         "players": [
-            _shape_table_player(player)
+            _shape_table_player(player, turn=turn)
             for player in core_data.get("players", [])
             if isinstance(player, dict)
         ],
@@ -77,7 +82,11 @@ def get_table(
 
     core_data = load_core_analytic(load_core, scope, ANALYTIC_ID, diagnostics=diagnostics)
     turn = get_core_client().get_turn_info(scope.game_id, scope.perspective, scope.turn)
-    return table_from_core(core_data, component_catalog=component_catalog_wire(turn))
+    return table_from_core(
+        core_data,
+        component_catalog=component_catalog_wire(turn),
+        turn=turn,
+    )
 
 
 def get_map(

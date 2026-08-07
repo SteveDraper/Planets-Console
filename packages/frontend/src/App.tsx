@@ -11,6 +11,8 @@ import {
   type ConnectionsMapParams,
 } from './api/bff'
 import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
+// Side-effect: install persisted player-color override port for map/table paint (#289).
+import './stores/playerColors'
 import { useScoresTablePreferencesStore } from './stores/scoresTablePreferences'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'

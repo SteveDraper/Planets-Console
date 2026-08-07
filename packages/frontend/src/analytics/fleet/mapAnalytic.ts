@@ -2,8 +2,8 @@ import type { MapAnalyticQueryContext, MapAnalyticRegistration } from '../mapAna
 import { FLEET_ANALYTIC_ID } from '../mapAnalyticIds'
 
 /**
- * Scaffold registration so enabling Fleet in map view does not crash the shell.
- * Node merge, visibility filter, and fleet map wire parsing land in #128.
+ * Fleet map registration for enablement / catalog symmetry.
+ * Live paint is stream-backed location rings (ADR 0011); mergeLayer stays a no-op.
  */
 export const fleetMapAnalytic: MapAnalyticRegistration = {
   buildQuerySpec(context: MapAnalyticQueryContext) {
@@ -13,13 +13,13 @@ export const fleetMapAnalytic: MapAnalyticRegistration = {
         FLEET_ANALYTIC_ID,
         'map',
         context.analyticScope,
-        'scaffold-v0',
+        'stream-rings-v1',
       ] as const,
       queryFn: async () => ({ analyticId: FLEET_ANALYTIC_ID, nodes: [], edges: [] }),
-      enabled: false,
+      enabled: context.analyticFetchEnabled && context.analyticScope != null,
     }
   },
   mergeLayer() {
-    // Fleet map layer merge is implemented in #128.
+    // Location rings paint from the fleet stream overlay, not map REST geometry.
   },
 }

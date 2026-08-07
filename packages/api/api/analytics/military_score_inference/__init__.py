@@ -24,11 +24,9 @@ from api.analytics.military_score_inference.scoring import (
     PLANET_DEFENSE_POST_SCORE_DELTA_2X,
     STARBASE_DEFENSE_POST_SCORE_DELTA_2X,
     STARBASE_FIGHTER_SCORE_DELTA_2X,
-    construction_value,
     loaded_ship_fighter_score_delta_2x,
     loaded_ship_torpedo_score_delta_2x,
     planet_defense_post_score_delta_2x,
-    ship_construction_score_delta_2x,
     starbase_defense_post_score_delta_2x,
     starbase_fighter_score_delta_2x,
 )
@@ -38,6 +36,10 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
     STATUS_TIME_LIMITED,
     solve_inference_problem,
+)
+from api.concepts.ship_build_military import (
+    construction_value,
+    ship_construction_score_delta_2x,
 )
 
 __all__ = [

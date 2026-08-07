@@ -109,7 +109,7 @@ describe('map analytic registry', () => {
     ])
   })
 
-  it('wires fleet to a disabled scaffold query spec until map layer lands', () => {
+  it('wires fleet to an enabled empty map query; rings paint from the stream overlay', () => {
     const registration = mapAnalyticRegistrationFor(FLEET_ANALYTIC_ID)
     expect(registration).toBe(fleetMapAnalytic)
     expect(registration.buildQuerySpec).toBeDefined()
@@ -121,9 +121,9 @@ describe('map analytic registry', () => {
       FLEET_ANALYTIC_ID,
       'map',
       sampleScope,
-      'scaffold-v0',
+      'stream-rings-v1',
     ])
-    expect(spec.enabled).toBe(false)
+    expect(spec.enabled).toBe(true)
   })
 
   it('wires homeworld locator to a markers query spec and custom merger', () => {

@@ -33,9 +33,9 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.scoring import ship_construction_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.analytics.military_score_inference.solver import solution_rank_objective
+from api.concepts.ship_build_military import ship_construction_score_delta_2x
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 

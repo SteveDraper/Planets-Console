@@ -11,8 +11,10 @@ import {
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
+import { FleetStreamPlayersProvider } from './FleetStreamPlayersContext'
 import { seedShellViewpoint } from './fleetTestShell'
 import type { FleetTableRecord } from './fleetTableWireSchema'
+import { useFleetTableStream } from './useFleetTableStream'
 
 vi.mock('../../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bff')>()
@@ -70,6 +72,22 @@ const refinedRecord: FleetTableRecord = {
   ],
 }
 
+/** Harness: stream session + tile projection (same wiring MainArea owns). */
+function FleetTileWithOwnedStream({
+  analyticScope,
+  fetchEnabled,
+}: {
+  analyticScope: AnalyticShellScope
+  fetchEnabled: boolean
+}) {
+  const { streamPlayersById } = useFleetTableStream(analyticScope, fetchEnabled)
+  return (
+    <FleetStreamPlayersProvider streamPlayersById={streamPlayersById}>
+      <FleetAnalyticTableTile analyticScope={analyticScope} fetchEnabled={fetchEnabled} />
+    </FleetStreamPlayersProvider>
+  )
+}
+
 function createWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -110,7 +128,7 @@ describe('FleetAnalyticTableTile stream integration', () => {
       async () => new Promise(() => {})
     )
 
-    render(<FleetAnalyticTableTile analyticScope={scope} fetchEnabled />, {
+    render(<FleetTileWithOwnedStream analyticScope={scope} fetchEnabled />, {
       wrapper: createWrapper(client),
     })
 
@@ -142,7 +160,7 @@ describe('FleetAnalyticTableTile stream integration', () => {
       }
     )
 
-    render(<FleetAnalyticTableTile analyticScope={scope} fetchEnabled />, {
+    render(<FleetTileWithOwnedStream analyticScope={scope} fetchEnabled />, {
       wrapper: createWrapper(client),
     })
 
@@ -174,7 +192,7 @@ describe('FleetAnalyticTableTile stream integration', () => {
       }
     )
 
-    render(<FleetAnalyticTableTile analyticScope={scope} fetchEnabled />, {
+    render(<FleetTileWithOwnedStream analyticScope={scope} fetchEnabled />, {
       wrapper: createWrapper(client),
     })
 
@@ -206,7 +224,7 @@ describe('FleetAnalyticTableTile stream integration', () => {
       }
     )
 
-    render(<FleetAnalyticTableTile analyticScope={scope} fetchEnabled />, {
+    render(<FleetTileWithOwnedStream analyticScope={scope} fetchEnabled />, {
       wrapper: createWrapper(client),
     })
 
@@ -235,7 +253,7 @@ describe('FleetAnalyticTableTile stream integration', () => {
       }
     )
 
-    render(<FleetAnalyticTableTile analyticScope={scope} fetchEnabled />, {
+    render(<FleetTileWithOwnedStream analyticScope={scope} fetchEnabled />, {
       wrapper: createWrapper(client),
     })
 

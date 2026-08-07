@@ -11,15 +11,22 @@ import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
 import { useStellarCartographyMapContext } from '../lib/useStellarCartographyMapContext'
 import { buildStellarCartographyMapContext, defaultStellarCartographyMapUiConfig } from '../analytics/stellar-cartography/mapUiConfig'
+import { seedShellViewpoint } from '../analytics/fleet/fleetTestShell'
+import { useFleetPlayerVisibilityStore } from '../stores/fleetPlayerVisibility'
+import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 
 vi.mock('../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/bff')>()
   return {
     ...actual,
     fetchAnalyticTable: vi.fn(),
+    fetchFleetTableStream: vi.fn(),
+    fetchFleetComponentCatalog: vi.fn(),
   }
 })
 
+import { fetchFleetTableStream, fetchFleetComponentCatalog } from '../api/bff'
+import { useFleetTableStream } from '../analytics/fleet/useFleetTableStream'
 vi.mock('../lib/useMapAnalyticQueries', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/useMapAnalyticQueries')>()
   return {
@@ -38,6 +45,12 @@ vi.mock('../lib/useStellarCartographyMapContext', () => ({
 
 vi.mock('./shell/MapShellContent', () => ({
   MapShellContent: () => <div data-testid="map-shell-content" />,
+}))
+
+const stableFleetStreamPlayersById = new Map()
+
+vi.mock('../analytics/fleet/useFleetTableStream', () => ({
+  useFleetTableStream: vi.fn(() => ({ streamPlayersById: stableFleetStreamPlayersById })),
 }))
 
 const defaultConnectionsParams: ConnectionsMapParams = {
@@ -77,8 +90,14 @@ const sampleAnalytics: AnalyticItem[] = [
     supportsMap: true,
     type: 'selectable',
   },
+  {
+    id: FLEET_ANALYTIC_ID,
+    name: 'Fleet',
+    supportsTable: true,
+    supportsMap: true,
+    type: 'selectable',
+  },
 ]
-
 const sampleScope: AnalyticShellScope = {
   gameId: '628580',
   turn: 5,
@@ -307,5 +326,47 @@ describe('MainArea tabular analytic sections', () => {
       screen.getByText('Enable at least one analytic in the left bar.')
     ).toBeInTheDocument()
     expect(fetchAnalyticTable).not.toHaveBeenCalled()
+  })
+
+  it('owns the fleet stream above view mode so tabular/map toggles keep the session', async () => {
+    useFleetPlayerVisibilityStore.setState({ overrides: {} })
+    seedShellViewpoint(1)
+    vi.mocked(fetchFleetComponentCatalog).mockResolvedValue({
+      hulls: {},
+      engines: {},
+      beams: {},
+      torpedoes: {},
+    })
+    vi.mocked(useFleetTableStream).mockClear()
+
+    const { rerender } = render(
+      <MainArea
+        {...defaultMainAreaProps('tabular')}
+        enabledAnalyticIds={[FLEET_ANALYTIC_ID, 'connections']}
+      />,
+      { wrapper: createWrapper() }
+    )
+
+    await screen.findByRole('button', { name: 'Collapse Fleet' })
+    expect(useFleetTableStream).toHaveBeenCalledWith(sampleScope, true)
+
+    rerender(
+      <MainArea
+        {...defaultMainAreaProps('map')}
+        enabledAnalyticIds={[FLEET_ANALYTIC_ID, 'connections']}
+      />
+    )
+    expect(screen.getByTestId('map-shell-content')).toBeInTheDocument()
+    expect(useFleetTableStream).toHaveBeenCalledWith(sampleScope, true)
+
+    rerender(
+      <MainArea
+        {...defaultMainAreaProps('tabular')}
+        enabledAnalyticIds={[FLEET_ANALYTIC_ID, 'connections']}
+      />
+    )
+    await screen.findByRole('button', { name: 'Collapse Fleet' })
+    expect(useFleetTableStream).toHaveBeenCalledWith(sampleScope, true)
+    expect(fetchFleetTableStream).not.toHaveBeenCalled()
   })
 })

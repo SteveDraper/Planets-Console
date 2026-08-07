@@ -4,12 +4,12 @@ from dataclasses import dataclass
 
 from api.analytics.military_score_inference.models import InferenceObservation, ShipBuildCombo
 from api.analytics.military_score_inference.prior_weights_catalog import PriorWeightsCatalog
-from api.analytics.military_score_inference.ship_build_scoring import (
+from api.analytics.military_score_inference.tier_policy import SlotCountMode
+from api.concepts.hulls import GENERIC_FREIGHTER_SENTINEL_HULL_ID
+from api.concepts.ship_build_military import (
     ship_build_counts_as_warship,
     ship_build_military_score_delta_2x,
 )
-from api.analytics.military_score_inference.tier_policy import SlotCountMode
-from api.concepts.hulls import GENERIC_FREIGHTER_SENTINEL_HULL_ID
 from api.models.components import Beam, Engine, Hull, Torpedo
 
 GENERIC_FREIGHTER_COMBO_ID = "combo_freighter"

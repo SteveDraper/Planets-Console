@@ -61,13 +61,16 @@ def resolve_player_stream_admission(
     perspective: int,
     turn_number: int,
     player_id: int,
+    turn: TurnInfo,
     force_schedule: bool = False,
 ) -> PlayerStreamAdmission:
     """Decide whether a fleet table player is cached-complete or needs scheduling."""
     if not force_schedule:
         persisted = persistence.get_ledger(game_id, perspective, turn_number, player_id)
         if persisted is not None and persisted.provenance.is_final:
-            return CachedCompletePlayerAdmission(events=wire_cached_player_events(persisted))
+            return CachedCompletePlayerAdmission(
+                events=wire_cached_player_events(persisted, turn=turn)
+            )
     return SchedulePlayerAdmission()
 
 

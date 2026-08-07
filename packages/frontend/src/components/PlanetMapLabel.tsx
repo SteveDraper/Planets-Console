@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import {
   buildMineralRows,
   buildPlanetTitleLine,
@@ -17,6 +18,8 @@ type PlanetMapLabelProps = {
   ownerName: string | null | undefined
   planetX: number
   planetY: number
+  /** Optional block below a separator (e.g. co-located fleet location-ring ships). */
+  footer?: ReactNode
 }
 
 function formatTemp(planet: PlanetWire | undefined): string {
@@ -112,7 +115,24 @@ function DebugDetailBlock({ planet }: { planet: PlanetWire | undefined }) {
   )
 }
 
-export function PlanetMapLabel({ options, nodeId, planet, ownerName, planetX, planetY }: PlanetMapLabelProps) {
+function PlanetMapLabelFooter({ footer }: { footer: ReactNode }) {
+  return (
+    <>
+      <div className="my-1.5 border-t border-[#52575d]" />
+      {footer}
+    </>
+  )
+}
+
+export function PlanetMapLabel({
+  options,
+  nodeId,
+  planet,
+  ownerName,
+  planetX,
+  planetY,
+  footer,
+}: PlanetMapLabelProps) {
   const title = buildPlanetTitleLine(options, planet, planetX, planetY, nodeId)
   const level = options.detailsLevel
   const availability = getPlanetDataAvailability(planet)
@@ -120,13 +140,24 @@ export function PlanetMapLabel({ options, nodeId, planet, ownerName, planetX, pl
   const opaquePanelStyle = { backgroundColor: '#000000' } as const
 
   if (level === 'none') {
+    if (footer == null) {
+      return (
+        <span
+          className="isolate inline-block rounded border border-[#52575d] px-2 py-0.5 shadow-lg"
+          style={opaquePanelStyle}
+        >
+          {title}
+        </span>
+      )
+    }
     return (
-      <span
-        className="isolate inline-block rounded border border-[#52575d] px-2 py-0.5 shadow-lg"
+      <div
+        className="isolate max-w-sm overflow-hidden rounded border border-[#52575d] px-2 py-1.5 shadow-lg"
         style={opaquePanelStyle}
       >
-        {title}
-      </span>
+        <div className="font-mono text-[10px] text-gray-200">{title}</div>
+        <PlanetMapLabelFooter footer={footer} />
+      </div>
     )
   }
 
@@ -146,6 +177,7 @@ export function PlanetMapLabel({ options, nodeId, planet, ownerName, planetX, pl
           <MineralTable planet={planet} />
           <DebugDetailBlock planet={planet} />
         </div>
+        {footer != null ? <PlanetMapLabelFooter footer={footer} /> : null}
       </div>
     )
   }
@@ -169,6 +201,7 @@ export function PlanetMapLabel({ options, nodeId, planet, ownerName, planetX, pl
       <div className="font-mono text-[10px] text-gray-200">{title}</div>
       <div className="my-1.5 border-t border-[#52575d]" />
       {level === 'low' ? masked : mediumBody}
+      {footer != null ? <PlanetMapLabelFooter footer={footer} /> : null}
     </div>
   )
 }
