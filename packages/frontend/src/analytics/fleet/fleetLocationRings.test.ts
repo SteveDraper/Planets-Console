@@ -6,7 +6,12 @@ import {
   collectFleetLocationRingShips,
   fleetLocationRingDiameterPx,
   fleetLocationRingOpacity,
+  fleetLocationRingPaintRadiusPx,
   fleetLocationRingShipFromRecord,
+  fleetLocationRingStrengthFraction,
+  fleetLocationRingStrokeWidthPx,
+  FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE,
+  FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX,
   hostMilitaryPointsFromEstimate2x,
 } from './fleetLocationRings'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
@@ -31,31 +36,57 @@ function record(partial: Partial<FleetTableRecord> & Pick<FleetTableRecord, 'rec
 }
 
 describe('fleetLocationRingDiameterPx', () => {
-  it('is 12px for a single ship', () => {
-    expect(fleetLocationRingDiameterPx(1)).toBe(12)
+  it('is 8px for a single ship', () => {
+    expect(fleetLocationRingDiameterPx(1)).toBe(8)
   })
 
   it('grows with floor(log2(shipCount)) and caps at 20', () => {
-    expect(fleetLocationRingDiameterPx(2)).toBe(14)
-    expect(fleetLocationRingDiameterPx(3)).toBe(14)
-    expect(fleetLocationRingDiameterPx(4)).toBe(16)
-    expect(fleetLocationRingDiameterPx(8)).toBe(18)
-    expect(fleetLocationRingDiameterPx(16)).toBe(20)
+    expect(fleetLocationRingDiameterPx(2)).toBe(10)
+    expect(fleetLocationRingDiameterPx(3)).toBe(10)
+    expect(fleetLocationRingDiameterPx(4)).toBe(12)
+    expect(fleetLocationRingDiameterPx(8)).toBe(14)
+    expect(fleetLocationRingDiameterPx(16)).toBe(16)
+    expect(fleetLocationRingDiameterPx(32)).toBe(18)
+    expect(fleetLocationRingDiameterPx(64)).toBe(20)
     expect(fleetLocationRingDiameterPx(1024)).toBe(20)
   })
 
   it('treats non-positive counts as 1 ship', () => {
-    expect(fleetLocationRingDiameterPx(0)).toBe(12)
-    expect(fleetLocationRingDiameterPx(-3)).toBe(12)
+    expect(fleetLocationRingDiameterPx(0)).toBe(8)
+    expect(fleetLocationRingDiameterPx(-3)).toBe(8)
+  })
+})
+
+describe('fleetLocationRingStrengthFraction', () => {
+  it('normalizes against an absolute scale and clamps to [0, 1]', () => {
+    expect(fleetLocationRingStrengthFraction(0, 10_000)).toBe(0)
+    expect(fleetLocationRingStrengthFraction(5_000, 10_000)).toBe(0.5)
+    expect(fleetLocationRingStrengthFraction(10_000, 10_000)).toBe(1)
+    expect(fleetLocationRingStrengthFraction(20_000, 10_000)).toBe(1)
+    expect(fleetLocationRingStrengthFraction(50, 0)).toBe(1)
   })
 })
 
 describe('fleetLocationRingOpacity', () => {
-  it('clamps to [0.40, 0.95] and uses Emax of at least 1', () => {
-    expect(fleetLocationRingOpacity(0, 0)).toBe(0.4)
-    expect(fleetLocationRingOpacity(0, 100)).toBe(0.4)
-    expect(fleetLocationRingOpacity(100, 100)).toBe(0.95)
-    expect(fleetLocationRingOpacity(50, 100)).toBeCloseTo(0.675)
+  it('clamps to [0.40, 0.95] from strength fraction', () => {
+    expect(fleetLocationRingOpacity(0)).toBe(0.4)
+    expect(fleetLocationRingOpacity(1)).toBe(0.95)
+    expect(fleetLocationRingOpacity(0.5)).toBeCloseTo(0.675)
+  })
+})
+
+describe('fleetLocationRingStrokeWidthPx', () => {
+  it('keeps a minimum stroke for weak stacks and fills to center at full strength', () => {
+    expect(fleetLocationRingStrokeWidthPx(8, 0)).toBe(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX)
+    expect(fleetLocationRingStrokeWidthPx(8, 1)).toBe(4)
+    expect(fleetLocationRingStrokeWidthPx(20, 0.5)).toBe(5)
+  })
+})
+
+describe('fleetLocationRingPaintRadiusPx', () => {
+  it('keeps the outer edge at diameter/2', () => {
+    expect(fleetLocationRingPaintRadiusPx(8, 2.5)).toBeCloseTo(2.75)
+    expect(fleetLocationRingPaintRadiusPx(8, 4)).toBe(2)
   })
 })
 
@@ -115,14 +146,16 @@ describe('buildFleetLocationRingStacks', () => {
       },
     ]
 
-    const stacks = buildFleetLocationRingStacks(ships)
+    const stacks = buildFleetLocationRingStacks(ships, 100)
     expect(stacks).toHaveLength(2)
 
     const stacked = stacks.find((s) => s.key === '100,200')!
     expect(stacked.shipCount).toBe(3)
     expect(stacked.hostMilitaryPointsSum).toBe(50)
-    expect(stacked.diameterPx).toBe(14)
-    expect(stacked.opacity).toBe(0.95)
+    expect(stacked.diameterPx).toBe(10)
+    expect(stacked.strengthFraction).toBe(0.5)
+    expect(stacked.opacity).toBeCloseTo(0.675)
+    expect(stacked.strokeWidthPx).toBe(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX)
     expect(stacked.arcs).toHaveLength(2)
     expect(stacked.arcs[0]).toMatchObject({
       playerId: 8,
@@ -140,10 +173,32 @@ describe('buildFleetLocationRingStacks', () => {
     const alone = stacks.find((s) => s.key === '50,50')!
     expect(alone.shipCount).toBe(1)
     expect(alone.hostMilitaryPointsSum).toBe(5)
-    expect(alone.opacity).toBeCloseTo(0.4 + 0.55 * (5 / 50))
+    expect(alone.strengthFraction).toBe(0.05)
+    expect(alone.opacity).toBeCloseTo(0.4 + 0.55 * 0.05)
+    expect(alone.diameterPx).toBe(8)
   })
 
-  it('excludes records without lastSeen via collect path', () => {
+  it('defaults strength scale to 10000', () => {
+    const ships = [
+      {
+        recordId: 'a',
+        playerId: 1,
+        playerName: 'P',
+        shipIdLabel: '1',
+        hullId: 13,
+        hullLabel: 'Cruiser',
+        hostMilitaryPoints: FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE,
+        x: 0,
+        y: 0,
+      },
+    ]
+    const [stack] = buildFleetLocationRingStacks(ships)
+    expect(stack!.strengthFraction).toBe(1)
+    expect(stack!.opacity).toBe(0.95)
+    expect(stack!.strokeWidthPx).toBe(4)
+  })
+
+  it('excludes records without lastSeen or lastSeen on another turn', () => {
     const streamPlayersById = new Map<number, FleetPlayerStreamSlice>([
       [
         8,
@@ -153,6 +208,11 @@ describe('buildFleetLocationRingStacks', () => {
             record({
               recordId: 'with-pos',
               lastSeen: { turn: 9, x: 1, y: 2 },
+              militaryEstimate2x: 20,
+            }),
+            record({
+              recordId: 'stale-pos',
+              lastSeen: { turn: 8, x: 3, y: 4 },
               militaryEstimate2x: 20,
             }),
             record({ recordId: 'no-pos' }),
@@ -175,7 +235,8 @@ describe('buildFleetLocationRingStacks', () => {
     const ships = collectFleetLocationRingShips(
       streamPlayersById,
       [{ playerId: 8, name: 'Alice' }],
-      EMPTY_FLEET_COMPONENT_CATALOG
+      EMPTY_FLEET_COMPONENT_CATALOG,
+      9
     )
     expect(ships).toHaveLength(1)
     expect(ships[0]!.recordId).toBe('with-pos')
@@ -190,7 +251,23 @@ describe('fleetLocationRingShipFromRecord', () => {
         record({ recordId: 'x' }),
         1,
         'P',
-        EMPTY_FLEET_COMPONENT_CATALOG
+        EMPTY_FLEET_COMPONENT_CATALOG,
+        9
+      )
+    ).toBeNull()
+  })
+
+  it('returns null when lastSeen turn differs from the displayed shell turn', () => {
+    expect(
+      fleetLocationRingShipFromRecord(
+        record({
+          recordId: 'stale',
+          lastSeen: { turn: 8, x: 1, y: 2 },
+        }),
+        1,
+        'P',
+        EMPTY_FLEET_COMPONENT_CATALOG,
+        9
       )
     ).toBeNull()
   })

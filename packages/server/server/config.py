@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from api.config import ApiConfig, HomeworldLocatorConfig
-from bff.config import BffConfig
+from bff.config import BffConfig, FleetBffConfig
 from omegaconf import OmegaConf
 
 DEFAULT_CONFIG_FILENAME = ".config.yaml"
@@ -354,5 +354,24 @@ def load_config(
         cors_origins=cors_tuple,
         show_initial_game=show_initial_game,
         diagnostics_buffer_size=raw_db,
+        fleet=_parse_bff_fleet_config(bff_dict.get("fleet")),
     )
     return RootConfig(server=server_config, api=api_config, bff=bff_config)
+
+
+def _parse_bff_fleet_config(raw: object) -> FleetBffConfig:
+    """Parse bff.fleet nested paint policy; missing/empty uses defaults."""
+    defaults = FleetBffConfig()
+    if raw is None:
+        return defaults
+    if not isinstance(raw, dict):
+        raise TypeError(f"bff.fleet must be a mapping or null, got {type(raw).__name__}: {raw!r}")
+    scale = raw.get("location_ring_strength_scale", defaults.location_ring_strength_scale)
+    if isinstance(scale, bool) or not isinstance(scale, int):
+        raise TypeError(
+            f"bff.fleet.location_ring_strength_scale must be an int, got "
+            f"{type(scale).__name__}: {scale!r}"
+        )
+    if scale < 1:
+        raise ValueError(f"bff.fleet.location_ring_strength_scale must be >= 1, got {scale}")
+    return FleetBffConfig(location_ring_strength_scale=scale)

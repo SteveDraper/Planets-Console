@@ -49,6 +49,7 @@ The amalgamated config has three top-level keys:
 |-------|------|---------|-------------|
 | `cors_origins` | list of strings | `["http://localhost:5173", "http://127.0.0.1:5173"]` | Allowed CORS origins for the SPA. |
 | `show_initial_game` | string, int, or null | null | When set to a non-empty string (numeric ids may be written unquoted in YAML), the SPA loads that **stored** game id without login via `GET /bff/shell/bootstrap` and stored game info. Requires the game (and turn) to exist in storage; pair with `api.include_dummy_data` for the sample game in dev. See [Frontend and backend state](design-frontend-and-backend-state.md). |
+| `fleet.location_ring_strength_scale` | integer | `10000` | Absolute host-military-points denominator for **fleet location ring** opacity and inward annulus fill. Stack strength `E` maps to `t = clamp(E / scale, 0, 1)`. Surfaced on `GET /bff/shell/bootstrap` as `fleetLocationRingStrengthScale`. Absent YAML key uses `10000`. Must be `>= 1`. |
 
 Example `.config.yaml`:
 
@@ -74,6 +75,8 @@ bff:
     - http://localhost:5173
     - http://127.0.0.1:5173
   # show_initial_game: "628580"   # optional SPA auto-load of a stored game id (dev)
+  # fleet:
+  #   location_ring_strength_scale: 10000  # absolute mil-points scale for location rings
 ```
 
 ## Command-line overrides

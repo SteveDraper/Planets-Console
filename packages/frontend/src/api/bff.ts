@@ -323,6 +323,8 @@ export type EnsureTurnParams = {
 export type ShellBootstrapResponse = {
   showInitialGame: string | null
   computeDiagnosticsEnabled?: boolean
+  /** Absolute host-mil scale for fleet location rings; defaults to 10000 when omitted. */
+  fleetLocationRingStrengthScale?: number
 }
 
 export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {

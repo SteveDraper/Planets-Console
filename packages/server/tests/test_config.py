@@ -350,3 +350,38 @@ def test_load_config_homeworld_locator_invalid_type_raises(tmp_path):
     )
     with pytest.raises(TypeError, match="homeworld_locator"):
         load_config(default_config_path=cfg)
+
+
+def test_load_config_bff_fleet_defaults():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(default_config_path=base)
+    assert root.bff.fleet.location_ring_strength_scale == 10_000
+
+
+def test_load_config_bff_fleet_overrides(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "server: {}\napi: {}\nbff:\n  fleet:\n    location_ring_strength_scale: 2500\n",
+        encoding="utf-8",
+    )
+    root = load_config(default_config_path=cfg)
+    assert root.bff.fleet.location_ring_strength_scale == 2500
+
+
+def test_load_config_bff_fleet_leaf_override():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(
+        override_specs=["bff.fleet.location_ring_strength_scale=4000"],
+        default_config_path=base,
+    )
+    assert root.bff.fleet.location_ring_strength_scale == 4000
+
+
+def test_load_config_bff_fleet_scale_invalid_raises(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "server: {}\napi: {}\nbff:\n  fleet:\n    location_ring_strength_scale: 0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="location_ring_strength_scale"):
+        load_config(default_config_path=cfg)

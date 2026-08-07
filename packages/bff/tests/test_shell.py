@@ -35,7 +35,11 @@ def _reset():
 def test_shell_bootstrap_null_when_unconfigured():
     response = client.get("/shell/bootstrap")
     assert response.status_code == 200
-    assert response.json() == {"showInitialGame": None, "computeDiagnosticsEnabled": False}
+    assert response.json() == {
+        "showInitialGame": None,
+        "computeDiagnosticsEnabled": False,
+        "fleetLocationRingStrengthScale": 10_000,
+    }
 
 
 def test_shell_bootstrap_returns_trimmed_game_id():
@@ -45,6 +49,7 @@ def test_shell_bootstrap_returns_trimmed_game_id():
     assert response.json() == {
         "showInitialGame": "628580",
         "computeDiagnosticsEnabled": False,
+        "fleetLocationRingStrengthScale": 10_000,
     }
 
 
@@ -54,3 +59,12 @@ def test_shell_bootstrap_preserves_game_id_when_diagnostics_enabled():
     assert response.status_code == 200
     assert response.json()["showInitialGame"] == "628580"
     assert "diagnostics" in response.json()
+
+
+def test_shell_bootstrap_exposes_fleet_location_ring_strength_scale():
+    from bff.config import FleetBffConfig
+
+    set_bff_config(BffConfig(fleet=FleetBffConfig(location_ring_strength_scale=2500)))
+    response = client.get("/shell/bootstrap")
+    assert response.status_code == 200
+    assert response.json()["fleetLocationRingStrengthScale"] == 2500

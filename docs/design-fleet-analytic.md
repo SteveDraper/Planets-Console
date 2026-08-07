@@ -316,7 +316,7 @@ Default consumer filter: `disposition == active`.
 
 SPA map does **not** use `GET …/fleet/map` as the live path ([ADR 0011](adr/0011-fleet-stream-behind-table-and-map.md)). Progressive ledger state comes from the **fleet stream** (same NDJSON session as table). Each record already carries `lastSeen` / fields / option sets; Core also attaches **fleet ship military estimate** (`militaryEstimate2x`) on table/stream records via the shared ship-build military helper (unknown beam/tube slots filled at minimal tech; engines passed for API uniformity -- contribution rules stay inside that helper).
 
-Client projects **fleet player visibility**-filtered **`active`** rows with known `lastSeen` `(x, y)` into **fleet location ring**s (exact coordinate stacks). Region overlays remain deferred.
+Client projects **fleet player visibility**-filtered **`active`** rows whose `lastSeen.turn` equals the shell turn and that have known `lastSeen` `(x, y)` into **fleet location ring**s (exact coordinate stacks). Stale last-seen positions from earlier turns are excluded. Region overlays remain deferred.
 
 `GET …/fleet/map` may remain a no-op scaffold for catalog symmetry; it is not required for the console map layer ([#126](https://github.com/SteveDraper/Planets-Console/issues/126) superseded).
 
@@ -336,10 +336,12 @@ Client projects **fleet player visibility**-filtered **`active`** rows with know
 - Own the **fleet stream** session above table vs map **view mode** (call site survives `viewMode` toggles -- e.g. shell main area -- not only inside the table tile)
 - Keep registry map analytic registration for enablement; paint via a dedicated **screen-fixed** overlay pane (homeworld-markers pattern), not `mergeLayer` planet nodes and not map-LY-scaled disks
 - **Fleet location ring** encoding (AFK constants for #128):
-  - Outer diameter (px): `min(20, 12 + 2 * floor(log2(max(1, shipCount))))` (1 ship → 12px; hard cap 20px)
+  - Outer diameter (px): `min(20, 8 + 2 * floor(log2(max(1, shipCount))))` (1 ship → 8px; hard cap 20px)
   - Arc length ∝ that player's ship count / stack total
-  - Stroke opacity: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `Emax` = max `E` among drawn stacks (or 1); `opacity = clamp(0.40 + 0.55 * (E / Emax), 0.40, 0.95)`
-  - Stroke width ~2.5px; colors from **player color** module
+  - Strength fraction: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `scale` = `bff.fleet.location_ring_strength_scale` (default `10000`, from shell bootstrap); `t = clamp(E / scale, 0, 1)`
+  - Stroke opacity: `clamp(0.40 + 0.55 * t, 0.40, 0.95)`
+  - Annulus stroke width (inward from outer radius `R`): `max(2.5px, t * R)` capped at `R` (full strength fills to center); SVG paint radius `R - strokeWidth/2` keeps the outer edge fixed
+  - Colors from **player color** module
 - Hover: per-player header, then indented ship lines (shared hull icon, id, hull name, mil-score host points). Omit alibi / possibly-lost on map tooltip (table owns status)
 - Region overlays deferred; heading trails → [#290](https://github.com/SteveDraper/Planets-Console/issues/290)
 

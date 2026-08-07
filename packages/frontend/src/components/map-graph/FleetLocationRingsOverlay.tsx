@@ -1,17 +1,19 @@
 import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useStore } from '@xyflow/react'
 import { HullIcon } from '../HullIcon'
 import { colorForPlayerId } from '../../lib/playerColor'
 import {
   buildFleetLocationRingStacks,
   collectFleetLocationRingShips,
-  FLEET_LOCATION_RING_STROKE_WIDTH_PX,
+  fleetLocationRingPaintRadiusPx,
+  FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE,
   type FleetLocationRingStack,
 } from '../../analytics/fleet/fleetLocationRings'
 import type { FleetPlayerStreamSlice } from '../../analytics/fleet/fleetTablePlayerStreamState'
 import { useFleetComponentCatalogQuery } from '../../analytics/fleet/useFleetComponentCatalogQuery'
 import { useOrderedFleetPlayers } from '../../analytics/fleet/useOrderedFleetPlayers'
-import type { AnalyticShellScope } from '../../api/bff'
+import { fetchShellBootstrap, type AnalyticShellScope } from '../../api/bff'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 
@@ -37,6 +39,14 @@ export function FleetLocationRingsOverlay({
   const { players: visiblePlayers } = useOrderedFleetPlayers({ visibleOnly: true })
   const componentCatalog = useFleetComponentCatalogQuery(analyticScope, enabled)
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
+  const { data: shellBootstrap } = useQuery({
+    queryKey: ['bff', 'shell-bootstrap'],
+    queryFn: fetchShellBootstrap,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  })
+  const strengthScale =
+    shellBootstrap?.fleetLocationRingStrengthScale ?? FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE
 
   const stacks = useMemo(() => {
     if (!enabled) {
@@ -48,10 +58,18 @@ export function FleetLocationRingsOverlay({
         playerId: player.playerId,
         name: player.name,
       })),
-      componentCatalog
+      componentCatalog,
+      analyticScope.turn
     )
-    return buildFleetLocationRingStacks(ships)
-  }, [enabled, streamPlayersById, visiblePlayers, componentCatalog])
+    return buildFleetLocationRingStacks(ships, strengthScale)
+  }, [
+    enabled,
+    streamPlayersById,
+    visiblePlayers,
+    componentCatalog,
+    analyticScope.turn,
+    strengthScale,
+  ])
 
   if (!enabled || !transform || width <= 0 || height <= 0 || stacks.length === 0) {
     return null
@@ -75,8 +93,9 @@ export function FleetLocationRingsOverlay({
           const { cx, cy } = flowCenterFromMapNode({ x: stack.x, y: stack.y })
           const paneX = cx * scale + tx
           const paneY = cy * scale + ty
-          const radius = stack.diameterPx / 2
-          const circumference = 2 * Math.PI * radius
+          const outerRadius = stack.diameterPx / 2
+          const paintRadius = fleetLocationRingPaintRadiusPx(stack.diameterPx, stack.strokeWidthPx)
+          const circumference = 2 * Math.PI * paintRadius
           let dashOffset = 0
           return (
             <g key={stack.key} transform={`translate(${paneX} ${paneY})`}>
@@ -84,7 +103,7 @@ export function FleetLocationRingsOverlay({
               <circle
                 cx={0}
                 cy={0}
-                r={radius + 4}
+                r={outerRadius + 4}
                 fill="transparent"
                 className="pointer-events-auto cursor-default"
                 onMouseEnter={() => setHoveredKey(stack.key)}
@@ -103,10 +122,10 @@ export function FleetLocationRingsOverlay({
                       key={arc.playerId}
                       cx={0}
                       cy={0}
-                      r={radius}
+                      r={paintRadius}
                       fill="none"
                       stroke={arc.color}
-                      strokeWidth={FLEET_LOCATION_RING_STROKE_WIDTH_PX}
+                      strokeWidth={stack.strokeWidthPx}
                       strokeDasharray={`${dash} ${gap}`}
                       strokeDashoffset={-offset}
                       strokeLinecap="butt"
