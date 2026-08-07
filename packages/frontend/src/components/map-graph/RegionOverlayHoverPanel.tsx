@@ -1,23 +1,30 @@
 /**
  * Debounced map tooltip for ``regionOverlays`` with structured hover facts.
  * Hit-tests filtered overlays in continuous map coordinates.
+ *
+ * Pane pointer ownership is migrating to the **map interaction surface**
+ * (``map-interaction/``); ``useMapPaneClientPos`` is re-exported from there.
  */
 
-import { useEffect, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { flowCenterToPlanet } from '../../lib/planetSpatialGrid'
 import { collectRegionOverlayHoverSummaries } from '../../lib/mapRegionOverlayHitTest'
+import {
+  useMapPaneClientPos,
+  type MapPaneClientPos,
+} from '../../map-interaction/useMapPanePointer'
 import { formatRegionOverlayHoverLine } from './formatRegionOverlayHover'
 import { clientToFlowPosition } from './geometry'
+
+export type { MapPaneClientPos }
+export { useMapPaneClientPos }
 
 type RegionOverlayHoverPanelProps = {
   regionOverlays: readonly MapRegionOverlay[]
   /** When a planet hover/pin label is showing, suppress region hover. */
   blockedByPlanetHover?: boolean
 }
-
-export type MapPaneClientPos = { x: number; y: number }
 
 export function regionOverlayHoverLinesAtClient(
   regionOverlays: readonly MapRegionOverlay[],
@@ -35,37 +42,6 @@ export function regionOverlayHoverLinesAtClient(
     py,
     formatRegionOverlayHoverLine
   )
-}
-
-/**
- * Tracks client pointer over the React Flow pane.
- *
- * Must be called from a component mounted under ``ReactFlow`` (xyflow store).
- */
-export function useMapPaneClientPos(): {
-  clientPos: MapPaneClientPos | null
-  domNode: HTMLElement | null
-} {
-  const domNode = useStore((s) => s.domNode ?? null)
-  const [clientPos, setClientPos] = useState<MapPaneClientPos | null>(null)
-
-  useEffect(() => {
-    const el = domNode
-    if (!el) {
-      setClientPos(null)
-      return
-    }
-    const onMove = (e: MouseEvent) => setClientPos({ x: e.clientX, y: e.clientY })
-    const onLeave = () => setClientPos(null)
-    el.addEventListener('mousemove', onMove)
-    el.addEventListener('mouseleave', onLeave)
-    return () => {
-      el.removeEventListener('mousemove', onMove)
-      el.removeEventListener('mouseleave', onLeave)
-    }
-  }, [domNode])
-
-  return { clientPos, domNode }
 }
 
 /** Hover lines for a shared pane pointer (no listener of its own). */
