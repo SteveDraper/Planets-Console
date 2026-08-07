@@ -1,20 +1,8 @@
 """BFF sub-config: SPA-shaped endpoint behaviour. Set by server from amalgamated config."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 _config: "BffConfig | None" = None
-
-
-@dataclass(frozen=True)
-class FleetBffConfig:
-    """SPA-facing fleet analytic paint knobs (YAML under ``bff.fleet``)."""
-
-    location_ring_strength_scale: int = 10_000
-    """Absolute host-mil-points denominator for location-ring opacity and annulus fill.
-
-    Stack strength ``E`` (sum of host mil points) maps to ``t = clamp(E / scale, 0, 1)``.
-    Absent YAML key uses ``10000``.
-    """
 
 
 @dataclass(frozen=True)
@@ -27,8 +15,6 @@ class BffConfig:
     """When set, the SPA loads this stored game id from the server without login (dev/demo)."""
     diagnostics_buffer_size: int = 10
     """How many most-recent per-request diagnostic trees to keep (0 disables retention)."""
-    fleet: FleetBffConfig = field(default_factory=FleetBffConfig)
-    """Fleet map/table SPA paint policy."""
 
 
 def get_config() -> BffConfig:

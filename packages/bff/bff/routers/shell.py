@@ -31,15 +31,6 @@ class ShellBootstrapResponse(BaseModel):
         serialization_alias="computeDiagnosticsEnabled",
         description="When true, the diagnostics modal exposes compute orchestrator controls.",
     )
-    fleet_location_ring_strength_scale: int = Field(
-        default=10_000,
-        serialization_alias="fleetLocationRingStrengthScale",
-        description=(
-            "Absolute host-mil-points scale for fleet location ring opacity and annulus fill "
-            "(from bff.fleet.location_ring_strength_scale)."
-        ),
-        ge=1,
-    )
     diagnostics: dict[str, Any] | None = Field(
         default=None,
         description="Request timing tree; present when includeDiagnostics=true.",
@@ -70,7 +61,6 @@ def get_shell_bootstrap(include: IncludeDiagnostics = False) -> object:
         return ShellBootstrapResponse(
             show_initial_game=show,
             compute_diagnostics_enabled=compute_diagnostics_enabled(),
-            fleet_location_ring_strength_scale=get_config().fleet.location_ring_strength_scale,
         )
 
     result = with_timed_child(root, "get_shell_bootstrap", "total", work)

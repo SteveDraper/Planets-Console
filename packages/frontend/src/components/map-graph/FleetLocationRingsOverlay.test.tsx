@@ -31,11 +31,6 @@ vi.mock('../../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bff')>()
   return {
     ...actual,
-    fetchShellBootstrap: vi.fn().mockResolvedValue({
-      showInitialGame: null,
-      computeDiagnosticsEnabled: false,
-      fleetLocationRingStrengthScale: 10_000,
-    }),
     fetchFleetComponentCatalog: vi.fn().mockResolvedValue({
       hulls: { '13': 'Cruiser A' },
       engines: {},

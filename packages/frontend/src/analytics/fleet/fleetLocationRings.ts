@@ -14,7 +14,7 @@ import type { FleetTableRecord } from './fleetTableWireSchema'
 export const FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX = 2.5
 export const FLEET_LOCATION_RING_MIN_DIAMETER_PX = 8
 export const FLEET_LOCATION_RING_MAX_DIAMETER_PX = 20
-/** Default absolute host-mil-points scale when bootstrap / YAML omit the knob. */
+/** Absolute host-mil-points scale for location-ring strength fraction (AFK constant). */
 export const FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE = 10_000
 
 export type FleetLocationRingShip = {

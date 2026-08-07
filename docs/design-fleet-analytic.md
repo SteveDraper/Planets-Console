@@ -338,7 +338,7 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
 - **Fleet location ring** encoding (AFK constants for #128):
   - Outer diameter (px): `min(20, 8 + 2 * floor(log2(max(1, shipCount))))` (1 ship → 8px; hard cap 20px)
   - Arc length ∝ that player's ship count / stack total
-  - Strength fraction: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `scale` = `bff.fleet.location_ring_strength_scale` (default `10000`, from shell bootstrap); `t = clamp(E / scale, 0, 1)`
+  - Strength fraction: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `scale` = `FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE` (`10000`, frontend AFK constant); `t = clamp(E / scale, 0, 1)`
   - Stroke opacity: `clamp(0.40 + 0.55 * t, 0.40, 0.95)`
   - Annulus stroke width (inward from outer radius `R`): `max(2.5px, t * R)` capped at `R` (full strength fills to center); SVG paint radius `R - strokeWidth/2` keeps the outer edge fixed
   - Colors from **player color** module

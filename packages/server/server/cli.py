@@ -73,7 +73,6 @@ Config structure:
   api.include_dummy_data  bool     [default: false]  Seed sample game data on startup
   bff.cors_origins        list of strings  CORS origins for the SPA
   bff.show_initial_game   string or null [default: null]  SPA loads this game without login
-  bff.fleet.location_ring_strength_scale  int [default: 10000]  Fleet ring mil-points scale
 
 See docs/configuration.md for full documentation.
 """
