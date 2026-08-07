@@ -82,7 +82,6 @@ describe('MapShellContent', () => {
 
   it('forwards shell analyticScope, roster, mapLayersPending, homeworldMapLayerSucceeded, and displayMapFrameIsLive to MapGraph', () => {
     mapGraphPropsSpy.mockClear()
-    const fleetStreamPlayersById = new Map()
     render(
       <MapShellContent
         mapShellView={{
@@ -99,7 +98,6 @@ describe('MapShellContent', () => {
         onPlanetLabelOptionsChange={vi.fn()}
         onMapZoomChange={vi.fn()}
         onSetZoomReady={vi.fn()}
-        fleetStreamPlayersById={fleetStreamPlayersById}
       />
     )
 
@@ -110,7 +108,6 @@ describe('MapShellContent', () => {
         mapLayersPending: true,
         homeworldMapLayerSucceeded: true,
         displayMapFrameIsLive: true,
-        fleetStreamPlayersById,
       })
     )
   })

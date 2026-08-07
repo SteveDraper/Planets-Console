@@ -6,6 +6,7 @@ import type { AnalyticShellScope } from '../../api/bff'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
+import { FleetStreamPlayersProvider } from './FleetStreamPlayersContext'
 import { pendingFleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
 import { seedShellViewpoint, FLEET_TEST_SHELL_PLAYERS } from './fleetTestShell'
 
@@ -36,9 +37,18 @@ function pendingStreamPlayersById() {
   )
 }
 
-function createWrapper(client: QueryClient) {
+function createWrapper(
+  client: QueryClient,
+  streamPlayersById = pendingStreamPlayersById()
+) {
   return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    return (
+      <QueryClientProvider client={client}>
+        <FleetStreamPlayersProvider streamPlayersById={streamPlayersById}>
+          {children}
+        </FleetStreamPlayersProvider>
+      </QueryClientProvider>
+    )
   }
 }
 
@@ -76,7 +86,6 @@ describe('FleetAnalyticTableTile', () => {
       <FleetAnalyticTableTile
         analyticScope={sampleScope}
         fetchEnabled
-        streamPlayersById={pendingStreamPlayersById()}
       />,
       { wrapper: createWrapper(client) }
     )
@@ -94,7 +103,6 @@ describe('FleetAnalyticTableTile', () => {
       <FleetAnalyticTableTile
         analyticScope={sampleScope}
         fetchEnabled
-        streamPlayersById={pendingStreamPlayersById()}
       />,
       { wrapper: createWrapper(client) }
     )

@@ -11,6 +11,7 @@ import {
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
+import { FleetStreamPlayersProvider } from './FleetStreamPlayersContext'
 import { seedShellViewpoint } from './fleetTestShell'
 import type { FleetTableRecord } from './fleetTableWireSchema'
 import { useFleetTableStream } from './useFleetTableStream'
@@ -81,11 +82,9 @@ function FleetTileWithOwnedStream({
 }) {
   const { streamPlayersById } = useFleetTableStream(analyticScope, fetchEnabled)
   return (
-    <FleetAnalyticTableTile
-      analyticScope={analyticScope}
-      fetchEnabled={fetchEnabled}
-      streamPlayersById={streamPlayersById}
-    />
+    <FleetStreamPlayersProvider streamPlayersById={streamPlayersById}>
+      <FleetAnalyticTableTile analyticScope={analyticScope} fetchEnabled={fetchEnabled} />
+    </FleetStreamPlayersProvider>
   )
 }
 

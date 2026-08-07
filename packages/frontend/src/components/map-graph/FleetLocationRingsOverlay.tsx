@@ -10,7 +10,7 @@ import {
   type FleetLocationRingPlayerArc,
   type FleetLocationRingStack,
 } from '../../analytics/fleet/fleetLocationRings'
-import type { FleetPlayerStreamSlice } from '../../analytics/fleet/fleetTablePlayerStreamState'
+import { useFleetStreamPlayersById } from '../../analytics/fleet/FleetStreamPlayersContext'
 import { useFleetComponentCatalogQuery } from '../../analytics/fleet/useFleetComponentCatalogQuery'
 import { useOrderedFleetPlayers } from '../../analytics/fleet/useOrderedFleetPlayers'
 import { fetchShellBootstrap, type AnalyticShellScope } from '../../api/bff'
@@ -20,7 +20,6 @@ import { useOverlayPaneSize } from './useOverlayPaneSize'
 
 type FleetLocationRingsOverlayProps = {
   analyticScope: AnalyticShellScope
-  streamPlayersById: ReadonlyMap<number, FleetPlayerStreamSlice>
   /** When false, paint nothing (fleet analytic disabled). */
   enabled: boolean
 }
@@ -31,9 +30,9 @@ type FleetLocationRingsOverlayProps = {
  */
 export function FleetLocationRingsOverlay({
   analyticScope,
-  streamPlayersById,
   enabled,
 }: FleetLocationRingsOverlayProps) {
+  const streamPlayersById = useFleetStreamPlayersById()
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)

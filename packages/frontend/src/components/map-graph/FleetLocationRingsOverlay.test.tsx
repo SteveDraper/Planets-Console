@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
 import { FleetLocationRingsOverlay } from './FleetLocationRingsOverlay'
+import { FleetStreamPlayersProvider } from '../../analytics/fleet/FleetStreamPlayersContext'
 import type { FleetPlayerStreamSlice } from '../../analytics/fleet/fleetTablePlayerStreamState'
 import { seedShellViewpoint } from '../../analytics/fleet/fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
@@ -50,9 +51,18 @@ const scope: AnalyticShellScope = {
   perspective: 1,
 }
 
-function createWrapper(client: QueryClient) {
+function createWrapper(
+  client: QueryClient,
+  streamPlayersById: Map<number, FleetPlayerStreamSlice> = new Map()
+) {
   return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    return (
+      <QueryClientProvider client={client}>
+        <FleetStreamPlayersProvider streamPlayersById={streamPlayersById}>
+          {children}
+        </FleetStreamPlayersProvider>
+      </QueryClientProvider>
+    )
   }
 }
 
@@ -146,11 +156,7 @@ describe('FleetLocationRingsOverlay', () => {
   it('renders nothing when disabled', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { container } = render(
-      <FleetLocationRingsOverlay
-        analyticScope={scope}
-        streamPlayersById={new Map()}
-        enabled={false}
-      />,
+      <FleetLocationRingsOverlay analyticScope={scope} enabled={false} />,
       { wrapper: createWrapper(client) }
     )
     expect(container.querySelector('svg')).toBeNull()
@@ -161,12 +167,8 @@ describe('FleetLocationRingsOverlay', () => {
     const streamPlayersById = stackedStreamPlayersById()
 
     const { container } = render(
-      <FleetLocationRingsOverlay
-        analyticScope={scope}
-        streamPlayersById={streamPlayersById}
-        enabled
-      />,
-      { wrapper: createWrapper(client) }
+      <FleetLocationRingsOverlay analyticScope={scope} enabled />,
+      { wrapper: createWrapper(client, streamPlayersById) }
     )
 
     const strokes = [...container.querySelectorAll('circle[stroke]')].map((el) =>
@@ -193,12 +195,8 @@ describe('FleetLocationRingsOverlay', () => {
   it('re-paints arc strokes when a player color override changes', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { container } = render(
-      <FleetLocationRingsOverlay
-        analyticScope={scope}
-        streamPlayersById={stackedStreamPlayersById()}
-        enabled
-      />,
-      { wrapper: createWrapper(client) }
+      <FleetLocationRingsOverlay analyticScope={scope} enabled />,
+      { wrapper: createWrapper(client, stackedStreamPlayersById()) }
     )
 
     expect(

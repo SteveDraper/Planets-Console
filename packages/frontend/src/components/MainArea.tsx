@@ -16,8 +16,8 @@ import { scoresTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
 import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
+import { FleetStreamPlayersProvider } from '../analytics/fleet/FleetStreamPlayersContext'
 import { useFleetTableStream } from '../analytics/fleet/useFleetTableStream'
-import type { FleetPlayerStreamSlice } from '../analytics/fleet/fleetTablePlayerStreamState'
 import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
 import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
@@ -240,7 +240,6 @@ type MapMainAreaProps = {
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
-  fleetStreamPlayersById: Map<number, FleetPlayerStreamSlice>
 }
 
 type MapShellContentBaseProps = Omit<MapShellContentProps, 'cartography'>
@@ -264,7 +263,6 @@ const MapMainArea = memo(function MapMainArea({
   onPlanetLabelOptionsChange,
   onMapZoomChange,
   onSetZoomReady,
-  fleetStreamPlayersById,
 }: MapMainAreaProps) {
   const analyticFetchEnabled = analyticScope != null && turnDataReady
   const roster =
@@ -322,7 +320,6 @@ const MapMainArea = memo(function MapMainArea({
     onPlanetLabelOptionsChange,
     onMapZoomChange,
     onSetZoomReady,
-    fleetStreamPlayersById,
   }
 
   if (isStellarCartographyMapEnabled(enabledMapIds)) {
@@ -398,51 +395,53 @@ export function MainArea({
     }
 
     return (
-      <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-black p-4">
-        {tableAnalyticIds.map((id) => {
-          const fetchEnabled =
-            analyticFetchEnabled && (id !== 'scores' || scoresPreferencesHydrated)
-          return (
-            <AnalyticTableSection
-              key={id}
-              title={analytics.find((a) => a.id === id)?.name ?? id}
-            >
-              {id === FLEET_ANALYTIC_ID ? (
-                <FleetAnalyticTableTile
-                  analyticScope={analyticScope}
-                  fetchEnabled={fetchEnabled}
-                  streamPlayersById={fleetStreamPlayersById}
-                />
-              ) : (
-                <TableTile
-                  analyticId={id}
-                  analyticScope={analyticScope}
-                  fetchEnabled={fetchEnabled}
-                  scoresTableParams={scoresTableParams}
-                  globalInferencePause={globalInferencePause}
-                />
-              )}
-            </AnalyticTableSection>
-          )
-        })}
-      </main>
+      <FleetStreamPlayersProvider streamPlayersById={fleetStreamPlayersById}>
+        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-black p-4">
+          {tableAnalyticIds.map((id) => {
+            const fetchEnabled =
+              analyticFetchEnabled && (id !== 'scores' || scoresPreferencesHydrated)
+            return (
+              <AnalyticTableSection
+                key={id}
+                title={analytics.find((a) => a.id === id)?.name ?? id}
+              >
+                {id === FLEET_ANALYTIC_ID ? (
+                  <FleetAnalyticTableTile
+                    analyticScope={analyticScope}
+                    fetchEnabled={fetchEnabled}
+                  />
+                ) : (
+                  <TableTile
+                    analyticId={id}
+                    analyticScope={analyticScope}
+                    fetchEnabled={fetchEnabled}
+                    scoresTableParams={scoresTableParams}
+                    globalInferencePause={globalInferencePause}
+                  />
+                )}
+              </AnalyticTableSection>
+            )
+          })}
+        </main>
+      </FleetStreamPlayersProvider>
     )
   }
 
   return (
-    <MapMainArea
-      enabledAnalyticIds={enabledAnalyticIds}
-      analytics={analytics}
-      analyticScope={analyticScope}
-      turnDataReady={turnDataReady}
-      turnEnsurePending={turnEnsurePending}
-      connectionsMapParams={connectionsMapParams}
-      futureTurnOffset={futureTurnOffset}
-      planetLabelOptions={planetLabelOptions}
-      onPlanetLabelOptionsChange={setPlanetLabelOptions}
-      onMapZoomChange={onMapZoomChange}
-      onSetZoomReady={onSetZoomReady}
-      fleetStreamPlayersById={fleetStreamPlayersById}
-    />
+    <FleetStreamPlayersProvider streamPlayersById={fleetStreamPlayersById}>
+      <MapMainArea
+        enabledAnalyticIds={enabledAnalyticIds}
+        analytics={analytics}
+        analyticScope={analyticScope}
+        turnDataReady={turnDataReady}
+        turnEnsurePending={turnEnsurePending}
+        connectionsMapParams={connectionsMapParams}
+        futureTurnOffset={futureTurnOffset}
+        planetLabelOptions={planetLabelOptions}
+        onPlanetLabelOptionsChange={setPlanetLabelOptions}
+        onMapZoomChange={onMapZoomChange}
+        onSetZoomReady={onSetZoomReady}
+      />
+    </FleetStreamPlayersProvider>
   )
 }
