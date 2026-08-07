@@ -28,30 +28,6 @@ def _strip_ship_record_dict(record: dict[str, object]) -> dict[str, object]:
     return shaped
 
 
-def strip_fleet_ship_record_for_table_wire(record: dict[str, object]) -> dict[str, object]:
-    """Strip core-only fields for table wire without attaching military estimates."""
-    return _strip_ship_record_dict(record)
-
-
-def strip_fleet_acquisition_ledger_for_table_wire(
-    player: dict[str, object],
-) -> dict[str, object]:
-    """Strip one core player ledger dict for table wire without military estimates."""
-    shaped: dict[str, object] = {
-        "playerId": player.get("playerId"),
-        "playerName": player.get("playerName", ""),
-        "records": [
-            strip_fleet_ship_record_for_table_wire(record)
-            for record in player.get("records", [])
-            if isinstance(record, dict)
-        ],
-    }
-    discrepancy = player.get("discrepancy")
-    if discrepancy is not None:
-        shaped["discrepancy"] = discrepancy
-    return shaped
-
-
 def fleet_ship_record_to_table_wire(
     record: FleetShipRecord,
     *,

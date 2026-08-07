@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import uuid
 
+from api.analytics.fleet.display_default_option_set import (
+    display_default_option_set_index,
+)
 from api.analytics.fleet.field_constraints import (
     known_built_turn_value,
     record_has_direct_observation,
@@ -208,7 +211,9 @@ def _assign_option_sets_to_placeholders(
         if prior_sets == option_sets:
             continue
         record.build_option_sets = list(option_sets)
-        record.display_default_option_set_index = _default_option_set_index(option_sets)
+        record.display_default_option_set_index = display_default_option_set_index(
+            option_sets
+        )
         _ensure_unknown_spec_fields(record)
         append_fleet_evidence_event(
             record,
@@ -240,16 +245,6 @@ def _option_sets_for_slot(
         reverse=True,
     )
     return tuple(ordered)
-
-
-def _default_option_set_index(option_sets: tuple[FleetBuildOptionSet, ...]) -> int:
-    best_index = 0
-    best_weight = option_sets[0].solution_rank_weight
-    for index, option_set in enumerate(option_sets[1:], start=1):
-        if option_set.solution_rank_weight > best_weight:
-            best_weight = option_set.solution_rank_weight
-            best_index = index
-    return best_index
 
 
 def _ensure_unknown_spec_fields(record: FleetShipRecord) -> None:
