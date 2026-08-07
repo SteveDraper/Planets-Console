@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { defaultColorForPlayerId } from '../../lib/playerColor'
 import { EMPTY_FLEET_COMPONENT_CATALOG } from './fleetComponentCatalog'
 import {
   buildFleetLocationRingStacks,
@@ -161,14 +160,14 @@ describe('buildFleetLocationRingStacks', () => {
       playerId: 8,
       shipCount: 2,
       share: 2 / 3,
-      color: defaultColorForPlayerId(8),
     })
     expect(stacked.arcs[1]).toMatchObject({
       playerId: 9,
       shipCount: 1,
       share: 1 / 3,
-      color: defaultColorForPlayerId(9),
     })
+    expect(stacked.arcs[0]).not.toHaveProperty('color')
+    expect(stacked.arcs[1]).not.toHaveProperty('color')
 
     const alone = stacks.find((s) => s.key === '50,50')!
     expect(alone.shipCount).toBe(1)

@@ -2,18 +2,19 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useStore } from '@xyflow/react'
 import { HullIcon } from '../HullIcon'
-import { colorForPlayerId } from '../../lib/playerColor'
 import {
   buildFleetLocationRingStacks,
   collectFleetLocationRingShips,
   fleetLocationRingPaintRadiusPx,
   FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE,
+  type FleetLocationRingPlayerArc,
   type FleetLocationRingStack,
 } from '../../analytics/fleet/fleetLocationRings'
 import type { FleetPlayerStreamSlice } from '../../analytics/fleet/fleetTablePlayerStreamState'
 import { useFleetComponentCatalogQuery } from '../../analytics/fleet/useFleetComponentCatalogQuery'
 import { useOrderedFleetPlayers } from '../../analytics/fleet/useOrderedFleetPlayers'
 import { fetchShellBootstrap, type AnalyticShellScope } from '../../api/bff'
+import { usePlayerColor } from '../../stores/playerColors'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 
@@ -118,17 +119,14 @@ export function FleetLocationRingsOverlay({
                   const offset = dashOffset
                   dashOffset += dash
                   return (
-                    <circle
+                    <FleetLocationRingArcStroke
                       key={arc.playerId}
-                      cx={0}
-                      cy={0}
-                      r={paintRadius}
-                      fill="none"
-                      stroke={arc.color}
-                      strokeWidth={stack.strokeWidthPx}
-                      strokeDasharray={`${dash} ${gap}`}
-                      strokeDashoffset={-offset}
-                      strokeLinecap="butt"
+                      playerId={arc.playerId}
+                      paintRadius={paintRadius}
+                      strokeWidthPx={stack.strokeWidthPx}
+                      dash={dash}
+                      gap={gap}
+                      dashOffset={offset}
                     />
                   )
                 })}
@@ -145,6 +143,37 @@ export function FleetLocationRingsOverlay({
         />
       ) : null}
     </div>
+  )
+}
+
+function FleetLocationRingArcStroke({
+  playerId,
+  paintRadius,
+  strokeWidthPx,
+  dash,
+  gap,
+  dashOffset,
+}: {
+  playerId: number
+  paintRadius: number
+  strokeWidthPx: number
+  dash: number
+  gap: number
+  dashOffset: number
+}) {
+  const color = usePlayerColor(playerId)
+  return (
+    <circle
+      cx={0}
+      cy={0}
+      r={paintRadius}
+      fill="none"
+      stroke={color}
+      strokeWidth={strokeWidthPx}
+      strokeDasharray={`${dash} ${gap}`}
+      strokeDashoffset={-dashOffset}
+      strokeLinecap="butt"
+    />
   )
 }
 
@@ -167,32 +196,36 @@ function FleetLocationRingTooltip({
       role="tooltip"
     >
       {stack.arcs.map((arc) => (
-        <div key={arc.playerId} className="mb-1 last:mb-0">
-          <div
-            className="font-medium"
-            style={{ color: arc.color || colorForPlayerId(arc.playerId) }}
-          >
-            {arc.playerName}
-          </div>
-          <ul className="mt-0.5 space-y-0.5 pl-3">
-            {arc.ships.map((ship) => (
-              <li key={ship.recordId} className="flex items-center gap-1.5 text-slate-300">
-                {ship.hullId != null ? (
-                  <HullIcon hullId={ship.hullId} className="h-4 w-4 shrink-0" />
-                ) : (
-                  <span className="inline-block h-4 w-4 shrink-0" aria-hidden />
-                )}
-                <span className="truncate">
-                  {ship.shipIdLabel} · {ship.hullLabel} ·{' '}
-                  {ship.hostMilitaryPoints != null
-                    ? `${formatHostPoints(ship.hostMilitaryPoints)} mil`
-                    : '— mil'}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <FleetLocationRingTooltipPlayer key={arc.playerId} arc={arc} />
       ))}
+    </div>
+  )
+}
+
+function FleetLocationRingTooltipPlayer({ arc }: { arc: FleetLocationRingPlayerArc }) {
+  const color = usePlayerColor(arc.playerId)
+  return (
+    <div className="mb-1 last:mb-0">
+      <div className="font-medium" style={{ color }}>
+        {arc.playerName}
+      </div>
+      <ul className="mt-0.5 space-y-0.5 pl-3">
+        {arc.ships.map((ship) => (
+          <li key={ship.recordId} className="flex items-center gap-1.5 text-slate-300">
+            {ship.hullId != null ? (
+              <HullIcon hullId={ship.hullId} className="h-4 w-4 shrink-0" />
+            ) : (
+              <span className="inline-block h-4 w-4 shrink-0" aria-hidden />
+            )}
+            <span className="truncate">
+              {ship.shipIdLabel} · {ship.hullLabel} ·{' '}
+              {ship.hostMilitaryPoints != null
+                ? `${formatHostPoints(ship.hostMilitaryPoints)} mil`
+                : '— mil'}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

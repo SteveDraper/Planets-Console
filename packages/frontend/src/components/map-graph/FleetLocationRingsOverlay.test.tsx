@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
@@ -7,8 +7,12 @@ import { FleetLocationRingsOverlay } from './FleetLocationRingsOverlay'
 import type { FleetPlayerStreamSlice } from '../../analytics/fleet/fleetTablePlayerStreamState'
 import { seedShellViewpoint } from '../../analytics/fleet/fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
+import {
+  installPlayerColorsStorePort,
+  usePlayerColorsStore,
+} from '../../stores/playerColors'
 import { useShellStore } from '../../stores/shell'
-import { defaultColorForPlayerId } from '../../lib/playerColor'
+import { defaultColorForPlayerId, resetPlayerColorOverrideStore } from '../../lib/playerColor'
 
 vi.mock('@xyflow/react', () => ({
   useStore: (selector: (state: { domNode: HTMLElement; transform: [number, number, number] }) => unknown) =>
@@ -52,9 +56,82 @@ function createWrapper(client: QueryClient) {
   }
 }
 
+function stackedStreamPlayersById(): Map<number, FleetPlayerStreamSlice> {
+  return new Map<number, FleetPlayerStreamSlice>([
+    [
+      8,
+      {
+        playerName: 'Alice',
+        records: [
+          {
+            recordId: 'a1',
+            disposition: 'active',
+            qualifiers: {
+              possiblyLost: { sinceTurn: 7, source: 'scoreboard' },
+              alibi: { afterTurn: 7, sightingTurn: 9, source: 'turnInfo.ships' },
+            },
+            fields: {
+              shipId: { kind: 'known', value: 101 },
+              hull: { kind: 'known', value: 13 },
+              engine: { kind: 'unknown' },
+              beams: { kind: 'unknown' },
+              launchers: { kind: 'unknown' },
+              builtTurn: { kind: 'unknown' },
+              location: { kind: 'unknown' },
+            },
+            buildOptionSets: [],
+            lastSeen: { turn: 9, x: 1000, y: 2000 },
+            militaryEstimate2x: 40,
+          },
+        ],
+        discrepancyOverlay: 'inherit',
+        isComplete: true,
+        isFinal: true,
+        isPending: false,
+        summary: 'ok',
+        error: null,
+      },
+    ],
+    [
+      9,
+      {
+        playerName: 'Bob',
+        records: [
+          {
+            recordId: 'b1',
+            disposition: 'active',
+            qualifiers: {},
+            fields: {
+              shipId: { kind: 'known', value: 202 },
+              hull: { kind: 'known', value: 13 },
+              engine: { kind: 'unknown' },
+              beams: { kind: 'unknown' },
+              launchers: { kind: 'unknown' },
+              builtTurn: { kind: 'unknown' },
+              location: { kind: 'unknown' },
+            },
+            buildOptionSets: [],
+            lastSeen: { turn: 9, x: 1000, y: 2000 },
+            militaryEstimate2x: 20,
+          },
+        ],
+        discrepancyOverlay: 'inherit',
+        isComplete: true,
+        isFinal: true,
+        isPending: false,
+        summary: 'ok',
+        error: null,
+      },
+    ],
+  ])
+}
+
 describe('FleetLocationRingsOverlay', () => {
   beforeEach(() => {
     useFleetPlayerVisibilityStore.setState({ overrides: {} })
+    usePlayerColorsStore.setState({ overrides: {} })
+    resetPlayerColorOverrideStore()
+    installPlayerColorsStorePort()
     useShellStore.setState({
       selectedGameId: null,
       gameInfoContext: null,
@@ -81,73 +158,7 @@ describe('FleetLocationRingsOverlay', () => {
 
   it('paints stacked arcs and shows hull/mil tooltip without alibi or possibly-lost', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const streamPlayersById = new Map<number, FleetPlayerStreamSlice>([
-      [
-        8,
-        {
-          playerName: 'Alice',
-          records: [
-            {
-              recordId: 'a1',
-              disposition: 'active',
-              qualifiers: {
-                possiblyLost: { sinceTurn: 7, source: 'scoreboard' },
-                alibi: { afterTurn: 7, sightingTurn: 9, source: 'turnInfo.ships' },
-              },
-              fields: {
-                shipId: { kind: 'known', value: 101 },
-                hull: { kind: 'known', value: 13 },
-                engine: { kind: 'unknown' },
-                beams: { kind: 'unknown' },
-                launchers: { kind: 'unknown' },
-                builtTurn: { kind: 'unknown' },
-                location: { kind: 'unknown' },
-              },
-              buildOptionSets: [],
-              lastSeen: { turn: 9, x: 1000, y: 2000 },
-              militaryEstimate2x: 40,
-            },
-          ],
-          discrepancyOverlay: 'inherit',
-          isComplete: true,
-          isFinal: true,
-          isPending: false,
-          summary: 'ok',
-          error: null,
-        },
-      ],
-      [
-        9,
-        {
-          playerName: 'Bob',
-          records: [
-            {
-              recordId: 'b1',
-              disposition: 'active',
-              qualifiers: {},
-              fields: {
-                shipId: { kind: 'known', value: 202 },
-                hull: { kind: 'known', value: 13 },
-                engine: { kind: 'unknown' },
-                beams: { kind: 'unknown' },
-                launchers: { kind: 'unknown' },
-                builtTurn: { kind: 'unknown' },
-                location: { kind: 'unknown' },
-              },
-              buildOptionSets: [],
-              lastSeen: { turn: 9, x: 1000, y: 2000 },
-              militaryEstimate2x: 20,
-            },
-          ],
-          discrepancyOverlay: 'inherit',
-          isComplete: true,
-          isFinal: true,
-          isPending: false,
-          summary: 'ok',
-          error: null,
-        },
-      ],
-    ])
+    const streamPlayersById = stackedStreamPlayersById()
 
     const { container } = render(
       <FleetLocationRingsOverlay
@@ -177,5 +188,29 @@ describe('FleetLocationRingsOverlay', () => {
     expect(tooltip.textContent).toMatch(/20 mil/)
     expect(tooltip.textContent).toMatch(/10 mil/)
     expect(tooltip.textContent).not.toMatch(/alibi|possibly/i)
+  })
+
+  it('re-paints arc strokes when a player color override changes', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(
+      <FleetLocationRingsOverlay
+        analyticScope={scope}
+        streamPlayersById={stackedStreamPlayersById()}
+        enabled
+      />,
+      { wrapper: createWrapper(client) }
+    )
+
+    expect(
+      [...container.querySelectorAll('circle[stroke]')].map((el) => el.getAttribute('stroke'))
+    ).toContain(defaultColorForPlayerId(8))
+
+    act(() => {
+      usePlayerColorsStore.getState().setPlayerColorOverride(8, '#112233')
+    })
+
+    expect(
+      [...container.querySelectorAll('circle[stroke]')].map((el) => el.getAttribute('stroke'))
+    ).toContain('#112233')
   })
 })

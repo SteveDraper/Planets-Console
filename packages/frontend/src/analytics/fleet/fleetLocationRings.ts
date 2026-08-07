@@ -3,7 +3,6 @@
  * coordinates and apply AFK diameter / absolute-strength opacity + annulus (#128).
  */
 
-import { colorForPlayerId } from '../../lib/playerColor'
 import type { FleetComponentCatalog } from './fleetComponentCatalog'
 import { formatFleetHullDisplay } from './fleetRecordComponentDisplay'
 import { activeFleetRecords, formatFleetRecordField } from './fleetRecordDisplay'
@@ -37,7 +36,6 @@ export type FleetLocationRingPlayerArc = {
   shipCount: number
   /** Fraction of stack ship count in [0, 1]. */
   share: number
-  color: string
   ships: readonly FleetLocationRingShip[]
 }
 
@@ -252,7 +250,6 @@ function buildPlayerArcs(
       playerName,
       shipCount: ships.length,
       share: ships.length / total,
-      color: colorForPlayerId(playerId),
       ships,
     }
   })
