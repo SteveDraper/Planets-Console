@@ -36,6 +36,10 @@ export const PLAYER_COLOR_PRESET = [
 
 export type PlayerColorMode = 'per_player' | 'diplomacy_family'
 
+export function isPlayerColorMode(value: string): value is PlayerColorMode {
+  return value === 'per_player' || value === 'diplomacy_family'
+}
+
 /** Default base for the diplomacy circle (in-threshold) family. */
 export const DEFAULT_FAMILY_BASE_COLOR = '#34d399'
 

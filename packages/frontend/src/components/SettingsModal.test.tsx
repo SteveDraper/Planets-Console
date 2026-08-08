@@ -60,4 +60,19 @@ describe('SettingsModal player colors', () => {
     expect(screen.getByLabelText(/others base color/i)).toBeInTheDocument()
     expect(usePlayerColorsStore.getState().mode).toBe('diplomacy_family')
   })
+
+  it('ignores invalid mode and threshold select values', async () => {
+    const user = userEvent.setup()
+    render(<SettingsModal isOpen onClose={() => {}} />)
+    await user.click(screen.getByText('Player Colors'))
+
+    fireEvent.change(screen.getByLabelText(/color by/i), { target: { value: 'not_a_mode' } })
+    expect(usePlayerColorsStore.getState().mode).toBe('per_player')
+
+    await user.selectOptions(screen.getByLabelText(/color by/i), 'diplomacy_family')
+    fireEvent.change(screen.getByLabelText(/minimum inbound status/i), {
+      target: { value: '99' },
+    })
+    expect(usePlayerColorsStore.getState().diplomacyThreshold).toBe(DiplomacyTier.SAFE_PASSAGE)
+  })
 })

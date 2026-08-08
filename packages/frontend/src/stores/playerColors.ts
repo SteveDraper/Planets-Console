@@ -10,6 +10,7 @@ import {
   DEFAULT_FAMILY_BASE_COLOR,
   DEFAULT_OUT_OF_CIRCLE_BASE_COLOR,
   defaultPlayerColorPaintSnapshotInputs,
+  isPlayerColorMode,
   playerColorOverrideStorageKey,
   resolvePlayerColor,
   setPlayerColorResolutionPort,
@@ -198,10 +199,12 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
             ? (persisted as Partial<PlayerColorsPersisted>)
             : {}
         const mode: PlayerColorMode =
-          p.mode === 'diplomacy_family' || p.mode === 'per_player' ? p.mode : current.mode
-        const diplomacyThreshold = isDiplomacyColorThreshold(p.diplomacyThreshold as number)
-          ? (p.diplomacyThreshold as DiplomacyColorThreshold)
-          : current.diplomacyThreshold
+          typeof p.mode === 'string' && isPlayerColorMode(p.mode) ? p.mode : current.mode
+        const diplomacyThreshold =
+          typeof p.diplomacyThreshold === 'number' &&
+          isDiplomacyColorThreshold(p.diplomacyThreshold)
+            ? p.diplomacyThreshold
+            : current.diplomacyThreshold
         const familyBaseColor =
           typeof p.familyBaseColor === 'string' && p.familyBaseColor.length > 0
             ? p.familyBaseColor

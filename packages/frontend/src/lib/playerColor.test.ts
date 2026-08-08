@@ -7,6 +7,7 @@ import {
   defaultColorForPlayerId,
   defaultPlayerColorPaintSnapshotInputs,
   diplomacyColorFamilyMemberIds,
+  isPlayerColorMode,
   outOfCircleFamilyMemberIds,
   resetPlayerColorResolutionPort,
   resolvePlayerColor,
@@ -40,6 +41,13 @@ describe('playerColor', () => {
     expect(defaultColorForPlayerId(15)).toBe(PLAYER_COLOR_PRESET[15])
     expect(defaultColorForPlayerId(16)).toBe(PLAYER_COLOR_PRESET[0])
     expect(defaultColorForPlayerId(-1)).toBe(PLAYER_COLOR_PRESET[15])
+  })
+
+  it('accepts only known player color modes', () => {
+    expect(isPlayerColorMode('per_player')).toBe(true)
+    expect(isPlayerColorMode('diplomacy_family')).toBe(true)
+    expect(isPlayerColorMode('unknown')).toBe(false)
+    expect(isPlayerColorMode('')).toBe(false)
   })
 
   it('uses defaults when the resolution port is empty', () => {

@@ -4,12 +4,12 @@ import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
 import {
   DIPLOMACY_COLOR_THRESHOLD_OPTIONS,
-  type DiplomacyColorThreshold,
+  isDiplomacyColorThreshold,
 } from '../lib/diplomacyTier'
 import { formatViewpointRowLabel } from '../lib/displayFormatters'
 import {
   defaultColorForPlayerId,
-  type PlayerColorMode,
+  isPlayerColorMode,
 } from '../lib/playerColor'
 import {
   useDisplayPreferencesStore,
@@ -116,7 +116,11 @@ function PlayerColorsSection() {
         <select
           id="settings-player-color-mode"
           value={mode}
-          onChange={(e) => setPlayerColorMode(e.target.value as PlayerColorMode)}
+          onChange={(e) => {
+            if (isPlayerColorMode(e.target.value)) {
+              setPlayerColorMode(e.target.value)
+            }
+          }}
           className={selectClassName}
         >
           <option value="per_player">Per player</option>
@@ -136,9 +140,12 @@ function PlayerColorsSection() {
             <select
               id="settings-diplomacy-color-threshold"
               value={diplomacyThreshold}
-              onChange={(e) =>
-                setDiplomacyThreshold(Number(e.target.value) as DiplomacyColorThreshold)
-              }
+              onChange={(e) => {
+                const next = Number(e.target.value)
+                if (isDiplomacyColorThreshold(next)) {
+                  setDiplomacyThreshold(next)
+                }
+              }}
               className={selectClassName}
             >
               {DIPLOMACY_COLOR_THRESHOLD_OPTIONS.map((o) => (
