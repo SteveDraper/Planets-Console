@@ -288,6 +288,26 @@ _Avoid_: keepPreviousData (implementation detail; not the product concept), stal
 One analytic's contribution to the combined map graph -- nodes and/or edges merged with **base map** and other enabled map analytics via id-prefixing.
 _Avoid_: overlay (acceptable informally; prefer map layer in docs)
 
+**Map interaction surface**:
+The SPA owner (under **map mode**) of pane pointer state, hit epoch, contribution registry, **map hover composition policy**, and hover chrome -- and later click / context-menu dispatch. Paint **map layer**s stay pointer-event transparent; they do not capture the pointer.
+_Avoid_: hover manager (undersells click/menu scope), MapGraph (implementation host), tooltip service (too narrow)
+
+**Map interaction contributor**:
+A registration on the **map interaction surface** that supplies hit-testing plus typed hover blocks (sync lines/rich content and/or async fetch), scoped by contributor role (planet, fleet, region, cartography, …). Click / context-menu handlers are the same registration concept in a later slice.
+_Avoid_: overlay hover handler, analytic-private mouse listener, pointer-events hit circle as the primary path
+
+**Map hover composition policy**:
+Declarative rules over **map hover contribution** kinds (not analytic ids alone) that decide how simultaneous hits compose: `yieldsTo`, `mergesWith`, and `stacksWith`. `mergesWith` folds **descriptive** contributions into one host panel as titled sections; `stacksWith` keeps independent chrome/placement for contributions that must not be swallowed into that panel (e.g. **map-element** affordances); `yieldsTo` suppresses a contribution while another is active.
+_Avoid_: blockedByPlanetHover (implementation flag), policy keyed only by analytic id, stacksWith as an analytic-to-analytic edge, imperative special cases scattered across overlays
+
+**Map hover contribution**:
+One hit payload produced by a **map interaction contributor** for the current pointer: typed content plus a **kind** that selects composition behavior. A single contributor (e.g. Stellar Cartography) may emit multiple contributions of different kinds at once.
+_Avoid_: hover line (too narrow), tooltip (chrome, not the contribution), analytic hover (ambiguous when one analytic has several kinds)
+
+**Map hover contribution kind**:
+Classification of a **map hover contribution** for **map hover composition policy**. v1 kinds: **descriptive** (titled panel sections -- planet facts, fleet ships, region/cartography text) and **map-element** (affordance-like hover that may stack independently of the descriptive panel).
+_Avoid_: analytic id as kind, rich vs string (implementation shape of a block, not composition class)
+
 **Map region overlay**:
 A shaded designated area on the map used to highlight a region rather than a single planet or ship. Shared wire field **`regionOverlays`** with discriminated geometry: **coverage** (hybrid disk unions plus nebula-local patches where \(V(P)\) / **Nebula Scanner** distort the footprint) or **boundary** (closed path of line and circular-arc edges, optionally with colocated envelope disks). Style metadata (fill color, kind id) and optional **domain annotations** (pin flag, status, candidate count, pinned player identity) travel with the geometry -- not English UI strings. Shared rendering and merge concern across map analytics; Core owns coverage/boundary truth and the SPA blits (and formats hover/display copy). Distinct from cartography hazard circles (`overlayCircles`). Per-analytic client preferences decide which kinds/modes are shown -- Visibility kind toggles do not own non-Visibility overlays.
 _Avoid_: overlay circle (cartography-specific), cartography layer (Stellar Cartography only), treating all region overlays as Visibility-owned, client-side reimplementation of coverage policy, full-map 1 ly boolean grids as the default wire, homeworld-only parallel wire field, Core-owned English hoverSummary

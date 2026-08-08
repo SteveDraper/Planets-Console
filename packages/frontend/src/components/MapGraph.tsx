@@ -4,10 +4,9 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { ReactFlow, useStore } from '@xyflow/react'
+import { ReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { AnalyticShellScope, CombinedMapData } from '../api/bff'
-import { StellarCartographyHoverPanel } from '../analytics/stellar-cartography/StellarCartographyHoverPanel'
 import {
   buildCartographyMapFrame,
   cartographyDisplayEdges,
@@ -24,20 +23,13 @@ import {
   DEFAULT_PLANET_LABEL_OPTIONS,
   type PlanetLabelOptions,
 } from './planetMapLabelModel'
-import { clientToFlowPosition } from './map-graph/geometry'
 import { nodeTypes, toFlowNodes } from './map-graph/nodes'
 import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
-import {
-  computeRegionOverlayHoverLines,
-  RegionOverlayHoverTooltip,
-  useMapPaneClientPos,
-} from './map-graph/RegionOverlayHoverPanel'
-import type { MapRegionOverlay } from '../api/mapRegionOverlayTypes'
 import { MapAttentionOrchestrator } from './map-graph/MapAttentionOrchestrator'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
-import { FleetLocationRingsOverlay, planetCoordKeysFromMapNodes } from './map-graph/FleetLocationRingsOverlay'
+import { FleetLocationRingsOverlay } from './map-graph/FleetLocationRingsOverlay'
 import { FleetLocationRingStacksProvider } from '../analytics/fleet/FleetLocationRingStacksContext'
 import { useFleetLocationRingStacks } from '../analytics/fleet/useFleetLocationRingStacks'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
@@ -72,7 +64,12 @@ import {
   SliderZoomControl,
   ViewportZoomSync,
 } from './map-graph/viewportControls'
-import { planetLabelOptionsShowAnyLabel } from './planetMapLabelModel'
+import { MapInteractionSurface } from '../map-interaction/MapInteractionSurface'
+import { PlanetMapInteraction } from '../map-interaction/contributors/PlanetMapInteraction'
+import { FleetMapInteractionContributor } from '../map-interaction/contributors/FleetMapInteractionContributor'
+import { RegionMapInteractionContributor } from '../map-interaction/contributors/RegionMapInteractionContributor'
+import { CartographyMapInteractionContributor } from '../map-interaction/contributors/CartographyMapInteractionContributor'
+import { WormholeDescriptiveBridgeContributor } from '../map-interaction/contributors/WormholeDescriptiveBridgeContributor'
 
 type MapGraphProps = {
   data: CombinedMapData
@@ -207,52 +204,6 @@ type MapGraphFlowProps = {
   onInitialFitDone: () => void
 }
 
-type MapHoverStackProps = {
-  regionOverlays: readonly MapRegionOverlay[]
-  blockedByPlanetHover: boolean
-  cartography?: StellarCartographyMapContext
-  wormholeHoverLines: string[] | null
-}
-
-/**
- * Region + cartography hover must mount under ``ReactFlow`` so xyflow ``useStore``
- * has a provider (React Flow error #001).
- *
- * One pane pointer source is shared: region hit-test and cartography sampling both
- * read ``clientPos``; neither attaches a second mousemove listener.
- */
-function MapHoverStack({
-  regionOverlays,
-  blockedByPlanetHover,
-  cartography,
-  wormholeHoverLines,
-}: MapHoverStackProps) {
-  const transform = useStore((s) => s.transform)
-  const { clientPos, domNode } = useMapPaneClientPos()
-  const regionHoverLines = computeRegionOverlayHoverLines(
-    regionOverlays,
-    clientPos,
-    domNode,
-    transform,
-    blockedByPlanetHover
-  )
-  if (cartography != null) {
-    return (
-      <StellarCartographyHoverPanel
-        cartography={cartography}
-        wormholeHoverLines={wormholeHoverLines}
-        clientPos={clientPos}
-        blockedByPlanetHover={blockedByPlanetHover}
-        additionalHoverLines={regionHoverLines}
-        clientToFlowPosition={clientToFlowPosition}
-      />
-    )
-  }
-  return (
-    <RegionOverlayHoverTooltip lines={regionHoverLines} clientPos={clientPos} />
-  )
-}
-
 function MapGraphFlow({
   data,
   frame,
@@ -272,12 +223,7 @@ function MapGraphFlow({
   onSetZoomReady,
   onInitialFitDone,
 }: MapGraphFlowProps) {
-  const {
-    wormholeLineRevealKey,
-    wormholeHoverLines,
-    blockedByPlanetHover,
-    onPlanetLabelHoverActiveChange,
-  } = useWormholeInteractionState()
+  const { wormholeLineRevealKey } = useWormholeInteractionState()
 
   const policy = useMemo(() => cartographyFramePolicy(cartography), [cartography])
   const edges = useMemo(
@@ -290,11 +236,6 @@ function MapGraphFlow({
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
   const fleetStacks = useFleetLocationRingStacks(analyticScope, fleetEnabled)
-  const planetCoordKeys = useMemo(
-    () => planetCoordKeysFromMapNodes(planetMapNodes),
-    [planetMapNodes]
-  )
-  const planetLabelsEnabled = planetLabelOptionsShowAnyLabel(planetLabelOptions)
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays
   )
@@ -381,35 +322,33 @@ function MapGraphFlow({
           wormholeEndpoints={frame.wormholeEndpoints}
           cartographyConfig={cartography.config}
           wormholeEndpointHoverByCell={frame.wormholeEndpointHoverByCell}
-          blockedByPlanetHover={blockedByPlanetHover}
           nuIonStorms={data.nuIonStorms}
         />
       ) : null}
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
-      <FleetLocationRingsOverlay
-        stacks={fleetStacks}
-        planetCoordKeys={planetCoordKeys}
-        planetLabelsEnabled={planetLabelsEnabled}
-      />
+      <FleetLocationRingsOverlay stacks={fleetStacks} />
       <MapAttentionOrchestrator homeworldMarkers={data.homeworldMarkers} />
-      <FixedSizeDotsOverlay
-        planetGrid={planetGrid}
-        planetLabelOptions={planetLabelOptions}
-        labelSourceByNodeId={labelSourceByNodeId}
-        mapNodes={planetMapNodes}
-        routeWaypoints={data.routeWaypoints}
-        waypointGrid={waypointGrid}
-        onPlanetLabelHoverActiveChange={onPlanetLabelHoverActiveChange}
-      />
+      <MapInteractionSurface>
+        <PlanetMapInteraction
+          planetGrid={planetGrid}
+          planetLabelOptions={planetLabelOptions}
+          labelSourceByNodeId={labelSourceByNodeId}
+          mapNodes={planetMapNodes}
+          waypointGrid={waypointGrid}
+        >
+          <FixedSizeDotsOverlay
+            mapNodes={planetMapNodes}
+            routeWaypoints={data.routeWaypoints}
+          />
+        </PlanetMapInteraction>
+        <FleetMapInteractionContributor stacks={fleetStacks} enabled={fleetEnabled} />
+        <RegionMapInteractionContributor regionOverlays={regionOverlays} />
+        <CartographyMapInteractionContributor cartography={cartography} />
+        <WormholeDescriptiveBridgeContributor cartography={cartography} />
+      </MapInteractionSurface>
       <FlowCoordinateReadout />
-      <MapHoverStack
-        regionOverlays={regionOverlays}
-        blockedByPlanetHover={blockedByPlanetHover}
-        cartography={cartography}
-        wormholeHoverLines={wormholeHoverLines}
-      />
       <HomeworldMapContextMenu
         analyticScope={analyticScope}
         enabled={homeworldEnabled}

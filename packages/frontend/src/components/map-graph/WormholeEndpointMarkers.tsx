@@ -20,11 +20,9 @@ import {
 export function WormholeEndpointMarkers({
   markers,
   wormholeEndpointHoverByCell,
-  blockedByPlanetHover,
 }: {
   markers: StellarCartographyOverlayWormholeMarkerShape[]
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
-  blockedByPlanetHover: boolean
 }) {
   const setWormholeHover = useContext(WormholeHoverContext)
   const lineReveal = useContext(WormholeLineRevealContext)
@@ -57,7 +55,7 @@ export function WormholeEndpointMarkers({
             onMouseEnter={() => {
               lineReveal.cancelClear()
               lineReveal.revealAt(mapX, mapY)
-              if (blockedByPlanetHover || hoverInfo == null) return
+              if (hoverInfo == null) return
               setWormholeHover(formatWormholeEndpointHoverLines(hoverInfo))
             }}
             onMouseLeave={() => {

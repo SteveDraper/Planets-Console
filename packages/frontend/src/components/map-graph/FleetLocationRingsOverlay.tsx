@@ -1,60 +1,26 @@
-import { useMemo } from 'react'
+/**
+ * Screen-fixed fleet location rings paint. Descriptive hover is owned by the
+ * **map interaction surface** (no pointer capture, no overlay tooltip).
+ */
+
 import { useStore } from '@xyflow/react'
 import {
   fleetLocationRingPaintRadiusPx,
   fleetLocationRingStackKey,
   type FleetLocationRingStack,
 } from '../../analytics/fleet/fleetLocationRings'
-import { findFleetLocationRingStackAtPanePoint } from '../../analytics/fleet/fleetLocationRingHitTest'
-import { FleetLocationRingTooltipBody } from '../../analytics/fleet/FleetLocationRingTooltipBody'
 import { usePlayerColor } from '../../stores/playerColors'
-import { useMapPaneClientPos } from './RegionOverlayHoverPanel'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 
 type FleetLocationRingsOverlayProps = {
   stacks: readonly FleetLocationRingStack[]
-  /**
-   * Map-cell keys (`x,y`) that have a planet node. When planet labels are on,
-   * stacks at those cells are shown on the planet label instead of here.
-   */
-  planetCoordKeys: ReadonlySet<string>
-  /** When false, stacks at planet cells still use this overlay's tooltip. */
-  planetLabelsEnabled: boolean
 }
 
-/**
- * Screen-fixed fleet location rings from shared stacks.
- * Hover uses pane pointer hit-test (no pointer-events capture) so planet hover still works.
- */
-export function FleetLocationRingsOverlay({
-  stacks,
-  planetCoordKeys,
-  planetLabelsEnabled,
-}: FleetLocationRingsOverlayProps) {
+export function FleetLocationRingsOverlay({ stacks }: FleetLocationRingsOverlayProps) {
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)
-  const { clientPos } = useMapPaneClientPos()
-
-  const hovered = useMemo(() => {
-    if (
-      clientPos == null ||
-      domNode == null ||
-      !transform ||
-      stacks.length === 0
-    ) {
-      return null
-    }
-    const rect = domNode.getBoundingClientRect()
-    const paneX = clientPos.x - rect.left
-    const paneY = clientPos.y - rect.top
-    return findFleetLocationRingStackAtPanePoint(stacks, paneX, paneY, transform)
-  }, [clientPos, domNode, transform, stacks])
-
-  const showStandaloneTooltip =
-    hovered != null &&
-    !(planetLabelsEnabled && planetCoordKeys.has(hovered.key))
 
   if (!transform || width <= 0 || height <= 0 || stacks.length === 0) {
     return null
@@ -62,13 +28,6 @@ export function FleetLocationRingsOverlay({
 
   const [tx, ty, rawScale] = transform
   const scale = safeZoomScale(rawScale)
-  let hoveredPaneX = 0
-  let hoveredPaneY = 0
-  if (showStandaloneTooltip && hovered != null) {
-    const { cx, cy } = flowCenterFromMapNode({ x: hovered.x, y: hovered.y })
-    hoveredPaneX = cx * scale + tx
-    hoveredPaneY = cy * scale + ty
-  }
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[7]">
@@ -110,18 +69,6 @@ export function FleetLocationRingsOverlay({
           )
         })}
       </svg>
-      {showStandaloneTooltip && hovered != null ? (
-        <div
-          className="absolute z-[8] max-w-xs rounded-md border border-[#52575d] bg-black/95 px-2 py-1.5 shadow-lg"
-          style={{
-            left: Math.round(hoveredPaneX + hovered.diameterPx / 2 + 8),
-            top: Math.round(hoveredPaneY - hovered.diameterPx / 2),
-          }}
-          role="tooltip"
-        >
-          <FleetLocationRingTooltipBody stack={hovered} />
-        </div>
-      ) : null}
     </div>
   )
 }

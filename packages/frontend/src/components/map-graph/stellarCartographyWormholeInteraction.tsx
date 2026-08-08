@@ -1,6 +1,16 @@
+/**
+ * Wormhole line-reveal + descriptive hover line bridge state.
+ *
+ * Temporary bridge only: feeds ``WormholeDescriptiveBridgeContributor`` until
+ * #293 reclassifies wormhole affordances as map-element. Do not copy the
+ * register-when-lines / hitTest-ignores-hit pattern used by that contributor.
+ *
+ * Composition vs planet is owned by the **map hover composition policy**;
+ * ``blockedByPlanetHover`` is no longer the source of truth (#292).
+ */
+
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -29,8 +39,6 @@ export const WormholeLineRevealContext = createContext<WormholeLineRevealApi>({
 export type WormholeInteractionState = {
   wormholeLineRevealKey: string | null
   wormholeHoverLines: string[] | null
-  blockedByPlanetHover: boolean
-  onPlanetLabelHoverActiveChange: (active: boolean) => void
 }
 
 const WormholeInteractionStateContext = createContext<WormholeInteractionState | null>(null)
@@ -45,18 +53,12 @@ export function useWormholeInteractionState(): WormholeInteractionState {
 
 type WormholeInteractionProviderProps = {
   children: ReactNode
-  /** When set, overrides internal planet-label hover blocking (e.g. tests). */
-  blockedByPlanetHover?: boolean
 }
 
-export function WormholeInteractionProvider({
-  children,
-  blockedByPlanetHover: blockedByPlanetHoverProp,
-}: WormholeInteractionProviderProps) {
+export function WormholeInteractionProvider({ children }: WormholeInteractionProviderProps) {
   const [wormholeHoverLines, setWormholeHoverLines] = useState<string[] | null>(null)
   const [wormholeLineRevealKey, setWormholeLineRevealKey] = useState<string | null>(null)
   const wormholeLineRevealClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [planetLabelHoverActive, setPlanetLabelHoverActive] = useState(false)
 
   const wormholeLineReveal = useMemo<WormholeLineRevealApi>(
     () => ({
@@ -94,27 +96,12 @@ export function WormholeInteractionProvider({
     }
   }, [])
 
-  const onPlanetLabelHoverActiveChange = useCallback((active: boolean) => {
-    setPlanetLabelHoverActive(active)
-    if (active) setWormholeHoverLines(null)
-  }, [])
-
-  const blockedByPlanetHover =
-    blockedByPlanetHoverProp ?? planetLabelHoverActive
-
   const interactionState = useMemo<WormholeInteractionState>(
     () => ({
       wormholeLineRevealKey,
       wormholeHoverLines,
-      blockedByPlanetHover,
-      onPlanetLabelHoverActiveChange,
     }),
-    [
-      wormholeLineRevealKey,
-      wormholeHoverLines,
-      blockedByPlanetHover,
-      onPlanetLabelHoverActiveChange,
-    ]
+    [wormholeLineRevealKey, wormholeHoverLines]
   )
 
   return (
