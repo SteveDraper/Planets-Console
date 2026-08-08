@@ -54,6 +54,49 @@ type PlayerColorsState = PlayerColorsPersisted & {
   }) => void
 }
 
+function inboundRelationMapsEqual(
+  a: ReadonlyMap<number, number>,
+  b: ReadonlyMap<number, number>
+): boolean {
+  if (a === b) return true
+  if (a.size !== b.size) return false
+  for (const [playerId, relation] of a) {
+    if (b.get(playerId) !== relation) return false
+  }
+  return true
+}
+
+function rosterPlayerIdsEqual(a: readonly number[], b: readonly number[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function paintContextEquals(
+  state: {
+    viewpointPlayerId: number | null
+    inboundRelationFromByPlayerId: ReadonlyMap<number, number>
+    rosterPlayerIds: readonly number[]
+  },
+  ctx: {
+    viewpointPlayerId: number | null
+    inboundRelationFromByPlayerId: ReadonlyMap<number, number>
+    rosterPlayerIds: readonly number[]
+  }
+): boolean {
+  return (
+    state.viewpointPlayerId === ctx.viewpointPlayerId &&
+    inboundRelationMapsEqual(
+      state.inboundRelationFromByPlayerId,
+      ctx.inboundRelationFromByPlayerId
+    ) &&
+    rosterPlayerIdsEqual(state.rosterPlayerIds, ctx.rosterPlayerIds)
+  )
+}
+
 function snapshotInputsFromState(
   state: PlayerColorsPersisted & {
     viewpointPlayerId: number | null
@@ -96,7 +139,7 @@ const initialSnapshotInputs = defaultPlayerColorPaintSnapshotInputs()
 
 export const usePlayerColorsStore = create<PlayerColorsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       overrides: {},
       mode: 'per_player',
       diplomacyThreshold: DEFAULT_DIPLOMACY_COLOR_THRESHOLD,
@@ -128,18 +171,16 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
         set((state) => withRebuiltSnapshot(state, { familyBaseColor })),
       setOutOfCircleBaseColor: (outOfCircleBaseColor) =>
         set((state) => withRebuiltSnapshot(state, { outOfCircleBaseColor })),
-      setPaintContext: ({
-        viewpointPlayerId,
-        inboundRelationFromByPlayerId,
-        rosterPlayerIds,
-      }) =>
+      setPaintContext: (ctx) => {
+        if (paintContextEquals(get(), ctx)) return
         set((state) =>
           withRebuiltSnapshot(state, {
-            viewpointPlayerId,
-            inboundRelationFromByPlayerId,
-            rosterPlayerIds,
+            viewpointPlayerId: ctx.viewpointPlayerId,
+            inboundRelationFromByPlayerId: ctx.inboundRelationFromByPlayerId,
+            rosterPlayerIds: ctx.rosterPlayerIds,
           })
-        ),
+        )
+      },
     }),
     {
       name: PLAYER_COLORS_STORAGE_KEY,

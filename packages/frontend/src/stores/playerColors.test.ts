@@ -8,6 +8,7 @@ import {
   tonalVariantForFamilyMember,
 } from '../lib/playerColor'
 import {
+  clearPlayerColorPaintContext,
   installPlayerColorsStorePort,
   resetPlayerColorsStoreState,
   usePlayerColor,
@@ -70,5 +71,49 @@ describe('usePlayerColorsStore', () => {
       })
     })
     expect(result.current).toBe(tonalVariantForFamilyMember('#336699', 2, [1, 2], 1))
+  })
+
+  it('setPaintContext is a no-op when viewpoint, inbound map, and roster are unchanged', () => {
+    usePlayerColorsStore.getState().setPaintContext({
+      viewpointPlayerId: 1,
+      inboundRelationFromByPlayerId: new Map([[2, DiplomacyTier.SAFE_PASSAGE]]),
+      rosterPlayerIds: [1, 2, 3],
+    })
+    const snapshotBefore = usePlayerColorsStore.getState().paintSnapshot
+
+    usePlayerColorsStore.getState().setPaintContext({
+      viewpointPlayerId: 1,
+      inboundRelationFromByPlayerId: new Map([[2, DiplomacyTier.SAFE_PASSAGE]]),
+      rosterPlayerIds: [1, 2, 3],
+    })
+    expect(usePlayerColorsStore.getState().paintSnapshot).toBe(snapshotBefore)
+
+    usePlayerColorsStore.getState().setPaintContext({
+      viewpointPlayerId: 1,
+      inboundRelationFromByPlayerId: new Map([[2, DiplomacyTier.ALLIANCE]]),
+      rosterPlayerIds: [1, 2, 3],
+    })
+    expect(usePlayerColorsStore.getState().paintSnapshot).not.toBe(snapshotBefore)
+  })
+
+  it('clearPlayerColorPaintContext is a no-op when already cleared', () => {
+    const snapshotBefore = usePlayerColorsStore.getState().paintSnapshot
+    clearPlayerColorPaintContext()
+    expect(usePlayerColorsStore.getState().paintSnapshot).toBe(snapshotBefore)
+
+    usePlayerColorsStore.getState().setPaintContext({
+      viewpointPlayerId: 1,
+      inboundRelationFromByPlayerId: new Map([[2, DiplomacyTier.SAFE_PASSAGE]]),
+      rosterPlayerIds: [1, 2],
+    })
+    const painted = usePlayerColorsStore.getState().paintSnapshot
+    expect(painted).not.toBe(snapshotBefore)
+
+    clearPlayerColorPaintContext()
+    const cleared = usePlayerColorsStore.getState().paintSnapshot
+    expect(cleared).not.toBe(painted)
+
+    clearPlayerColorPaintContext()
+    expect(usePlayerColorsStore.getState().paintSnapshot).toBe(cleared)
   })
 })
