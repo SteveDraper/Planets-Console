@@ -35,6 +35,13 @@ export type MapInteractionContributor = {
    */
   hitTest: (hit: MapHitContext) => MapHoverContribution | null
   /**
+   * Optional sticky contribution that persists without a live pointer hit
+   * (e.g. pinned planet label). The surface unions this with ``hitTest``
+   * results; contributors that need stickiness implement this explicitly
+   * rather than relying on role special-cases in the surface.
+   */
+  stickyContribution?: () => MapHoverContribution | null
+  /**
    * Optional manager-owned async path. Invoked when ``hitTest`` returns a
    * contribution with a pending ``async`` block; must be cancel-safe via
    * hitEpoch / requestKey (surface async slot).

@@ -157,6 +157,37 @@ export function PlanetMapInteraction({
   const contributor = useMemo<MapInteractionContributor | null>(() => {
     if (!showAnyLabelOption && pinnedNodeId == null) return null
 
+    const contributionFromHit = (
+      planetHit: NonNullable<ReturnType<typeof resolvePinnedPlanet>>,
+      pinned: boolean
+    ) => ({
+      id: `planet:${planetHit.nodeId}`,
+      role: 'planet' as const,
+      kind: 'descriptive' as const,
+      title: 'Planet',
+      placement: {
+        mode: 'anchor' as const,
+        flowX: planetHit.flowX,
+        flowY: planetHit.flowY,
+        pinned,
+      },
+      blocks: [
+        {
+          type: 'rich' as const,
+          content: (
+            <PlanetMapLabel
+              options={planetLabelOptions}
+              nodeId={planetHit.nodeId}
+              planet={planetHit.labelSource?.planet}
+              ownerName={planetHit.labelSource?.ownerName}
+              planetX={planetHit.mapX}
+              planetY={planetHit.mapY}
+            />
+          ),
+        },
+      ],
+    })
+
     return {
       id: 'planet',
       role: 'planet',
@@ -175,34 +206,17 @@ export function PlanetMapInteraction({
             ? hitTestPlanetAtPointer(ctx, planetGrid, mapNodes, labelSourceByNodeId)
             : null)
         if (planetHit == null) return null
-        const src = planetHit.labelSource
-        return {
-          id: `planet:${planetHit.nodeId}`,
-          role: 'planet',
-          kind: 'descriptive',
-          title: 'Planet',
-          placement: {
-            mode: 'anchor',
-            flowX: planetHit.flowX,
-            flowY: planetHit.flowY,
-            pinned: pinned != null,
-          },
-          blocks: [
-            {
-              type: 'rich',
-              content: (
-                <PlanetMapLabel
-                  options={planetLabelOptions}
-                  nodeId={planetHit.nodeId}
-                  planet={src?.planet}
-                  ownerName={src?.ownerName}
-                  planetX={planetHit.mapX}
-                  planetY={planetHit.mapY}
-                />
-              ),
-            },
-          ],
-        }
+        return contributionFromHit(planetHit, pinned != null)
+      },
+      stickyContribution: () => {
+        if (pinnedNodeIdRef.current == null) return null
+        const pinned = resolvePinnedPlanet(
+          pinnedNodeIdRef.current,
+          mapNodes,
+          labelSourceByNodeId
+        )
+        if (pinned == null) return null
+        return contributionFromHit(pinned, true)
       },
     }
   }, [

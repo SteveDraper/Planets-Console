@@ -17,6 +17,7 @@ export function useMapInteractionContributor(
   const id = contributor?.id ?? null
   const role = contributor?.role
   const hasFetch = contributor?.fetch != null
+  const hasSticky = contributor?.stickyContribution != null
 
   useEffect(() => {
     if (id == null || role == null) return
@@ -25,6 +26,9 @@ export function useMapInteractionContributor(
       id,
       role,
       hitTest: (hit) => latestRef.current?.hitTest(hit) ?? null,
+      stickyContribution: hasSticky
+        ? () => latestRef.current?.stickyContribution?.() ?? null
+        : undefined,
       fetch: hasFetch
         ? (hit) => {
             const current = latestRef.current
@@ -37,5 +41,5 @@ export function useMapInteractionContributor(
     }
     register(wrapper)
     return () => unregister(id)
-  }, [id, role, hasFetch, register, unregister])
+  }, [id, role, hasFetch, hasSticky, register, unregister])
 }

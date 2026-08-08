@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useStore } from '@xyflow/react'
+import { collectMapHoverContributions } from './collectMapHoverContributions'
 import { composeMapHoverContributions } from './mapHoverCompositionPolicy'
 import { createAsyncSampleSlot } from './mapHoverAsyncSlot'
 import type { MapHoverSyncBlock } from './mapHoverContributionTypes'
@@ -43,37 +44,11 @@ function MapInteractionHoverEngine() {
   // ``version`` bumps on register/unregister; ``list`` identity is stable.
   const contributors = list()
 
-  const rawContributions = useMemo(() => {
-    const out = []
-    for (const contributor of contributors) {
-      if (hit != null) {
-        const contribution = contributor.hitTest(hit)
-        if (contribution != null) out.push(contribution)
-        continue
-      }
-      // Pinned planet labels persist after the pointer leaves the pane.
-      if (
-        contributor.role === 'planet' &&
-        hitState.domNode != null &&
-        hitState.transform != null
-      ) {
-        const sticky = contributor.hitTest({
-          clientPos: { x: 0, y: 0 },
-          hitEpoch: 0,
-          domNode: hitState.domNode,
-          transform: hitState.transform,
-        })
-        if (
-          sticky?.placement.mode === 'anchor' &&
-          sticky.placement.pinned === true
-        ) {
-          out.push(sticky)
-        }
-      }
-    }
-    return out
+  const rawContributions = useMemo(
+    () => collectMapHoverContributions(contributors, hit),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ``version`` invalidates ``contributors``
-  }, [contributors, hit, hitState.domNode, hitState.transform, version])
+    [contributors, hit, version]
+  )
 
   const scheduledKeyRef = useRef<string | null>(null)
 
