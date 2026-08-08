@@ -1,8 +1,6 @@
-import { useContext } from 'react'
 import type { StellarCartographyOverlayWormholeMarkerShape } from '../../lib/cartography/stellarCartographyOverlay'
 import { WormholeEndpointIconMark } from '../../lib/wormholeEndpointIcon'
 import {
-  formatWormholeEndpointHoverLines,
   type WormholeEndpointHoverInfo,
   wormholeEndpointRecenterGameCoords,
   wormholeMapCellKey,
@@ -12,11 +10,11 @@ import {
   requestMapAttention,
   useMapAttentionRequestStore,
 } from '../../stores/mapAttentionRequest'
-import {
-  WormholeHoverContext,
-  WormholeLineRevealContext,
-} from './stellarCartographyWormholeInteraction'
 
+/**
+ * Wormhole endpoint paint + click recenter.
+ * Hover labels / on-hover line reveal are owned by WormholeMapInteractionContributor.
+ */
 export function WormholeEndpointMarkers({
   markers,
   wormholeEndpointHoverByCell,
@@ -24,8 +22,6 @@ export function WormholeEndpointMarkers({
   markers: StellarCartographyOverlayWormholeMarkerShape[]
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
 }) {
-  const setWormholeHover = useContext(WormholeHoverContext)
-  const lineReveal = useContext(WormholeLineRevealContext)
   const pending = useMapAttentionRequestStore((s) => s.pending)
   const pulseTarget = isWormholeCellAttention(pending) ? pending : null
 
@@ -51,16 +47,6 @@ export function WormholeEndpointMarkers({
               top: cy - half,
               width: diameterPx,
               height: diameterPx,
-            }}
-            onMouseEnter={() => {
-              lineReveal.cancelClear()
-              lineReveal.revealAt(mapX, mapY)
-              if (hoverInfo == null) return
-              setWormholeHover(formatWormholeEndpointHoverLines(hoverInfo))
-            }}
-            onMouseLeave={() => {
-              setWormholeHover(null)
-              lineReveal.scheduleClear()
             }}
             onClick={(e) => {
               if (recenterGame == null) return

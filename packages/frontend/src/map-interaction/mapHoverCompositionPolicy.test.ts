@@ -81,7 +81,7 @@ describe('composeMapHoverContributions', () => {
     ])
   })
 
-  it('wormhole descriptive yieldsTo planet', () => {
+  it('wormhole map-element stacks with planet descriptive (not suppressed)', () => {
     const result = composeMapHoverContributions([
       contribution({
         id: 'planet:1',
@@ -93,13 +93,17 @@ describe('composeMapHoverContributions', () => {
       contribution({
         id: 'wormhole:1',
         role: 'wormhole',
-        kind: 'descriptive',
+        kind: 'map-element',
         title: 'Wormhole',
       }),
     ])
 
-    expect(result.suppressedIds).toEqual(['wormhole:1'])
-    expect(result.descriptiveHosts[0]!.sections).toHaveLength(1)
+    expect(result.suppressedIds).toEqual([])
+    expect(result.descriptiveHosts).toHaveLength(1)
+    expect(result.descriptiveHosts[0]!.sections.map((s) => s.role)).toEqual([
+      'planet',
+    ])
+    expect(result.stacked.map((c) => c.id)).toEqual(['wormhole:1'])
   })
 
   it('region mergesWith cartography as titled cursor sections in role order', () => {
@@ -132,7 +136,7 @@ describe('composeMapHoverContributions', () => {
     ])
   })
 
-  it('wormhole mergesWith cartography when both descriptive', () => {
+  it('cartography descriptive and wormhole map-element show simultaneously', () => {
     const result = composeMapHoverContributions([
       contribution({
         id: 'cartography:1',
@@ -141,18 +145,21 @@ describe('composeMapHoverContributions', () => {
         title: 'Stellar Cartography',
       }),
       contribution({
-        id: 'wormhole:1',
+        id: 'wormhole:endpoint:10,20',
         role: 'wormhole',
-        kind: 'descriptive',
+        kind: 'map-element',
         title: 'Wormhole',
       }),
     ])
 
+    expect(result.suppressedIds).toEqual([])
     expect(result.descriptiveHosts).toHaveLength(1)
     expect(result.descriptiveHosts[0]!.sections.map((s) => s.role)).toEqual([
       'cartography',
-      'wormhole',
     ])
+    expect(result.stacked).toHaveLength(1)
+    expect(result.stacked[0]!.id).toBe('wormhole:endpoint:10,20')
+    expect(result.stacked[0]!.kind).toBe('map-element')
   })
 
   it('deep-space fleet alone stays a separate descriptive host', () => {

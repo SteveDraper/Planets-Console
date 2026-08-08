@@ -1,12 +1,9 @@
 /**
- * Wormhole line-reveal + descriptive hover line bridge state.
+ * Wormhole on-hover line reveal state for Stellar Cartography paint.
  *
- * Temporary bridge only: feeds ``WormholeDescriptiveBridgeContributor`` until
- * #293 reclassifies wormhole affordances as map-element. Do not copy the
- * register-when-lines / hitTest-ignores-hit pattern used by that contributor.
- *
- * Composition vs planet is owned by the **map hover composition policy**;
- * ``blockedByPlanetHover`` is no longer the source of truth (#292).
+ * Hover *labels* are map-element contributions on the map interaction surface
+ * (#293); this provider only owns which wormhole lines are revealed in
+ * on-hover display mode.
  */
 
 import {
@@ -26,8 +23,6 @@ export type WormholeLineRevealApi = {
   cancelClear: () => void
 }
 
-export const WormholeHoverContext = createContext<(lines: string[] | null) => void>(() => {})
-
 export const WORMHOLE_LINE_REVEAL_CLEAR_MS = 120
 
 export const WormholeLineRevealContext = createContext<WormholeLineRevealApi>({
@@ -38,27 +33,39 @@ export const WormholeLineRevealContext = createContext<WormholeLineRevealApi>({
 
 export type WormholeInteractionState = {
   wormholeLineRevealKey: string | null
-  wormholeHoverLines: string[] | null
 }
 
-const WormholeInteractionStateContext = createContext<WormholeInteractionState | null>(null)
+const WormholeInteractionStateContext = createContext<WormholeInteractionState | null>(
+  null
+)
 
 export function useWormholeInteractionState(): WormholeInteractionState {
   const state = useContext(WormholeInteractionStateContext)
   if (state == null) {
-    throw new Error('useWormholeInteractionState must be used within WormholeInteractionProvider')
+    throw new Error(
+      'useWormholeInteractionState must be used within WormholeInteractionProvider'
+    )
   }
   return state
+}
+
+export function useWormholeLineReveal(): WormholeLineRevealApi {
+  return useContext(WormholeLineRevealContext)
 }
 
 type WormholeInteractionProviderProps = {
   children: ReactNode
 }
 
-export function WormholeInteractionProvider({ children }: WormholeInteractionProviderProps) {
-  const [wormholeHoverLines, setWormholeHoverLines] = useState<string[] | null>(null)
-  const [wormholeLineRevealKey, setWormholeLineRevealKey] = useState<string | null>(null)
-  const wormholeLineRevealClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+export function WormholeInteractionProvider({
+  children,
+}: WormholeInteractionProviderProps) {
+  const [wormholeLineRevealKey, setWormholeLineRevealKey] = useState<string | null>(
+    null
+  )
+  const wormholeLineRevealClearRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
 
   const wormholeLineReveal = useMemo<WormholeLineRevealApi>(
     () => ({
@@ -97,20 +104,15 @@ export function WormholeInteractionProvider({ children }: WormholeInteractionPro
   }, [])
 
   const interactionState = useMemo<WormholeInteractionState>(
-    () => ({
-      wormholeLineRevealKey,
-      wormholeHoverLines,
-    }),
-    [wormholeLineRevealKey, wormholeHoverLines]
+    () => ({ wormholeLineRevealKey }),
+    [wormholeLineRevealKey]
   )
 
   return (
     <WormholeInteractionStateContext.Provider value={interactionState}>
-      <WormholeHoverContext.Provider value={setWormholeHoverLines}>
-        <WormholeLineRevealContext.Provider value={wormholeLineReveal}>
-          {children}
-        </WormholeLineRevealContext.Provider>
-      </WormholeHoverContext.Provider>
+      <WormholeLineRevealContext.Provider value={wormholeLineReveal}>
+        {children}
+      </WormholeLineRevealContext.Provider>
     </WormholeInteractionStateContext.Provider>
   )
 }

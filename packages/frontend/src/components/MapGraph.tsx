@@ -69,7 +69,7 @@ import { PlanetMapInteraction } from '../map-interaction/contributors/PlanetMapI
 import { FleetMapInteractionContributor } from '../map-interaction/contributors/FleetMapInteractionContributor'
 import { RegionMapInteractionContributor } from '../map-interaction/contributors/RegionMapInteractionContributor'
 import { CartographyMapInteractionContributor } from '../map-interaction/contributors/CartographyMapInteractionContributor'
-import { WormholeDescriptiveBridgeContributor } from '../map-interaction/contributors/WormholeDescriptiveBridgeContributor'
+import { WormholeMapInteractionContributor } from '../map-interaction/contributors/WormholeMapInteractionContributor'
 
 type MapGraphProps = {
   data: CombinedMapData
@@ -226,10 +226,11 @@ function MapGraphFlow({
   const { wormholeLineRevealKey } = useWormholeInteractionState()
 
   const policy = useMemo(() => cartographyFramePolicy(cartography), [cartography])
-  const edges = useMemo(
-    () => toEdges(cartographyDisplayEdges(frame, policy, wormholeLineRevealKey)),
+  const displayMapEdges = useMemo(
+    () => cartographyDisplayEdges(frame, policy, wormholeLineRevealKey),
     [frame, policy, wormholeLineRevealKey]
   )
+  const edges = useMemo(() => toEdges(displayMapEdges), [displayMapEdges])
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
@@ -346,7 +347,11 @@ function MapGraphFlow({
         <FleetMapInteractionContributor stacks={fleetStacks} enabled={fleetEnabled} />
         <RegionMapInteractionContributor regionOverlays={regionOverlays} />
         <CartographyMapInteractionContributor cartography={cartography} />
-        <WormholeDescriptiveBridgeContributor cartography={cartography} />
+        <WormholeMapInteractionContributor
+          cartography={cartography}
+          hoverByCell={frame.wormholeEndpointHoverByCell}
+          displayEdges={displayMapEdges}
+        />
       </MapInteractionSurface>
       <FlowCoordinateReadout />
       <HomeworldMapContextMenu
