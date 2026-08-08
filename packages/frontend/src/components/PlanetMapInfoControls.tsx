@@ -7,7 +7,11 @@ type PlanetMapInfoControlsProps = {
 
 const DETAIL_OPTIONS: { value: PlanetDetailsLevel; label: string; description: string }[] = [
   { value: 'none', label: 'None', description: 'Show only title information' },
-  { value: 'low', label: 'Low', description: 'Show basic details' },
+  {
+    value: 'low',
+    label: 'Low',
+    description: 'Owner, colonist clans, natives, and temperature when known',
+  },
   { value: 'medium', label: 'Medium', description: 'Show full resource details' },
   { value: 'debug', label: 'Debug', description: 'Show all properties' },
 ]

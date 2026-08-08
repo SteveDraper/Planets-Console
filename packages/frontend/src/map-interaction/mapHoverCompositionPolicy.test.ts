@@ -199,13 +199,14 @@ describe('composeMapHoverContributions', () => {
     })
   })
 
-  it('fleet and region without merge edge produce two descriptive hosts', () => {
+  it('fleet mergesWith region into one host anchored at the fleet (fleet then region)', () => {
     const result = composeMapHoverContributions([
       contribution({
         id: 'fleet:1',
         role: 'fleet',
         kind: 'descriptive',
         title: 'Fleet',
+        placement: { mode: 'anchor', flowX: 5, flowY: 6 },
       }),
       contribution({
         id: 'region:1',
@@ -215,10 +216,53 @@ describe('composeMapHoverContributions', () => {
       }),
     ])
 
-    expect(result.descriptiveHosts).toHaveLength(2)
-    expect(result.descriptiveHosts.map((h) => h.sections[0]!.role)).toEqual([
+    expect(result.suppressedIds).toEqual([])
+    expect(result.descriptiveHosts).toHaveLength(1)
+    expect(result.descriptiveHosts[0]!.placement).toEqual({
+      mode: 'anchor',
+      flowX: 5,
+      flowY: 6,
+    })
+    expect(result.descriptiveHosts[0]!.sections.map((s) => s.role)).toEqual([
       'fleet',
       'region',
+    ])
+  })
+
+  it('fleet+region merge pulls cartography into the same anchored host', () => {
+    const result = composeMapHoverContributions([
+      contribution({
+        id: 'fleet:1',
+        role: 'fleet',
+        kind: 'descriptive',
+        title: 'Fleet',
+        placement: { mode: 'anchor', flowX: 5, flowY: 6 },
+      }),
+      contribution({
+        id: 'region:1',
+        role: 'region',
+        kind: 'descriptive',
+        title: 'Region',
+      }),
+      contribution({
+        id: 'cartography:1',
+        role: 'cartography',
+        kind: 'descriptive',
+        title: 'Stellar Cartography',
+      }),
+    ])
+
+    expect(result.suppressedIds).toEqual([])
+    expect(result.descriptiveHosts).toHaveLength(1)
+    expect(result.descriptiveHosts[0]!.placement).toEqual({
+      mode: 'anchor',
+      flowX: 5,
+      flowY: 6,
+    })
+    expect(result.descriptiveHosts[0]!.sections.map((s) => s.role)).toEqual([
+      'fleet',
+      'region',
+      'cartography',
     ])
   })
 
