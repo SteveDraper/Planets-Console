@@ -79,6 +79,11 @@ describe('hitTestWormholeAtPointer', () => {
     expect(result!.lines[0]).toMatch(/wormhole to \(30, 40\)/)
     expect(result!.revealMapX).toBe(10)
     expect(result!.revealMapY).toBe(20)
+    expect(result!.placement).toEqual({
+      mode: 'anchor',
+      flowX: 10.5,
+      flowY: -20.5,
+    })
   })
 
   it('prefers endpoint over edge when both are under the pointer', () => {
@@ -91,7 +96,7 @@ describe('hitTestWormholeAtPointer', () => {
   })
 
   it('hits edge mid-line when away from endpoints', () => {
-    // Midpoint between (10.5,-20.5) and (30.5,-40.5)
+    // Midpoint between (10.5,-20.5) and (30.5,-40.5); nearer the source end.
     const midX = (10.5 + 30.5) / 2
     const midY = (-20.5 + -40.5) / 2
     const result = hitTestWormholeAtPointer(
@@ -102,6 +107,14 @@ describe('hitTestWormholeAtPointer', () => {
     expect(result).not.toBeNull()
     expect(result!.id.startsWith('wormhole:edge:')).toBe(true)
     expect(result!.lines).toHaveLength(1)
+    // Midpoint ties nearer the source; chrome anchors there, reveal stays far end.
+    expect(result!.revealMapX).toBe(30)
+    expect(result!.revealMapY).toBe(40)
+    expect(result!.placement).toEqual({
+      mode: 'anchor',
+      flowX: 10.5,
+      flowY: -20.5,
+    })
   })
 
   it('returns null when pointer is far from wormholes', () => {

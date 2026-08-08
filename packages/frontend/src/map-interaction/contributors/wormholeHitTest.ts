@@ -1,8 +1,9 @@
 /**
  * Wormhole affordance hit-test for the **map interaction surface**.
  *
- * Emits **map-element** hover (issue #293): endpoint / edge proximity in flow
- * space from the pane pointer -- not pointer-capture on wormhole paint.
+ * Emits **map-element** hover: endpoint / edge proximity in flow space from the
+ * pane pointer -- not pointer-capture on wormhole paint. Chrome anchors at the
+ * hit cell center so it stays visually independent of cursor descriptive hosts.
  */
 
 import type { MapEdge } from '../../api/bff'
@@ -20,6 +21,7 @@ import {
   wormholeMapCellKey,
   type WormholeEndpointHoverInfo,
 } from '../../lib/wormholeEndpointHover'
+import type { MapHoverPlacement } from '../mapHoverContributionTypes'
 import type { MapHitContext } from '../mapInteractionContributorTypes'
 
 /** Pane-pixel half-width for wormhole edge line hit (matches BaseEdge interactionWidth). */
@@ -36,11 +38,19 @@ export type WormholeEdgeHoverData = {
 export type WormholeHitResult = {
   id: string
   lines: readonly string[]
-  /** Cursor-follow chrome; affordance stacks independently of descriptive hosts. */
-  placement: { mode: 'cursor' }
+  /** Flow-space anchor at the hit cell (endpoint) or near-end cell (edge). */
+  placement: Extract<MapHoverPlacement, { mode: 'anchor' }>
   /** Map cell used for on-hover wormhole line reveal. */
   revealMapX: number
   revealMapY: number
+}
+
+function anchorPlacementAtCell(
+  mapX: number,
+  mapY: number
+): Extract<MapHoverPlacement, { mode: 'anchor' }> {
+  const { cx, cy } = gameMapCellCenterToFlow(mapX, mapY)
+  return { mode: 'anchor', flowX: cx, flowY: cy }
 }
 
 function endpointHoverRadiusFlow(scale: number): number {
@@ -65,7 +75,7 @@ function distancePointToSegment(
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 }
 
-/** Edge mid-line / near-end label (same copy as pre-#293 edge hover). */
+/** Edge mid-line / near-end label. */
 export function wormholeHoverLabel(
   data: WormholeEdgeHoverData | undefined,
   nearSource: boolean
@@ -114,7 +124,7 @@ function hitTestEndpointAtFlow(
   return {
     id: `wormhole:endpoint:${wormholeMapCellKey(best.mapX, best.mapY)}`,
     lines: formatWormholeEndpointHoverLines(best.info),
-    placement: { mode: 'cursor' },
+    placement: anchorPlacementAtCell(best.mapX, best.mapY),
     revealMapX: best.mapX,
     revealMapY: best.mapY,
   }
@@ -174,12 +184,15 @@ function hitTestEdgeAtFlow(
     best.nearSource
   )
   if (label == null) return null
+  const nearMapX = best.nearSource ? best.sx : best.tx
+  const nearMapY = best.nearSource ? best.sy : best.ty
+  // Reveal paints the far end so the wormhole line is visible from the hover side.
   const revealMapX = best.nearSource ? best.tx : best.sx
   const revealMapY = best.nearSource ? best.ty : best.sy
   return {
     id: `wormhole:edge:${best.edge.source}:${best.edge.target}:${best.nearSource ? 's' : 't'}`,
     lines: [label],
-    placement: { mode: 'cursor' },
+    placement: anchorPlacementAtCell(nearMapX, nearMapY),
     revealMapX,
     revealMapY,
   }
