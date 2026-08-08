@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { FleetLocationRingsOverlay } from './FleetLocationRingsOverlay'
@@ -9,10 +9,6 @@ import {
 } from '../../stores/playerColors'
 import { defaultColorForPlayerId, resetPlayerColorOverrideStore } from '../../lib/playerColor'
 import type { FleetLocationRingStack } from '../../analytics/fleet/fleetLocationRings'
-
-const clientPosRef = vi.hoisted(() => ({
-  current: null as { x: number; y: number } | null,
-}))
 
 vi.mock('@xyflow/react', () => ({
   useStore: (selector: (state: { domNode: HTMLElement; transform: [number, number, number] }) => unknown) => {
@@ -38,13 +34,6 @@ vi.mock('@xyflow/react', () => ({
 
 vi.mock('./useOverlayPaneSize', () => ({
   useOverlayPaneSize: () => ({ width: 800, height: 600 }),
-}))
-
-vi.mock('./RegionOverlayHoverPanel', () => ({
-  useMapPaneClientPos: () => ({
-    clientPos: clientPosRef.current,
-    domNode: document.createElement('div'),
-  }),
 }))
 
 function sampleStack(overrides: Partial<FleetLocationRingStack> = {}): FleetLocationRingStack {
@@ -110,7 +99,6 @@ function wrapper({ children }: { children: ReactNode }) {
 
 describe('FleetLocationRingsOverlay', () => {
   beforeEach(() => {
-    clientPosRef.current = null
     usePlayerColorsStore.setState({ overrides: {} })
     resetPlayerColorOverrideStore()
     installPlayerColorsStorePort()
@@ -118,37 +106,16 @@ describe('FleetLocationRingsOverlay', () => {
 
   it('renders nothing when stacks are empty', () => {
     const { container } = render(
-      <FleetLocationRingsOverlay
-        stacks={[]}
-        planetCoordKeys={new Set()}
-        planetLabelsEnabled
-      />,
+      <FleetLocationRingsOverlay stacks={[]} />,
       { wrapper }
     )
     expect(container.querySelector('svg')).toBeNull()
   })
 
-  it('paints arcs and shows standalone tooltip from pane hit-test when not on a planet', async () => {
-    const stack = sampleStack()
-    // flow center (1000.5, -2000.5) at identity transform
-    clientPosRef.current = { x: 1000.5, y: -2000.5 }
-
-    const { container, rerender } = render(
-      <FleetLocationRingsOverlay
-        stacks={[stack]}
-        planetCoordKeys={new Set()}
-        planetLabelsEnabled
-      />,
+  it('paints arcs without pointer-capture hit targets', () => {
+    const { container } = render(
+      <FleetLocationRingsOverlay stacks={[sampleStack()]} />,
       { wrapper }
-    )
-
-    // Remount with clientPos already set (hook reads ref each render via mock).
-    rerender(
-      <FleetLocationRingsOverlay
-        stacks={[stack]}
-        planetCoordKeys={new Set()}
-        planetLabelsEnabled
-      />
     )
 
     const strokes = [...container.querySelectorAll('circle[stroke]')].map((el) =>
@@ -157,40 +124,12 @@ describe('FleetLocationRingsOverlay', () => {
     expect(strokes).toContain(defaultColorForPlayerId(8))
     expect(strokes).toContain(defaultColorForPlayerId(9))
     expect(container.querySelector('circle.pointer-events-auto')).toBeNull()
-
-    const tooltip = await screen.findByRole('tooltip')
-    expect(tooltip.textContent).toMatch(/Alice/)
-    expect(tooltip.textContent).toMatch(/Bob/)
-    expect(tooltip.textContent).toMatch(/101/)
-    expect(tooltip.textContent).toMatch(/202/)
-    expect(tooltip.textContent).toMatch(/20 mil/)
-    expect(tooltip.textContent).toMatch(/10 mil/)
-    expect(tooltip.textContent).not.toMatch(/alibi|possibly/i)
-  })
-
-  it('omits standalone tooltip when the stack sits on a planet with labels enabled', () => {
-    const stack = sampleStack()
-    clientPosRef.current = { x: 1000.5, y: -2000.5 }
-
-    render(
-      <FleetLocationRingsOverlay
-        stacks={[stack]}
-        planetCoordKeys={new Set(['1000,2000'])}
-        planetLabelsEnabled
-      />,
-      { wrapper }
-    )
-
-    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(container.querySelector('[role="tooltip"]')).toBeNull()
   })
 
   it('re-paints arc strokes when a player color override changes', () => {
     const { container } = render(
-      <FleetLocationRingsOverlay
-        stacks={[sampleStack()]}
-        planetCoordKeys={new Set()}
-        planetLabelsEnabled={false}
-      />,
+      <FleetLocationRingsOverlay stacks={[sampleStack()]} />,
       { wrapper }
     )
 

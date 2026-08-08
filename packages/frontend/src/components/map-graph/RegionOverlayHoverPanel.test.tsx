@@ -117,18 +117,11 @@ describe('computeRegionOverlayHoverLines', () => {
         [sampleOverlay],
         { x: 50, y: 60 },
         pane,
-        [0, 0, 1],
-        false
+        [0, 0, 1]
       )
     ).toEqual(['region line'])
     expect(
-      computeRegionOverlayHoverLines(
-        [sampleOverlay],
-        { x: 50, y: 60 },
-        pane,
-        [0, 0, 1],
-        true
-      )
+      computeRegionOverlayHoverLines([], { x: 50, y: 60 }, pane, [0, 0, 1])
     ).toEqual([])
     expect(pane.addEventListener).not.toHaveBeenCalled()
   })
@@ -143,11 +136,9 @@ describe('useRegionOverlayHoverLines', () => {
     vi.restoreAllMocks()
   })
 
-  it('shares one pointer source and suppresses lines when blocked by planet hover', () => {
-    const { result, rerender } = renderHook(
-      ({ blocked }: { blocked: boolean }) =>
-        useRegionOverlayHoverLines([sampleOverlay], blocked),
-      { initialProps: { blocked: false } }
+  it('shares one pointer source for region hover lines', () => {
+    const { result } = renderHook(() =>
+      useRegionOverlayHoverLines([sampleOverlay])
     )
 
     expect(pane.addEventListener).toHaveBeenCalledTimes(2)
@@ -160,12 +151,6 @@ describe('useRegionOverlayHoverLines', () => {
     })
     expect(result.current.clientPos).toEqual({ x: 50, y: 60 })
     expect(result.current.lines).toEqual(['region line'])
-
-    rerender({ blocked: true })
-    expect(result.current.clientPos).toEqual({ x: 50, y: 60 })
-    expect(result.current.lines).toEqual([])
-    // Rerender must not attach a second listener pair.
-    expect(pane.addEventListener).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -193,7 +178,7 @@ describe('RegionOverlayHoverTooltip', () => {
     expect(tip.textContent).toBe('pinned · 1 candidate')
   })
 
-  it('renders nothing when lines are empty (planet-hover suppression)', () => {
+  it('renders nothing when lines are empty', () => {
     const { container } = render(
       <RegionOverlayHoverTooltip lines={[]} clientPos={{ x: 30, y: 40 }} />
     )

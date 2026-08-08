@@ -22,8 +22,6 @@ export { useMapPaneClientPos }
 
 type RegionOverlayHoverPanelProps = {
   regionOverlays: readonly MapRegionOverlay[]
-  /** When a planet hover/pin label is showing, suppress region hover. */
-  blockedByPlanetHover?: boolean
 }
 
 export function regionOverlayHoverLinesAtClient(
@@ -49,10 +47,9 @@ export function computeRegionOverlayHoverLines(
   regionOverlays: readonly MapRegionOverlay[],
   clientPos: MapPaneClientPos | null,
   domNode: HTMLElement | null,
-  transform: [number, number, number] | undefined,
-  blockedByPlanetHover = false
+  transform: [number, number, number] | undefined
 ): string[] {
-  if (blockedByPlanetHover || clientPos == null || regionOverlays.length === 0) {
+  if (clientPos == null || regionOverlays.length === 0) {
     return []
   }
   return regionOverlayHoverLinesAtClient(
@@ -71,8 +68,7 @@ Attaches a pane pointer listener; prefer ``useMapPaneClientPos`` +
 ``computeRegionOverlayHoverLines`` when composing with other hover consumers.
 */
 export function useRegionOverlayHoverLines(
-  regionOverlays: readonly MapRegionOverlay[],
-  blockedByPlanetHover = false
+  regionOverlays: readonly MapRegionOverlay[]
 ): { lines: string[]; clientPos: MapPaneClientPos | null } {
   const transform = useStore((s) => s.transform)
   const { clientPos, domNode } = useMapPaneClientPos()
@@ -81,8 +77,7 @@ export function useRegionOverlayHoverLines(
       regionOverlays,
       clientPos,
       domNode,
-      transform,
-      blockedByPlanetHover
+      transform
     ),
     clientPos,
   }
@@ -135,11 +130,7 @@ export function RegionOverlayHoverTooltip({
  */
 export function RegionOverlayHoverPanel({
   regionOverlays,
-  blockedByPlanetHover = false,
 }: RegionOverlayHoverPanelProps) {
-  const { lines, clientPos } = useRegionOverlayHoverLines(
-    regionOverlays,
-    blockedByPlanetHover
-  )
+  const { lines, clientPos } = useRegionOverlayHoverLines(regionOverlays)
   return <RegionOverlayHoverTooltip lines={lines} clientPos={clientPos} />
 }

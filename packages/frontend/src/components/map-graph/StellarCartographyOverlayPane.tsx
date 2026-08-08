@@ -16,14 +16,12 @@ export function StellarCartographyOverlayPane({
   wormholeEndpoints,
   cartographyConfig,
   wormholeEndpointHoverByCell,
-  blockedByPlanetHover,
   nuIonStorms,
 }: {
   overlayCircles: CombinedMapData['overlayCircles']
   wormholeEndpoints: { x: number; y: number }[]
   cartographyConfig: StellarCartographyMapUiConfig
   wormholeEndpointHoverByCell: Map<string, WormholeEndpointHoverInfo>
-  blockedByPlanetHover: boolean
   nuIonStorms?: boolean
 }) {
   const domNode = useStore((s) => s.domNode ?? null)
@@ -59,7 +57,6 @@ export function StellarCartographyOverlayPane({
       <WormholeEndpointMarkers
         markers={shapes.wormholeMarkers}
         wormholeEndpointHoverByCell={wormholeEndpointHoverByCell}
-        blockedByPlanetHover={blockedByPlanetHover}
       />
     </div>
   )
