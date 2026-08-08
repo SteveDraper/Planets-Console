@@ -2,28 +2,27 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DiplomacyTier } from './diplomacyTier'
 import {
   PLAYER_COLOR_PRESET,
+  buildPlayerColorPaintSnapshot,
   colorForPlayerId,
   defaultColorForPlayerId,
+  defaultPlayerColorPaintSnapshotInputs,
   diplomacyColorFamilyMemberIds,
   outOfCircleFamilyMemberIds,
   resetPlayerColorResolutionPort,
+  resolvePlayerColor,
   setPlayerColorResolutionPort,
   tonalVariantForFamilyMember,
-  type PlayerColorResolutionPort,
+  type PlayerColorPaintSnapshot,
+  type PlayerColorPaintSnapshotInputs,
 } from './playerColor'
 
-function port(partial: Partial<PlayerColorResolutionPort>): PlayerColorResolutionPort {
-  return {
-    getMode: () => 'per_player',
-    getOverride: () => undefined,
-    getDiplomacyThreshold: () => DiplomacyTier.SAFE_PASSAGE,
-    getFamilyBaseColor: () => '#34d399',
-    getOutOfCircleBaseColor: () => '#f43f5e',
-    getViewpointPlayerId: () => null,
-    getInboundRelationFromByPlayerId: () => new Map(),
-    getRosterPlayerIds: () => [],
+function snapshot(
+  partial: Partial<PlayerColorPaintSnapshotInputs> = {}
+): PlayerColorPaintSnapshot {
+  return buildPlayerColorPaintSnapshot({
+    ...defaultPlayerColorPaintSnapshotInputs(),
     ...partial,
-  }
+  })
 }
 
 describe('playerColor', () => {
@@ -48,13 +47,13 @@ describe('playerColor', () => {
   })
 
   it('consults overrides in per-player mode', () => {
-    setPlayerColorResolutionPort(
-      port({
-        getOverride: (playerId) => (playerId === 8 ? '#ffffff' : undefined),
-      })
-    )
+    const paint = snapshot({
+      overrides: { '8': '#ffffff' },
+    })
+    setPlayerColorResolutionPort({ getSnapshot: () => paint })
     expect(colorForPlayerId(8)).toBe('#ffffff')
     expect(colorForPlayerId(9)).toBe(defaultColorForPlayerId(9))
+    expect(resolvePlayerColor(8, paint)).toBe('#ffffff')
   })
 
   it('lists diplomacy family members including viewpoint plus inbound grants at threshold', () => {
@@ -76,19 +75,20 @@ describe('playerColor', () => {
       [4, DiplomacyTier.SHARE_INTEL],
     ])
     const roster = [1, 2, 3, 4]
-    setPlayerColorResolutionPort(
-      port({
-        getMode: () => 'diplomacy_family',
-        getViewpointPlayerId: () => 1,
-        getInboundRelationFromByPlayerId: () => inbound,
-        getFamilyBaseColor: () => '#336699',
-        getOutOfCircleBaseColor: () => '#aa3333',
-        getDiplomacyThreshold: () => DiplomacyTier.SAFE_PASSAGE,
-        getRosterPlayerIds: () => roster,
-      })
-    )
+    const paint = snapshot({
+      mode: 'diplomacy_family',
+      viewpointPlayerId: 1,
+      inboundRelationFromByPlayerId: inbound,
+      familyBaseColor: '#336699',
+      outOfCircleBaseColor: '#aa3333',
+      diplomacyThreshold: DiplomacyTier.SAFE_PASSAGE,
+      rosterPlayerIds: roster,
+    })
+    setPlayerColorResolutionPort({ getSnapshot: () => paint })
     const inCircle = [1, 2, 4]
     const outCircle = [3]
+    expect(paint.inCircleMemberIds).toEqual(inCircle)
+    expect(paint.outOfCircleMemberIds).toEqual(outCircle)
     expect(colorForPlayerId(1)).toBe(
       tonalVariantForFamilyMember('#336699', 1, inCircle, 1)
     )
@@ -108,15 +108,14 @@ describe('playerColor', () => {
   })
 
   it('paints missing-relation roster players with the out-of-circle base', () => {
-    setPlayerColorResolutionPort(
-      port({
-        getMode: () => 'diplomacy_family',
-        getViewpointPlayerId: () => 1,
-        getInboundRelationFromByPlayerId: () => new Map([[2, DiplomacyTier.SAFE_PASSAGE]]),
-        getOutOfCircleBaseColor: () => '#aa3333',
-        getRosterPlayerIds: () => [1, 2, 9],
-      })
-    )
+    const paint = snapshot({
+      mode: 'diplomacy_family',
+      viewpointPlayerId: 1,
+      inboundRelationFromByPlayerId: new Map([[2, DiplomacyTier.SAFE_PASSAGE]]),
+      outOfCircleBaseColor: '#aa3333',
+      rosterPlayerIds: [1, 2, 9],
+    })
+    setPlayerColorResolutionPort({ getSnapshot: () => paint })
     expect(colorForPlayerId(9)).toBe(
       tonalVariantForFamilyMember('#aa3333', 9, [9], null)
     )

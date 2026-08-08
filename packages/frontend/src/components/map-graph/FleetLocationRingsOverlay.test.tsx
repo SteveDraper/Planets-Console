@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { FleetLocationRingsOverlay } from './FleetLocationRingsOverlay'
 import {
   installPlayerColorsStorePort,
+  resetPlayerColorsStoreState,
   usePlayerColorsStore,
 } from '../../stores/playerColors'
 import { defaultColorForPlayerId, resetPlayerColorResolutionPort } from '../../lib/playerColor'
@@ -99,16 +100,8 @@ function wrapper({ children }: { children: ReactNode }) {
 
 describe('FleetLocationRingsOverlay', () => {
   beforeEach(() => {
-    usePlayerColorsStore.setState({
-      overrides: {},
-      mode: 'per_player',
+    resetPlayerColorsStoreState({
       diplomacyThreshold: 2,
-      familyBaseColor: '#34d399',
-      outOfCircleBaseColor: '#f43f5e',
-      viewpointPlayerId: null,
-      inboundRelationFromByPlayerId: new Map(),
-      rosterPlayerIds: [],
-      paintRevision: 0,
     })
     resetPlayerColorResolutionPort()
     installPlayerColorsStorePort()

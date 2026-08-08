@@ -9,39 +9,26 @@ import {
 } from '../lib/playerColor'
 import {
   installPlayerColorsStorePort,
+  resetPlayerColorsStoreState,
   usePlayerColor,
   usePlayerColorsStore,
 } from './playerColors'
 
 describe('usePlayerColorsStore', () => {
   beforeEach(() => {
-    usePlayerColorsStore.setState({
-      overrides: {},
-      mode: 'per_player',
-      diplomacyThreshold: DiplomacyTier.SAFE_PASSAGE,
-      familyBaseColor: '#34d399',
-      outOfCircleBaseColor: '#f43f5e',
-      viewpointPlayerId: null,
-      inboundRelationFromByPlayerId: new Map(),
-      rosterPlayerIds: [],
-      paintRevision: 0,
-    })
+    resetPlayerColorsStoreState()
     resetPlayerColorResolutionPort()
     installPlayerColorsStorePort()
   })
 
   it('starts with empty overrides and returns preset defaults', () => {
     expect(usePlayerColorsStore.getState().overrides).toEqual({})
-    expect(usePlayerColorsStore.getState().colorForPlayerId(3)).toBe(
-      defaultColorForPlayerId(3)
-    )
     expect(colorForPlayerId(3)).toBe(defaultColorForPlayerId(3))
   })
 
-  it('setPlayerColorOverride updates the resolution port used by colorForPlayerId', () => {
+  it('setPlayerColorOverride updates the snapshot used by colorForPlayerId', () => {
     usePlayerColorsStore.getState().setPlayerColorOverride(3, '#112233')
     expect(colorForPlayerId(3)).toBe('#112233')
-    expect(usePlayerColorsStore.getState().colorForPlayerId(3)).toBe('#112233')
 
     usePlayerColorsStore.getState().setPlayerColorOverride(3, null)
     expect(colorForPlayerId(3)).toBe(defaultColorForPlayerId(3))

@@ -7,6 +7,7 @@ import { perspectiveRow } from '../lib/perspectiveRowTestFixtures'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import {
   installPlayerColorsStorePort,
+  resetPlayerColorsStoreState,
   usePlayerColorsStore,
 } from '../stores/playerColors'
 import { useShellStore } from '../stores/shell'
@@ -14,16 +15,8 @@ import { resetPlayerColorResolutionPort } from '../lib/playerColor'
 
 describe('SettingsModal player colors', () => {
   beforeEach(() => {
-    usePlayerColorsStore.setState({
-      overrides: {},
-      mode: 'per_player',
+    resetPlayerColorsStoreState({
       diplomacyThreshold: DiplomacyTier.SAFE_PASSAGE,
-      familyBaseColor: '#34d399',
-      outOfCircleBaseColor: '#f43f5e',
-      viewpointPlayerId: null,
-      inboundRelationFromByPlayerId: new Map(),
-      rosterPlayerIds: [],
-      paintRevision: 0,
     })
     resetPlayerColorResolutionPort()
     installPlayerColorsStorePort()

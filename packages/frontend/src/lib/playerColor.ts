@@ -1,6 +1,7 @@
 /**
  * Shared player identity colors for map/table paint.
- * Shell + Settings install a resolution port; call sites use colorForPlayerId.
+ * Build an immutable {@link PlayerColorPaintSnapshot}, then
+ * {@link resolvePlayerColor}. Non-React callers use {@link colorForPlayerId}.
  */
 
 import { hexToRgb } from './cartography/cartographyColor'
@@ -41,55 +42,88 @@ export type PlayerColorOverrides = Readonly<Record<string, string>>
 const EMPTY_INBOUND = new Map<number, number>()
 const EMPTY_ROSTER: readonly number[] = []
 
-/** Paint inputs consulted by {@link colorForPlayerId}. */
+/** Inputs used to build an immutable paint snapshot. */
+export type PlayerColorPaintSnapshotInputs = {
+  mode: PlayerColorMode
+  overrides: PlayerColorOverrides
+  diplomacyThreshold: DiplomacyColorThreshold
+  familyBaseColor: string
+  outOfCircleBaseColor: string
+  viewpointPlayerId: number | null
+  inboundRelationFromByPlayerId: ReadonlyMap<number, number>
+  rosterPlayerIds: readonly number[]
+}
+
+/**
+ * Immutable paint policy inputs. Family membership is precomputed at build time
+ * so resolve is a pure lookup + tonal variant.
+ */
+export type PlayerColorPaintSnapshot = Readonly<{
+  mode: PlayerColorMode
+  overrides: PlayerColorOverrides
+  familyBaseColor: string
+  outOfCircleBaseColor: string
+  viewpointPlayerId: number | null
+  inCircleMemberIds: readonly number[]
+  outOfCircleMemberIds: readonly number[]
+}>
+
+/** Thin port: non-React {@link colorForPlayerId} reads the active snapshot. */
 export type PlayerColorResolutionPort = {
-  getMode: () => PlayerColorMode
-  getOverride: (playerId: number) => string | undefined
-  getDiplomacyThreshold: () => DiplomacyColorThreshold
-  getFamilyBaseColor: () => string
-  getOutOfCircleBaseColor: () => string
-  getViewpointPlayerId: () => number | null
-  getInboundRelationFromByPlayerId: () => ReadonlyMap<number, number>
-  /** Game roster player ids (for out-of-circle tone assignment). */
-  getRosterPlayerIds: () => readonly number[]
+  getSnapshot: () => PlayerColorPaintSnapshot
+}
+
+export const EMPTY_PLAYER_COLOR_PAINT_SNAPSHOT: PlayerColorPaintSnapshot = {
+  mode: 'per_player',
+  overrides: {},
+  familyBaseColor: DEFAULT_FAMILY_BASE_COLOR,
+  outOfCircleBaseColor: DEFAULT_OUT_OF_CIRCLE_BASE_COLOR,
+  viewpointPlayerId: null,
+  inCircleMemberIds: EMPTY_ROSTER,
+  outOfCircleMemberIds: EMPTY_ROSTER,
 }
 
 const emptyResolutionPort: PlayerColorResolutionPort = {
-  getMode: () => 'per_player',
-  getOverride: () => undefined,
-  getDiplomacyThreshold: () => DEFAULT_DIPLOMACY_COLOR_THRESHOLD,
-  getFamilyBaseColor: () => DEFAULT_FAMILY_BASE_COLOR,
-  getOutOfCircleBaseColor: () => DEFAULT_OUT_OF_CIRCLE_BASE_COLOR,
-  getViewpointPlayerId: () => null,
-  getInboundRelationFromByPlayerId: () => EMPTY_INBOUND,
-  getRosterPlayerIds: () => EMPTY_ROSTER,
+  getSnapshot: () => EMPTY_PLAYER_COLOR_PAINT_SNAPSHOT,
 }
 
 let activeResolutionPort: PlayerColorResolutionPort = emptyResolutionPort
 
-/** Install the resolution port consulted by {@link colorForPlayerId}. */
+/** Install the snapshot port consulted by {@link colorForPlayerId}. */
 export function setPlayerColorResolutionPort(port: PlayerColorResolutionPort): void {
   activeResolutionPort = port
 }
 
-/** Restore the empty resolution port (tests / teardown). */
+/** Restore the empty snapshot port (tests / teardown). */
 export function resetPlayerColorResolutionPort(): void {
   activeResolutionPort = emptyResolutionPort
 }
 
-/** Override-only install helper for tests that do not need full resolution inputs. */
-export function setPlayerColorOverrideStore(store: {
-  getOverride: (playerId: number) => string | undefined
-}): void {
-  setPlayerColorResolutionPort({
-    ...emptyResolutionPort,
-    getOverride: store.getOverride,
-  })
-}
-
-/** Alias for {@link resetPlayerColorResolutionPort}. */
-export function resetPlayerColorOverrideStore(): void {
-  resetPlayerColorResolutionPort()
+/**
+ * Build an immutable paint snapshot, precomputing in-circle and out-of-circle
+ * membership for diplomacy-family resolve.
+ */
+export function buildPlayerColorPaintSnapshot(
+  inputs: PlayerColorPaintSnapshotInputs
+): PlayerColorPaintSnapshot {
+  const inCircleMemberIds = diplomacyColorFamilyMemberIds(
+    inputs.inboundRelationFromByPlayerId,
+    inputs.viewpointPlayerId,
+    inputs.diplomacyThreshold
+  )
+  const outOfCircleMemberIds = outOfCircleFamilyMemberIds(
+    inputs.rosterPlayerIds,
+    inCircleMemberIds
+  )
+  return {
+    mode: inputs.mode,
+    overrides: inputs.overrides,
+    familyBaseColor: inputs.familyBaseColor,
+    outOfCircleBaseColor: inputs.outOfCircleBaseColor,
+    viewpointPlayerId: inputs.viewpointPlayerId,
+    inCircleMemberIds,
+    outOfCircleMemberIds,
+  }
 }
 
 export function playerColorOverrideStorageKey(playerId: number): string {
@@ -272,50 +306,69 @@ export function outOfCircleFamilyMemberIds(
 
 function colorFromDiplomacyFamily(
   playerId: number,
-  port: PlayerColorResolutionPort
+  snapshot: PlayerColorPaintSnapshot
 ): string | null {
-  const viewpointPlayerId = port.getViewpointPlayerId()
-  if (viewpointPlayerId == null) {
+  if (snapshot.viewpointPlayerId == null) {
     return null
   }
-  const threshold = port.getDiplomacyThreshold()
-  const inbound = port.getInboundRelationFromByPlayerId()
-  const inCircle = diplomacyColorFamilyMemberIds(inbound, viewpointPlayerId, threshold)
-  if (inCircle.includes(playerId)) {
+  if (snapshot.inCircleMemberIds.includes(playerId)) {
     return tonalVariantForFamilyMember(
-      port.getFamilyBaseColor(),
+      snapshot.familyBaseColor,
       playerId,
-      inCircle,
-      viewpointPlayerId
+      snapshot.inCircleMemberIds,
+      snapshot.viewpointPlayerId
     )
   }
-  const roster = port.getRosterPlayerIds()
-  let outCircle = outOfCircleFamilyMemberIds(roster, inCircle)
+  let outCircle = snapshot.outOfCircleMemberIds
   if (!outCircle.includes(playerId)) {
     // Painted id missing from roster still gets out-of-circle paint as a singleton.
     outCircle = [...outCircle, playerId].sort((a, b) => a - b)
   }
   return tonalVariantForFamilyMember(
-    port.getOutOfCircleBaseColor(),
+    snapshot.outOfCircleBaseColor,
     playerId,
     outCircle,
     null
   )
 }
 
-/**
- * Resolve a player's paint color from the resolution port.
- * Non-React callers use this entry point. React paint that must update when
- * Settings or shell paint context change should use ``usePlayerColor``.
- */
-export function colorForPlayerId(playerId: number): string {
-  const port = activeResolutionPort
-  if (port.getMode() === 'diplomacy_family') {
-    const familyColor = colorFromDiplomacyFamily(playerId, port)
+/** Pure paint policy: resolve a player color from an immutable snapshot. */
+export function resolvePlayerColor(
+  playerId: number,
+  snapshot: PlayerColorPaintSnapshot
+): string {
+  if (snapshot.mode === 'diplomacy_family') {
+    const familyColor = colorFromDiplomacyFamily(playerId, snapshot)
     if (familyColor != null) {
       return familyColor
     }
     return defaultColorForPlayerId(playerId)
   }
-  return colorFromOverrideOrDefault(playerId, port.getOverride(playerId))
+  return colorFromOverrideOrDefault(
+    playerId,
+    snapshot.overrides[playerColorOverrideStorageKey(playerId)]
+  )
+}
+
+/**
+ * Resolve a player's paint color from the active snapshot port.
+ * Non-React callers use this entry point. React paint that must update when
+ * Settings or shell paint context change should use ``usePlayerColor``.
+ */
+export function colorForPlayerId(playerId: number): string {
+  return resolvePlayerColor(playerId, activeResolutionPort.getSnapshot())
+}
+
+/** Default snapshot inputs (empty shell context, default knobs). */
+export function defaultPlayerColorPaintSnapshotInputs(): PlayerColorPaintSnapshotInputs {
+  return {
+    mode: 'per_player',
+    overrides: {},
+    diplomacyThreshold: DEFAULT_DIPLOMACY_COLOR_THRESHOLD,
+    familyBaseColor: DEFAULT_FAMILY_BASE_COLOR,
+    outOfCircleBaseColor: DEFAULT_OUT_OF_CIRCLE_BASE_COLOR,
+    viewpointPlayerId: null,
+    inboundRelationFromByPlayerId: EMPTY_INBOUND,
+    rosterPlayerIds: EMPTY_ROSTER,
+  }
 }

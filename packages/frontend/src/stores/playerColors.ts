@@ -6,13 +6,17 @@ import {
   type DiplomacyColorThreshold,
 } from '../lib/diplomacyTier'
 import {
-  colorForPlayerId as resolvePlayerColor,
+  buildPlayerColorPaintSnapshot,
   DEFAULT_FAMILY_BASE_COLOR,
   DEFAULT_OUT_OF_CIRCLE_BASE_COLOR,
+  defaultPlayerColorPaintSnapshotInputs,
   playerColorOverrideStorageKey,
+  resolvePlayerColor,
   setPlayerColorResolutionPort,
   type PlayerColorMode,
   type PlayerColorOverrides,
+  type PlayerColorPaintSnapshot,
+  type PlayerColorPaintSnapshotInputs,
 } from '../lib/playerColor'
 import { createLocalStorageOrMemoryStateStorage } from '../lib/browserPersistStorage'
 
@@ -36,8 +40,8 @@ type PlayerColorsState = PlayerColorsPersisted & {
   viewpointPlayerId: number | null
   inboundRelationFromByPlayerId: ReadonlyMap<number, number>
   rosterPlayerIds: readonly number[]
-  /** Bumps so ``usePlayerColor`` re-renders on any paint-affecting change. */
-  paintRevision: number
+  /** Immutable paint snapshot; rebuilt when knobs or shell context change. */
+  paintSnapshot: PlayerColorPaintSnapshot
   setPlayerColorOverride: (playerId: number, color: string | null) => void
   setPlayerColorMode: (mode: PlayerColorMode) => void
   setDiplomacyThreshold: (threshold: DiplomacyColorThreshold) => void
@@ -48,12 +52,47 @@ type PlayerColorsState = PlayerColorsPersisted & {
     inboundRelationFromByPlayerId: ReadonlyMap<number, number>
     rosterPlayerIds: readonly number[]
   }) => void
-  colorForPlayerId: (playerId: number) => string
 }
 
-function bumpRevision(state: PlayerColorsState): number {
-  return state.paintRevision + 1
+function snapshotInputsFromState(
+  state: PlayerColorsPersisted & {
+    viewpointPlayerId: number | null
+    inboundRelationFromByPlayerId: ReadonlyMap<number, number>
+    rosterPlayerIds: readonly number[]
+  }
+): PlayerColorPaintSnapshotInputs {
+  return {
+    mode: state.mode,
+    overrides: state.overrides,
+    diplomacyThreshold: state.diplomacyThreshold,
+    familyBaseColor: state.familyBaseColor,
+    outOfCircleBaseColor: state.outOfCircleBaseColor,
+    viewpointPlayerId: state.viewpointPlayerId,
+    inboundRelationFromByPlayerId: state.inboundRelationFromByPlayerId,
+    rosterPlayerIds: state.rosterPlayerIds,
+  }
 }
+
+function withRebuiltSnapshot(
+  state: PlayerColorsPersisted & {
+    viewpointPlayerId: number | null
+    inboundRelationFromByPlayerId: ReadonlyMap<number, number>
+    rosterPlayerIds: readonly number[]
+  },
+  patch: Partial<PlayerColorsPersisted> & {
+    viewpointPlayerId?: number | null
+    inboundRelationFromByPlayerId?: ReadonlyMap<number, number>
+    rosterPlayerIds?: readonly number[]
+  }
+): typeof patch & { paintSnapshot: PlayerColorPaintSnapshot } {
+  const next = { ...state, ...patch }
+  return {
+    ...patch,
+    paintSnapshot: buildPlayerColorPaintSnapshot(snapshotInputsFromState(next)),
+  }
+}
+
+const initialSnapshotInputs = defaultPlayerColorPaintSnapshotInputs()
 
 export const usePlayerColorsStore = create<PlayerColorsState>()(
   persist(
@@ -66,43 +105,41 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
       viewpointPlayerId: null,
       inboundRelationFromByPlayerId: EMPTY_INBOUND,
       rosterPlayerIds: EMPTY_ROSTER,
-      paintRevision: 0,
+      paintSnapshot: buildPlayerColorPaintSnapshot(initialSnapshotInputs),
       setPlayerColorOverride: (playerId, color) =>
         set((state) => {
           const key = playerColorOverrideStorageKey(playerId)
           if (color == null || color.length === 0) {
             const rest = { ...state.overrides }
             delete rest[key]
-            return { overrides: rest, paintRevision: bumpRevision(state) }
+            return withRebuiltSnapshot(state, { overrides: rest })
           }
-          return {
+          return withRebuiltSnapshot(state, {
             overrides: {
               ...state.overrides,
               [key]: color,
             },
-            paintRevision: bumpRevision(state),
-          }
+          })
         }),
-      setPlayerColorMode: (mode) =>
-        set((state) => ({ mode, paintRevision: bumpRevision(state) })),
+      setPlayerColorMode: (mode) => set((state) => withRebuiltSnapshot(state, { mode })),
       setDiplomacyThreshold: (diplomacyThreshold) =>
-        set((state) => ({ diplomacyThreshold, paintRevision: bumpRevision(state) })),
+        set((state) => withRebuiltSnapshot(state, { diplomacyThreshold })),
       setFamilyBaseColor: (familyBaseColor) =>
-        set((state) => ({ familyBaseColor, paintRevision: bumpRevision(state) })),
+        set((state) => withRebuiltSnapshot(state, { familyBaseColor })),
       setOutOfCircleBaseColor: (outOfCircleBaseColor) =>
-        set((state) => ({ outOfCircleBaseColor, paintRevision: bumpRevision(state) })),
+        set((state) => withRebuiltSnapshot(state, { outOfCircleBaseColor })),
       setPaintContext: ({
         viewpointPlayerId,
         inboundRelationFromByPlayerId,
         rosterPlayerIds,
       }) =>
-        set((state) => ({
-          viewpointPlayerId,
-          inboundRelationFromByPlayerId,
-          rosterPlayerIds,
-          paintRevision: bumpRevision(state),
-        })),
-      colorForPlayerId: (playerId) => resolvePlayerColor(playerId),
+        set((state) =>
+          withRebuiltSnapshot(state, {
+            viewpointPlayerId,
+            inboundRelationFromByPlayerId,
+            rosterPlayerIds,
+          })
+        ),
     }),
     {
       name: PLAYER_COLORS_STORAGE_KEY,
@@ -134,7 +171,7 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
             : current.outOfCircleBaseColor
         const overrides =
           p.overrides != null && typeof p.overrides === 'object' ? p.overrides : current.overrides
-        return {
+        const merged = {
           ...current,
           overrides,
           mode,
@@ -142,40 +179,35 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
           familyBaseColor,
           outOfCircleBaseColor,
         }
+        return {
+          ...merged,
+          paintSnapshot: buildPlayerColorPaintSnapshot(snapshotInputsFromState(merged)),
+        }
       },
     }
   )
 )
 
 /**
- * Bind zustand state into the shared {@link colorForPlayerId} resolution port.
+ * Bind zustand paint snapshot into the shared {@link colorForPlayerId} port.
  * Settings (or another always-mounted shell module) must import this module so
  * the port is installed and persisted knobs rehydrate.
  */
 export function installPlayerColorsStorePort(): void {
   setPlayerColorResolutionPort({
-    getMode: () => usePlayerColorsStore.getState().mode,
-    getOverride: (playerId) =>
-      usePlayerColorsStore.getState().overrides[playerColorOverrideStorageKey(playerId)],
-    getDiplomacyThreshold: () => usePlayerColorsStore.getState().diplomacyThreshold,
-    getFamilyBaseColor: () => usePlayerColorsStore.getState().familyBaseColor,
-    getOutOfCircleBaseColor: () => usePlayerColorsStore.getState().outOfCircleBaseColor,
-    getViewpointPlayerId: () => usePlayerColorsStore.getState().viewpointPlayerId,
-    getInboundRelationFromByPlayerId: () =>
-      usePlayerColorsStore.getState().inboundRelationFromByPlayerId,
-    getRosterPlayerIds: () => usePlayerColorsStore.getState().rosterPlayerIds,
+    getSnapshot: () => usePlayerColorsStore.getState().paintSnapshot,
   })
 }
 
 installPlayerColorsStorePort()
 
 /**
- * Reactive player color for map/table paint. Subscribes to paint-affecting
- * store changes so Settings and shell context updates re-render.
+ * Reactive player color for map/table paint. Subscribes to the paint snapshot
+ * so Settings and shell context updates re-render.
  */
 export function usePlayerColor(playerId: number): string {
-  usePlayerColorsStore((state) => state.paintRevision)
-  return resolvePlayerColor(playerId)
+  const snapshot = usePlayerColorsStore((state) => state.paintSnapshot)
+  return resolvePlayerColor(playerId, snapshot)
 }
 
 /** Clear shell paint context (no viewpoint / relations / roster). */
@@ -184,5 +216,19 @@ export function clearPlayerColorPaintContext(): void {
     viewpointPlayerId: null,
     inboundRelationFromByPlayerId: EMPTY_INBOUND,
     rosterPlayerIds: EMPTY_ROSTER,
+  })
+}
+
+/** Test helper: reset knobs + shell context and rebuild the paint snapshot. */
+export function resetPlayerColorsStoreState(
+  patch: Partial<PlayerColorPaintSnapshotInputs> = {}
+): void {
+  const inputs: PlayerColorPaintSnapshotInputs = {
+    ...defaultPlayerColorPaintSnapshotInputs(),
+    ...patch,
+  }
+  usePlayerColorsStore.setState({
+    ...inputs,
+    paintSnapshot: buildPlayerColorPaintSnapshot(inputs),
   })
 }
