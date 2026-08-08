@@ -48,10 +48,7 @@ import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSel
 import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
-import {
-  WormholeInteractionProvider,
-  useWormholeInteractionState,
-} from './map-graph/stellarCartographyWormholeInteraction'
+import { useWormholeLineRevealStore } from '../stores/wormholeLineReveal'
 import {
   buildLabelSourceByNodeId,
   FixedSizeDotsOverlay,
@@ -69,7 +66,7 @@ import { PlanetMapInteraction } from '../map-interaction/contributors/PlanetMapI
 import { FleetMapInteractionContributor } from '../map-interaction/contributors/FleetMapInteractionContributor'
 import { RegionMapInteractionContributor } from '../map-interaction/contributors/RegionMapInteractionContributor'
 import { CartographyMapInteractionContributor } from '../map-interaction/contributors/CartographyMapInteractionContributor'
-import { WormholeDescriptiveBridgeContributor } from '../map-interaction/contributors/WormholeDescriptiveBridgeContributor'
+import { WormholeMapInteractionContributor } from '../map-interaction/contributors/WormholeMapInteractionContributor'
 
 type MapGraphProps = {
   data: CombinedMapData
@@ -158,27 +155,25 @@ export function MapGraph({
         className="h-full w-full transition-opacity duration-150"
         style={{ opacity: initialFitDone ? 1 : 0 }}
       >
-        <WormholeInteractionProvider>
-          <MapGraphFlow
-            data={data}
-            frame={frame}
-            nodes={nodes}
-            planetMapNodes={planetMapNodes}
-            planetGrid={planetGrid}
-            waypointGrid={waypointGrid}
-            labelSourceByNodeId={labelSourceByNodeId}
-            planetLabelOptions={planetLabelOptions}
-            analyticScope={analyticScope}
-            roster={roster}
-            cartography={cartography}
-            mapLayersPending={mapLayersPending}
-            homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
-            displayMapFrameIsLive={displayMapFrameIsLive}
-            onMapZoomChange={onMapZoomChange}
-            onSetZoomReady={onSetZoomReady}
-            onInitialFitDone={onInitialFitDone}
-          />
-        </WormholeInteractionProvider>
+        <MapGraphFlow
+          data={data}
+          frame={frame}
+          nodes={nodes}
+          planetMapNodes={planetMapNodes}
+          planetGrid={planetGrid}
+          waypointGrid={waypointGrid}
+          labelSourceByNodeId={labelSourceByNodeId}
+          planetLabelOptions={planetLabelOptions}
+          analyticScope={analyticScope}
+          roster={roster}
+          cartography={cartography}
+          mapLayersPending={mapLayersPending}
+          homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
+          displayMapFrameIsLive={displayMapFrameIsLive}
+          onMapZoomChange={onMapZoomChange}
+          onSetZoomReady={onSetZoomReady}
+          onInitialFitDone={onInitialFitDone}
+        />
       </div>
     </div>
   )
@@ -223,13 +218,16 @@ function MapGraphFlow({
   onSetZoomReady,
   onInitialFitDone,
 }: MapGraphFlowProps) {
-  const { wormholeLineRevealKey } = useWormholeInteractionState()
+  const wormholeLineRevealKey = useWormholeLineRevealStore(
+    (s) => s.wormholeLineRevealKey
+  )
 
   const policy = useMemo(() => cartographyFramePolicy(cartography), [cartography])
-  const edges = useMemo(
-    () => toEdges(cartographyDisplayEdges(frame, policy, wormholeLineRevealKey)),
+  const displayMapEdges = useMemo(
+    () => cartographyDisplayEdges(frame, policy, wormholeLineRevealKey),
     [frame, policy, wormholeLineRevealKey]
   )
+  const edges = useMemo(() => toEdges(displayMapEdges), [displayMapEdges])
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
   const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
@@ -346,7 +344,11 @@ function MapGraphFlow({
         <FleetMapInteractionContributor stacks={fleetStacks} enabled={fleetEnabled} />
         <RegionMapInteractionContributor regionOverlays={regionOverlays} />
         <CartographyMapInteractionContributor cartography={cartography} />
-        <WormholeDescriptiveBridgeContributor cartography={cartography} />
+        <WormholeMapInteractionContributor
+          cartography={cartography}
+          hoverByCell={frame.wormholeEndpointHoverByCell}
+          displayEdges={displayMapEdges}
+        />
       </MapInteractionSurface>
       <FlowCoordinateReadout />
       <HomeworldMapContextMenu

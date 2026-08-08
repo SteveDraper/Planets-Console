@@ -4,4 +4,4 @@ Under **map mode**, hover (and later click / context-menu) must not be implement
 
 **Considered:** hover-only manager (rejected -- invites a parallel click manager); policy keyed only by analytic id (rejected -- one analytic can emit descriptive and map-element contributions); folding peer descriptive panels into a separate `stacksWith` (rejected for descriptive content -- use `mergesWith` with titled sections; keep `stacksWith` for map-element chrome).
 
-**Consequences:** Migrate planet, fleet, region, and cartography descriptive hover onto the surface before adding click/menu contributors. Reclassifying wormhole affordances as **map-element** contributions is a separate hover follow-on; full click/context-menu migration is a further ticket that may need more grilling.
+**Consequences:** Planet, fleet, region, and cartography descriptive hover use the surface. Wormhole affordance hover is a **map-element** contribution (`stacksWith` descriptive chrome); on-hover line reveal is driven from the same hit-test without requiring paint capture for hover composition. Full click/context-menu migration remains a further ticket.

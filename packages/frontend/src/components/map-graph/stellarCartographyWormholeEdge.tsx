@@ -1,4 +1,4 @@
-import { useCallback, useContext } from 'react'
+import { useCallback } from 'react'
 import { BaseEdge, getStraightPath, useStore, type EdgeProps } from '@xyflow/react'
 import { shallow } from 'zustand/shallow'
 import {
@@ -7,10 +7,6 @@ import {
 } from '../../lib/cartography/stellarCartographyTheme'
 import { requestMapAttention } from '../../stores/mapAttentionRequest'
 import { NODE_SIZE_FLOW, clientToFlowPosition, safeZoomScale } from './geometry'
-import {
-  WormholeHoverContext,
-  WormholeLineRevealContext,
-} from './stellarCartographyWormholeInteraction'
 
 export type WormholeEdgeData = {
   isBidirectional?: boolean
@@ -21,25 +17,7 @@ export type WormholeEdgeData = {
   wormholeExitOnly?: boolean
 }
 
-export function wormholeHoverLabel(
-  data: WormholeEdgeData | undefined,
-  nearSource: boolean
-): string | null {
-  if (data == null) return null
-  const sx = data.sourceGameX
-  const sy = data.sourceGameY
-  const tx = data.targetGameX
-  const ty = data.targetGameY
-  if (sx == null || sy == null || tx == null || ty == null) return null
-  if (data.isBidirectional === true) {
-    if (nearSource) return `goes to (${tx}, ${ty})`
-    return `goes to (${sx}, ${sy})`
-  }
-  if (nearSource) return `goes to (${tx}, ${ty})`
-  return `exit - entrance at (${sx}, ${sy})`
-}
-
-/** Stellar Cartography wormhole edge: sky line, mono arrowhead, click recenter, hover label. */
+/** Stellar Cartography wormhole edge: sky line, mono arrowhead, click recenter. */
 export function WormholeEdgeOnePixel(props: EdgeProps) {
   const { sourceNode, targetNode, zoom, domNode, transform } = useStore(
     (s) => ({
@@ -65,8 +43,6 @@ export function WormholeEdgeOnePixel(props: EdgeProps) {
   })
   const data = props.data as WormholeEdgeData | undefined
   const isBidirectional = data?.isBidirectional !== false
-  const setWormholeHover = useContext(WormholeHoverContext)
-  const lineReveal = useContext(WormholeLineRevealContext)
 
   const handlePointer = useCallback(
     (clientX: number, clientY: number): boolean => {
@@ -98,23 +74,6 @@ export function WormholeEdgeOnePixel(props: EdgeProps) {
           strokeWidth: 1 / scale,
           opacity: WORMHOLE_EDGE_OPACITY,
           strokeDasharray: `${5 / scale} ${4 / scale}`,
-        }}
-        onMouseMove={(e) => {
-          lineReveal.cancelClear()
-          const nearSource = handlePointer(e.clientX, e.clientY)
-          const sx = data?.sourceGameX
-          const sy = data?.sourceGameY
-          const tx = data?.targetGameX
-          const ty = data?.targetGameY
-          if (sx != null && sy != null && tx != null && ty != null) {
-            lineReveal.revealAt(nearSource ? tx : sx, nearSource ? ty : sy)
-          }
-          const label = wormholeHoverLabel(data, nearSource)
-          setWormholeHover(label != null ? [label] : null)
-        }}
-        onMouseLeave={() => {
-          setWormholeHover(null)
-          lineReveal.scheduleClear()
         }}
         onClick={(e) => {
           const nearSource = handlePointer(e.clientX, e.clientY)

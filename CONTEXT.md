@@ -305,7 +305,7 @@ One hit payload produced by a **map interaction contributor** for the current po
 _Avoid_: hover line (too narrow), tooltip (chrome, not the contribution), analytic hover (ambiguous when one analytic has several kinds)
 
 **Map hover contribution kind**:
-Classification of a **map hover contribution** for **map hover composition policy**. v1 kinds: **descriptive** (titled panel sections -- planet facts, fleet ships, region/cartography text) and **map-element** (affordance-like hover that may stack independently of the descriptive panel).
+Classification of a **map hover contribution** for **map hover composition policy**. v1 kinds: **descriptive** (titled panel sections -- planet facts, fleet ships, region/cartography text) and **map-element** (affordance-like hover that may stack independently of the descriptive panel -- e.g. wormhole endpoint/edge chrome).
 _Avoid_: analytic id as kind, rich vs string (implementation shape of a block, not composition class)
 
 **Map region overlay**:

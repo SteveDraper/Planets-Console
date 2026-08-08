@@ -29,9 +29,9 @@ export type MapHoverPolicyEdge = {
 }
 
 /**
- * v1 policy table (issue #292). Map-element / ``stacksWith`` machinery is
- * present so follow-on wormhole reclassification (#293) can attach without
- * inventing a second policy path.
+ * v1 policy table. Descriptive peers use ``yieldsTo`` / ``mergesWith``.
+ * All ``map-element`` contributions (e.g. wormhole affordances, #293) go to
+ * ``stacked`` chrome -- independent of this edge table.
  */
 export const MAP_HOVER_COMPOSITION_POLICY: readonly MapHoverPolicyEdge[] = [
   {
@@ -45,11 +45,6 @@ export const MAP_HOVER_COMPOSITION_POLICY: readonly MapHoverPolicyEdge[] = [
     to: { kind: 'descriptive', role: 'planet' },
   },
   {
-    from: { kind: 'descriptive', role: 'wormhole' },
-    relation: 'yieldsTo',
-    to: { kind: 'descriptive', role: 'planet' },
-  },
-  {
     from: { kind: 'descriptive', role: 'fleet' },
     relation: 'mergesWith',
     to: { kind: 'descriptive', role: 'planet' },
@@ -59,17 +54,11 @@ export const MAP_HOVER_COMPOSITION_POLICY: readonly MapHoverPolicyEdge[] = [
     relation: 'mergesWith',
     to: { kind: 'descriptive', role: 'cartography' },
   },
-  {
-    from: { kind: 'descriptive', role: 'wormhole' },
-    relation: 'mergesWith',
-    to: { kind: 'descriptive', role: 'cartography' },
-  },
 ]
 
 /** Section order inside a merged descriptive host (cursor host by role order). */
 export const DESCRIPTIVE_SECTION_ROLE_ORDER: readonly MapInteractionContributorRole[] =
-  ['planet', 'fleet', 'region', 'cartography', 'wormhole']
-
+  ['planet', 'fleet', 'region', 'cartography']
 export type ComposedDescriptiveSection = {
   contributionId: string
   role: MapInteractionContributorRole
@@ -270,7 +259,7 @@ export function composeMapHoverContributions(
     const aRole = a.sections[0]?.role
     const bRole = b.sections[0]?.role
     const roleCmp =
-      roleOrderIndex(aRole ?? 'wormhole') - roleOrderIndex(bRole ?? 'wormhole')
+      roleOrderIndex(aRole ?? 'planet') - roleOrderIndex(bRole ?? 'planet')
     if (roleCmp !== 0) return roleCmp
     return (a.sections[0]?.contributionId ?? '').localeCompare(
       b.sections[0]?.contributionId ?? ''
