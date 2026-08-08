@@ -3,10 +3,21 @@ import { useModalKeydownFocusTrap } from '../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'
 import { cn } from '../lib/utils'
 import {
+  DIPLOMACY_COLOR_THRESHOLD_OPTIONS,
+  type DiplomacyColorThreshold,
+} from '../lib/diplomacyTier'
+import { formatViewpointRowLabel } from '../lib/displayFormatters'
+import {
+  defaultColorForPlayerId,
+  type PlayerColorMode,
+} from '../lib/playerColor'
+import {
   useDisplayPreferencesStore,
   type PlayerListLabelMode,
   type SectorListLabelMode,
 } from '../stores/displayPreferences'
+import { usePlayerColorsStore } from '../stores/playerColors'
+import { useShellStore } from '../stores/shell'
 
 type SettingsModalProps = {
   isOpen: boolean
@@ -82,6 +93,119 @@ function DisplayOptionsSection() {
   )
 }
 
+function PlayerColorsSection() {
+  const playerListLabelMode = useDisplayPreferencesStore((s) => s.playerListLabelMode)
+  const perspectives = useShellStore((s) => s.gameInfoContext?.perspectives)
+  const mode = usePlayerColorsStore((s) => s.mode)
+  const diplomacyThreshold = usePlayerColorsStore((s) => s.diplomacyThreshold)
+  const familyBaseColor = usePlayerColorsStore((s) => s.familyBaseColor)
+  const overrides = usePlayerColorsStore((s) => s.overrides)
+  const setPlayerColorMode = usePlayerColorsStore((s) => s.setPlayerColorMode)
+  const setDiplomacyThreshold = usePlayerColorsStore((s) => s.setDiplomacyThreshold)
+  const setFamilyBaseColor = usePlayerColorsStore((s) => s.setFamilyBaseColor)
+  const setPlayerColorOverride = usePlayerColorsStore((s) => s.setPlayerColorOverride)
+
+  return (
+    <div className="flex flex-col gap-3 pt-2">
+      <div className="flex flex-col gap-1">
+        <label htmlFor="settings-player-color-mode" className="text-xs text-slate-400">
+          Color by
+        </label>
+        <select
+          id="settings-player-color-mode"
+          value={mode}
+          onChange={(e) => setPlayerColorMode(e.target.value as PlayerColorMode)}
+          className={selectClassName}
+        >
+          <option value="per_player">Per player</option>
+          <option value="diplomacy_family">Diplomacy family</option>
+        </select>
+      </div>
+
+      {mode === 'diplomacy_family' ? (
+        <>
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="settings-diplomacy-color-threshold"
+              className="text-xs text-slate-400"
+            >
+              Minimum inbound status
+            </label>
+            <select
+              id="settings-diplomacy-color-threshold"
+              value={diplomacyThreshold}
+              onChange={(e) =>
+                setDiplomacyThreshold(Number(e.target.value) as DiplomacyColorThreshold)
+              }
+              className={selectClassName}
+            >
+              {DIPLOMACY_COLOR_THRESHOLD_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="settings-family-base-color"
+              className="text-xs text-slate-400"
+            >
+              Family base color
+            </label>
+            <input
+              id="settings-family-base-color"
+              type="color"
+              aria-label="Family base color"
+              value={familyBaseColor}
+              onChange={(e) => setFamilyBaseColor(e.target.value)}
+              className="h-8 w-12 cursor-pointer rounded border border-[#52575d] bg-transparent p-0"
+            />
+          </div>
+        </>
+      ) : perspectives == null || perspectives.length === 0 ? (
+        <p className="text-xs text-slate-400">Load a game to set player colors.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {perspectives.map((row) => {
+            const key = String(row.playerId)
+            const override = overrides[key]
+            const effective = override ?? defaultColorForPlayerId(row.playerId)
+            const label = formatViewpointRowLabel(
+              playerListLabelMode,
+              row.name,
+              row.raceName
+            )
+            return (
+              <li
+                key={row.playerId}
+                className="flex items-center gap-2 text-xs text-slate-200"
+              >
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                <input
+                  type="color"
+                  aria-label={`Color for ${label}`}
+                  value={effective}
+                  onChange={(e) => setPlayerColorOverride(row.playerId, e.target.value)}
+                  className="h-6 w-7 shrink-0 cursor-pointer rounded border border-[#52575d] bg-transparent p-0"
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-white/10 hover:text-slate-200 disabled:opacity-40"
+                  disabled={override == null}
+                  onClick={() => setPlayerColorOverride(row.playerId, null)}
+                >
+                  Reset
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 type SettingsSectionDef = {
   id: string
   title: string
@@ -93,6 +217,11 @@ const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     id: 'display-options',
     title: 'Display Options',
     Content: DisplayOptionsSection,
+  },
+  {
+    id: 'player-colors',
+    title: 'Player Colors',
+    Content: PlayerColorsSection,
   },
 ].sort((a, b) => a.title.localeCompare(b.title))
 

@@ -12,7 +12,11 @@ vi.mock('../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/bff')>()
   return {
     ...actual,
-    ensureTurnData: vi.fn().mockResolvedValue({ ready: true, turnUsernamesByPlayerId: new Map() }),
+    ensureTurnData: vi.fn().mockResolvedValue({
+      ready: true,
+      turnUsernamesByPlayerId: new Map(),
+      turnRelations: [],
+    }),
     fetchStoredTurnPerspectives: vi.fn().mockResolvedValue({ perspectives: [1] }),
   }
 })

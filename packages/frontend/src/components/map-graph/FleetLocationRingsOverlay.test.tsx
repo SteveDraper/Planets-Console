@@ -7,7 +7,7 @@ import {
   installPlayerColorsStorePort,
   usePlayerColorsStore,
 } from '../../stores/playerColors'
-import { defaultColorForPlayerId, resetPlayerColorOverrideStore } from '../../lib/playerColor'
+import { defaultColorForPlayerId, resetPlayerColorResolutionPort } from '../../lib/playerColor'
 import type { FleetLocationRingStack } from '../../analytics/fleet/fleetLocationRings'
 
 vi.mock('@xyflow/react', () => ({
@@ -99,8 +99,16 @@ function wrapper({ children }: { children: ReactNode }) {
 
 describe('FleetLocationRingsOverlay', () => {
   beforeEach(() => {
-    usePlayerColorsStore.setState({ overrides: {} })
-    resetPlayerColorOverrideStore()
+    usePlayerColorsStore.setState({
+      overrides: {},
+      mode: 'per_player',
+      diplomacyThreshold: 2,
+      familyBaseColor: '#34d399',
+      viewpointPlayerId: null,
+      inboundRelationFromByPlayerId: new Map(),
+      paintRevision: 0,
+    })
+    resetPlayerColorResolutionPort()
     installPlayerColorsStorePort()
   })
 

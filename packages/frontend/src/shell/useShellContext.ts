@@ -5,9 +5,17 @@ import {
   fetchStoredTurnPerspectives,
   type AnalyticShellScope,
 } from '../api/bff'
-import { LOGIN_REQUIRED_FOR_GAME_SELECTION } from '../lib/gameInfoShell'
+import {
+  LOGIN_REQUIRED_FOR_GAME_SELECTION,
+  playerIdForPerspectiveOrdinal,
+} from '../lib/gameInfoShell'
+import { inboundRelationFromByPlayerId } from '../lib/turnRelations'
 import { useSessionStore } from '../stores/session'
 import { useShellStore } from '../stores/shell'
+import {
+  clearPlayerColorPaintContext,
+  usePlayerColorsStore,
+} from '../stores/playerColors'
 import {
   deriveAnalyticScope,
   deriveSelectedViewpointOrdinal,
@@ -141,6 +149,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
   })
 
   const turnUsernamesByPlayerId = turnEnsureData?.turnUsernamesByPlayerId ?? null
+  const turnRelations = turnEnsureData?.turnRelations ?? null
 
   const shellInputs = useMemo(
     () => ({
@@ -179,6 +188,33 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     () => deriveSelectedViewpointOrdinal(shellInputs),
     [shellInputs]
   )
+
+  useEffect(() => {
+    if (!turnEnsureSuccess || turnRelations == null || gameInfoContext == null) {
+      clearPlayerColorPaintContext()
+      return
+    }
+    const viewpointPlayerId = playerIdForPerspectiveOrdinal(
+      gameInfoContext.perspectives,
+      selectedViewpointOrdinal
+    )
+    if (viewpointPlayerId == null) {
+      clearPlayerColorPaintContext()
+      return
+    }
+    usePlayerColorsStore.getState().setPaintContext({
+      viewpointPlayerId,
+      inboundRelationFromByPlayerId: inboundRelationFromByPlayerId(
+        turnRelations,
+        viewpointPlayerId
+      ),
+    })
+  }, [
+    turnEnsureSuccess,
+    turnRelations,
+    gameInfoContext,
+    selectedViewpointOrdinal,
+  ])
 
   useEffect(() => {
     if (
