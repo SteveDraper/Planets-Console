@@ -1,6 +1,11 @@
 /**
- * Wormhole hover *lines* as a descriptive contribution (bridge until #293
- * reclassifies wormhole affordances as map-element).
+ * Temporary bridge: wormhole hover *lines* as a descriptive contribution.
+ *
+ * Do not copy this pattern. It registers only when lines already exist and
+ * ``hitTest`` ignores the hit (returns a fixed contribution). That is not how
+ * map-interaction contributors should work.
+ *
+ * Superseded by #293 (map-element reclassification of wormhole affordances).
  */
 
 import { useMemo } from 'react'
@@ -16,6 +21,7 @@ export function WormholeDescriptiveBridgeContributor({
 }) {
   const { wormholeHoverLines } = useWormholeInteractionState()
 
+  // Temporary bridge (#293): register-when-lines + hitTest that ignores hit -- do not copy.
   const contributor = useMemo<MapInteractionContributor | null>(() => {
     if (cartography == null) return null
     if (!cartography.policy.areWormholesShown()) return null

@@ -52,10 +52,6 @@ export function useMapInteractionHitState(): MapInteractionHitState {
   return state
 }
 
-export function useOptionalMapInteractionHitState(): MapInteractionHitState | null {
-  return useContext(HitStateContext)
-}
-
 type MapInteractionRegistryProviderProps = {
   children: ReactNode
   hit: MapInteractionHitState

@@ -1,5 +1,10 @@
 /**
  * Wormhole line-reveal + descriptive hover line bridge state.
+ *
+ * Temporary bridge only: feeds ``WormholeDescriptiveBridgeContributor`` until
+ * #293 reclassifies wormhole affordances as map-element. Do not copy the
+ * register-when-lines / hitTest-ignores-hit pattern used by that contributor.
+ *
  * Composition vs planet is owned by the **map hover composition policy**;
  * ``blockedByPlanetHover`` is no longer the source of truth (#292).
  */
