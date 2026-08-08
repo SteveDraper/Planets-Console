@@ -5,9 +5,10 @@ import type { ReactNode } from 'react'
 import { FleetLocationRingsOverlay } from './FleetLocationRingsOverlay'
 import {
   installPlayerColorsStorePort,
+  resetPlayerColorsStoreState,
   usePlayerColorsStore,
 } from '../../stores/playerColors'
-import { defaultColorForPlayerId, resetPlayerColorOverrideStore } from '../../lib/playerColor'
+import { defaultColorForPlayerId, resetPlayerColorResolutionPort } from '../../lib/playerColor'
 import type { FleetLocationRingStack } from '../../analytics/fleet/fleetLocationRings'
 
 vi.mock('@xyflow/react', () => ({
@@ -99,8 +100,10 @@ function wrapper({ children }: { children: ReactNode }) {
 
 describe('FleetLocationRingsOverlay', () => {
   beforeEach(() => {
-    usePlayerColorsStore.setState({ overrides: {} })
-    resetPlayerColorOverrideStore()
+    resetPlayerColorsStoreState({
+      diplomacyThreshold: 2,
+    })
+    resetPlayerColorResolutionPort()
     installPlayerColorsStorePort()
   })
 

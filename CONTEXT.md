@@ -653,8 +653,32 @@ Single NDJSON connection for all **fleet player visibility**-enabled players on 
 _Avoid_: per-player HTTP connections, admission-order wire drain, separate map NDJSON protocol, map-mode `GET …/fleet/map` as the live SPA path, treating the stream as table-only
 
 **Player color**:
-Shared SPA identity color for a **Player**, used by any analytic or chrome that needs per-player paint (including **fleet location ring**s). Read API and defaults live in a shared module: `colorForPlayerId(playerId)` uses `playerId % 16` into this preset table (dark-map friendly): `#38bdf8 #f472b6 #a78bfa #34d399 #fbbf24 #fb7185 #22d3ee #a3e635 #f97316 #818cf8 #2dd4bf #e879f9 #60a5fa #f43f5e #c084fc #84cc16`. Persistable overrides use a storage abstraction the Settings UI ([#289](https://github.com/SteveDraper/Planets-Console/issues/289)) can later wire without changing callers. Overrides are global localStorage, not inside one analytic sidebar.
-_Avoid_: fleet-only color store, relying on often-empty host `Relation.color` as the sole source, baking Settings UI into every consumer
+Shared SPA identity color for a **Player**, used by any analytic or chrome that needs per-player paint (including **fleet location ring**s). Resolved under the active **player color mode**. Consumers keep calling `usePlayerColor(playerId)` / `colorForPlayerId(playerId)`; shell + Settings install the resolution inputs. Default palette in **per-player** mode (when not overridden): `playerId % 16` into `#38bdf8 #f472b6 #a78bfa #34d399 #fbbf24 #fb7185 #22d3ee #a3e635 #f97316 #818cf8 #2dd4bf #e879f9 #60a5fa #f43f5e #c084fc #84cc16`. Policy knobs and per-player overrides are global localStorage ([#289](https://github.com/SteveDraper/Planets-Console/issues/289)), not per-analytic sidebar state.
+_Avoid_: fleet-only color store, relying on often-empty host `Relation.color` as the sole source, baking Settings UI into every consumer, changing every paint call site when mode inputs change
+
+**Player color mode**:
+Mutually exclusive paint policy for **player color**: **per-player** (independent override or default per **Player**) or **diplomacy-family** (two families -- **diplomacy color family** and **non-diplomacy color family** -- each with its own base color and tonal variants). Switching modes changes which policy paints; both modes' settings are preserved.
+_Avoid_: hybrid overlay of overrides on top of diplomacy families, Nu multi-bucket Allied/Enemy/You palettes as the Console policy, mixing default preset hues into diplomacy-family paint
+
+**Diplomacy color family**:
+The current shell **viewpoint** (always -- implicit self-ally) plus other **Player**s whose inbound grant to that viewpoint meets the **diplomacy color threshold** -- on that viewpoint's turn `Relation` rows, `relationfrom >= threshold`. Missing relation row counts as inbound None (not in this family). Members share the **family base color** with tonal variants; the viewpoint always receives the brightest tone. Membership recomputes when viewpoint, turn relations, or threshold change.
+_Avoid_: using what you grant them (`relationto`), OR-ing both directions (Visibility Share-Intel partners), host `Relation.color`, excluding self from the family
+
+**Non-diplomacy color family**:
+In **diplomacy-family** **player color mode**, every roster **Player** not in the **diplomacy color family**. Members share the **out-of-circle base color** with deterministic tonal variants (no special brightest member). Guarantees contrast with the diplomacy circle instead of falling back to the per-player preset palette.
+_Avoid_: default preset for out-of-circle players, treating out-of-circle as ungrouped individuals
+
+**Diplomacy color threshold**:
+Minimum diplomacy tier for **diplomacy color family** membership (other players). User-selectable among Ambassador, Safe Passage, Share Intel, and Full Alliance; default **Safe Passage**. Blocked and None are not offered as thresholds. Does not gate the viewpoint's own membership.
+_Avoid_: ally threshold, conflict level
+
+**Family base color**:
+User-chosen base hue for the **diplomacy color family**. Family members receive deterministic tonal variants derived from this base (stable for a given base, member id, family size, and brightest/viewpoint id); the viewpoint is always the brightest tone. The exact tone recipe is not a user setting.
+_Avoid_: per-member color pickers in diplomacy-family mode, Relation.color
+
+**Out-of-circle base color**:
+User-chosen base hue for the **non-diplomacy color family**. Chosen independently of the **family base color** so the two circles stay visually distinct.
+_Avoid_: reusing the per-player preset for out-of-circle paint
 
 **Military score build inference**:
 Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row** with top-K **20**. No fixed row time budget once **#71** ships -- SPA runs continue until the ladder finishes, **inference global pause** freezes them, or the stream is **cancelled** (scope change, disable build inference, explicit cancel/recompute -- **not** disconnect). Disconnect is detach-only; see **Inference stream cancellation**. See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
