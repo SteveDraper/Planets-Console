@@ -48,10 +48,7 @@ import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSel
 import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
-import {
-  WormholeInteractionProvider,
-  useWormholeInteractionState,
-} from './map-graph/stellarCartographyWormholeInteraction'
+import { useWormholeLineRevealStore } from '../stores/wormholeLineReveal'
 import {
   buildLabelSourceByNodeId,
   FixedSizeDotsOverlay,
@@ -158,27 +155,25 @@ export function MapGraph({
         className="h-full w-full transition-opacity duration-150"
         style={{ opacity: initialFitDone ? 1 : 0 }}
       >
-        <WormholeInteractionProvider>
-          <MapGraphFlow
-            data={data}
-            frame={frame}
-            nodes={nodes}
-            planetMapNodes={planetMapNodes}
-            planetGrid={planetGrid}
-            waypointGrid={waypointGrid}
-            labelSourceByNodeId={labelSourceByNodeId}
-            planetLabelOptions={planetLabelOptions}
-            analyticScope={analyticScope}
-            roster={roster}
-            cartography={cartography}
-            mapLayersPending={mapLayersPending}
-            homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
-            displayMapFrameIsLive={displayMapFrameIsLive}
-            onMapZoomChange={onMapZoomChange}
-            onSetZoomReady={onSetZoomReady}
-            onInitialFitDone={onInitialFitDone}
-          />
-        </WormholeInteractionProvider>
+        <MapGraphFlow
+          data={data}
+          frame={frame}
+          nodes={nodes}
+          planetMapNodes={planetMapNodes}
+          planetGrid={planetGrid}
+          waypointGrid={waypointGrid}
+          labelSourceByNodeId={labelSourceByNodeId}
+          planetLabelOptions={planetLabelOptions}
+          analyticScope={analyticScope}
+          roster={roster}
+          cartography={cartography}
+          mapLayersPending={mapLayersPending}
+          homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
+          displayMapFrameIsLive={displayMapFrameIsLive}
+          onMapZoomChange={onMapZoomChange}
+          onSetZoomReady={onSetZoomReady}
+          onInitialFitDone={onInitialFitDone}
+        />
       </div>
     </div>
   )
@@ -223,7 +218,9 @@ function MapGraphFlow({
   onSetZoomReady,
   onInitialFitDone,
 }: MapGraphFlowProps) {
-  const { wormholeLineRevealKey } = useWormholeInteractionState()
+  const wormholeLineRevealKey = useWormholeLineRevealStore(
+    (s) => s.wormholeLineRevealKey
+  )
 
   const policy = useMemo(() => cartographyFramePolicy(cartography), [cartography])
   const displayMapEdges = useMemo(
