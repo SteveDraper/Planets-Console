@@ -9,11 +9,11 @@ import {
 } from './planetMapLabelModel'
 
 describe('planetMapLabelModel', () => {
-  it('defaults to only planet id for label options', () => {
+  it('defaults to planet id title plus low detail (owner / clans / natives)', () => {
     expect(DEFAULT_PLANET_LABEL_OPTIONS.includePlanetId).toBe(true)
     expect(DEFAULT_PLANET_LABEL_OPTIONS.includePlanetName).toBe(false)
     expect(DEFAULT_PLANET_LABEL_OPTIONS.includeCoordinates).toBe(false)
-    expect(DEFAULT_PLANET_LABEL_OPTIONS.detailsLevel).toBe('none')
+    expect(DEFAULT_PLANET_LABEL_OPTIONS.detailsLevel).toBe('low')
   })
 
   it('planetLabelOptionsShowAnyLabel is false when nothing is selected', () => {

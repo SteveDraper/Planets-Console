@@ -93,22 +93,23 @@ function DescriptiveHostChrome({
   const showTitles = host.sections.length > 1
   const cursorHost = host.placement.mode === 'cursor'
 
+  // Above map paint overlays (region z-6, fleet rings z-7) so the opaque panel
+  // occludes ring/fill opacity rather than letting those layers composite on top.
+  const chromeClass =
+    pos.pinned
+      ? 'pointer-events-auto absolute z-[20] isolate max-w-xs font-mono text-xs text-gray-300'
+      : 'pointer-events-none absolute z-[20] isolate max-w-xs font-mono text-xs text-gray-300'
+
   return (
     <div
-      className={
-        cursorHost
-          ? 'pointer-events-none absolute z-[6] max-w-xs font-mono text-xs text-gray-300'
-          : pos.pinned
-            ? 'pointer-events-auto absolute z-[6] max-w-xs font-mono text-xs text-gray-300'
-            : 'pointer-events-none absolute z-[6] max-w-xs font-mono text-xs text-gray-300'
-      }
+      className={chromeClass}
       style={{
         left: pos.left,
         top: pos.top,
         transform: cursorHost ? 'translateY(-100%)' : undefined,
         backgroundColor: '#000000',
         borderRadius: 6,
-        padding: cursorHost ? '4px 8px' : undefined,
+        padding: '4px 8px',
       }}
       role="tooltip"
       onClick={pos.pinned ? (e) => e.stopPropagation() : undefined}

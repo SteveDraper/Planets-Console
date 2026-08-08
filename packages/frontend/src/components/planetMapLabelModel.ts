@@ -13,7 +13,7 @@ export const DEFAULT_PLANET_LABEL_OPTIONS: PlanetLabelOptions = {
   includePlanetId: true,
   includePlanetName: false,
   includeCoordinates: false,
-  detailsLevel: 'none',
+  detailsLevel: 'low',
 }
 
 export function planetLabelOptionsShowAnyLabel(options: PlanetLabelOptions): boolean {
