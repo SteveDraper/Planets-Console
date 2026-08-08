@@ -208,6 +208,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
         turnRelations,
         viewpointPlayerId
       ),
+      rosterPlayerIds: gameInfoContext.perspectives.map((p) => p.playerId),
     })
   }, [
     turnEnsureSuccess,

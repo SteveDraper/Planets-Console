@@ -20,8 +20,10 @@ describe('usePlayerColorsStore', () => {
       mode: 'per_player',
       diplomacyThreshold: DiplomacyTier.SAFE_PASSAGE,
       familyBaseColor: '#34d399',
+      outOfCircleBaseColor: '#f43f5e',
       viewpointPlayerId: null,
       inboundRelationFromByPlayerId: new Map(),
+      rosterPlayerIds: [],
       paintRevision: 0,
     })
     resetPlayerColorResolutionPort()
@@ -77,8 +79,9 @@ describe('usePlayerColorsStore', () => {
       usePlayerColorsStore.getState().setPaintContext({
         viewpointPlayerId: 1,
         inboundRelationFromByPlayerId: new Map([[2, DiplomacyTier.SAFE_PASSAGE]]),
+        rosterPlayerIds: [1, 2, 3],
       })
     })
-    expect(result.current).toBe(tonalVariantForFamilyMember('#336699', 2, [2]))
+    expect(result.current).toBe(tonalVariantForFamilyMember('#336699', 2, [1, 2], 1))
   })
 })

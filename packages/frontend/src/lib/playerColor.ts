@@ -30,11 +30,16 @@ export const PLAYER_COLOR_PRESET = [
 
 export type PlayerColorMode = 'per_player' | 'diplomacy_family'
 
+/** Default base for the diplomacy circle (in-threshold) family. */
 export const DEFAULT_FAMILY_BASE_COLOR = '#34d399'
+
+/** Default base for the out-of-circle family -- chosen for contrast with the in-circle default. */
+export const DEFAULT_OUT_OF_CIRCLE_BASE_COLOR = '#f43f5e'
 
 export type PlayerColorOverrides = Readonly<Record<string, string>>
 
 const EMPTY_INBOUND = new Map<number, number>()
+const EMPTY_ROSTER: readonly number[] = []
 
 /** Paint inputs consulted by {@link colorForPlayerId}. */
 export type PlayerColorResolutionPort = {
@@ -42,8 +47,11 @@ export type PlayerColorResolutionPort = {
   getOverride: (playerId: number) => string | undefined
   getDiplomacyThreshold: () => DiplomacyColorThreshold
   getFamilyBaseColor: () => string
+  getOutOfCircleBaseColor: () => string
   getViewpointPlayerId: () => number | null
   getInboundRelationFromByPlayerId: () => ReadonlyMap<number, number>
+  /** Game roster player ids (for out-of-circle tone assignment). */
+  getRosterPlayerIds: () => readonly number[]
 }
 
 const emptyResolutionPort: PlayerColorResolutionPort = {
@@ -51,8 +59,10 @@ const emptyResolutionPort: PlayerColorResolutionPort = {
   getOverride: () => undefined,
   getDiplomacyThreshold: () => DEFAULT_DIPLOMACY_COLOR_THRESHOLD,
   getFamilyBaseColor: () => DEFAULT_FAMILY_BASE_COLOR,
+  getOutOfCircleBaseColor: () => DEFAULT_OUT_OF_CIRCLE_BASE_COLOR,
   getViewpointPlayerId: () => null,
   getInboundRelationFromByPlayerId: () => EMPTY_INBOUND,
+  getRosterPlayerIds: () => EMPTY_ROSTER,
 }
 
 let activeResolutionPort: PlayerColorResolutionPort = emptyResolutionPort
@@ -179,21 +189,38 @@ function normalizeHexColor(hex: string): string | null {
 }
 
 /**
+ * Tone assignment order: other members by ascending id, then ``brightestMemberId``
+ * last so they receive the highest lightness.
+ */
+export function diplomacyFamilyToneOrderIds(
+  familyMemberIds: readonly number[],
+  brightestMemberId: number | null | undefined
+): number[] {
+  const sorted = [...familyMemberIds].sort((a, b) => a - b)
+  if (brightestMemberId == null || !sorted.includes(brightestMemberId)) {
+    return sorted
+  }
+  return [...sorted.filter((id) => id !== brightestMemberId), brightestMemberId]
+}
+
+/**
  * Deterministic tonal variant of ``familyBaseColor`` for one family member.
- * Stable for a given (base, memberPlayerId, familyMemberIds set).
+ * Stable for a given (base, memberPlayerId, familyMemberIds set, brightestMemberId).
+ * ``brightestMemberId`` (viewpoint) always gets the brightest tone when present.
  */
 export function tonalVariantForFamilyMember(
   familyBaseColor: string,
   memberPlayerId: number,
-  familyMemberIds: readonly number[]
+  familyMemberIds: readonly number[],
+  brightestMemberId?: number | null
 ): string {
   const normalizedBase = normalizeHexColor(familyBaseColor) ?? DEFAULT_FAMILY_BASE_COLOR
-  const sorted = [...familyMemberIds].sort((a, b) => a - b)
-  const index = sorted.indexOf(memberPlayerId)
+  const ordered = diplomacyFamilyToneOrderIds(familyMemberIds, brightestMemberId)
+  const index = ordered.indexOf(memberPlayerId)
   if (index < 0) {
     return normalizedBase
   }
-  const n = sorted.length
+  const n = ordered.length
   const [r, g, b] = hexToRgb(normalizedBase)
   const [h, s, baseL] = rgbToHsl(r, g, b)
   if (n <= 1) {
@@ -207,7 +234,10 @@ export function tonalVariantForFamilyMember(
   return rgbToHex(nr, ng, nb)
 }
 
-/** Players at or above threshold for the active viewpoint (excludes viewpoint). */
+/**
+ * Diplomacy circle (in-family): viewpoint (always) plus others with inbound grant
+ * ``relationfrom >= threshold``.
+ */
 export function diplomacyColorFamilyMemberIds(
   inboundRelationFromByPlayerId: ReadonlyMap<number, number>,
   viewpointPlayerId: number | null,
@@ -216,7 +246,7 @@ export function diplomacyColorFamilyMemberIds(
   if (viewpointPlayerId == null) {
     return []
   }
-  const members: number[] = []
+  const members: number[] = [viewpointPlayerId]
   for (const [otherId, relationFrom] of inboundRelationFromByPlayerId) {
     if (otherId === viewpointPlayerId) {
       continue
@@ -229,22 +259,48 @@ export function diplomacyColorFamilyMemberIds(
   return members
 }
 
+/** Roster players not in the diplomacy circle. */
+export function outOfCircleFamilyMemberIds(
+  rosterPlayerIds: readonly number[],
+  diplomacyCircleMemberIds: readonly number[]
+): number[] {
+  const inCircle = new Set(diplomacyCircleMemberIds)
+  const members = rosterPlayerIds.filter((id) => !inCircle.has(id))
+  members.sort((a, b) => a - b)
+  return members
+}
+
 function colorFromDiplomacyFamily(
   playerId: number,
   port: PlayerColorResolutionPort
 ): string | null {
   const viewpointPlayerId = port.getViewpointPlayerId()
-  if (viewpointPlayerId == null || playerId === viewpointPlayerId) {
+  if (viewpointPlayerId == null) {
     return null
   }
   const threshold = port.getDiplomacyThreshold()
   const inbound = port.getInboundRelationFromByPlayerId()
-  const relationFrom = inbound.get(playerId)
-  if (relationFrom == null || relationFrom < threshold) {
-    return null
+  const inCircle = diplomacyColorFamilyMemberIds(inbound, viewpointPlayerId, threshold)
+  if (inCircle.includes(playerId)) {
+    return tonalVariantForFamilyMember(
+      port.getFamilyBaseColor(),
+      playerId,
+      inCircle,
+      viewpointPlayerId
+    )
   }
-  const members = diplomacyColorFamilyMemberIds(inbound, viewpointPlayerId, threshold)
-  return tonalVariantForFamilyMember(port.getFamilyBaseColor(), playerId, members)
+  const roster = port.getRosterPlayerIds()
+  let outCircle = outOfCircleFamilyMemberIds(roster, inCircle)
+  if (!outCircle.includes(playerId)) {
+    // Painted id missing from roster still gets out-of-circle paint as a singleton.
+    outCircle = [...outCircle, playerId].sort((a, b) => a - b)
+  }
+  return tonalVariantForFamilyMember(
+    port.getOutOfCircleBaseColor(),
+    playerId,
+    outCircle,
+    null
+  )
 }
 
 /**

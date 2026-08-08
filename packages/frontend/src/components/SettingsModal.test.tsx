@@ -19,8 +19,10 @@ describe('SettingsModal player colors', () => {
       mode: 'per_player',
       diplomacyThreshold: DiplomacyTier.SAFE_PASSAGE,
       familyBaseColor: '#34d399',
+      outOfCircleBaseColor: '#f43f5e',
       viewpointPlayerId: null,
       inboundRelationFromByPlayerId: new Map(),
+      rosterPlayerIds: [],
       paintRevision: 0,
     })
     resetPlayerColorResolutionPort()
@@ -61,7 +63,8 @@ describe('SettingsModal player colors', () => {
     await user.click(screen.getByText('Player Colors'))
     await user.selectOptions(screen.getByLabelText(/color by/i), 'diplomacy_family')
     expect(screen.getByLabelText(/minimum inbound status/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/family base color/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/diplomacy circle base color/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/others base color/i)).toBeInTheDocument()
     expect(usePlayerColorsStore.getState().mode).toBe('diplomacy_family')
   })
 })

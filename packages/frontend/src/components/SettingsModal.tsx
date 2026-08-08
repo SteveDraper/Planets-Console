@@ -99,10 +99,12 @@ function PlayerColorsSection() {
   const mode = usePlayerColorsStore((s) => s.mode)
   const diplomacyThreshold = usePlayerColorsStore((s) => s.diplomacyThreshold)
   const familyBaseColor = usePlayerColorsStore((s) => s.familyBaseColor)
+  const outOfCircleBaseColor = usePlayerColorsStore((s) => s.outOfCircleBaseColor)
   const overrides = usePlayerColorsStore((s) => s.overrides)
   const setPlayerColorMode = usePlayerColorsStore((s) => s.setPlayerColorMode)
   const setDiplomacyThreshold = usePlayerColorsStore((s) => s.setDiplomacyThreshold)
   const setFamilyBaseColor = usePlayerColorsStore((s) => s.setFamilyBaseColor)
+  const setOutOfCircleBaseColor = usePlayerColorsStore((s) => s.setOutOfCircleBaseColor)
   const setPlayerColorOverride = usePlayerColorsStore((s) => s.setPlayerColorOverride)
 
   return (
@@ -151,14 +153,30 @@ function PlayerColorsSection() {
               htmlFor="settings-family-base-color"
               className="text-xs text-slate-400"
             >
-              Family base color
+              Diplomacy circle base
             </label>
             <input
               id="settings-family-base-color"
               type="color"
-              aria-label="Family base color"
+              aria-label="Diplomacy circle base color"
               value={familyBaseColor}
               onChange={(e) => setFamilyBaseColor(e.target.value)}
+              className="h-8 w-12 cursor-pointer rounded border border-[#52575d] bg-transparent p-0"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="settings-out-of-circle-base-color"
+              className="text-xs text-slate-400"
+            >
+              Others base
+            </label>
+            <input
+              id="settings-out-of-circle-base-color"
+              type="color"
+              aria-label="Others base color"
+              value={outOfCircleBaseColor}
+              onChange={(e) => setOutOfCircleBaseColor(e.target.value)}
               className="h-8 w-12 cursor-pointer rounded border border-[#52575d] bg-transparent p-0"
             />
           </div>

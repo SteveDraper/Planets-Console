@@ -8,6 +8,7 @@ import {
 import {
   colorForPlayerId as resolvePlayerColor,
   DEFAULT_FAMILY_BASE_COLOR,
+  DEFAULT_OUT_OF_CIRCLE_BASE_COLOR,
   playerColorOverrideStorageKey,
   setPlayerColorResolutionPort,
   type PlayerColorMode,
@@ -20,27 +21,32 @@ const playerColorsPersistStorage = createLocalStorageOrMemoryStateStorage()
 export const PLAYER_COLORS_STORAGE_KEY = 'planets-console-player-colors'
 
 const EMPTY_INBOUND = new Map<number, number>()
+const EMPTY_ROSTER: readonly number[] = []
 
 type PlayerColorsPersisted = {
   overrides: PlayerColorOverrides
   mode: PlayerColorMode
   diplomacyThreshold: DiplomacyColorThreshold
   familyBaseColor: string
+  outOfCircleBaseColor: string
 }
 
 type PlayerColorsState = PlayerColorsPersisted & {
   /** Shell paint context -- not persisted. */
   viewpointPlayerId: number | null
   inboundRelationFromByPlayerId: ReadonlyMap<number, number>
+  rosterPlayerIds: readonly number[]
   /** Bumps so ``usePlayerColor`` re-renders on any paint-affecting change. */
   paintRevision: number
   setPlayerColorOverride: (playerId: number, color: string | null) => void
   setPlayerColorMode: (mode: PlayerColorMode) => void
   setDiplomacyThreshold: (threshold: DiplomacyColorThreshold) => void
   setFamilyBaseColor: (color: string) => void
+  setOutOfCircleBaseColor: (color: string) => void
   setPaintContext: (ctx: {
     viewpointPlayerId: number | null
     inboundRelationFromByPlayerId: ReadonlyMap<number, number>
+    rosterPlayerIds: readonly number[]
   }) => void
   colorForPlayerId: (playerId: number) => string
 }
@@ -56,8 +62,10 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
       mode: 'per_player',
       diplomacyThreshold: DEFAULT_DIPLOMACY_COLOR_THRESHOLD,
       familyBaseColor: DEFAULT_FAMILY_BASE_COLOR,
+      outOfCircleBaseColor: DEFAULT_OUT_OF_CIRCLE_BASE_COLOR,
       viewpointPlayerId: null,
       inboundRelationFromByPlayerId: EMPTY_INBOUND,
+      rosterPlayerIds: EMPTY_ROSTER,
       paintRevision: 0,
       setPlayerColorOverride: (playerId, color) =>
         set((state) => {
@@ -81,10 +89,17 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
         set((state) => ({ diplomacyThreshold, paintRevision: bumpRevision(state) })),
       setFamilyBaseColor: (familyBaseColor) =>
         set((state) => ({ familyBaseColor, paintRevision: bumpRevision(state) })),
-      setPaintContext: ({ viewpointPlayerId, inboundRelationFromByPlayerId }) =>
+      setOutOfCircleBaseColor: (outOfCircleBaseColor) =>
+        set((state) => ({ outOfCircleBaseColor, paintRevision: bumpRevision(state) })),
+      setPaintContext: ({
+        viewpointPlayerId,
+        inboundRelationFromByPlayerId,
+        rosterPlayerIds,
+      }) =>
         set((state) => ({
           viewpointPlayerId,
           inboundRelationFromByPlayerId,
+          rosterPlayerIds,
           paintRevision: bumpRevision(state),
         })),
       colorForPlayerId: (playerId) => resolvePlayerColor(playerId),
@@ -97,6 +112,7 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
         mode: state.mode,
         diplomacyThreshold: state.diplomacyThreshold,
         familyBaseColor: state.familyBaseColor,
+        outOfCircleBaseColor: state.outOfCircleBaseColor,
       }),
       merge: (persisted, current) => {
         const p =
@@ -112,6 +128,10 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
           typeof p.familyBaseColor === 'string' && p.familyBaseColor.length > 0
             ? p.familyBaseColor
             : current.familyBaseColor
+        const outOfCircleBaseColor =
+          typeof p.outOfCircleBaseColor === 'string' && p.outOfCircleBaseColor.length > 0
+            ? p.outOfCircleBaseColor
+            : current.outOfCircleBaseColor
         const overrides =
           p.overrides != null && typeof p.overrides === 'object' ? p.overrides : current.overrides
         return {
@@ -120,6 +140,7 @@ export const usePlayerColorsStore = create<PlayerColorsState>()(
           mode,
           diplomacyThreshold,
           familyBaseColor,
+          outOfCircleBaseColor,
         }
       },
     }
@@ -138,9 +159,11 @@ export function installPlayerColorsStorePort(): void {
       usePlayerColorsStore.getState().overrides[playerColorOverrideStorageKey(playerId)],
     getDiplomacyThreshold: () => usePlayerColorsStore.getState().diplomacyThreshold,
     getFamilyBaseColor: () => usePlayerColorsStore.getState().familyBaseColor,
+    getOutOfCircleBaseColor: () => usePlayerColorsStore.getState().outOfCircleBaseColor,
     getViewpointPlayerId: () => usePlayerColorsStore.getState().viewpointPlayerId,
     getInboundRelationFromByPlayerId: () =>
       usePlayerColorsStore.getState().inboundRelationFromByPlayerId,
+    getRosterPlayerIds: () => usePlayerColorsStore.getState().rosterPlayerIds,
   })
 }
 
@@ -155,10 +178,11 @@ export function usePlayerColor(playerId: number): string {
   return resolvePlayerColor(playerId)
 }
 
-/** Clear shell paint context (no viewpoint / relations). */
+/** Clear shell paint context (no viewpoint / relations / roster). */
 export function clearPlayerColorPaintContext(): void {
   usePlayerColorsStore.getState().setPaintContext({
     viewpointPlayerId: null,
     inboundRelationFromByPlayerId: EMPTY_INBOUND,
+    rosterPlayerIds: EMPTY_ROSTER,
   })
 }

@@ -104,8 +104,10 @@ describe('FleetLocationRingsOverlay', () => {
       mode: 'per_player',
       diplomacyThreshold: 2,
       familyBaseColor: '#34d399',
+      outOfCircleBaseColor: '#f43f5e',
       viewpointPlayerId: null,
       inboundRelationFromByPlayerId: new Map(),
+      rosterPlayerIds: [],
       paintRevision: 0,
     })
     resetPlayerColorResolutionPort()
