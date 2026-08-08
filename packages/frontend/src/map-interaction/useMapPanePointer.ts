@@ -53,15 +53,3 @@ export function useMapPanePointer(): MapPanePointerState {
 
   return { clientPos, domNode, hitEpoch }
 }
-
-/**
- * Pane client position without exposing hit epoch. Call sites that need
- * stale-seq should use ``useMapPanePointer`` instead.
- */
-export function useMapPaneClientPos(): {
-  clientPos: MapPaneClientPos | null
-  domNode: HTMLElement | null
-} {
-  const { clientPos, domNode } = useMapPanePointer()
-  return { clientPos, domNode }
-}
