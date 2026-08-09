@@ -285,10 +285,7 @@ def test_military_estimate_accepts_precomputed_catalog(sample_turn):
     catalog = turn_component_indexes(sample_turn)
     expected = fleet_ship_military_estimate_2x(record, turn=sample_turn)
     assert expected is not None
-    assert (
-        fleet_ship_military_estimate_2x(record, turn=sample_turn, catalog=catalog)
-        == expected
-    )
+    assert fleet_ship_military_estimate_2x(record, turn=sample_turn, catalog=catalog) == expected
     wire = fleet_ship_record_to_table_wire(record, turn=sample_turn, catalog=catalog)
     assert wire["militaryEstimate2x"] == expected
 
