@@ -13,9 +13,8 @@ from api.analytics.fleet.field_constraints import known_ship_id_value
 from api.analytics.fleet.types import FleetShipRecord
 from api.concepts.hull_abilities import hull_has_gravitonic_movement
 from api.concepts.planet_connections.wells import max_travel_distance
-from api.concepts.turn_component_catalog import hulls_by_id
+from api.concepts.turn_component_catalog import TurnComponentIndexes, turn_component_indexes
 from api.concepts.warp_well import WarpWellKind, coordinate_in_warp_well
-from api.models.components import Hull
 from api.models.game import TurnInfo
 from api.models.planet import Planet
 from api.models.ship import Ship
@@ -29,7 +28,7 @@ def fleet_ship_motion_wire(
     *,
     turn: TurnInfo,
     ships_by_id: Mapping[int, Ship] | None = None,
-    hulls_by_id_map: Mapping[int, Hull] | None = None,
+    catalog: TurnComponentIndexes | None = None,
 ) -> dict[str, object] | None:
     """Return SPA motion payload for one record, or None when not underway.
 
@@ -40,8 +39,8 @@ def fleet_ship_motion_wire(
     (waypoint, or planet when warp >= 2 and the waypoint is on/in a normal warp
     well -- W1 is not pulled into wells, so trailStop stays at the waypoint).
 
-    Optional ``ships_by_id`` / ``hulls_by_id_map`` avoid rebuilding indexes when
-    the caller already has them (e.g. ledger table-wire shaping).
+    Optional ``ships_by_id`` / ``catalog`` avoid rebuilding indexes when the
+    caller already has them (e.g. ledger table-wire shaping).
     """
     ship_id = known_ship_id_value(record)
     if ship_id is None:
@@ -59,8 +58,8 @@ def fleet_ship_motion_wire(
     if heading is None:
         return None
 
-    hull_index = hulls_by_id_map if hulls_by_id_map is not None else hulls_by_id(turn)
-    gravitonic = _ship_has_gravitonic_movement(ship, hulls_by_id_map=hull_index)
+    indexes = catalog if catalog is not None else turn_component_indexes(turn)
+    gravitonic = _ship_has_gravitonic_movement(ship, catalog=indexes)
     travel_ly = max_travel_distance(ship.warp, gravitonic)
     stop_x, stop_y = _resolve_trail_stop(ship, turn.planets)
 
@@ -79,9 +78,9 @@ def _ships_by_id(turn: TurnInfo) -> dict[int, Ship]:
 def _ship_has_gravitonic_movement(
     ship: Ship,
     *,
-    hulls_by_id_map: Mapping[int, Hull],
+    catalog: TurnComponentIndexes,
 ) -> bool:
-    hull = hulls_by_id_map.get(ship.hullid)
+    hull = catalog.hulls_by_id.get(ship.hullid)
     if hull is None:
         return False
     return hull_has_gravitonic_movement(hull)

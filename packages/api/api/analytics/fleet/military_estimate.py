@@ -29,10 +29,8 @@ from api.concepts.ship_build_military import (
     ship_build_military_score_delta_2x,
 )
 from api.concepts.turn_component_catalog import (
-    beams_by_id,
-    engines_by_id,
-    hulls_by_id,
-    torpedos_by_id,
+    TurnComponentIndexes,
+    turn_component_indexes,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
@@ -54,6 +52,7 @@ def fleet_ship_military_estimate_2x(
     record: FleetShipRecord,
     *,
     turn: TurnInfo,
+    catalog: TurnComponentIndexes | None = None,
 ) -> int | None:
     """Return scaled military estimate for one record, or None when not estimable.
 
@@ -61,6 +60,9 @@ def fleet_ship_military_estimate_2x(
     Unknown beam/tube slots are treated as full at minimal-tech catalog parts;
     unknown engines use the same default picker for API uniformity with the scorer.
     Loaded ammo is excluded (owned by the shared construction helper).
+
+    Optional ``catalog`` avoids rebuilding turn component indexes when the caller
+    already has them (e.g. ledger table-wire shaping).
     """
     option_set = resolve_display_default_build_option_set(record)
     locks = observation_locks_from_record(record)
@@ -70,9 +72,10 @@ def fleet_ship_military_estimate_2x(
     if is_generic_freighter_sentinel_hull_id(hull_id):
         return 0
 
+    indexes = catalog if catalog is not None else turn_component_indexes(turn)
     fit = _resolve_fit_for_hull(
         record,
-        turn=turn,
+        catalog=indexes,
         hull_id=hull_id,
         option_set=option_set,
         locks=locks,
@@ -92,31 +95,26 @@ def fleet_ship_military_estimate_2x(
 def _resolve_fit_for_hull(
     record: FleetShipRecord,
     *,
-    turn: TurnInfo,
+    catalog: TurnComponentIndexes,
     hull_id: int,
     option_set: FleetBuildOptionSet | None,
     locks: ObservationComponentLocks,
 ) -> _ResolvedShipConstructionFit | None:
-    turn_hulls = hulls_by_id(turn)
-    turn_engines = engines_by_id(turn)
-    turn_beams = beams_by_id(turn)
-    turn_torpedos = torpedos_by_id(turn)
-
-    hull = turn_hulls.get(hull_id)
+    hull = catalog.hulls_by_id.get(hull_id)
     if hull is None:
         return None
 
     defaults = default_build_components(
-        engines_by_id=turn_engines,
-        beams_by_id=turn_beams,
-        torpedos_by_id=turn_torpedos,
+        engines_by_id=catalog.engines_by_id,
+        beams_by_id=catalog.beams_by_id,
+        torpedos_by_id=catalog.torpedos_by_id,
     )
 
     engine = _resolve_engine(
         record,
         option_set=option_set,
         locks_engine_id=locks.engine_id,
-        engines_by_id=turn_engines,
+        engines_by_id=catalog.engines_by_id,
         default_engine=defaults.engine,
     )
     if engine is None:
@@ -129,7 +127,7 @@ def _resolve_fit_for_hull(
         locks_id=locks.beam_id,
         locks_count=locks.beam_count,
         slot_capacity=hull.beams,
-        components_by_id=turn_beams,
+        components_by_id=catalog.beams_by_id,
         default_component=defaults.beam,
     )
     if beam_count is None:
@@ -142,7 +140,7 @@ def _resolve_fit_for_hull(
         locks_id=locks.torp_id,
         locks_count=locks.launcher_count,
         slot_capacity=hull.launchers,
-        components_by_id=turn_torpedos,
+        components_by_id=catalog.torpedos_by_id,
         default_component=defaults.torpedo,
     )
     if launcher_count is None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from api.analytics.fleet.motion_estimate import fleet_ship_motion_wire
+from api.analytics.fleet.motion_wire import fleet_ship_motion_wire
 from api.analytics.fleet.serialization import fleet_ship_record_to_json
 from api.analytics.fleet.table_wire import fleet_ship_record_to_table_wire
 from api.analytics.fleet.types import (
@@ -86,7 +86,8 @@ def test_motion_omitted_when_warp_above_nine(sample_turn):
     assert fleet_ship_motion_wire(record, turn=turn) is None
 
 
-def test_motion_omitted_when_heading_unknown_and_no_waypoint(sample_turn):
+def test_motion_omitted_when_parked_even_with_unknown_heading(sample_turn):
+    """Target equals position is not underway; residual/unknown heading does not emit."""
     turn, ship = _ship_with(
         sample_turn,
         id=42,
@@ -233,8 +234,8 @@ def test_table_wire_attaches_motion_and_durable_omits(sample_turn):
 
 
 def test_motion_wire_accepts_precomputed_indexes(sample_turn):
-    """Ledger path may pass ship/hull indexes; payloads match turn-built defaults."""
-    from api.concepts.turn_component_catalog import hulls_by_id
+    """Ledger path may pass ship/catalog indexes; payloads match turn-built defaults."""
+    from api.concepts.turn_component_catalog import turn_component_indexes
 
     turn, ship = _ship_with(
         sample_turn,
@@ -247,7 +248,7 @@ def test_motion_wire_accepts_precomputed_indexes(sample_turn):
     )
     record = _record_for_ship(ship.id)
     ships_by_id = {s.id: s for s in turn.ships}
-    hulls_by_id_map = hulls_by_id(turn)
+    catalog = turn_component_indexes(turn)
 
     expected = fleet_ship_motion_wire(record, turn=turn)
     assert expected is not None
@@ -256,7 +257,7 @@ def test_motion_wire_accepts_precomputed_indexes(sample_turn):
             record,
             turn=turn,
             ships_by_id=ships_by_id,
-            hulls_by_id_map=hulls_by_id_map,
+            catalog=catalog,
         )
         == expected
     )
@@ -264,6 +265,6 @@ def test_motion_wire_accepts_precomputed_indexes(sample_turn):
         record,
         turn=turn,
         ships_by_id=ships_by_id,
-        hulls_by_id_map=hulls_by_id_map,
+        catalog=catalog,
     )
     assert wire["motion"] == expected
