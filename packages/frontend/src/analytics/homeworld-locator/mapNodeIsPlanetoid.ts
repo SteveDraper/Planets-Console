@@ -1,14 +1,5 @@
 import type { MapNode } from '../../api/bff'
-
-/** Coerce host ``debrisdisk`` (number or numeric string) for planetoid checks. */
-function debrisdiskValue(raw: unknown): number | null {
-  if (typeof raw === 'number' && Number.isFinite(raw)) return raw
-  if (typeof raw === 'string' && raw.trim() !== '') {
-    const parsed = Number(raw)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return null
-}
+import { debrisdiskValue } from '../../lib/debrisdisk'
 
 /** True when the map node is a planetoid (`debrisdisk == 1`), matching Core `planet_is_planetoid`. */
 export function mapNodeIsPlanetoid(node: Pick<MapNode, 'planet'>): boolean {
