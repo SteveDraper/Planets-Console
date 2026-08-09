@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
+import { useFleetHeadingTrailExtendStore } from '../../stores/fleetHeadingTrailExtend'
 import {
   collectFleetHeadingTrails,
   type FleetHeadingTrail,
@@ -7,13 +8,14 @@ import {
 import { useFleetStreamPlayersById } from './FleetStreamPlayersContext'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 
-/** Project the shared fleet stream into current-turn heading trails for map paint. */
+/** Project the shared fleet stream into heading trail segments for map paint. */
 export function useFleetHeadingTrails(
   analyticScope: AnalyticShellScope,
   enabled: boolean
 ): readonly FleetHeadingTrail[] {
   const streamPlayersById = useFleetStreamPlayersById()
   const { players: visiblePlayers } = useOrderedFleetPlayers({ visibleOnly: true })
+  const extendTurns = useFleetHeadingTrailExtendStore((state) => state.extendTurns)
 
   return useMemo(() => {
     if (!enabled) {
@@ -25,7 +27,8 @@ export function useFleetHeadingTrails(
         playerId: player.playerId,
         name: player.name,
       })),
-      analyticScope.turn
+      analyticScope.turn,
+      extendTurns
     )
-  }, [enabled, streamPlayersById, visiblePlayers, analyticScope.turn])
+  }, [enabled, streamPlayersById, visiblePlayers, analyticScope.turn, extendTurns])
 }

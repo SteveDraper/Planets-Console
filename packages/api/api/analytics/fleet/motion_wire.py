@@ -34,7 +34,7 @@ def fleet_ship_motion_wire(
 
     Attached only when the record has a known ship id present in ``turn.ships``
     that is underway (``targetx``/``targety`` ≠ position) with warp in 1..9 and a
-    resolvable heading (direct ``heading`` or derived from the waypoint).
+    resolvable heading (vector to the waypoint; ``Ship.heading`` only as fallback).
     Includes gravitonic ×2 in ``travelLyPerTurn``. ``trailStop`` is always set
     (waypoint, or planet when warp >= 2 and the waypoint is on/in a normal warp
     well -- W1 is not pulled into wells, so trailStop stays at the waypoint).
@@ -87,19 +87,25 @@ def _ship_has_gravitonic_movement(
 
 
 def _resolve_heading_degrees(ship: Ship) -> int | None:
-    """Heading in degrees (0 = north, clockwise). None when unknown."""
-    if ship.heading != _UNKNOWN_HEADING and ship.heading >= 0:
-        return int(ship.heading) % 360
+    """Heading in degrees (0 = north, clockwise). None when unknown.
 
+    Prefer the vector to the current waypoint (``targetx``/``targety``): that is
+    the host order for this turn. Nu ``Ship.heading`` can lag or disagree by
+    several degrees from the waypoint (observed ~12°), which mis-aims map trails
+    when trusted first.
+    """
     dx = ship.targetx - ship.x
     dy = ship.targety - ship.y
-    if dx == 0 and dy == 0:
-        return None
-    # Match SPA ion-storm convention: 0 north, positive clockwise (atan2(dx, dy)).
-    degrees = math.degrees(math.atan2(float(dx), float(dy)))
-    if degrees < 0.0:
-        degrees += 360.0
-    return int(round(degrees)) % 360
+    if dx != 0 or dy != 0:
+        # Match SPA ion-storm convention: 0 north, positive clockwise (atan2(dx, dy)).
+        degrees = math.degrees(math.atan2(float(dx), float(dy)))
+        if degrees < 0.0:
+            degrees += 360.0
+        return int(round(degrees)) % 360
+
+    if ship.heading != _UNKNOWN_HEADING and ship.heading >= 0:
+        return int(ship.heading) % 360
+    return None
 
 
 def _resolve_trail_stop(

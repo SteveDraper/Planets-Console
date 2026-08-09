@@ -1,5 +1,5 @@
 /**
- * Screen-space fleet heading trails (current-turn rays). Paint only -- no hit targets.
+ * Screen-space fleet heading trails. Paint only -- no hit targets.
  */
 
 import { useStore } from '@xyflow/react'

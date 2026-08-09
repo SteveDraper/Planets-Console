@@ -5,10 +5,19 @@ import { useTurnRacePlayerLabels } from '../../lib/turnRacePlayerLabels'
 import { cn } from '../../lib/utils'
 import { useSessionStore } from '../../stores/session'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
+import {
+  FLEET_HEADING_TRAIL_MAX_EXTEND_TURNS,
+  useFleetHeadingTrailExtendStore,
+} from '../../stores/fleetHeadingTrailExtend'
 import { useShellStore } from '../../stores/shell'
 import { fleetPlayerDisplayLabel } from './fleetPlayerDisplayLabel'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 import { tileClassName } from '../tileChrome'
+
+const TRAIL_EXTEND_OPTIONS = Array.from(
+  { length: FLEET_HEADING_TRAIL_MAX_EXTEND_TURNS + 1 },
+  (_, n) => n
+)
 
 type FleetAnalyticTileProps = {
   name: string
@@ -35,6 +44,8 @@ export function FleetAnalyticTile({
   const loginName = useSessionStore((s) => s.name)
   const { players: orderedPlayers, isPlayerVisible } = useOrderedFleetPlayers()
   const setFleetPlayerVisible = useFleetPlayerVisibilityStore((state) => state.setFleetPlayerVisible)
+  const trailExtendTurns = useFleetHeadingTrailExtendStore((state) => state.extendTurns)
+  const setTrailExtendTurns = useFleetHeadingTrailExtendStore((state) => state.setExtendTurns)
   const analyticScope = useMemo(
     () =>
       deriveAnalyticScope({
@@ -119,9 +130,25 @@ export function FleetAnalyticTile({
       </div>
       {showExpandedBody ? (
         <div
-          className="flex min-w-0 flex-col gap-1 border-t border-[#52575d]/70 px-2 pb-2 pt-1.5 text-xs text-slate-300"
+          className="flex min-w-0 flex-col gap-1.5 border-t border-[#52575d]/70 px-2 pb-2 pt-1.5 text-xs text-slate-300"
           onClick={(event) => event.stopPropagation()}
         >
+          <label className="flex min-w-0 w-full items-center gap-1.5">
+            <span className="w-11 shrink-0 text-slate-400">Trail</span>
+            <select
+              aria-label="Fleet heading trail extend turns"
+              title="Extra turns of heading trail beyond the current turn (0 = current turn only). Forward and backward segments fade with distance."
+              value={trailExtendTurns}
+              onChange={(event) => setTrailExtendTurns(Number(event.target.value))}
+              className="min-w-0 w-0 flex-1 rounded border border-[#52575d] bg-[#2a2d30] px-1 py-0.5 text-slate-200"
+            >
+              {TRAIL_EXTEND_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n === 0 ? '0 (current only)' : String(n)}
+                </option>
+              ))}
+            </select>
+          </label>
           {orderedPlayers.map((player) => {
             const playerLabel = fleetPlayerDisplayLabel(player, racePlayerLabels, undefined)
             return (

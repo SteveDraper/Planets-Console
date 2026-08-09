@@ -40,7 +40,7 @@ vi.mock('./useOverlayPaneSize', () => ({
 
 function sampleTrail(overrides: Partial<FleetHeadingTrail> = {}): FleetHeadingTrail {
   return {
-    key: 'r1:1000,2000',
+    key: 'r1:t0:1000,2000',
     recordId: 'r1',
     playerId: 8,
     x: 1000,
@@ -49,6 +49,7 @@ function sampleTrail(overrides: Partial<FleetHeadingTrail> = {}): FleetHeadingTr
     endY: 2000,
     heading: 90,
     travelLyPerTurn: 81,
+    turnOffset: 0,
     opacity: FLEET_HEADING_TRAIL_CURRENT_OPACITY,
     ...overrides,
   }
@@ -76,7 +77,7 @@ describe('FleetHeadingTrailsOverlay', () => {
   it('paints player-colored rays without pointer capture', () => {
     const { container } = render(
       <FleetHeadingTrailsOverlay
-        trails={[sampleTrail(), sampleTrail({ key: 'r2:1000,2000', recordId: 'r2', playerId: 9 })]}
+        trails={[sampleTrail(), sampleTrail({ key: 'r2:t0:1000,2000', recordId: 'r2', playerId: 9 })]}
       />,
       { wrapper }
     )

@@ -100,7 +100,7 @@ def test_motion_omitted_when_parked_even_with_unknown_heading(sample_turn):
     assert fleet_ship_motion_wire(record, turn=turn) is None
 
 
-def test_motion_uses_direct_heading_and_warp_square(sample_turn):
+def test_motion_uses_waypoint_heading_and_warp_square(sample_turn):
     turn, ship = _ship_with(
         sample_turn,
         id=42,
@@ -118,6 +118,26 @@ def test_motion_uses_direct_heading_and_warp_square(sample_turn):
         "travelLyPerTurn": max_travel_distance(5, False),
         "trailStop": {"x": ship.targetx, "y": ship.targety},
     }
+
+
+def test_motion_prefers_waypoint_over_disagreeing_host_heading(sample_turn):
+    """Host heading can lag the waypoint (e.g. game 680224 ship 59 vs p74)."""
+    turn, ship = _ship_with(
+        sample_turn,
+        id=59,
+        warp=8,
+        heading=225,
+        hullid=1,
+        x=2485,
+        y=2277,
+        targetx=2433,
+        targety=2244,
+    )
+    record = _record_for_ship(ship.id)
+    motion = fleet_ship_motion_wire(record, turn=turn)
+    assert motion is not None
+    assert motion["heading"] == 238  # atan2 toward waypoint, not host 225
+    assert motion["heading"] != ship.heading
 
 
 def test_motion_applies_gravitonic_multiplier(sample_turn):
