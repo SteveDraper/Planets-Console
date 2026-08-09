@@ -30,7 +30,7 @@ export function FleetLocationRingsOverlay({ stacks }: FleetLocationRingsOverlayP
   const scale = safeZoomScale(rawScale)
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[7]">
+    <div className="pointer-events-none absolute inset-0 z-[8]">
       <svg
         className="h-full w-full"
         viewBox={`0 0 ${width} ${height}`}

@@ -28,7 +28,7 @@ export function FleetHeadingTrailsOverlay({ trails }: FleetHeadingTrailsOverlayP
   const scale = safeZoomScale(rawScale)
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[6]">
+    <div className="pointer-events-none absolute inset-0 z-[7]">
       <svg
         className="h-full w-full"
         viewBox={`0 0 ${width} ${height}`}
