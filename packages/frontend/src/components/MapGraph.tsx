@@ -236,7 +236,11 @@ function MapGraphFlow({
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
   const fleetStacks = useFleetLocationRingStacks(analyticScope, fleetEnabled)
-  const fleetHeadingTrails = useFleetHeadingTrails(analyticScope, fleetEnabled)
+  const fleetHeadingTrails = useFleetHeadingTrails(
+    analyticScope,
+    fleetEnabled,
+    planetMapNodes
+  )
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays
   )

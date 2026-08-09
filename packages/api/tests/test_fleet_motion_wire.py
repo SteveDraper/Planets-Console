@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 from api.analytics.fleet.motion_wire import fleet_ship_motion_wire
@@ -138,6 +139,69 @@ def test_motion_prefers_waypoint_over_disagreeing_host_heading(sample_turn):
     assert motion is not None
     assert motion["heading"] == 238  # atan2 toward waypoint, not host 225
     assert motion["heading"] != ship.heading
+
+
+def _turn_with_hyperjump_hull(sample_turn: TurnInfo, hull_id: int) -> TurnInfo:
+    hulls = [
+        replace(h, special="Hyperjump - Can jump 350 ly with FC HYP") if h.id == hull_id else h
+        for h in sample_turn.hulls
+    ]
+    return replace(sample_turn, hulls=hulls)
+
+
+def test_motion_hyperjump_sets_landing_and_flag(sample_turn):
+    """Performing HYP: dotted-trail payload aims at jump landing, not warp²."""
+    hyp_hull_id = sample_turn.hulls[0].id
+    sample = _turn_with_hyperjump_hull(sample_turn, hyp_hull_id)
+    turn, ship = _ship_with(
+        sample,
+        id=17,
+        warp=7,
+        heading=0,
+        hullid=hyp_hull_id,
+        friendlycode="HYp",
+        neutronium=51,
+        x=2458,
+        y=2128,
+        targetx=2311,
+        targety=2441,
+    )
+    record = _record_for_ship(ship.id)
+    motion = fleet_ship_motion_wire(record, turn=turn)
+    assert motion is not None
+    assert motion["hyperjump"] is True
+    assert motion["trailStop"] == {"x": 2311, "y": 2441}
+    assert motion["travelLyPerTurn"] == math.hypot(2311 - 2458, 2441 - 2128)
+
+    ordinary = fleet_ship_motion_wire(
+        record,
+        turn=replace(turn, ships=[replace(ship, friendlycode="abc")]),
+    )
+    assert ordinary is not None
+    assert "hyperjump" not in ordinary
+    assert ordinary["travelLyPerTurn"] == max_travel_distance(7, False)
+
+
+def test_motion_hyperjump_omitted_without_fuel(sample_turn):
+    hyp_hull_id = sample_turn.hulls[0].id
+    sample = _turn_with_hyperjump_hull(sample_turn, hyp_hull_id)
+    turn, ship = _ship_with(
+        sample,
+        id=17,
+        warp=7,
+        heading=0,
+        hullid=hyp_hull_id,
+        friendlycode="HYP",
+        neutronium=49,
+        x=1000,
+        y=1000,
+        targetx=1350,
+        targety=1000,
+    )
+    motion = fleet_ship_motion_wire(_record_for_ship(ship.id), turn=turn)
+    assert motion is not None
+    assert "hyperjump" not in motion
+    assert motion["travelLyPerTurn"] == max_travel_distance(7, False)
 
 
 def test_motion_applies_gravitonic_multiplier(sample_turn):

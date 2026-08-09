@@ -4,6 +4,7 @@
 
 import { useStore } from '@xyflow/react'
 import {
+  FLEET_HEADING_TRAIL_HYPERJUMP_DASHARRAY,
   FLEET_HEADING_TRAIL_STROKE_WIDTH_PX,
   type FleetHeadingTrail,
 } from '../../analytics/fleet/fleetHeadingTrails'
@@ -77,6 +78,7 @@ function FleetHeadingTrailStroke({
       stroke={color}
       strokeWidth={FLEET_HEADING_TRAIL_STROKE_WIDTH_PX}
       strokeLinecap="round"
+      strokeDasharray={trail.isHyperjump ? FLEET_HEADING_TRAIL_HYPERJUMP_DASHARRAY : undefined}
       opacity={trail.opacity}
     />
   )

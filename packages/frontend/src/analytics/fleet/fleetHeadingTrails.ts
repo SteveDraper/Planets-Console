@@ -2,9 +2,18 @@
  * Fleet heading trail projection: rays along known wire ``motion`` from lastSeen
  * (#290). ``extendTurns`` 0 = current-turn segment only; 1..5 adds matching
  * forward and backward segments with opacity by |turnOffset|.
+ *
+ * Ordinary (non-HYP) rays also clamp when they first intersect a planet cell or
+ * normal warp well. Back-trails are omitted when the origin is already on a
+ * planet / in a well.
  */
 
 import { headingTravelDeltaGameLy } from '../../lib/cartography/headingTravel'
+import {
+  firstFleetTrailPlanetStopAlongSegment,
+  pointInAnyFleetTrailPlanetStop,
+  type FleetTrailPlanetStop,
+} from './fleetHeadingTrailPlanetStops'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
 import type { FleetShipMotion, FleetTableRecord } from './fleetTableWireSchema'
 import {
@@ -14,6 +23,8 @@ import {
 
 /** Screen-fixed stroke for heading trails (px). */
 export const FLEET_HEADING_TRAIL_STROKE_WIDTH_PX = 1.5
+/** SVG dash pattern for hyperjump (HYP) current-turn trails. */
+export const FLEET_HEADING_TRAIL_HYPERJUMP_DASHARRAY = '5 4'
 /** Opacity for the current-turn forward segment (turnOffset 0). */
 export const FLEET_HEADING_TRAIL_CURRENT_OPACITY = 0.9
 /** Opacity at the farthest extended segment when ``extendTurns`` is max. */
@@ -41,6 +52,8 @@ export type FleetHeadingTrail = {
    */
   turnOffset: number
   opacity: number
+  /** True when this segment is a performing hyperjump (dotted current-turn only). */
+  isHyperjump: boolean
 }
 
 /**
@@ -78,7 +91,8 @@ export function collectFleetHeadingTrails(
   streamPlayersById: ReadonlyMap<number, FleetPlayerStreamSlice>,
   visiblePlayers: readonly FleetVisiblePlayer[],
   displayTurn: number,
-  extendTurns: number = 0
+  extendTurns: number = 0,
+  planets: readonly FleetTrailPlanetStop[] = []
 ): FleetHeadingTrail[] {
   const turns = clampFleetHeadingTrailExtendTurns(extendTurns)
   const trails: FleetHeadingTrail[] = []
@@ -88,7 +102,13 @@ export function collectFleetHeadingTrails(
     displayTurn
   )) {
     trails.push(
-      ...fleetHeadingTrailSegmentsFromRecord(record, playerId, displayTurn, turns)
+      ...fleetHeadingTrailSegmentsFromRecord(
+        record,
+        playerId,
+        displayTurn,
+        turns,
+        planets
+      )
     )
   }
   return trails.sort((a, b) => a.key.localeCompare(b.key))
@@ -98,28 +118,41 @@ export function collectFleetHeadingTrails(
 export function fleetHeadingTrailFromRecord(
   record: FleetTableRecord,
   playerId: number,
-  displayTurn: number
+  displayTurn: number,
+  planets: readonly FleetTrailPlanetStop[] = []
 ): FleetHeadingTrail | null {
-  const segments = fleetHeadingTrailSegmentsFromRecord(record, playerId, displayTurn, 0)
+  const segments = fleetHeadingTrailSegmentsFromRecord(
+    record,
+    playerId,
+    displayTurn,
+    0,
+    planets
+  )
   return segments[0] ?? null
 }
 
 /**
  * Build forward (``0..extendTurns``) and backward (``-1..-extendTurns``) segments
- * for one record. Forward legs stop once a segment clamps at ``trailStop``.
+ * for one record. Forward legs stop at ``trailStop`` or the first planet/well hit.
+ * Backward legs stop at the first planet/well (and are omitted entirely when the
+ * origin is already on a planet / in a well). Performing hyperjumps always emit
+ * only the current-turn segment and skip planet/well path clamps.
  */
 export function fleetHeadingTrailSegmentsFromRecord(
   record: FleetTableRecord,
   playerId: number,
   displayTurn: number,
-  extendTurns: number
+  extendTurns: number,
+  planets: readonly FleetTrailPlanetStop[] = []
 ): FleetHeadingTrail[] {
   const lastSeen = record.lastSeen
   const motion = record.motion
   if (lastSeen == null || lastSeen.turn !== displayTurn || motion == null) {
     return []
   }
-  const turns = clampFleetHeadingTrailExtendTurns(extendTurns)
+  const isHyperjump = motion.hyperjump === true
+  const turns = isHyperjump ? 0 : clampFleetHeadingTrailExtendTurns(extendTurns)
+  const pathPlanets = isHyperjump ? [] : planets
   const originX = lastSeen.x
   const originY = lastSeen.y
   const { dx, dy } = headingTravelDeltaGameLy(motion.heading, motion.travelLyPerTurn)
@@ -139,7 +172,8 @@ export function fleetHeadingTrailSegmentsFromRecord(
       startY,
       motion,
       dx,
-      dy
+      dy,
+      pathPlanets
     )
     const length = Math.hypot(endX - startX, endY - startY)
     if (length > SEGMENT_LENGTH_EPS) {
@@ -155,6 +189,7 @@ export function fleetHeadingTrailSegmentsFromRecord(
           travelLyPerTurn: motion.travelLyPerTurn,
           turnOffset,
           opacity: fleetHeadingTrailOpacity(turnOffset, turns),
+          isHyperjump,
         })
       )
     }
@@ -166,29 +201,55 @@ export function fleetHeadingTrailSegmentsFromRecord(
     }
   }
 
-  for (let k = 1; k <= turns; k += 1) {
-    const endX = originX - (k - 1) * dx
-    const endY = originY - (k - 1) * dy
-    const startX = originX - k * dx
-    const startY = originY - k * dy
-    const length = Math.hypot(endX - startX, endY - startY)
-    if (length <= SEGMENT_LENGTH_EPS) {
-      continue
+  if (
+    turns > 0 &&
+    !pointInAnyFleetTrailPlanetStop(originX, originY, pathPlanets)
+  ) {
+    let nearX = originX
+    let nearY = originY
+    for (let k = 1; k <= turns; k += 1) {
+      const proposedFarX = nearX - dx
+      const proposedFarY = nearY - dy
+      const planetHit = firstFleetTrailPlanetStopAlongSegment(
+        nearX,
+        nearY,
+        proposedFarX,
+        proposedFarY,
+        pathPlanets,
+        { skipPlanetsContainingStart: true }
+      )
+      let farX = proposedFarX
+      let farY = proposedFarY
+      let stopFurther = false
+      if (planetHit != null) {
+        farX = planetHit.x
+        farY = planetHit.y
+        stopFurther = true
+      }
+      const length = Math.hypot(nearX - farX, nearY - farY)
+      if (length > SEGMENT_LENGTH_EPS) {
+        segments.push(
+          makeTrailSegment({
+            recordId: record.recordId,
+            playerId,
+            x: farX,
+            y: farY,
+            endX: nearX,
+            endY: nearY,
+            heading: motion.heading,
+            travelLyPerTurn: motion.travelLyPerTurn,
+            turnOffset: -k,
+            opacity: fleetHeadingTrailOpacity(k, turns),
+            isHyperjump: false,
+          })
+        )
+      }
+      if (stopFurther) {
+        break
+      }
+      nearX = proposedFarX
+      nearY = proposedFarY
     }
-    segments.push(
-      makeTrailSegment({
-        recordId: record.recordId,
-        playerId,
-        x: startX,
-        y: startY,
-        endX,
-        endY,
-        heading: motion.heading,
-        travelLyPerTurn: motion.travelLyPerTurn,
-        turnOffset: -k,
-        opacity: fleetHeadingTrailOpacity(k, turns),
-      })
-    )
   }
 
   return segments
@@ -196,12 +257,14 @@ export function fleetHeadingTrailSegmentsFromRecord(
 
 /**
  * One-turn endpoint along heading at ``travelLyPerTurn``, clamped to ``trailStop``
- * when that stop is within the one-turn travel distance from the segment start.
+ * or the first planet/well hit when that stop is within the one-turn travel
+ * distance from the segment start.
  */
 export function fleetHeadingTrailEndpoint(
   originX: number,
   originY: number,
-  motion: FleetShipMotion
+  motion: FleetShipMotion,
+  planets: readonly FleetTrailPlanetStop[] = []
 ): { x: number; y: number } {
   const { dx, dy } = headingTravelDeltaGameLy(motion.heading, motion.travelLyPerTurn)
   const { endX, endY } = fleetHeadingTrailForwardEndpoint(
@@ -209,7 +272,8 @@ export function fleetHeadingTrailEndpoint(
     originY,
     motion,
     dx,
-    dy
+    dy,
+    motion.hyperjump === true ? [] : planets
   )
   return { x: endX, y: endY }
 }
@@ -219,14 +283,41 @@ function fleetHeadingTrailForwardEndpoint(
   startY: number,
   motion: FleetShipMotion,
   dx: number,
-  dy: number
+  dy: number,
+  planets: readonly FleetTrailPlanetStop[]
 ): { endX: number; endY: number; clamped: boolean } {
   const uncappedX = startX + dx
   const uncappedY = startY + dy
+
+  type Candidate = { x: number; y: number; distance: number }
+  const candidates: Candidate[] = []
+
   const stop = motion.trailStop
-  const stopDistance = Math.hypot(stop.x - startX, stop.y - startY)
-  if (stopDistance <= motion.travelLyPerTurn + SEGMENT_LENGTH_EPS) {
-    return { endX: stop.x, endY: stop.y, clamped: true }
+  const trailStopDistance = Math.hypot(stop.x - startX, stop.y - startY)
+  if (trailStopDistance <= motion.travelLyPerTurn + SEGMENT_LENGTH_EPS) {
+    candidates.push({ x: stop.x, y: stop.y, distance: trailStopDistance })
+  }
+
+  const planetHit = firstFleetTrailPlanetStopAlongSegment(
+    startX,
+    startY,
+    uncappedX,
+    uncappedY,
+    planets,
+    { skipPlanetsContainingStart: true }
+  )
+  if (planetHit != null) {
+    candidates.push({
+      x: planetHit.x,
+      y: planetHit.y,
+      distance: Math.hypot(planetHit.x - startX, planetHit.y - startY),
+    })
+  }
+
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => a.distance - b.distance)
+    const nearest = candidates[0]!
+    return { endX: nearest.x, endY: nearest.y, clamped: true }
   }
   return { endX: uncappedX, endY: uncappedY, clamped: false }
 }

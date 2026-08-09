@@ -162,6 +162,7 @@ describe('fleetHeadingTrailFromRecord', () => {
       travelLyPerTurn: 81,
       turnOffset: 0,
       opacity: FLEET_HEADING_TRAIL_CURRENT_OPACITY,
+      isHyperjump: false,
     })
   })
 })
@@ -246,6 +247,90 @@ describe('fleetHeadingTrailSegmentsFromRecord', () => {
     expect(forward.map((s) => s.turnOffset)).toEqual([0, 1, 2])
     expect(forward[2]!.endX).toBe(1060)
     expect(forward[2]!.endY).toBe(2000)
+  })
+
+  it('forces current-turn only for hyperjump even when extendTurns is set', () => {
+    const origin = { x: 2458, y: 2128 }
+    const landing = { x: 2311, y: 2441 }
+    const travelLyPerTurn = Math.hypot(landing.x - origin.x, landing.y - origin.y)
+    const hyp = record({
+      recordId: 'hyp',
+      lastSeen: { turn: 9, x: origin.x, y: origin.y },
+      motion: {
+        heading: 335,
+        warp: 7,
+        travelLyPerTurn,
+        trailStop: landing,
+        hyperjump: true,
+      },
+    })
+    const intervening = [{ x: 2400, y: 2200, stopRadius: 3 }]
+    const segments = fleetHeadingTrailSegmentsFromRecord(hyp, 2, 9, 5, intervening)
+    expect(segments).toHaveLength(1)
+    expect(segments[0]!.turnOffset).toBe(0)
+    expect(segments[0]!.isHyperjump).toBe(true)
+    expect(segments[0]!.endX).toBe(landing.x)
+    expect(segments[0]!.endY).toBe(landing.y)
+  })
+
+  it('clamps forward legs at an intervening planet well', () => {
+    const ship = record({
+      recordId: 'well',
+      lastSeen: { turn: 9, x: 1000, y: 2000 },
+      motion: {
+        heading: 90,
+        warp: 9,
+        travelLyPerTurn: 81,
+        trailStop: { x: 2000, y: 2000 },
+      },
+    })
+    const planets = [{ x: 1040, y: 2000, stopRadius: 3 }]
+    const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 2, planets)
+    const forward = segments.filter((s) => s.turnOffset >= 0)
+    expect(forward).toHaveLength(1)
+    expect(forward[0]!.endX).toBe(1040)
+    expect(forward[0]!.endY).toBe(2000)
+  })
+
+  it('omits back-trails when the origin is already in a warp well', () => {
+    const ship = record({
+      recordId: 'orbit',
+      lastSeen: { turn: 9, x: 1001, y: 2000 },
+      motion: {
+        heading: 90,
+        warp: 5,
+        travelLyPerTurn: 25,
+        trailStop: { x: 2000, y: 2000 },
+      },
+    })
+    const planets = [{ x: 1000, y: 2000, stopRadius: 3 }]
+    const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 3, planets)
+    expect(segments.every((s) => s.turnOffset >= 0)).toBe(true)
+    expect(segments.some((s) => s.turnOffset < 0)).toBe(false)
+  })
+
+  it('stops back-trails at a planet well behind the ship', () => {
+    const ship = record({
+      recordId: 'back',
+      lastSeen: { turn: 9, x: 1000, y: 2000 },
+      motion: {
+        heading: 90,
+        warp: 5,
+        travelLyPerTurn: 25,
+        trailStop: { x: 2000, y: 2000 },
+      },
+    })
+    // Planet well centered west of origin; back ray (west) enters it.
+    const planets = [{ x: 950, y: 2000, stopRadius: 3 }]
+    const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 3, planets)
+    const backward = segments
+      .filter((s) => s.turnOffset < 0)
+      .sort((a, b) => b.turnOffset - a.turnOffset)
+    expect(backward.length).toBeGreaterThanOrEqual(1)
+    expect(backward.length).toBeLessThanOrEqual(2)
+    const last = backward[backward.length - 1]!
+    expect(last.x).toBe(950)
+    expect(last.y).toBe(2000)
   })
 })
 

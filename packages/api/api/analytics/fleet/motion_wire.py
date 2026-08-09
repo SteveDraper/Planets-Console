@@ -12,6 +12,10 @@ from collections.abc import Mapping
 from api.analytics.fleet.field_constraints import known_ship_id_value
 from api.analytics.fleet.types import FleetShipRecord
 from api.concepts.hull_abilities import hull_has_gravitonic_movement
+from api.concepts.hyperjump import (
+    hyperjump_landing_xy,
+    ship_is_performing_hyperjump,
+)
 from api.concepts.planet_connections.wells import max_travel_distance
 from api.concepts.turn_component_catalog import TurnComponentIndexes, turn_component_indexes
 from api.concepts.warp_well import WarpWellKind, coordinate_in_warp_well
@@ -35,9 +39,10 @@ def fleet_ship_motion_wire(
     Attached only when the record has a known ship id present in ``turn.ships``
     that is underway (``targetx``/``targety`` ≠ position) with warp in 1..9 and a
     resolvable heading (vector to the waypoint; ``Ship.heading`` only as fallback).
-    Includes gravitonic ×2 in ``travelLyPerTurn``. ``trailStop`` is always set
-    (waypoint, or planet when warp >= 2 and the waypoint is on/in a normal warp
-    well -- W1 is not pulled into wells, so trailStop stays at the waypoint).
+    Ordinary travel uses warp² (×2 gravitonic) for ``travelLyPerTurn`` and clamps
+    ``trailStop`` at the waypoint / warp-well planet. Performing hyperjumps set
+    ``hyperjump: true``, aim ``trailStop`` at the HYP landing, and set
+    ``travelLyPerTurn`` to that jump length.
 
     Optional ``ships_by_id`` / ``catalog`` avoid rebuilding indexes when the
     caller already has them (e.g. ledger table-wire shaping).
@@ -59,7 +64,21 @@ def fleet_ship_motion_wire(
         return None
 
     indexes = catalog if catalog is not None else turn_component_indexes(turn)
-    gravitonic = _ship_has_gravitonic_movement(ship, catalog=indexes)
+    hull = indexes.hulls_by_id.get(ship.hullid)
+    if ship_is_performing_hyperjump(ship, hull):
+        land_x, land_y = hyperjump_landing_xy(ship)
+        travel_ly = math.hypot(float(land_x - ship.x), float(land_y - ship.y))
+        if travel_ly <= 0.0:
+            return None
+        return {
+            "heading": heading,
+            "warp": ship.warp,
+            "travelLyPerTurn": travel_ly,
+            "trailStop": {"x": land_x, "y": land_y},
+            "hyperjump": True,
+        }
+
+    gravitonic = hull is not None and hull_has_gravitonic_movement(hull)
     travel_ly = max_travel_distance(ship.warp, gravitonic)
     stop_x, stop_y = _resolve_trail_stop(ship, turn.planets)
 
@@ -73,17 +92,6 @@ def fleet_ship_motion_wire(
 
 def _ships_by_id(turn: TurnInfo) -> dict[int, Ship]:
     return {ship.id: ship for ship in turn.ships}
-
-
-def _ship_has_gravitonic_movement(
-    ship: Ship,
-    *,
-    catalog: TurnComponentIndexes,
-) -> bool:
-    hull = catalog.hulls_by_id.get(ship.hullid)
-    if hull is None:
-        return False
-    return hull_has_gravitonic_movement(hull)
 
 
 def _resolve_heading_degrees(ship: Ship) -> int | None:

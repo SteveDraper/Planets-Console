@@ -10,7 +10,10 @@ import {
 } from '../../stores/playerColors'
 import { defaultColorForPlayerId, resetPlayerColorResolutionPort } from '../../lib/playerColor'
 import type { FleetHeadingTrail } from '../../analytics/fleet/fleetHeadingTrails'
-import { FLEET_HEADING_TRAIL_CURRENT_OPACITY } from '../../analytics/fleet/fleetHeadingTrails'
+import {
+  FLEET_HEADING_TRAIL_CURRENT_OPACITY,
+  FLEET_HEADING_TRAIL_HYPERJUMP_DASHARRAY,
+} from '../../analytics/fleet/fleetHeadingTrails'
 
 vi.mock('@xyflow/react', () => ({
   useStore: (selector: (state: { domNode: HTMLElement; transform: [number, number, number] }) => unknown) => {
@@ -51,6 +54,7 @@ function sampleTrail(overrides: Partial<FleetHeadingTrail> = {}): FleetHeadingTr
     travelLyPerTurn: 81,
     turnOffset: 0,
     opacity: FLEET_HEADING_TRAIL_CURRENT_OPACITY,
+    isHyperjump: false,
     ...overrides,
   }
 }
@@ -108,5 +112,14 @@ describe('FleetHeadingTrailsOverlay', () => {
     expect(
       [...container.querySelectorAll('line[stroke]')].map((el) => el.getAttribute('stroke'))
     ).toContain('#112233')
+  })
+
+  it('uses a dashed stroke for hyperjump trails', () => {
+    const { container } = render(
+      <FleetHeadingTrailsOverlay trails={[sampleTrail({ isHyperjump: true })]} />,
+      { wrapper }
+    )
+    const line = container.querySelector('line[stroke]')
+    expect(line?.getAttribute('stroke-dasharray')).toBe(FLEET_HEADING_TRAIL_HYPERJUMP_DASHARRAY)
   })
 })

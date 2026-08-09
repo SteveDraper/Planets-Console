@@ -102,6 +102,8 @@ export const fleetShipMotionSchema = z.object({
     x: z.number().int(),
     y: z.number().int(),
   }),
+  /** Present when the ship is performing a hyperjump this turn. */
+  hyperjump: z.boolean().optional(),
 })
 
 export const fleetShipDispositionSchema = z.enum([
