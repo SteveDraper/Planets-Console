@@ -70,6 +70,22 @@ def test_motion_omitted_when_warp_zero(sample_turn):
     assert fleet_ship_motion_wire(record, turn=turn) is None
 
 
+def test_motion_omitted_when_warp_above_nine(sample_turn):
+    """Warp outside Zod 1..9 must omit motion even when otherwise underway."""
+    origin = sample_turn.ships[0]
+    turn, ship = _ship_with(
+        sample_turn,
+        id=42,
+        warp=10,
+        heading=90,
+        hullid=1,
+        targetx=origin.x + 10,
+        targety=origin.y,
+    )
+    record = _record_for_ship(ship.id)
+    assert fleet_ship_motion_wire(record, turn=turn) is None
+
+
 def test_motion_omitted_when_heading_unknown_and_no_waypoint(sample_turn):
     turn, ship = _ship_with(
         sample_turn,

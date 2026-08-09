@@ -30,7 +30,7 @@ def fleet_ship_motion_wire(
     """Return SPA motion payload for one record, or None when not underway.
 
     Attached only when the record has a known ship id present in ``turn.ships``
-    that is underway (``targetx``/``targety`` ≠ position) with usable warp and a
+    that is underway (``targetx``/``targety`` ≠ position) with warp in 1..9 and a
     resolvable heading (direct ``heading`` or derived from the waypoint).
     Includes gravitonic ×2 in ``travelLyPerTurn``. ``trailStop`` is always set
     (waypoint, or planet when the waypoint is on/in a normal warp well).
@@ -41,7 +41,7 @@ def fleet_ship_motion_wire(
     ship = _ship_by_id(turn, ship_id)
     if ship is None:
         return None
-    if ship.warp < 1:
+    if not 1 <= ship.warp <= 9:
         return None
     if ship.targetx == ship.x and ship.targety == ship.y:
         return None
