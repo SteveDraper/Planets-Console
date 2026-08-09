@@ -230,3 +230,40 @@ def test_table_wire_attaches_motion_and_durable_omits(sample_turn):
 
     wire = fleet_ship_record_to_table_wire(record, turn=turn)
     assert wire["motion"] == fleet_ship_motion_wire(record, turn=turn)
+
+
+def test_motion_wire_accepts_precomputed_indexes(sample_turn):
+    """Ledger path may pass ship/hull indexes; payloads match turn-built defaults."""
+    from api.concepts.turn_component_catalog import hulls_by_id
+
+    turn, ship = _ship_with(
+        sample_turn,
+        id=42,
+        warp=9,
+        heading=45,
+        hullid=1,
+        targetx=sample_turn.ships[0].x + 10,
+        targety=sample_turn.ships[0].y,
+    )
+    record = _record_for_ship(ship.id)
+    ships_by_id = {s.id: s for s in turn.ships}
+    hulls_by_id_map = hulls_by_id(turn)
+
+    expected = fleet_ship_motion_wire(record, turn=turn)
+    assert expected is not None
+    assert (
+        fleet_ship_motion_wire(
+            record,
+            turn=turn,
+            ships_by_id=ships_by_id,
+            hulls_by_id_map=hulls_by_id_map,
+        )
+        == expected
+    )
+    wire = fleet_ship_record_to_table_wire(
+        record,
+        turn=turn,
+        ships_by_id=ships_by_id,
+        hulls_by_id_map=hulls_by_id_map,
+    )
+    assert wire["motion"] == expected

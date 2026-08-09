@@ -7,6 +7,7 @@ Not persisted on the durable ledger. Resolves motion from the current-turn
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 from api.analytics.fleet.field_constraints import known_ship_id_value
 from api.analytics.fleet.types import FleetShipRecord
@@ -14,6 +15,7 @@ from api.concepts.hull_abilities import hull_has_gravitonic_movement
 from api.concepts.planet_connections.wells import max_travel_distance
 from api.concepts.turn_component_catalog import hulls_by_id
 from api.concepts.warp_well import WarpWellKind, coordinate_in_warp_well
+from api.models.components import Hull
 from api.models.game import TurnInfo
 from api.models.planet import Planet
 from api.models.ship import Ship
@@ -26,6 +28,8 @@ def fleet_ship_motion_wire(
     record: FleetShipRecord,
     *,
     turn: TurnInfo,
+    ships_by_id: Mapping[int, Ship] | None = None,
+    hulls_by_id_map: Mapping[int, Hull] | None = None,
 ) -> dict[str, object] | None:
     """Return SPA motion payload for one record, or None when not underway.
 
@@ -35,11 +39,15 @@ def fleet_ship_motion_wire(
     Includes gravitonic ×2 in ``travelLyPerTurn``. ``trailStop`` is always set
     (waypoint, or planet when warp >= 2 and the waypoint is on/in a normal warp
     well -- W1 is not pulled into wells, so trailStop stays at the waypoint).
+
+    Optional ``ships_by_id`` / ``hulls_by_id_map`` avoid rebuilding indexes when
+    the caller already has them (e.g. ledger table-wire shaping).
     """
     ship_id = known_ship_id_value(record)
     if ship_id is None:
         return None
-    ship = _ship_by_id(turn, ship_id)
+    ship_index = ships_by_id if ships_by_id is not None else _ships_by_id(turn)
+    ship = ship_index.get(ship_id)
     if ship is None:
         return None
     if not 1 <= ship.warp <= 9:
@@ -51,7 +59,8 @@ def fleet_ship_motion_wire(
     if heading is None:
         return None
 
-    gravitonic = _ship_has_gravitonic_movement(ship, turn=turn)
+    hull_index = hulls_by_id_map if hulls_by_id_map is not None else hulls_by_id(turn)
+    gravitonic = _ship_has_gravitonic_movement(ship, hulls_by_id_map=hull_index)
     travel_ly = max_travel_distance(ship.warp, gravitonic)
     stop_x, stop_y = _resolve_trail_stop(ship, turn.planets)
 
@@ -63,15 +72,16 @@ def fleet_ship_motion_wire(
     }
 
 
-def _ship_by_id(turn: TurnInfo, ship_id: int) -> Ship | None:
-    for ship in turn.ships:
-        if ship.id == ship_id:
-            return ship
-    return None
+def _ships_by_id(turn: TurnInfo) -> dict[int, Ship]:
+    return {ship.id: ship for ship in turn.ships}
 
 
-def _ship_has_gravitonic_movement(ship: Ship, *, turn: TurnInfo) -> bool:
-    hull = hulls_by_id(turn).get(ship.hullid)
+def _ship_has_gravitonic_movement(
+    ship: Ship,
+    *,
+    hulls_by_id_map: Mapping[int, Hull],
+) -> bool:
+    hull = hulls_by_id_map.get(ship.hullid)
     if hull is None:
         return False
     return hull_has_gravitonic_movement(hull)
