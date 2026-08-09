@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { headingTravelDeltaGameLy } from '../../lib/cartography/ionStormMovement'
+import { headingTravelDeltaGameLy } from '../../lib/cartography/headingTravel'
 import {
   collectFleetHeadingTrails,
   fleetHeadingTrailEndpoint,

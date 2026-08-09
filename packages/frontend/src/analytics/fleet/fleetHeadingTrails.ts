@@ -3,7 +3,7 @@
  * with known wire ``motion`` and lastSeen on the shell turn (#290).
  */
 
-import { headingTravelDeltaGameLy } from '../../lib/cartography/ionStormMovement'
+import { headingTravelDeltaGameLy } from '../../lib/cartography/headingTravel'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
 import type { FleetShipMotion, FleetTableRecord } from './fleetTableWireSchema'
 import {
