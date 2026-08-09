@@ -174,6 +174,30 @@ def test_trail_stop_snaps_to_planet_when_waypoint_in_warp_well(sample_turn):
     assert motion["trailStop"] == {"x": planet.x, "y": planet.y}
 
 
+def test_trail_stop_keeps_waypoint_for_w1_in_warp_well(sample_turn):
+    """W1 is not pulled into wells -- trailStop stays at the raw waypoint."""
+    planet = sample_turn.planets[0]
+    waypoint_x = planet.x + 2
+    waypoint_y = planet.y
+    turn, ship = _ship_with(
+        sample_turn,
+        id=42,
+        warp=1,
+        heading=45,
+        hullid=1,
+        x=planet.x + 50,
+        y=planet.y,
+        targetx=waypoint_x,
+        targety=waypoint_y,
+    )
+    record = _record_for_ship(ship.id)
+    motion = fleet_ship_motion_wire(record, turn=turn)
+    assert motion is not None
+    assert motion["warp"] == 1
+    assert motion["trailStop"] == {"x": waypoint_x, "y": waypoint_y}
+    assert motion["trailStop"] != {"x": planet.x, "y": planet.y}
+
+
 def test_motion_omitted_when_target_equals_position(sample_turn):
     """Parked ship with residual heading/warp is not underway -- no motion wire."""
     origin = sample_turn.ships[0]

@@ -33,7 +33,8 @@ def fleet_ship_motion_wire(
     that is underway (``targetx``/``targety`` ≠ position) with warp in 1..9 and a
     resolvable heading (direct ``heading`` or derived from the waypoint).
     Includes gravitonic ×2 in ``travelLyPerTurn``. ``trailStop`` is always set
-    (waypoint, or planet when the waypoint is on/in a normal warp well).
+    (waypoint, or planet when warp >= 2 and the waypoint is on/in a normal warp
+    well -- W1 is not pulled into wells, so trailStop stays at the waypoint).
     """
     ship_id = known_ship_id_value(record)
     if ship_id is None:
@@ -96,10 +97,15 @@ def _resolve_trail_stop(
     ship: Ship,
     planets: list[Planet],
 ) -> tuple[int, int]:
-    """Waypoint clamp for forward trail extension. Caller ensures ship is underway."""
-    planet_stop = _planet_stop_for_waypoint(ship.targetx, ship.targety, planets)
-    if planet_stop is not None:
-        return planet_stop
+    """Waypoint clamp for forward trail extension. Caller ensures ship is underway.
+
+    Host warp wells pull ships ending within 3 ly unless non-moving or W1.
+    Only snap to planet for warp >= 2; W1 keeps the raw waypoint.
+    """
+    if ship.warp >= 2:
+        planet_stop = _planet_stop_for_waypoint(ship.targetx, ship.targety, planets)
+        if planet_stop is not None:
+            return planet_stop
     return (ship.targetx, ship.targety)
 
 
@@ -108,7 +114,10 @@ def _planet_stop_for_waypoint(
     waypoint_y: int,
     planets: list[Planet],
 ) -> tuple[int, int] | None:
-    """Planet orbit when the waypoint is on the planet or inside its normal warp well."""
+    """Planet orbit when the waypoint is on the planet or inside its normal warp well.
+
+    Caller gates on warp >= 2 (W1 is not pulled into wells).
+    """
     for planet in planets:
         if waypoint_x == planet.x and waypoint_y == planet.y:
             return (planet.x, planet.y)

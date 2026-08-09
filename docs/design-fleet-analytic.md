@@ -318,8 +318,9 @@ motion:
   warp             -- host warp 1--9
   travelLyPerTurn  -- one-turn ly (warp², ×2 when gravitonic hull)
   trailStop        -- {x,y} forward-extension clamp (waypoint, or planet when
-                     waypoint is on/in a normal warp well); always present when
-                     motion is present
+                     warp >= 2 and waypoint is on/in a normal warp well; W1
+                     keeps the raw waypoint); always present when motion is
+                     present
 ```
 
 Parked ships (target equals position), inferred / never-sighted rows (no matching current-turn ship), and rows without usable warp/heading omit `motion`.
