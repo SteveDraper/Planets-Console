@@ -10,8 +10,29 @@ import {
   FLEET_HEADING_TRAIL_CURRENT_OPACITY,
   FLEET_HEADING_TRAIL_MIN_OPACITY,
 } from './fleetHeadingTrails'
+import type { WarpWellMapCell } from '../../lib/warpWell'
+import type { FleetTrailPlanetStop } from './fleetHeadingTrailPlanetStops'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
 import type { FleetTableRecord } from './fleetTableWireSchema'
+
+/** Test fixture mirroring Core NORMAL well cell enumeration. */
+function normalWellCellsAround(px: number, py: number): WarpWellMapCell[] {
+  const out: WarpWellMapCell[] = []
+  for (let dgx = -3; dgx <= 3; dgx += 1) {
+    for (let dgy = -3; dgy <= 3; dgy += 1) {
+      const gx = px + dgx
+      const gy = py + dgy
+      if (Math.hypot(gx - px, gy - py) <= 3) {
+        out.push({ x: gx, y: gy })
+      }
+    }
+  }
+  return out
+}
+
+function planetStop(x: number, y: number): FleetTrailPlanetStop {
+  return { x, y, wellCells: normalWellCellsAround(x, y) }
+}
 
 function record(partial: Partial<FleetTableRecord> & Pick<FleetTableRecord, 'recordId'>): FleetTableRecord {
   return {
@@ -264,7 +285,7 @@ describe('fleetHeadingTrailSegmentsFromRecord', () => {
         hyperjump: true,
       },
     })
-    const intervening = [{ x: 2400, y: 2200, stopRadius: 3 }]
+    const intervening = [planetStop(2400, 2200)]
     const segments = fleetHeadingTrailSegmentsFromRecord(hyp, 2, 9, 5, intervening)
     expect(segments).toHaveLength(1)
     expect(segments[0]!.turnOffset).toBe(0)
@@ -284,7 +305,8 @@ describe('fleetHeadingTrailSegmentsFromRecord', () => {
         trailStop: { x: 2000, y: 2000 },
       },
     })
-    const planets = [{ x: 1040, y: 2000, stopRadius: 3 }]
+    // Exact planet lies on the eastbound one-turn segment (1000 → 1081).
+    const planets = [planetStop(1040, 2000)]
     const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 2, planets)
     const forward = segments.filter((s) => s.turnOffset >= 0)
     expect(forward).toHaveLength(1)
@@ -303,7 +325,7 @@ describe('fleetHeadingTrailSegmentsFromRecord', () => {
         trailStop: { x: 2000, y: 2000 },
       },
     })
-    const planets = [{ x: 1000, y: 2000, stopRadius: 3 }]
+    const planets = [planetStop(1000, 2000)]
     const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 3, planets)
     expect(segments.every((s) => s.turnOffset >= 0)).toBe(true)
     expect(segments.some((s) => s.turnOffset < 0)).toBe(false)
@@ -320,8 +342,8 @@ describe('fleetHeadingTrailSegmentsFromRecord', () => {
         trailStop: { x: 2000, y: 2000 },
       },
     })
-    // Planet well centered west of origin; back ray (west) enters it.
-    const planets = [{ x: 950, y: 2000, stopRadius: 3 }]
+    // Planet west of origin; back ray hits exact planet on a later segment.
+    const planets = [planetStop(950, 2000)]
     const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 3, planets)
     const backward = segments
       .filter((s) => s.turnOffset < 0)

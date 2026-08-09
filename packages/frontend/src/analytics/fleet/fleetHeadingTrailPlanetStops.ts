@@ -1,22 +1,30 @@
 /**
  * Planet / normal warp-well stops for fleet heading trail rays (#290).
- * Clamp trail endpoints to the planet center when a segment first intersects
- * the planet cell or its normal well (radius 3). Debris-disk bodies have no
- * well -- only the planet cell.
+ * Well membership uses server ``normalWellCells`` (and the planet map cell);
+ * there is no SPA twin of Core ``NORMAL_RADIUS`` continuous geometry.
+ *
+ * Stops fire on exact planet coordinates along a segment, or when a segment
+ * endpoint lands in the planet cell / well cells -- not mid-path continuous
+ * disk entry.
  */
 
-/** Matches Core ``NORMAL_RADIUS`` for normal warp wells. */
-export const FLEET_TRAIL_NORMAL_WARP_WELL_RADIUS = 3
-/** Hit radius for debris-disk / planetoid cells (no extended well). */
-export const FLEET_TRAIL_PLANET_CELL_RADIUS = 0.5
+import type { WarpWellMapCell } from '../../lib/warpWell'
 
 const HIT_EPS = 1e-9
 
 export type FleetTrailPlanetStop = {
   x: number
   y: number
-  /** Normal-well radius (3), or cell-only radius when the body has no well. */
-  stopRadius: number
+  /**
+   * Server ``normalWellCells`` (normalized). Empty ⇒ debris / planet-cell only
+   * (no extended well).
+   */
+  wellCells: readonly WarpWellMapCell[]
+}
+
+/** Map cell index for a continuous point (matches Core debris reachability rounding). */
+export function fleetTrailMapCellIndex(x: number, y: number): WarpWellMapCell {
+  return { x: Math.round(x), y: Math.round(y) }
 }
 
 export function pointInFleetTrailPlanetStop(
@@ -24,10 +32,22 @@ export function pointInFleetTrailPlanetStop(
   y: number,
   planet: FleetTrailPlanetStop
 ): boolean {
-  return Math.hypot(planet.x - x, planet.y - y) <= planet.stopRadius + HIT_EPS
+  if (Math.abs(x - planet.x) <= HIT_EPS && Math.abs(y - planet.y) <= HIT_EPS) {
+    return true
+  }
+  const cell = fleetTrailMapCellIndex(x, y)
+  if (planet.wellCells.length === 0) {
+    return cell.x === planet.x && cell.y === planet.y
+  }
+  for (const wellCell of planet.wellCells) {
+    if (wellCell.x === cell.x && wellCell.y === cell.y) {
+      return true
+    }
+  }
+  return false
 }
 
-/** True when ``(x, y)`` lies on any planet cell or inside a normal well. */
+/** True when ``(x, y)`` lies on any planet cell or inside a shipped normal well. */
 export function pointInAnyFleetTrailPlanetStop(
   x: number,
   y: number,
@@ -42,10 +62,12 @@ export function pointInAnyFleetTrailPlanetStop(
 }
 
 /**
- * First planet/well hit along the segment from ``(x0,y0)`` toward ``(x1,y1)``.
- * Returns the planet center (clamp target) and distance along the segment to
- * first disk entry. When ``skipPlanetsContainingStart`` is true, planets that
- * already contain the start (e.g. departing orbit) are ignored.
+ * First planet/well stop along the segment from ``(x0,y0)`` toward ``(x1,y1)``.
+ * Hits when the ray passes through exact planet coordinates, or when the
+ * segment endpoint lies in that planet's cell / well cells. Returns the planet
+ * center (clamp target) and distance along the segment used for ordering.
+ * When ``skipPlanetsContainingStart`` is true, planets that already contain the
+ * start (e.g. departing orbit) are ignored.
  */
 export function firstFleetTrailPlanetStopAlongSegment(
   x0: number,
@@ -63,8 +85,6 @@ export function firstFleetTrailPlanetStopAlongSegment(
   if (segLen <= HIT_EPS || planets.length === 0) {
     return null
   }
-  const ux = segDx / segLen
-  const uy = segDy / segLen
 
   let best: { x: number; y: number; distanceAlong: number } | null = null
 
@@ -75,19 +95,26 @@ export function firstFleetTrailPlanetStopAlongSegment(
     ) {
       continue
     }
-    const tEnter = rayDiskEntryDistance(
+
+    const exactAlong = exactPlanetDistanceAlongSegment(
       x0,
       y0,
-      ux,
-      uy,
+      segDx,
+      segDy,
+      segLen,
       planet.x,
-      planet.y,
-      planet.stopRadius
+      planet.y
     )
-    if (tEnter == null || tEnter > segLen + HIT_EPS) {
+    const endInStop = pointInFleetTrailPlanetStop(x1, y1, planet)
+    if (exactAlong == null && !endInStop) {
       continue
     }
-    const distanceAlong = Math.max(0, tEnter)
+
+    const distanceAlong =
+      exactAlong != null
+        ? exactAlong
+        : Math.hypot(planet.x - x0, planet.y - y0)
+
     if (best == null || distanceAlong < best.distanceAlong) {
       best = { x: planet.x, y: planet.y, distanceAlong }
     }
@@ -97,39 +124,27 @@ export function firstFleetTrailPlanetStopAlongSegment(
 }
 
 /**
- * Distance along unit direction ``(ux,uy)`` from ``(ox,oy)`` to first entry into
- * the disk centered at ``(cx,cy)`` with radius ``r``. Null when the ray misses
- * or only touches behind the origin.
+ * Distance along the segment to exact planet ``(px,py)`` when that point lies on
+ * the segment; otherwise null.
  */
-function rayDiskEntryDistance(
-  ox: number,
-  oy: number,
-  ux: number,
-  uy: number,
-  cx: number,
-  cy: number,
-  r: number
+function exactPlanetDistanceAlongSegment(
+  x0: number,
+  y0: number,
+  segDx: number,
+  segDy: number,
+  segLen: number,
+  px: number,
+  py: number
 ): number | null {
-  const fx = ox - cx
-  const fy = oy - cy
-  const distOrigin = Math.hypot(fx, fy)
-  if (distOrigin <= r + HIT_EPS) {
-    return 0
-  }
-
-  // Quadratic |O + t D - C|^2 = r^2 with |D|=1: t^2 + 2(F·D)t + (|F|^2 - r^2) = 0
-  const b = 2 * (fx * ux + fy * uy)
-  const c = fx * fx + fy * fy - r * r
-  const disc = b * b - 4 * c
-  if (disc < 0) {
+  const toPx = px - x0
+  const toPy = py - y0
+  const cross = segDx * toPy - segDy * toPx
+  if (Math.abs(cross) > HIT_EPS * segLen) {
     return null
   }
-  const sqrtDisc = Math.sqrt(disc)
-  const t0 = (-b - sqrtDisc) / 2
-  const t1 = (-b + sqrtDisc) / 2
-  const candidates = [t0, t1].filter((t) => t >= -HIT_EPS)
-  if (candidates.length === 0) {
+  const along = (toPx * segDx + toPy * segDy) / segLen
+  if (along < -HIT_EPS || along > segLen + HIT_EPS) {
     return null
   }
-  return Math.max(0, Math.min(...candidates))
+  return Math.max(0, Math.min(along, segLen))
 }
