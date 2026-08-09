@@ -4,11 +4,12 @@
  */
 
 import { headingTravelDeltaGameLy } from '../../lib/cartography/ionStormMovement'
-import { activeFleetRecords } from './fleetRecordDisplay'
-import type { FleetLocationRingVisiblePlayer } from './fleetLocationRings'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
-import { fleetPlayerFromStreamSlice } from './fleetTablePlayerStreamState'
 import type { FleetShipMotion, FleetTableRecord } from './fleetTableWireSchema'
+import {
+  visibleActiveOnTurnFleetRecords,
+  type FleetVisiblePlayer,
+} from './fleetVisibleActiveOnTurnRecords'
 
 /** Screen-fixed stroke for current-turn heading trails (px). */
 export const FLEET_HEADING_TRAIL_STROKE_WIDTH_PX = 1.5
@@ -33,18 +34,18 @@ export type FleetHeadingTrail = {
 /** Collect current-turn heading trails from visibility-filtered stream records. */
 export function collectFleetHeadingTrails(
   streamPlayersById: ReadonlyMap<number, FleetPlayerStreamSlice>,
-  visiblePlayers: readonly FleetLocationRingVisiblePlayer[],
+  visiblePlayers: readonly FleetVisiblePlayer[],
   displayTurn: number
 ): FleetHeadingTrail[] {
   const trails: FleetHeadingTrail[] = []
-  for (const player of visiblePlayers) {
-    const streamSlice = streamPlayersById.get(player.playerId)
-    const merged = fleetPlayerFromStreamSlice(streamSlice, player.name)
-    for (const record of activeFleetRecords(merged.records)) {
-      const trail = fleetHeadingTrailFromRecord(record, player.playerId, displayTurn)
-      if (trail != null) {
-        trails.push(trail)
-      }
+  for (const { playerId, record } of visibleActiveOnTurnFleetRecords(
+    streamPlayersById,
+    visiblePlayers,
+    displayTurn
+  )) {
+    const trail = fleetHeadingTrailFromRecord(record, playerId, displayTurn)
+    if (trail != null) {
+      trails.push(trail)
     }
   }
   return trails.sort((a, b) => a.key.localeCompare(b.key))
