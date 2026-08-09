@@ -28,6 +28,17 @@ def known_built_turn_value(record: FleetShipRecord) -> int | None:
     return None
 
 
+def known_ship_id_value(record: FleetShipRecord) -> int | None:
+    """Concrete host ship id when the record field is a known integer (not bool)."""
+    ship_id = record.fields.ship_id
+    if not isinstance(ship_id, FleetFieldKnown):
+        return None
+    value = ship_id.value
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    return value
+
+
 def record_has_direct_observation(record: FleetShipRecord) -> bool:
     """True when the record carries a turnInfo.ships sighting or position update."""
     return any(event.kind in _DIRECT_OBSERVATION_EVENT_KINDS for event in record.events)

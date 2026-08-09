@@ -35,12 +35,16 @@ def fleet_ship_record_to_table_wire(
 ) -> dict[str, object]:
     """Shape one ship record for the SPA table wire (no evidence events)."""
     from api.analytics.fleet.military_estimate import fleet_ship_military_estimate_2x
+    from api.analytics.fleet.motion_estimate import fleet_ship_motion_wire
     from api.analytics.fleet.serialization import fleet_ship_record_to_json
 
     shaped = _strip_ship_record_dict(fleet_ship_record_to_json(record))
     estimate = fleet_ship_military_estimate_2x(record, turn=turn)
     if estimate is not None:
         shaped["militaryEstimate2x"] = estimate
+    motion = fleet_ship_motion_wire(record, turn=turn)
+    if motion is not None:
+        shaped["motion"] = motion
     return shaped
 
 

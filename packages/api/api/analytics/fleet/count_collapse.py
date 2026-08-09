@@ -6,6 +6,7 @@ import uuid
 
 from api.analytics.fleet.field_constraints import (
     known_built_turn_value,
+    known_ship_id_value,
     record_has_direct_observation,
     ship_id_matches_constraint,
 )
@@ -175,10 +176,7 @@ def _is_survivor(record: FleetShipRecord, hulls_by_id: dict[int, Hull]) -> bool:
 
 
 def _known_ship_id(record: FleetShipRecord) -> int | None:
-    ship_id = record.fields.ship_id
-    if isinstance(ship_id, FleetFieldKnown) and isinstance(ship_id.value, int):
-        return ship_id.value
-    return None
+    return known_ship_id_value(record)
 
 
 def _ship_id_admits_survivor(constraint: AbsorbableShipId, ship_id: int) -> bool:

@@ -11,6 +11,7 @@ import {
   fleetLastSeenSchema,
   fleetRowQualifiersSchema,
   fleetShipDispositionSchema,
+  fleetShipMotionSchema,
 } from './fleetWirePrimitives'
 
 export {
@@ -19,6 +20,7 @@ export {
   fleetLastSeenSchema,
   fleetRowQualifiersSchema,
   fleetShipDispositionSchema,
+  fleetShipMotionSchema,
 } from './fleetWirePrimitives'
 export type {
   FleetBuildOptionSet,
@@ -26,6 +28,7 @@ export type {
   FleetLastSeen,
   FleetRowQualifiers,
   FleetShipDisposition,
+  FleetShipMotion,
 } from './fleetWirePrimitives'
 
 const fleetShipRecordFieldsSchema = z.object({
@@ -48,6 +51,7 @@ export const fleetTableRecordSchema = z
     displayDefaultOptionSetIndex: z.number().int().min(0).optional(),
     lastSeen: fleetLastSeenSchema.optional(),
     militaryEstimate2x: z.number().int().optional(),
+    motion: fleetShipMotionSchema.optional(),
   })
   .strict()
   .superRefine((record, ctx) => {
