@@ -287,7 +287,12 @@ describe('fleetLocationRingShipFromRecord', () => {
       record({
         recordId: 'moving',
         lastSeen: { turn: 9, x: 1, y: 2 },
-        motion: { heading: 90, warp: 9, travelLyPerTurn: 81 },
+        motion: {
+          heading: 90,
+          warp: 9,
+          travelLyPerTurn: 81,
+          trailStop: { x: 100, y: 2 },
+        },
       }),
       1,
       'P',

@@ -87,9 +87,6 @@ export function fleetHeadingTrailEndpoint(
   const { dx, dy } = headingTravelDeltaGameLy(motion.heading, motion.travelLyPerTurn)
   const uncapped = { x: originX + dx, y: originY + dy }
   const stop = motion.trailStop
-  if (stop == null) {
-    return uncapped
-  }
   const stopDistance = Math.hypot(stop.x - originX, stop.y - originY)
   if (stopDistance <= motion.travelLyPerTurn + 1e-9) {
     return { x: stop.x, y: stop.y }

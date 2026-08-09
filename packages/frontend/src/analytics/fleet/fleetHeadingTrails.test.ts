@@ -33,6 +33,7 @@ describe('fleetHeadingTrailEndpoint', () => {
       heading: 0,
       warp: 5,
       travelLyPerTurn: 25,
+      trailStop: { x: 1000, y: 3000 },
     })
     expect(end).toEqual({ x: 1000, y: 2025 })
   })
@@ -42,6 +43,7 @@ describe('fleetHeadingTrailEndpoint', () => {
       heading: 90,
       warp: 3,
       travelLyPerTurn: 9,
+      trailStop: { x: 2000, y: 2000 },
     })
     expect(end.x).toBeCloseTo(1009)
     expect(end.y).toBeCloseTo(2000)
@@ -87,7 +89,12 @@ describe('fleetHeadingTrailFromRecord', () => {
         record({
           recordId: 'stale',
           lastSeen: { turn: 8, x: 1, y: 2 },
-          motion: { heading: 0, warp: 9, travelLyPerTurn: 81 },
+          motion: {
+            heading: 0,
+            warp: 9,
+            travelLyPerTurn: 81,
+            trailStop: { x: 1, y: 83 },
+          },
         }),
         1,
         9
@@ -100,7 +107,12 @@ describe('fleetHeadingTrailFromRecord', () => {
       record({
         recordId: 'r1',
         lastSeen: { turn: 9, x: 500, y: 600 },
-        motion: { heading: 0, warp: 9, travelLyPerTurn: 81 },
+        motion: {
+          heading: 0,
+          warp: 9,
+          travelLyPerTurn: 81,
+          trailStop: { x: 500, y: 800 },
+        },
       }),
       3,
       9
@@ -131,13 +143,23 @@ describe('collectFleetHeadingTrails', () => {
             record({
               recordId: 'a-ok',
               lastSeen: { turn: 9, x: 10, y: 20 },
-              motion: { heading: 90, warp: 4, travelLyPerTurn: 16 },
+              motion: {
+                heading: 90,
+                warp: 4,
+                travelLyPerTurn: 16,
+                trailStop: { x: 100, y: 20 },
+              },
             }),
             record({
               recordId: 'a-lost',
               disposition: 'lost',
               lastSeen: { turn: 9, x: 10, y: 20 },
-              motion: { heading: 90, warp: 4, travelLyPerTurn: 16 },
+              motion: {
+                heading: 90,
+                warp: 4,
+                travelLyPerTurn: 16,
+                trailStop: { x: 100, y: 20 },
+              },
             }),
             record({
               recordId: 'a-no-motion',
@@ -160,7 +182,12 @@ describe('collectFleetHeadingTrails', () => {
             record({
               recordId: 'b-hidden',
               lastSeen: { turn: 9, x: 30, y: 40 },
-              motion: { heading: 0, warp: 9, travelLyPerTurn: 81 },
+              motion: {
+                heading: 0,
+                warp: 9,
+                travelLyPerTurn: 81,
+                trailStop: { x: 30, y: 200 },
+              },
             }),
           ],
           discrepancyOverlay: 'inherit',
