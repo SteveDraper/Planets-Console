@@ -95,6 +95,22 @@ describe('fleetTableWireSchema', () => {
       heading: -1,
       warp: 9,
       travelLyPerTurn: 81,
+      trailStop: { x: 100, y: 200 },
+    }
+
+    const result = fleetTableWireSchema.safeParse(withBadMotion)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects motion without trailStop', () => {
+    expect(primaryGolden).toBeDefined()
+    const withBadMotion = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    withBadMotion.players[0]!.records[0]!.motion = {
+      heading: 90,
+      warp: 9,
+      travelLyPerTurn: 81,
     }
 
     const result = fleetTableWireSchema.safeParse(withBadMotion)

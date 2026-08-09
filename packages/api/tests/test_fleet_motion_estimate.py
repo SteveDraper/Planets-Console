@@ -158,7 +158,8 @@ def test_trail_stop_snaps_to_planet_when_waypoint_in_warp_well(sample_turn):
     assert motion["trailStop"] == {"x": planet.x, "y": planet.y}
 
 
-def test_trail_stop_omitted_when_target_equals_position(sample_turn):
+def test_motion_omitted_when_target_equals_position(sample_turn):
+    """Parked ship with residual heading/warp is not underway -- no motion wire."""
     origin = sample_turn.ships[0]
     turn, ship = _ship_with(
         sample_turn,
@@ -170,11 +171,7 @@ def test_trail_stop_omitted_when_target_equals_position(sample_turn):
         targety=origin.y,
     )
     record = _record_for_ship(ship.id)
-    motion = fleet_ship_motion_wire(record, turn=turn)
-    assert motion is not None
-    assert "trailStop" not in motion
-    assert motion["heading"] == 180
-    assert motion["travelLyPerTurn"] == 81.0
+    assert fleet_ship_motion_wire(record, turn=turn) is None
 
 
 def test_table_wire_attaches_motion_and_durable_omits(sample_turn):

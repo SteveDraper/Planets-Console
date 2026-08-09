@@ -27,13 +27,13 @@ def fleet_ship_motion_wire(
     *,
     turn: TurnInfo,
 ) -> dict[str, object] | None:
-    """Return SPA motion payload for one record, or None when heading/speed unknown.
+    """Return SPA motion payload for one record, or None when not underway.
 
     Attached only when the record has a known ship id present in ``turn.ships``
-    with usable warp and a resolvable heading (direct ``heading`` or derived from
-    ``targetx``/``targety``). Includes gravitonic ×2 in ``travelLyPerTurn``.
-    Optional ``trailStop`` is the forward-extension clamp (waypoint, or planet
-    when the waypoint is on/in a normal warp well).
+    that is underway (``targetx``/``targety`` ≠ position) with usable warp and a
+    resolvable heading (direct ``heading`` or derived from the waypoint).
+    Includes gravitonic ×2 in ``travelLyPerTurn``. ``trailStop`` is always set
+    (waypoint, or planet when the waypoint is on/in a normal warp well).
     """
     ship_id = known_ship_id_value(record)
     if ship_id is None:
@@ -43,6 +43,8 @@ def fleet_ship_motion_wire(
         return None
     if ship.warp < 1:
         return None
+    if ship.targetx == ship.x and ship.targety == ship.y:
+        return None
 
     heading = _resolve_heading_degrees(ship)
     if heading is None:
@@ -50,17 +52,14 @@ def fleet_ship_motion_wire(
 
     gravitonic = _ship_has_gravitonic_movement(ship, turn=turn)
     travel_ly = max_travel_distance(ship.warp, gravitonic)
+    stop_x, stop_y = _resolve_trail_stop(ship, turn.planets)
 
-    payload: dict[str, object] = {
+    return {
         "heading": heading,
         "warp": ship.warp,
         "travelLyPerTurn": travel_ly,
+        "trailStop": {"x": stop_x, "y": stop_y},
     }
-    trail_stop = _resolve_trail_stop(ship, turn.planets)
-    if trail_stop is not None:
-        stop_x, stop_y = trail_stop
-        payload["trailStop"] = {"x": stop_x, "y": stop_y}
-    return payload
 
 
 def _ship_by_id(turn: TurnInfo, ship_id: int) -> Ship | None:
@@ -96,11 +95,8 @@ def _resolve_heading_degrees(ship: Ship) -> int | None:
 def _resolve_trail_stop(
     ship: Ship,
     planets: list[Planet],
-) -> tuple[int, int] | None:
-    """Waypoint clamp for forward trail extension, or None when not underway to a point."""
-    if ship.targetx == ship.x and ship.targety == ship.y:
-        return None
-
+) -> tuple[int, int]:
+    """Waypoint clamp for forward trail extension. Caller ensures ship is underway."""
     planet_stop = _planet_stop_for_waypoint(ship.targetx, ship.targety, planets)
     if planet_stop is not None:
         return planet_stop

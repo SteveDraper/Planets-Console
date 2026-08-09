@@ -310,25 +310,25 @@ records[]:
 
 Optional `militaryEstimate2x` is Core-attached on table/stream wire only (not durable ledger). Same fill policy as §7.2: unknown beam/tube slots at minimal-tech catalog parts via the shared ship-build military helper.
 
-Optional `motion` is Core-attached on table/stream wire only when the record has a known ship id present in the current-turn `TurnInfo.ships` with usable warp and a resolvable heading (`Ship.heading`, or derived from `targetx`/`targety` when heading is unset). Shape:
+Optional `motion` is Core-attached on table/stream wire only when the record has a known ship id present in the current-turn `TurnInfo.ships` that is underway (`targetx`/`targety` ≠ position) with usable warp and a resolvable heading (`Ship.heading`, or derived from the waypoint when heading is unset). Shape:
 
 ```text
 motion:
   heading          -- degrees, 0 = north, clockwise
   warp             -- host warp 1--9
   travelLyPerTurn  -- one-turn ly (warp², ×2 when gravitonic hull)
-  trailStop?       -- {x,y} forward-extension clamp (waypoint, or planet when
-                     waypoint is on/in a normal warp well); omitted when target
-                     equals current position
+  trailStop        -- {x,y} forward-extension clamp (waypoint, or planet when
+                     waypoint is on/in a normal warp well); always present when
+                     motion is present
 ```
 
-Inferred / never-sighted rows (no matching current-turn ship) omit `motion`.
+Parked ships (target equals position), inferred / never-sighted rows (no matching current-turn ship), and rows without usable warp/heading omit `motion`.
 
 Default consumer filter: `disposition == active`.
 
 ### 7.2 Map live path (fleet stream projection)
 
-SPA map does **not** use `GET …/fleet/map` as the live path ([ADR 0011](adr/0011-fleet-stream-behind-table-and-map.md)). Progressive ledger state comes from the **fleet stream** (same NDJSON session as table). Each record already carries `lastSeen` / fields / option sets; Core also attaches **fleet ship military estimate** (`militaryEstimate2x`) on table/stream records via the shared ship-build military helper (unknown beam/tube slots filled at minimal tech; engines passed for API uniformity -- contribution rules stay inside that helper). When known, Core also attaches wire-only **`motion`** (heading / warp / `travelLyPerTurn` / optional `trailStop`) for **fleet heading trail** paint ([#290](https://github.com/SteveDraper/Planets-Console/issues/290)).
+SPA map does **not** use `GET …/fleet/map` as the live path ([ADR 0011](adr/0011-fleet-stream-behind-table-and-map.md)). Progressive ledger state comes from the **fleet stream** (same NDJSON session as table). Each record already carries `lastSeen` / fields / option sets; Core also attaches **fleet ship military estimate** (`militaryEstimate2x`) on table/stream records via the shared ship-build military helper (unknown beam/tube slots filled at minimal tech; engines passed for API uniformity -- contribution rules stay inside that helper). When known and underway, Core also attaches wire-only **`motion`** (heading / warp / `travelLyPerTurn` / `trailStop`) for **fleet heading trail** paint ([#290](https://github.com/SteveDraper/Planets-Console/issues/290)).
 
 Client projects **fleet player visibility**-filtered **`active`** rows whose `lastSeen.turn` equals the shell turn and that have known `lastSeen` `(x, y)` into **fleet location ring**s (exact coordinate stacks). Stale last-seen positions from earlier turns are excluded. Region overlays remain deferred; heading trails use the same stream records' optional `motion` (map paint in a follow-on).
 
