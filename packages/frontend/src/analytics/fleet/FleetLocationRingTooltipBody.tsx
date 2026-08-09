@@ -33,9 +33,9 @@ function fleetHoverHullLabel(
   return ship.hullLabel
 }
 
-/** Warp suffix for map hover ship lines: ``(w9)`` when known, ``(?)`` otherwise. */
+/** Warp suffix for map hover ship lines: ``(w9)`` when known, ``(-)`` when motionless/unknown. */
 export function formatFleetHoverWarpLabel(warp: number | null): string {
-  return warp != null ? `(w${warp})` : '(?)'
+  return warp != null ? `(w${warp})` : '(-)'
 }
 
 export function FleetLocationRingTooltipBody({

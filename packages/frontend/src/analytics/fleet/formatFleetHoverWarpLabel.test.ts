@@ -7,7 +7,7 @@ describe('formatFleetHoverWarpLabel', () => {
     expect(formatFleetHoverWarpLabel(1)).toBe('(w1)')
   })
 
-  it('formats unknown warp as (?)', () => {
-    expect(formatFleetHoverWarpLabel(null)).toBe('(?)')
+  it('formats motionless/unknown warp as (-)', () => {
+    expect(formatFleetHoverWarpLabel(null)).toBe('(-)')
   })
 })
