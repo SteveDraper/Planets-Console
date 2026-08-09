@@ -93,15 +93,17 @@ export const fleetLastSeenSchema = z.object({
   planetId: z.number().int().optional(),
 })
 
-/** Wire-only heading trail motion (omitted when not underway / unknown). */
+/** Wire-only heading trail motion (omitted when unknown). */
 export const fleetShipMotionSchema = z.object({
   heading: z.number().int().min(0).max(359),
   warp: z.number().int().min(1).max(9),
   travelLyPerTurn: z.number().positive(),
-  trailStop: z.object({
-    x: z.number().int(),
-    y: z.number().int(),
-  }),
+  trailStop: z
+    .object({
+      x: z.number().int(),
+      y: z.number().int(),
+    })
+    .optional(),
 })
 
 export const fleetShipDispositionSchema = z.enum([

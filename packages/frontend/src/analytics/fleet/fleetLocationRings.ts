@@ -26,6 +26,8 @@ export type FleetLocationRingShip = {
   shipIdLabel: string
   hullId: number | null
   hullLabel: string
+  /** Current-turn warp from wire ``motion``, or null when unknown. */
+  warp: number | null
   /** Host military points (militaryEstimate2x / 2), or null when not estimable. */
   hostMilitaryPoints: number | null
   x: number
@@ -186,6 +188,7 @@ export function fleetLocationRingShipFromRecord(
     shipIdLabel: formatFleetRecordField(record, 'shipId'),
     hullId: hull.hullId,
     hullLabel: hull.label,
+    warp: record.motion?.warp ?? null,
     hostMilitaryPoints: hostMilitaryPointsFromEstimate2x(record.militaryEstimate2x),
     x: lastSeen.x,
     y: lastSeen.y,

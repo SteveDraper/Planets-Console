@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ionStormStepDeltaGameLy } from './ionStormMovement'
+import { headingTravelDeltaGameLy, ionStormStepDeltaGameLy } from './ionStormMovement'
 
 describe('ionStormStepDeltaGameLy', () => {
   it('moves north at heading 0 by warp squared per turn', () => {
@@ -14,5 +14,14 @@ describe('ionStormStepDeltaGameLy', () => {
 
   it('treats undefined warp as zero movement', () => {
     expect(ionStormStepDeltaGameLy(45, undefined)).toEqual({ dx: 0, dy: 0 })
+  })
+})
+
+describe('headingTravelDeltaGameLy', () => {
+  it('scales an arbitrary ly length along heading', () => {
+    expect(headingTravelDeltaGameLy(0, 81)).toEqual({ dx: 0, dy: 81 })
+    const east = headingTravelDeltaGameLy(90, 16)
+    expect(east.dx).toBeCloseTo(16)
+    expect(east.dy).toBeCloseTo(0)
   })
 })

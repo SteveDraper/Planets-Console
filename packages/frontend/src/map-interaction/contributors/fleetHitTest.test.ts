@@ -28,6 +28,7 @@ function sampleStack(): FleetLocationRingStack {
             shipIdLabel: '101',
             hullId: 13,
             hullLabel: 'Cruiser A',
+            warp: null,
             hostMilitaryPoints: 20,
             x: 1000,
             y: 2000,

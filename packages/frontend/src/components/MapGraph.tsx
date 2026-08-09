@@ -29,8 +29,10 @@ import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOve
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
 import { MapAttentionOrchestrator } from './map-graph/MapAttentionOrchestrator'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
+import { FleetHeadingTrailsOverlay } from './map-graph/FleetHeadingTrailsOverlay'
 import { FleetLocationRingsOverlay } from './map-graph/FleetLocationRingsOverlay'
 import { FleetLocationRingStacksProvider } from '../analytics/fleet/FleetLocationRingStacksContext'
+import { useFleetHeadingTrails } from '../analytics/fleet/useFleetHeadingTrails'
 import { useFleetLocationRingStacks } from '../analytics/fleet/useFleetLocationRingStacks'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
@@ -234,6 +236,7 @@ function MapGraphFlow({
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
   const fleetStacks = useFleetLocationRingStacks(analyticScope, fleetEnabled)
+  const fleetHeadingTrails = useFleetHeadingTrails(analyticScope, fleetEnabled)
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays
   )
@@ -326,6 +329,7 @@ function MapGraphFlow({
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
+      <FleetHeadingTrailsOverlay trails={fleetHeadingTrails} />
       <FleetLocationRingsOverlay stacks={fleetStacks} />
       <MapAttentionOrchestrator homeworldMarkers={data.homeworldMarkers} />
       <MapInteractionSurface>
@@ -341,7 +345,11 @@ function MapGraphFlow({
             routeWaypoints={data.routeWaypoints}
           />
         </PlanetMapInteraction>
-        <FleetMapInteractionContributor stacks={fleetStacks} enabled={fleetEnabled} />
+        <FleetMapInteractionContributor
+          stacks={fleetStacks}
+          analyticScope={analyticScope}
+          enabled={fleetEnabled}
+        />
         <RegionMapInteractionContributor regionOverlays={regionOverlays} />
         <CartographyMapInteractionContributor cartography={cartography} />
         <WormholeMapInteractionContributor

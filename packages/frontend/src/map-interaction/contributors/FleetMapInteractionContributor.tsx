@@ -3,6 +3,7 @@
  */
 
 import { useMemo } from 'react'
+import type { AnalyticShellScope } from '../../api/bff'
 import type { FleetLocationRingStack } from '../../analytics/fleet/fleetLocationRings'
 import { FleetLocationRingTooltipBody } from '../../analytics/fleet/FleetLocationRingTooltipBody'
 import type { MapInteractionContributor } from '../mapInteractionContributorTypes'
@@ -11,9 +12,11 @@ import { hitTestFleetAtPointer } from './fleetHitTest'
 
 export function FleetMapInteractionContributor({
   stacks,
+  analyticScope,
   enabled,
 }: {
   stacks: readonly FleetLocationRingStack[]
+  analyticScope: AnalyticShellScope
   enabled: boolean
 }) {
   const contributor = useMemo<MapInteractionContributor | null>(() => {
@@ -37,14 +40,21 @@ export function FleetMapInteractionContributor({
           blocks: [
             {
               type: 'rich',
-              content: <FleetLocationRingTooltipBody stack={result.stack} />,
+              content: (
+                <FleetLocationRingTooltipBody
+                  stack={result.stack}
+                  analyticScope={analyticScope}
+                />
+              ),
             },
           ],
         }
       },
     }
-  }, [enabled, stacks])
+  }, [enabled, stacks, analyticScope])
 
-  useMapInteractionContributor(contributor)
+  // Re-register when stacks change so the hover engine recollects (version bump).
+  useMapInteractionContributor(contributor, stacks)
+
   return null
 }

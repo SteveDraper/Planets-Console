@@ -331,7 +331,7 @@ Default consumer filter: `disposition == active`.
 
 SPA map does **not** use `GET …/fleet/map` as the live path ([ADR 0011](adr/0011-fleet-stream-behind-table-and-map.md)). Progressive ledger state comes from the **fleet stream** (same NDJSON session as table). Each record already carries `lastSeen` / fields / option sets; Core also attaches **fleet ship military estimate** (`militaryEstimate2x`) on table/stream records via the shared ship-build military helper (unknown beam/tube slots filled at minimal tech; engines passed for API uniformity -- contribution rules stay inside that helper). When known and underway, Core also attaches wire-only **`motion`** (heading / warp / `travelLyPerTurn` / `trailStop`) for **fleet heading trail** paint ([#290](https://github.com/SteveDraper/Planets-Console/issues/290)).
 
-Client projects **fleet player visibility**-filtered **`active`** rows whose `lastSeen.turn` equals the shell turn and that have known `lastSeen` `(x, y)` into **fleet location ring**s (exact coordinate stacks). Stale last-seen positions from earlier turns are excluded. Region overlays remain deferred; heading trails use the same stream records' optional `motion` (map paint in a follow-on).
+Client projects **fleet player visibility**-filtered **`active`** rows whose `lastSeen.turn` equals the shell turn and that have known `lastSeen` `(x, y)` into **fleet location ring**s (exact coordinate stacks). The same filter plus optional `motion` feeds **fleet heading trail** rays (current-turn segment). Stale last-seen positions from earlier turns are excluded. Region overlays remain deferred.
 
 `GET …/fleet/map` may remain a no-op scaffold for catalog symmetry; it is not required for the console map layer ([#126](https://github.com/SteveDraper/Planets-Console/issues/126) superseded).
 
@@ -358,7 +358,8 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
   - Annulus stroke width (inward from outer radius `R`): `maxStroke = max(0, R - 3)` (min inner hole radius 3px); stroke `min(maxStroke, max(2.5px, t * maxStroke))` (when the ring is too small for both floors, the hole floor wins); SVG paint radius `R - strokeWidth/2` keeps the outer edge fixed
   - Colors from **player color** module
 - Hover: per-player header, then indented ship lines (shared hull icon, id, hull name, mil-score host points). Omit alibi / possibly-lost on map tooltip (table owns status)
-- Region overlays deferred; heading trails → [#290](https://github.com/SteveDraper/Planets-Console/issues/290)
+- **Fleet heading trail**s: for each visible **active** ship with wire `motion`, draw a player-colored ray from the location-ring origin along `heading`, length `travelLyPerTurn` (clamped to `trailStop` when nearer). Current-turn segment only until the multi-turn extend control lands ([#290](https://github.com/SteveDraper/Planets-Console/issues/290))
+- Region overlays deferred
 
 ### 8.3 Table (same stream, tabular projection)
 
