@@ -3,9 +3,11 @@
  * (#290). ``extendTurns`` 0 = current-turn segment only; 1..5 adds matching
  * forward and backward segments with opacity by |turnOffset|.
  *
- * Ordinary (non-HYP) rays also clamp on exact planet hit or when a one-turn
- * endpoint lands in a planet cell / server ``normalWellCells``. Back-trails are
- * omitted when the origin is already on a planet / in a well.
+ * Ordinary (non-HYP, warp ≥ 2) rays also clamp on exact planet hit or when a
+ * one-turn endpoint lands in a planet cell / server ``normalWellCells``.
+ * Back-trails are omitted when the origin is already on a planet / in a well.
+ * W1 is exempt from normal well pull (host parity with Core ``trailStop``), so
+ * planet/well path clamps are skipped; ``trailStop`` still applies.
  */
 
 import { headingTravelDeltaGameLy } from '../../lib/cartography/headingTravel'
@@ -133,11 +135,13 @@ export function fleetHeadingTrailFromRecord(
 
 /**
  * Build forward (``0..extendTurns``) and backward (``-1..-extendTurns``) segments
- * for one record. Forward legs stop at ``trailStop`` or the first planet/well
- * stop (exact planet on the segment, or end-of-turn in a well). Backward legs
- * use the same rule (and are omitted entirely when the origin is already on a
- * planet / in a well). Performing hyperjumps always emit only the current-turn
- * segment and skip planet/well path clamps.
+ * for one record. Forward legs stop at ``trailStop`` or (when warp ≥ 2) the
+ * first planet/well stop (exact planet on the segment, or end-of-turn in a
+ * well). Backward legs use the same rule (and are omitted entirely when the
+ * origin is already on a planet / in a well). Performing hyperjumps always emit
+ * only the current-turn segment and skip planet/well path clamps. W1 skips
+ * planet/well path clamps (host well-pull exemption) but still honors
+ * ``trailStop``.
  */
 export function fleetHeadingTrailSegmentsFromRecord(
   record: FleetTableRecord,
@@ -153,7 +157,7 @@ export function fleetHeadingTrailSegmentsFromRecord(
   }
   const isHyperjump = motion.hyperjump === true
   const turns = isHyperjump ? 0 : clampFleetHeadingTrailExtendTurns(extendTurns)
-  const pathPlanets = isHyperjump ? [] : planets
+  const pathPlanets = fleetHeadingTrailPathPlanets(motion, planets)
   const originX = lastSeen.x
   const originY = lastSeen.y
   const { dx, dy } = headingTravelDeltaGameLy(motion.heading, motion.travelLyPerTurn)
@@ -258,8 +262,9 @@ export function fleetHeadingTrailSegmentsFromRecord(
 
 /**
  * One-turn endpoint along heading at ``travelLyPerTurn``, clamped to ``trailStop``
- * or a planet/well stop (exact planet on the segment, or end-of-turn in a well)
- * when that stop is within the one-turn travel distance from the segment start.
+ * or (when warp ≥ 2) a planet/well stop (exact planet on the segment, or
+ * end-of-turn in a well) when that stop is within the one-turn travel distance
+ * from the segment start.
  */
 export function fleetHeadingTrailEndpoint(
   originX: number,
@@ -274,9 +279,20 @@ export function fleetHeadingTrailEndpoint(
     motion,
     dx,
     dy,
-    motion.hyperjump === true ? [] : planets
+    fleetHeadingTrailPathPlanets(motion, planets)
   )
   return { x: endX, y: endY }
+}
+
+/** Planet/well path clamps apply only for ordinary warp ≥ 2 motion (not HYP, not W1). */
+function fleetHeadingTrailPathPlanets(
+  motion: FleetShipMotion,
+  planets: readonly FleetTrailPlanetStop[]
+): readonly FleetTrailPlanetStop[] {
+  if (motion.hyperjump === true || motion.warp < 2) {
+    return []
+  }
+  return planets
 }
 
 function fleetHeadingTrailForwardEndpoint(

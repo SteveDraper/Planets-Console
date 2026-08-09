@@ -94,6 +94,38 @@ describe('fleetHeadingTrailEndpoint', () => {
     expect(end.x).toBeCloseTo(1025)
     expect(end.y).toBeCloseTo(2000)
   })
+
+  it('skips planet/well clamps at warp 1 while still honoring trailStop', () => {
+    // End-of-turn (1001) is in the well of planet 1004; W2+ would snap to 1004.
+    const planets = [planetStop(1004, 2000)]
+    const withoutStop = fleetHeadingTrailEndpoint(
+      1000,
+      2000,
+      {
+        heading: 90,
+        warp: 1,
+        travelLyPerTurn: 1,
+        trailStop: { x: 1100, y: 2000 },
+      },
+      planets
+    )
+    expect(withoutStop.x).toBeCloseTo(1001)
+    expect(withoutStop.y).toBeCloseTo(2000)
+
+    const withStop = fleetHeadingTrailEndpoint(
+      1000,
+      2000,
+      {
+        heading: 90,
+        warp: 1,
+        travelLyPerTurn: 1,
+        trailStop: { x: 1000.5, y: 2000 },
+      },
+      planets
+    )
+    expect(withStop.x).toBeCloseTo(1000.5)
+    expect(withStop.y).toBeCloseTo(2000)
+  })
 })
 
 describe('fleetHeadingTrailOpacity', () => {
@@ -312,6 +344,72 @@ describe('fleetHeadingTrailSegmentsFromRecord', () => {
     expect(forward).toHaveLength(1)
     expect(forward[0]!.endX).toBe(1040)
     expect(forward[0]!.endY).toBe(2000)
+  })
+
+  it('does not apply planet/well path clamps at warp 1 (W1 well-pull exemption)', () => {
+    const ship = record({
+      recordId: 'w1',
+      lastSeen: { turn: 9, x: 1000, y: 2000 },
+      motion: {
+        heading: 90,
+        warp: 1,
+        travelLyPerTurn: 1,
+        // Core keeps trailStop at the raw waypoint for W1 (no well snap).
+        trailStop: { x: 1100, y: 2000 },
+      },
+    })
+    // Planet at 1004: one-turn end (1001) sits in its well (≤3 ly). W2+ would
+    // snap the endpoint to the planet center; W1 must keep travelLy motion.
+    const planets = [planetStop(1004, 2000)]
+    const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 3, planets)
+    const byOffset = new Map(segments.map((s) => [s.turnOffset, s]))
+    expect(byOffset.get(0)!.endX).toBeCloseTo(1001)
+    expect(byOffset.get(0)!.endY).toBeCloseTo(2000)
+    expect(byOffset.get(1)!.endX).toBeCloseTo(1002)
+    expect(byOffset.get(-1)!.x).toBeCloseTo(999)
+    expect(byOffset.get(-1)!.endX).toBeCloseTo(1000)
+  })
+
+  it('still clamps W1 forward legs to Core trailStop', () => {
+    const ship = record({
+      recordId: 'w1-stop',
+      lastSeen: { turn: 9, x: 1000, y: 2000 },
+      motion: {
+        heading: 90,
+        warp: 1,
+        travelLyPerTurn: 1,
+        trailStop: { x: 1002, y: 2000 },
+      },
+    })
+    // Would snap to planet center under W2+ path clamps; W1 ignores it.
+    const planets = [planetStop(1004, 2000)]
+    const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 5, planets)
+    const forward = segments
+      .filter((s) => s.turnOffset >= 0)
+      .sort((a, b) => a.turnOffset - b.turnOffset)
+    expect(forward.map((s) => s.turnOffset)).toEqual([0, 1])
+    expect(forward[0]!.endX).toBeCloseTo(1001)
+    expect(forward[1]!.endX).toBe(1002)
+    expect(forward[1]!.endY).toBe(2000)
+  })
+
+  it('emits W1 back-trails even when the origin sits in a warp well', () => {
+    const ship = record({
+      recordId: 'w1-orbit',
+      lastSeen: { turn: 9, x: 1001, y: 2000 },
+      motion: {
+        heading: 90,
+        warp: 1,
+        travelLyPerTurn: 1,
+        trailStop: { x: 1100, y: 2000 },
+      },
+    })
+    const planets = [planetStop(1000, 2000)]
+    const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 3, planets)
+    expect(segments.some((s) => s.turnOffset < 0)).toBe(true)
+    const back = segments.find((s) => s.turnOffset === -1)!
+    expect(back.x).toBeCloseTo(1000)
+    expect(back.endX).toBeCloseTo(1001)
   })
 
   it('omits back-trails when the origin is already in a warp well', () => {
