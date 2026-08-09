@@ -95,4 +95,19 @@ describe('FleetAnalyticTile', () => {
     expect(useFleetHeadingTrailExtendStore.getState().extendTurns).toBe(3)
     expect(trailSelect).toHaveValue('3')
   })
+
+  it('disables the trail extend control on future shell turns', async () => {
+    const user = userEvent.setup()
+    useShellStore.setState((state) => ({
+      ...state,
+      selectedTurn: 12,
+      gameInfoContext: state.gameInfoContext
+        ? { ...state.gameInfoContext, turn: 10 }
+        : null,
+    }))
+    renderTile()
+    await user.click(screen.getByLabelText('Expand Fleet player visibility'))
+    const trailSelect = screen.getByLabelText('Fleet heading trail extend turns')
+    expect(trailSelect).toBeDisabled()
+  })
 })

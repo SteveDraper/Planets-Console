@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { deriveAnalyticScope } from '../../shell/shellContext'
+import {
+  deriveAnalyticScope,
+  deriveShellTurnMax,
+  deriveTurnView,
+} from '../../shell/shellContext'
 import { useTurnRacePlayerLabels } from '../../lib/turnRacePlayerLabels'
 import { cn } from '../../lib/utils'
 import { useSessionStore } from '../../stores/session'
@@ -46,6 +50,14 @@ export function FleetAnalyticTile({
   const setFleetPlayerVisible = useFleetPlayerVisibilityStore((state) => state.setFleetPlayerVisible)
   const trailExtendTurns = useFleetHeadingTrailExtendStore((state) => state.extendTurns)
   const setTrailExtendTurns = useFleetHeadingTrailExtendStore((state) => state.setExtendTurns)
+  const shellTurnMax = useMemo(
+    () => deriveShellTurnMax(gameInfoContext),
+    [gameInfoContext]
+  )
+  const { isFuture } = useMemo(
+    () => deriveTurnView(selectedTurn, shellTurnMax),
+    [selectedTurn, shellTurnMax]
+  )
   const analyticScope = useMemo(
     () =>
       deriveAnalyticScope({
@@ -137,10 +149,15 @@ export function FleetAnalyticTile({
             <span className="w-11 shrink-0 text-slate-400">Trail</span>
             <select
               aria-label="Fleet heading trail extend turns"
-              title="Extra turns of heading trail beyond the current turn (0 = current turn only). Forward and backward segments fade with distance."
+              title={
+                isFuture
+                  ? 'Heading trails are hidden on future turns (no movement simulation beyond the hosted turn).'
+                  : 'Extra turns of heading trail beyond the current turn (0 = current turn only). Forward and backward segments fade with distance.'
+              }
               value={trailExtendTurns}
               onChange={(event) => setTrailExtendTurns(Number(event.target.value))}
-              className="min-w-0 w-0 flex-1 rounded border border-[#52575d] bg-[#2a2d30] px-1 py-0.5 text-slate-200"
+              disabled={isFuture}
+              className="min-w-0 w-0 flex-1 rounded border border-[#52575d] bg-[#2a2d30] px-1 py-0.5 text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {TRAIL_EXTEND_OPTIONS.map((n) => (
                 <option key={n} value={n}>

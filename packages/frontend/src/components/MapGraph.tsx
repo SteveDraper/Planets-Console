@@ -172,6 +172,7 @@ export function MapGraph({
           mapLayersPending={mapLayersPending}
           homeworldMapLayerSucceeded={homeworldMapLayerSucceeded}
           displayMapFrameIsLive={displayMapFrameIsLive}
+          futureTurnOffset={futureTurnOffset}
           onMapZoomChange={onMapZoomChange}
           onSetZoomReady={onSetZoomReady}
           onInitialFitDone={onInitialFitDone}
@@ -196,6 +197,7 @@ type MapGraphFlowProps = {
   mapLayersPending: boolean
   homeworldMapLayerSucceeded: boolean
   displayMapFrameIsLive: boolean
+  futureTurnOffset: number
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
   onInitialFitDone: () => void
@@ -216,6 +218,7 @@ function MapGraphFlow({
   mapLayersPending,
   homeworldMapLayerSucceeded,
   displayMapFrameIsLive,
+  futureTurnOffset,
   onMapZoomChange,
   onSetZoomReady,
   onInitialFitDone,
@@ -239,7 +242,8 @@ function MapGraphFlow({
   const fleetHeadingTrails = useFleetHeadingTrails(
     analyticScope,
     fleetEnabled,
-    planetMapNodes
+    planetMapNodes,
+    futureTurnOffset
   )
   const showEnvelopeOverlays = useHomeworldRegionSelectionStore(
     (s) => s.showEnvelopeOverlays

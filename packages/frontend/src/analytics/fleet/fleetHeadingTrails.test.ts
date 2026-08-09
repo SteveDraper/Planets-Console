@@ -6,6 +6,7 @@ import {
   fleetHeadingTrailEndpoint,
   fleetHeadingTrailFromRecord,
   fleetHeadingTrailOpacity,
+  fleetHeadingTrailsEnabledForShell,
   fleetHeadingTrailSegmentsFromRecord,
   FLEET_HEADING_TRAIL_CURRENT_OPACITY,
   FLEET_HEADING_TRAIL_MIN_OPACITY,
@@ -225,6 +226,16 @@ describe('clampFleetHeadingTrailExtendTurns', () => {
     expect(clampFleetHeadingTrailExtendTurns(2.9)).toBe(2)
     expect(clampFleetHeadingTrailExtendTurns(99)).toBe(5)
     expect(clampFleetHeadingTrailExtendTurns(Number.NaN)).toBe(0)
+  })
+})
+
+describe('fleetHeadingTrailsEnabledForShell', () => {
+  it('requires the fleet analytic and a non-future shell turn', () => {
+    expect(fleetHeadingTrailsEnabledForShell(true, 0)).toBe(true)
+    expect(fleetHeadingTrailsEnabledForShell(true, -1)).toBe(true)
+    expect(fleetHeadingTrailsEnabledForShell(false, 0)).toBe(false)
+    expect(fleetHeadingTrailsEnabledForShell(true, 1)).toBe(false)
+    expect(fleetHeadingTrailsEnabledForShell(true, 3)).toBe(false)
   })
 })
 

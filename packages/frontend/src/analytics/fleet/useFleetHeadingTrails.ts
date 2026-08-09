@@ -3,6 +3,7 @@ import type { AnalyticShellScope, MapNode } from '../../api/bff'
 import { useFleetHeadingTrailExtendStore } from '../../stores/fleetHeadingTrailExtend'
 import {
   collectFleetHeadingTrails,
+  fleetHeadingTrailsEnabledForShell,
   type FleetHeadingTrail,
 } from './fleetHeadingTrails'
 import { fleetTrailPlanetStopsFromMapNodes } from './fleetTrailPlanetStopsFromMapNodes'
@@ -13,7 +14,8 @@ import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 export function useFleetHeadingTrails(
   analyticScope: AnalyticShellScope,
   enabled: boolean,
-  planetMapNodes: readonly MapNode[] = []
+  planetMapNodes: readonly MapNode[] = [],
+  futureTurnOffset: number = 0
 ): readonly FleetHeadingTrail[] {
   const streamPlayersById = useFleetStreamPlayersById()
   const { players: visiblePlayers } = useOrderedFleetPlayers({ visibleOnly: true })
@@ -22,9 +24,10 @@ export function useFleetHeadingTrails(
     () => fleetTrailPlanetStopsFromMapNodes(planetMapNodes),
     [planetMapNodes]
   )
+  const trailsEnabled = fleetHeadingTrailsEnabledForShell(enabled, futureTurnOffset)
 
   return useMemo(() => {
-    if (!enabled) {
+    if (!trailsEnabled) {
       return []
     }
     return collectFleetHeadingTrails(
@@ -38,7 +41,7 @@ export function useFleetHeadingTrails(
       planets
     )
   }, [
-    enabled,
+    trailsEnabled,
     streamPlayersById,
     visiblePlayers,
     analyticScope.turn,

@@ -88,6 +88,18 @@ export function clampFleetHeadingTrailExtendTurns(value: number): number {
   )
 }
 
+/**
+ * Whether map heading trails should paint for this shell view.
+ * Future shell turns (selected beyond hosted ``shellTurnMax``) reuse data-turn
+ * motion without movement simulation -- trails would look like prediction.
+ */
+export function fleetHeadingTrailsEnabledForShell(
+  fleetAnalyticEnabled: boolean,
+  futureTurnOffset: number
+): boolean {
+  return fleetAnalyticEnabled && futureTurnOffset <= 0
+}
+
 /** Collect heading trail segments from visibility-filtered stream records. */
 export function collectFleetHeadingTrails(
   streamPlayersById: ReadonlyMap<number, FleetPlayerStreamSlice>,
