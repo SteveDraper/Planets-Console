@@ -327,7 +327,7 @@ function fleetHeadingTrailForwardEndpoint(
     candidates.push({
       x: planetHit.x,
       y: planetHit.y,
-      distance: Math.hypot(planetHit.x - startX, planetHit.y - startY),
+      distance: planetHit.distanceAlong,
     })
   }
 

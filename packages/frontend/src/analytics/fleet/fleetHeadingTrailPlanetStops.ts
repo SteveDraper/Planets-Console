@@ -110,10 +110,10 @@ export function firstFleetTrailPlanetStopAlongSegment(
       continue
     }
 
-    const distanceAlong =
-      exactAlong != null
-        ? exactAlong
-        : Math.hypot(planet.x - x0, planet.y - y0)
+    // Exact planet: along-ray distance to the planet. End-in-well only: full
+    // segment length to the projected endpoint (not planet-center hypot).
+    // When both apply, exactAlong ≤ segLen so the nearer event wins.
+    const distanceAlong = exactAlong ?? segLen
 
     if (best == null || distanceAlong < best.distanceAlong) {
       best = { x: planet.x, y: planet.y, distanceAlong }

@@ -49,6 +49,7 @@ describe('fleetHeadingTrailPlanetStops', () => {
 
   it('stops when the segment endpoint lands in a well cell (no mid-path disk)', () => {
     // Path misses the planet center but ends on a well cell east of the planet.
+    // distanceAlong is segment length to the endpoint, not planet-center hypot.
     const hit = firstFleetTrailPlanetStopAlongSegment(
       1003,
       2010,
@@ -60,8 +61,34 @@ describe('fleetHeadingTrailPlanetStops', () => {
     expect(hit).toEqual({
       x: 1000,
       y: 2000,
-      distanceAlong: Math.hypot(1000 - 1003, 2000 - 2010),
+      distanceAlong: 10,
     })
+  })
+
+  it('does not stop on mid-path well graze when the endpoint is outside the well', () => {
+    // North→south ray skims well cells at x=1003 but ends south of the well.
+    const hit = firstFleetTrailPlanetStopAlongSegment(
+      1003,
+      2010,
+      1003,
+      1990,
+      [planet],
+      { skipPlanetsContainingStart: true }
+    )
+    expect(hit).toBeNull()
+  })
+
+  it('prefers exact planet when it is nearer than the end-in-well event', () => {
+    // Exact planet on the eastbound path; endpoint also sits in the same well.
+    const hit = firstFleetTrailPlanetStopAlongSegment(
+      990,
+      2000,
+      1002,
+      2000,
+      [planet],
+      { skipPlanetsContainingStart: true }
+    )
+    expect(hit).toEqual({ x: 1000, y: 2000, distanceAlong: 10 })
   })
 
   it('skips the well that already contains the start when departing', () => {

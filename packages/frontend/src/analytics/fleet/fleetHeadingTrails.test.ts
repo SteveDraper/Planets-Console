@@ -126,6 +126,77 @@ describe('fleetHeadingTrailEndpoint', () => {
     expect(withStop.x).toBeCloseTo(1000.5)
     expect(withStop.y).toBeCloseTo(2000)
   })
+
+  it('does not snap when the ray grazes a well but the endpoint is outside', () => {
+    // Planet off the ray: path cells enter the well mid-segment, endpoint does not.
+    const planets = [planetStop(1010, 2003)]
+    const end = fleetHeadingTrailEndpoint(
+      1000,
+      2000,
+      {
+        heading: 90,
+        warp: 9,
+        travelLyPerTurn: 81,
+        trailStop: { x: 2000, y: 2000 },
+      },
+      planets
+    )
+    expect(end.x).toBeCloseTo(1081)
+    expect(end.y).toBeCloseTo(2000)
+  })
+
+  it('snaps to planet when the one-turn endpoint lands in the well', () => {
+    // Exact planet is off the ray; only the end-of-turn cell is in the well.
+    const planets = [planetStop(1080, 2002)]
+    const end = fleetHeadingTrailEndpoint(
+      1000,
+      2000,
+      {
+        heading: 90,
+        warp: 9,
+        travelLyPerTurn: 81,
+        trailStop: { x: 2000, y: 2000 },
+      },
+      planets
+    )
+    expect(end).toEqual({ x: 1080, y: 2002 })
+  })
+
+  it('prefers trailStop when it is nearer along the ray than end-in-well', () => {
+    // Planet-center hypot (~80.02) is < trailStop (80.5) < segLen (81). Ordering
+    // must use along-ray distance (segLen), not planet-center hypot, or the
+    // planet would incorrectly beat trailStop.
+    const planets = [planetStop(1080, 2002)]
+    const end = fleetHeadingTrailEndpoint(
+      1000,
+      2000,
+      {
+        heading: 90,
+        warp: 9,
+        travelLyPerTurn: 81,
+        trailStop: { x: 1080.5, y: 2000 },
+      },
+      planets
+    )
+    expect(end).toEqual({ x: 1080.5, y: 2000 })
+  })
+
+  it('prefers end-in-well when trailStop is farther along the ray', () => {
+    // trailStop beyond one-turn range is not a candidate; endpoint-in-well wins.
+    const planets = [planetStop(1080, 2002)]
+    const end = fleetHeadingTrailEndpoint(
+      1000,
+      2000,
+      {
+        heading: 90,
+        warp: 9,
+        travelLyPerTurn: 81,
+        trailStop: { x: 1090, y: 2000 },
+      },
+      planets
+    )
+    expect(end).toEqual({ x: 1080, y: 2002 })
+  })
 })
 
 describe('fleetHeadingTrailOpacity', () => {
@@ -344,6 +415,26 @@ describe('fleetHeadingTrailSegmentsFromRecord', () => {
     expect(forward).toHaveLength(1)
     expect(forward[0]!.endX).toBe(1040)
     expect(forward[0]!.endY).toBe(2000)
+  })
+
+  it('stops further forward segments after end-in-well snap', () => {
+    const ship = record({
+      recordId: 'end-well',
+      lastSeen: { turn: 9, x: 1000, y: 2000 },
+      motion: {
+        heading: 90,
+        warp: 9,
+        travelLyPerTurn: 81,
+        trailStop: { x: 2000, y: 2000 },
+      },
+    })
+    // Endpoint (1081,2000) is in the well; exact planet is off the ray.
+    const planets = [planetStop(1080, 2002)]
+    const segments = fleetHeadingTrailSegmentsFromRecord(ship, 1, 9, 3, planets)
+    const forward = segments.filter((s) => s.turnOffset >= 0)
+    expect(forward).toHaveLength(1)
+    expect(forward[0]!.endX).toBe(1080)
+    expect(forward[0]!.endY).toBe(2002)
   })
 
   it('does not apply planet/well path clamps at warp 1 (W1 well-pull exemption)', () => {
