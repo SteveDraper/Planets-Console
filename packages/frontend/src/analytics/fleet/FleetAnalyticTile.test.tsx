@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event'
 import { FleetAnalyticTile } from './FleetAnalyticTile'
 import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
+import { useFleetHeadingTrailExtendStore } from '../../stores/fleetHeadingTrailExtend'
 import { useShellStore } from '../../stores/shell'
 
 vi.mock('../../api/bff', async (importOriginal) => {
@@ -42,6 +43,7 @@ function renderTile(overrides: Partial<ComponentProps<typeof FleetAnalyticTile>>
 describe('FleetAnalyticTile', () => {
   beforeEach(() => {
     useFleetPlayerVisibilityStore.setState({ overrides: {} })
+    useFleetHeadingTrailExtendStore.setState({ extendTurns: 0 })
     useShellStore.setState({
       selectedGameId: null,
       gameInfoContext: null,
@@ -81,5 +83,31 @@ describe('FleetAnalyticTile', () => {
     await user.click(bob)
     expect(bob).not.toBeChecked()
     expect(useFleetPlayerVisibilityStore.getState().isFleetPlayerVisible(9, 8)).toBe(false)
+  })
+
+  it('updates heading trail extend turns from the sidebar select', async () => {
+    const user = userEvent.setup()
+    renderTile()
+    await user.click(screen.getByLabelText('Expand Fleet player visibility'))
+    const trailSelect = screen.getByLabelText('Fleet heading trail extend turns')
+    expect(trailSelect).toHaveValue('0')
+    await user.selectOptions(trailSelect, '3')
+    expect(useFleetHeadingTrailExtendStore.getState().extendTurns).toBe(3)
+    expect(trailSelect).toHaveValue('3')
+  })
+
+  it('disables the trail extend control on future shell turns', async () => {
+    const user = userEvent.setup()
+    useShellStore.setState((state) => ({
+      ...state,
+      selectedTurn: 12,
+      gameInfoContext: state.gameInfoContext
+        ? { ...state.gameInfoContext, turn: 10 }
+        : null,
+    }))
+    renderTile()
+    await user.click(screen.getByLabelText('Expand Fleet player visibility'))
+    const trailSelect = screen.getByLabelText('Fleet heading trail extend turns')
+    expect(trailSelect).toBeDisabled()
   })
 })

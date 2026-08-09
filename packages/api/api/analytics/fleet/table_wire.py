@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord
+    from api.concepts.turn_component_catalog import TurnComponentIndexes
     from api.models.game import TurnInfo
+    from api.models.ship import Ship
 
 
 def _strip_ship_record_dict(record: dict[str, object]) -> dict[str, object]:
@@ -32,15 +35,30 @@ def fleet_ship_record_to_table_wire(
     record: FleetShipRecord,
     *,
     turn: TurnInfo,
+    ships_by_id: Mapping[int, Ship] | None = None,
+    catalog: TurnComponentIndexes | None = None,
 ) -> dict[str, object]:
-    """Shape one ship record for the SPA table wire (no evidence events)."""
+    """Shape one ship record for the SPA table wire (no evidence events).
+
+    Optional ``ships_by_id`` / ``catalog`` are forwarded to military and motion
+    shaping so ledger callers can build indexes once.
+    """
     from api.analytics.fleet.military_estimate import fleet_ship_military_estimate_2x
+    from api.analytics.fleet.motion_wire import fleet_ship_motion_wire
     from api.analytics.fleet.serialization import fleet_ship_record_to_json
 
     shaped = _strip_ship_record_dict(fleet_ship_record_to_json(record))
-    estimate = fleet_ship_military_estimate_2x(record, turn=turn)
+    estimate = fleet_ship_military_estimate_2x(record, turn=turn, catalog=catalog)
     if estimate is not None:
         shaped["militaryEstimate2x"] = estimate
+    motion = fleet_ship_motion_wire(
+        record,
+        turn=turn,
+        ships_by_id=ships_by_id,
+        catalog=catalog,
+    )
+    if motion is not None:
+        shaped["motion"] = motion
     return shaped
 
 
@@ -51,12 +69,21 @@ def fleet_acquisition_ledger_to_table_wire(
 ) -> dict[str, object]:
     """Shape one player ledger for the SPA table wire."""
     from api.analytics.fleet.serialization import fleet_count_discrepancy_to_json
+    from api.concepts.turn_component_catalog import turn_component_indexes
 
+    ships_by_id = {ship.id: ship for ship in turn.ships}
+    catalog = turn_component_indexes(turn)
     shaped: dict[str, object] = {
         "playerId": ledger.player_id,
         "playerName": ledger.player_name,
         "records": [
-            fleet_ship_record_to_table_wire(record, turn=turn) for record in ledger.records
+            fleet_ship_record_to_table_wire(
+                record,
+                turn=turn,
+                ships_by_id=ships_by_id,
+                catalog=catalog,
+            )
+            for record in ledger.records
         ],
     }
     if ledger.discrepancy is not None:

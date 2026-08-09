@@ -1,6 +1,9 @@
 /**
  * Register / unregister a **map interaction contributor** for the lifetime of
  * the calling component. Pass ``null`` when the analytic is disabled.
+ *
+ * ``revision`` bumps the registry when contributor inputs change without an
+ * id/role change (e.g. fleet stacks), so the hover engine recollects.
  */
 
 import { useEffect, useRef } from 'react'
@@ -8,7 +11,8 @@ import type { MapInteractionContributor } from './mapInteractionContributorTypes
 import { useMapInteractionRegistry } from './mapInteractionRegistry'
 
 export function useMapInteractionContributor(
-  contributor: MapInteractionContributor | null
+  contributor: MapInteractionContributor | null,
+  revision: unknown = 0
 ): void {
   const { register, unregister } = useMapInteractionRegistry()
   const latestRef = useRef(contributor)
@@ -41,5 +45,5 @@ export function useMapInteractionContributor(
     }
     register(wrapper)
     return () => unregister(id)
-  }, [id, role, hasFetch, hasSticky, register, unregister])
+  }, [id, role, hasFetch, hasSticky, register, unregister, revision])
 }

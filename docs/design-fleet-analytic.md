@@ -305,18 +305,37 @@ players[]:
   playerId, playerName, discrepancy?, records[]
 records[]:
   recordId, disposition, qualifiers, fields{...}, buildOptionSets[], displayDefaultOptionSetIndex?,
-  militaryEstimate2x?
+  militaryEstimate2x?, motion?
 ```
 
 Optional `militaryEstimate2x` is Core-attached on table/stream wire only (not durable ledger). Same fill policy as §7.2: unknown beam/tube slots at minimal-tech catalog parts via the shared ship-build military helper.
+
+Optional `motion` is Core-attached on table/stream wire only when the record has a known ship id present in the current-turn `TurnInfo.ships` that is underway (`targetx`/`targety` ≠ position) with usable warp and a resolvable heading (vector to the waypoint; `Ship.heading` only if the waypoint coincides with position). Shape:
+
+```text
+motion:
+  heading          -- degrees, 0 = north, clockwise (vector to waypoint)
+  warp             -- host warp 1--9
+  travelLyPerTurn  -- one-turn ly (warp² ×2 gravitonic; or HYP jump length when
+                     hyperjump)
+  trailStop        -- {x,y} forward-extension clamp (waypoint, or planet when
+                     warp >= 2 and waypoint is on/in a normal warp well; W1
+                     keeps the raw waypoint; HYP landing when hyperjump);
+                     always present when motion is present
+  hyperjump?       -- true when the ship is performing a hyperjump this turn
+                     (hyperdrive hull, FC HYP case-insensitive, warp > 0,
+                     neutronium ≥ 50, waypoint > 20 ly)
+```
+
+Parked ships (target equals position), inferred / never-sighted rows (no matching current-turn ship), and rows without usable warp/heading omit `motion`.
 
 Default consumer filter: `disposition == active`.
 
 ### 7.2 Map live path (fleet stream projection)
 
-SPA map does **not** use `GET …/fleet/map` as the live path ([ADR 0011](adr/0011-fleet-stream-behind-table-and-map.md)). Progressive ledger state comes from the **fleet stream** (same NDJSON session as table). Each record already carries `lastSeen` / fields / option sets; Core also attaches **fleet ship military estimate** (`militaryEstimate2x`) on table/stream records via the shared ship-build military helper (unknown beam/tube slots filled at minimal tech; engines passed for API uniformity -- contribution rules stay inside that helper).
+SPA map does **not** use `GET …/fleet/map` as the live path ([ADR 0011](adr/0011-fleet-stream-behind-table-and-map.md)). Progressive ledger state comes from the **fleet stream** (same NDJSON session as table). Each record already carries `lastSeen` / fields / option sets; Core also attaches **fleet ship military estimate** (`militaryEstimate2x`) on table/stream records via the shared ship-build military helper (unknown beam/tube slots filled at minimal tech; engines passed for API uniformity -- contribution rules stay inside that helper). When known and underway, Core also attaches wire-only **`motion`** (heading / warp / `travelLyPerTurn` / `trailStop` / optional `hyperjump`) for **fleet heading trail** paint ([#290](https://github.com/SteveDraper/Planets-Console/issues/290)).
 
-Client projects **fleet player visibility**-filtered **`active`** rows whose `lastSeen.turn` equals the shell turn and that have known `lastSeen` `(x, y)` into **fleet location ring**s (exact coordinate stacks). Stale last-seen positions from earlier turns are excluded. Region overlays remain deferred.
+Client projects **fleet player visibility**-filtered **`active`** rows whose `lastSeen.turn` equals the shell turn and that have known `lastSeen` `(x, y)` into **fleet location ring**s (exact coordinate stacks). The same filter plus optional `motion` feeds **fleet heading trail** rays (current-turn segment by default; optional multi-turn extend; HYP is always current-turn dotted only). Stale last-seen positions from earlier turns are excluded. Region overlays remain deferred.
 
 `GET …/fleet/map` may remain a no-op scaffold for catalog symmetry; it is not required for the console map layer ([#126](https://github.com/SteveDraper/Planets-Console/issues/126) superseded).
 
@@ -343,7 +362,8 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
   - Annulus stroke width (inward from outer radius `R`): `maxStroke = max(0, R - 3)` (min inner hole radius 3px); stroke `min(maxStroke, max(2.5px, t * maxStroke))` (when the ring is too small for both floors, the hole floor wins); SVG paint radius `R - strokeWidth/2` keeps the outer edge fixed
   - Colors from **player color** module
 - Hover: per-player header, then indented ship lines (shared hull icon, id, hull name, mil-score host points). Omit alibi / possibly-lost on map tooltip (table owns status)
-- Region overlays deferred; heading trails → [#290](https://github.com/SteveDraper/Planets-Console/issues/290)
+- **Fleet heading trail**s: for each visible **active** ship with wire `motion`, draw player-colored rays from the location-ring origin along `heading`, length `travelLyPerTurn` per segment (forward legs clamp to `trailStop` or, when warp ≥ 2, a planet/well stop from base-map centers + shipped `normalWellCells` -- exact planet on the segment, or end-of-turn in a well cell; backward legs likewise, and are omitted when the origin is already on a planet / in a well). **W1** skips SPA planet/well path clamps (host well-pull exemption) but still honors `trailStop`. Sidebar **Trail** control `N` ∈ 0..5 (persisted): `0` = current-turn segment only (default); `N > 0` adds forward `+1..N` and backward `-1..-N` with opacity `f(|turnOffset|)` (current highest). Backward rays are estimate-only (reverse of current heading/speed). Performing **hyperjump** (`motion.hyperjump`): dotted current-turn ray to the HYP landing only -- never multi-turn extend, and no mid-path planet/well clamps. Omit all heading trails (and disable the Trail control) when the shell selected turn is **future** (`selectedTurn` > hosted turn) -- no movement simulation beyond hosted data. [#290](https://github.com/SteveDraper/Planets-Console/issues/290)
+- Region overlays deferred
 
 ### 8.3 Table (same stream, tabular projection)
 

@@ -5,10 +5,13 @@
 
 import type { FleetComponentCatalog } from './fleetComponentCatalog'
 import { formatFleetHullDisplay } from './fleetRecordComponentDisplay'
-import { activeFleetRecords, formatFleetRecordField } from './fleetRecordDisplay'
+import { formatFleetRecordField } from './fleetRecordDisplay'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
-import { fleetPlayerFromStreamSlice } from './fleetTablePlayerStreamState'
 import type { FleetTableRecord } from './fleetTableWireSchema'
+import {
+  visibleActiveOnTurnFleetRecords,
+  type FleetVisiblePlayer,
+} from './fleetVisibleActiveOnTurnRecords'
 
 /** Minimum inward stroke width (px) when strength fraction is 0. */
 export const FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX = 2.5
@@ -26,6 +29,8 @@ export type FleetLocationRingShip = {
   shipIdLabel: string
   hullId: number | null
   hullLabel: string
+  /** Current-turn warp from wire ``motion``, or null when unknown. */
+  warp: number | null
   /** Host military points (militaryEstimate2x / 2), or null when not estimable. */
   hostMilitaryPoints: number | null
   x: number
@@ -135,33 +140,28 @@ export function hostMilitaryPointsFromEstimate2x(
   return militaryEstimate2x / 2
 }
 
-export type FleetLocationRingVisiblePlayer = {
-  playerId: number
-  name: string
-}
-
 /** Project visibility-filtered active records last seen on the shell turn into ring ships. */
 export function collectFleetLocationRingShips(
   streamPlayersById: ReadonlyMap<number, FleetPlayerStreamSlice>,
-  visiblePlayers: readonly FleetLocationRingVisiblePlayer[],
+  visiblePlayers: readonly FleetVisiblePlayer[],
   componentCatalog: FleetComponentCatalog,
   displayTurn: number
 ): FleetLocationRingShip[] {
   const ships: FleetLocationRingShip[] = []
-  for (const player of visiblePlayers) {
-    const streamSlice = streamPlayersById.get(player.playerId)
-    const merged = fleetPlayerFromStreamSlice(streamSlice, player.name)
-    for (const record of activeFleetRecords(merged.records)) {
-      const ship = fleetLocationRingShipFromRecord(
-        record,
-        player.playerId,
-        merged.playerName,
-        componentCatalog,
-        displayTurn
-      )
-      if (ship != null) {
-        ships.push(ship)
-      }
+  for (const { playerId, playerName, record } of visibleActiveOnTurnFleetRecords(
+    streamPlayersById,
+    visiblePlayers,
+    displayTurn
+  )) {
+    const ship = fleetLocationRingShipFromRecord(
+      record,
+      playerId,
+      playerName,
+      componentCatalog,
+      displayTurn
+    )
+    if (ship != null) {
+      ships.push(ship)
     }
   }
   return ships
@@ -186,6 +186,7 @@ export function fleetLocationRingShipFromRecord(
     shipIdLabel: formatFleetRecordField(record, 'shipId'),
     hullId: hull.hullId,
     hullLabel: hull.label,
+    warp: record.motion?.warp ?? null,
     hostMilitaryPoints: hostMilitaryPointsFromEstimate2x(record.militaryEstimate2x),
     x: lastSeen.x,
     y: lastSeen.y,

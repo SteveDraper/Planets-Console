@@ -6,7 +6,6 @@ import type { ConnectionsMapParams } from '../analytics/connections/api'
 import { appendScoresTableQueryParams } from '../analytics/scores/api'
 import type { ScoresTableParams } from '../analytics/scores/api'
 import {
-  EMPTY_FLEET_COMPONENT_CATALOG,
   parseFleetComponentCatalog,
   type FleetComponentCatalog,
 } from '../analytics/fleet/fleetComponentCatalog'
@@ -839,7 +838,11 @@ export async function fetchFleetComponentCatalog(
     throw new Error(withEndpointIfGeneric(String(response.status), endpointLabel))
   }
   const body = (await response.json()) as { componentCatalog?: unknown }
-  return parseFleetComponentCatalog(body.componentCatalog) ?? EMPTY_FLEET_COMPONENT_CATALOG
+  const catalog = parseFleetComponentCatalog(body.componentCatalog)
+  if (catalog == null) {
+    throw new Error(`${endpointLabel}: response componentCatalog failed validation`)
+  }
+  return catalog
 }
 
 export async function fetchAnalyticMap(

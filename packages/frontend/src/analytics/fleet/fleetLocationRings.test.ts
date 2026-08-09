@@ -110,6 +110,7 @@ describe('buildFleetLocationRingStacks', () => {
         shipIdLabel: '1',
         hullId: 13,
         hullLabel: 'Cruiser',
+        warp: null,
         hostMilitaryPoints: 10,
         x: 100,
         y: 200,
@@ -121,6 +122,7 @@ describe('buildFleetLocationRingStacks', () => {
         shipIdLabel: '2',
         hullId: 24,
         hullLabel: 'Serpent',
+        warp: null,
         hostMilitaryPoints: 30,
         x: 100,
         y: 200,
@@ -132,6 +134,7 @@ describe('buildFleetLocationRingStacks', () => {
         shipIdLabel: '3',
         hullId: 13,
         hullLabel: 'Cruiser',
+        warp: null,
         hostMilitaryPoints: 10,
         x: 100,
         y: 200,
@@ -143,6 +146,7 @@ describe('buildFleetLocationRingStacks', () => {
         shipIdLabel: '4',
         hullId: 13,
         hullLabel: 'Cruiser',
+        warp: null,
         hostMilitaryPoints: 5,
         x: 50,
         y: 50,
@@ -191,6 +195,7 @@ describe('buildFleetLocationRingStacks', () => {
         shipIdLabel: '1',
         hullId: 13,
         hullLabel: 'Cruiser',
+        warp: null,
         hostMilitaryPoints: FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE,
         x: 0,
         y: 0,
@@ -275,5 +280,37 @@ describe('fleetLocationRingShipFromRecord', () => {
         9
       )
     ).toBeNull()
+  })
+
+  it('carries warp from motion when present and null when omitted', () => {
+    const withWarp = fleetLocationRingShipFromRecord(
+      record({
+        recordId: 'moving',
+        lastSeen: { turn: 9, x: 1, y: 2 },
+        motion: {
+          heading: 90,
+          warp: 9,
+          travelLyPerTurn: 81,
+          trailStop: { x: 100, y: 2 },
+        },
+      }),
+      1,
+      'P',
+      EMPTY_FLEET_COMPONENT_CATALOG,
+      9
+    )
+    expect(withWarp?.warp).toBe(9)
+
+    const without = fleetLocationRingShipFromRecord(
+      record({
+        recordId: 'static',
+        lastSeen: { turn: 9, x: 1, y: 2 },
+      }),
+      1,
+      'P',
+      EMPTY_FLEET_COMPONENT_CATALOG,
+      9
+    )
+    expect(without?.warp).toBeNull()
   })
 })

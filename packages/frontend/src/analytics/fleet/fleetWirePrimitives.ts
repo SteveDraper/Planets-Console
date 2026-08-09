@@ -93,6 +93,19 @@ export const fleetLastSeenSchema = z.object({
   planetId: z.number().int().optional(),
 })
 
+/** Wire-only heading trail motion (omitted when unknown). */
+export const fleetShipMotionSchema = z.object({
+  heading: z.number().int().min(0).max(359),
+  warp: z.number().int().min(1).max(9),
+  travelLyPerTurn: z.number().positive(),
+  trailStop: z.object({
+    x: z.number().int(),
+    y: z.number().int(),
+  }),
+  /** Present when the ship is performing a hyperjump this turn. */
+  hyperjump: z.boolean().optional(),
+})
+
 export const fleetShipDispositionSchema = z.enum([
   'active',
   'lost',
@@ -105,4 +118,5 @@ export type FleetFieldConstraint = z.infer<typeof fleetFieldConstraintSchema>
 export type FleetRowQualifiers = z.infer<typeof fleetRowQualifiersSchema>
 export type FleetBuildOptionSet = z.infer<typeof fleetBuildOptionSetSchema>
 export type FleetLastSeen = z.infer<typeof fleetLastSeenSchema>
+export type FleetShipMotion = z.infer<typeof fleetShipMotionSchema>
 export type FleetShipDisposition = z.infer<typeof fleetShipDispositionSchema>

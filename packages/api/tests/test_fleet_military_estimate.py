@@ -277,6 +277,19 @@ def test_table_wire_attaches_estimate_and_durable_omits(sample_turn):
     )
 
 
+def test_military_estimate_accepts_precomputed_catalog(sample_turn):
+    """Ledger path may pass turn component indexes; score matches turn-built default."""
+    from api.concepts.turn_component_catalog import turn_component_indexes
+
+    record = _serpent_record(beam_id=1, beam_count=2, engine_id=1)
+    catalog = turn_component_indexes(sample_turn)
+    expected = fleet_ship_military_estimate_2x(record, turn=sample_turn)
+    assert expected is not None
+    assert fleet_ship_military_estimate_2x(record, turn=sample_turn, catalog=catalog) == expected
+    wire = fleet_ship_record_to_table_wire(record, turn=sample_turn, catalog=catalog)
+    assert wire["militaryEstimate2x"] == expected
+
+
 def test_table_wire_omits_estimate_when_not_estimable(sample_turn):
     record = FleetShipRecord(record_id="rec-unknown")
     wire = fleet_ship_record_to_table_wire(record, turn=sample_turn)

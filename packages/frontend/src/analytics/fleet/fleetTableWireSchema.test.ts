@@ -62,6 +62,61 @@ describe('fleetTableWireSchema', () => {
     }
   })
 
+  it('accepts optional motion on records', () => {
+    expect(primaryGolden).toBeDefined()
+    const withMotion = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    withMotion.players[0]!.records[0]!.motion = {
+      heading: 90,
+      warp: 9,
+      travelLyPerTurn: 81,
+      trailStop: { x: 100, y: 200 },
+    }
+
+    const result = fleetTableWireSchema.safeParse(withMotion)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.players[0]!.records[0]!.motion).toEqual({
+        heading: 90,
+        warp: 9,
+        travelLyPerTurn: 81,
+        trailStop: { x: 100, y: 200 },
+      })
+    }
+  })
+
+  it('rejects motion with unknown heading sentinel', () => {
+    expect(primaryGolden).toBeDefined()
+    const withBadMotion = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    withBadMotion.players[0]!.records[0]!.motion = {
+      heading: -1,
+      warp: 9,
+      travelLyPerTurn: 81,
+      trailStop: { x: 100, y: 200 },
+    }
+
+    const result = fleetTableWireSchema.safeParse(withBadMotion)
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects motion without trailStop', () => {
+    expect(primaryGolden).toBeDefined()
+    const withBadMotion = structuredClone(primaryGolden) as {
+      players: Array<{ records: Array<Record<string, unknown>> }>
+    }
+    withBadMotion.players[0]!.records[0]!.motion = {
+      heading: 90,
+      warp: 9,
+      travelLyPerTurn: 81,
+    }
+
+    const result = fleetTableWireSchema.safeParse(withBadMotion)
+    expect(result.success).toBe(false)
+  })
+
   it('rejects non-integer militaryEstimate2x', () => {
     expect(primaryGolden).toBeDefined()
     const withFloat = structuredClone(primaryGolden) as {
