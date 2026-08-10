@@ -111,7 +111,11 @@ class InferenceInvalidationService:
         self._fleet_persistence.on_ledger_persisted = self.on_fleet_ledger_persisted
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:
-        """Drop one player's scores@N inference row when fleet@(N-1) is persisted."""
+        """Drop one player's scores@N inference row when fleet@(N-1) is persisted.
+
+        Own-DAG elision (#204): when scores is already waiting on that fleet scope
+        on the same orchestrator DAG, skip wipe and reschedule.
+        """
         host_turn = event.fleet_turn + 1
         scope = self._scope(event.game_id, event.perspective, host_turn)
         scheduler = self._scheduler_instance()
