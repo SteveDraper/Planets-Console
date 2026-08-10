@@ -615,32 +615,45 @@ def _materialize_fleet_snapshot_chain(
     until REST compute migrates onto ensure (#204 out-of-scope). Not the
     player-scoped export ensure path -- see ``ensure_fleet_export``.
     """
+    from api.errors import FleetGapFillEpochInvalidated
+
+    turn_number = turn.settings.turn
     turn_context_cache: dict[int, FleetTurnContext] = {}
-    for player_id in _roster_player_ids(turn):
-        generation = persistence.player_invalidation_generation(game_id, perspective, player_id)
-        player_coherence = _GapFillCoherence(
-            persistence,
-            game_id,
-            perspective,
-            player_id,
-            generation,
-        )
-        _materialize_fleet_ledger_chain_for_player(
-            persistence,
-            game_id,
-            perspective,
-            player_id,
-            turn,
-            load_turn=load_turn,
-            inference_materialization=inference_materialization,
-            coherence=player_coherence,
-            turn_context_cache=turn_context_cache,
-        )
-    snapshot = persistence.get_snapshot(game_id, perspective, turn.settings.turn)
+    try:
+        for player_id in _roster_player_ids(turn):
+            generation = persistence.player_invalidation_generation(
+                game_id,
+                perspective,
+                player_id,
+            )
+            player_coherence = _GapFillCoherence(
+                persistence,
+                game_id,
+                perspective,
+                player_id,
+                generation,
+            )
+            _materialize_fleet_ledger_chain_for_player(
+                persistence,
+                game_id,
+                perspective,
+                player_id,
+                turn,
+                load_turn=load_turn,
+                inference_materialization=inference_materialization,
+                coherence=player_coherence,
+                turn_context_cache=turn_context_cache,
+            )
+    except _FleetSnapshotInvalidated as exc:
+        raise FleetGapFillEpochInvalidated(
+            f"fleet snapshot gap-fill for game {game_id} perspective {perspective} "
+            f"turn {turn_number} aborted: invalidation generation bumped mid-chain"
+        ) from exc
+    snapshot = persistence.get_snapshot(game_id, perspective, turn_number)
     if snapshot is None:
         raise ConflictError(
             f"fleet snapshot gap-fill produced no document for game {game_id} "
-            f"perspective {perspective} turn {turn.settings.turn}"
+            f"perspective {perspective} turn {turn_number}"
         )
     return snapshot
 
