@@ -751,7 +751,7 @@ def test_held_solutions_scheduler_callback_invalidates_cached_fleet_snapshot(
 
 
 def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memory_backend):
-    from api.analytics.fleet.chain import _FleetSnapshotInvalidated
+    from api.errors import FleetGapFillEpochInvalidated
 
     turn_110 = load_turn(110)
     assert turn_110 is not None
@@ -801,7 +801,7 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     sync.wait()
     gap_fill_thread.join()
 
-    assert isinstance(gap_fill_error, _FleetSnapshotInvalidated)
+    assert isinstance(gap_fill_error, FleetGapFillEpochInvalidated)
     # Torn-tail guard: abort before persisting later turns on a stale generation.
     assert persistence.get_snapshot(628580, 1, 112) is None
 
@@ -820,7 +820,7 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
 
 
 def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persistence, load_turn):
-    from api.analytics.fleet.chain import _FleetSnapshotInvalidated
+    from api.errors import FleetGapFillEpochInvalidated
 
     turn_110 = load_turn(110)
     assert turn_110 is not None
@@ -893,7 +893,7 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
     gap_fill_thread.join(timeout=5)
 
     assert not gap_fill_thread.is_alive()
-    assert isinstance(gap_fill_error, _FleetSnapshotInvalidated)
+    assert isinstance(gap_fill_error, FleetGapFillEpochInvalidated)
     assert attempt_puts[0] == [111]
     assert persistence.get_snapshot(628580, 1, 112) is None
 
