@@ -219,6 +219,66 @@ def test_ensure_scope_short_circuits_when_already_satisfied(sample_turn):
     assert orchestrator.nodes[shared_scope].state == "complete"
 
 
+def test_ensure_scope_force_fresh_replaces_stale_terminal_when_unsatisfied(sample_turn):
+    """Wipe/invalidate can leave a hollow complete node; ensure must rebuild."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    policy = _StubPersistencePolicy()
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry(
+            (_thread_registration(SHARED_ID, persistence_policy=policy),)
+        ),
+        pool_submitter=lambda _node, _step: None,
+    )
+
+    # Seed a terminal node as if a prior ensure completed, then durable state wiped.
+    first = orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="interactive_ensure"),
+    )
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": "stale"})
+    assert first.wait(timeout=1.0).state == "complete"
+    prior_generation = orchestrator.nodes[shared_scope].execution_generation
+
+    result_box: list[object] = []
+    errors: list[BaseException] = []
+    started = threading.Event()
+
+    def ensure_in_background() -> None:
+        started.set()
+        try:
+            result_box.append(
+                orchestrator.ensure_scope(
+                    ComputeRequest(
+                        ctx=ctx,
+                        scope=shared_scope,
+                        priority_band="interactive_ensure",
+                    ),
+                    timeout=2.0,
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=ensure_in_background, daemon=True)
+    thread.start()
+    assert started.wait(timeout=1.0)
+    time.sleep(0.05)
+    rebuilt = orchestrator.nodes[shared_scope]
+    assert rebuilt.state == "running"
+    assert rebuilt.execution_generation != prior_generation
+
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": "fresh"})
+    thread.join(timeout=2.0)
+    assert errors == []
+    assert len(result_box) == 1
+    assert result_box[0].state == "complete"
+    assert result_box[0].result_wire == {"result": "fresh"}
+
+
 def test_ensure_scope_submit_and_wait_until_complete(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,

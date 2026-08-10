@@ -341,8 +341,15 @@ class OrchestratorLifecycleMixin:
             for waiter in node.waiters:
                 waiter._waiter_error = error
             node.waiters.clear()
-            # Wake orchestration-plane ComputeHandle.wait callers (leaders and attachers).
-            self._condition.notify_all()
+            # Wake orchestration-plane ComputeHandle.wait callers (leaders and
+            # attachers). ``Condition.notify*`` requires the lock; the orchestrator
+            # uses a non-reentrant Lock, so re-entering ``with self._condition``
+            # would deadlock when the caller already holds it.
+            if self._condition._is_owned():
+                self._condition.notify_all()
+            else:
+                with self._condition:
+                    self._condition.notify_all()
         self._observers.notify_scope_outcome(node)
         if not soft_pause:
             completed_scope = node.scope

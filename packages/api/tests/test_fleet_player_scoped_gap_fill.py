@@ -14,7 +14,7 @@ from api.analytics.fleet.chain import (
     _materialize_fleet_ledger_chain_for_player,
     get_or_materialize_fleet_ledger_for_player,
 )
-from api.analytics.fleet.exports import EXPORT_CATALOG, ensure_fleet_export
+from api.analytics.fleet.exports import ensure_fleet_export
 from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
@@ -26,7 +26,7 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
-from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.export_chain_test_fixtures import GAME_ID, export_chain_query_context
 from tests.fleet_player_scoped_gap_fill_helpers import (
     ensure_fleet_export_gap_fill_context,
     install_mid_chain_put_ledger_gate,
@@ -151,7 +151,13 @@ def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
 
 
 def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
-    """Dependency walk and forward unwind both ensure fleet@T,P once; materialize once."""
+    """Sync fleet ensure of the same player scope materializes once (Phase 2 leaf path).
+
+    ``ctx.query`` routes registered analytics through orchestrator submit+wait; this
+    regression covers the sync ``ensure_fleet_export`` path still used by the gap-fill
+    coordinator until Phase 3.
+    """
+    from api.analytics.export_types import ExportScope
     from api.analytics.fleet.compute_services import turn_chain_through
 
     player_id = first_player_id(sample_turn)
@@ -182,14 +188,14 @@ def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
         ),
     )
 
-    fleet_ensure_calls: list[tuple[int, int | None]] = []
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=host_turn.player.id,
+        turn=turn_number,
+        player_id=player_id,
+    )
     materialize_calls: list[tuple[int, int]] = []
-    original_ensure = ensure_fleet_export
     original_materialize = _materialize_fleet_ledger_chain_for_player
-
-    def tracking_ensure(query_ctx, scope):
-        fleet_ensure_calls.append((scope.turn, scope.player_id))
-        return original_ensure(query_ctx, scope)
 
     def counting_materialize(
         persistence_service,
@@ -209,31 +215,13 @@ def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
             **kwargs,
         )
 
-    ctx.export_registry = {
-        **ctx.export_registry,
-        "fleet": replace(EXPORT_CATALOG, ensure_export=tracking_ensure),
-    }
-
-    with (
-        patch(
-            "api.analytics.fleet.gap_fill_coordinator.ensure_fleet_export",
-            side_effect=tracking_ensure,
-        ),
-        patch(
-            "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
-            side_effect=counting_materialize,
-        ),
+    with patch(
+        "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
+        side_effect=counting_materialize,
     ):
-        result = ctx.query(
-            "fleet",
-            ["$.players"],
-            {"turn": turn_number, "player_id": player_id},
-            force_inline_ensure=True,
-        )
+        assert ensure_fleet_export(ctx, scope) is True
+        assert ensure_fleet_export(ctx, scope) is True
 
-    assert result.status == "ok"
-    target_ensure_calls = [call for call in fleet_ensure_calls if call == (turn_number, player_id)]
-    assert len(target_ensure_calls) == 2
     target_materialize_calls = [
         call for call in materialize_calls if call == (turn_number, player_id)
     ]

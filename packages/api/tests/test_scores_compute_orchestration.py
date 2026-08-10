@@ -359,7 +359,7 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
 
     with (
         patch(
-            "api.analytics.scores.exports.ensure_scores_export",
+            "api.analytics.scores.exports.admit_scores_export_work",
             return_value=True,
         ),
         patch.object(ScoresPersistencePolicy, "is_satisfied", return_value=False),
@@ -444,7 +444,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
 
     with (
         patch(
-            "api.analytics.scores.exports.ensure_scores_export",
+            "api.analytics.scores.exports.admit_scores_export_work",
             return_value=True,
         ),
         patch.object(ScoresPersistencePolicy, "is_satisfied", return_value=False),
@@ -494,7 +494,7 @@ def test_build_scores_tier_solve_job_wire_raises_when_ensure_satisfied_without_a
 
     with (
         patch(
-            "api.analytics.scores.exports.ensure_scores_export",
+            "api.analytics.scores.exports.admit_scores_export_work",
             return_value=True,
         ),
         patch.object(ScoresPersistencePolicy, "is_satisfied", return_value=False),
@@ -529,7 +529,7 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
         reset_inference_row_scheduler_for_tests,
     )
     from api.analytics.scores.exports import (
-        ensure_scores_export,
+        admit_scores_export_work,
         is_scores_export_ensure_satisfied,
         is_scores_export_turn_evidence_closed,
     )
@@ -573,7 +573,9 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
         player_id=player_id,
     )
 
-    assert ensure_scores_export(ctx, export_scope) is True
+    # Leaf admit (not orchestration-plane ensure): accelerated-window cheap terminal
+    # must close evidence without planning a prior-turn fleet DAG.
+    assert admit_scores_export_work(ctx, export_scope, overlay_ensure=False) is True
     assert is_scores_export_ensure_satisfied(ctx, export_scope) is True
     assert get_row_run_for_scope(scope) is None
 

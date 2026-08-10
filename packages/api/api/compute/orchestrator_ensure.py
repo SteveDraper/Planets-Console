@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
@@ -24,10 +25,12 @@ class OrchestratorEnsureMixin:
 
         If durable satisfaction already holds, returns a terminal handle without
         blocking on pool work (submit may still short-circuit to ``complete``).
-        Otherwise submits and waits until the scope is terminal or ``timeout``.
+        Otherwise submits with ``force_fresh`` (when the caller did not already
+        set it) and waits until the scope is terminal or ``timeout``. Force-fresh
+        on the unsatisfied path replaces hollow terminal nodes left after wipe /
+        invalidate so ensure cannot attach to a stale ``complete``.
 
-        Defaults match grill locks: callers typically pass ``force_fresh=False``
-        and an inherited ``priority_band`` (cold ensure → ``interactive_ensure``).
+        Defaults match grill locks: cold ensure → ``interactive_ensure`` priority.
         Pool workers and leaf ``run_step`` must never call this.
         """
         bundle = self._require_bundle(request)
@@ -38,10 +41,14 @@ class OrchestratorEnsureMixin:
             request.scope,
         )
 
-        handle = self.submit(request)
-        if already_satisfied and handle._node.is_terminal:
-            error = handle.error
-            if error is not None:
-                raise error
-            return handle
-        return handle.wait(timeout=timeout)
+        if already_satisfied:
+            handle = self.submit(request)
+            if handle._node.is_terminal:
+                error = handle.error
+                if error is not None:
+                    raise error
+                return handle
+            return handle.wait(timeout=timeout)
+
+        ensure_request = request if request.force_fresh else replace(request, force_fresh=True)
+        return self.submit(ensure_request).wait(timeout=timeout)
