@@ -253,29 +253,26 @@ def test_get_or_materialize_fleet_snapshot_does_not_short_circuit_on_partial_cac
         is False
     )
 
-    ledger_calls: list[int] = []
-    original_ledger_materialize = get_or_materialize_fleet_ledger_for_player
+    snapshot = get_or_materialize_fleet_snapshot(
+        fleet_services.persistence,
+        GAME_ID,
+        perspective_id,
+        turn,
+        load_turn=ctx.load_turn,
+        inference_materialization=fleet_services.inference_materialization,
+    )
 
-    def counting_ledger_materialize(*args, **kwargs):
-        ledger_calls.append(kwargs.get("player_id", args[3]))
-        return original_ledger_materialize(*args, **kwargs)
-
-    with patch(
-        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
-        side_effect=counting_ledger_materialize,
-    ):
-        snapshot = get_or_materialize_fleet_snapshot(
-            fleet_services.persistence,
-            GAME_ID,
-            perspective_id,
-            turn,
-            load_turn=ctx.load_turn,
-            inference_materialization=fleet_services.inference_materialization,
-        )
-
-    assert set(ledger_calls) == roster_ids
     assert snapshot is not None
     assert roster_ids <= {ledger.player_id for ledger in snapshot.players}
+    rematerialized = fleet_services.persistence.get_ledger(
+        GAME_ID,
+        perspective_id,
+        turn_number,
+        player_id,
+    )
+    assert rematerialized is not None
+    # Planted partial had prior_ledger_at_n_minus_1=False; rematerialize must replace it.
+    assert rematerialized.provenance.prior_ledger_at_n_minus_1 is True
 
 
 def test_get_or_materialize_fleet_ledger_rematerializes_when_cached_partial(

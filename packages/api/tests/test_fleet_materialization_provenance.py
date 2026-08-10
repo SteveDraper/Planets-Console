@@ -305,8 +305,8 @@ def test_snapshot_gap_fill_reuses_turn_context_across_players(persistence, load_
             load_turn=load_turn,
         )
 
-    # Single-turn leaf builds one turn context per player.
-    assert from_turn_mock.call_count == player_count
+    # Snapshot chain shares turn context across roster players for the same turn.
+    assert from_turn_mock.call_count == 1
 
 
 def test_gap_fill_persists_per_player_ledgers_with_provenance(persistence, load_turn):

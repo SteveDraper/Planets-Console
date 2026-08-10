@@ -436,11 +436,12 @@ def _materialize_fleet_ledger_chain_for_player(
     coherence: _GapFillCoherence,
     turn_context_cache: dict[int, FleetTurnContext],
 ) -> PersistedFleetLedger:
-    """Gap-fill one player's fleet ledger from anchor through turn T (test/seed).
+    """Gap-fill one player's fleet ledger from anchor through turn T.
 
-    Production leaf ``get_or_materialize_fleet_ledger_for_player`` is single-turn
-    only. Multi-turn cold unwind uses orchestrator DAG; this helper remains for
-    fixture seeding (e.g. ``seed_fleet_unwind_through``).
+    Used by roster snapshot/compute multi-turn unwind and fixture seeding.
+    Player-scoped leaf ``get_or_materialize_fleet_ledger_for_player`` remains
+    single-turn (export materialize after ensure); orchestrator ensure is the
+    durable multi-turn path for that leaf.
     """
     turn_number = turn.settings.turn
 
@@ -608,9 +609,11 @@ def _materialize_fleet_snapshot_chain(
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None = None,
 ) -> FleetTurnSnapshot:
-    """Gap-fill fleet ledgers for every roster player through turn T (test/seed).
+    """Gap-fill fleet ledgers for every roster player through turn T.
 
-    Not a production ensure path -- see ``ensure_fleet_export`` / orchestrator.
+    Temporary multi-turn path for roster snapshot / legacy ``compute_fleet``
+    until REST compute migrates onto ensure (#204 out-of-scope). Not the
+    player-scoped export ensure path -- see ``ensure_fleet_export``.
     """
     turn_context_cache: dict[int, FleetTurnContext] = {}
     for player_id in _roster_player_ids(turn):
@@ -750,11 +753,16 @@ def get_or_materialize_fleet_snapshot(
     inference_materialization: FleetInferenceMaterialization | None = None,
     query_context: AnalyticQueryContext | None = None,
 ) -> FleetTurnSnapshot:
-    """Return a cached snapshot or fan out single-turn leaf materialize per player.
+    """Return a cached snapshot or multi-turn gap-fill for the full roster.
 
-    Each player requires a final prior (or baseline at floor). Multi-turn cold
-    fill is orchestrator ensure, not this fan-out.
+    Roster snapshot / legacy ``compute_fleet`` unwind via
+    ``_materialize_fleet_snapshot_chain`` (temporary until REST compute migrates
+    onto ensure -- #204 out-of-scope). Player-scoped leaf
+    ``get_or_materialize_fleet_ledger_for_player`` remains single-turn.
+    ``query_context`` is retained for call-site compatibility and does not nest
+    ensure.
     """
+    del query_context
     turn_number = turn.settings.turn
     cached = persistence.get_snapshot(game_id, perspective, turn_number)
     if cached is not None and _is_fleet_snapshot_cache_hit(
@@ -767,22 +775,11 @@ def get_or_materialize_fleet_snapshot(
     ):
         return cached
 
-    for player_id in _roster_player_ids(turn):
-        get_or_materialize_fleet_ledger_for_player(
-            persistence,
-            game_id,
-            perspective,
-            player_id,
-            turn,
-            load_turn=load_turn,
-            inference_materialization=inference_materialization,
-            query_context=query_context,
-        )
-
-    snapshot = persistence.get_snapshot(game_id, perspective, turn_number)
-    if snapshot is None or not _snapshot_has_all_roster_players(snapshot, turn):
-        raise ConflictError(
-            f"fleet snapshot gap-fill produced incomplete document "
-            f"for game {game_id} perspective {perspective} turn {turn_number}"
-        )
-    return snapshot
+    return _materialize_fleet_snapshot_chain(
+        persistence,
+        game_id,
+        perspective,
+        turn,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )

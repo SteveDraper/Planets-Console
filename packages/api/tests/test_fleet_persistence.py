@@ -205,21 +205,13 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
 
 
 def test_leaf_rejects_multi_turn_gap_without_final_prior(persistence, load_turn, memory_backend):
-    """Production leaf does not unwind multiple turns; missing final prior fails."""
+    """Player-scoped leaf does not unwind multiple turns; missing final prior fails."""
     turn_110 = load_turn(110)
     assert turn_110 is not None
     _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
-    with pytest.raises(ConflictError, match="requires a final prior ledger"):
-        get_or_materialize_fleet_snapshot(
-            persistence,
-            628580,
-            1,
-            turn_112,
-            load_turn=load_turn,
-        )
     with pytest.raises(ConflictError, match="use ensure_fleet_export"):
         get_or_materialize_fleet_ledger_for_player(
             persistence,

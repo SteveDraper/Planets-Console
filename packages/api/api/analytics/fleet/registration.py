@@ -32,30 +32,15 @@ def _run_fleet_finalization_leg(job_wire: dict[str, object]) -> StepResult:
 def compute_fleet(ctx: AnalyticComputeContext) -> dict:
     """Return the fleet acquisition ledger for the shell turn.
 
-    Brings each roster player's fleet scope to durable satisfaction via
-    ``ensure_fleet_export`` (orchestrator submit+wait), then leaf-materializes
-    (cache hit or single-turn when priors are final).
+    Materializes via the roster snapshot path (multi-turn unwind without
+    orchestrator ensure-wait). Export ensure remains the durable player-scoped
+    path; REST compute migration onto ensure is #204 out-of-scope.
     """
-    from api.analytics.export_types import ExportScope
     from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
     from api.analytics.fleet.compute_services import resolve_fleet_compute_services
-    from api.analytics.fleet.exports import ensure_fleet_export
     from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
-    from api.analytics.turn_roster import iter_turn_players
 
     services = resolve_fleet_compute_services(ctx)
-    query_context = ctx.exports
-    turn_number = ctx.turn.settings.turn
-    for player in iter_turn_players(ctx.turn):
-        ensure_fleet_export(
-            query_context,
-            ExportScope(
-                game_id=services.game_id,
-                perspective=services.perspective,
-                turn=turn_number,
-                player_id=player.id,
-            ),
-        )
     snapshot = get_or_materialize_fleet_snapshot(
         services.persistence,
         services.game_id,
@@ -63,7 +48,7 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
         ctx.turn,
         load_turn=services.load_turn,
         inference_materialization=services.inference_materialization,
-        query_context=query_context,
+        query_context=ctx.exports,
     )
     return fleet_turn_snapshot_to_compute_wire(snapshot)
 
