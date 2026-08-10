@@ -1,18 +1,8 @@
 """Shared constants for the fleet turn analytic."""
 
-from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
-
 ANALYTIC_ID = "fleet"
 
 FLEET_LEDGERS_KEY = "ledgers"
-
-# Alias of orchestrator ensure wait timeout; retired with FleetGapFillCoordinator (#204).
-GAP_FILL_MATERIALIZE_WAIT_TIMEOUT_SEC = int(ENSURE_WAIT_TIMEOUT_SEC)
-
-# Quiet period after the last target_turn bump before the leader starts unwind.
-# Waiters notify via threading.Condition; this bounds how long the leader waits
-# for late joiners that raise target_turn.
-GAP_FILL_TARGET_TURN_COLLECT_SEC = 0.05
 
 # Persisted fleet turn snapshot materialization semantics. Bump conservatively when
 # materialization output would change for the same stored RST + scores inputs

@@ -21,7 +21,7 @@ from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetTurnSnapshot
 from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.exports import held_scores_for_scope
-from api.errors import FleetGapFillEpochInvalidated, ValidationError
+from api.errors import ValidationError
 from api.models.game import TurnInfo
 
 PATH_PREFIX_SCOPE_RULES = (
@@ -120,29 +120,24 @@ def is_fleet_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> 
 
 
 def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    """Ensure final fleet ledger for one scope.
+    """Bring fleet export scope to durable final ledger via orchestrator submit+wait.
 
-    Cold ``ctx.query`` / ``ensure_export_scope_via_orchestrator`` own DAG unwind.
-    This catalog hook remains the sync materialize entry for
-    ``FleetGapFillCoordinator`` and overlay callers until that coordinator is
-    retired (#204 Phase 3). It does not walk nested ``ensure_export`` chains.
+    Catalog ``ensure_export`` for designated in-process callers (#204). Pool workers
+    and leaf ``run_step`` must not call this. Leaf ``get_or_materialize_fleet_*``
+    remains the direct-chain materialize path (no nested ensure).
     """
     if is_fleet_export_ensure_satisfied(ctx, scope):
         return True
-
-    turn = ctx.load_turn(scope.turn)
-    if turn is None:
+    if scope.player_id is None:
+        return True
+    if ctx.load_turn(scope.turn) is None:
         return True
 
-    try:
-        _fleet_snapshot_for_scope(ctx, scope, turn=turn)
-    except FleetGapFillEpochInvalidated:
-        # Mid-chain invalidation: leave ensure unsatisfied so orchestrator /
-        # stream adapters re-queue after the epoch advances or scores evidence closes.
-        ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
-        return is_fleet_export_ensure_satisfied(ctx, scope)
+    from api.compute.export_ensure import ensure_export_scope_via_orchestrator
+
+    satisfied = ensure_export_scope_via_orchestrator(ctx, ANALYTIC_ID, scope)
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
-    return is_fleet_export_ensure_satisfied(ctx, scope)
+    return satisfied
 
 
 def _scores_search_status_for_scope(

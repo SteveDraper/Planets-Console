@@ -675,16 +675,86 @@ def get_or_materialize_fleet_ledger_for_player(
     query_context: AnalyticQueryContext | None = None,
     on_progress: FleetMaterializationProgressCallback | None = None,
 ) -> PersistedFleetLedger:
-    """Return a cached ledger or materialize turn T for one player."""
-    from api.analytics.fleet.gap_fill_coordinator import coordinator_for
+    """Return a cached ledger or materialize turn T for one player.
 
-    return coordinator_for(persistence, game_id, perspective, player_id).materialize_ledger(
-        turn,
-        load_turn=load_turn,
-        inference_materialization=inference_materialization,
-        query_context=query_context,
-        on_progress=on_progress,
+    Cold durable ensure belongs on ``ensure_fleet_export`` / orchestrator
+    submit+wait. This helper is the leaf materialize / batch path: cache hit,
+    active coherence re-entry, or direct chain. ``query_context`` is retained for
+    call-site compatibility but does not nest ensure (avoids ensure↔materialize
+    recursion and scores wait hangs in tree materialize).
+    """
+    del query_context, on_progress
+    turn_number = turn.settings.turn
+    cached = persistence.get_ledger(game_id, perspective, turn_number, player_id)
+    if cached is not None and _is_fleet_ledger_cache_hit(cached):
+        return cached
+
+    if active_gap_fill_coherence() is not None:
+        result = _run_materialize_on_active_coherence(
+            persistence,
+            game_id,
+            perspective,
+            turn,
+            load_turn=load_turn,
+            inference_materialization=inference_materialization,
+            materialize_player_id=player_id,
+        )
+        assert isinstance(result, PersistedFleetLedger)
+        return result
+
+    from api.analytics.fleet.gap_fill_deferred_notifications import (
+        complete_ledger_turn_numbers_for_player,
+        emit_deferred_fleet_ledger_notifications,
     )
+    from api.errors import FleetGapFillEpochInvalidated
+
+    complete_before = complete_ledger_turn_numbers_for_player(
+        persistence,
+        game_id,
+        perspective,
+        player_id,
+        turn_number,
+        load_turn,
+    )
+    generation = persistence.player_invalidation_generation(game_id, perspective, player_id)
+    coherence = _GapFillCoherence(
+        persistence,
+        game_id,
+        perspective,
+        player_id,
+        generation,
+    )
+    turn_context_cache: dict[int, FleetTurnContext] = {}
+    try:
+        with gap_fill_coherence_scope(coherence):
+            result = _materialize_fleet_ledger_chain_for_player(
+                persistence,
+                game_id,
+                perspective,
+                player_id,
+                turn,
+                load_turn=load_turn,
+                inference_materialization=inference_materialization,
+                coherence=coherence,
+                turn_context_cache=turn_context_cache,
+            )
+    except _FleetSnapshotInvalidated as exc:
+        raise FleetGapFillEpochInvalidated(
+            f"fleet gap-fill for game {game_id} perspective {perspective} "
+            f"player {player_id} turn {turn_number} aborted: invalidation "
+            "generation bumped mid-chain"
+        ) from exc
+
+    emit_deferred_fleet_ledger_notifications(
+        persistence,
+        game_id,
+        perspective,
+        player_id,
+        complete_before=complete_before,
+        through_turn=turn_number,
+        load_turn=load_turn,
+    )
+    return result
 
 
 def get_or_materialize_fleet_snapshot(

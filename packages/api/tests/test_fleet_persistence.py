@@ -14,7 +14,6 @@ from api.analytics.fleet.chain import (
     get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.constants import FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
-from api.analytics.fleet.gap_fill_coordinator import reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
 from api.analytics.fleet.types import (
@@ -33,16 +32,6 @@ from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
-
-
-# Coordinator registry reset is called in coordinator-focused tests.
-
-
-@pytest.fixture(autouse=True)
-def _reset_fleet_gap_fill_coordinators():
-    reset_coordinators()
-    yield
-    reset_coordinators()
 
 
 @pytest.fixture
@@ -1057,7 +1046,7 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
     winner = _put_provenance_final_snapshot(persistence, 628580, 1, turn_111)
 
     with patch(
-        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
+        "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
         side_effect=_FleetSnapshotInvalidated,
     ):
         result = get_or_materialize_fleet_snapshot(
@@ -1071,19 +1060,16 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
     assert result == winner
 
 
-def test_ensure_fleet_export_returns_false_on_epoch_abort_without_final(
-    sample_turn, memory_backend
+def test_get_or_materialize_fleet_ledger_for_player_raises_on_epoch_abort(
+    persistence, load_turn, sample_turn, memory_backend
 ):
-    """Ensure catches epoch abort as unsatisfied; non-final ledger is not ensure-final."""
+    """Chain surfaces epoch invalidation as FleetGapFillEpochInvalidated."""
     from dataclasses import replace
 
     from api.analytics.export_types import ExportScope
+    from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
     from api.analytics.fleet.compute_services import resolve_fleet_services, turn_chain_through
-    from api.analytics.fleet.exports import (
-        EXPORT_CATALOG,
-        ensure_fleet_export,
-        is_fleet_export_ensure_satisfied,
-    )
+    from api.analytics.fleet.exports import is_fleet_export_ensure_satisfied
     from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.errors import FleetGapFillEpochInvalidated
@@ -1132,15 +1118,20 @@ def test_ensure_fleet_export_returns_false_on_epoch_abort_without_final(
     )
 
     with patch(
-        "api.analytics.fleet.exports.get_or_materialize_fleet_ledger_for_player",
+        "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
         side_effect=FleetGapFillEpochInvalidated(
             "fleet gap-fill aborted: invalidation generation bumped mid-chain"
         ),
     ):
-        assert ensure_fleet_export(ctx, scope) is False
-
-    assert is_fleet_export_ensure_satisfied(ctx, scope) is False
-    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is False
+        with pytest.raises(FleetGapFillEpochInvalidated):
+            get_or_materialize_fleet_ledger_for_player(
+                persistence,
+                GAME_ID,
+                perspective(sample_turn),
+                player_id,
+                host_turn,
+                load_turn=ctx.load_turn,
+            )
 
     # Counter-check: a persisted non-final ledger still leaves ensure unsatisfied.
     fleet_services = resolve_fleet_services(ctx)

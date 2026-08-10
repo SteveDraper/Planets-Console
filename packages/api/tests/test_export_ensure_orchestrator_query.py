@@ -99,3 +99,66 @@ def test_fixture_analytic_keeps_sync_ensure_fallback(sample_turn):
 
     assert result.status == "ok"
     assert result.paths["$.payload.label"].kind == "value"
+
+
+def test_ensure_fleet_export_uses_orchestrator(sample_turn, persistence):
+    """Catalog ensure_fleet_export routes through ensure_export_scope_via_orchestrator (#204 3a)."""
+    from api.analytics.export_types import ExportScope
+    from api.analytics.fleet.exports import ensure_fleet_export
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    from tests.export_chain_test_fixtures import export_chain_query_context
+    from tests.scores_exports_helpers import GAME_ID, perspective, put_persisted_row
+
+    player_id = first_player_id(sample_turn)
+    from dataclasses import replace
+
+    from api.analytics.fleet.compute_services import turn_chain_through
+
+    turn_number = 8
+    host_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=turn_number),
+        game=replace(sample_turn.game, turn=turn_number),
+    )
+    stored_turns = turn_chain_through(host_turn)
+    ctx = export_chain_query_context(
+        host_turn,
+        persistence=persistence,
+        stored_turns=stored_turns,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    put_persisted_row(
+        persistence,
+        host_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="seed",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=turn_number,
+        player_id=player_id,
+    )
+
+    calls: list[tuple[str, int, int | None]] = []
+
+    def tracking_ensure(query_ctx, analytic_id, export_scope, **_kwargs):
+        calls.append((analytic_id, export_scope.turn, export_scope.player_id))
+        return True
+
+    with patch.object(
+        export_ensure_module,
+        "ensure_export_scope_via_orchestrator",
+        side_effect=tracking_ensure,
+    ):
+        assert ensure_fleet_export(ctx, scope) is True
+
+    assert calls == [("fleet", turn_number, player_id)]

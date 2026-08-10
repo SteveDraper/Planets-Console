@@ -23,7 +23,7 @@ from tests.test_fleet_persistence import _put_provenance_final_snapshot
 __all__ = [
     "ensure_fleet_export_gap_fill_context",
     "install_mid_chain_put_ledger_gate",
-    "materialize_chain_from_coordinator_module",
+    "materialize_chain_from_chain_module",
     "require_turns",
     "roster_ids",
     "seed_provenance_snapshot",
@@ -155,9 +155,9 @@ def ensure_fleet_export_gap_fill_context(
     return ctx, scope, player_id, other_player_id, fleet_persistence
 
 
-def materialize_chain_from_coordinator_module():
+def materialize_chain_from_chain_module():
     return __import__(
-        "api.analytics.fleet.gap_fill_coordinator",
+        "api.analytics.fleet.chain",
         fromlist=["_materialize_fleet_ledger_chain_for_player"],
     )._materialize_fleet_ledger_chain_for_player
 

@@ -11,7 +11,6 @@ from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
 from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
 from api.analytics.fleet.compute_services import FleetComputeServices
-from api.analytics.fleet.gap_fill_coordinator import reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
@@ -56,13 +55,6 @@ def _fake_orchestrator_with_nodes(nodes: dict) -> object:
             )
 
     return FakeOrchestrator()
-
-
-@pytest.fixture(autouse=True)
-def _reset_fleet_gap_fill_coordinators():
-    reset_coordinators()
-    yield
-    reset_coordinators()
 
 
 @pytest.fixture
@@ -149,10 +141,9 @@ def test_materialize_chain_does_not_invoke_on_snapshot_persisted(
 
 
 def test_single_player_hot_paths_do_not_reference_on_snapshot_persisted():
-    """Guard: coordinator and chain materialize paths stay on per-player ledger notify."""
+    """Guard: chain materialize paths stay on per-player ledger notify."""
     guarded_modules = (
         API_ROOT / "analytics" / "fleet" / "chain.py",
-        API_ROOT / "analytics" / "fleet" / "gap_fill_coordinator.py",
         API_ROOT / "analytics" / "fleet" / "gap_fill_deferred_notifications.py",
     )
     for module_path in guarded_modules:

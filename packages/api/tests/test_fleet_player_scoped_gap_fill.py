@@ -4,22 +4,18 @@ from __future__ import annotations
 
 import copy
 import json
-import threading
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from api.analytics.fleet.chain import (
-    _materialize_fleet_ledger_chain_for_player,
     get_or_materialize_fleet_ledger_for_player,
 )
 from api.analytics.fleet.exports import ensure_fleet_export
-from api.analytics.fleet.gap_fill_coordinator import coordinator_for, reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.errors import FleetGapFillEpochInvalidated, FleetMaterializationTimeoutError
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -29,8 +25,6 @@ from api.storage.memory_asset import MemoryAssetBackend
 from tests.export_chain_test_fixtures import GAME_ID, export_chain_query_context
 from tests.fleet_player_scoped_gap_fill_helpers import (
     ensure_fleet_export_gap_fill_context,
-    install_mid_chain_put_ledger_gate,
-    materialize_chain_from_coordinator_module,
     require_turns,
     roster_ids,
     seed_provenance_snapshot,
@@ -46,16 +40,14 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "asset
 
 
 @pytest.fixture(autouse=True)
-def _reset_coordinators():
+def _reset_inference_row_scheduler():
     from api.analytics.military_score_inference.inference_scheduler import (
         reset_inference_row_scheduler_for_tests,
     )
 
     reset_inference_row_scheduler_for_tests()
-    reset_coordinators()
     yield
     reset_inference_row_scheduler_for_tests()
-    reset_coordinators()
 
 
 @pytest.fixture
@@ -114,28 +106,13 @@ def test_single_player_gap_fill_does_not_materialize_other_players(persistence, 
 
 
 def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
+    """Orchestrator fleet ensure for one player must not materialize other roster players."""
     ctx, scope, player_id, other_player_id, fleet_persistence = (
         ensure_fleet_export_gap_fill_context(sample_turn, memory_backend)
     )
-    ledger_calls: list[int] = []
-    original = get_or_materialize_fleet_ledger_for_player
 
-    def tracking_ledger(*args, **kwargs):
-        ledger_calls.append(args[3])
-        return original(*args, **kwargs)
+    assert ensure_fleet_export(ctx, scope) is True
 
-    with patch(
-        "api.analytics.fleet.exports.get_or_materialize_fleet_ledger_for_player",
-        side_effect=tracking_ledger,
-    ):
-        assert ensure_fleet_export(ctx, scope) is True
-
-    assert ledger_calls
-    assert set(ledger_calls) == {player_id}
-    assert len(ledger_calls) <= 2, (
-        f"expected at most two ledger materializations for one-turn gap; got {ledger_calls}"
-    )
-    assert other_player_id not in ledger_calls
     assert fleet_persistence.has_final_ledger(
         scope.game_id,
         scope.perspective,
@@ -151,14 +128,14 @@ def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
 
 
 def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
-    """Sync fleet ensure of the same player scope materializes once (Phase 2 leaf path).
+    """Orchestrator fleet ensure is idempotent: second call short-circuits when final.
 
-    ``ctx.query`` routes registered analytics through orchestrator submit+wait; this
-    regression covers the sync ``ensure_fleet_export`` path still used by the gap-fill
-    coordinator until Phase 3.
+    ``ensure_fleet_export`` submits via orchestrator; a second ensure of the same
+    satisfied scope must not re-submit (is_satisfied short-circuit).
     """
     from api.analytics.export_types import ExportScope
     from api.analytics.fleet.compute_services import turn_chain_through
+    from api.compute import export_ensure as export_ensure_module
 
     player_id = first_player_id(sample_turn)
     turn_number = 8
@@ -194,38 +171,48 @@ def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
         turn=turn_number,
         player_id=player_id,
     )
-    materialize_calls: list[tuple[int, int]] = []
-    original_materialize = _materialize_fleet_ledger_chain_for_player
+    orchestrator_calls: list[tuple[int, int | None]] = []
 
-    def counting_materialize(
-        persistence_service,
-        game_id,
-        perspective_id,
-        materialize_player_id,
-        turn,
-        **kwargs,
-    ):
-        materialize_calls.append((turn.settings.turn, materialize_player_id))
-        return original_materialize(
-            persistence_service,
-            game_id,
-            perspective_id,
-            materialize_player_id,
-            turn,
-            **kwargs,
+    def tracking_ensure(query_ctx, analytic_id, export_scope, **_kwargs):
+        orchestrator_calls.append((export_scope.turn, export_scope.player_id))
+        # Simulate durable final satisfaction without running the full DAG in-unit.
+        from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
+        from api.analytics.fleet.compute_services import resolve_fleet_services
+        from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+
+        services = resolve_fleet_services(query_ctx)
+        turn = query_ctx.load_turn(export_scope.turn)
+        assert turn is not None
+        assert export_scope.player_id is not None
+        services.persistence.put_ledger(
+            services.game_id,
+            services.perspective,
+            export_scope.turn,
+            export_scope.player_id,
+            PersistedFleetLedger(
+                ledger=ensure_fleet_baseline_for_player(
+                    services.game_id,
+                    services.perspective,
+                    turn,
+                    export_scope.player_id,
+                ),
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
         )
+        return True
 
-    with patch(
-        "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
-        side_effect=counting_materialize,
+    with patch.object(
+        export_ensure_module,
+        "ensure_export_scope_via_orchestrator",
+        side_effect=tracking_ensure,
     ):
         assert ensure_fleet_export(ctx, scope) is True
         assert ensure_fleet_export(ctx, scope) is True
 
-    target_materialize_calls = [
-        call for call in materialize_calls if call == (turn_number, player_id)
-    ]
-    assert len(target_materialize_calls) == 1
+    assert orchestrator_calls == [(turn_number, player_id)]
 
 
 def test_ensure_fleet_export_does_not_invoke_full_snapshot_materialize(sample_turn, memory_backend):
@@ -457,591 +444,3 @@ def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, 
         )
 
     assert ledger_calls == roster_size
-
-
-def test_coordinator_two_threads_same_player_share_one_chain(persistence, load_turn):
-    turn_109, turn_111, turn_112 = require_turns(load_turn, 109, 111, 112)
-    player_id = roster_ids(turn_112)[0]
-    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
-
-    materialize_calls = 0
-    original_chain = materialize_chain_from_coordinator_module()
-
-    def counting_chain(*args, **kwargs):
-        nonlocal materialize_calls
-        materialize_calls += 1
-        return original_chain(*args, **kwargs)
-
-    results: list[object] = []
-
-    def materialize_to(turn):
-        results.append(
-            get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_id,
-                turn,
-                load_turn=load_turn,
-            ),
-        )
-
-    with patch(
-        "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
-        side_effect=counting_chain,
-    ):
-        leader = threading.Thread(target=materialize_to, args=(turn_111,))
-        waiter = threading.Thread(target=materialize_to, args=(turn_112,))
-        leader.start()
-        waiter.start()
-        leader.join(timeout=30)
-        waiter.join(timeout=30)
-
-    assert len(results) == 2
-    assert materialize_calls == 1
-
-
-def test_coordinator_same_player_waiters_satisfy_to_max_turn(persistence, load_turn):
-    turn_109, turn_111, turn_112 = require_turns(load_turn, 109, 111, 112)
-    player_id = roster_ids(turn_112)[0]
-    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
-
-    leader_ready = threading.Event()
-    release_leader = threading.Event()
-    coordinator = coordinator_for(persistence, 628580, 1, player_id)
-    original_run_leader = coordinator._run_leader_unwind
-
-    def gated_run_leader(inflight, turn, **kwargs):
-        leader_ready.set()
-        assert release_leader.wait(timeout=5)
-        return original_run_leader(inflight, turn, **kwargs)
-
-    with patch.object(coordinator, "_run_leader_unwind", side_effect=gated_run_leader):
-        leader = threading.Thread(
-            target=lambda: get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_id,
-                turn_111,
-                load_turn=load_turn,
-            ),
-        )
-        waiter = threading.Thread(
-            target=lambda: get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_id,
-                turn_112,
-                load_turn=load_turn,
-            ),
-        )
-        leader.start()
-        assert leader_ready.wait(timeout=5)
-        waiter.start()
-        release_leader.set()
-        leader.join(timeout=30)
-        waiter.join(timeout=30)
-
-    assert persistence.has_ledger(628580, 1, 111, player_id)
-    assert persistence.has_ledger(628580, 1, 112, player_id)
-
-
-def test_coordinator_different_players_separate_dedupe_keys(persistence, load_turn):
-    turn_109, turn_110, turn_111, turn_112 = require_turns(load_turn, 109, 110, 111, 112)
-    player_p, player_q = two_players_from_turn(turn_112)
-    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
-
-    coordinator_p = coordinator_for(persistence, 628580, 1, player_p)
-    coordinator_q = coordinator_for(persistence, 628580, 1, player_q)
-    assert coordinator_p is not coordinator_q
-
-    leader_p_ready = threading.Event()
-    release_p = threading.Event()
-    original_p_unwind = coordinator_p._run_leader_unwind
-
-    def gated_p_unwind(inflight, turn, **kwargs):
-        leader_p_ready.set()
-        assert release_p.wait(timeout=5)
-        return original_p_unwind(inflight, turn, **kwargs)
-
-    q_started = threading.Event()
-    errors: list[BaseException] = []
-
-    def materialize_q() -> None:
-        q_started.set()
-        try:
-            get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_q,
-                turn_112,
-                load_turn=load_turn,
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    def materialize_p() -> None:
-        try:
-            get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_p,
-                turn_112,
-                load_turn=load_turn,
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    with patch.object(coordinator_p, "_run_leader_unwind", side_effect=gated_p_unwind):
-        thread_p = threading.Thread(target=materialize_p)
-        thread_q = threading.Thread(target=materialize_q)
-        thread_p.start()
-        assert leader_p_ready.wait(timeout=5)
-        thread_q.start()
-        assert q_started.wait(timeout=5)
-        thread_q.join(timeout=30)
-        release_p.set()
-        thread_p.join(timeout=30)
-
-    assert not errors, f"thread errors: {errors}"
-    assert persistence.has_ledger(628580, 1, 112, player_p)
-    assert persistence.has_ledger(628580, 1, 112, player_q)
-
-
-def test_coordinator_waiter_timeout_per_player(persistence, load_turn):
-    turn_109, turn_112 = require_turns(load_turn, 109, 112)
-    player_p, player_q = two_players_from_turn(turn_112)
-    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
-
-    started = threading.Event()
-    release = threading.Event()
-    original_unwind = coordinator_for(persistence, 628580, 1, player_p)._run_leader_unwind
-
-    def blocking_unwind(*args, **kwargs):
-        started.set()
-        assert release.wait(timeout=5)
-        return original_unwind(*args, **kwargs)
-
-    errors: list[BaseException] = []
-
-    def wait_for_p() -> None:
-        try:
-            get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_p,
-                turn_112,
-                load_turn=load_turn,
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    with (
-        patch(
-            "api.analytics.fleet.gap_fill_coordinator.GAP_FILL_MATERIALIZE_WAIT_TIMEOUT_SEC",
-            0.2,
-        ),
-        patch.object(
-            coordinator_for(persistence, 628580, 1, player_p),
-            "_run_leader_unwind",
-            side_effect=blocking_unwind,
-        ),
-    ):
-        leader = threading.Thread(
-            target=lambda: get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_p,
-                turn_112,
-                load_turn=load_turn,
-            ),
-        )
-        waiter = threading.Thread(target=wait_for_p)
-        leader.start()
-        assert started.wait(timeout=5)
-        waiter.start()
-        waiter.join(timeout=5)
-        release.set()
-        leader.join(timeout=5)
-
-        # Player Q is unaffected by player P's timeout.
-        get_or_materialize_fleet_ledger_for_player(
-            persistence,
-            628580,
-            1,
-            player_q,
-            turn_112,
-            load_turn=load_turn,
-        )
-
-    assert any(isinstance(error, FleetMaterializationTimeoutError) for error in errors)
-    assert persistence.has_ledger(628580, 1, 112, player_q)
-
-
-def test_forward_unwind_scores_before_fleet_per_player(
-    persistence,
-    load_turn,
-    memory_backend,
-):
-    """Gap M..N for one player: scores@t,P is ensured before fleet@t,P at each gap turn."""
-    from api.analytics.export_context import AnalyticQueryContext
-
-    turn_109, turn_111, turn_112 = require_turns(load_turn, 109, 111, 112)
-    player_p = roster_ids(turn_112)[0]
-
-    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
-
-    _, inference_materialization = _inference_materialization_for_fleet(
-        memory_backend,
-        load_turn,
-    )
-
-    ensure_events: list[tuple[str, int, int | None]] = []
-    fleet_exports = __import__(
-        "api.analytics.fleet.exports",
-        fromlist=["ensure_fleet_export"],
-    )
-    original_fleet_ensure = fleet_exports.ensure_fleet_export
-
-    def tracking_ensure_declared_dependencies(self, analytic_id, scope):
-        walk_outcome = self._walk_export_dependencies(
-            analytic_id,
-            scope,
-            catch_ensure_cycle=False,
-        )
-        from api.analytics.export_dependency_walk import DependencyWalkResult
-
-        if not isinstance(walk_outcome, DependencyWalkResult):
-            return walk_outcome
-        for dependency_id, dependency_scope, catalog in walk_outcome.pending_ensure:
-            if dependency_id == analytic_id and dependency_scope == scope:
-                break
-            if catalog.ensure_export is None:
-                continue
-            ensure_events.append(
-                (dependency_id, dependency_scope.turn, dependency_scope.player_id),
-            )
-            catalog.ensure_export(self, dependency_scope)
-        return None
-
-    def tracking_fleet_ensure(query_ctx, scope):
-        result = original_fleet_ensure(query_ctx, scope)
-        ensure_events.append(("fleet", scope.turn, scope.player_id))
-        return result
-
-    with (
-        patch(
-            "api.analytics.fleet.gap_fill_coordinator.ensure_fleet_export",
-            side_effect=tracking_fleet_ensure,
-        ),
-        patch.object(
-            AnalyticQueryContext,
-            "ensure_declared_dependencies",
-            tracking_ensure_declared_dependencies,
-        ),
-    ):
-        get_or_materialize_fleet_ledger_for_player(
-            persistence,
-            628580,
-            1,
-            player_p,
-            turn_112,
-            load_turn=load_turn,
-            inference_materialization=inference_materialization,
-        )
-
-    assert ensure_events
-    assert all(player_id == player_p for _, _, player_id in ensure_events), (
-        f"ensure calls must be scoped to player {player_p}; events={ensure_events}"
-    )
-
-    fleet_turns = [
-        turn for analytic_id, turn, _player_id in ensure_events if analytic_id == "fleet"
-    ]
-    assert fleet_turns
-    gap_turns = range(min(fleet_turns), max(fleet_turns) + 1)
-    for event_index, (analytic_id, turn, player_id) in enumerate(ensure_events):
-        if analytic_id != "fleet" or turn not in gap_turns:
-            continue
-        prior_same_turn_scores = [
-            index
-            for index, (dependency_id, dependency_turn, dependency_player_id) in enumerate(
-                ensure_events[:event_index],
-            )
-            if dependency_id == "scores"
-            and dependency_turn == turn
-            and dependency_player_id == player_id
-        ]
-        assert not prior_same_turn_scores, (
-            f"fleet ensure at turn {turn} for player {player_id} must not require "
-            f"same-turn scores ensure; events={ensure_events}"
-        )
-
-
-def test_invalidation_mid_chain_same_player_waiters_retry_once(persistence, load_turn):
-    """P invalidation aborts P once (no sync spin); Q's in-flight chain is unaffected."""
-    turn_109, turn_112 = require_turns(load_turn, 109, 112)
-    player_p, player_q = two_players_from_turn(turn_112)
-    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
-
-    leader_mid_chain = threading.Event()
-    p_waiter_joined = threading.Event()
-    q_started = threading.Event()
-    release_leader = threading.Event()
-    install_mid_chain_put_ledger_gate(
-        persistence,
-        player_id=player_p,
-        turn_number=111,
-        leader_mid_chain=leader_mid_chain,
-        release_leader=release_leader,
-    )
-
-    coordinator_p = coordinator_for(persistence, 628580, 1, player_p)
-    coordinator_q = coordinator_for(persistence, 628580, 1, player_q)
-    original_chain = materialize_chain_from_coordinator_module()
-    original_run_leader_p = coordinator_p._run_leader_unwind
-
-    p_materialize_calls = 0
-    q_materialize_calls = 0
-    leader_unwind_calls = 0
-
-    def counting_chain(*args, **kwargs):
-        nonlocal p_materialize_calls, q_materialize_calls
-        materialize_player_id = args[3]
-        if materialize_player_id == player_p:
-            p_materialize_calls += 1
-        elif materialize_player_id == player_q:
-            q_materialize_calls += 1
-        return original_chain(*args, **kwargs)
-
-    def counting_run_leader_p(
-        inflight,
-        turn,
-        *,
-        load_turn,
-        inference_materialization,
-        query_context,
-    ):
-        nonlocal leader_unwind_calls
-        leader_unwind_calls += 1
-        return original_run_leader_p(
-            inflight,
-            turn,
-            load_turn=load_turn,
-            inference_materialization=inference_materialization,
-            query_context=query_context,
-        )
-
-    p_leader_result: PersistedFleetLedger | None = None
-    p_waiter_result: PersistedFleetLedger | None = None
-    errors: list[BaseException] = []
-
-    def run_p_leader() -> None:
-        nonlocal p_leader_result
-        try:
-            p_leader_result = get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_p,
-                turn_112,
-                load_turn=load_turn,
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    def run_p_waiter() -> None:
-        nonlocal p_waiter_result
-        assert leader_mid_chain.wait(timeout=5)
-        p_waiter_joined.set()
-        try:
-            p_waiter_result = get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_p,
-                turn_112,
-                load_turn=load_turn,
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    def run_q() -> None:
-        q_started.set()
-        try:
-            get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_q,
-                turn_112,
-                load_turn=load_turn,
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    with (
-        patch(
-            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
-            side_effect=counting_chain,
-        ),
-        patch.object(coordinator_p, "_run_leader_unwind", side_effect=counting_run_leader_p),
-    ):
-        p_leader_thread = threading.Thread(target=run_p_leader)
-        p_waiter_thread = threading.Thread(target=run_p_waiter)
-        q_thread = threading.Thread(target=run_q)
-        p_leader_thread.start()
-        p_waiter_thread.start()
-        assert leader_mid_chain.wait(timeout=5)
-        assert p_waiter_joined.wait(timeout=5)
-        q_thread.start()
-        assert q_started.wait(timeout=5)
-        persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, player_p)
-        release_leader.set()
-        p_leader_thread.join(timeout=30)
-        p_waiter_thread.join(timeout=30)
-        q_thread.join(timeout=30)
-
-    assert p_leader_result is None
-    assert p_waiter_result is None
-    assert errors
-    assert all(isinstance(exc, FleetGapFillEpochInvalidated) for exc in errors)
-    # P aborted once with no sync spin; Q completed independently.
-    assert persistence.get_ledger(628580, 1, 112, player_p) is None
-    assert persistence.get_ledger(628580, 1, 112, player_q) is not None
-    assert leader_unwind_calls == 1, f"expected one P leader unwind, got {leader_unwind_calls}"
-    assert p_materialize_calls == 1, (
-        f"expected a single P chain attempt (no sync spin), got {p_materialize_calls}"
-    )
-    assert q_materialize_calls == 1, (
-        f"expected one Q materialization chain, got {q_materialize_calls}"
-    )
-    assert coordinator_p is not coordinator_q
-
-    result = get_or_materialize_fleet_ledger_for_player(
-        persistence,
-        628580,
-        1,
-        player_p,
-        turn_112,
-        load_turn=load_turn,
-    )
-    assert result.ledger.player_id == player_p
-    assert persistence.get_ledger(628580, 1, 112, player_p) is not None
-
-
-def test_coordinator_q_unaffected_when_p_epoch_bumps_mid_chain(persistence, load_turn):
-    """Q leader does not re-enter materialize chain when only P's epoch bumps."""
-    turn_109, turn_112 = require_turns(load_turn, 109, 112)
-    player_p, player_q = two_players_from_turn(turn_112)
-    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
-
-    leader_mid_chain = threading.Event()
-    q_started = threading.Event()
-    release_leader = threading.Event()
-    install_mid_chain_put_ledger_gate(
-        persistence,
-        player_id=player_p,
-        turn_number=111,
-        leader_mid_chain=leader_mid_chain,
-        release_leader=release_leader,
-    )
-
-    coordinator_q = coordinator_for(persistence, 628580, 1, player_q)
-    original_chain = materialize_chain_from_coordinator_module()
-    original_run_leader_q = coordinator_q._run_leader_unwind
-
-    q_materialize_calls = 0
-    q_leader_unwind_calls = 0
-    q_epoch_at_start: int | None = None
-    errors: list[BaseException] = []
-
-    def counting_chain(*args, **kwargs):
-        nonlocal q_materialize_calls
-        materialize_player_id = args[3]
-        if materialize_player_id == player_q:
-            q_materialize_calls += 1
-        return original_chain(*args, **kwargs)
-
-    def counting_run_leader_q(
-        inflight,
-        turn,
-        *,
-        load_turn,
-        inference_materialization,
-        query_context,
-    ):
-        nonlocal q_leader_unwind_calls, q_epoch_at_start
-        if q_epoch_at_start is None:
-            q_epoch_at_start = coordinator_q.epoch
-        q_leader_unwind_calls += 1
-        return original_run_leader_q(
-            inflight,
-            turn,
-            load_turn=load_turn,
-            inference_materialization=inference_materialization,
-            query_context=query_context,
-        )
-
-    def run_p_leader() -> None:
-        try:
-            get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_p,
-                turn_112,
-                load_turn=load_turn,
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    def run_q() -> None:
-        q_started.set()
-        try:
-            get_or_materialize_fleet_ledger_for_player(
-                persistence,
-                628580,
-                1,
-                player_q,
-                turn_112,
-                load_turn=load_turn,
-            )
-        except BaseException as exc:
-            errors.append(exc)
-
-    with (
-        patch(
-            "api.analytics.fleet.gap_fill_coordinator._materialize_fleet_ledger_chain_for_player",
-            side_effect=counting_chain,
-        ),
-        patch.object(coordinator_q, "_run_leader_unwind", side_effect=counting_run_leader_q),
-    ):
-        p_leader_thread = threading.Thread(target=run_p_leader)
-        p_leader_thread.start()
-        assert leader_mid_chain.wait(timeout=5)
-        q_thread = threading.Thread(target=run_q)
-        q_thread.start()
-        assert q_started.wait(timeout=5)
-        q_epoch_before_invalidation = coordinator_q.epoch
-        persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, player_p)
-        assert coordinator_q.epoch == q_epoch_before_invalidation
-        release_leader.set()
-        p_leader_thread.join(timeout=30)
-        q_thread.join(timeout=30)
-
-    assert errors
-    assert all(isinstance(exc, FleetGapFillEpochInvalidated) for exc in errors)
-    assert persistence.get_ledger(628580, 1, 112, player_q) is not None
-    assert q_epoch_at_start is not None
-    assert coordinator_q.epoch == q_epoch_at_start
-    assert q_leader_unwind_calls == 1, f"expected one Q leader unwind, got {q_leader_unwind_calls}"
-    assert q_materialize_calls == 1, (
-        f"expected one Q materialization chain, got {q_materialize_calls}"
-    )

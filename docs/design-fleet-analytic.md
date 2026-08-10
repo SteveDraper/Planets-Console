@@ -264,7 +264,7 @@ scores@M,P → fleet@M,P → scores@(M+1),P → fleet@(M+1),P → … → scores
 
 **Phase 1 (shipped):** before failing an abort path, re-read the target player's ledger cache; return it if another path already finished ensure-final. Background warm / ensure treat a peer-written final ledger as success without rematerializing.
 
-**Phase 2 ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)):** **fleet gap-fill coordinator** (singleflight) with forward scores↔fleet unwind via export ensure; deferred per-player ledger notifications; epoch aligned with invalidation generation. **Superseded by [#204](https://github.com/SteveDraper/Planets-Console/issues/204)** — delete the coordinator; gap-fill is orchestrator per-turn DAG nodes + singleflight only.
+**Phase 2 ([#161](https://github.com/SteveDraper/Planets-Console/issues/161)):** **fleet gap-fill coordinator** (singleflight) with forward scores↔fleet unwind via export ensure; deferred per-player ledger notifications; epoch aligned with invalidation generation. **Superseded by [#204](https://github.com/SteveDraper/Planets-Console/issues/204)** — the coordinator was deleted; gap-fill is orchestrator per-turn DAG nodes + singleflight only.
 
 **Phase 2b ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)):** narrow coordinator dedupe to `(gameId, perspective, playerId)`; per-player gap-start and cache-hit gates; ensure path uses per-player materialization only. Waiters for the same player share one in-flight unwind to `max(requested_turn)`; requests for different players do not block each other. Per-player scope identity remains; the Event-wait coordinator does not.
 

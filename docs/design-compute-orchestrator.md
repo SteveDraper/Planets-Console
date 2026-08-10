@@ -481,7 +481,7 @@ Until phase 2, table/map REST responses may still call `compute()` handlers dire
 
 | Lock | Rule |
 |------|------|
-| Mechanism | One engine only — delete nested sync `ensure_export` / `ensure_declared_dependencies` production work and **`FleetGapFillCoordinator`** (no thin Event-wait shim). |
+| Mechanism | One engine only — nested sync `ensure_export` / `ensure_declared_dependencies` production work and **`FleetGapFillCoordinator`** are retired (no thin Event-wait shim). |
 | Callers | All production ensure paths (fleet, scores, homeworld, `ctx.query` when not `ensure_blocked`) migrate in #204. |
 | Priority | Inherit context: `stream_attached` / adopt; cold ensure `interactive_ensure`; warm `background`. |
 | `force_fresh` | Ensure defaults `false` (attach / satisfied short-circuit). |
@@ -525,7 +525,7 @@ Tracked under [#190](https://github.com/SteveDraper/Planets-Console/issues/190):
 | Job wire + epochs | [#198](https://github.com/SteveDraper/Planets-Console/issues/198) | Wire builders, `DependencyOutputs`, invalidation re-check, persist coordination |
 | Fleet migration | [#199](https://github.com/SteveDraper/Planets-Console/issues/199) | Fleet leg steps; delete `FleetTableStreamScheduler` worker pool |
 | Scores migration | [#200](https://github.com/SteveDraper/Planets-Console/issues/200) | Tier steps; orchestrator primitives; delete `InferenceRowScheduler` worker pool; fleet overlay + `has_final_ledger` fix |
-| Export ensure migration | [#204](https://github.com/SteveDraper/Planets-Console/issues/204) | Ensure = orchestrator DAG `submit(root)` + orchestration-plane wait; delete `FleetGapFillCoordinator` + nested sync ensure; fleet→scores notify per final persist with own-DAG elision; #109 stays separate |
+| Export ensure migration | [#204](https://github.com/SteveDraper/Planets-Console/issues/204) | Ensure = orchestrator DAG `submit(root)` + orchestration-plane wait; **`FleetGapFillCoordinator`** + nested sync ensure retired; fleet→scores notify per final persist with own-DAG elision; #109 stays separate |
 | Turn cache | [#201](https://github.com/SteveDraper/Planets-Console/issues/201) | Orchestrator LRU + prefetch into job wire |
 | Singleton orchestrator | [#209](https://github.com/SteveDraper/Planets-Console/issues/209) | Process-wide orchestrator; retire per-ctx bindings + scope lease; observer registry |
 | Process-scoped export services | [#239](https://github.com/SteveDraper/Planets-Console/issues/239) | Retire per-node sticky `export_services` bags |
