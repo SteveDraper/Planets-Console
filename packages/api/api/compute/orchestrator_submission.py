@@ -105,7 +105,14 @@ class OrchestratorSubmissionMixin:
         )
         for node in self._nodes.values():
             self._refresh_node_readiness(node)
-        return ComputeHandle(scope=scope, _node=self._nodes[scope]), *self._dispatch()
+        return (
+            ComputeHandle(
+                scope=scope,
+                _node=self._nodes[scope],
+                _condition=self._condition,
+            ),
+            *self._dispatch(),
+        )
 
     def _finish_submission(
         self: ComputeOrchestrator,
@@ -137,8 +144,17 @@ class OrchestratorSubmissionMixin:
         request: ComputeRequest,
     ) -> ComputeHandle:
         if node.is_terminal:
-            return ComputeHandle(scope=node.scope, _node=node)
-        handle = ComputeHandle(scope=node.scope, _node=node, is_waiter=True)
+            return ComputeHandle(
+                scope=node.scope,
+                _node=node,
+                _condition=self._condition,
+            )
+        handle = ComputeHandle(
+            scope=node.scope,
+            _node=node,
+            is_waiter=True,
+            _condition=self._condition,
+        )
         node.waiters.append(handle)
         self._maybe_adopt_priority(node, request.priority_band)
         return handle

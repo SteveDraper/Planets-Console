@@ -1,11 +1,13 @@
 """Shared constants for the fleet turn analytic."""
 
+from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
+
 ANALYTIC_ID = "fleet"
 
 FLEET_LEDGERS_KEY = "ledgers"
 
-# Max seconds a waiter blocks on an in-flight coordinated gap-fill before surfacing error.
-GAP_FILL_MATERIALIZE_WAIT_TIMEOUT_SEC = 300
+# Alias of orchestrator ensure wait timeout; retired with FleetGapFillCoordinator (#204).
+GAP_FILL_MATERIALIZE_WAIT_TIMEOUT_SEC = int(ENSURE_WAIT_TIMEOUT_SEC)
 
 # Quiet period after the last target_turn bump before the leader starts unwind.
 # Waiters notify via threading.Condition; this bounds how long the leader waits
