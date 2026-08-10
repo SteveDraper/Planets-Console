@@ -507,12 +507,7 @@ def _materialize_fleet_ledger_chain_for_player(
         turn_number,
         min_turn=chain_floor,
     )
-    skip_missing_prefix_rst = (
-        anchor_turn == 0
-        and turn_number > chain_floor
-        and first_stored_rst is not None
-        and first_stored_rst > chain_floor
-    )
+    skip_missing_prefix_rst = False
     start_turn = anchor_turn + 1 if anchor_turn >= chain_floor else chain_floor
     current_ledger = anchor_persisted.ledger if anchor_persisted is not None else None
     current_persisted = anchor_persisted
@@ -525,9 +520,14 @@ def _materialize_fleet_ledger_chain_for_player(
         emit_gap_fill_leg_progress(persisted_leg, materialize_turn)
         current_ledger = persisted_leg.ledger
 
-    if skip_missing_prefix_rst:
+    if (
+        anchor_turn == 0
+        and turn_number > chain_floor
+        and first_stored_rst is not None
+        and first_stored_rst > chain_floor
+    ):
+        skip_missing_prefix_rst = True
         start_turn = first_stored_rst
-        assert first_stored_rst is not None
         first_rst_turn = require_turn(start_turn)
         current_ledger = advance_ledger_to_turn(
             ensure_fleet_baseline_for_player(
@@ -564,7 +564,11 @@ def _materialize_fleet_ledger_chain_for_player(
             return current_persisted
         start_turn = chain_floor + 1
 
-    assert current_ledger is not None
+    if current_ledger is None:
+        raise ConflictError(
+            f"fleet snapshot chain for game {game_id} perspective {perspective} "
+            f"player {player_id} turn {turn_number} has no ledger to advance from"
+        )
 
     for materialize_turn in range(start_turn, turn_number + 1):
         require_prior_rst(
@@ -587,7 +591,11 @@ def _materialize_fleet_ledger_chain_for_player(
         )
         emit_leg_progress(current_persisted, materialize_turn)
 
-    assert current_persisted is not None
+    if current_persisted is None:
+        raise ConflictError(
+            f"fleet snapshot chain for game {game_id} perspective {perspective} "
+            f"player {player_id} turn {turn_number} produced no persisted ledger"
+        )
     return current_persisted
 
 
@@ -749,7 +757,7 @@ def get_or_materialize_fleet_snapshot(
     """
     turn_number = turn.settings.turn
     cached = persistence.get_snapshot(game_id, perspective, turn_number)
-    if _is_fleet_snapshot_cache_hit(
+    if cached is not None and _is_fleet_snapshot_cache_hit(
         persistence,
         game_id,
         perspective,
@@ -757,7 +765,6 @@ def get_or_materialize_fleet_snapshot(
         turn,
         cached,
     ):
-        assert cached is not None
         return cached
 
     for player_id in _roster_player_ids(turn):
