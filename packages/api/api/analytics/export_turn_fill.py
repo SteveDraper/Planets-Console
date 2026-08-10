@@ -3,8 +3,7 @@
 Self-chained analytics (``EnsureDependency`` on themselves at ``turn_delta=-1``)
 need contiguous stored turns from the ensure floor through the shell turn. This
 helper is the shared fill policy analytics opt into when the dependency walk
-reports a hole; the framework still owns the ensure loop itself
-(``AnalyticQueryContext.ensure_declared_dependencies``).
+reports a hole; orchestrator ``ensure_scope`` / ``query`` owns ensure execution.
 """
 
 from __future__ import annotations

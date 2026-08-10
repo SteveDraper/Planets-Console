@@ -342,6 +342,9 @@ def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> No
     from api.analytics.compute_context import make_analytic_compute_context
     from api.analytics.export_types import ExportScope
     from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+    from api.analytics.turn_roster import iter_turn_players
+
+    from tests.test_homeworld_locator_core import _final_fleet_ledger
 
     turn_one = replace(
         _load_turn(),
@@ -351,11 +354,21 @@ def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> No
     turn_three = replace(turn_one, settings=replace(turn_one.settings, turn=3))
     turns = {1: turn_one, 3: turn_three}
     ensure_calls: list[int] = []
+    export_services: dict[str, object] = {}
 
     def ensure_turn(turn_number: int):
         ensure_calls.append(turn_number)
         if turn_number == 2:
             turns[2] = turn_two
+            fleet_services = export_services["fleet"]
+            for player in iter_turn_players(turn_two):
+                fleet_services.persistence.put_ledger(
+                    fleet_services.game_id,
+                    fleet_services.perspective,
+                    2,
+                    player.id,
+                    _final_fleet_ledger(player.id),
+                )
             return turn_two
         return None
 
@@ -367,10 +380,11 @@ def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> No
         _floor_aggregate(),
     )
 
+    export_services.update(_export_services(services, turns))
     ctx = make_analytic_compute_context(
         turn_three,
         load_turn=lambda n: turns.get(n),
-        export_services=_export_services(services, turns),
+        export_services=export_services,
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
     assert ensure_calls == [2]
@@ -456,14 +470,15 @@ def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     assert persistence.get_evidence_aggregate(628580, 1, 4) is not None
 
 
-def test_export_ensure_delegates_the_ensure_loop_to_the_framework(persistence) -> None:
-    """Dependency ensure runs through ``ensure_declared_dependencies``, not a local loop."""
+def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkeypatch) -> None:
+    """Homeworld ensure fills turns via walk check, then submit+wait (no sync ensure loop)."""
     from unittest.mock import patch
 
     from api.analytics.compute_context import make_analytic_compute_context
     from api.analytics.export_context import AnalyticQueryContext
     from api.analytics.export_types import ExportScope
     from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+    from api.compute import export_ensure as export_ensure_module
 
     turn_one = replace(
         _load_turn(),
@@ -487,21 +502,64 @@ def test_export_ensure_delegates_the_ensure_loop_to_the_framework(persistence) -
         export_services=_export_services(services, turns),
     ).exports
 
+    walk_scopes: list[tuple[str, int]] = []
     original_ensure_declared = AnalyticQueryContext.ensure_declared_dependencies
-    ensured_scopes: list[tuple[str, int]] = []
 
     def tracking_ensure_declared_dependencies(self, analytic_id, scope):
-        ensured_scopes.append((analytic_id, scope.turn))
+        walk_scopes.append((analytic_id, scope.turn))
         return original_ensure_declared(self, analytic_id, scope)
 
-    with patch.object(
-        AnalyticQueryContext,
-        "ensure_declared_dependencies",
-        tracking_ensure_declared_dependencies,
+    orchestrator_calls: list[tuple[str, int]] = []
+
+    def tracking_ensure_via_orchestrator(ctx, analytic_id, scope, **_kwargs):
+        orchestrator_calls.append((analytic_id, scope.turn))
+        # Satisfy via the sync refine path for this unit assertion (DAG unwind
+        # would refine turns 1..shell; mirror that here).
+        from api.analytics.homeworld_locator.baseline_ensure import ensure_homeworld_baseline
+        from api.analytics.homeworld_locator.compute_services import resolve_homeworld_services
+        from api.analytics.homeworld_locator.evidence_ensure import (
+            ensure_homeworld_evidence_refined,
+        )
+        from api.analytics.homeworld_locator.exports import _fleet_built_turns_after_ensure
+
+        turn = ctx.load_turn(scope.turn)
+        assert turn is not None
+        resolved = resolve_homeworld_services(ctx)
+        baseline_result = ensure_homeworld_baseline(resolved, shell_turn=turn)
+        for refine_turn_number in range(
+            baseline_result.game_state.baseline_turn,
+            scope.turn + 1,
+        ):
+            refine_turn = ctx.load_turn(refine_turn_number)
+            assert refine_turn is not None
+            ensure_homeworld_evidence_refined(
+                resolved,
+                shell_turn=refine_turn,
+                game_state_baseline_turn=baseline_result.game_state.baseline_turn,
+                fleet_built_turns=_fleet_built_turns_after_ensure(
+                    ctx,
+                    refine_turn,
+                    resolved,
+                ),
+            )
+        return True
+
+    with (
+        patch.object(
+            AnalyticQueryContext,
+            "ensure_declared_dependencies",
+            tracking_ensure_declared_dependencies,
+        ),
+        patch.object(
+            export_ensure_module,
+            "ensure_export_scope_via_orchestrator",
+            tracking_ensure_via_orchestrator,
+        ),
     ):
         assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
 
-    assert ensured_scopes == [(ANALYTIC_ID, 3), (ANALYTIC_ID, 2)]
+    assert walk_scopes == [(ANALYTIC_ID, 3)]
+    assert orchestrator_calls == [(ANALYTIC_ID, 3)]
     assert persistence.get_evidence_aggregate(628580, 1, 3) is not None
 
 

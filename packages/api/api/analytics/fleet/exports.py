@@ -120,15 +120,19 @@ def is_fleet_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) -> 
 
 
 def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Ensure final fleet ledger for one scope.
+
+    Cold ``ctx.query`` / ``ensure_export_scope_via_orchestrator`` own DAG unwind.
+    This catalog hook remains the sync materialize entry for
+    ``FleetGapFillCoordinator`` and overlay callers until that coordinator is
+    retired (#204 Phase 3). It does not walk nested ``ensure_export`` chains.
+    """
     if is_fleet_export_ensure_satisfied(ctx, scope):
         return True
 
     turn = ctx.load_turn(scope.turn)
     if turn is None:
         return True
-
-    if ctx.ensure_declared_dependencies(ANALYTIC_ID, scope) is not None:
-        return is_fleet_export_ensure_satisfied(ctx, scope)
 
     try:
         _fleet_snapshot_for_scope(ctx, scope, turn=turn)

@@ -16,7 +16,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_STOPPED
-from api.analytics.scores.exports import EXPORT_CATALOG
+from api.analytics.scores.exports import EXPORT_CATALOG, admit_scores_export_work
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
@@ -144,7 +144,7 @@ def test_ensure_invalidates_materialized_tree_cache(sample_turn, persistence):
     tree_before = ctx._materialize_tree("scores", scope, catalog)
     assert tree_before["meta"]["searchStatus"] == "not_started"
 
-    EXPORT_CATALOG.ensure_export(ctx, scope)
+    admit_scores_export_work(ctx, scope)
 
     tree_after = ctx._materialize_tree("scores", scope, catalog)
     assert tree_after["meta"]["searchStatus"] == "in_progress"
@@ -222,7 +222,7 @@ def test_ensure_prior_turn_schedules_inference_row_without_sync_solve(sample_tur
         ) as mock_inference,
         patch.object(persistence, "put_row") as mock_put_row,
     ):
-        assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+        assert admit_scores_export_work(ctx, scope) is True
         mock_inference.assert_not_called()
         mock_put_row.assert_not_called()
 
@@ -249,7 +249,7 @@ def test_ensure_prior_turn_scheduler_passes_fleet_torp_input_status(sample_turn,
         "api.analytics.scores.exports.schedule_inference_row",
         side_effect=capture_and_schedule,
     ):
-        EXPORT_CATALOG.ensure_export(ctx, scope)
+        admit_scores_export_work(ctx, scope)
 
     assert captured.get("fleet_torp_input_status") == "applied"
 
@@ -280,15 +280,15 @@ def test_ensure_prior_turn_no_schedule_when_already_persisted(sample_turn, persi
     with patch(
         "api.analytics.scores.exports.schedule_inference_row",
     ) as mock_schedule:
-        assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+        assert admit_scores_export_work(ctx, scope) is True
         mock_schedule.assert_not_called()
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
     assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
 
 
-def test_probe_after_prior_turn_schedule_omits_missing_step(sample_turn, persistence):
-    """After historical ensure schedules a RowRun, probe treats ensure as satisfied."""
+def test_probe_after_prior_turn_admit_omits_missing_step(sample_turn, persistence):
+    """After historical admit schedules a RowRun, probe treats ensure as satisfied."""
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     ctx, scope, player_id, _, _ = prior_turn_ensure_context(
@@ -297,15 +297,7 @@ def test_probe_after_prior_turn_schedule_omits_missing_step(sample_turn, persist
         scheduler=scheduler,
     )
 
-    result = ctx.query(
-        "scores",
-        ["$.meta.searchStatus"],
-        {"turn": 110, "player_id": player_id},
-        force_inline_ensure=True,
-    )
-
-    assert result.status == "ok"
-    assert result.paths["$.meta.searchStatus"].value == "in_progress"
+    assert admit_scores_export_work(ctx, scope, overlay_ensure=True) is True
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None
     assert EXPORT_CATALOG.is_persisted is not None
     assert EXPORT_CATALOG.is_persisted(ctx, scope) is False
@@ -343,7 +335,7 @@ def test_ensure_player_not_found_records_ephemeral_without_schedule(sample_turn,
     with patch(
         "api.analytics.scores.exports.schedule_inference_row",
     ) as mock_schedule:
-        assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+        assert admit_scores_export_work(ctx, scope) is True
         mock_schedule.assert_not_called()
 
     assert scheduler.row_run_for_player(stream_scope, missing_player_id) is None
@@ -392,7 +384,7 @@ def test_ensure_no_prior_turn_records_ephemeral_without_schedule(sample_turn, pe
     with patch(
         "api.analytics.scores.exports.schedule_inference_row",
     ) as mock_schedule:
-        assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+        assert admit_scores_export_work(ctx, scope) is True
         mock_schedule.assert_not_called()
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
@@ -441,7 +433,7 @@ def test_ensure_cheap_terminal_persist_does_not_notify_row_persisted(
         player_id=player_id,
     )
 
-    assert EXPORT_CATALOG.ensure_export(ctx, scope) is True
+    assert admit_scores_export_work(ctx, scope) is True
     assert persistence.get_row(GAME_ID, perspective(turn_2), 2, player_id) is not None
     assert notified == []
 
@@ -465,7 +457,7 @@ def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence
     )
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
-    EXPORT_CATALOG.ensure_export(ctx, scope)
+    admit_scores_export_work(ctx, scope)
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is not None
 
@@ -499,7 +491,7 @@ def test_ensure_current_turn_scheduler_passes_fleet_torp_input_status(
         "api.analytics.scores.exports.schedule_inference_row",
         side_effect=capture_and_schedule,
     ):
-        EXPORT_CATALOG.ensure_export(ctx, scope)
+        admit_scores_export_work(ctx, scope)
 
     assert captured.get("fleet_torp_input_status") == "applied"
 
@@ -528,7 +520,7 @@ def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):
         turn=sample_turn.settings.turn,
         player_id=player_id,
     )
-    EXPORT_CATALOG.ensure_export(ctx, scope)
+    admit_scores_export_work(ctx, scope)
 
     run_after = scheduler.row_run_for_player(stream_scope, player_id)
     assert run_after is run_before
@@ -559,7 +551,7 @@ def test_ensure_no_op_when_row_persisted_stopped(sample_turn, persistence):
         player_id=player_id,
     )
 
-    EXPORT_CATALOG.ensure_export(ctx, scope)
+    admit_scores_export_work(ctx, scope)
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
@@ -658,6 +650,6 @@ def test_ensure_no_op_when_row_persisted(sample_turn, persistence):
         player_id=player_id,
     )
 
-    EXPORT_CATALOG.ensure_export(ctx, scope)
+    admit_scores_export_work(ctx, scope)
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is None

@@ -38,6 +38,28 @@ pytest_plugins = ["tests.scores_exports_helpers"]
 
 
 @pytest.fixture(autouse=True)
+def _isolate_compute_orchestrator_singleton():
+    """Drop process-wide orchestrator DAG state between tests (#204 ensure uses singleton).
+
+    If a prior test left the worker pool at ``worker_count=0`` (the default for
+    ``reset_compute_worker_pool_for_tests``), restore configured workers so
+    ensure_scope can dequeue interpreter/thread work.
+    """
+    from api.compute.pools import (
+        configured_worker_count,
+        get_compute_worker_pool,
+        reset_compute_worker_pool_for_tests,
+    )
+    from api.compute.runtime import reset_orchestrators_for_tests
+
+    reset_orchestrators_for_tests()
+    if get_compute_worker_pool().worker_count == 0:
+        reset_compute_worker_pool_for_tests(worker_count=configured_worker_count())
+    yield
+    reset_orchestrators_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_global_compute_worker_pool(request: pytest.FixtureRequest):
     yield
     if request.path.name != "test_compute_pools.py":

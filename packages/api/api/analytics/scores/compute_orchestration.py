@@ -76,13 +76,17 @@ def build_scores_materialize_job_wire(
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Materialize scores export tree on the orchestration plane."""
-    from api.analytics.scores.exports import ensure_scores_export, materialize_scores_export_tree
+    from api.analytics.scores.exports import (
+        admit_scores_export_work,
+        materialize_scores_export_tree,
+    )
 
     del dependency_outputs
     if ctx is None:
         raise RuntimeError("scores materialize job wire requires AnalyticQueryContext")
     export_scope = compute_scope_to_export_scope(scope)
-    ensure_scores_export(ctx, export_scope)
+    # Admit only -- never ensure_scope / wait. Fleet deps are already terminal on the DAG.
+    admit_scores_export_work(ctx, export_scope, overlay_ensure=False)
     tree = materialize_scores_export_tree(ctx, export_scope)
     return {"exportTree": tree}
 
@@ -115,11 +119,15 @@ def build_scores_tier_solve_job_wire(
     run = get_row_run_for_scope(scope)
     ensure_satisfied = True
     if run is None:
-        # Materialize already ensures; re-ensure covers tier_solve entry submits and
+        # Materialize already admits; re-admit covers tier_solve entry submits and
         # races where the stream has not registered yet but admit can still schedule.
-        from api.analytics.scores.exports import ensure_scores_export
+        from api.analytics.scores.exports import admit_scores_export_work
 
-        ensure_satisfied = ensure_scores_export(ctx, export_scope)
+        ensure_satisfied = admit_scores_export_work(
+            ctx,
+            export_scope,
+            overlay_ensure=False,
+        )
         run = get_row_run_for_scope(scope)
     if run is None:
         run = _adopt_scheduler_row_run_for_tier_wire(ctx, export_scope)
