@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
@@ -25,10 +24,14 @@ class OrchestratorEnsureMixin:
 
         If durable satisfaction already holds, returns a terminal handle without
         blocking on pool work (submit may still short-circuit to ``complete``).
-        Otherwise submits with ``force_fresh`` (when the caller did not already
-        set it) and waits until the scope is terminal or ``timeout``. Force-fresh
-        on the unsatisfied path replaces hollow terminal nodes left after wipe /
-        invalidate so ensure cannot attach to a stale ``complete``.
+        Otherwise submits with the caller's ``force_fresh`` (default ``False`` per
+        F1) and waits until the scope is terminal or ``timeout``.
+
+        When durable satisfaction fails but a terminal node remains (hollow after
+        wipe / invalidate), that cache-hit node is dropped under the orchestrator
+        lock before submit so ``force_fresh=False`` plans fresh work instead of
+        attaching to a stale ``complete``. Explicit ``force_fresh=True`` remains
+        the wipe / reschedule wake path; ensure does not silently set it.
 
         Defaults match grill locks: cold ensure → ``interactive_ensure`` priority.
         Pool workers and leaf ``run_step`` must never call this.
@@ -50,5 +53,13 @@ class OrchestratorEnsureMixin:
                 return handle
             return handle.wait(timeout=timeout)
 
-        ensure_request = request if request.force_fresh else replace(request, force_fresh=True)
-        return self.submit(ensure_request).wait(timeout=timeout)
+        with self._condition:
+            existing = self._nodes.get(request.scope)
+            # Hollow terminal: durable gone, node still complete/failed. Drop so
+            # default force_fresh=False can plan fresh work (F1). Leave non-terminal
+            # nodes alone for attach / singleflight; parked wake stays explicit.
+            if existing is not None and existing.is_terminal and not request.force_fresh:
+                self._replace_terminal_node(existing)
+            submission = self._submit_locked(request, wake_if_parked_only=False)
+        handle = self._finish_submission(submission)
+        return handle.wait(timeout=timeout)

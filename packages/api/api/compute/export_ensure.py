@@ -33,7 +33,8 @@ def ensure_export_scope_via_orchestrator(
 ) -> bool:
     """Bring one export scope to durable satisfaction via orchestrator submit+wait.
 
-    Returns whether ``PersistencePolicy.is_satisfied`` holds after ensure.
+    Submits with the caller's ``force_fresh`` (default ``False`` per F1). Returns
+    whether ``PersistencePolicy.is_satisfied`` holds after ensure.
     """
     from api.compute.registry import COMPUTE_REGISTRY
     from api.compute.runtime import get_compute_orchestrator

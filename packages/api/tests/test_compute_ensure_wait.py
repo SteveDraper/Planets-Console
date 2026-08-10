@@ -219,8 +219,13 @@ def test_ensure_scope_short_circuits_when_already_satisfied(sample_turn):
     assert orchestrator.nodes[shared_scope].state == "complete"
 
 
-def test_ensure_scope_force_fresh_replaces_stale_terminal_when_unsatisfied(sample_turn):
-    """Wipe/invalidate can leave a hollow complete node; ensure must rebuild."""
+def test_ensure_scope_rebuilds_hollow_terminal_without_force_fresh(sample_turn):
+    """Hollow complete after wipe: default ensure (F1 force_fresh=False) rebuilds.
+
+    Durable satisfaction fails while a stale terminal remains. Ensure drops that
+    hollow cache hit, then submits with the caller's force_fresh (False) -- it
+    must not silently set force_fresh=True.
+    """
     ctx = make_fixture_query_context(
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
@@ -256,6 +261,7 @@ def test_ensure_scope_force_fresh_replaces_stale_terminal_when_unsatisfied(sampl
                         ctx=ctx,
                         scope=shared_scope,
                         priority_band="interactive_ensure",
+                        force_fresh=False,
                     ),
                     timeout=2.0,
                 )

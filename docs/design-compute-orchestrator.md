@@ -484,7 +484,7 @@ Until phase 2, table/map REST responses may still call `compute()` handlers dire
 | Mechanism | One engine only — nested sync `ensure_export` / `ensure_declared_dependencies` production work and **`FleetGapFillCoordinator`** are retired (no thin Event-wait shim). |
 | Callers | All production ensure paths (fleet, scores, homeworld, `ctx.query` when not `ensure_blocked`) migrate in #204. |
 | Priority | Inherit context: `stream_attached` / adopt; cold ensure `interactive_ensure`; warm `background`. |
-| `force_fresh` | Ensure defaults `false` (attach / satisfied short-circuit). |
+| `force_fresh` | Ensure defaults `false` (attach / `is_satisfied` short-circuit). Wipe / reschedule callers pass `true` when they must replace a terminal; ensure does not silently override to `true` on the unsatisfied path. Hollow terminals (durable wiped, node still `complete`) are dropped before default submit so `force_fresh=False` can plan fresh work. |
 | Wait timeout | Fails the **waiter** only; in-flight DAG continues for attach/retry/streams. |
 | `#109` | Separate BFF probe + opt-in job UX; preserve Core `probe` / `ensure_blocked` so oversized `query` does not auto full-DAG wait. |
 | Fleet→scores notify | Fire `on_ledger_persisted` on each fleet **final** node complete (no end-of-chain batch). **Own-DAG elision:** if `scores@(fleet_turn+1)` is already a non-terminal dependent of that fleet scope on this DAG, do **not** wipe or reschedule — first-pass dataflow is DependencyOutputs. Keep the side channel for ambient/external scores consumers. |
