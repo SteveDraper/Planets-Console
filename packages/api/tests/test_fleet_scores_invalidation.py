@@ -958,7 +958,8 @@ def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(samp
     orchestrator._nodes[fleet_scope] = waiting_fleet
     orchestrator._nodes[scores_scope] = waiting_scores
 
-    orchestrator._refresh_node_readiness(waiting_scores)
+    with orchestrator._condition:
+        orchestrator._refresh_node_readiness(waiting_scores)
 
     assert waiting_scores.state == "waiting_deps"
     assert waiting_scores.error is None
@@ -978,7 +979,8 @@ def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(samp
     orchestrator._nodes[fleet_scope] = failed_fleet
     orchestrator._nodes[scores_scope] = cascade_scores
 
-    orchestrator._refresh_node_readiness(cascade_scores)
+    with orchestrator._condition:
+        orchestrator._refresh_node_readiness(cascade_scores)
 
     assert cascade_scores.state == "failed"
     assert cascade_scores.error is fleet_failure

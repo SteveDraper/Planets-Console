@@ -991,52 +991,76 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
     assert all("beamCount" in entry and "launcherCount" in entry for entry in option_sets)
 
 
-def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
-    reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+def test_ephemeral_compute_services_refine_from_scheduler(sample_turn, persistence):
+    """compute_fleet ensure+leaf refines placeholders from closed scores solutions.
+
+    Ensure requires turn-evidence closed (final provenance); seed STATUS_EXACT rows
+    through T and final fleet through T-1 so orchestrator ensure can complete.
+    """
+    from api.analytics.compute_context import invoke_analytic_compute
+    from api.analytics.fleet import ANALYTIC_ID, compute_fleet
+    from api.analytics.fleet.chain import _materialize_fleet_snapshot_chain
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.analytics.turn_roster import iter_turn_players
+
     player_id = sample_turn.scores[0].ownerid
     turn = _turn_with_score_delta(
         turn_number=5,
         owner_id=player_id,
         shipchange=1,
     )
-    schedule_row_with_ladder(
-        scheduler,
-        turn,
-        player_id,
-        merged_solutions=[
-            inference_solution(
-                objective_value=40,
-                actions=(
-                    InferenceSolutionAction(
-                        action_id="planet_defense_posts_added_total",
-                        label="Planet defense",
-                        count=1,
-                    ),
-                ),
-                ship_builds=(
-                    ship_build_domain(
-                        combo_id="combo-13",
-                        label="Cruiser",
-                        hull_id=13,
-                        engine_id=9,
-                    ),
-                ),
-            )
-        ],
-    )
-    from api.analytics.compute_context import invoke_analytic_compute
-    from api.analytics.fleet import ANALYTIC_ID, compute_fleet
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-
-    scores_services = ScoresExportContext(
-        persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-        scheduler=scheduler,
-    )
+    scores_services = ScoresExportContext(persistence=persistence)
     services = build_ephemeral_fleet_compute_services(
         turn,
         perspective=perspective(turn),
         inference=FleetInferenceSupport(scores_services=scores_services),
+    )
+    roster_ids = [player.id for player in iter_turn_players(turn)]
+    refine_solutions = [
+        {
+            "objectiveValue": 40,
+            "actions": [
+                {
+                    "actionId": "planet_defense_posts_added_total",
+                    "label": "Planet defense",
+                    "count": 1,
+                }
+            ],
+            "shipBuilds": [
+                ship_build_wire(
+                    combo_id="combo-13",
+                    label="Cruiser",
+                    hull_id=13,
+                    engine_id=9,
+                )
+            ],
+        }
+    ]
+    for turn_number in range(1, turn.settings.turn + 1):
+        for roster_player_id in roster_ids:
+            is_refine_row = turn_number == turn.settings.turn and roster_player_id == player_id
+            persistence.put_row(
+                services.game_id,
+                services.perspective,
+                turn_number,
+                roster_player_id,
+                PersistedInferenceRow(
+                    status=STATUS_EXACT,
+                    summary="refine" if is_refine_row else "seed",
+                    solution_count=1 if is_refine_row else 0,
+                    is_complete=True,
+                    solutions=refine_solutions if is_refine_row else [],
+                ),
+            )
+    prior_turn = services.load_turn(turn.settings.turn - 1)
+    assert prior_turn is not None
+    _materialize_fleet_snapshot_chain(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        prior_turn,
+        load_turn=services.load_turn,
+        inference_materialization=services.inference_materialization,
     )
     payload = invoke_analytic_compute(
         compute_fleet,

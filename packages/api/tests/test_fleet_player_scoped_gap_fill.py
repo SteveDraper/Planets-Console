@@ -418,39 +418,49 @@ def test_per_player_gap_start_independent(persistence, load_turn):
     assert not persistence.has_ledger(628580, 1, 111, player_q)
 
 
-def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, load_turn):
+def test_compute_fleet_fan_out_materializes_all_players_explicitly(
+    persistence, load_turn, memory_backend
+):
+    """compute_fleet ensure+leaf brings every roster player to a final ledger."""
     from api.analytics.compute_context import invoke_analytic_compute
     from api.analytics.fleet import compute_fleet
     from api.analytics.fleet.compute_services import FleetComputeServices
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
     turn_111, turn_112 = require_turns(load_turn, 111, 112)
-    roster_size = len(roster_ids(turn_112))
+    roster = roster_ids(turn_112)
     seed_provenance_snapshot(persistence, load_turn, from_turn=111)
+
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    scores_services = ScoresExportContext(persistence=inference_persistence)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
 
     fleet_services = FleetComputeServices(
         persistence=persistence,
         game_id=628580,
         perspective=1,
         load_turn=load_turn,
-        inference_materialization=None,
+        inference_materialization=FleetInferenceMaterialization(
+            inference=FleetInferenceSupport(scores_services=scores_services),
+            load_turn=load_turn,
+        ),
     )
 
-    ledger_calls = 0
-    original = get_or_materialize_fleet_ledger_for_player
+    invoke_analytic_compute(
+        compute_fleet,
+        turn_112,
+        load_turn=load_turn,
+        export_services={
+            "fleet": fleet_services,
+            SCORES_ANALYTIC_ID: scores_services,
+        },
+    )
 
-    def counting_ledger(*args, **kwargs):
-        nonlocal ledger_calls
-        ledger_calls += 1
-        return original(*args, **kwargs)
-
-    with patch(
-        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
-        side_effect=counting_ledger,
-    ):
-        invoke_analytic_compute(
-            compute_fleet,
-            turn_112,
-            export_services={"fleet": fleet_services},
-        )
-
-    assert ledger_calls == roster_size
+    for player_id in roster:
+        assert persistence.has_final_ledger(628580, 1, 112, player_id)
