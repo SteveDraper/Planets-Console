@@ -124,16 +124,18 @@ class InferenceRowScheduler(
         Own-DAG elision (#204): when scores is already a non-terminal dependent of
         this fleet scope on the same orchestrator DAG, skip **both** durable wipe
         and in-place reschedule -- first-pass dataflow is DependencyOutputs.
-        Ambient / external consumers still wipe then reschedule.
+        Elision peeks the stream binding's orchestrator when a scores stream is
+        open, otherwise the process compute orchestrator (cold export-ensure DAG
+        with no stream). Ambient / external consumers still wipe then reschedule
+        (reschedule is a no-op without a stream controller).
 
         Orchestrator peeks run outside the scheduler lock so adapters never read
         the live ``nodes`` map under that lock.
         """
+        from api.compute.runtime import get_compute_orchestrator
+
         with self._lock:
             binding = self._stream_binding_for_scope_locked(scope)
-            if binding is None:
-                invalidate_row()
-                return True
             scores_scope = ComputeScope(
                 analytic_id=SCORES_ANALYTIC_ID,
                 game_id=scope.game_id,
@@ -142,7 +144,10 @@ class InferenceRowScheduler(
                 player_id=event.player_id,
             )
             fleet_scope = self._fleet_scope_for_event(scope, event)
-            orchestrator = binding.orchestrator
+            orchestrator = binding.orchestrator if binding is not None else None
+
+        if orchestrator is None:
+            orchestrator = get_compute_orchestrator()
 
         if self._should_skip_reschedule_for_fleet_persist(
             orchestrator,
