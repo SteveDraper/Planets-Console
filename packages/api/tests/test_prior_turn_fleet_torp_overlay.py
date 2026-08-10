@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from api.analytics.fleet.chain import (
     ensure_fleet_baseline_for_player,
-    get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.types import (
@@ -100,42 +97,27 @@ def test_resolve_prior_turn_overlay_readonly_pending_on_partial_ledger(sample_tu
         seed_player_ids=player_id,
     )
     prior_turn = HOST_TURN - 1
-    prior_turn_obj = replace(
-        host_turn,
-        settings=replace(host_turn.settings, turn=prior_turn),
-        game=replace(host_turn.game, turn=prior_turn),
-    )
     fleet_services = ctx.export_services["fleet"]
-    snapshot = get_or_materialize_fleet_snapshot(
-        fleet_services.persistence,
-        ctx.game_id,
-        ctx.perspective,
-        prior_turn_obj,
-        load_turn=ctx.load_turn,
-        inference_materialization=fleet_services.inference_materialization,
-    )
-    snapshot.players = [
-        FleetAcquisitionLedger(
-            player_id=player_id,
-            records=[
-                FleetShipRecord(
-                    record_id="inferred",
-                    disposition="active",
-                    fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
-                    build_option_sets=[
-                        FleetBuildOptionSet(torp_id=4, label="Mk IV"),
-                    ],
-                ),
-            ],
-        ),
-    ]
+    # Seed already persisted prior-turn ledgers; overwrite player 8 with a partial.
     fleet_services.persistence.put_ledger(
         ctx.game_id,
         ctx.perspective,
         prior_turn,
         player_id,
         PersistedFleetLedger(
-            ledger=next(ledger for ledger in snapshot.players if ledger.player_id == player_id),
+            ledger=FleetAcquisitionLedger(
+                player_id=player_id,
+                records=[
+                    FleetShipRecord(
+                        record_id="inferred",
+                        disposition="active",
+                        fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
+                        build_option_sets=[
+                            FleetBuildOptionSet(torp_id=4, label="Mk IV"),
+                        ],
+                    ),
+                ],
+            ),
             provenance=FleetMaterializationProvenance(
                 turn_evidence_at_n=True,
                 prior_ledger_at_n_minus_1=False,
@@ -238,41 +220,33 @@ def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, per
         seed_player_ids=player_id,
     )
     prior_turn = HOST_TURN - 1
-    prior_turn_obj = replace(
-        host_turn,
-        settings=replace(host_turn.settings, turn=prior_turn),
-        game=replace(host_turn.game, turn=prior_turn),
-    )
     fleet_services = ctx.export_services["fleet"]
-    snapshot = get_or_materialize_fleet_snapshot(
-        fleet_services.persistence,
-        ctx.game_id,
-        ctx.perspective,
-        prior_turn_obj,
-        load_turn=ctx.load_turn,
-        inference_materialization=fleet_services.inference_materialization,
+    target_ledger = FleetAcquisitionLedger(
+        player_id=player_id,
+        records=[
+            FleetShipRecord(
+                record_id="inferred",
+                disposition="active",
+                fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
+                build_option_sets=[
+                    FleetBuildOptionSet(torp_id=4, label="Mk IV"),
+                    FleetBuildOptionSet(torp_id=8, label="Mk VIII"),
+                ],
+            ),
+        ],
     )
-    snapshot.players = [
-        FleetAcquisitionLedger(
-            player_id=player_id,
-            records=[
-                FleetShipRecord(
-                    record_id="inferred",
-                    disposition="active",
-                    fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
-                    build_option_sets=[
-                        FleetBuildOptionSet(torp_id=4, label="Mk IV"),
-                        FleetBuildOptionSet(torp_id=8, label="Mk VIII"),
-                    ],
-                ),
-            ],
-        ),
-    ]
-    fleet_services.persistence.put_snapshot(
+    fleet_services.persistence.put_ledger(
         ctx.game_id,
         ctx.perspective,
         prior_turn,
-        snapshot,
+        player_id,
+        PersistedFleetLedger(
+            ledger=target_ledger,
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
     )
     prior_persisted = fleet_services.persistence.get_ledger(
         ctx.game_id,

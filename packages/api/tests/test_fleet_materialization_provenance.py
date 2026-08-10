@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from api.analytics.fleet.chain import (
+    _materialize_fleet_snapshot_chain,
     ensure_fleet_baseline,
     get_or_materialize_fleet_ledger_for_player,
     get_or_materialize_fleet_snapshot,
@@ -80,7 +81,19 @@ def test_partial_scores_closure_persists_non_final_provenance(persistence, load_
         load_turn=load_turn,
     )
 
-    get_or_materialize_fleet_ledger_for_player(
+    from api.analytics.fleet.chain import (
+        _GapFillCoherence,
+        _materialize_fleet_ledger_chain_for_player,
+    )
+
+    coherence = _GapFillCoherence(
+        persistence,
+        628580,
+        1,
+        player_id,
+        persistence.player_invalidation_generation(628580, 1, player_id),
+    )
+    _materialize_fleet_ledger_chain_for_player(
         persistence,
         628580,
         1,
@@ -88,6 +101,8 @@ def test_partial_scores_closure_persists_non_final_provenance(persistence, load_
         turn,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
+        coherence=coherence,
+        turn_context_cache={},
     )
 
     loaded = persistence.get_ledger(628580, 1, 111, player_id)
@@ -119,7 +134,19 @@ def test_scheduler_row_run_persists_non_final_fleet_provenance(persistence, load
         load_turn=load_turn,
     )
 
-    get_or_materialize_fleet_ledger_for_player(
+    from api.analytics.fleet.chain import (
+        _GapFillCoherence,
+        _materialize_fleet_ledger_chain_for_player,
+    )
+
+    coherence = _GapFillCoherence(
+        persistence,
+        628580,
+        1,
+        player_id,
+        persistence.player_invalidation_generation(628580, 1, player_id),
+    )
+    _materialize_fleet_ledger_chain_for_player(
         persistence,
         628580,
         1,
@@ -127,6 +154,8 @@ def test_scheduler_row_run_persists_non_final_fleet_provenance(persistence, load
         turn,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
+        coherence=coherence,
+        turn_context_cache={},
     )
 
     loaded = persistence.get_ledger(628580, 1, 111, player_id)
@@ -243,6 +272,24 @@ def test_turn_context_includes_max_ship_id_bound(load_turn):
 def test_snapshot_gap_fill_reuses_turn_context_across_players(persistence, load_turn):
     turn = load_turn(111)
     assert turn is not None
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+
+    for player in ensure_fleet_baseline(628580, 1, turn_110).players:
+        persistence.put_ledger(
+            628580,
+            1,
+            110,
+            player.player_id,
+            PersistedFleetLedger(
+                ledger=player,
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
     player_count = len(list(iter_turn_players(turn)))
     assert player_count > 1
 
@@ -258,13 +305,31 @@ def test_snapshot_gap_fill_reuses_turn_context_across_players(persistence, load_
             load_turn=load_turn,
         )
 
-    # Each player gap-fills with its own chain; turn context is built per turn per chain.
-    assert from_turn_mock.call_count == 2 * player_count
+    # Single-turn leaf builds one turn context per player.
+    assert from_turn_mock.call_count == player_count
 
 
 def test_gap_fill_persists_per_player_ledgers_with_provenance(persistence, load_turn):
     turn = load_turn(111)
     assert turn is not None
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+
+    for player in ensure_fleet_baseline(628580, 1, turn_110).players:
+        persistence.put_ledger(
+            628580,
+            1,
+            110,
+            player.player_id,
+            PersistedFleetLedger(
+                ledger=player,
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
 
     get_or_materialize_fleet_snapshot(
         persistence,
@@ -296,7 +361,7 @@ def test_gap_fill_persists_intermediate_turn_per_player(persistence, load_turn):
         ensure_fleet_baseline(628580, 1, turn_110),
     )
 
-    get_or_materialize_fleet_snapshot(
+    _materialize_fleet_snapshot_chain(
         persistence,
         628580,
         1,

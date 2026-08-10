@@ -134,13 +134,14 @@ class _GapFillCoherence:
         persisted: PersistedFleetLedger,
     ) -> None:
         self._assert_unchanged()
+        # Immediate notify (N1'): orchestrator also fires per final persist after
+        # complete; leaf must not batch via gap_fill_deferred_notifications.
         self.persistence.put_ledger(
             self.game_id,
             self.perspective,
             turn_number,
             self.player_id,
             persisted,
-            defer_ledger_persisted_notification=True,
         )
         self._assert_unchanged()
 
@@ -435,7 +436,12 @@ def _materialize_fleet_ledger_chain_for_player(
     coherence: _GapFillCoherence,
     turn_context_cache: dict[int, FleetTurnContext],
 ) -> PersistedFleetLedger:
-    """Gap-fill one player's fleet ledger from the latest anchor through turn T."""
+    """Gap-fill one player's fleet ledger from anchor through turn T (test/seed).
+
+    Production leaf ``get_or_materialize_fleet_ledger_for_player`` is single-turn
+    only. Multi-turn cold unwind uses orchestrator DAG; this helper remains for
+    fixture seeding (e.g. ``seed_fleet_unwind_through``).
+    """
     turn_number = turn.settings.turn
 
     existing = persistence.get_ledger(game_id, perspective, turn_number, player_id)
@@ -594,7 +600,10 @@ def _materialize_fleet_snapshot_chain(
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None = None,
 ) -> FleetTurnSnapshot:
-    """Gap-fill fleet ledgers for every roster player through turn T."""
+    """Gap-fill fleet ledgers for every roster player through turn T (test/seed).
+
+    Not a production ensure path -- see ``ensure_fleet_export`` / orchestrator.
+    """
     turn_context_cache: dict[int, FleetTurnContext] = {}
     for player_id in _roster_player_ids(turn):
         generation = persistence.player_invalidation_generation(game_id, perspective, player_id)
@@ -625,42 +634,37 @@ def _materialize_fleet_snapshot_chain(
     return snapshot
 
 
-def _run_materialize_on_active_coherence(
+def _resolve_leaf_prior_for_player(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
     perspective: int,
+    player_id: int,
     turn: TurnInfo,
-    *,
-    load_turn: Callable[[int], TurnInfo | None],
-    inference_materialization: FleetInferenceMaterialization | None,
-    materialize_player_id: int | None,
-) -> FleetTurnSnapshot | PersistedFleetLedger:
-    """Materialize one turn using the coordinator leader's active coherence guard."""
-    coherence = active_gap_fill_coherence()
-    if coherence is None:
-        raise RuntimeError("active gap-fill coherence is required for re-entrant materialize")
+) -> tuple[PersistedFleetLedger | None, FleetAcquisitionLedger]:
+    """Prior for single-turn leaf materialize: baseline at floor, else final T-1.
 
-    turn_context_cache: dict[int, FleetTurnContext] = {}
-    if materialize_player_id is None:
-        return _materialize_fleet_snapshot_chain(
-            persistence,
+    Multi-turn unwind belongs on ``ensure_fleet_export`` / orchestrator DAG, not
+    this leaf.
+    """
+    turn_number = turn.settings.turn
+    chain_floor = accelerated_ensure_floor(turn.settings, turn_number)
+    if turn_number == chain_floor:
+        return None, ensure_fleet_baseline_for_player(
             game_id,
             perspective,
             turn,
-            load_turn=load_turn,
-            inference_materialization=inference_materialization,
+            player_id,
         )
-    return _materialize_fleet_ledger_chain_for_player(
-        persistence,
-        game_id,
-        perspective,
-        materialize_player_id,
-        turn,
-        load_turn=load_turn,
-        inference_materialization=inference_materialization,
-        coherence=coherence,
-        turn_context_cache=turn_context_cache,
-    )
+    prior_turn = turn_number - 1
+    prior = persistence.get_ledger(game_id, perspective, prior_turn, player_id)
+    if prior is None or not prior.provenance.is_final:
+        raise ConflictError(
+            f"fleet leaf materialize for game {game_id} perspective {perspective} "
+            f"player {player_id} turn {turn_number} requires a final prior ledger "
+            f"at turn {prior_turn}; use ensure_fleet_export / orchestrator for "
+            "multi-turn gap-fill"
+        )
+    return prior, prior.ledger
 
 
 def get_or_materialize_fleet_ledger_for_player(
@@ -675,46 +679,27 @@ def get_or_materialize_fleet_ledger_for_player(
     query_context: AnalyticQueryContext | None = None,
     on_progress: FleetMaterializationProgressCallback | None = None,
 ) -> PersistedFleetLedger:
-    """Return a cached ledger or materialize turn T for one player.
+    """Return a cached final ledger or materialize a single turn for one player.
 
-    Cold durable ensure belongs on ``ensure_fleet_export`` / orchestrator
-    submit+wait. This helper is the leaf materialize / batch path: cache hit,
-    active coherence re-entry, or direct chain. ``query_context`` is retained for
-    call-site compatibility but does not nest ensure (avoids ensure↔materialize
-    recursion and scores wait hangs in tree materialize).
+    Cold multi-turn gap-fill belongs on ``ensure_fleet_export`` / orchestrator
+    submit+wait. This leaf is cache-hit or one turn when prior is final (or
+    baseline at the accelerated ensure floor). ``query_context`` is retained for
+    call-site compatibility but does not nest ensure.
     """
     del query_context, on_progress
+    from api.errors import FleetGapFillEpochInvalidated
+
     turn_number = turn.settings.turn
     cached = persistence.get_ledger(game_id, perspective, turn_number, player_id)
     if cached is not None and _is_fleet_ledger_cache_hit(cached):
         return cached
 
-    if active_gap_fill_coherence() is not None:
-        result = _run_materialize_on_active_coherence(
-            persistence,
-            game_id,
-            perspective,
-            turn,
-            load_turn=load_turn,
-            inference_materialization=inference_materialization,
-            materialize_player_id=player_id,
-        )
-        assert isinstance(result, PersistedFleetLedger)
-        return result
-
-    from api.analytics.fleet.gap_fill_deferred_notifications import (
-        complete_ledger_turn_numbers_for_player,
-        emit_deferred_fleet_ledger_notifications,
-    )
-    from api.errors import FleetGapFillEpochInvalidated
-
-    complete_before = complete_ledger_turn_numbers_for_player(
+    prior_persisted, prior_ledger = _resolve_leaf_prior_for_player(
         persistence,
         game_id,
         perspective,
         player_id,
-        turn_number,
-        load_turn,
+        turn,
     )
     generation = persistence.player_invalidation_generation(game_id, perspective, player_id)
     coherence = _GapFillCoherence(
@@ -724,37 +709,27 @@ def get_or_materialize_fleet_ledger_for_player(
         player_id,
         generation,
     )
-    turn_context_cache: dict[int, FleetTurnContext] = {}
     try:
         with gap_fill_coherence_scope(coherence):
-            result = _materialize_fleet_ledger_chain_for_player(
-                persistence,
-                game_id,
-                perspective,
-                player_id,
-                turn,
+            return _materialize_and_persist_player_turn(
+                coherence,
+                materialize_turn=turn_number,
+                player_id=player_id,
+                prior_persisted=prior_persisted,
+                prior_ledger=prior_ledger,
+                turn_info=turn,
+                turn_context=FleetTurnContext.from_turn(turn),
+                game_id=game_id,
+                perspective=perspective,
                 load_turn=load_turn,
                 inference_materialization=inference_materialization,
-                coherence=coherence,
-                turn_context_cache=turn_context_cache,
             )
     except _FleetSnapshotInvalidated as exc:
         raise FleetGapFillEpochInvalidated(
-            f"fleet gap-fill for game {game_id} perspective {perspective} "
+            f"fleet leaf materialize for game {game_id} perspective {perspective} "
             f"player {player_id} turn {turn_number} aborted: invalidation "
-            "generation bumped mid-chain"
+            "generation bumped mid-put"
         ) from exc
-
-    emit_deferred_fleet_ledger_notifications(
-        persistence,
-        game_id,
-        perspective,
-        player_id,
-        complete_before=complete_before,
-        through_turn=turn_number,
-        load_turn=load_turn,
-    )
-    return result
 
 
 def get_or_materialize_fleet_snapshot(
@@ -767,7 +742,11 @@ def get_or_materialize_fleet_snapshot(
     inference_materialization: FleetInferenceMaterialization | None = None,
     query_context: AnalyticQueryContext | None = None,
 ) -> FleetTurnSnapshot:
-    """Return a cached snapshot or fan out per-player materialization for turn T."""
+    """Return a cached snapshot or fan out single-turn leaf materialize per player.
+
+    Each player requires a final prior (or baseline at floor). Multi-turn cold
+    fill is orchestrator ensure, not this fan-out.
+    """
     turn_number = turn.settings.turn
     cached = persistence.get_snapshot(game_id, perspective, turn_number)
     if _is_fleet_snapshot_cache_hit(

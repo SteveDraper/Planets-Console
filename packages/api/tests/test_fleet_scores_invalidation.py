@@ -142,23 +142,21 @@ def test_materialize_chain_does_not_invoke_on_snapshot_persisted(
 
 def test_single_player_hot_paths_do_not_reference_on_snapshot_persisted():
     """Guard: chain materialize paths stay on per-player ledger notify."""
-    guarded_modules = (
-        API_ROOT / "analytics" / "fleet" / "chain.py",
-        API_ROOT / "analytics" / "fleet" / "gap_fill_deferred_notifications.py",
-    )
+    guarded_modules = (API_ROOT / "analytics" / "fleet" / "chain.py",)
     for module_path in guarded_modules:
         source = module_path.read_text(encoding="utf-8")
         assert "on_snapshot_persisted" not in source, (
             f"{module_path.name} must not wire roster snapshot notification"
         )
+    assert not (API_ROOT / "analytics" / "fleet" / "gap_fill_deferred_notifications.py").exists()
 
 
-def test_gap_fill_defers_ledger_notify_until_chain_completes(
+def test_leaf_materialize_notifies_immediately_on_each_final_persist(
     persistence,
     load_turn,
     memory_backend,
 ):
-    """Per-player put_ledger during gap-fill must not notify; flush runs after the chain."""
+    """Leaf put_ledger fires on_ledger_persisted immediately (N1'; no end-of-chain batch)."""
     from api.analytics.turn_roster import iter_turn_players
 
     turn_111 = load_turn(111)
@@ -174,18 +172,18 @@ def test_gap_fill_defers_ledger_notify_until_chain_completes(
     _seed_scores_rows_for_all_players(inference_persistence, turn_111)
 
     callback_events: list[tuple[int, int]] = []
-    persistence.on_ledger_persisted = lambda event: callback_events.append(
-        (event.fleet_turn, event.player_id)
-    )
-
-    put_ledger_calls = 0
+    notify_counts_during_put: list[int] = []
     original_put_ledger = persistence.put_ledger
 
     def counting_put_ledger(*args, **kwargs):
-        nonlocal put_ledger_calls
-        put_ledger_calls += 1
-        return original_put_ledger(*args, **kwargs)
+        before = len(callback_events)
+        result = original_put_ledger(*args, **kwargs)
+        notify_counts_during_put.append(len(callback_events) - before)
+        return result
 
+    persistence.on_ledger_persisted = lambda event: callback_events.append(
+        (event.fleet_turn, event.player_id)
+    )
     persistence.put_ledger = counting_put_ledger  # type: ignore[method-assign]
 
     snapshot = get_or_materialize_fleet_snapshot(
@@ -200,17 +198,18 @@ def test_gap_fill_defers_ledger_notify_until_chain_completes(
     assert snapshot.turn == 111
     roster_size = len(list(iter_turn_players(turn_111)))
     assert roster_size > 1
-    assert put_ledger_calls >= roster_size
     assert len(callback_events) == roster_size
     assert all(turn_number == 111 for turn_number, _ in callback_events)
+    # Each put that becomes final notifies inside put_ledger, not in a later flush.
+    assert sum(notify_counts_during_put) == roster_size
 
 
-def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
+def test_leaf_final_persist_invalidates_scores_at_next_turn(
     persistence,
     load_turn,
     memory_backend,
 ):
-    """After gap-fill, newly complete fleet@(T-1) invalidates scores@T (not mid-chain)."""
+    """Single-turn leaf final fleet@T invalidates scores@(T+1) immediately on put."""
     from api.analytics.turn_roster import iter_turn_players
 
     inference_persistence, inference_materialization = _inference_materialization_for_fleet(
@@ -223,12 +222,12 @@ def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
     )
     invalidation.wire_scores_invalidation_to_fleet_persistence()
 
-    turn_112 = load_turn(112)
-    assert turn_112 is not None
     turn_111 = load_turn(111)
     assert turn_111 is not None
     turn_110 = load_turn(110)
     assert turn_110 is not None
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
     _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
     _seed_scores_rows_for_all_players(inference_persistence, turn_111)
     _seed_scores_rows_for_all_players(inference_persistence, turn_112)
@@ -237,12 +236,12 @@ def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
         persistence,
         628580,
         1,
-        turn_112,
+        turn_111,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
     )
 
-    assert snapshot.turn == 112
+    assert snapshot.turn == 111
     for player in iter_turn_players(turn_112):
         assert inference_persistence.get_row(628580, 1, 112, player.id) is None
 

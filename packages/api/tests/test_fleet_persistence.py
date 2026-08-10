@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from api.analytics.fleet.chain import (
+    _materialize_fleet_snapshot_chain,
     ensure_fleet_baseline,
     get_or_materialize_fleet_snapshot,
 )
@@ -24,7 +25,7 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
-from api.errors import NotFoundError, ValidationError
+from api.errors import ConflictError, NotFoundError, ValidationError
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -173,6 +174,7 @@ def _put_turn_rst(memory_backend, turn_number: int, template_turn_number: int = 
 
 
 def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memory_backend):
+    """Seed/helper multi-turn chain still persists intermediate turns."""
     turn_110 = load_turn(110)
     assert turn_110 is not None
     prior = ensure_fleet_baseline(628580, 1, turn_110)
@@ -183,7 +185,7 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
-    snapshot = get_or_materialize_fleet_snapshot(
+    snapshot = _materialize_fleet_snapshot_chain(
         persistence,
         628580,
         1,
@@ -201,6 +203,24 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
 
 
+def test_leaf_rejects_multi_turn_gap_without_final_prior(persistence, load_turn, memory_backend):
+    """Production leaf does not unwind multiple turns; missing final prior fails."""
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    with pytest.raises(ConflictError, match="requires a final prior ledger"):
+        get_or_materialize_fleet_snapshot(
+            persistence,
+            628580,
+            1,
+            turn_112,
+            load_turn=load_turn,
+        )
+
+
 def test_chain_raises_when_intermediate_rst_missing(persistence, load_turn, memory_backend):
     turn_110 = load_turn(110)
     assert turn_110 is not None
@@ -215,7 +235,7 @@ def test_chain_raises_when_intermediate_rst_missing(persistence, load_turn, memo
     turn_112 = load_turn(112)
     assert turn_112 is not None
     with pytest.raises(NotFoundError, match="requires stored turn 111"):
-        get_or_materialize_fleet_snapshot(
+        _materialize_fleet_snapshot_chain(
             persistence,
             628580,
             1,
@@ -225,7 +245,7 @@ def test_chain_raises_when_intermediate_rst_missing(persistence, load_turn, memo
     assert persistence.get_snapshot(628580, 1, 112) is None
 
 
-def test_implicit_turn_one_baseline_without_persisting_turn_one(
+def test_seed_chain_implicit_turn_one_baseline_without_persisting_turn_one(
     persistence,
     load_turn,
     memory_backend,
@@ -234,7 +254,7 @@ def test_implicit_turn_one_baseline_without_persisting_turn_one(
     for turn_number in range(2, 110):
         _put_turn_rst(memory_backend, turn_number)
 
-    snapshot = get_or_materialize_fleet_snapshot(
+    snapshot = _materialize_fleet_snapshot_chain(
         persistence,
         628580,
         1,
@@ -249,7 +269,7 @@ def test_implicit_turn_one_baseline_without_persisting_turn_one(
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
 
-def test_implicit_baseline_when_only_later_turn_rst_stored(
+def test_seed_chain_implicit_baseline_when_only_later_turn_rst_stored(
     persistence,
     load_turn,
     memory_backend,
@@ -258,7 +278,7 @@ def test_implicit_baseline_when_only_later_turn_rst_stored(
     turn_three = load_turn(3)
     assert turn_three is not None
 
-    snapshot = get_or_materialize_fleet_snapshot(
+    snapshot = _materialize_fleet_snapshot_chain(
         persistence,
         628580,
         1,
@@ -273,12 +293,26 @@ def test_implicit_baseline_when_only_later_turn_rst_stored(
     assert persistence.get_snapshot(628580, 1, 3) == snapshot
 
 
-def test_chain_materializes_turn_from_prior_snapshot(persistence, load_turn, sample_turn):
-    prior = ensure_fleet_baseline(628580, 1, load_turn(110))
-    prior.players[0].records.append(
+def test_leaf_materializes_turn_from_final_prior(persistence, load_turn, sample_turn):
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+    first_player_id = sample_turn.scores[0].ownerid
+    persisted = persistence.get_ledger(628580, 1, 110, first_player_id)
+    assert persisted is not None
+    persisted.ledger.records.append(
         FleetShipRecord(record_id="rec-1", disposition="active"),
     )
-    persistence.put_snapshot(628580, 1, 110, prior)
+    persistence.put_ledger(
+        628580,
+        1,
+        110,
+        first_player_id,
+        PersistedFleetLedger(
+            ledger=persisted.ledger,
+            provenance=persisted.provenance,
+        ),
+    )
 
     snapshot = get_or_materialize_fleet_snapshot(
         persistence,
@@ -288,8 +322,9 @@ def test_chain_materializes_turn_from_prior_snapshot(persistence, load_turn, sam
         load_turn=load_turn,
     )
     assert snapshot.turn == 111
-    assert len(snapshot.players[0].records) == 6
-    assert snapshot.players[0].records[0].record_id == "rec-1"
+    player_ledger = next(p for p in snapshot.players if p.player_id == first_player_id)
+    assert len(player_ledger.records) == 6
+    assert player_ledger.records[0].record_id == "rec-1"
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
 
@@ -511,12 +546,7 @@ def test_turn_analytic_service_materializes_persisted_fleet(memory_backend, load
     persistence = FleetSnapshotPersistenceService(memory_backend)
     turn_110 = load_turn(110)
     assert turn_110 is not None
-    persistence.put_snapshot(
-        628580,
-        1,
-        110,
-        ensure_fleet_baseline(628580, 1, turn_110),
-    )
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
     _, _, _, _, analytics, _ = build_service_stack(memory_backend)
     data = analytics.get_turn_analytics(628580, 1, 111, "fleet")
     assert data["analyticId"] == "fleet"
@@ -591,6 +621,23 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
         110,
         ensure_fleet_baseline(628580, 1, turn_110),
     )
+    # Leaf requires final prior; stamp provenance after baseline put.
+    for player in ensure_fleet_baseline(628580, 1, turn_110).players:
+        existing = fleet_persistence.get_ledger(628580, 1, 110, player.player_id)
+        assert existing is not None
+        fleet_persistence.put_ledger(
+            628580,
+            1,
+            110,
+            player.player_id,
+            PersistedFleetLedger(
+                ledger=existing.ledger,
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
 
     snapshot = get_or_materialize_fleet_snapshot(
         fleet_persistence,
@@ -702,7 +749,7 @@ def test_held_solutions_scheduler_callback_invalidates_cached_fleet_snapshot(
 
 
 def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memory_backend):
-    from api.errors import FleetGapFillEpochInvalidated
+    from api.analytics.fleet.chain import _FleetSnapshotInvalidated
 
     turn_110 = load_turn(110)
     assert turn_110 is not None
@@ -735,7 +782,7 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     def run_gap_fill() -> None:
         nonlocal gap_fill_error
         try:
-            get_or_materialize_fleet_snapshot(
+            _materialize_fleet_snapshot_chain(
                 persistence,
                 628580,
                 1,
@@ -752,12 +799,12 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     sync.wait()
     gap_fill_thread.join()
 
-    assert isinstance(gap_fill_error, FleetGapFillEpochInvalidated)
+    assert isinstance(gap_fill_error, _FleetSnapshotInvalidated)
     # Torn-tail guard: abort before persisting later turns on a stale generation.
     assert persistence.get_snapshot(628580, 1, 112) is None
 
     persistence.put_ledger = original_put_ledger  # type: ignore[method-assign]
-    snapshot = get_or_materialize_fleet_snapshot(
+    snapshot = _materialize_fleet_snapshot_chain(
         persistence,
         628580,
         1,
@@ -771,7 +818,7 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
 
 
 def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persistence, load_turn):
-    from api.errors import FleetGapFillEpochInvalidated
+    from api.analytics.fleet.chain import _FleetSnapshotInvalidated
 
     turn_110 = load_turn(110)
     assert turn_110 is not None
@@ -825,7 +872,7 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
     def run_gap_fill() -> None:
         nonlocal gap_fill_error
         try:
-            get_or_materialize_fleet_snapshot(
+            _materialize_fleet_snapshot_chain(
                 persistence,
                 628580,
                 1,
@@ -844,12 +891,12 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
     gap_fill_thread.join(timeout=5)
 
     assert not gap_fill_thread.is_alive()
-    assert isinstance(gap_fill_error, FleetGapFillEpochInvalidated)
+    assert isinstance(gap_fill_error, _FleetSnapshotInvalidated)
     assert attempt_puts[0] == [111]
     assert persistence.get_snapshot(628580, 1, 112) is None
 
     persistence.put_ledger = original_put_ledger  # type: ignore[method-assign]
-    snapshot = get_or_materialize_fleet_snapshot(
+    snapshot = _materialize_fleet_snapshot_chain(
         persistence,
         628580,
         1,
@@ -861,12 +908,12 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
 
 
 def test_gap_fill_aborts_on_mid_chain_invalidation_without_spin(persistence, load_turn):
-    """Single-attempt abort: continuous put-time invalidation must not spin retries."""
+    """Single-attempt abort: put-time invalidation must not spin retries."""
     from api.errors import FleetGapFillEpochInvalidated
 
     turn_110 = load_turn(110)
     assert turn_110 is not None
-    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
 
     turn_111 = load_turn(111)
     assert turn_111 is not None
@@ -1034,9 +1081,7 @@ def _seed_scores_rows_for_all_players(
 
 
 def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(persistence, load_turn):
-    """On invalidation abort, return a peer-written final snapshot instead of raising."""
-    from api.analytics.fleet.chain import _FleetSnapshotInvalidated
-
+    """Cache hit returns a peer-written final snapshot without rematerializing."""
     turn_110 = load_turn(110)
     assert turn_110 is not None
     _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
@@ -1045,17 +1090,13 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
     assert turn_111 is not None
     winner = _put_provenance_final_snapshot(persistence, 628580, 1, turn_111)
 
-    with patch(
-        "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
-        side_effect=_FleetSnapshotInvalidated,
-    ):
-        result = get_or_materialize_fleet_snapshot(
-            persistence,
-            628580,
-            1,
-            turn_111,
-            load_turn=load_turn,
-        )
+    result = get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_111,
+        load_turn=load_turn,
+    )
 
     assert result == winner
 
@@ -1063,11 +1104,14 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
 def test_get_or_materialize_fleet_ledger_for_player_raises_on_epoch_abort(
     persistence, load_turn, sample_turn, memory_backend
 ):
-    """Chain surfaces epoch invalidation as FleetGapFillEpochInvalidated."""
+    """Leaf surfaces epoch invalidation as FleetGapFillEpochInvalidated."""
     from dataclasses import replace
 
     from api.analytics.export_types import ExportScope
-    from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
+    from api.analytics.fleet.chain import (
+        _FleetSnapshotInvalidated,
+        get_or_materialize_fleet_ledger_for_player,
+    )
     from api.analytics.fleet.compute_services import resolve_fleet_services, turn_chain_through
     from api.analytics.fleet.exports import is_fleet_export_ensure_satisfied
     from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
@@ -1118,14 +1162,12 @@ def test_get_or_materialize_fleet_ledger_for_player_raises_on_epoch_abort(
     )
 
     with patch(
-        "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
-        side_effect=FleetGapFillEpochInvalidated(
-            "fleet gap-fill aborted: invalidation generation bumped mid-chain"
-        ),
+        "api.analytics.fleet.chain._materialize_and_persist_player_turn",
+        side_effect=_FleetSnapshotInvalidated(),
     ):
         with pytest.raises(FleetGapFillEpochInvalidated):
             get_or_materialize_fleet_ledger_for_player(
-                persistence,
+                resolve_fleet_services(ctx).persistence,
                 GAME_ID,
                 perspective(sample_turn),
                 player_id,
@@ -1238,9 +1280,13 @@ def test_stale_chain_anchor_skipped_during_gap_fill(persistence, load_turn, memo
         stale_payload,
     )
 
+    # Drop stale entries (and absorb generation bumps) before coherent rematerialize.
+    for player in stale_anchor.players:
+        assert persistence.get_ledger(628580, 1, 110, player.player_id) is None
+
     turn_112 = load_turn(112)
     assert turn_112 is not None
-    snapshot = get_or_materialize_fleet_snapshot(
+    snapshot = _materialize_fleet_snapshot_chain(
         persistence,
         628580,
         1,

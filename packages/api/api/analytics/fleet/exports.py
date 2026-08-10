@@ -124,7 +124,7 @@ def ensure_fleet_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
 
     Catalog ``ensure_export`` for designated in-process callers (#204). Pool workers
     and leaf ``run_step`` must not call this. Leaf ``get_or_materialize_fleet_*``
-    remains the direct-chain materialize path (no nested ensure).
+    is cache-hit or single-turn when prior is final (no nested ensure / multi-turn).
     """
     if is_fleet_export_ensure_satisfied(ctx, scope):
         return True

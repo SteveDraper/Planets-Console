@@ -85,12 +85,26 @@ def load_turn(memory_backend):
     return _load
 
 
-def test_single_player_gap_fill_does_not_materialize_other_players(persistence, load_turn):
-    _, turn_112 = require_turns(load_turn, 109, 112)
+def test_single_player_leaf_does_not_materialize_other_players(persistence, load_turn):
+    """Single-turn leaf for P at T requires final prior; does not touch Q."""
+    from api.errors import ConflictError
+
+    _, turn_111, turn_112 = require_turns(load_turn, 109, 111, 112)
     player_p, player_q = two_players_from_turn(turn_112)
 
     seed_provenance_snapshot(persistence, load_turn, from_turn=109)
 
+    with pytest.raises(ConflictError, match="requires a final prior ledger"):
+        get_or_materialize_fleet_ledger_for_player(
+            persistence,
+            628580,
+            1,
+            player_p,
+            turn_112,
+            load_turn=load_turn,
+        )
+
+    seed_provenance_snapshot(persistence, load_turn, from_turn=111)
     get_or_materialize_fleet_ledger_for_player(
         persistence,
         628580,
@@ -100,9 +114,10 @@ def test_single_player_gap_fill_does_not_materialize_other_players(persistence, 
         load_turn=load_turn,
     )
 
-    for turn_number in range(110, 113):
-        assert persistence.has_ledger(628580, 1, turn_number, player_p)
-        assert not persistence.has_ledger(628580, 1, turn_number, player_q)
+    assert persistence.has_ledger(628580, 1, 112, player_p)
+    assert not persistence.has_ledger(628580, 1, 112, player_q)
+    assert not persistence.has_ledger(628580, 1, 110, player_p)
+    assert not persistence.has_ledger(628580, 1, 110, player_q)
 
 
 def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
@@ -351,7 +366,7 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
     assert inference_persistence.get_row(628580, 1, 112, player_q) is not None
 
 
-def test_per_player_gap_fill_emits_deferred_scores_invalidation_for_player(
+def test_per_player_leaf_emits_scores_invalidation_for_player(
     persistence,
     load_turn,
     memory_backend,
@@ -413,9 +428,9 @@ def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, 
     from api.analytics.fleet import compute_fleet
     from api.analytics.fleet.compute_services import FleetComputeServices
 
-    turn_109, turn_112 = require_turns(load_turn, 109, 112)
+    turn_111, turn_112 = require_turns(load_turn, 111, 112)
     roster_size = len(roster_ids(turn_112))
-    seed_provenance_snapshot(persistence, load_turn, from_turn=109)
+    seed_provenance_snapshot(persistence, load_turn, from_turn=111)
 
     fleet_services = FleetComputeServices(
         persistence=persistence,
