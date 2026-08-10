@@ -302,6 +302,7 @@ def test_worker_turn_cache_reuses_turn_wire_deserialize(sample_turn) -> None:
 
 
 def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> None:
+    from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
     from api.analytics.fleet.held_solutions import FleetInferenceSupport
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.serialization.inference_row_persistence import PersistedInferenceRow
@@ -336,6 +337,21 @@ def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> No
         perspective=1,
         stored_turns=stored_turns,
         inference=FleetInferenceSupport(scores_services=scores_services),
+    )
+    # Final fleet@1 satisfies the prior-turn DAG edge so only fleet@2 hits the pool
+    # (turn-1 roots are no longer elided from the walk).
+    fleet_services.persistence.put_ledger(
+        628580,
+        1,
+        1,
+        player_id,
+        PersistedFleetLedger(
+            ledger=ensure_fleet_baseline_for_player(628580, 1, stored_turns[1], player_id),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
     )
     ctx = make_analytic_query_context(
         stored_turns[2],
