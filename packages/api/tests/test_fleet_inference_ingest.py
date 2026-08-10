@@ -31,7 +31,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
-from api.analytics.military_score_inference.models import InferenceSolutionAction
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.export_services import ScoresExportContext
 from api.serialization.inference_row_persistence import PersistedInferenceRow
