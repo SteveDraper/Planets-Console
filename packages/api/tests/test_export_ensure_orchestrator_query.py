@@ -38,7 +38,11 @@ def test_ensure_blocked_does_not_submit_orchestrator(sample_turn, monkeypatch):
 
 
 def test_query_registered_analytic_uses_orchestrator_ensure(sample_turn, persistence):
-    """Scores query root ensure goes through ensure_export_scope_via_orchestrator."""
+    """Scores query root ensure goes through ensure_export_scope_via_orchestrator.
+
+    Scores CP-SAT remains mocked at the ensure entrypoint; fleet cold ensure is
+    covered without entrypoint mocking in ``test_ensure_fleet_export_*``.
+    """
     from api.analytics.military_score_inference.inference_scheduler import (
         InferenceRowScheduler,
         reset_inference_row_scheduler_for_tests,
@@ -101,64 +105,36 @@ def test_fixture_analytic_keeps_sync_ensure_fallback(sample_turn):
     assert result.paths["$.payload.label"].kind == "value"
 
 
-def test_ensure_fleet_export_uses_orchestrator(sample_turn, persistence):
-    """Catalog ensure_fleet_export routes through ensure_export_scope_via_orchestrator (#204 3a)."""
-    from api.analytics.export_types import ExportScope
+def test_ensure_fleet_export_uses_orchestrator(sample_turn, memory_backend):
+    """Cold fleet ensure runs real orchestrator submit+wait to durable final."""
     from api.analytics.fleet.exports import ensure_fleet_export
-    from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.serialization.inference_row_persistence import PersistedInferenceRow
 
-    from tests.export_chain_test_fixtures import export_chain_query_context
-    from tests.scores_exports_helpers import GAME_ID, perspective, put_persisted_row
+    from tests.fleet_player_scoped_gap_fill_helpers import ensure_fleet_export_gap_fill_context
 
-    player_id = first_player_id(sample_turn)
-    from dataclasses import replace
-
-    from api.analytics.fleet.compute_services import turn_chain_through
-
-    turn_number = 8
-    host_turn = replace(
-        sample_turn,
-        settings=replace(sample_turn.settings, turn=turn_number),
-        game=replace(sample_turn.game, turn=turn_number),
+    ctx, scope, player_id, other_player_id, fleet_persistence = (
+        ensure_fleet_export_gap_fill_context(sample_turn, memory_backend)
     )
-    stored_turns = turn_chain_through(host_turn)
-    ctx = export_chain_query_context(
-        host_turn,
-        persistence=persistence,
-        stored_turns=stored_turns,
-        seed_fleet_prerequisites_for=player_id,
-    )
-    put_persisted_row(
-        persistence,
-        host_turn,
-        player_id,
-        PersistedInferenceRow(
-            status=STATUS_EXACT,
-            summary="seed",
-            solution_count=0,
-            is_complete=True,
-            solutions=[],
-        ),
-    )
-    scope = ExportScope(
-        game_id=GAME_ID,
-        perspective=perspective(sample_turn),
-        turn=turn_number,
-        player_id=player_id,
-    )
-
-    calls: list[tuple[str, int, int | None]] = []
-
-    def tracking_ensure(query_ctx, analytic_id, export_scope, **_kwargs):
-        calls.append((analytic_id, export_scope.turn, export_scope.player_id))
-        return True
 
     with patch.object(
         export_ensure_module,
         "ensure_export_scope_via_orchestrator",
-        side_effect=tracking_ensure,
-    ):
+        wraps=export_ensure_module.ensure_export_scope_via_orchestrator,
+    ) as ensure_spy:
         assert ensure_fleet_export(ctx, scope) is True
 
-    assert calls == [("fleet", turn_number, player_id)]
+    assert ensure_spy.call_count == 1
+    assert ensure_spy.call_args.args[1] == "fleet"
+    assert ensure_spy.call_args.args[2].turn == scope.turn
+    assert ensure_spy.call_args.args[2].player_id == player_id
+    assert fleet_persistence.has_final_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        player_id,
+    )
+    assert not fleet_persistence.has_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        other_player_id,
+    )

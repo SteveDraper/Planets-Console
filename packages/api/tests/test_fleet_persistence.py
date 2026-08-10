@@ -12,6 +12,7 @@ import pytest
 from api.analytics.fleet.chain import (
     _materialize_fleet_snapshot_chain,
     ensure_fleet_baseline,
+    get_or_materialize_fleet_ledger_for_player,
     get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.constants import FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
@@ -216,6 +217,15 @@ def test_leaf_rejects_multi_turn_gap_without_final_prior(persistence, load_turn,
             persistence,
             628580,
             1,
+            turn_112,
+            load_turn=load_turn,
+        )
+    with pytest.raises(ConflictError, match="use ensure_fleet_export"):
+        get_or_materialize_fleet_ledger_for_player(
+            persistence,
+            628580,
+            1,
+            turn_112.scores[0].ownerid,
             turn_112,
             load_turn=load_turn,
         )

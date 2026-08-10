@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,10 +18,8 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
-from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
-from tests.export_chain_test_fixtures import GAME_ID, export_chain_query_context
 from tests.fleet_player_scoped_gap_fill_helpers import (
     ensure_fleet_export_gap_fill_context,
     require_turns,
@@ -30,7 +27,6 @@ from tests.fleet_player_scoped_gap_fill_helpers import (
     seed_provenance_snapshot,
     two_players_from_turn,
 )
-from tests.scores_exports_helpers import first_player_id, put_persisted_row
 from tests.test_fleet_persistence import (
     _inference_materialization_for_fleet,
     _seed_scores_rows_for_all_players,
@@ -86,7 +82,10 @@ def load_turn(memory_backend):
 
 
 def test_single_player_leaf_does_not_materialize_other_players(persistence, load_turn):
-    """Single-turn leaf for P at T requires final prior; does not touch Q."""
+    """Single-turn leaf for P at T requires final prior; does not touch Q.
+
+    Missing T-1 (only T-3 seeded) raises ConflictError -- leaf must not multi-turn.
+    """
     from api.errors import ConflictError
 
     _, turn_111, turn_112 = require_turns(load_turn, 109, 111, 112)
@@ -142,92 +141,88 @@ def test_ensure_fleet_export_scoped_to_player_only(sample_turn, memory_backend):
     )
 
 
-def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
-    """Orchestrator fleet ensure is idempotent: second call short-circuits when final.
-
-    ``ensure_fleet_export`` submits via orchestrator; a second ensure of the same
-    satisfied scope must not re-submit (is_satisfied short-circuit).
-    """
-    from api.analytics.export_types import ExportScope
-    from api.analytics.fleet.compute_services import turn_chain_through
+def test_ensure_fleet_export_fills_two_turn_gap_without_other_players(
+    sample_turn,
+    memory_backend,
+):
+    """Cold two-turn ensure uses orchestrator DAG; leaf cannot fill the same gap."""
+    from api.analytics.fleet.chain import get_or_materialize_fleet_ledger_for_player
     from api.compute import export_ensure as export_ensure_module
+    from api.errors import ConflictError
 
-    player_id = first_player_id(sample_turn)
     turn_number = 8
-    inference_persistence = InferenceRowPersistenceService(memory_backend)
-    host_turn = replace(
-        sample_turn,
-        settings=replace(sample_turn.settings, turn=turn_number),
-        game=replace(sample_turn.game, turn=turn_number),
-    )
-    stored_turns = turn_chain_through(host_turn)
-    ctx = export_chain_query_context(
-        host_turn,
-        persistence=inference_persistence,
-        stored_turns=stored_turns,
-        seed_fleet_prerequisites_for=player_id,
-    )
-    put_persisted_row(
-        inference_persistence,
-        host_turn,
-        player_id,
-        PersistedInferenceRow(
-            status=STATUS_EXACT,
-            summary="seed",
-            solution_count=0,
-            is_complete=True,
-            solutions=[],
-        ),
-    )
-
-    scope = ExportScope(
-        game_id=GAME_ID,
-        perspective=host_turn.player.id,
-        turn=turn_number,
-        player_id=player_id,
-    )
-    orchestrator_calls: list[tuple[int, int | None]] = []
-
-    def tracking_ensure(query_ctx, analytic_id, export_scope, **_kwargs):
-        orchestrator_calls.append((export_scope.turn, export_scope.player_id))
-        # Simulate durable final satisfaction without running the full DAG in-unit.
-        from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-        from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
-
-        services = resolve_fleet_services(query_ctx)
-        turn = query_ctx.load_turn(export_scope.turn)
-        assert turn is not None
-        assert export_scope.player_id is not None
-        services.persistence.put_ledger(
-            services.game_id,
-            services.perspective,
-            export_scope.turn,
-            export_scope.player_id,
-            PersistedFleetLedger(
-                ledger=ensure_fleet_baseline_for_player(
-                    services.game_id,
-                    services.perspective,
-                    turn,
-                    export_scope.player_id,
-                ),
-                provenance=FleetMaterializationProvenance(
-                    turn_evidence_at_n=True,
-                    prior_ledger_at_n_minus_1=True,
-                ),
-            ),
+    ctx, scope, player_id, other_player_id, fleet_persistence = (
+        ensure_fleet_export_gap_fill_context(
+            sample_turn,
+            memory_backend,
+            turn_number=turn_number,
+            seed_fleet_through=turn_number - 2,
         )
-        return True
+    )
+    host_turn = ctx.load_turn(turn_number)
+    assert host_turn is not None
+
+    with pytest.raises(ConflictError, match="requires a final prior ledger"):
+        get_or_materialize_fleet_ledger_for_player(
+            fleet_persistence,
+            scope.game_id,
+            scope.perspective,
+            player_id,
+            host_turn,
+            load_turn=ctx.load_turn,
+        )
 
     with patch.object(
         export_ensure_module,
         "ensure_export_scope_via_orchestrator",
-        side_effect=tracking_ensure,
-    ):
+        wraps=export_ensure_module.ensure_export_scope_via_orchestrator,
+    ) as ensure_spy:
+        assert ensure_fleet_export(ctx, scope) is True
+
+    assert ensure_spy.call_count == 1
+    for filled_turn in (turn_number - 1, turn_number):
+        assert fleet_persistence.has_final_ledger(
+            scope.game_id,
+            scope.perspective,
+            filled_turn,
+            player_id,
+        )
+        assert not fleet_persistence.has_ledger(
+            scope.game_id,
+            scope.perspective,
+            filled_turn,
+            other_player_id,
+        )
+
+
+def test_nested_ensure_dedupes_same_player_node(sample_turn, memory_backend):
+    """Orchestrator fleet ensure is idempotent: second call short-circuits when final.
+
+    Real submit+wait runs once; a second ensure of the satisfied scope must not
+    re-enter ``ensure_export_scope_via_orchestrator`` (is_satisfied short-circuit).
+    """
+    from api.compute import export_ensure as export_ensure_module
+
+    ctx, scope, player_id, _, fleet_persistence = ensure_fleet_export_gap_fill_context(
+        sample_turn,
+        memory_backend,
+    )
+
+    with patch.object(
+        export_ensure_module,
+        "ensure_export_scope_via_orchestrator",
+        wraps=export_ensure_module.ensure_export_scope_via_orchestrator,
+    ) as ensure_spy:
         assert ensure_fleet_export(ctx, scope) is True
         assert ensure_fleet_export(ctx, scope) is True
 
-    assert orchestrator_calls == [(turn_number, player_id)]
+    assert ensure_spy.call_count == 1
+    assert fleet_persistence.has_final_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        player_id,
+    )
 
 
 def test_ensure_fleet_export_does_not_invoke_full_snapshot_materialize(sample_turn, memory_backend):
