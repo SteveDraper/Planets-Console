@@ -231,7 +231,7 @@ def _prepare_homeworld_ensure_chain(
     services: HomeworldLocatorComputeServices,
 ) -> None:
     """Auto-fetch missing dependency-chain turns before orchestrator DAG plan."""
-    unavailable = ctx.ensure_declared_dependencies(ANALYTIC_ID, scope)
+    unavailable = ctx.dependency_walk_unavailable(ANALYTIC_ID, scope)
     if unavailable is None:
         return
     if unavailable == "turn_not_stored":
@@ -242,7 +242,7 @@ def _prepare_homeworld_ensure_chain(
         )
         if fill.still_missing is not None:
             _raise_chain_fill_failure(scope, fill)
-        unavailable = ctx.ensure_declared_dependencies(ANALYTIC_ID, scope)
+        unavailable = ctx.dependency_walk_unavailable(ANALYTIC_ID, scope)
         if unavailable is None:
             return
     _raise_dependency_ensure_unavailable(ctx, scope, unavailable)

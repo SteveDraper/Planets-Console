@@ -347,7 +347,12 @@ class AnalyticQueryContext:
         analytic_id: str,
         scope: ExportScope,
     ) -> UnavailableReason | None:
-        """Return walk-time unavailability without running ensure work."""
+        """Return walk-time unavailability without running ensure work.
+
+        Production ensure runs through the compute orchestrator (``ensure_scope`` /
+        ``query``). Callers that need a cheap ``turn_not_stored`` / cycle check
+        before submit (e.g. homeworld turn fill) use this walk-only probe.
+        """
         walk_outcome = self._walk_export_dependencies(
             analytic_id,
             scope,
@@ -356,19 +361,6 @@ class AnalyticQueryContext:
         if not isinstance(walk_outcome, DependencyWalkResult):
             return walk_outcome
         return None
-
-    def ensure_declared_dependencies(
-        self,
-        analytic_id: str,
-        scope: ExportScope,
-    ) -> UnavailableReason | None:
-        """Walk declared deps for unavailability only -- no nested sync ensure.
-
-        Production ensure runs through the compute orchestrator (``ensure_scope`` /
-        ``query``). This method remains for callers that need a cheap
-        ``turn_not_stored`` / cycle check before submit (e.g. homeworld turn fill).
-        """
-        return self.dependency_walk_unavailable(analytic_id, scope)
 
     def _ensure_query_root(
         self,

@@ -503,11 +503,11 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
     ).exports
 
     walk_scopes: list[tuple[str, int]] = []
-    original_ensure_declared = AnalyticQueryContext.ensure_declared_dependencies
+    original_dependency_walk = AnalyticQueryContext.dependency_walk_unavailable
 
-    def tracking_ensure_declared_dependencies(self, analytic_id, scope):
+    def tracking_dependency_walk_unavailable(self, analytic_id, scope):
         walk_scopes.append((analytic_id, scope.turn))
-        return original_ensure_declared(self, analytic_id, scope)
+        return original_dependency_walk(self, analytic_id, scope)
 
     orchestrator_calls: list[tuple[str, int]] = []
 
@@ -547,8 +547,8 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
     with (
         patch.object(
             AnalyticQueryContext,
-            "ensure_declared_dependencies",
-            tracking_ensure_declared_dependencies,
+            "dependency_walk_unavailable",
+            tracking_dependency_walk_unavailable,
         ),
         patch.object(
             export_ensure_module,
