@@ -140,9 +140,7 @@ def test_fleet_seed_chain_starts_at_accelerated_floor_with_turn_two_hole(sample_
         turn4.game.id,
         turn4.player.id,
         player_id,
-        persistence.player_invalidation_generation(
-            turn4.game.id, turn4.player.id, player_id
-        ),
+        persistence.player_invalidation_generation(turn4.game.id, turn4.player.id, player_id),
     )
     persisted = _materialize_fleet_ledger_chain_for_player(
         persistence,

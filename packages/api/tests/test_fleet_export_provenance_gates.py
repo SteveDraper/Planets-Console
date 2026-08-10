@@ -223,9 +223,7 @@ def test_get_or_materialize_fleet_snapshot_does_not_short_circuit_on_partial_cac
         host_turn,
         persistence=persistence,
         stored_turns=stored_turns,
-        seed_fleet_prerequisites_for=tuple(
-            player.id for player in iter_turn_players(turn)
-        ),
+        seed_fleet_prerequisites_for=tuple(player.id for player in iter_turn_players(turn)),
     )
     fleet_services = ctx.export_services["fleet"]
     fleet_services.persistence.put_ledger(
