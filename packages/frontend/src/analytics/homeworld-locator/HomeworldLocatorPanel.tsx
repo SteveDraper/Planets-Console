@@ -17,8 +17,8 @@ import {
 import {
   HomeworldPlayerAccordion,
   HomeworldSectorAccordion,
-} from './HomeworldSectorAccordion'
-import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
+} from './HomeworldLocatorAccordion'
+import { buildHomeworldSectorPanelModel } from './homeworldLocatorPanelModel'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
 import type { HomeworldCandidateRecord } from './wireSchema'
 

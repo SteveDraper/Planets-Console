@@ -8,12 +8,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelectionStore'
-import { HomeworldPlayerAccordion, HomeworldSectorAccordion } from './HomeworldSectorAccordion'
+import { HomeworldPlayerAccordion, HomeworldSectorAccordion } from './HomeworldLocatorAccordion'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 import type {
   HomeworldPlayerPanelSection,
   HomeworldSectorPanelSection,
-} from './homeworldSectorPanelModel'
+} from './homeworldLocatorPanelModel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 function annularSector(

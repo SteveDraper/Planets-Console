@@ -19,7 +19,7 @@ import {
   sortCandidatesPreferredFirst,
   sortHomeworldSectorsNorthernmostClockwise,
   sortRosterByPlayerIdAscending,
-} from './homeworldSectorPanelModel'
+} from './homeworldLocatorPanelModel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 /** Annular quarter-sector at origin spanning [angleStart, angleEnd] (CCW). */
@@ -100,7 +100,7 @@ function planetEnvelope(planetId: number): MapRegionOverlay {
   }
 }
 
-describe('homeworldSectorPanelModel', () => {
+describe('homeworldLocatorPanelModel', () => {
   it('computes mid-angle from outer arc endpoints', () => {
     // North-east quarter: 0 → π/2, mid = π/4
     const overlay = annularSector('homeworld-sector-0', 0, Math.PI / 2)

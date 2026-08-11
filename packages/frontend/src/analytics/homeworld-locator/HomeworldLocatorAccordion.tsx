@@ -14,7 +14,7 @@ import { HomeworldCandidateRows } from './HomeworldCandidateRows'
 import type {
   HomeworldPlayerPanelSection,
   HomeworldSectorPanelSection,
-} from './homeworldSectorPanelModel'
+} from './homeworldLocatorPanelModel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 type AccordionCommonProps = {
