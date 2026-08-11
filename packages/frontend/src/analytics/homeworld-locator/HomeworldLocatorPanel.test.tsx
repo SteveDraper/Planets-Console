@@ -107,20 +107,41 @@ describe('HomeworldLocatorPanel', () => {
     vi.mocked(postHomeworldLocatorRefresh).mockReset()
   })
 
-  it('renders read-only candidate rows without assert controls', async () => {
+  it('renders player tiles with pinned candidates and no flat dump', async () => {
+    const user = userEvent.setup()
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
       inactiveReason: null,
       baselineDegraded: true,
       baselineTurn: 4,
-      rows: [CANDIDATE_ROW],
+      rows: [
+        CANDIDATE_ROW,
+        {
+          ...CANDIDATE_ROW,
+          planetId: 99,
+          perspective: null,
+          confidenceTier: 'possible',
+        },
+      ],
     })
 
-    renderPanel()
+    const roster = [
+      perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
+      perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
+    ]
+    renderPanel(roster)
+
     expect(await screen.findByRole('status')).toHaveTextContent(/Baseline degraded/)
-    expect(screen.getByText('12')).toBeInTheDocument()
+    // playerId order: alice then bob
     expect(screen.getByText('alice (The Federation)')).toBeInTheDocument()
+    expect(screen.getByText('bob (The Lizards)')).toBeInTheDocument()
+    expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()
+    expect(screen.queryByText('99')).not.toBeInTheDocument()
+    expect(screen.queryByText('12')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /expand player alice/i }))
+    expect(screen.getByText('12')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /assert hw/i })).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/assert ownership/i)).not.toBeInTheDocument()
   })

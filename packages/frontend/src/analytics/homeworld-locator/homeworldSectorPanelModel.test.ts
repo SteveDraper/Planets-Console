@@ -4,14 +4,17 @@
 
 import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
+import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
 import {
   buildHomeworldSectorPanelModel,
   clockwiseFromNorthSortKey,
   homeworldSectorAccordionTitle,
+  isHomeworldSidebarPlayerCandidate,
   sectorMidAngleRadians,
   sortCandidatesPreferredFirst,
   sortHomeworldSectorsNorthernmostClockwise,
+  sortRosterByPlayerIdAscending,
 } from './homeworldSectorPanelModel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
@@ -143,16 +146,92 @@ describe('homeworldSectorPanelModel', () => {
     ])
   })
 
-  it('builds flat model when no sector overlays', () => {
-    const rows = [
-      candidate({ planetId: 2, confidenceTier: 'possible' }),
-      candidate({ planetId: 1, confidenceTier: 'definite' }),
+  it('builds player model when no sector overlays', () => {
+    const roster = [
+      perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
+      perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
     ]
-    const model = buildHomeworldSectorPanelModel(rows, [], new Map())
-    expect(model.kind).toBe('flat')
-    if (model.kind === 'flat') {
-      expect(model.candidates.map((r) => r.planetId)).toEqual([1, 2])
-    }
+    const rows = [
+      candidate({ planetId: 30, perspective: 1, confidenceTier: 'possible' }),
+      candidate({ planetId: 10, perspective: 1, confidenceTier: 'definite' }),
+      candidate({
+        planetId: 20,
+        perspective: 2,
+        confidenceTier: 'possible',
+        locationAsserted: true,
+      }),
+      candidate({ planetId: 99, perspective: null, confidenceTier: 'possible' }),
+      candidate({
+        planetId: 40,
+        perspective: 2,
+        confidenceTier: 'possible',
+        isMostProbable: true,
+      }),
+    ]
+    const model = buildHomeworldSectorPanelModel(rows, [], new Map(), roster)
+    expect(model.kind).toBe('players')
+    if (model.kind !== 'players') return
+    // playerId ascending: alice (2) then bob (847)
+    expect(model.sections.map((s) => s.playerId)).toEqual([2, 847])
+    expect(model.sections.map((s) => s.title)).toEqual([
+      'alice (The Federation)',
+      'bob (The Lizards)',
+    ])
+    expect(model.sections[0]!.candidates.map((c) => c.planetId)).toEqual([10])
+    expect(model.sections[1]!.candidates.map((c) => c.planetId)).toEqual([20])
+  })
+
+  it('qualifies sidebar player candidates by definite bind or location+ownership', () => {
+    expect(
+      isHomeworldSidebarPlayerCandidate(
+        candidate({ planetId: 1, perspective: 2, confidenceTier: 'definite' }),
+        2
+      )
+    ).toBe(true)
+    expect(
+      isHomeworldSidebarPlayerCandidate(
+        candidate({
+          planetId: 2,
+          perspective: 2,
+          confidenceTier: 'possible',
+          locationAsserted: true,
+        }),
+        2
+      )
+    ).toBe(true)
+    expect(
+      isHomeworldSidebarPlayerCandidate(
+        candidate({ planetId: 3, perspective: 2, confidenceTier: 'possible' }),
+        2
+      )
+    ).toBe(false)
+    expect(
+      isHomeworldSidebarPlayerCandidate(
+        candidate({
+          planetId: 4,
+          perspective: null,
+          confidenceTier: 'possible',
+          locationAsserted: true,
+        }),
+        2
+      )
+    ).toBe(false)
+    expect(
+      isHomeworldSidebarPlayerCandidate(
+        candidate({ planetId: 5, perspective: 1, confidenceTier: 'definite' }),
+        2
+      )
+    ).toBe(false)
+  })
+
+  it('sorts roster by playerId ascending', () => {
+    const roster = [
+      perspectiveRow(1, 'alice', { playerId: 99 }),
+      perspectiveRow(2, 'bob', { playerId: 3 }),
+    ]
+    expect(sortRosterByPlayerIdAscending(roster).map((p) => p.playerId)).toEqual([
+      3, 99,
+    ])
   })
 
   it('groups candidates into sectors by map position', () => {

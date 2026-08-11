@@ -1,15 +1,18 @@
 /**
- * Pure model helpers for the homeworld locator sector accordion panel:
+ * Pure model helpers for the homeworld locator sidebar panel:
  * northernmost-then-clockwise sector order, preferred-first candidates,
- * sector titles, and planet→sector grouping.
+ * sector titles, planet→sector grouping, and player-tile grouping when
+ * sector overlays are absent.
  */
 
 import type {
   MapRegionBoundaryGeometry,
   MapRegionOverlay,
 } from '../../api/mapRegionOverlayTypes'
+import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { CONFIDENCE_DEFINITE } from './constants'
 import { formatHomeworldSectorHoverLine } from './formatHomeworldSectorHover'
+import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import { findHomeworldSectorAtMapPoint } from './resolveOwnershipAssertTarget'
 import {
   homeworldSectorsPresentOnMap,
@@ -26,6 +29,13 @@ export type HomeworldSectorPanelSection = {
   candidates: readonly HomeworldCandidateRecord[]
 }
 
+export type HomeworldPlayerPanelSection = {
+  playerOrdinal: number
+  playerId: number
+  title: string
+  candidates: readonly HomeworldCandidateRecord[]
+}
+
 export type HomeworldSectorPanelModel =
   | {
       kind: 'sectors'
@@ -33,8 +43,8 @@ export type HomeworldSectorPanelModel =
       unassigned: readonly HomeworldCandidateRecord[]
     }
   | {
-      kind: 'flat'
-      candidates: readonly HomeworldCandidateRecord[]
+      kind: 'players'
+      sections: readonly HomeworldPlayerPanelSection[]
     }
 
 /** Map-center from the first arc edge on a homeworld sector boundary. */
@@ -173,16 +183,42 @@ function preferredCandidateRank(row: HomeworldCandidateRecord): number {
 }
 
 /**
+ * Whether a candidate belongs in a player-tile sidebar section for ``playerOrdinal``.
+ * Machine definite + slot-anchored, or location assert with known ownership bind
+ * (``perspective`` matches the player -- asserted or observed).
+ */
+export function isHomeworldSidebarPlayerCandidate(
+  row: HomeworldCandidateRecord,
+  playerOrdinal: number
+): boolean {
+  if (row.perspective !== playerOrdinal) return false
+  if (row.confidenceTier === CONFIDENCE_DEFINITE) return true
+  return row.locationAsserted === true
+}
+
+/** Roster players sorted by host ``playerId`` ascending (stable on ties by ordinal). */
+export function sortRosterByPlayerIdAscending(
+  roster: readonly PerspectiveRow[]
+): PerspectiveRow[] {
+  return [...roster].sort((a, b) => {
+    const idDiff = a.playerId - b.playerId
+    if (idDiff !== 0) return idDiff
+    return a.ordinal - b.ordinal
+  })
+}
+
+/**
  * Build accordion model: per-sector sections when homeworld-sector overlays exist,
- * otherwise a flat candidate list (non-circular / no-overlay games).
+ * otherwise one player tile per roster player (no flat candidate dump).
  */
 export function buildHomeworldSectorPanelModel(
   rows: readonly HomeworldCandidateRecord[],
   overlays: readonly MapRegionOverlay[],
-  planetPositions: ReadonlyMap<number, { x: number; y: number }>
+  planetPositions: ReadonlyMap<number, { x: number; y: number }>,
+  roster: readonly PerspectiveRow[] = []
 ): HomeworldSectorPanelModel {
   if (!homeworldSectorsPresentOnMap(overlays)) {
-    return { kind: 'flat', candidates: sortCandidatesPreferredFirst(rows) }
+    return buildHomeworldPlayersPanelModel(rows, roster)
   }
 
   const orderedSectors = sortHomeworldSectorsNorthernmostClockwise(overlays)
@@ -236,4 +272,25 @@ export function buildHomeworldSectorPanelModel(
     sections,
     unassigned: sortCandidatesPreferredFirst(unassigned),
   }
+}
+
+/** Player-tile model: all roster players, sparse pinned/asserted candidates only. */
+export function buildHomeworldPlayersPanelModel(
+  rows: readonly HomeworldCandidateRecord[],
+  roster: readonly PerspectiveRow[]
+): HomeworldSectorPanelModel {
+  const sections: HomeworldPlayerPanelSection[] = sortRosterByPlayerIdAscending(roster).map(
+    (player) => {
+      const qualifying = rows.filter((row) =>
+        isHomeworldSidebarPlayerCandidate(row, player.ordinal)
+      )
+      return {
+        playerOrdinal: player.ordinal,
+        playerId: player.playerId,
+        title: formatHomeworldOwnershipPickLabel(player.name, player.raceName),
+        candidates: sortCandidatesPreferredFirst(qualifying),
+      }
+    }
+  )
+  return { kind: 'players', sections }
 }

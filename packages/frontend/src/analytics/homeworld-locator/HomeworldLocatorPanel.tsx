@@ -1,5 +1,5 @@
 /**
- * Homeworld locator sidebar panel: sector accordion, refresh (#37 / #283).
+ * Homeworld locator sidebar panel: sector/player accordion, refresh (#37 / #283).
  * Assert/revoke is map-context-menu only -- panel rows are read-only.
  */
 
@@ -14,8 +14,10 @@ import {
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
   homeworldInactiveHint,
 } from './constants'
-import { HomeworldCandidateRows } from './HomeworldCandidateRows'
-import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
+import {
+  HomeworldPlayerAccordion,
+  HomeworldSectorAccordion,
+} from './HomeworldSectorAccordion'
 import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
 import type { HomeworldCandidateRecord } from './wireSchema'
@@ -68,8 +70,8 @@ export function HomeworldLocatorPanel({
     queryFn: () => fetchHomeworldLocatorTable(analyticScope!),
     enabled: fetchEnabled && analyticScope != null,
   })
-  // Hold until overlays are known -- building with empty overlays flashes a flat
-  // list before the sector accordion appears on circular maps. Settled failure
+  // Hold until overlays are known -- building with empty overlays flashes player
+  // tiles before the sector accordion appears on circular maps. Settled failure
   // is not "awaiting" (surface overlaysError instead of perpetual Loading).
   const awaitingOverlays =
     !homeworldMapOverlaysQuerySucceeded && overlaysError == null
@@ -82,12 +84,13 @@ export function HomeworldLocatorPanel({
   const panelModel = useMemo(() => {
     if (awaitingSectorModel) return null
     const rows: readonly HomeworldCandidateRecord[] = tableQuery.data?.rows ?? []
-    return buildHomeworldSectorPanelModel(rows, overlays, planetPositions)
+    return buildHomeworldSectorPanelModel(rows, overlays, planetPositions, roster)
   }, [
     tableQuery.data?.rows,
     awaitingSectorModel,
     overlays,
     planetPositions,
+    roster,
   ])
 
   const refreshMutation = useHomeworldLocatorRefreshMutation(analyticScope)
@@ -166,9 +169,9 @@ export function HomeworldLocatorPanel({
           selectedSectorIndexes={selectedSectorIndexes}
           onToggleSectorIndex={onToggleSectorIndex}
         />
-      ) : panelModel?.kind === 'flat' ? (
-        <HomeworldCandidateRows
-          rows={panelModel.candidates}
+      ) : panelModel?.kind === 'players' ? (
+        <HomeworldPlayerAccordion
+          sections={panelModel.sections}
           baselineDegraded={data.baselineDegraded}
           baselineTurn={data.baselineTurn}
           roster={roster}

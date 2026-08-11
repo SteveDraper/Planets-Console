@@ -15,6 +15,7 @@ import {
   HOMEWORLD_REGION_SELECTION_UI_PRESETS,
   type HomeworldRegionSelectionUiPreset,
 } from '../../lib/homeworldRegionSelection'
+import { homeworldSectorsPresentOnMap } from './homeworldSectorIndex'
 import { useBaseMapPlanetPositions } from './useBaseMapPlanetPositions'
 import { useHomeworldLocatorMapOverlays } from './useHomeworldLocatorMapOverlays'
 import { useHomeworldRegionSelection } from './useHomeworldRegionSelection'
@@ -119,6 +120,9 @@ export function HomeworldLocatorTile({
 
   const showExpandedBody = canExpand && expanded
   const chevronPointsDown = showExpandedBody
+  // Region selection is sector-outline chrome; hide in player-tile mode (no sectors).
+  const showRegionSelection =
+    homeworldMapOverlaysQuerySucceeded && homeworldSectorsPresentOnMap(overlays)
 
   return (
     <div
@@ -189,10 +193,12 @@ export function HomeworldLocatorTile({
             />
             <span>Show overlays</span>
           </label>
-          <HomeworldRegionSelectionControl
-            value={uiPreset}
-            onChange={setUiPreset}
-          />
+          {showRegionSelection ? (
+            <HomeworldRegionSelectionControl
+              value={uiPreset}
+              onChange={setUiPreset}
+            />
+          ) : null}
           <HomeworldLocatorPanel
             analyticScope={analyticScope}
             fetchEnabled={canExpand}
