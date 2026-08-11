@@ -143,7 +143,9 @@ def resolve_viewpoint_pin_planet(
        location planet on the map (lowest id), else a definite slot-anchored
        candidate.
     2. Normal shell: definite slot-anchored matching ``shell_perspective``
-       (viewpoint owner's observed HW), else any definite slot-anchored.
+       (viewpoint owner's observed HW), preferring rows that are not
+       location-asserted so ownership-bound asserts cannot steal the pin;
+       else any definite slot-anchored (same preference).
     """
     from api.analytics.homeworld_locator.constants import SPECTATOR_PERSPECTIVE
 
@@ -163,25 +165,44 @@ def resolve_viewpoint_pin_planet(
                 if planet is not None:
                     return planet
 
-    if shell_perspective is not None and shell_perspective != SPECTATOR_PERSPECTIVE:
+    def _first_definite_slot_anchored(
+        *,
+        required_perspective: int | None,
+        prefer_not_location_asserted: bool,
+    ) -> Planet | None:
+        matches = []
         for row in view.candidates:
             if row.confidence_tier != CONFIDENCE_DEFINITE:
                 continue
-            if row.perspective != shell_perspective:
+            if row.perspective is None:
                 continue
-            planet = _planet_if_present(row.planet_id)
-            if planet is not None:
-                return planet
+            if required_perspective is not None and row.perspective != required_perspective:
+                continue
+            if _planet_if_present(row.planet_id) is None:
+                continue
+            matches.append(row)
+        if prefer_not_location_asserted:
+            observed = [row for row in matches if not row.location_asserted]
+            if observed:
+                matches = observed
+        if not matches:
+            return None
+        return _planet_if_present(matches[0].planet_id)
 
-    for row in view.candidates:
-        if row.confidence_tier != CONFIDENCE_DEFINITE:
-            continue
-        if row.perspective is None:
-            continue
-        planet = _planet_if_present(row.planet_id)
-        if planet is not None:
-            return planet
-    return None
+    if shell_perspective is not None and shell_perspective != SPECTATOR_PERSPECTIVE:
+        # Prefer the observed viewpoint HW over location-asserted planets that
+        # later acquired the same perspective via ownership bind (conqueror noise).
+        pin = _first_definite_slot_anchored(
+            required_perspective=shell_perspective,
+            prefer_not_location_asserted=True,
+        )
+        if pin is not None:
+            return pin
+
+    return _first_definite_slot_anchored(
+        required_perspective=None,
+        prefer_not_location_asserted=True,
+    )
 
 
 def annular_sector_boundary(
@@ -676,14 +697,19 @@ def build_homeworld_sector_overlays_for_turn(
     """Emit sector overlays for a shell turn when the emission gate passes."""
     if get_config().homeworld_locator.use_player_homeworld_sidebar:
         return ()
-    pin = resolve_viewpoint_pin_planet(
-        view,
-        turn.planets,
-        shell_perspective=shell_perspective,
-        asserted_location_planet_ids=tuple(
-            row.planet_id for row in view.candidates if row.location_asserted
-        ),
-    )
+    planet_by_id = {planet.id: planet for planet in turn.planets}
+    pin: Planet | None = None
+    if view.sector_pin_planet_id is not None:
+        pin = planet_by_id.get(view.sector_pin_planet_id)
+    if pin is None:
+        pin = resolve_viewpoint_pin_planet(
+            view,
+            turn.planets,
+            shell_perspective=shell_perspective,
+            asserted_location_planet_ids=tuple(
+                row.planet_id for row in view.candidates if row.location_asserted
+            ),
+        )
     player_count = len(players_by_id(turn))
     if pin is None or not homeworld_sector_emission_eligible(
         turn, pin=pin, player_count=player_count

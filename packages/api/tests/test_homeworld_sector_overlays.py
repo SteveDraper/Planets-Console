@@ -448,6 +448,92 @@ def test_resolve_viewpoint_pin_planet(template_planet) -> None:
     assert resolve_viewpoint_pin_planet(view, [pin, other, rival]) is rival
 
 
+def test_resolve_viewpoint_pin_prefers_non_location_asserted(template_planet) -> None:
+    """Ownership-bound asserted locations must not steal the ring pin."""
+    observed = _planet(template_planet, planet_id=182, x=3, y=4)
+    asserted = _planet(template_planet, planet_id=45, x=1, y=2)
+    view = HomeworldCandidateView(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=45,
+                perspective=2,
+                confidence_tier=CONFIDENCE_DEFINITE,
+                location_asserted=True,
+            ),
+            HomeworldCandidateRecord(
+                planet_id=182,
+                perspective=2,
+                confidence_tier=CONFIDENCE_DEFINITE,
+                location_asserted=False,
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=False,
+        available=True,
+    )
+    assert resolve_viewpoint_pin_planet(view, [asserted, observed], shell_perspective=2) is observed
+
+
+def test_overlays_reuse_sector_pin_planet_id(template_planet, sample_turn) -> None:
+    """Materialize pin wins over post-derive ownership-bound competitors."""
+    asset = _stub_layout_asset(support_min=500.0, support_max=600.0)
+    players = [
+        replace(sample_turn.player, id=index + 1, username=f"p{index + 1}") for index in range(11)
+    ]
+    pin = _planet(template_planet, planet_id=182, x=2550, y=2000, ownerid=players[1].id)
+    steal = _planet(template_planet, planet_id=45, x=2200, y=2400, ownerid=players[0].id)
+    settings = replace(
+        sample_turn.settings,
+        hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+        mapshape=MAP_SHAPE_ROUND,
+        shiplimit=500,
+        endturn=100,
+        campaignmode=False,
+        planetscanrange=10000,
+    )
+    turn = replace(
+        sample_turn,
+        settings=settings,
+        player=players[1],
+        players=players,
+        planets=[pin, steal],
+        ships=[],
+        relations=[],
+    )
+    view = HomeworldCandidateView(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=45,
+                perspective=2,
+                confidence_tier=CONFIDENCE_DEFINITE,
+                location_asserted=True,
+            ),
+            HomeworldCandidateRecord(
+                planet_id=182,
+                perspective=2,
+                confidence_tier=CONFIDENCE_DEFINITE,
+                location_asserted=True,
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=False,
+        available=True,
+        sector_pin_planet_id=182,
+    )
+    overlays = build_homeworld_sector_overlays_for_turn(
+        turn,
+        view,
+        layout_asset=asset,
+        shell_perspective=2,
+        map_center=(2000.0, 2000.0),
+    )
+    assert overlays
+    # Pin 182 at +x from center → sector 0 contains the pin planet.
+    sector_zero = next(overlay for overlay in overlays if overlay.id == "homeworld-sector-0")
+    assert sector_zero.geometry.type == "boundary"
+    assert any(disk.x == pin.x and disk.y == pin.y for disk in sector_zero.geometry.disks)
+
+
 def test_resolve_viewpoint_pin_spectator_uses_asserted_location(template_planet) -> None:
     """Pseudo-observer (spectator) pin bootstraps from any asserted homeworld."""
     from api.analytics.homeworld_locator.constants import SPECTATOR_PERSPECTIVE

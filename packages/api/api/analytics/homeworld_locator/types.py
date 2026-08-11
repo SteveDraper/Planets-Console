@@ -101,6 +101,9 @@ class HomeworldCandidateView:
     inactive_reason: str | None = None
     # Soft layout-prior evidence from the shell evidence aggregate (may be empty).
     origin_distance_observations: tuple[OriginDistanceObservation, ...] = ()
+    # Pin used for sector partition during materialize (pre-derive). Overlay and
+    # layout-prior geometry must reuse this so ownership binds cannot rotate the ring.
+    sector_pin_planet_id: int | None = None
 
 
 @dataclass(frozen=True)

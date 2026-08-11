@@ -80,6 +80,44 @@ describe('resolveOwnershipAssertTarget', () => {
     })
   })
 
+  it('ignores envelope disks when keying ownership asserts', () => {
+    const wedgeAwayFromPlanet: MapRegionOverlay = {
+      ...sectorOverlay(10),
+      geometry: {
+        type: 'boundary',
+        // Wedge far from planet at (50, 50).
+        vertices: [
+          { x: 0, y: 0 },
+          { x: 1, y: 0 },
+          { x: 1, y: 1 },
+          { x: 0, y: 1 },
+        ],
+        edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }, { type: 'line' }],
+        disks: [{ x: 50, y: 50, radius: 20 }],
+      },
+    }
+    const trueWedge: MapRegionOverlay = {
+      ...sectorOverlay(1),
+      geometry: {
+        type: 'boundary',
+        vertices: [
+          { x: 40, y: 40 },
+          { x: 60, y: 40 },
+          { x: 60, y: 60 },
+          { x: 40, y: 60 },
+        ],
+        edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }, { type: 'line' }],
+      },
+    }
+    expect(
+      resolveOwnershipAssertTargetForPlanet([wedgeAwayFromPlanet, trueWedge], 88, 50, 50)
+    ).toEqual({
+      keying: 'sector',
+      sectorIndex: 1,
+      planetId: 88,
+    })
+  })
+
   it('returns null when sectors exist but the planet is outside all of them', () => {
     expect(
       resolveOwnershipAssertTargetForPlanet([sectorOverlay(0)], 12, 50, 50)

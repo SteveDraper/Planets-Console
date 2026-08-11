@@ -4,7 +4,7 @@
  */
 
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import { pointHitsMapRegionOverlay } from '../../lib/mapRegionOverlayHitTest'
+import { pointHitsMapRegionOverlayBoundary } from '../../lib/mapRegionOverlayHitTest'
 import { PROVENANCE_KIND_ASSERTED } from './constants'
 import { isHomeworldSectorOverlay } from './homeworldSectorIndex'
 import {
@@ -24,7 +24,8 @@ export function findHomeworldSectorAtMapPoint(
 ): MapRegionOverlay | null {
   for (const overlay of overlays) {
     if (!isHomeworldSectorOverlay(overlay)) continue
-    if (pointHitsMapRegionOverlay(mapX, mapY, overlay)) {
+    // Wedge boundary only -- envelope disks must not key ownership asserts.
+    if (pointHitsMapRegionOverlayBoundary(mapX, mapY, overlay)) {
       return overlay
     }
   }

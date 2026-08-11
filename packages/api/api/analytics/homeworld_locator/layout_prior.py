@@ -149,14 +149,19 @@ def try_layout_prior_problem(
     config when omitted (absolute-turn update weight ``w(t)=λ^t``).
     """
     resolved_count = player_count if player_count is not None else len(players_by_id(turn))
-    pin = resolve_viewpoint_pin_planet(
-        view,
-        turn.planets,
-        shell_perspective=shell_perspective,
-        asserted_location_planet_ids=tuple(
-            row.planet_id for row in view.candidates if row.location_asserted
-        ),
-    )
+    planet_by_id = {planet.id: planet for planet in turn.planets}
+    pin = None
+    if view.sector_pin_planet_id is not None:
+        pin = planet_by_id.get(view.sector_pin_planet_id)
+    if pin is None:
+        pin = resolve_viewpoint_pin_planet(
+            view,
+            turn.planets,
+            shell_perspective=shell_perspective,
+            asserted_location_planet_ids=tuple(
+                row.planet_id for row in view.candidates if row.location_asserted
+            ),
+        )
     if pin is None or not homeworld_sector_emission_eligible(
         turn, pin=pin, player_count=resolved_count
     ):
@@ -175,7 +180,7 @@ def try_layout_prior_problem(
     half = math.pi / resolved_count
     width = (2.0 * math.pi) / resolved_count
 
-    planets_by_id = {planet.id: planet for planet in turn.planets}
+    planets_by_id = planet_by_id
     owner_ids = visibility_owner_ids(turn.player.id, turn.relations)
     scan_origins = planet_scan_origins(
         turn.planets,
