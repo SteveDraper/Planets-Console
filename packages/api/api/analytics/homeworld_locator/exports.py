@@ -225,18 +225,13 @@ def _raise_dependency_ensure_unavailable(
     )
 
 
-def _ensure_homeworld_chain_dependencies(
+def _prepare_homeworld_ensure_chain(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
     services: HomeworldLocatorComputeServices,
 ) -> None:
-    """Run the framework ensure loop, repairing missing chain turns once.
-
-    The evidence self-chain needs contiguous stored TurnInfo. When the declared
-    dependency walk reports a hole, prefer login-backed auto-fetch and retry
-    before failing the shell turn.
-    """
-    unavailable = ctx.ensure_declared_dependencies(ANALYTIC_ID, scope)
+    """Auto-fetch missing dependency-chain turns before orchestrator DAG plan."""
+    unavailable = ctx.dependency_walk_unavailable(ANALYTIC_ID, scope)
     if unavailable is None:
         return
     if unavailable == "turn_not_stored":
@@ -247,7 +242,7 @@ def _ensure_homeworld_chain_dependencies(
         )
         if fill.still_missing is not None:
             _raise_chain_fill_failure(scope, fill)
-        unavailable = ctx.ensure_declared_dependencies(ANALYTIC_ID, scope)
+        unavailable = ctx.dependency_walk_unavailable(ANALYTIC_ID, scope)
         if unavailable is None:
             return
     _raise_dependency_ensure_unavailable(ctx, scope, unavailable)
@@ -270,6 +265,7 @@ def _fleet_built_turns_after_ensure(
 
 
 def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Bring homeworld export scope to satisfaction via orchestrator submit+wait."""
     if is_homeworld_export_ensure_satisfied(ctx, scope):
         return True
 
@@ -288,17 +284,13 @@ def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bo
         return True
 
     services = resolve_homeworld_services(ctx)
-    _ensure_homeworld_chain_dependencies(ctx, scope, services)
+    _prepare_homeworld_ensure_chain(ctx, scope, services)
 
-    baseline_result = ensure_homeworld_baseline(services, shell_turn=turn)
-    ensure_homeworld_evidence_refined(
-        services,
-        shell_turn=turn,
-        game_state_baseline_turn=baseline_result.game_state.baseline_turn,
-        fleet_built_turns=_fleet_built_turns_after_ensure(ctx, turn, services),
-    )
+    from api.compute.export_ensure import ensure_export_scope_via_orchestrator
+
+    satisfied = ensure_export_scope_via_orchestrator(ctx, ANALYTIC_ID, scope)
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
-    return is_homeworld_export_ensure_satisfied(ctx, scope)
+    return satisfied
 
 
 def materialize_homeworld_export_tree(

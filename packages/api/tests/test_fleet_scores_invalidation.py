@@ -11,7 +11,6 @@ from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
 from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
 from api.analytics.fleet.compute_services import FleetComputeServices
-from api.analytics.fleet.gap_fill_coordinator import reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
@@ -56,13 +55,6 @@ def _fake_orchestrator_with_nodes(nodes: dict) -> object:
             )
 
     return FakeOrchestrator()
-
-
-@pytest.fixture(autouse=True)
-def _reset_fleet_gap_fill_coordinators():
-    reset_coordinators()
-    yield
-    reset_coordinators()
 
 
 @pytest.fixture
@@ -149,25 +141,22 @@ def test_materialize_chain_does_not_invoke_on_snapshot_persisted(
 
 
 def test_single_player_hot_paths_do_not_reference_on_snapshot_persisted():
-    """Guard: coordinator and chain materialize paths stay on per-player ledger notify."""
-    guarded_modules = (
-        API_ROOT / "analytics" / "fleet" / "chain.py",
-        API_ROOT / "analytics" / "fleet" / "gap_fill_coordinator.py",
-        API_ROOT / "analytics" / "fleet" / "gap_fill_deferred_notifications.py",
-    )
+    """Guard: chain materialize paths stay on per-player ledger notify."""
+    guarded_modules = (API_ROOT / "analytics" / "fleet" / "chain.py",)
     for module_path in guarded_modules:
         source = module_path.read_text(encoding="utf-8")
         assert "on_snapshot_persisted" not in source, (
             f"{module_path.name} must not wire roster snapshot notification"
         )
+    assert not (API_ROOT / "analytics" / "fleet" / "gap_fill_deferred_notifications.py").exists()
 
 
-def test_gap_fill_defers_ledger_notify_until_chain_completes(
+def test_leaf_materialize_notifies_immediately_on_each_final_persist(
     persistence,
     load_turn,
     memory_backend,
 ):
-    """Per-player put_ledger during gap-fill must not notify; flush runs after the chain."""
+    """Leaf put_ledger fires on_ledger_persisted immediately (N1'; no end-of-chain batch)."""
     from api.analytics.turn_roster import iter_turn_players
 
     turn_111 = load_turn(111)
@@ -183,18 +172,18 @@ def test_gap_fill_defers_ledger_notify_until_chain_completes(
     _seed_scores_rows_for_all_players(inference_persistence, turn_111)
 
     callback_events: list[tuple[int, int]] = []
-    persistence.on_ledger_persisted = lambda event: callback_events.append(
-        (event.fleet_turn, event.player_id)
-    )
-
-    put_ledger_calls = 0
+    notify_counts_during_put: list[int] = []
     original_put_ledger = persistence.put_ledger
 
     def counting_put_ledger(*args, **kwargs):
-        nonlocal put_ledger_calls
-        put_ledger_calls += 1
-        return original_put_ledger(*args, **kwargs)
+        before = len(callback_events)
+        result = original_put_ledger(*args, **kwargs)
+        notify_counts_during_put.append(len(callback_events) - before)
+        return result
 
+    persistence.on_ledger_persisted = lambda event: callback_events.append(
+        (event.fleet_turn, event.player_id)
+    )
     persistence.put_ledger = counting_put_ledger  # type: ignore[method-assign]
 
     snapshot = get_or_materialize_fleet_snapshot(
@@ -209,17 +198,18 @@ def test_gap_fill_defers_ledger_notify_until_chain_completes(
     assert snapshot.turn == 111
     roster_size = len(list(iter_turn_players(turn_111)))
     assert roster_size > 1
-    assert put_ledger_calls >= roster_size
     assert len(callback_events) == roster_size
     assert all(turn_number == 111 for turn_number, _ in callback_events)
+    # Each put that becomes final notifies inside put_ledger, not in a later flush.
+    assert sum(notify_counts_during_put) == roster_size
 
 
-def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
+def test_leaf_final_persist_invalidates_scores_at_next_turn(
     persistence,
     load_turn,
     memory_backend,
 ):
-    """After gap-fill, newly complete fleet@(T-1) invalidates scores@T (not mid-chain)."""
+    """Single-turn leaf final fleet@T invalidates scores@(T+1) immediately on put."""
     from api.analytics.turn_roster import iter_turn_players
 
     inference_persistence, inference_materialization = _inference_materialization_for_fleet(
@@ -232,12 +222,12 @@ def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
     )
     invalidation.wire_scores_invalidation_to_fleet_persistence()
 
-    turn_112 = load_turn(112)
-    assert turn_112 is not None
     turn_111 = load_turn(111)
     assert turn_111 is not None
     turn_110 = load_turn(110)
     assert turn_110 is not None
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
     _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
     _seed_scores_rows_for_all_players(inference_persistence, turn_111)
     _seed_scores_rows_for_all_players(inference_persistence, turn_112)
@@ -246,12 +236,12 @@ def test_gap_fill_emits_deferred_scores_invalidation_after_chain_completes(
         persistence,
         628580,
         1,
-        turn_112,
+        turn_111,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
     )
 
-    assert snapshot.turn == 112
+    assert snapshot.turn == 111
     for player in iter_turn_players(turn_112):
         assert inference_persistence.get_row(628580, 1, 112, player.id) is None
 
@@ -319,7 +309,7 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
     memory_backend,
     monkeypatch,
 ):
-    """Skip reschedule only for same-orchestrator dep delivery while scores waits on fleet."""
+    """Own-DAG elision: skip wipe and reschedule when scores waits on matching fleet."""
     from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
     from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
     from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
@@ -388,20 +378,47 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
         player_id=8,
         materialization_version=FLEET_MATERIALIZATION_VERSION,
     )
+    wipe_calls = 0
+
+    def _count_wipe() -> None:
+        nonlocal wipe_calls
+        wipe_calls += 1
+
     assert (
         scheduler.should_reschedule_scores_row_after_fleet_persist(
             scope,
             event,
-            invalidate_row=lambda: None,
+            invalidate_row=_count_wipe,
         )
         is False
     )
+    assert wipe_calls == 0
 
     rescheduled_players: list[int] = []
     monkeypatch.setattr(
         "api.services.inference_invalidation_service.reschedule_inference_row",
         lambda _scope, player_id: rescheduled_players.append(player_id) or True,
     )
+
+    # Seed a durable scores row so on_fleet_ledger_persisted would wipe it if not elided.
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+    inference_persistence.put_row(
+        628580,
+        1,
+        112,
+        8,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="cached-8",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        notify=False,
+    )
+    assert inference_persistence.get_row(628580, 1, 112, 8) is not None
 
     invalidation = InferenceInvalidationService(
         inference_persistence,
@@ -411,6 +428,91 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
     invalidation.on_fleet_ledger_persisted(event)
 
     assert rescheduled_players == []
+    assert inference_persistence.get_row(628580, 1, 112, 8) is not None
+
+
+def test_fleet_ledger_persist_skips_reschedule_for_cold_own_dag_without_stream(
+    monkeypatch,
+):
+    """Cold ensure DAG: own-DAG elision via process orchestrator with no stream binding."""
+    from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
+    from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
+    from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
+    from api.analytics.fleet.types import FleetAcquisitionLedger, FleetMaterializationProvenance
+    from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+    from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.orchestrator import ComputeNodeRun
+
+    scheduler = InferenceRowScheduler(worker_count=0)
+    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=112)
+    # No begin_scope / stream binding -- cold export-ensure path.
+    scores_scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=112,
+        player_id=8,
+    )
+    fleet_scope = ComputeScope(
+        analytic_id="fleet",
+        game_id=628580,
+        perspective=1,
+        turn=111,
+        player_id=8,
+    )
+    persisted = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=8),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+        materialization_version=FLEET_MATERIALIZATION_VERSION,
+    )
+    process_orchestrator = _fake_orchestrator_with_nodes(
+        {
+            scores_scope: ComputeNodeRun(
+                scope=scores_scope,
+                dependency_scopes=(fleet_scope,),
+                state="waiting_deps",
+            ),
+            fleet_scope: ComputeNodeRun(
+                scope=fleet_scope,
+                dependency_scopes=(),
+                state="complete",
+                result_wire={
+                    "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
+                },
+            ),
+        }
+    )
+    monkeypatch.setattr(
+        "api.compute.runtime.get_compute_orchestrator",
+        lambda: process_orchestrator,
+    )
+
+    event = FleetLedgerPersistedEvent(
+        game_id=628580,
+        perspective=1,
+        fleet_turn=111,
+        player_id=8,
+        materialization_version=FLEET_MATERIALIZATION_VERSION,
+    )
+    wipe_calls = 0
+
+    def _count_wipe() -> None:
+        nonlocal wipe_calls
+        wipe_calls += 1
+
+    assert (
+        scheduler.should_reschedule_scores_row_after_fleet_persist(
+            scope,
+            event,
+            invalidate_row=_count_wipe,
+        )
+        is False
+    )
+    assert wipe_calls == 0
 
 
 def test_fleet_ledger_persist_reschedules_for_external_persist_while_waiting_on_fleet(
@@ -464,14 +566,21 @@ def test_fleet_ledger_persist_reschedules_for_external_persist_while_waiting_on_
         player_id=8,
         materialization_version=FLEET_MATERIALIZATION_VERSION,
     )
+    wipe_calls = 0
+
+    def _count_wipe() -> None:
+        nonlocal wipe_calls
+        wipe_calls += 1
+
     assert (
         scheduler.should_reschedule_scores_row_after_fleet_persist(
             scope,
             event,
-            invalidate_row=lambda: None,
+            invalidate_row=_count_wipe,
         )
         is True
     )
+    assert wipe_calls == 1
 
 
 def test_fleet_ledger_persist_reschedules_when_stream_fleet_version_differs(
@@ -849,7 +958,8 @@ def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(samp
     orchestrator._nodes[fleet_scope] = waiting_fleet
     orchestrator._nodes[scores_scope] = waiting_scores
 
-    orchestrator._refresh_node_readiness(waiting_scores)
+    with orchestrator._condition:
+        orchestrator._refresh_node_readiness(waiting_scores)
 
     assert waiting_scores.state == "waiting_deps"
     assert waiting_scores.error is None
@@ -869,7 +979,8 @@ def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(samp
     orchestrator._nodes[fleet_scope] = failed_fleet
     orchestrator._nodes[scores_scope] = cascade_scores
 
-    orchestrator._refresh_node_readiness(cascade_scores)
+    with orchestrator._condition:
+        orchestrator._refresh_node_readiness(cascade_scores)
 
     assert cascade_scores.state == "failed"
     assert cascade_scores.error is fleet_failure

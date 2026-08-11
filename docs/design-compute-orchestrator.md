@@ -377,7 +377,7 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 | **Complete** | If `generation != generation_at_submit`, discard result and re-queue node |
 | **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist` |
 
-Same semantics as gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` reads the **turn-scoped** fleet epoch for `fleet@(host_turn - 1)` so in-flight `tier_solve` work is discarded when that prior fleet changes -- not when same-player scores/fleet activity on unrelated turns advances the player-scoped counter used by fleet compute / gap-fill; `InferenceInvalidationService` still deletes inference row persistence and reschedules the open-stream row.
+Same semantics as former gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233); coordinator deleted in [#204](https://github.com/SteveDraper/Planets-Console/issues/204)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` reads the **turn-scoped** fleet epoch for `fleet@(host_turn - 1)` so in-flight `tier_solve` work is discarded when that prior fleet changes -- not when same-player scores/fleet activity on unrelated turns advances the player-scoped counter used by fleet compute / gap-fill. Fleet final `on_ledger_persisted` may wipe/reschedule ambient scores; **own-DAG elision** (#204) skips wipe and reschedule when `scores@(fleet_turn+1)` is already a non-terminal dependent of that fleet scope on the same DAG.
 
 **Follow-on ([#280](https://github.com/SteveDraper/Planets-Console/issues/280)):** generalize ancestor-repersist → dependent wipe + `force_fresh` as orchestrator **reverse-ENSURE** routing (derived from catalog edges, including `player_id="all"`). Migrate scores↔fleet off the scores-specific ledger callback onto that path; homeworld ownership ([#269](https://github.com/SteveDraper/Planets-Console/issues/269)) remains DAG-gated for open-turn until then. Does **not** demand-wake `waiting_deps` / parked nodes (ADR 0006).
 
@@ -475,6 +475,22 @@ Cancel silence is one operation (`stream_drain.seal_canceled`) with two justifie
 
 Until phase 2, table/map REST responses may still call `compute()` handlers directly; export ensure and streams migrate first.
 
+### Export ensure migration ([#204](https://github.com/SteveDraper/Planets-Console/issues/204))
+
+**Ensure means DAG unwind, not a second walker.** Bringing export scope `S` to terminal quality is `orchestrator.submit(S)` (plans `ENSURE_DEPENDENCIES` via `plan_compute_dag`) plus, for designated in-process callers, **orchestration-plane** `ComputeHandle.wait(timeout=…)` (default 300s, ported from the former gap-fill waiter). Pool workers and leaf `run_step` never wait.
+
+| Lock | Rule |
+|------|------|
+| Mechanism | One engine only — nested sync ensure production work and **`FleetGapFillCoordinator`** are retired (no thin Event-wait shim). Walk-time unavailability is `dependency_walk_unavailable` only (no second ensure walker). |
+| Callers | All production ensure paths (fleet, scores, homeworld, `ctx.query` when not `ensure_blocked`) migrate in #204. |
+| Priority | Inherit context: `stream_attached` / adopt; cold ensure `interactive_ensure`; warm `background`. |
+| `force_fresh` | Ensure defaults `false` (attach / `is_satisfied` short-circuit). Wipe / reschedule callers pass `true` when they must replace a terminal; ensure does not silently override to `true` on the unsatisfied path. Hollow terminals (durable wiped, node still `complete`) are dropped before default submit so `force_fresh=False` can plan fresh work. |
+| Wait timeout | Fails the **waiter** only; in-flight DAG continues for attach/retry/streams. |
+| `#109` | Separate BFF probe + opt-in job UX; preserve Core `probe` / `ensure_blocked` so oversized `query` does not auto full-DAG wait. |
+| Fleet→scores notify | Fire `on_ledger_persisted` on each fleet **final** node complete (no end-of-chain batch). **Own-DAG elision:** if `scores@(fleet_turn+1)` is already a non-terminal dependent of that fleet scope on this DAG, do **not** wipe or reschedule — first-pass dataflow is DependencyOutputs. Keep the side channel for ambient/external scores consumers. |
+
+Follow-ons (not #204): early RST-observed stream before same-turn scores ([#301](https://github.com/SteveDraper/Planets-Console/issues/301)); generic reverse-ENSURE ([#280](https://github.com/SteveDraper/Planets-Console/issues/280)); BFF ensure job surface ([#109](https://github.com/SteveDraper/Planets-Console/issues/109)).
+
 ---
 
 ## Package layout (target)
@@ -509,7 +525,7 @@ Tracked under [#190](https://github.com/SteveDraper/Planets-Console/issues/190):
 | Job wire + epochs | [#198](https://github.com/SteveDraper/Planets-Console/issues/198) | Wire builders, `DependencyOutputs`, invalidation re-check, persist coordination |
 | Fleet migration | [#199](https://github.com/SteveDraper/Planets-Console/issues/199) | Fleet leg steps; delete `FleetTableStreamScheduler` worker pool |
 | Scores migration | [#200](https://github.com/SteveDraper/Planets-Console/issues/200) | Tier steps; orchestrator primitives; delete `InferenceRowScheduler` worker pool; fleet overlay + `has_final_ledger` fix |
-| Export ensure migration | [#204](https://github.com/SteveDraper/Planets-Console/issues/204) | Ensure/gap-fill via orchestrator; retire coordinator + blocking ensure |
+| Export ensure migration | [#204](https://github.com/SteveDraper/Planets-Console/issues/204) | Ensure = orchestrator DAG `submit(root)` + orchestration-plane wait; **`FleetGapFillCoordinator`** + nested sync ensure retired; fleet→scores notify per final persist with own-DAG elision; #109 stays separate |
 | Turn cache | [#201](https://github.com/SteveDraper/Planets-Console/issues/201) | Orchestrator LRU + prefetch into job wire |
 | Singleton orchestrator | [#209](https://github.com/SteveDraper/Planets-Console/issues/209) | Process-wide orchestrator; retire per-ctx bindings + scope lease; observer registry |
 | Process-scoped export services | [#239](https://github.com/SteveDraper/Planets-Console/issues/239) | Retire per-node sticky `export_services` bags |
@@ -523,4 +539,5 @@ Tracked under [#190](https://github.com/SteveDraper/Planets-Console/issues/190):
 
 - Unit: scope normalization, WILDCARD keys, priority dequeue, epoch discard, dependency gating (no worker without deps).
 - Integration: fixture analytics with mutual dependencies; fleet+scores cold gap-fill parallelism; attach_inflight does not double pool workers.
-- Regression: existing `test_export_dependency_walk`, `test_gap_fill_coordinator`, scheduler fairness tests ported to orchestrator.
+- Regression: existing `test_export_dependency_walk`, gap-fill/epoch scenarios ported off `FleetGapFillCoordinator` onto orchestrator (#204), scheduler fairness tests ported to orchestrator.
+- #204: own-DAG fleet→scores elision; `ensure_blocked` without submit-and-wait; wait timeout does not abort shared work.

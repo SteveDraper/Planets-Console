@@ -323,13 +323,13 @@ class OrchestratorLifecycleMixin:
     ) -> None:
         """Transition ``node`` out of active dispatch and publish its outcome.
 
-        Shared by complete, fail, and park -- the three states that stop a
-        node's dispatch loop and report a :class:`ScopeLifecycleSnapshot`.
-        Soft park (``state="parked"``) does not release waiters (they keep
-        waiting for a real terminal outcome) and does not notify dependents
-        (dependents stay blocked rather than promoted); the caller emits its
-        own lifecycle event and resets ``generation_at_submit`` around this
-        call.
+        Caller must hold ``self._condition``. Shared by complete, fail, and park
+        -- the three states that stop a node's dispatch loop and report a
+        :class:`ScopeLifecycleSnapshot`. Soft park (``state="parked"``) does not
+        release waiters (they keep waiting for a real terminal outcome) and does
+        not notify dependents (dependents stay blocked rather than promoted); the
+        caller emits its own lifecycle event and resets ``generation_at_submit``
+        around this call.
         """
         soft_pause = state == "parked"
         node.state = state
@@ -341,6 +341,11 @@ class OrchestratorLifecycleMixin:
             for waiter in node.waiters:
                 waiter._waiter_error = error
             node.waiters.clear()
+            # Wake orchestration-plane ComputeHandle.wait callers (leaders and
+            # attachers). Invariant: ``_settle_node`` always runs while the
+            # caller holds ``self._condition`` (non-reentrant), so notify without
+            # re-entering the lock.
+            self._condition.notify_all()
         self._observers.notify_scope_outcome(node)
         if not soft_pause:
             completed_scope = node.scope

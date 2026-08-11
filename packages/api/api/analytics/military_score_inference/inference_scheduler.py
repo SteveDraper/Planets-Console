@@ -119,16 +119,23 @@ class InferenceRowScheduler(
         *,
         invalidate_row: Callable[[], None],
     ) -> bool:
-        """Return whether scores@N should reschedule after one fleet ledger persist.
+        """Return whether scores@N should wipe+reschedule after one fleet ledger persist.
 
-        Invalidation runs under the scheduler lock; orchestrator peeks run outside
-        that lock so adapters never read the live ``nodes`` map.
+        Own-DAG elision (#204): when scores is already a non-terminal dependent of
+        this fleet scope on the same orchestrator DAG, skip **both** durable wipe
+        and in-place reschedule -- first-pass dataflow is DependencyOutputs.
+        Elision peeks the stream binding's orchestrator when a scores stream is
+        open, otherwise the process compute orchestrator (cold export-ensure DAG
+        with no stream). Ambient / external consumers still wipe then reschedule
+        (reschedule is a no-op without a stream controller).
+
+        Orchestrator peeks run outside the scheduler lock so adapters never read
+        the live ``nodes`` map under that lock.
         """
+        from api.compute.runtime import get_compute_orchestrator
+
         with self._lock:
-            invalidate_row()
             binding = self._stream_binding_for_scope_locked(scope)
-            if binding is None:
-                return True
             scores_scope = ComputeScope(
                 analytic_id=SCORES_ANALYTIC_ID,
                 game_id=scope.game_id,
@@ -137,13 +144,22 @@ class InferenceRowScheduler(
                 player_id=event.player_id,
             )
             fleet_scope = self._fleet_scope_for_event(scope, event)
-            orchestrator = binding.orchestrator
-        return not self._should_skip_reschedule_for_fleet_persist(
+            orchestrator = binding.orchestrator if binding is not None else None
+
+        if orchestrator is None:
+            orchestrator = get_compute_orchestrator()
+
+        if self._should_skip_reschedule_for_fleet_persist(
             orchestrator,
             scores_scope,
             fleet_scope,
             event,
-        )
+        ):
+            return False
+
+        with self._lock:
+            invalidate_row()
+        return True
 
     def _should_skip_reschedule_for_fleet_persist(
         self,
@@ -152,13 +168,13 @@ class InferenceRowScheduler(
         fleet_scope: ComputeScope,
         event: FleetLedgerPersistedEvent,
     ) -> bool:
-        """Return whether to skip in-place reschedule for this fleet persist notification.
+        """Return whether to skip wipe+reschedule for this fleet persist notification.
 
         Own-DAG fleet persist notifications fire only after the fleet node is
         ``complete`` (deferred until after ``_complete_node``). Skip when scores is
         ``waiting_deps`` on that fleet scope and the completed fleet node's
         materialization version matches the notification. A persist while fleet is
-        still non-terminal is treated as external and must reschedule.
+        still non-terminal is treated as external and must wipe+reschedule.
         """
         scores_view = orchestrator.peek_scope_view(scores_scope)
         if scores_view is None or scores_view.state != "waiting_deps":

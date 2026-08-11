@@ -88,7 +88,9 @@ def test_materialized_tree_turn_one_empty_composition(sample_turn):
     }
 
 
-def test_materialized_tree_composition_omits_unknown_placeholder_launchers(sample_turn):
+def test_materialized_tree_composition_omits_unknown_placeholder_launchers(
+    sample_turn, persistence
+):
     player_id = first_player_id(sample_turn)
     sighting = single_ship_turn(turn_number=5, ship_id=99, owner_id=player_id, x=100, y=100)
     turn = turn_with_score_delta(sighting, turn_number=5, owner_id=player_id, shipchange=1)
@@ -98,8 +100,10 @@ def test_materialized_tree_composition_omits_unknown_placeholder_launchers(sampl
 
     ctx = export_chain_query_context(
         turn,
+        persistence=persistence,
         stored_turns=stored_turns,
         scheduler=InferenceRowScheduler(worker_count=0),
+        seed_fleet_prerequisites_for=player_id,
     )
     tree, _scope = materialize_fleet_tree(ctx, player_id, turn=5)
     ledger = tree["players"][0]
@@ -248,7 +252,9 @@ def test_materialized_tree_surfaces_in_progress_scores_status(sample_turn, persi
     assert tree["meta"]["searchStatus"] == "in_progress"
 
 
-def test_materialized_tree_includes_placeholder_records_with_incomplete_search(sample_turn):
+def test_materialized_tree_includes_placeholder_records_with_incomplete_search(
+    sample_turn, persistence
+):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
 
@@ -264,8 +270,10 @@ def test_materialized_tree_includes_placeholder_records_with_incomplete_search(s
 
     ctx = export_chain_query_context(
         turn,
+        persistence=persistence,
         stored_turns=stored_turns,
         scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
     )
     schedule_row_with_ladder(
         scheduler,

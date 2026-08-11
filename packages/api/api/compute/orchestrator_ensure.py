@@ -1,0 +1,65 @@
+"""Orchestration-plane ensure: satisfied short-circuit or submit+wait."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
+from api.compute.orchestrator_state import ComputeHandle, ComputeRequest
+
+if TYPE_CHECKING:
+    from api.compute.orchestrator import ComputeOrchestrator
+
+
+class OrchestratorEnsureMixin:
+    """Public ensure entry for designated in-process callers (#204)."""
+
+    def ensure_scope(
+        self: ComputeOrchestrator,
+        request: ComputeRequest,
+        *,
+        timeout: float | None = ENSURE_WAIT_TIMEOUT_SEC,
+    ) -> ComputeHandle:
+        """Bring ``request.scope`` to terminal quality on the orchestration plane.
+
+        If durable satisfaction already holds, returns a terminal handle without
+        blocking on pool work (submit may still short-circuit to ``complete``).
+        Otherwise submits with the caller's ``force_fresh`` (default ``False`` per
+        F1) and waits until the scope is terminal or ``timeout``.
+
+        When durable satisfaction fails but a terminal node remains (hollow after
+        wipe / invalidate), that cache-hit node is dropped under the orchestrator
+        lock before submit so ``force_fresh=False`` plans fresh work instead of
+        attaching to a stale ``complete``. Explicit ``force_fresh=True`` remains
+        the wipe / reschedule wake path; ensure does not silently set it.
+
+        Defaults match grill locks: cold ensure → ``interactive_ensure`` priority.
+        Pool workers and leaf ``run_step`` must never call this.
+        """
+        bundle = self._require_bundle(request)
+        ctx = self._ctx_for_bundle(bundle)
+        registration = self._compute_registry[request.scope.analytic_id]
+        already_satisfied = registration.persistence_policy.is_satisfied(
+            ctx,
+            request.scope,
+        )
+
+        if already_satisfied:
+            handle = self.submit(request)
+            if handle._node.is_terminal:
+                error = handle.error
+                if error is not None:
+                    raise error
+                return handle
+            return handle.wait(timeout=timeout)
+
+        with self._condition:
+            existing = self._nodes.get(request.scope)
+            # Hollow terminal: durable gone, node still complete/failed. Drop so
+            # default force_fresh=False can plan fresh work (F1). Leave non-terminal
+            # nodes alone for attach / singleflight; parked wake stays explicit.
+            if existing is not None and existing.is_terminal and not request.force_fresh:
+                self._replace_terminal_node(existing)
+            submission = self._submit_locked(request, wake_if_parked_only=False)
+        handle = self._finish_submission(submission)
+        return handle.wait(timeout=timeout)

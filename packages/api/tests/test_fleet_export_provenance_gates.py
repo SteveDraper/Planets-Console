@@ -9,8 +9,7 @@ from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
     _is_fleet_snapshot_cache_hit,
-    _materialize_fleet_ledger_chain_for_player,
-    get_or_materialize_fleet_ledger_for_player,
+    _materialize_and_persist_player_turn,
     get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.exports import EXPORT_CATALOG
@@ -214,10 +213,16 @@ def test_get_or_materialize_fleet_snapshot_does_not_short_circuit_on_partial_cac
     turn_number = 8
     stored_turns = _turn_chain_through(sample_turn, through_turn=turn_number)
     turn = stored_turns[turn_number]
-    ctx = export_chain_query_context(
+    host_turn = replace(
         sample_turn,
+        settings=replace(sample_turn.settings, turn=turn_number),
+        game=replace(sample_turn.game, turn=turn_number),
+    )
+    ctx = export_chain_query_context(
+        host_turn,
         persistence=persistence,
         stored_turns=stored_turns,
+        seed_fleet_prerequisites_for=tuple(player.id for player in iter_turn_players(turn)),
     )
     fleet_services = ctx.export_services["fleet"]
     fleet_services.persistence.put_ledger(
@@ -247,32 +252,29 @@ def test_get_or_materialize_fleet_snapshot_does_not_short_circuit_on_partial_cac
         is False
     )
 
-    ledger_calls: list[int] = []
-    original_ledger_materialize = get_or_materialize_fleet_ledger_for_player
+    snapshot = get_or_materialize_fleet_snapshot(
+        fleet_services.persistence,
+        GAME_ID,
+        perspective_id,
+        turn,
+        load_turn=ctx.load_turn,
+        inference_materialization=fleet_services.inference_materialization,
+    )
 
-    def counting_ledger_materialize(*args, **kwargs):
-        ledger_calls.append(kwargs.get("player_id", args[3]))
-        return original_ledger_materialize(*args, **kwargs)
-
-    with patch(
-        "api.analytics.fleet.chain.get_or_materialize_fleet_ledger_for_player",
-        side_effect=counting_ledger_materialize,
-    ):
-        snapshot = get_or_materialize_fleet_snapshot(
-            fleet_services.persistence,
-            GAME_ID,
-            perspective_id,
-            turn,
-            load_turn=ctx.load_turn,
-            inference_materialization=fleet_services.inference_materialization,
-        )
-
-    assert set(ledger_calls) == roster_ids
     assert snapshot is not None
     assert roster_ids <= {ledger.player_id for ledger in snapshot.players}
+    rematerialized = fleet_services.persistence.get_ledger(
+        GAME_ID,
+        perspective_id,
+        turn_number,
+        player_id,
+    )
+    assert rematerialized is not None
+    # Planted partial had prior_ledger_at_n_minus_1=False; rematerialize must replace it.
+    assert rematerialized.provenance.prior_ledger_at_n_minus_1 is True
 
 
-def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(
+def test_get_or_materialize_fleet_ledger_rematerializes_when_cached_partial(
     sample_turn,
     persistence,
 ):
@@ -280,28 +282,35 @@ def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(
     turn_number = 8
     stored_turns = _turn_chain_through(sample_turn, through_turn=turn_number)
     turn = stored_turns[turn_number]
-    ctx = export_chain_query_context(
+    roster_player_ids = tuple(player.id for player in iter_turn_players(turn))
+    host_turn = replace(
         sample_turn,
+        settings=replace(sample_turn.settings, turn=turn_number),
+        game=replace(sample_turn.game, turn=turn_number),
+    )
+    ctx = export_chain_query_context(
+        host_turn,
         persistence=persistence,
         stored_turns=stored_turns,
+        seed_fleet_prerequisites_for=roster_player_ids,
     )
     fleet_services = ctx.export_services["fleet"]
-    # Terminal scores@N for each rematerialized turn so provenance can close honestly
-    # (in-progress RowRun alone must not close turnEvidenceAtN).
-    for host_turn in range(2, turn_number + 1):
-        put_persisted_row(
-            persistence,
-            stored_turns[host_turn],
-            player_id,
-            PersistedInferenceRow(
-                status=STATUS_EXACT,
-                summary="seed",
-                solution_count=0,
-                is_complete=True,
-                solutions=[],
-            ),
-            host_turn=host_turn,
-        )
+    # Terminal scores@N so provenance can close honestly on rematerialize.
+    for host_turn_number in range(2, turn_number + 1):
+        for row_player_id in roster_player_ids:
+            put_persisted_row(
+                persistence,
+                stored_turns[host_turn_number],
+                row_player_id,
+                PersistedInferenceRow(
+                    status=STATUS_EXACT,
+                    summary="seed",
+                    solution_count=0,
+                    is_complete=True,
+                    solutions=[],
+                ),
+                host_turn=host_turn_number,
+            )
     fleet_services.persistence.put_ledger(
         GAME_ID,
         perspective(sample_turn),
@@ -311,7 +320,7 @@ def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(
     )
 
     materialize_calls = 0
-    original = _materialize_fleet_ledger_chain_for_player
+    original = _materialize_and_persist_player_turn
 
     def counting_materialize(*args, **kwargs):
         nonlocal materialize_calls
@@ -319,7 +328,7 @@ def test_get_or_materialize_fleet_ledger_rechains_when_cached_partial(
         return original(*args, **kwargs)
 
     with patch(
-        "api.analytics.fleet.chain._materialize_fleet_ledger_chain_for_player",
+        "api.analytics.fleet.chain._materialize_and_persist_player_turn",
         side_effect=counting_materialize,
     ):
         get_or_materialize_fleet_snapshot(

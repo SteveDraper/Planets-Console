@@ -227,14 +227,21 @@ def is_scores_export_turn_evidence_closed(ctx: AnalyticQueryContext, scope: Expo
     )
 
 
-def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    """Admit scores work for one scope without running CP-SAT on this thread.
+def admit_scores_export_work(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    *,
+    overlay_ensure: bool = False,
+) -> bool:
+    """Admit scores work for one scope without waiting on the orchestrator.
 
-    Ambient and historical turns share the same path. Satisfaction is probe-aligned
-    (persistence, scheduler, ensure-ephemeral). Cheap ImmediateRowAdmission terminals
-    are recorded as ensure-ephemeral and also written to inference-row storage when
-    missing so the materialization probe (fleet provenance) can close; real solve
-    work schedules a ``RowRun`` for orchestrator ``tier_solve``.
+    Cheap ImmediateRowAdmission terminals are recorded as ensure-ephemeral and
+    written to inference-row storage when missing; real solve work schedules a
+    ``RowRun`` for orchestrator ``tier_solve``. Leaf job-wire builders call this
+    (never ``ensure_scores_export`` / submit+wait).
+
+    ``overlay_ensure`` may sync-ensure prior fleet only for non-DAG callers; DAG
+    materialize/tier wires must pass ``False`` (fleet already on DependencyOutputs).
     """
     if scope.player_id is None:
         return True
@@ -255,7 +262,13 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     ):
         return True
 
-    mutated = _ensure_admit_inference_row(ctx, services, scope, turn)
+    mutated = _ensure_admit_inference_row(
+        ctx,
+        services,
+        scope,
+        turn,
+        overlay_ensure=overlay_ensure,
+    )
     if not mutated:
         return is_scores_export_ensure_satisfied_from_snapshot(
             gather_scores_ensure_probe_snapshot(ctx, services, scope, turn),
@@ -267,11 +280,29 @@ def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
     return resolved.decision.is_ensure_satisfied
 
 
+def ensure_scores_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Bring scores export scope to durable satisfaction via orchestrator submit+wait."""
+    if scope.player_id is None:
+        return True
+    if scope.turn <= 1:
+        return True
+    if ctx.load_turn(scope.turn) is None:
+        return True
+
+    from api.compute.export_ensure import ensure_export_scope_via_orchestrator
+
+    satisfied = ensure_export_scope_via_orchestrator(ctx, ANALYTIC_ID, scope)
+    ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
+    return satisfied
+
+
 def _ensure_admit_inference_row(
     ctx: AnalyticQueryContext,
     services: ScoresExportContext,
     scope: ExportScope,
     turn: TurnInfo,
+    *,
+    overlay_ensure: bool = False,
 ) -> bool:
     """Admit cheap terminals via ephemeral events, else schedule a RowRun for CP-SAT."""
     player_id = scope.player_id
@@ -309,7 +340,7 @@ def _ensure_admit_inference_row(
         turn_number=scope.turn,
         player_id=inputs.player_id,
         turn=turn,
-        overlay_ensure=True,
+        overlay_ensure=overlay_ensure,
     )
     schedule_inference_row(
         services.scheduler,

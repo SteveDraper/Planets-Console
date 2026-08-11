@@ -30,7 +30,12 @@ def _run_fleet_finalization_leg(job_wire: dict[str, object]) -> StepResult:
 
 
 def compute_fleet(ctx: AnalyticComputeContext) -> dict:
-    """Return the fleet acquisition ledger for the shell turn."""
+    """Return the fleet acquisition ledger for the shell turn.
+
+    Materializes via the roster snapshot path (multi-turn unwind without
+    orchestrator ensure-wait). Export ensure remains the durable player-scoped
+    path; REST compute migration onto ensure is #204 out-of-scope.
+    """
     from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
     from api.analytics.fleet.compute_services import resolve_fleet_compute_services
     from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
@@ -52,10 +57,12 @@ def get_fleet(turn: TurnInfo) -> dict:
     """Convenience entry for tests and direct callers without durable persistence."""
     from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 
+    services = build_ephemeral_fleet_compute_services(turn)
     return invoke_analytic_compute(
         compute_fleet,
         turn,
-        export_services={ANALYTIC_ID: build_ephemeral_fleet_compute_services(turn)},
+        load_turn=services.load_turn,
+        export_services={ANALYTIC_ID: services},
     )
 
 

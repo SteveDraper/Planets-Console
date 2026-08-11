@@ -543,3 +543,45 @@ def test_freighter_only_zero_military_score_uses_fast_path():
     assert len(result.solutions) == 1
     assert result.solutions[0].ship_builds[0].combo_id == GENERIC_FREIGHTER_COMBO_ID
     assert result.solutions[0].ship_builds[0].count == 1
+
+
+def test_configured_sat_search_workers_defaults_to_one(monkeypatch):
+    from api.analytics.military_score_inference.near_best_structural_search import (
+        configured_sat_search_workers,
+    )
+
+    monkeypatch.delenv("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS", raising=False)
+    assert configured_sat_search_workers() == 1
+
+
+def test_configured_sat_search_workers_env_override(monkeypatch):
+    from api.analytics.military_score_inference.near_best_structural_search import (
+        configured_sat_search_workers,
+    )
+
+    monkeypatch.setenv("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS", "4")
+    assert configured_sat_search_workers() == 4
+    monkeypatch.setenv("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS", "0")
+    assert configured_sat_search_workers() == 1
+
+
+def test_ortools_rejects_both_num_workers_and_num_search_workers():
+    """Regression: dual non-zero worker params → MODEL_INVALID (fleet '?' bug).
+
+    Near-best search must set only ``num_workers``, not also the deprecated
+    ``num_search_workers`` alias.
+    """
+    from ortools.sat.python import cp_model
+
+    model = cp_model.CpModel()
+    x = model.new_int_var(0, 10, "x")
+    model.maximize(x)
+
+    either = cp_model.CpSolver()
+    either.parameters.num_workers = 1
+    assert either.solve(model) == cp_model.OPTIMAL
+
+    both = cp_model.CpSolver()
+    both.parameters.num_workers = 1
+    both.parameters.num_search_workers = 1
+    assert both.solve(model) == cp_model.MODEL_INVALID

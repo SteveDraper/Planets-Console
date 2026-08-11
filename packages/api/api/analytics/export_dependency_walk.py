@@ -236,28 +236,18 @@ def _dependency_needs_processing(
     scope: ExportScope,
     catalog: AnalyticExportCatalog | None,
 ) -> bool:
+    """Whether ``scope`` still needs ensure work (and thus belongs in a DAG plan).
+
+    Prior-turn edges that fall below the ensure floor are skipped when walking
+    dependencies; they must not elide an unsatisfied root. Homeworld (and fleet)
+    at turn 1 still need baseline/materialize even when ``turn_delta=-1`` points
+    at turn 0.
+    """
     if catalog is None or catalog.is_empty:
-        return False
-    if _is_at_baseline(scope, catalog):
         return False
     if _is_ensure_satisfied(ctx, analytic_id, scope, catalog):
         return False
     return True
-
-
-def _is_at_baseline(
-    scope: ExportScope,
-    catalog: AnalyticExportCatalog,
-) -> bool:
-    """Game-start baseline only (turn 1). Accelerated floor N still needs ensure work."""
-    if scope.turn <= 1 and not catalog.ensure_dependencies:
-        return True
-    if scope.turn <= 1:
-        for dependency in catalog.ensure_dependencies:
-            dep_turn = scope.turn + dependency.turn_delta
-            if dep_turn < 1:
-                return True
-    return False
 
 
 def is_ensure_dependency_satisfied(

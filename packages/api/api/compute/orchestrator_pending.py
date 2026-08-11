@@ -23,7 +23,7 @@ __all__ = [
 class PendingInlineExecution:
     """Inline work accepted under the orchestrator lock; executed after release.
 
-    Job-wire builders (e.g. scores ``ensure_scores_export``) may take other locks
+    Job-wire builders (e.g. scores ``admit_scores_export_work``) may take other locks
     such as the inference scheduler lock. Building or running them while holding
     the orchestrator lock deadlocks with scheduler paths that call back into
     dispatch / observer registration.

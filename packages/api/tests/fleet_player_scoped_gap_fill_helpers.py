@@ -23,7 +23,7 @@ from tests.test_fleet_persistence import _put_provenance_final_snapshot
 __all__ = [
     "ensure_fleet_export_gap_fill_context",
     "install_mid_chain_put_ledger_gate",
-    "materialize_chain_from_coordinator_module",
+    "materialize_chain_from_chain_module",
     "require_turns",
     "roster_ids",
     "seed_provenance_snapshot",
@@ -69,8 +69,14 @@ def ensure_fleet_export_gap_fill_context(
     memory_backend,
     *,
     turn_number: int = 8,
+    seed_fleet_through: int | None = None,
 ):
-    """Export-ensure context with per-player prerequisites through T-1 (one-turn gap at T)."""
+    """Export-ensure context with per-player fleet seeds and scores through ``turn_number``.
+
+    By default seeds final fleet ledgers through ``turn_number - 1`` (one-turn gap).
+    Pass ``seed_fleet_through=turn_number - 2`` for a two-turn cold ensure gap.
+    Scores rows are seeded for every turn in ``1..turn_number`` so evidence can close.
+    """
     from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
     from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 
@@ -89,8 +95,13 @@ def ensure_fleet_export_gap_fill_context(
         turn_evidence_at_n=True,
         prior_ledger_at_n_minus_1=True,
     )
+    fleet_seed_end = turn_number - 1 if seed_fleet_through is None else seed_fleet_through
+    if fleet_seed_end < 0 or fleet_seed_end >= turn_number:
+        raise ValueError(
+            f"seed_fleet_through must be in 0..{turn_number - 1}, got {fleet_seed_end}"
+        )
 
-    for prior_turn in range(1, turn_number):
+    for prior_turn in range(1, turn_number + 1):
         prior_turn_info = stored_turns[prior_turn]
         put_persisted_row(
             inference_persistence,
@@ -104,34 +115,22 @@ def ensure_fleet_export_gap_fill_context(
                 solutions=[],
             ),
         )
-        fleet_persistence.put_ledger(
-            GAME_ID,
-            persp,
-            prior_turn,
-            player_id,
-            PersistedFleetLedger(
-                ledger=ensure_fleet_baseline_for_player(
-                    GAME_ID,
-                    persp,
-                    prior_turn_info,
-                    player_id,
+        if prior_turn <= fleet_seed_end:
+            fleet_persistence.put_ledger(
+                GAME_ID,
+                persp,
+                prior_turn,
+                player_id,
+                PersistedFleetLedger(
+                    ledger=ensure_fleet_baseline_for_player(
+                        GAME_ID,
+                        persp,
+                        prior_turn_info,
+                        player_id,
+                    ),
+                    provenance=final_provenance,
                 ),
-                provenance=final_provenance,
-            ),
-        )
-
-    put_persisted_row(
-        inference_persistence,
-        host_turn,
-        player_id,
-        PersistedInferenceRow(
-            status=STATUS_EXACT,
-            summary="seed",
-            solution_count=0,
-            is_complete=True,
-            solutions=[],
-        ),
-    )
+            )
 
     ctx = export_chain_query_context(
         host_turn,
@@ -155,9 +154,9 @@ def ensure_fleet_export_gap_fill_context(
     return ctx, scope, player_id, other_player_id, fleet_persistence
 
 
-def materialize_chain_from_coordinator_module():
+def materialize_chain_from_chain_module():
     return __import__(
-        "api.analytics.fleet.gap_fill_coordinator",
+        "api.analytics.fleet.chain",
         fromlist=["_materialize_fleet_ledger_chain_for_player"],
     )._materialize_fleet_ledger_chain_for_player
 

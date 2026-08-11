@@ -214,7 +214,7 @@ class AnalyticQueryContext:
         walk_result = plan.walk_result
         self._resolution_stack.append(resolution_key)
         try:
-            self._apply_pending_ensure(walk_result.pending_ensure)
+            self._ensure_query_root(analytic_id, scope, walk_result)
             tree = self._materialize_tree(analytic_id, scope, catalog)
             path_results = {
                 path: self._resolve_path_result(catalog, scope, tree, path) for path in paths
@@ -342,12 +342,17 @@ class AnalyticQueryContext:
                 return "invalid_scope"
         return None
 
-    def ensure_declared_dependencies(
+    def dependency_walk_unavailable(
         self,
         analytic_id: str,
         scope: ExportScope,
     ) -> UnavailableReason | None:
-        """Ensure declared export dependencies for one scope before self-ensure."""
+        """Return walk-time unavailability without running ensure work.
+
+        Production ensure runs through the compute orchestrator (``ensure_scope`` /
+        ``query``). Callers that need a cheap ``turn_not_stored`` / cycle check
+        before submit (e.g. homeworld turn fill) use this walk-only probe.
+        """
         walk_outcome = self._walk_export_dependencies(
             analytic_id,
             scope,
@@ -355,18 +360,36 @@ class AnalyticQueryContext:
         )
         if not isinstance(walk_outcome, DependencyWalkResult):
             return walk_outcome
-        for dependency_id, dependency_scope, catalog in walk_outcome.pending_ensure:
-            if dependency_id == analytic_id and dependency_scope == scope:
-                break
-            if catalog.ensure_export is None:
-                continue
-            catalog.ensure_export(self, dependency_scope)
         return None
+
+    def _ensure_query_root(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        walk_result: DependencyWalkResult,
+    ) -> None:
+        """Ensure the query root (and its DAG) before materialize.
+
+        Analytics registered on the compute orchestrator use submit+wait.
+        Fixture / non-compute catalogs keep the legacy per-scope ``ensure_export``
+        walk until they gain compute profiles.
+        """
+        from api.compute.export_ensure import (
+            analytic_has_compute_registration,
+            ensure_export_scope_via_orchestrator,
+        )
+
+        if analytic_has_compute_registration(analytic_id):
+            if ensure_export_scope_via_orchestrator(self, analytic_id, scope):
+                self.mark_scope_ensured(analytic_id, scope)
+            return
+        self._apply_pending_ensure(walk_result.pending_ensure)
 
     def _apply_pending_ensure(
         self,
         pending_ensure: list[tuple[str, ExportScope, AnalyticExportCatalog]],
     ) -> None:
+        """Legacy sync ensure walk for catalogs without compute registration."""
         for analytic_id, scope, catalog in pending_ensure:
             if catalog.ensure_export is None:
                 continue

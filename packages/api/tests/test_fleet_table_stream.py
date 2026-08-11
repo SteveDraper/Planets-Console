@@ -28,7 +28,6 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.analytics.fleet.gap_fill_coordinator import reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
@@ -43,13 +42,6 @@ from api.transport.fleet_table_stream import (
 )
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
-
-
-@pytest.fixture(autouse=True)
-def _reset_fleet_gap_fill_coordinators():
-    reset_coordinators()
-    yield
-    reset_coordinators()
 
 
 @pytest.fixture

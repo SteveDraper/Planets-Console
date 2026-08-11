@@ -16,6 +16,8 @@ from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
     _first_stored_rst_turn,
+    _GapFillCoherence,
+    _materialize_fleet_ledger_chain_for_player,
     get_or_materialize_fleet_ledger_for_player,
 )
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
@@ -23,6 +25,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
+from api.errors import ConflictError
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -119,7 +122,8 @@ def test_scores_ensure_walk_at_first_reliable_turn_skips_prior_fleet(sample_turn
     assert ("fleet", 2) not in pending_turns
 
 
-def test_fleet_chain_starts_at_accelerated_floor_with_turn_two_hole(sample_turn):
+def test_fleet_seed_chain_starts_at_accelerated_floor_with_turn_two_hole(sample_turn):
+    """Multi-turn seed helper (not production leaf) starts at accelerated floor."""
     stored = _680224_shaped_store(sample_turn)
     turn4 = stored[4]
     player_id = first_player_id(sample_turn)
@@ -131,7 +135,14 @@ def test_fleet_chain_starts_at_accelerated_floor_with_turn_two_hole(sample_turn)
     assert _first_stored_rst_turn(load_turn, 4, min_turn=3) == 3
 
     persistence = FleetSnapshotPersistenceService(MemoryAssetBackend(initial={}))
-    persisted = get_or_materialize_fleet_ledger_for_player(
+    coherence = _GapFillCoherence(
+        persistence,
+        turn4.game.id,
+        turn4.player.id,
+        player_id,
+        persistence.player_invalidation_generation(turn4.game.id, turn4.player.id, player_id),
+    )
+    persisted = _materialize_fleet_ledger_chain_for_player(
         persistence,
         turn4.game.id,
         turn4.player.id,
@@ -139,7 +150,8 @@ def test_fleet_chain_starts_at_accelerated_floor_with_turn_two_hole(sample_turn)
         turn4,
         load_turn=load_turn,
         inference_materialization=None,
-        query_context=None,
+        coherence=coherence,
+        turn_context_cache={},
     )
 
     assert persisted.ledger.player_id == player_id
@@ -151,6 +163,26 @@ def test_fleet_chain_starts_at_accelerated_floor_with_turn_two_hole(sample_turn)
     floor_ledger = persistence.get_ledger(turn4.game.id, turn4.player.id, 3, player_id)
     assert floor_ledger is not None
     assert floor_ledger.provenance.prior_ledger_at_n_minus_1 is True
+
+
+def test_leaf_materialize_rejects_multi_turn_gap_at_accelerated_floor(sample_turn):
+    """Leaf is single-turn: missing final prior raises (ensure owns multi-turn)."""
+    stored = _680224_shaped_store(sample_turn)
+    turn4 = stored[4]
+    player_id = first_player_id(sample_turn)
+
+    persistence = FleetSnapshotPersistenceService(MemoryAssetBackend(initial={}))
+    with pytest.raises(ConflictError, match="requires a final prior ledger"):
+        get_or_materialize_fleet_ledger_for_player(
+            persistence,
+            turn4.game.id,
+            turn4.player.id,
+            player_id,
+            turn4,
+            load_turn=stored.get,
+            inference_materialization=None,
+            query_context=None,
+        )
 
 
 def test_prior_fleet_torp_overlay_not_applicable_at_first_reliable_turn(sample_turn):

@@ -49,13 +49,23 @@ class NearBestStructuralSearchOutcome:
     top_solution_bucket_counts: dict[str, tuple[int, ...]]
 
 
-def _configured_num_search_workers(combo_count: int) -> int | None:
+def configured_sat_search_workers() -> int:
+    """Return CP-SAT ``num_workers`` for one ``Solve()`` call.
+
+    Default is **1**: multi-worker CP-SAT portfolios (LNS) routinely overshoot
+    short stream tier ``max_time_in_seconds`` budgets. Parallelism for cold
+    ensure / streams belongs on the orchestrator thread pool across per-player
+    DAG nodes, not inside one solve. Override with
+    ``MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS`` for experiments / batch jobs.
+
+    Callers must set only ``parameters.num_workers``. Also setting the deprecated
+    ``num_search_workers`` to a non-zero value makes OR-Tools return
+    ``MODEL_INVALID``.
+    """
     raw = os.environ.get("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS")
     if raw is not None:
-        return int(raw)
-    if combo_count > 100:
-        return 8
-    return None
+        return max(1, int(raw))
+    return 1
 
 
 def add_no_good_cut(
@@ -266,9 +276,10 @@ def collect_near_best_structural_hits(
             break
 
         solver.parameters.max_time_in_seconds = remaining_seconds
-        num_search_workers = _configured_num_search_workers(len(problem.ship_build_combos))
-        if num_search_workers is not None:
-            solver.parameters.num_search_workers = num_search_workers
+        # Set only ``num_workers``. Setting both ``num_workers`` and the deprecated
+        # ``num_search_workers`` to non-zero values makes OR-Tools return
+        # MODEL_INVALID on this model (empty search; fleet warships stay "?").
+        solver.parameters.num_workers = configured_sat_search_workers()
         if cancel_token is not None:
             callback = _StopSearchOnCancel(cancel_token)
             last_solver_status = solver.solve(model, callback)

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
+from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
+from api.compute.errors import ComputeWaitTimeoutError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.pools import ComputePriorityBand
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, format_compute_scope_key
 
 NodeState = Literal[
     "waiting_deps",
@@ -49,6 +53,7 @@ class ComputeHandle:
     _node: ComputeNodeRun
     is_waiter: bool = False
     _waiter_error: BaseException | None = field(default=None, compare=False)
+    _condition: threading.Condition | None = field(default=None, compare=False, repr=False)
 
     @property
     def error(self) -> BaseException | None:
@@ -67,6 +72,47 @@ class ComputeHandle:
     @property
     def result_wire(self) -> object | None:
         return self._node.result_wire
+
+    def wait(self, timeout: float | None = ENSURE_WAIT_TIMEOUT_SEC) -> ComputeHandle:
+        """Block until this scope is terminal on the orchestration plane.
+
+        Default timeout is :data:`ENSURE_WAIT_TIMEOUT_SEC` (300s). Pass ``None`` to
+        wait without a deadline. On timeout raises :class:`ComputeWaitTimeoutError`
+        for this waiter only -- in-flight DAG work is not cancelled (T1 / #204).
+
+        Soft ``parked`` is not terminal; waiters keep blocking until ``complete`` /
+        ``failed`` or timeout.
+        """
+        condition = self._condition
+        if condition is None:
+            raise RuntimeError(
+                "ComputeHandle.wait requires an orchestrator condition; "
+                "use handles returned from ComputeOrchestrator.submit / ensure_scope"
+            )
+
+        with condition:
+            if not self._node.is_terminal:
+                if timeout is None:
+                    while not self._node.is_terminal:
+                        condition.wait()
+                else:
+                    deadline = time.monotonic() + timeout
+                    while not self._node.is_terminal:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise ComputeWaitTimeoutError(
+                                "compute wait for "
+                                f"{format_compute_scope_key(self.scope)} "
+                                f"did not complete within {timeout}s",
+                                scope=self.scope,
+                                timeout_sec=timeout,
+                            )
+                        condition.wait(timeout=remaining)
+
+            error = self.error
+            if error is not None:
+                raise error
+            return self
 
 
 @dataclass

@@ -78,6 +78,14 @@ def __getattr__(name: str) -> object:
         from api.compute import registry as registry_module
 
         return getattr(registry_module, name)
+    if name == "ENSURE_WAIT_TIMEOUT_SEC":
+        from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
+
+        return ENSURE_WAIT_TIMEOUT_SEC
+    if name == "ComputeWaitTimeoutError":
+        from api.compute.errors import ComputeWaitTimeoutError
+
+        return ComputeWaitTimeoutError
     if name in _COMPUTE_ORCHESTRATOR_EXPORTS:
         from api.compute import orchestrator as orchestrator_module
 
@@ -109,8 +117,10 @@ __all__ = [
     "ComputeRequest",
     "ComputeScope",
     "ComputeStepSpec",
+    "ComputeWaitTimeoutError",
     "ComputeWorkerPool",
     "DependencyOutputs",
+    "ENSURE_WAIT_TIMEOUT_SEC",
     "NodeState",
     "OrchestrationBundle",
     "OrchestratorMetrics",

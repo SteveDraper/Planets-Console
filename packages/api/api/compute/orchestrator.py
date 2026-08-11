@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
+from api.compute.orchestrator_ensure import OrchestratorEnsureMixin
 from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
 from api.compute.orchestrator_observers import OrchestratorObservers
 from api.compute.orchestrator_state import (
@@ -82,6 +83,7 @@ class OrchestratorDiagnosticsSnapshot:
 
 
 class ComputeOrchestrator(
+    OrchestratorEnsureMixin,
     OrchestratorStepExecutionMixin,
     OrchestratorLifecycleMixin,
     OrchestratorSubmissionMixin,
@@ -107,6 +109,9 @@ class ComputeOrchestrator(
     satisfaction short-circuit (``PersistencePolicy.is_satisfied``) is enough
     to avoid duplicate work for one orchestrator instance, and only one
     instance exists per process.
+
+    Designated in-process ensure callers use :meth:`ensure_scope` (submit +
+    :meth:`ComputeHandle.wait`); pool workers and leaf ``run_step`` never wait.
 
     Observer registration (dispatch gates, lifecycle listeners, etc.) lives on
     :attr:`observers` -- call ``orchestrator.observers.register_*`` directly.

@@ -29,6 +29,7 @@ def test_registry_dispatches_fleet(sample_turn):
         "fleet",
         sample_turn,
         TurnAnalyticsOptions(),
+        load_turn=services.load_turn,
         export_services={ANALYTIC_ID: services},
     )
     assert data["analyticId"] == "fleet"

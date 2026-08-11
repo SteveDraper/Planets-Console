@@ -8,7 +8,6 @@ from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
-from api.analytics.fleet.gap_fill_coordinator import reset_coordinators
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -59,12 +58,10 @@ def _reset_stream_registry_after_test() -> None:
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
-    reset_coordinators()
     reset_compute_diagnostics_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
     yield
-    reset_coordinators()
     reset_inference_table_stream_registry_for_tests()
     reset_compute_diagnostics_for_tests()
     reset_orchestrators_for_tests()
