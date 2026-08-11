@@ -222,6 +222,33 @@ def test_boundary_wire_round_trip_with_annotations():
     assert "hoverSummary" not in wire
 
 
+def test_disks_only_boundary_wire():
+    from api.concepts.map_region_coverage import disks_to_boundary_overlay
+
+    overlay = disks_to_boundary_overlay(
+        kind="homeworld-planet-envelope",
+        overlay_id="homeworld-planet-envelope-7",
+        fill_color="#f97316",
+        fill_opacity=0.0,
+        disks=(
+            MapRegionOverlayDisk(x=100, y=200, radius=81),
+            MapRegionOverlayDisk(x=100, y=200, radius=162),
+        ),
+        is_pinned=True,
+        status="ok",
+        candidate_count=1,
+    )
+    wire = map_region_overlay_to_wire(overlay)
+    assert wire["geometry"] == {
+        "type": "boundary",
+        "vertices": [],
+        "edges": [],
+        "disks": [
+            {"x": 100, "y": 200, "radius": 81},
+            {"x": 100, "y": 200, "radius": 162},
+        ],
+    }
+
 def test_possible_owners_wire_includes_optional_player_label():
     overlay = boundary_to_overlay(
         kind="homeworld-sector",

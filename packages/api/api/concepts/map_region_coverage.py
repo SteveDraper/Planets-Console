@@ -188,7 +188,10 @@ class MapRegionCoverageGeometry:
 
 @dataclass(frozen=True)
 class MapRegionBoundaryGeometry:
-    """Closed path boundary (line/arc edges) with optional envelope disks."""
+    """Closed path boundary (line/arc edges) with optional envelope disks.
+
+    Vertices/edges may be empty when the overlay carries disks only (no outline).
+    """
 
     vertices: tuple[MapRegionOverlayVertex, ...]
     edges: tuple[MapRegionBoundaryEdge, ...]
@@ -612,6 +615,47 @@ def boundary_to_overlay(
             vertices=verts,
             edges=edge_tuple,
             disks=tuple(disks),
+        ),
+        is_pinned=is_pinned,
+        status=status,
+        candidate_count=candidate_count,
+        player_label=player_label,
+        possible_owners=None if possible_owners is None else tuple(possible_owners),
+        ownership_winning_strength=ownership_winning_strength,
+    )
+
+
+def disks_to_boundary_overlay(
+    *,
+    kind: str,
+    overlay_id: str,
+    fill_color: str,
+    fill_opacity: float,
+    disks: Sequence[MapRegionOverlayDisk],
+    is_pinned: bool | None = None,
+    status: str | None = None,
+    candidate_count: int | None = None,
+    player_label: str | None = None,
+    possible_owners: Sequence[MapRegionPossibleOwner] | None = None,
+    ownership_winning_strength: str | None = None,
+) -> MapRegionOverlay:
+    """Boundary overlay that carries envelope disks without a closed path.
+
+    Clients paint stroke-only disks via analytic ``paint.diskStrokes``; an empty
+    vertex/edge list means no boundary outline. Requires at least one disk.
+    """
+    disk_tuple = tuple(disks)
+    if not disk_tuple:
+        raise ValueError("disks-only boundary requires at least one disk")
+    return MapRegionOverlay(
+        kind=kind,
+        id=overlay_id,
+        fill_color=fill_color,
+        fill_opacity=fill_opacity,
+        geometry=MapRegionBoundaryGeometry(
+            vertices=(),
+            edges=(),
+            disks=disk_tuple,
         ),
         is_pinned=is_pinned,
         status=status,

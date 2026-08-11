@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { buildMapRegionOverlayPaneShapes } from '../../lib/mapRegionOverlay'
-import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
-import { applyHomeworldRegionStyle, homeworldSectorPaint } from './homeworldRegionStyle'
+import {
+  HOMEWORLD_PLANET_ENVELOPE_KIND,
+  HOMEWORLD_SECTOR_KIND,
+} from './homeworldSectorIndex'
+import {
+  applyHomeworldRegionStyle,
+  homeworldPlanetEnvelopePaint,
+  homeworldSectorPaint,
+} from './homeworldRegionStyle'
 
 function sectorOverlay(overrides: Partial<MapRegionOverlay> = {}): MapRegionOverlay {
   return {
@@ -67,6 +74,33 @@ describe('homeworldRegionStyle', () => {
         { strokeColor: '#c084fc', strokeWidth: 1.75 },
       ],
     })
+  })
+
+  it('styles planet envelopes as disk strokes only', () => {
+    const envelope: MapRegionOverlay = {
+      kind: HOMEWORLD_PLANET_ENVELOPE_KIND,
+      id: 'homeworld-planet-envelope-7',
+      fillColor: '#f97316',
+      fillOpacity: 0,
+      geometry: {
+        type: 'boundary',
+        vertices: [],
+        edges: [],
+        disks: [
+          { x: 150, y: 50, radius: 81 },
+          { x: 150, y: 50, radius: 162 },
+        ],
+      },
+    }
+    const [styled] = applyHomeworldRegionStyle([envelope])
+    expect(styled!.paint).toEqual({
+      fillOpacity: 0,
+      diskStrokes: [
+        { strokeColor: '#38bdf8', strokeWidth: 1.75 },
+        { strokeColor: '#c084fc', strokeWidth: 1.75 },
+      ],
+    })
+    expect(homeworldPlanetEnvelopePaint(envelope).strokeColor).toBeUndefined()
   })
 
   it('uses error stroke when status is error', () => {

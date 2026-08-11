@@ -135,6 +135,51 @@ describe('normalizeMapRegionOverlay', () => {
     ).toBeNull()
   })
 
+  it('accepts disks-only boundary with empty path', () => {
+    const overlay = normalizeMapRegionOverlay({
+      kind: 'homeworld-planet-envelope',
+      id: 'homeworld-planet-envelope-7',
+      fillColor: '#f97316',
+      fillOpacity: 0,
+      geometry: {
+        type: 'boundary',
+        vertices: [],
+        edges: [],
+        disks: [
+          { x: 100, y: 200, radius: 81 },
+          { x: 100, y: 200, radius: 162 },
+        ],
+      },
+      isPinned: true,
+    })
+    expect(overlay).not.toBeNull()
+    expect(overlay!.geometry).toEqual({
+      type: 'boundary',
+      vertices: [],
+      edges: [],
+      disks: [
+        { x: 100, y: 200, radius: 81 },
+        { x: 100, y: 200, radius: 162 },
+      ],
+    })
+  })
+
+  it('rejects empty-path boundary without disks', () => {
+    expect(
+      normalizeMapRegionOverlay({
+        kind: 'homeworld-planet-envelope',
+        id: 'homeworld-planet-envelope-7',
+        fillColor: '#f97316',
+        fillOpacity: 0,
+        geometry: {
+          type: 'boundary',
+          vertices: [],
+          edges: [],
+        },
+      })
+    ).toBeNull()
+  })
+
   it('rejects invalid arc edges', () => {
     expect(
       normalizeMapRegionOverlay({

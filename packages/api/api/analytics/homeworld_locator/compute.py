@@ -15,6 +15,9 @@ from api.analytics.homeworld_locator.constants import (
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
 from api.analytics.homeworld_locator.merge_above_read import merge_homeworld_evidence_above_read
 from api.analytics.homeworld_locator.ownership_refine import sector_owner_sets_to_dict
+from api.analytics.homeworld_locator.planet_envelopes import (
+    build_homeworld_planet_envelope_overlays_for_turn,
+)
 from api.analytics.homeworld_locator.sector_overlays import (
     build_homeworld_sector_overlays_for_turn,
 )
@@ -111,6 +114,10 @@ def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
         game_id=services.game_id,
         sector_owner_sets=sector_owner_sets,
     )
+    # No sector wedges (suppressed, ineligible, or non-circular): planet envelopes
+    # for sidebar-qualifying candidates (Show overlays filters on the client).
+    if not overlays:
+        overlays = build_homeworld_planet_envelope_overlays_for_turn(ctx.turn, view)
     return _view_to_wire(
         view,
         region_overlays=[map_region_overlay_to_wire(overlay) for overlay in overlays],

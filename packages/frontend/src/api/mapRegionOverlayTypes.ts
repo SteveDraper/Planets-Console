@@ -54,7 +54,10 @@ export type MapRegionBoundaryGeometry = {
   vertices: MapRegionOverlayVertex[]
   /** Edge i connects vertex i to vertex (i+1)%n (closed path). */
   edges: MapRegionBoundaryEdge[]
-  /** Optional envelope disks colocated with this boundary overlay. */
+  /**
+   * Optional envelope disks. When ``vertices``/``edges`` are empty, the overlay
+   * is disks-only (no boundary outline) -- e.g. planet-centered homeworld envelopes.
+   */
   disks?: MapRegionOverlayDisk[]
 }
 

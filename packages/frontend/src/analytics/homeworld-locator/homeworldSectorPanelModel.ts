@@ -186,6 +186,7 @@ function preferredCandidateRank(row: HomeworldCandidateRecord): number {
  * Whether a candidate belongs in a player-tile sidebar section for ``playerOrdinal``.
  * Machine definite + slot-anchored, or location assert with known ownership bind
  * (``perspective`` matches the player -- asserted or observed).
+ * Keep in sync with Core ``is_homeworld_sidebar_player_candidate`` (planet envelopes).
  */
 export function isHomeworldSidebarPlayerCandidate(
   row: HomeworldCandidateRecord,

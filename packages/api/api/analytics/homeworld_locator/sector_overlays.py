@@ -76,6 +76,14 @@ ENVELOPE_RADII_LY: tuple[float, float] = (
 )
 
 
+def envelope_disks_at(x: float, y: float) -> tuple[MapRegionOverlayDisk, ...]:
+    """81/162 LY envelope disks centered on ``(x, y)`` (rounded to int ly)."""
+    ix, iy = int(round(x)), int(round(y))
+    return tuple(
+        MapRegionOverlayDisk(x=ix, y=iy, radius=radius) for radius in ENVELOPE_RADII_LY
+    )
+
+
 def homeworld_layout_asset_category(
     turn: TurnInfo,
     *,
@@ -619,10 +627,7 @@ def build_homeworld_sector_overlays(
         disks: tuple[MapRegionOverlayDisk, ...] = ()
         if decision.envelope_center is not None:
             ex, ey = decision.envelope_center
-            disks = tuple(
-                MapRegionOverlayDisk(x=int(round(ex)), y=int(round(ey)), radius=radius)
-                for radius in ENVELOPE_RADII_LY
-            )
+            disks = envelope_disks_at(ex, ey)
 
         vertices, edges = annular_sector_boundary(
             center=center,

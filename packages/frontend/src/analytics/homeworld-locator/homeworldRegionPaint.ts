@@ -6,6 +6,7 @@
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import type { HomeworldLocatorSelection } from '../../stores/homeworldLocatorSelection'
 import {
+  isHomeworldPlanetEnvelopeOverlay,
   isHomeworldSectorOverlay,
   parseHomeworldSectorIndex,
 } from './homeworldSectorIndex'
@@ -23,7 +24,10 @@ export type HomeworldRegionPaintInput = {
    * ``effectiveSelectedSectorIndexes``). Paint does not re-derive from preset.
    */
   effectiveSelectedSectorIndexes: readonly number[]
-  /** Show overlays checkbox: 81/162 disks for selected sectors only. */
+  /**
+   * Show overlays checkbox: 81/162 disks for selected sectors, or for
+   * planet-envelope overlays when sector wedges are absent.
+   */
   showEnvelopeOverlays: boolean
   /**
    * Assert-focus selection (panel/map highlight). Distinct from
@@ -38,6 +42,7 @@ export type HomeworldRegionPaintInput = {
  * envelope toggle. Non-homeworld overlays pass through unchanged.
  * Selected homeworld sectors keep outlines; envelope disks remain only when
  * ``showEnvelopeOverlays`` is true. Unselected homeworld sectors are omitted.
+ * Planet-envelope overlays paint only when ``showEnvelopeOverlays`` is true.
  */
 export function applyHomeworldRegionSelection(
   overlays: readonly MapRegionOverlay[],
@@ -47,6 +52,10 @@ export function applyHomeworldRegionSelection(
   const selected = new Set(selectedSectorIndexes)
   const result: MapRegionOverlay[] = []
   for (const overlay of overlays) {
+    if (isHomeworldPlanetEnvelopeOverlay(overlay)) {
+      if (showEnvelopeOverlays) result.push(overlay)
+      continue
+    }
     if (!isHomeworldSectorOverlay(overlay)) {
       result.push(overlay)
       continue
@@ -74,7 +83,8 @@ export function applyHomeworldRegionSelection(
  * assert-focus highlight when the focused sector remains visible.
  *
  * - Outlines: ``effectiveSelectedSectorIndexes`` (caller-resolved)
- * - Envelope disks: only when ``showEnvelopeOverlays`` and sector selected
+ * - Sector envelope disks: only when ``showEnvelopeOverlays`` and sector selected
+ * - Planet envelopes: only when ``showEnvelopeOverlays`` (no sector selection)
  * - Assert-focus cyan/amber stroke: from ``assertFocusSelection``, not multi-select
  */
 export function buildHomeworldRegionOverlaysForPaint(

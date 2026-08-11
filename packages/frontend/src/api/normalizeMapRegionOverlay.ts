@@ -123,8 +123,16 @@ function normalizeBoundaryGeometry(raw: Record<string, unknown>): MapRegionBound
   const verticesRaw = raw.vertices
   const edgesRaw = raw.edges
   if (!Array.isArray(verticesRaw) || !Array.isArray(edgesRaw)) return null
-  if (verticesRaw.length < 3) return null
   if (edgesRaw.length !== verticesRaw.length) return null
+
+  // Disks-only boundary: empty path carries envelope disks (no outline).
+  if (verticesRaw.length === 0) {
+    const disks = normalizeDisks(raw.disks)
+    if (disks == null || disks.length === 0) return null
+    return { type: 'boundary', vertices: [], edges: [], disks }
+  }
+
+  if (verticesRaw.length < 3) return null
 
   const vertices: MapRegionOverlayVertex[] = []
   for (const item of verticesRaw) {
