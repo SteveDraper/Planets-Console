@@ -203,7 +203,16 @@ class OrchestratorSubmissionMixin:
             game_id=bundle.game_id,
             perspective=bundle.perspective,
         )
+        # Hollow terminals on the planned DAG (root or deps): durable wipe left
+        # orchestrator ``complete`` nodes that ``_register_planned_node`` would
+        # otherwise keep. Drop unsatisfied terminals so the chain rebuilds -- not
+        # only the ensure root (see ensure_scope hollow-root eviction).
         for planned in planned_nodes:
+            existing = self._nodes.get(planned.scope)
+            if existing is not None and existing.is_terminal:
+                registration = self._compute_registry[planned.scope.analytic_id]
+                if not registration.persistence_policy.is_satisfied(ctx, planned.scope):
+                    self._replace_terminal_node(existing)
             self._register_planned_node(
                 planned,
                 bundle=bundle,
