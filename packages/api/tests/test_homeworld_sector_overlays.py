@@ -444,8 +444,37 @@ def test_resolve_viewpoint_pin_planet(template_planet) -> None:
     # Prefer the shell perspective owner's observed (definite) homeworld.
     assert resolve_viewpoint_pin_planet(view, [pin, other, rival], shell_perspective=1) is pin
     assert resolve_viewpoint_pin_planet(view, [other]) is None
-    # Without shell perspective, first definite slot-anchored wins (stable by walk order).
+    # Without shell perspective, lowest planet_id among definite slot-anchored wins.
     assert resolve_viewpoint_pin_planet(view, [pin, other, rival]) is rival
+
+
+def test_resolve_viewpoint_pin_definite_slot_anchored_stable_by_planet_id(
+    template_planet,
+) -> None:
+    """Multiple definite slot-anchored matches: choose lowest planet_id, not walk order."""
+    higher = _planet(template_planet, planet_id=99, x=1, y=2)
+    lower = _planet(template_planet, planet_id=7, x=3, y=4)
+    view = HomeworldCandidateView(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=99,
+                perspective=3,
+                confidence_tier=CONFIDENCE_DEFINITE,
+            ),
+            HomeworldCandidateRecord(
+                planet_id=7,
+                perspective=1,
+                confidence_tier=CONFIDENCE_DEFINITE,
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=False,
+        available=True,
+    )
+    assert resolve_viewpoint_pin_planet(view, [higher, lower]) is lower
+    assert (
+        resolve_viewpoint_pin_planet(view, [higher, lower], shell_perspective=3) is higher
+    )
 
 
 def test_resolve_viewpoint_pin_prefers_non_location_asserted(template_planet) -> None:

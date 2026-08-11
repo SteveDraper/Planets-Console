@@ -187,6 +187,7 @@ def resolve_viewpoint_pin_planet(
                 matches = observed
         if not matches:
             return None
+        matches.sort(key=lambda row: row.planet_id)
         return _planet_if_present(matches[0].planet_id)
 
     if shell_perspective is not None and shell_perspective != SPECTATOR_PERSPECTIVE:
