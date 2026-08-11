@@ -32,7 +32,9 @@ PRIORITY_BAND_RANK: dict[ComputePriorityBand, int] = {
     "background": 2,
 }
 
-_DEFAULT_WORKER_COUNT = 4
+# Wider than historical 4: scores ``tier_solve`` is single-threaded CP-SAT, so
+# parallelism is across per-player DAG nodes on this pool (not inside one Solve).
+_DEFAULT_WORKER_COUNT = 8
 _DEQUEUE_WAIT_SECONDS = 0.25
 
 
