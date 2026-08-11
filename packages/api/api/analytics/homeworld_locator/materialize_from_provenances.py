@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
@@ -21,6 +22,10 @@ from api.analytics.homeworld_locator.models import (
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
 
+# Sentinel sector key for planets (and their location provenances) outside the
+# annular sector index, or for the single global bucket when no sector map exists.
+_UNASSIGNED_SECTOR: int | None = None
+
 
 def collect_location_provenances_for_planet(
     provenances: Sequence[LocationProvenance],
@@ -34,21 +39,44 @@ def _confidence_for_planet(
     *,
     planet_id: int,
     prior_tier: str,
-    has_location_provenances: bool,
+    bucket_has_location_provenances: bool,
     location_resolution: LocationAxisResolution,
 ) -> str:
-    """Map one planet onto confidence from a single ``LocationAxisResolution``.
+    """Map one planet onto confidence from its location-axis bucket resolution.
 
-    Non-empty merged location lists are authoritative (ADR 0010): the axis
-    winner is definite; every other planet is possible -- ``prior_tier`` must
-    not preserve false definites. Empty list falls back to the candidate row
-    tier (pre-mint / transitional aggregates).
+    Non-empty bucket lists are authoritative (ADR 0010): the axis winner is
+    definite; every other planet in that bucket is possible -- ``prior_tier``
+    must not preserve false definites. Empty bucket falls back to the candidate
+    row tier (pre-mint / transitional aggregates / other sectors' evidence).
     """
-    if not has_location_provenances:
+    if not bucket_has_location_provenances:
         return prior_tier
     if location_resolution.is_definite and location_resolution.resolved_planet_id == planet_id:
         return CONFIDENCE_DEFINITE
     return CONFIDENCE_POSSIBLE
+
+
+def _location_buckets(
+    provenances: Sequence[LocationProvenance],
+    planet_sector_index: Mapping[int, int] | None,
+) -> dict[int | None, list[LocationProvenance]]:
+    """Group location provenances by homeworld sector (or one global bucket)."""
+    if planet_sector_index is None:
+        return {_UNASSIGNED_SECTOR: list(provenances)}
+
+    buckets: dict[int | None, list[LocationProvenance]] = defaultdict(list)
+    for row in provenances:
+        buckets[planet_sector_index.get(row.planet_id)].append(row)
+    return dict(buckets)
+
+
+def _bucket_key_for_planet(
+    planet_id: int,
+    planet_sector_index: Mapping[int, int] | None,
+) -> int | None:
+    if planet_sector_index is None:
+        return _UNASSIGNED_SECTOR
+    return planet_sector_index.get(planet_id)
 
 
 def derive_candidates_from_merged_evidence(
@@ -60,18 +88,26 @@ def derive_candidates_from_merged_evidence(
 ) -> tuple[HomeworldCandidateRecord, ...]:
     """Apply location strength resolution and asserted cues onto candidate rows.
 
+    Location max-strength resolution is **per homeworld sector** when
+    ``planet_sector_index`` is provided (one definite location per sector ≈ per
+    player). Same-strength conflicts only within a sector stay ambiguous.
+    Without a sector index (non-circular / no partition), resolve stays global.
+
     When ``planet_sector_index`` is provided, ownership cues/bind use sector-keyed
     merged sets. Otherwise planet-keyed asserted ownership is used. Unique
     ownership binds ``perspective`` only when the row is still unbound
     (``perspective is None``) -- both keying modes share that preserve policy.
     ``race_id_by_owner_slot`` is required (empty map allowed when no race context).
     """
-    has_location_provenances = bool(merged.location_provenances)
-    location_resolution = resolve_location_axis(merged.location_provenances)
-    definite_ids = (
-        frozenset({location_resolution.resolved_planet_id})
-        if location_resolution.is_definite and location_resolution.resolved_planet_id is not None
-        else frozenset()
+    location_buckets = _location_buckets(merged.location_provenances, planet_sector_index)
+    location_resolutions = {
+        key: resolve_location_axis(rows) for key, rows in location_buckets.items()
+    }
+    empty_resolution = resolve_location_axis(())
+    definite_ids = frozenset(
+        resolution.resolved_planet_id
+        for resolution in location_resolutions.values()
+        if resolution.is_definite and resolution.resolved_planet_id is not None
     )
     sector_members: dict[int, tuple[SectorOwnerMember, ...]] = dict(merged.sector_owner_sets)
     planet_members: dict[int, tuple[SectorOwnerMember, ...]] = dict(merged.planet_owner_sets)
@@ -82,10 +118,13 @@ def derive_candidates_from_merged_evidence(
             merged.location_provenances,
             planet_id=row.planet_id,
         )
+        bucket_key = _bucket_key_for_planet(row.planet_id, planet_sector_index)
+        bucket_rows = location_buckets.get(bucket_key, [])
+        location_resolution = location_resolutions.get(bucket_key, empty_resolution)
         confidence = _confidence_for_planet(
             planet_id=row.planet_id,
             prior_tier=row.confidence_tier,
-            has_location_provenances=has_location_provenances,
+            bucket_has_location_provenances=bool(bucket_rows),
             location_resolution=location_resolution,
         )
 

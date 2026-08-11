@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { buildMapRegionOverlayPaneShapes } from '../../lib/mapRegionOverlay'
-import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
+import {
+  HOMEWORLD_PLANET_ENVELOPE_KIND,
+  HOMEWORLD_SECTOR_KIND,
+} from './homeworldSectorIndex'
 import { buildHomeworldRegionOverlaysForPaint, applyHomeworldRegionSelection } from './homeworldRegionPaint'
 
 function sector(
@@ -48,6 +51,25 @@ function visibilityOverlay(): MapRegionOverlay {
       type: 'coverage',
       disks: [{ x: 0, y: 0, radius: 100 }],
       patches: [],
+    },
+  }
+}
+
+function planetEnvelope(
+  planetId: number,
+  disks: { x: number; y: number; radius: number }[]
+): MapRegionOverlay {
+  return {
+    kind: HOMEWORLD_PLANET_ENVELOPE_KIND,
+    id: `homeworld-planet-envelope-${planetId}`,
+    fillColor: '#f97316',
+    fillOpacity: 0,
+    isPinned: true,
+    geometry: {
+      type: 'boundary',
+      vertices: [],
+      edges: [],
+      disks,
     },
   }
 }
@@ -223,5 +245,40 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       homeworldMarkers: [{ planetId: 42, x: 5, y: 5 }],
     })
     expect(painted[0]!.paint?.strokeColor).toBe('#38bdf8')
+  })
+
+  it('paints planet envelopes when Show overlays is on and strips them when off', () => {
+    const envelopes = [planetEnvelope(7, disks), visibilityOverlay()]
+    expect(applyHomeworldRegionSelection(envelopes, [], true).map((o) => o.id)).toEqual([
+      'homeworld-planet-envelope-7',
+      'vis-1',
+    ])
+    expect(applyHomeworldRegionSelection(envelopes, [], false).map((o) => o.id)).toEqual([
+      'vis-1',
+    ])
+
+    const paintedOn = buildHomeworldRegionOverlaysForPaint({
+      overlays: envelopes,
+      effectiveSelectedSectorIndexes: [],
+      showEnvelopeOverlays: true,
+      assertFocusSelection: null,
+      homeworldMarkers: [],
+    })
+    expect(paintedOn.map((o) => o.id)).toEqual(['homeworld-planet-envelope-7', 'vis-1'])
+    const group = buildMapRegionOverlayPaneShapes(
+      paintedOn.filter((o) => o.kind === HOMEWORLD_PLANET_ENVELOPE_KIND),
+      viewport
+    ).groups[0]!
+    expect(group.strokeDisks.map((d) => d.strokeColor)).toEqual(['#38bdf8', '#c084fc'])
+    expect(group.boundaryPath).toBeUndefined()
+
+    const paintedOff = buildHomeworldRegionOverlaysForPaint({
+      overlays: envelopes,
+      effectiveSelectedSectorIndexes: [],
+      showEnvelopeOverlays: false,
+      assertFocusSelection: null,
+      homeworldMarkers: [],
+    })
+    expect(paintedOff.map((o) => o.id)).toEqual(['vis-1'])
   })
 })

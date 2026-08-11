@@ -1,5 +1,5 @@
 /**
- * Homeworld locator sidebar panel: sector accordion, refresh (#37 / #283).
+ * Homeworld locator sidebar panel: sector/player accordion, refresh (#37 / #283).
  * Assert/revoke is map-context-menu only -- panel rows are read-only.
  */
 
@@ -14,9 +14,12 @@ import {
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
   homeworldInactiveHint,
 } from './constants'
-import { HomeworldCandidateRows } from './HomeworldCandidateRows'
-import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
-import { buildHomeworldSectorPanelModel } from './homeworldSectorPanelModel'
+import {
+  HomeworldPlayerAccordion,
+  HomeworldSectorAccordion,
+} from './HomeworldLocatorAccordion'
+import { buildHomeworldLocatorPanelModel } from './homeworldLocatorPanelModel'
+import { homeworldSectorsPresentOnMap } from './homeworldSectorIndex'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
@@ -68,26 +71,29 @@ export function HomeworldLocatorPanel({
     queryFn: () => fetchHomeworldLocatorTable(analyticScope!),
     enabled: fetchEnabled && analyticScope != null,
   })
-  // Hold until overlays are known -- building with empty overlays flashes a flat
-  // list before the sector accordion appears on circular maps. Settled failure
+  // Hold until overlays are known -- building with empty overlays flashes player
+  // tiles before the sector accordion appears on circular maps. Settled failure
   // is not "awaiting" (surface overlaysError instead of perpetual Loading).
   const awaitingOverlays =
     !homeworldMapOverlaysQuerySucceeded && overlaysError == null
-  // Sector grouping needs planet positions. Until they are ready, do not build
-  // a sectors model (empty positions would dump every candidate into Unassigned).
-  const needsBaseMap = homeworldMapOverlaysQuerySucceeded && overlays.length > 0
+  // Sector grouping needs planet positions. Planet-envelope / player mode does not.
+  // Until positions are ready, do not build a sectors model (empty positions would
+  // dump every candidate into Unassigned).
+  const needsBaseMap =
+    homeworldMapOverlaysQuerySucceeded && homeworldSectorsPresentOnMap(overlays)
   const awaitingBaseMapForSectors = needsBaseMap && !positionsReady
-  const awaitingSectorModel = awaitingOverlays || awaitingBaseMapForSectors
+  const awaitingPanelModel = awaitingOverlays || awaitingBaseMapForSectors
 
   const panelModel = useMemo(() => {
-    if (awaitingSectorModel) return null
+    if (awaitingPanelModel) return null
     const rows: readonly HomeworldCandidateRecord[] = tableQuery.data?.rows ?? []
-    return buildHomeworldSectorPanelModel(rows, overlays, planetPositions)
+    return buildHomeworldLocatorPanelModel(rows, overlays, planetPositions, roster)
   }, [
     tableQuery.data?.rows,
-    awaitingSectorModel,
+    awaitingPanelModel,
     overlays,
     planetPositions,
+    roster,
   ])
 
   const refreshMutation = useHomeworldLocatorRefreshMutation(analyticScope)
@@ -149,7 +155,7 @@ export function HomeworldLocatorPanel({
           {errorDetailFromUnknown(positionsError)}
         </p>
       ) : null}
-      {awaitingSectorModel ? (
+      {awaitingPanelModel ? (
         awaitingBaseMapForSectors && positionsError != null ? null : (
           <p className="px-0.5 text-[11px] text-slate-400">Loading…</p>
         )
@@ -166,9 +172,9 @@ export function HomeworldLocatorPanel({
           selectedSectorIndexes={selectedSectorIndexes}
           onToggleSectorIndex={onToggleSectorIndex}
         />
-      ) : panelModel?.kind === 'flat' ? (
-        <HomeworldCandidateRows
-          rows={panelModel.candidates}
+      ) : panelModel?.kind === 'players' ? (
+        <HomeworldPlayerAccordion
+          sections={panelModel.sections}
           baselineDegraded={data.baselineDegraded}
           baselineTurn={data.baselineTurn}
           roster={roster}

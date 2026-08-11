@@ -2,6 +2,9 @@
 
 ANALYTIC_ID = "homeworld-locator"
 
+# Shell storage slot for spectator / pseudo-observer RST (no owned homeworld).
+SPECTATOR_PERSPECTIVE = 0
+
 ATTRIBUTION_INFERRED = "inferred"
 # Wire/FE-compat only: derive at emit from ``asserted_cue``. Not durable authority
 # (ADR 0010); do not store as parallel to asserted location provenances.

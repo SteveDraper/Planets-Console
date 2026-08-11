@@ -285,6 +285,89 @@ def test_ensure_scope_rebuilds_hollow_terminal_without_force_fresh(sample_turn):
     assert result_box[0].result_wire == {"result": "fresh"}
 
 
+def test_ensure_scope_rebuilds_hollow_dependency_terminals(sample_turn):
+    """Hollow complete deps must rebuild with the ensure root after durable wipe.
+
+    Root-only hollow eviction left planned dependency scopes ``complete`` in the
+    DAG; ``_register_planned_node`` skipped them and the root ran against empty
+    durable state. Drop unsatisfied terminals for every planned scope.
+    """
+    from api.compute.wire import StepResult
+
+    from tests.fixtures.export_framework.diamond_exports import (
+        BRANCH_B_EXPORT_CATALOG,
+        BRANCH_B_ID,
+        SHARED_EXPORT_CATALOG,
+        SHARED_ID,
+    )
+
+    def _inline_registration(
+        analytic_id: str,
+        export_catalog: object,
+        *,
+        persistence_policy: object,
+    ) -> TurnAnalyticRegistration:
+        def run_materialize(_job: object) -> StepResult:
+            return StepResult(outcome="complete", payload={"result": analytic_id})
+
+        return TurnAnalyticRegistration(
+            catalog_entry=_catalog_entry(analytic_id),
+            compute=lambda _ctx: {"analyticId": analytic_id},
+            export_catalog=export_catalog,
+            scope_key_spec=_ROW_SCOPE_KEY,
+            compute_profile=AnalyticComputeProfile(
+                steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+            ),
+            persistence_policy=persistence_policy,
+            build_step_job_wires=(
+                ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+            ),
+            run_steps=(("materialize", run_materialize),),
+        )
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    policy = _StubPersistencePolicy()
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry(
+            (
+                _inline_registration(SHARED_ID, SHARED_EXPORT_CATALOG, persistence_policy=policy),
+                _inline_registration(
+                    BRANCH_B_ID, BRANCH_B_EXPORT_CATALOG, persistence_policy=policy
+                ),
+            )
+        ),
+        pool_submitter=lambda _node, _step: None,
+    )
+
+    first = orchestrator.ensure_scope(
+        ComputeRequest(ctx=ctx, scope=branch_scope, priority_band="interactive_ensure"),
+        timeout=2.0,
+    )
+    assert first.state == "complete"
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    prior_shared_generation = orchestrator.nodes[shared_scope].execution_generation
+
+    second = orchestrator.ensure_scope(
+        ComputeRequest(
+            ctx=ctx,
+            scope=branch_scope,
+            priority_band="interactive_ensure",
+            force_fresh=False,
+        ),
+        timeout=2.0,
+    )
+    assert second.state == "complete"
+    rebuilt_shared = orchestrator.nodes[shared_scope]
+    assert rebuilt_shared.state == "complete"
+    assert rebuilt_shared.execution_generation != prior_shared_generation
+
+
 def test_ensure_scope_submit_and_wait_until_complete(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,

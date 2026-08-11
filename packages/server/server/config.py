@@ -181,12 +181,22 @@ def _parse_homeworld_locator_config(raw: object) -> HomeworldLocatorConfig:
             "api.homeworld_locator.cluster_fow_density_credit_multiplier must be >= 0, "
             f"got {credit_multiplier}"
         )
+    sidebar_raw = raw.get(
+        "use_player_homeworld_sidebar",
+        defaults.use_player_homeworld_sidebar,
+    )
+    if not isinstance(sidebar_raw, bool):
+        raise TypeError(
+            f"api.homeworld_locator.use_player_homeworld_sidebar must be a boolean, got "
+            f"{type(sidebar_raw).__name__}: {sidebar_raw!r}"
+        )
     return HomeworldLocatorConfig(
         min_baseline_clans=min_clans,
         origin_distance_evidence_lambda=evidence_lambda,
         layout_prior_solver=solver,
         layout_prior_budget_ms=budget_ms,
         cluster_fow_density_credit_multiplier=credit_multiplier,
+        use_player_homeworld_sidebar=sidebar_raw,
     )
 
 

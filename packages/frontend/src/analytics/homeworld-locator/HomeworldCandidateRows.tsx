@@ -29,8 +29,8 @@ export type HomeworldCandidateRowsProps = {
   /** When false, omit the column header row (used inside sector sections). */
   showHeader?: boolean
   /**
-   * Owner column. Default true for flat / unassigned lists.
-   * False inside a sector section -- sector title already carries ownership.
+   * Owner column. Default true for Unassigned lists.
+   * False inside sector/player sections -- section title already carries ownership.
    */
   showOwnerColumn?: boolean
   /** Override empty-state copy (sector sections use a quieter message). */

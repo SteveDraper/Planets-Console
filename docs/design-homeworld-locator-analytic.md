@@ -166,7 +166,7 @@ When no planet is pinned for a slot, [#35](https://github.com/SteveDraper/Planet
 | Emission gate | Only when `hwdistribution=2`, `mapshape=0`, game category epic\|standard, and a **viewpoint pin** fixes rotation -- then emit **all** `player_count` sector overlays; otherwise none (markers unchanged) |
 | Wire | Shared **map region overlay** boundary primitive ([ADR 0008](adr/0008-shared-map-region-overlays.md)); not a homeworld-only field; not cartography `overlayCircles` |
 | Band radii | From **homeworld layout distribution asset** smoothed center-distance support extremes |
-| Envelopes | 81 + 162 LY disks when a sector center exists (orphan: layout-prior **most probable** in the sector when annotated, else candidate closest to sector geometric mid; pinned planet when pinned; incomplete + no candidates → geometric band center; fully observed + zero candidates → no disks, error stroke + hover) |
+| Envelopes | 81 + 162 LY disks when a sector center exists (orphan: layout-prior **most probable** in the sector when annotated, else candidate closest to sector geometric mid; pinned planet when pinned; incomplete + no candidates → geometric band center; fully observed + zero candidates → no disks, error stroke + hover). When **no sector wedges** are emitted (non-circular / no pin / `use_player_homeworld_sidebar`), Core emits disks-only ``homeworld-planet-envelope`` overlays centered on sidebar-qualifying planets (definite + slot-anchored, or location assert with ownership bind) |
 | Sector paint | Stroke-only annular boundaries (no fill); FE **homeworld region selection** chooses which sector outlines show |
 | FE display | **Homeworld region selection** (#283): UI preset `pinned` \| `unpinned` \| `selected` (control default appearance: Selected). Init-only internal preset `all` (not shown in UI) until overlays-ready; MapGraph sole materialize via `useHomeworldRegionSelectionMaterialize` writes `selected` + explicit full index list (gated on homeworld enabled + live map frame + not layers-pending + homeworld map layer succeeded). Pinned/Unpinned derive-at-read from overlay facts (persist empty indexes); Selected holds concrete multi-select (entering Selected snapshots the effective set; tile toggles force Selected). Tile uses `useHomeworldLocatorMapOverlays` + `useHomeworldRegionSelection`; store stays dumb (preset + indexes + envelope). **Show overlays** checkbox (default on) toggles 81/162 envelope disks for **selected** sectors only. Replaces #35's `off` \| `un-pinned` \| `pinned` \| `all` display mode |
 | Labels | No rival slot labels in #35 (assignment stays #37) |
@@ -279,7 +279,7 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 
 ### 4.4 User assertion (#37)
 
-**Two independent axes.** Users may assert **ownership** (whose sector / whose planet) and **location** (which planet is the HW) separately or together. Each axis keeps a provenance list; kinds map to **homeworld evidence strength class** (`weak` < `strong` < `asserted`). Display/decision state uses **homeworld evidence strength resolution** (max strength wins; same-strength conflicts stay ambiguous / possible). ADR: [0010](adr/0010-homeworld-assertion-provenance-strength.md).
+**Two independent axes.** Users may assert **ownership** (whose sector / whose planet) and **location** (which planet is the HW) separately or together. Each axis keeps a provenance list; kinds map to **homeworld evidence strength class** (`weak` < `strong` < `asserted`). Display/decision state uses **homeworld evidence strength resolution** (max strength wins; same-strength conflicts stay ambiguous / possible). **Location** resolve is **per homeworld sector** when a sector partition exists (one definite ≈ per player); without sectors it remains global. ADR: [0010](adr/0010-homeworld-assertion-provenance-strength.md).
 
 **Kind → strength (v1):**
 
@@ -310,7 +310,7 @@ Geometry / co-sector / definite-neighborhood culls do not mint provenances.
 
 | Kind | When |
 |------|------|
-| **Definite** | Winning **location** strength is **strong** or **asserted** and that class resolves to one planet (baseline profile, single-SB new-build, or UI location assert) |
+| **Definite** | Winning **location** strength is **strong** or **asserted** and that class resolves to one planet **per homeworld sector** when sectors exist (baseline profile, single-SB new-build, or UI location assert). Same-strength conflicts only within a sector stay possible. Without a sector partition (non-circular), resolve stays global over all location provenances |
 | **Possible** | Only **weak** location evidence, or winning-class location conflict |
 | **Most probable** (`isMostProbable`) | Selection status on one **possible** per unpinned sector under layout prior -- **not** a confidence tier |
 
@@ -388,6 +388,7 @@ Under Core `api` config (**homeworld locator config**):
 | `origin_distance_evidence_lambda` | Absolute-turn soft OD weight base λ (`w(t)=λ^t`; default **0.95**; range `(0, 1]`) |
 | Soft OD ship-limit freeze | Not a YAML knob: sticky `originDistanceEvidenceThroughTurn = T_limit - 1` at earliest shared scoreboard ship-limit crossing (see §4.3.3) |
 | `layout_prior_solver` / `layout_prior_budget_ms` | Anneal vs enumerate; wall-clock SA budget **per inline solve** (turn `> 1` dual-seed ≈ 2×) |
+| `use_player_homeworld_sidebar` | When true, sector overlay emission returns empty (player-sidebar mode; circular/epic behave like no-sector for map wedges). Default **false**. |
 
 Origin distances (81 LY pod, warp table) and the shared ship-limit gate stay in **game concepts**. Hard definite from location evidence is **single-starbase new-build only** -- there is no evidence-hit promotion threshold.
 
@@ -402,10 +403,10 @@ Map-only analytic (`supports_table=False`): sidebar **homeworld locator panel** 
 | **Homeworld map marker** | Decorates on **base map** node -- solid = definite; dashed/light = possible; **most probable** = stronger possible (double-layer dotted ring) via `isMostProbable` |
 | **Asserted cue** | Distinct marker/overlay cue when an **asserted**-strength provenance is present (location and/or ownership) |
 | **Homeworld region overlay** | Shared **map region overlay** boundary sectors (+ optional envelopes) for Circular round; outlines follow **homeworld region selection**; envelopes follow **homeworld envelope overlay toggle** on selected sectors |
-| **Homeworld locator panel** | Per-sector collapsible sections (clockwise from northernmost; title = known owner label else Unknown); read-only preferred-first candidates; thin FE hover evidence; sector title multi-select (thicker border) drives outline visibility; refresh + degraded baseline warning. Candidate click flashes the map marker and pans only if off-screen (#283) |
+| **Homeworld locator panel** | When sector overlays are present: per-sector collapsible sections (clockwise from northernmost; title = known owner label else Unknown); read-only preferred-first candidates; thin FE hover evidence; sector title multi-select (thicker border) drives outline visibility. When sector overlays are absent (non-circular / no pin / `use_player_homeworld_sidebar`): per-player collapsible sections for the full roster in **player id** ascending order; a section lists a candidate only when machine **definite + slot-anchored** (`perspective` matches that player) or **location asserted** with known ownership bind for that player; other candidates stay map-only (no flat dump / Unassigned). Refresh + degraded baseline warning in both modes. Candidate click flashes the map marker and pans only if off-screen (#283) |
 | Map context menu | **Homeworld assertion** only: ownership/location assert + revoke (#37) on planet markers and sector overlays |
-| **Homeworld region selection** | Sidebar control (Cartography sticky preference): UI **Pinned / Unpinned / Selected**. Init-only internal ``all`` (UI shows Selected) materializes via MapGraph ``useHomeworldRegionSelectionMaterialize`` to Selected + full indexes on overlays-ready; Pinned/Unpinned derive-at-read (empty persisted indexes); Selected holds concrete multi-select; tile toggles force Selected. Tile: ``useHomeworldLocatorMapOverlays`` + ``useHomeworldRegionSelection`` |
-| **Homeworld envelope overlay toggle** | **Show overlays** checkbox above Region selection; when on, paint 81/162 LY disks for selected sectors only |
+| **Homeworld region selection** | Sidebar control (Cartography sticky preference): UI **Pinned / Unpinned / Selected**. Init-only internal ``all`` (UI shows Selected) materializes via MapGraph ``useHomeworldRegionSelectionMaterialize`` to Selected + full indexes on overlays-ready; Pinned/Unpinned derive-at-read (empty persisted indexes); Selected holds concrete multi-select; tile toggles force Selected. Tile: ``useHomeworldLocatorMapOverlays`` + ``useHomeworldRegionSelection``. **Hidden** in player-tile mode (no sector overlays) |
+| **Homeworld envelope overlay toggle** | **Show overlays** checkbox (above Region selection when that control is visible); when on, paint 81/162 LY disks for selected sectors, or for Core-emitted planet envelopes when sector wedges are absent |
 
 ---
 
@@ -434,7 +435,7 @@ Hybrid phases (each independently reviewable):
 
 1. **Shared region boundary** -- discriminate `regionOverlays` coverage vs boundary; FE normalize + pane; MapGraph Visibility-pref isolation; ADR 0008; CONTEXT/design grill locks (this section / §4.2).
 2. **Layout distribution asset** -- committed Normal mean/std plus empirical support extremes (epic/standard); loader; support extremes for paint band; ``-log`` density cost for layout prior. Shipped at `assets/analytics/homeworld-locator/layout_distributions.json` (schema v2). Regenerate: build gitignored `local/homeworld_distributions.json` from `local/sampled_homeworlds.csv` + `.sampler_data` via `scripts/visualize_homeworld_distributions.py`, then `… distill --report local/homeworld_distributions.json`.
-3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes (`regionOverlays` boundary entries; FE display-mode filter is phase 4).
+3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes (`regionOverlays` boundary entries; FE display-mode filter is phase 4). Gate also honors `use_player_homeworld_sidebar` (when true, sector emission is empty). When no sector wedges are emitted, map GET may include planet-centered ``homeworld-planet-envelope`` disks instead.
 4. **FE display mode + hover** -- preference store, merge/filter, hit-test structured overlay facts; FE formats hover lines. (**Superseded for visibility controls by [#283](https://github.com/SteveDraper/Planets-Console/issues/283)** region selection -- keep hover facts.)
 
 ### 11.3 Issue #36 phased plan
@@ -537,3 +538,6 @@ Grill locks: §4.2 FE display row, §10 (this doc). CONTEXT: **homeworld region 
 | 2026-08-03 | #283: sector accordion panel + region selection (Pinned/Unpinned/Selected, default Selected, initial set = all) + Show overlays checkbox; thin FE hovers; candidate flash/pan; replaces #35 display mode; §4.2 / §10 / §11.7 |
 | 2026-08-05 | #283 docs: region selection ownership -- Pinned/Unpinned derive-at-read (empty persist); MapGraph-only materialize; Tile overlay query + read/action selection hook (§4.2 / §10 / CONTEXT) |
 | 2026-08-06 | Ownership: Privateer `ship_travel_envelope` strength demoted to weak (Rob/tow-capture); Crystal tow-capture left strong by product choice |
+| 2026-08-11 | Location definite resolve is **per sector** when partitioned (cross-sector asserts do not conflict); viewpoint pin prefers observed HW, spectator bootstraps from any asserted location; ADR 0010 |
+| 2026-08-11 | Player-tile sidebar when sector overlays absent: retire flat candidate dump; roster tiles by player id; sparse definite/asserted rows; hide Region selection in that mode |
+| 2026-08-11 | When sector wedges absent: Core emits ``homeworld-planet-envelope`` 81/162 disks for sidebar-qualifying planets; Show overlays gates paint; disks-only boundary wire allowed |

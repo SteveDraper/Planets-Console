@@ -910,7 +910,7 @@ def test_materialize_homeworld_candidates_culls_after_assert_wins(
         lambda *_args, **_kwargs: 430.0,
     )
     services = _services(persistence, {5: shell_turn})
-    materialized = materialize_homeworld_candidates(
+    materialized, _sector_pin = materialize_homeworld_candidates(
         services,
         candidates=game_state.candidates,
         aggregate=aggregate,

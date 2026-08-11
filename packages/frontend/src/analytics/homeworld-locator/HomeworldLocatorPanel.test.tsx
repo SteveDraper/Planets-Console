@@ -42,6 +42,32 @@ const SECTOR_OVERLAY: MapRegionOverlay = {
   },
 }
 
+/** Core-emitted planet envelope for sidebar-qualifying candidate planet 12. */
+const PLANET_ENVELOPE_12: MapRegionOverlay = {
+  kind: 'homeworld-planet-envelope' as const,
+  id: 'homeworld-planet-envelope-12',
+  fillColor: '#f97316',
+  fillOpacity: 0,
+  geometry: {
+    type: 'boundary' as const,
+    vertices: [
+      { x: 81, y: 0 },
+      { x: 0, y: 81 },
+      { x: -81, y: 0 },
+      { x: 0, y: -81 },
+    ],
+    edges: [
+      { type: 'arc' as const, centerX: 0, centerY: 0, clockwise: false },
+      { type: 'arc' as const, centerX: 0, centerY: 0, clockwise: false },
+      { type: 'arc' as const, centerX: 0, centerY: 0, clockwise: false },
+      { type: 'arc' as const, centerX: 0, centerY: 0, clockwise: false },
+    ],
+  },
+  isPinned: true,
+  status: 'ok',
+  candidateCount: 1,
+}
+
 const CANDIDATE_ROW = {
   planetId: 12,
   perspective: 1,
@@ -107,22 +133,98 @@ describe('HomeworldLocatorPanel', () => {
     vi.mocked(postHomeworldLocatorRefresh).mockReset()
   })
 
-  it('renders read-only candidate rows without assert controls', async () => {
+  it('renders player tiles with pinned candidates and no flat dump', async () => {
+    const user = userEvent.setup()
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
       inactiveReason: null,
       baselineDegraded: true,
       baselineTurn: 4,
+      rows: [
+        CANDIDATE_ROW,
+        {
+          ...CANDIDATE_ROW,
+          planetId: 99,
+          perspective: null,
+          confidenceTier: 'possible',
+        },
+      ],
+    })
+
+    const roster = [
+      perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
+      perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
+    ]
+    renderPanel(roster, { overlays: [PLANET_ENVELOPE_12] })
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/Baseline degraded/)
+    // playerId order: alice then bob
+    expect(screen.getByText('alice (The Federation)')).toBeInTheDocument()
+    expect(screen.getByText('bob (The Lizards)')).toBeInTheDocument()
+    expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()
+    expect(screen.queryByText('99')).not.toBeInTheDocument()
+    expect(screen.queryByText('12')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /expand player alice/i }))
+    expect(screen.getByText('12')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /assert hw/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/assert ownership/i)).not.toBeInTheDocument()
+  })
+
+  it('renders player tiles without waiting on base-map planet positions', async () => {
+    const user = userEvent.setup()
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
       rows: [CANDIDATE_ROW],
     })
 
-    renderPanel()
-    expect(await screen.findByRole('status')).toHaveTextContent(/Baseline degraded/)
+    const roster = [
+      perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
+    ]
+    renderPanel(roster, {
+      overlays: [PLANET_ENVELOPE_12],
+      homeworldMapOverlaysQuerySucceeded: true,
+      positionsReady: false,
+      positionsError: null,
+      planetPositions: EMPTY_POSITIONS,
+    })
+
+    expect(await screen.findByText('alice (The Federation)')).toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /expand player alice/i }))
     expect(screen.getByText('12')).toBeInTheDocument()
-    expect(screen.getByText('alice (The Federation)')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /assert hw/i })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText(/assert ownership/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps player tiles when base-map positions fail', async () => {
+    const user = userEvent.setup()
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [CANDIDATE_ROW],
+    })
+
+    const roster = [
+      perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
+    ]
+    renderPanel(roster, {
+      overlays: [PLANET_ENVELOPE_12],
+      homeworldMapOverlaysQuerySucceeded: true,
+      positionsReady: false,
+      positionsError: new Error('base map unavailable'),
+      planetPositions: EMPTY_POSITIONS,
+    })
+
+    expect(await screen.findByText('alice (The Federation)')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /expand player alice/i }))
+    expect(screen.getByText('12')).toBeInTheDocument()
   })
 
   it('holds sector accordion on Loading… while overlays are not ready', async () => {

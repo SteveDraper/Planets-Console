@@ -494,6 +494,71 @@ def test_refresh_wipes_machine_state_preserves_asserts_and_rebuilds(
     assert asserted[0]["assertedCue"] is True
 
 
+def test_refresh_rebuilds_accelerated_evidence_chain_after_prior_ensure(
+    persistence, sample_turn
+) -> None:
+    """Wipe + rematerialize must rebuild hollow orchestrator dep terminals.
+
+    Sample settings use acceleratedturns=3, so shell 8's DAG is turns 3..8.
+    A prior ensure leaves those scopes ``complete``; refresh clears durable
+    evidence. Re-ensure must not treat hollow dep ``complete`` as ready (that
+    previously failed with ``evidence aggregate before turn N is required``).
+    """
+    from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_types import ExportScope
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    from tests.test_homeworld_locator_core import _export_services, _services
+
+    shell = 8
+    turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
+    turns = {
+        turn_number: replace(turn_one, settings=replace(turn_one.settings, turn=turn_number))
+        for turn_number in range(1, shell + 1)
+    }
+    fingerprint = homeworld_settings_fingerprint(turn_one.settings)
+    persistence.put_game_state(
+        628580,
+        HomeworldLocatorGameState(
+            candidates=(
+                HomeworldCandidateRecord(
+                    planet_id=1,
+                    perspective=1,
+                    confidence_tier=CONFIDENCE_DEFINITE,
+                ),
+            ),
+            baseline_turn=1,
+            baseline_degraded=False,
+            settings_fingerprint=fingerprint,
+            baseline_algorithm_version=HOMEWORLD_BASELINE_ALGORITHM_VERSION,
+            asserted_location_provenances=(
+                LocationProvenance(kind=PROVENANCE_ASSERTED, turn=shell, planet_id=3),
+            ),
+        ),
+    )
+    services = _services(persistence, turns)
+    ctx = make_analytic_compute_context(
+        turns[shell],
+        load_turn=lambda n: turns.get(n),
+        export_services=_export_services(services, turns),
+    ).exports
+    assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=shell))
+    assert persistence.get_evidence_aggregate(628580, 1, shell) is not None
+    assert persistence.get_evidence_aggregate(628580, 1, shell - 1) is not None
+
+    service = _make_assertion_service(persistence, turns)
+    result = service.refresh(turn_number=shell)
+    assert result["available"] is True
+    assert persistence.get_evidence_aggregate(628580, 1, 1) is not None
+    for turn_number in range(3, shell + 1):
+        assert persistence.get_evidence_aggregate(628580, 1, turn_number) is not None
+    state = persistence.get_game_state(628580)
+    assert state is not None
+    assert state.asserted_location_provenances == (
+        LocationProvenance(kind=PROVENANCE_ASSERTED, turn=shell, planet_id=3),
+    )
+
+
 @pytest.fixture
 def http_client(sample_turn):
     clear_backend_cache()

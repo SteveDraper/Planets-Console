@@ -58,7 +58,7 @@ from api.analytics.homeworld_locator.models import OriginDistanceObservation
 from api.analytics.homeworld_locator.sector_overlays import (
     homeworld_layout_asset_category,
     homeworld_sector_emission_eligible,
-    resolve_viewpoint_pin_planet,
+    resolve_sector_geometry_pin,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord, HomeworldCandidateView
 from api.analytics.turn_roster import players_by_id
@@ -137,6 +137,7 @@ def try_layout_prior_problem(
     map_center: tuple[float, float] | None = None,
     origin_distance_observations: Sequence[OriginDistanceObservation] | None = None,
     origin_distance_evidence_lambda: float | None = None,
+    shell_perspective: int | None = None,
 ) -> LayoutPriorProblem | None:
     """Build a solver problem from turn + view, or ``None`` when the emission gate fails.
 
@@ -148,7 +149,12 @@ def try_layout_prior_problem(
     config when omitted (absolute-turn update weight ``w(t)=λ^t``).
     """
     resolved_count = player_count if player_count is not None else len(players_by_id(turn))
-    pin = resolve_viewpoint_pin_planet(view, turn.planets)
+    planet_by_id = {planet.id: planet for planet in turn.planets}
+    pin = resolve_sector_geometry_pin(
+        view,
+        turn.planets,
+        shell_perspective=shell_perspective,
+    )
     if pin is None or not homeworld_sector_emission_eligible(
         turn, pin=pin, player_count=resolved_count
     ):
@@ -167,7 +173,7 @@ def try_layout_prior_problem(
     half = math.pi / resolved_count
     width = (2.0 * math.pi) / resolved_count
 
-    planets_by_id = {planet.id: planet for planet in turn.planets}
+    planets_by_id = planet_by_id
     owner_ids = visibility_owner_ids(turn.player.id, turn.relations)
     scan_origins = planet_scan_origins(
         turn.planets,
@@ -223,6 +229,7 @@ def apply_layout_prior_most_probable(
     origin_distance_observations: Sequence[OriginDistanceObservation] | None = None,
     origin_distance_evidence_lambda: float | None = None,
     previous_most_probable_planet_ids: Sequence[int] | None = None,
+    shell_perspective: int | None = None,
 ) -> tuple[HomeworldCandidateRecord, ...]:
     """Annotate ``is_most_probable`` after evidence culls when the emission gate passes.
 
@@ -241,6 +248,7 @@ def apply_layout_prior_most_probable(
         map_center=map_center,
         origin_distance_observations=origin_distance_observations,
         origin_distance_evidence_lambda=origin_distance_evidence_lambda,
+        shell_perspective=shell_perspective,
     )
     if problem is None:
         return tuple(

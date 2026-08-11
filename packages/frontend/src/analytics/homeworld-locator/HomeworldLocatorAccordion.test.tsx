@@ -8,9 +8,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { useHomeworldRegionSelectionStore } from '../../stores/homeworldRegionSelectionStore'
-import { HomeworldSectorAccordion } from './HomeworldSectorAccordion'
+import { HomeworldPlayerAccordion, HomeworldSectorAccordion } from './HomeworldLocatorAccordion'
 import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
-import type { HomeworldSectorPanelSection } from './homeworldSectorPanelModel'
+import type {
+  HomeworldPlayerPanelSection,
+  HomeworldSectorPanelSection,
+} from './homeworldLocatorPanelModel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 function annularSector(
@@ -266,5 +269,51 @@ describe('HomeworldSectorAccordion', () => {
     expect(sectorEl!.textContent).toContain('12')
     // Sector title carries ownership; candidate row must not repeat owner label.
     expect(sectorEl!.querySelector('tbody')?.textContent).not.toContain('alice (The Federation)')
+  })
+})
+
+
+describe('HomeworldPlayerAccordion', () => {
+  it('renders player sections in given order and expands sparse candidates', async () => {
+    const user = userEvent.setup()
+    const sections: HomeworldPlayerPanelSection[] = [
+      {
+        playerOrdinal: 1,
+        playerId: 2,
+        title: 'alice (The Federation)',
+        candidates: [candidate({ planetId: 12, perspective: 1, confidenceTier: 'definite' })],
+      },
+      {
+        playerOrdinal: 2,
+        playerId: 847,
+        title: 'bob (The Lizards)',
+        candidates: [],
+      },
+    ]
+    render(
+      <HomeworldPlayerAccordion
+        sections={sections}
+        baselineDegraded={false}
+        baselineTurn={null}
+        roster={[
+          perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
+          perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
+        ]}
+        selectedPlanetId={null}
+        onSelectPlanet={vi.fn()}
+        compact
+      />
+    )
+
+    expect(screen.getByText('alice (The Federation)')).toBeInTheDocument()
+    expect(screen.getByText('bob (The Lizards)')).toBeInTheDocument()
+    expect(screen.queryByText('Unassigned')).not.toBeInTheDocument()
+    expect(screen.queryByText('12')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /expand player alice/i }))
+    expect(screen.getByText('12')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /expand player bob/i }))
+    expect(screen.getByText('No pinned homeworld.')).toBeInTheDocument()
   })
 })

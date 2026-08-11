@@ -104,6 +104,8 @@ def build_homeworld_sector_partition(
     candidates: Sequence[HomeworldCandidateRecord],
     baseline_turn: int,
     layout_asset: LayoutDistributionsAsset | None = None,
+    shell_perspective: int | None = None,
+    asserted_location_planet_ids: Sequence[int] = (),
 ) -> HomeworldSectorPartition | None:
     """Return sector partition when homeworld sector emission is eligible."""
     view = HomeworldCandidateView(
@@ -112,7 +114,12 @@ def build_homeworld_sector_partition(
         baseline_degraded=False,
         available=True,
     )
-    pin = resolve_viewpoint_pin_planet(view, turn.planets)
+    pin = resolve_viewpoint_pin_planet(
+        view,
+        turn.planets,
+        shell_perspective=shell_perspective,
+        asserted_location_planet_ids=asserted_location_planet_ids,
+    )
     player_count = len(players_by_id(turn))
     if pin is None or not homeworld_sector_emission_eligible(
         turn,

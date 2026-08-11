@@ -109,6 +109,7 @@ def test_homeworld_locator_config_defaults() -> None:
     assert cfg.min_baseline_clans == 10_000
     assert cfg.origin_distance_evidence_lambda == 0.95
     assert cfg.cluster_fow_density_credit_multiplier == 1.0
+    assert cfg.use_player_homeworld_sidebar is False
 
 
 def test_supports_circular_round_only(sample_settings) -> None:

@@ -30,8 +30,11 @@ class OrchestratorEnsureMixin:
         When durable satisfaction fails but a terminal node remains (hollow after
         wipe / invalidate), that cache-hit node is dropped under the orchestrator
         lock before submit so ``force_fresh=False`` plans fresh work instead of
-        attaching to a stale ``complete``. Explicit ``force_fresh=True`` remains
-        the wipe / reschedule wake path; ensure does not silently set it.
+        attaching to a stale ``complete``. ``_plan_and_register`` also drops
+        hollow terminals on planned dependency scopes (same wipe class -- root-only
+        eviction left chains ready against empty durable state). Explicit
+        ``force_fresh=True`` remains the wipe / reschedule wake path; ensure does
+        not silently set it.
 
         Defaults match grill locks: cold ensure → ``interactive_ensure`` priority.
         Pool workers and leaf ``run_step`` must never call this.

@@ -185,6 +185,21 @@ export function pointHitsMapRegionOverlay(
 }
 
 /**
+ * Hit-test the closed boundary path only (ignore envelope / coverage disks).
+ * Ownership assert keying uses this so empty-sector envelopes centered on a
+ * planet in another sector cannot steal the assert target.
+ */
+export function pointHitsMapRegionOverlayBoundary(
+  mapX: number,
+  mapY: number,
+  overlay: MapRegionOverlay
+): boolean {
+  const { geometry } = overlay
+  if (geometry.type !== 'boundary') return false
+  return pointInBoundaryGeometry(mapX, mapY, geometry)
+}
+
+/**
  * Collect hover tooltip lines for overlays under ``(mapX, mapY)``.
  * ``formatLine`` builds display copy from structured overlay facts (FE-owned).
  * Overlays that format to null/empty are skipped even if hit.

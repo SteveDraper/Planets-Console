@@ -52,6 +52,7 @@ from api.concepts.map_region_coverage import (
 from api.concepts.stellar_cartography.nebula_visibility import NebulaCenter, distance_ly
 from api.concepts.visibility_coverage import planet_scan_origins, visibility_owner_ids
 from api.concepts.warp_well import planet_is_planetoid
+from api.config import get_config
 from api.errors import ValidationError
 from api.models.game import GameInfo, TurnInfo
 from api.models.planet import Planet
@@ -73,6 +74,12 @@ ENVELOPE_RADII_LY: tuple[float, float] = (
     VERY_CLOSE_PLANETS_MAX_LY,
     CLOSE_PLANETS_MAX_LY,
 )
+
+
+def envelope_disks_at(x: float, y: float) -> tuple[MapRegionOverlayDisk, ...]:
+    """81/162 LY envelope disks centered on ``(x, y)`` (rounded to int ly)."""
+    ix, iy = int(round(x)), int(round(y))
+    return tuple(MapRegionOverlayDisk(x=ix, y=iy, radius=radius) for radius in ENVELOPE_RADII_LY)
 
 
 def homeworld_layout_asset_category(
@@ -125,18 +132,104 @@ def homeworld_sector_emission_eligible(
 def resolve_viewpoint_pin_planet(
     view: HomeworldCandidateView,
     planets: Sequence[Planet],
+    *,
+    shell_perspective: int | None = None,
+    asserted_location_planet_ids: Sequence[int] = (),
 ) -> Planet | None:
-    """Viewpoint definite slot-anchored candidate planet, if present on the map."""
+    """Resolve the planet that fixes homeworld sector ring rotation.
+
+    Preference:
+    1. Spectator / pseudo-observer (``shell_perspective == 0``): any asserted
+       location planet on the map (lowest id), else a definite slot-anchored
+       candidate.
+    2. Normal shell: definite slot-anchored matching ``shell_perspective``
+       (viewpoint owner's observed HW), preferring rows that are not
+       location-asserted so ownership-bound asserts cannot steal the pin;
+       else any definite slot-anchored (same preference).
+    """
+    from api.analytics.homeworld_locator.constants import SPECTATOR_PERSPECTIVE
+
     planet_by_id = {planet.id: planet for planet in planets}
-    for row in view.candidates:
-        if row.confidence_tier != CONFIDENCE_DEFINITE:
-            continue
-        if row.perspective is None:
-            continue
-        planet = planet_by_id.get(row.planet_id)
-        if planet is not None:
-            return planet
-    return None
+
+    def _planet_if_present(planet_id: int) -> Planet | None:
+        return planet_by_id.get(planet_id)
+
+    if shell_perspective == SPECTATOR_PERSPECTIVE:
+        for planet_id in sorted(set(asserted_location_planet_ids)):
+            planet = _planet_if_present(planet_id)
+            if planet is not None:
+                return planet
+        for row in view.candidates:
+            if row.location_asserted:
+                planet = _planet_if_present(row.planet_id)
+                if planet is not None:
+                    return planet
+
+    def _first_definite_slot_anchored(
+        *,
+        required_perspective: int | None,
+        prefer_not_location_asserted: bool,
+    ) -> Planet | None:
+        matches = []
+        for row in view.candidates:
+            if row.confidence_tier != CONFIDENCE_DEFINITE:
+                continue
+            if row.perspective is None:
+                continue
+            if required_perspective is not None and row.perspective != required_perspective:
+                continue
+            if _planet_if_present(row.planet_id) is None:
+                continue
+            matches.append(row)
+        if prefer_not_location_asserted:
+            observed = [row for row in matches if not row.location_asserted]
+            if observed:
+                matches = observed
+        if not matches:
+            return None
+        matches.sort(key=lambda row: row.planet_id)
+        return _planet_if_present(matches[0].planet_id)
+
+    if shell_perspective is not None and shell_perspective != SPECTATOR_PERSPECTIVE:
+        # Prefer the observed viewpoint HW over location-asserted planets that
+        # later acquired the same perspective via ownership bind (conqueror noise).
+        pin = _first_definite_slot_anchored(
+            required_perspective=shell_perspective,
+            prefer_not_location_asserted=True,
+        )
+        if pin is not None:
+            return pin
+
+    return _first_definite_slot_anchored(
+        required_perspective=None,
+        prefer_not_location_asserted=True,
+    )
+
+
+def resolve_sector_geometry_pin(
+    view: HomeworldCandidateView,
+    planets: Sequence[Planet],
+    *,
+    shell_perspective: int | None = None,
+) -> Planet | None:
+    """Resolve the planet that pins sector ring geometry for layout and overlays.
+
+    Prefer ``view.sector_pin_planet_id`` when that planet is present on the map;
+    otherwise fall back to :func:`resolve_viewpoint_pin_planet`.
+    """
+    if view.sector_pin_planet_id is not None:
+        planet_by_id = {planet.id: planet for planet in planets}
+        pin = planet_by_id.get(view.sector_pin_planet_id)
+        if pin is not None:
+            return pin
+    return resolve_viewpoint_pin_planet(
+        view,
+        planets,
+        shell_perspective=shell_perspective,
+        asserted_location_planet_ids=tuple(
+            row.planet_id for row in view.candidates if row.location_asserted
+        ),
+    )
 
 
 def annular_sector_boundary(
@@ -580,10 +673,7 @@ def build_homeworld_sector_overlays(
         disks: tuple[MapRegionOverlayDisk, ...] = ()
         if decision.envelope_center is not None:
             ex, ey = decision.envelope_center
-            disks = tuple(
-                MapRegionOverlayDisk(x=int(round(ex)), y=int(round(ey)), radius=radius)
-                for radius in ENVELOPE_RADII_LY
-            )
+            disks = envelope_disks_at(ex, ey)
 
         vertices, edges = annular_sector_boundary(
             center=center,
@@ -632,7 +722,13 @@ def build_homeworld_sector_overlays_for_turn(
     sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Emit sector overlays for a shell turn when the emission gate passes."""
-    pin = resolve_viewpoint_pin_planet(view, turn.planets)
+    if get_config().homeworld_locator.use_player_homeworld_sidebar:
+        return ()
+    pin = resolve_sector_geometry_pin(
+        view,
+        turn.planets,
+        shell_perspective=shell_perspective,
+    )
     player_count = len(players_by_id(turn))
     if pin is None or not homeworld_sector_emission_eligible(
         turn, pin=pin, player_count=player_count

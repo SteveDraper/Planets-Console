@@ -1,18 +1,25 @@
 /**
- * Unit tests for homeworld sector accordion panel model helpers.
+ * Unit tests for homeworld locator sidebar panel model helpers.
  */
 
 import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import { HOMEWORLD_SECTOR_KIND } from './homeworldSectorIndex'
+import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import {
-  buildHomeworldSectorPanelModel,
+  HOMEWORLD_PLANET_ENVELOPE_KIND,
+  HOMEWORLD_SECTOR_KIND,
+  parseHomeworldPlanetEnvelopePlanetId,
+} from './homeworldSectorIndex'
+import {
+  buildHomeworldLocatorPanelModel,
   clockwiseFromNorthSortKey,
   homeworldSectorAccordionTitle,
+  planetIdsFromHomeworldPlanetEnvelopes,
   sectorMidAngleRadians,
   sortCandidatesPreferredFirst,
   sortHomeworldSectorsNorthernmostClockwise,
-} from './homeworldSectorPanelModel'
+  sortRosterByPlayerIdAscending,
+} from './homeworldLocatorPanelModel'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
 /** Annular quarter-sector at origin spanning [angleStart, angleEnd] (CCW). */
@@ -65,7 +72,35 @@ function candidate(
   }
 }
 
-describe('homeworldSectorPanelModel', () => {
+/** Minimal planet-envelope overlay (geometry unused by player-tile membership). */
+function planetEnvelope(planetId: number): MapRegionOverlay {
+  return {
+    kind: HOMEWORLD_PLANET_ENVELOPE_KIND,
+    id: `homeworld-planet-envelope-${planetId}`,
+    fillColor: '#f97316',
+    fillOpacity: 0,
+    geometry: {
+      type: 'boundary',
+      vertices: [
+        { x: 81, y: 0 },
+        { x: 0, y: 81 },
+        { x: -81, y: 0 },
+        { x: 0, y: -81 },
+      ],
+      edges: [
+        { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+        { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+        { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+        { type: 'arc', centerX: 0, centerY: 0, clockwise: false },
+      ],
+    },
+    isPinned: true,
+    status: 'ok',
+    candidateCount: 1,
+  }
+}
+
+describe('homeworldLocatorPanelModel', () => {
   it('computes mid-angle from outer arc endpoints', () => {
     // North-east quarter: 0 → π/2, mid = π/4
     const overlay = annularSector('homeworld-sector-0', 0, Math.PI / 2)
@@ -143,16 +178,106 @@ describe('homeworldSectorPanelModel', () => {
     ])
   })
 
-  it('builds flat model when no sector overlays', () => {
-    const rows = [
-      candidate({ planetId: 2, confidenceTier: 'possible' }),
-      candidate({ planetId: 1, confidenceTier: 'definite' }),
+  it('builds player model from Core planet-envelope overlays', () => {
+    const roster = [
+      perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
+      perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
     ]
-    const model = buildHomeworldSectorPanelModel(rows, [], new Map())
-    expect(model.kind).toBe('flat')
-    if (model.kind === 'flat') {
-      expect(model.candidates.map((r) => r.planetId)).toEqual([1, 2])
-    }
+    const rows = [
+      candidate({ planetId: 30, perspective: 1, confidenceTier: 'possible' }),
+      candidate({ planetId: 10, perspective: 1, confidenceTier: 'definite' }),
+      candidate({
+        planetId: 20,
+        perspective: 2,
+        confidenceTier: 'possible',
+        locationAsserted: true,
+      }),
+      candidate({ planetId: 99, perspective: null, confidenceTier: 'possible' }),
+      candidate({
+        planetId: 40,
+        perspective: 2,
+        confidenceTier: 'possible',
+        isMostProbable: true,
+      }),
+    ]
+    // Core emits envelopes only for sidebar-qualifying planets (10, 20).
+    const envelopes = [planetEnvelope(10), planetEnvelope(20)]
+    const model = buildHomeworldLocatorPanelModel(rows, envelopes, new Map(), roster)
+    expect(model.kind).toBe('players')
+    if (model.kind !== 'players') return
+    // playerId ascending: alice (2) then bob (847)
+    expect(model.sections.map((s) => s.playerId)).toEqual([2, 847])
+    expect(model.sections.map((s) => s.title)).toEqual([
+      'alice (The Federation)',
+      'bob (The Lizards)',
+    ])
+    expect(model.sections[0]!.candidates.map((c) => c.planetId)).toEqual([10])
+    expect(model.sections[1]!.candidates.map((c) => c.planetId)).toEqual([20])
+  })
+
+  it('excludes candidates whose planet lacks a Core envelope overlay', () => {
+    const roster = [perspectiveRow(1, 'alice', { playerId: 2 })]
+    const rows = [
+      candidate({ planetId: 10, perspective: 1, confidenceTier: 'definite' }),
+      candidate({
+        planetId: 20,
+        perspective: 1,
+        confidenceTier: 'possible',
+        locationAsserted: true,
+      }),
+    ]
+    // Envelope only for 10 -- FE must not re-apply Core qualifying policy.
+    const model = buildHomeworldLocatorPanelModel(
+      rows,
+      [planetEnvelope(10)],
+      new Map(),
+      roster
+    )
+    expect(model.kind).toBe('players')
+    if (model.kind !== 'players') return
+    expect(model.sections[0]!.candidates.map((c) => c.planetId)).toEqual([10])
+  })
+
+  it('binds envelope planets only to matching perspective ordinal', () => {
+    const roster = [
+      perspectiveRow(1, 'alice', { playerId: 2 }),
+      perspectiveRow(2, 'bob', { playerId: 3 }),
+    ]
+    const rows = [
+      candidate({ planetId: 10, perspective: 1, confidenceTier: 'definite' }),
+      candidate({ planetId: 10, perspective: 2, confidenceTier: 'definite' }),
+    ]
+    const model = buildHomeworldLocatorPanelModel(
+      rows,
+      [planetEnvelope(10)],
+      new Map(),
+      roster
+    )
+    expect(model.kind).toBe('players')
+    if (model.kind !== 'players') return
+    expect(model.sections[0]!.candidates.map((c) => c.planetId)).toEqual([10])
+    expect(model.sections[1]!.candidates.map((c) => c.planetId)).toEqual([10])
+  })
+
+  it('parses planet ids from homeworld-planet-envelope overlay ids', () => {
+    expect(parseHomeworldPlanetEnvelopePlanetId('homeworld-planet-envelope-7')).toBe(7)
+    expect(parseHomeworldPlanetEnvelopePlanetId('homeworld-sector-3')).toBeNull()
+    expect(parseHomeworldPlanetEnvelopePlanetId('homeworld-planet-envelope-x')).toBeNull()
+    expect(
+      [...planetIdsFromHomeworldPlanetEnvelopes([planetEnvelope(7), planetEnvelope(12)])].sort(
+        (a, b) => a - b
+      )
+    ).toEqual([7, 12])
+  })
+
+  it('sorts roster by playerId ascending', () => {
+    const roster = [
+      perspectiveRow(1, 'alice', { playerId: 99 }),
+      perspectiveRow(2, 'bob', { playerId: 3 }),
+    ]
+    expect(sortRosterByPlayerIdAscending(roster).map((p) => p.playerId)).toEqual([
+      3, 99,
+    ])
   })
 
   it('groups candidates into sectors by map position', () => {
@@ -171,7 +296,7 @@ describe('homeworldSectorPanelModel', () => {
       [100, { x: 150, y: 0 }], // east
       [101, { x: 0, y: 150 }], // north
     ])
-    const model = buildHomeworldSectorPanelModel(rows, [east, north], positions)
+    const model = buildHomeworldLocatorPanelModel(rows, [east, north], positions, [])
     expect(model.kind).toBe('sectors')
     if (model.kind === 'sectors') {
       expect(model.sections.map((s) => s.title)).toEqual(['north-owner', 'Unknown'])

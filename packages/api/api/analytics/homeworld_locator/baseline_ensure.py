@@ -316,8 +316,12 @@ def materialize_homeworld_candidates(
     shell_turn: TurnInfo,
     baseline_turn: int,
     baseline_degraded: bool,
-) -> tuple[HomeworldCandidateRecord, ...]:
+) -> tuple[tuple[HomeworldCandidateRecord, ...], int | None]:
     """Ordered shell materialize: ownership, derive, cull, layout prior.
+
+    Returns ``(candidates, sector_pin_planet_id)``. The pin is the planet that
+    fixed homeworld sector rotation during partition (before ownership derive);
+    callers must thread it onto the candidate view so overlays stay aligned.
 
     Design lock: docs/design-homeworld-locator-analytic.md §4.3.1 / §4.3.2.
     Asserted provenances merge above the evidence aggregate (ADR 0010).
@@ -334,16 +338,24 @@ def materialize_homeworld_candidates(
         row.planet_id for row in game_state.asserted_location_provenances
     )
     merged = merge_homeworld_evidence_above_read(game_state=game_state, aggregate=aggregate)
+    asserted_location_planet_ids = tuple(
+        row.planet_id for row in game_state.asserted_location_provenances
+    )
     adjusted = apply_unique_owner_orphan_bind(
         seeded,
         replace(aggregate, sector_owner_sets=merged.sector_owner_sets),
         turn=shell_turn,
+        shell_perspective=services.perspective,
+        asserted_location_planet_ids=asserted_location_planet_ids,
     )
     partition = build_homeworld_sector_partition(
         shell_turn,
         candidates=adjusted,
         baseline_turn=baseline_turn,
+        shell_perspective=services.perspective,
+        asserted_location_planet_ids=asserted_location_planet_ids,
     )
+    sector_pin_planet_id = partition.pin.id if partition is not None else None
     adjusted = derive_candidates_from_merged_evidence(
         adjusted,
         merged,
@@ -370,7 +382,10 @@ def materialize_homeworld_candidates(
         and aggregate.layout_prior_evidence_fingerprint == evidence_fingerprint
     ):
         selected = frozenset(aggregate.most_probable_planet_ids)
-        return tuple(replace(row, is_most_probable=row.planet_id in selected) for row in adjusted)
+        return (
+            tuple(replace(row, is_most_probable=row.planet_id in selected) for row in adjusted),
+            sector_pin_planet_id,
+        )
 
     interim_view = HomeworldCandidateView(
         candidates=adjusted,
@@ -378,6 +393,7 @@ def materialize_homeworld_candidates(
         baseline_degraded=baseline_degraded,
         available=True,
         origin_distance_observations=effective_observations,
+        sector_pin_planet_id=sector_pin_planet_id,
     )
     previous_most_probable = _previous_turn_most_probable_planet_ids(
         services,
@@ -391,6 +407,7 @@ def materialize_homeworld_candidates(
         origin_distance_observations=effective_observations,
         origin_distance_evidence_lambda=evidence_lambda,
         previous_most_probable_planet_ids=previous_most_probable,
+        shell_perspective=services.perspective,
     )
     most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
     services.persistence.put_evidence_aggregate(
@@ -405,7 +422,7 @@ def materialize_homeworld_candidates(
             most_probable_planet_ids=most_probable_ids,
         ),
     )
-    return annotated
+    return annotated, sector_pin_planet_id
 
 
 def _previous_turn_most_probable_planet_ids(
@@ -463,7 +480,7 @@ def materialize_homeworld_candidate_view(
     if aggregate is None:
         raise ValidationError("homeworld locator shell evidence missing after ensure")
 
-    candidates = materialize_homeworld_candidates(
+    candidates, sector_pin_planet_id = materialize_homeworld_candidates(
         services,
         candidates=state.candidates,
         aggregate=aggregate,
@@ -479,4 +496,5 @@ def materialize_homeworld_candidate_view(
         available=True,
         inactive_reason=None,
         origin_distance_observations=effective_origin_distance_observations(aggregate),
+        sector_pin_planet_id=sector_pin_planet_id,
     )

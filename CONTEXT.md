@@ -453,7 +453,7 @@ Core **game concept** mapping **race id** to preferred planet temperature for **
 _Avoid_: HW temp table, climate lookup (generic)
 
 **Homeworld locator config**:
-Server-side **analytic policy** for the **homeworld locator**, loaded from amalgamated YAML under the Core API config (not exposed in the SPA UI). Includes minimum clan count for **homeworld baseline profile** matching; soft-evidence absolute-turn weight base `origin_distance_evidence_lambda` (default 0.95; update weight `w(t)=λ^t`) for layout-prior cost; and `cluster_fow_density_credit_multiplier` (default 1.0) for **homeworld cluster constraint** FoW density credit. Soft origin-distance observations freeze once the shared ship limit is reached (scoreboard total ≥ `shiplimit`); the sticky cutoff is the turn before the earliest historical crossing in scoreboard history, not merely the prior shell. Origin-distance match bands use host-aligned constants from **game concepts** (81 LY pod hop, warp-speed range table) -- not ad-hoc YAML distance lists. Hard definite remains SB-only (no promotion-threshold config).
+Server-side **analytic policy** for the **homeworld locator**, loaded from amalgamated YAML under the Core API config (not exposed in the SPA UI). Includes minimum clan count for **homeworld baseline profile** matching; soft-evidence absolute-turn weight base `origin_distance_evidence_lambda` (default 0.95; update weight `w(t)=λ^t`) for layout-prior cost; `cluster_fow_density_credit_multiplier` (default 1.0) for **homeworld cluster constraint** FoW density credit; and `use_player_homeworld_sidebar` (default false) to suppress homeworld sector `regionOverlays` emission when the player-sidebar UX is enabled. Soft origin-distance observations freeze once the shared ship limit is reached (scoreboard total ≥ `shiplimit`); the sticky cutoff is the turn before the earliest historical crossing in scoreboard history, not merely the prior shell. Origin-distance match bands use host-aligned constants from **game concepts** (81 LY pod hop, warp-speed range table) -- not ad-hoc YAML distance lists. Hard definite remains SB-only (no promotion-threshold config).
 _Avoid_: HW settings panel, client-side heuristic config
 
 **Homeworld locator state**:
@@ -509,7 +509,7 @@ Map decoration on a **base map** planet node for a **homeworld candidate** at a 
 _Avoid_: HW node (separate graph node), duplicate planet
 
 **Homeworld region overlay**:
-The **homeworld locator** analytic's use of shared **map region overlay** geometry for circular-ring sectors (stroke-only annular boundaries, plus optional cluster envelope disks). Which sector **outlines** appear is controlled by **homeworld region selection**; which **envelope disks** appear is controlled by **homeworld envelope overlay toggle** on the selected set. Emitted as `regionOverlays` boundary entries (not cartography `overlayCircles`). Slot binding and rival labels are separate slices.
+The **homeworld locator** analytic's use of shared **map region overlay** geometry for circular-ring sectors (stroke-only annular boundaries, plus optional cluster envelope disks) and, when sector wedges are absent, planet-centered disks-only ``homeworld-planet-envelope`` entries. Which sector **outlines** appear is controlled by **homeworld region selection**; which **envelope disks** appear is controlled by **homeworld envelope overlay toggle** (selected sectors, or planet envelopes when no wedges). Emitted as `regionOverlays` boundary entries (not cartography `overlayCircles`). Slot binding and rival labels are separate slices.
 _Avoid_: possible zone (vague), sector blob (informal), overlayCircles for homeworld sectors, homeworld-only parallel wire field
 
 **Homeworld region selection**:
@@ -521,8 +521,8 @@ Older four-way paint filter (`off` \| `un-pinned` \| `pinned` \| `all`, default 
 _Avoid_: as current architecture -- use **homeworld region selection**
 
 **Homeworld envelope overlay toggle**:
-Client preference (**Show overlays** checkbox) controlling whether 81/162 LY cluster envelope disks paint for **selected** homeworld sectors. Default on. Independent of sector outline multi-select, but envelopes paint only for sectors that are selected under **homeworld region selection**.
-_Avoid_: reintroducing envelopes for non-selected sectors, backend-owned envelope visibility flag
+Client preference (**Show overlays** checkbox) controlling whether 81/162 LY cluster envelope disks paint for **selected** homeworld sectors, or for Core-emitted planet-centered envelopes when sector wedges are absent. Default on. Independent of sector outline multi-select; with sectors present, envelopes paint only for sectors that are selected under **homeworld region selection**.
+_Avoid_: reintroducing envelopes for non-selected sectors, backend-owned envelope visibility flag, FE-only circle math when Core already emits planet envelopes
 
 **Homeworld layout distribution asset**:
 Committed, reloadable tables for homeworld center-distance and neighbor-separation on epic and standard circular layouts. Each metric stores empirical `supportMin`/`supportMax` (paint band / cull) plus fitted Normal `mean`/`std` for layout-prior `-log` density scoring. Derived from sampled layout histograms, not recomputed from live TurnInfo each request.
