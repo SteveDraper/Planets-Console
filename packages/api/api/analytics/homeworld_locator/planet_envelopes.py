@@ -1,8 +1,8 @@
 """Planet-centered 81/162 LY envelope overlays when sector wedges are absent.
 
 Emitted for sidebar-qualifying candidates (definite + slot-anchored, or
-location assert with ownership bind). Policy mirrors the FE player-tile
-predicate ``isHomeworldSidebarPlayerCandidate`` -- keep both in sync.
+location assert with ownership bind). Sole owner of sidebar-qualifying policy;
+FE player tiles derive membership from these overlay planet ids.
 """
 
 from __future__ import annotations
@@ -30,8 +30,7 @@ def is_homeworld_sidebar_player_candidate(row: HomeworldCandidateRecord) -> bool
     """True when ``row`` qualifies for a player-tile sidebar section.
 
     Slot-anchored (``perspective`` set) and either machine definite or location
-    asserted. Matches FE ``isHomeworldSidebarPlayerCandidate`` (without the
-    per-player ordinal filter -- callers filter by ``perspective`` as needed).
+    asserted. Callers filter by ``perspective`` when binding to a roster player.
     """
     if row.perspective is None:
         return False

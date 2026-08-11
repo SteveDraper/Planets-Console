@@ -12,6 +12,7 @@ export const HOMEWORLD_SECTOR_KIND = 'homeworld-sector'
 export const HOMEWORLD_PLANET_ENVELOPE_KIND = 'homeworld-planet-envelope'
 
 const SECTOR_ID_RE = /^homeworld-sector-(\d+)$/
+const PLANET_ENVELOPE_ID_RE = /^homeworld-planet-envelope-(\d+)$/
 
 /** True when the overlay is a homeworld sector entry. */
 export function isHomeworldSectorOverlay(overlay: Pick<MapRegionOverlay, 'kind'>): boolean {
@@ -31,6 +32,17 @@ export function parseHomeworldSectorIndex(overlayId: string): number | null {
   if (match == null) return null
   const index = Number.parseInt(match[1]!, 10)
   return Number.isFinite(index) ? index : null
+}
+
+/**
+ * Extract planet id from a ``homeworld-planet-envelope-{planetId}`` overlay id,
+ * or null if not applicable.
+ */
+export function parseHomeworldPlanetEnvelopePlanetId(overlayId: string): number | null {
+  const match = PLANET_ENVELOPE_ID_RE.exec(overlayId)
+  if (match == null) return null
+  const planetId = Number.parseInt(match[1]!, 10)
+  return Number.isFinite(planetId) ? planetId : null
 }
 
 /** True when any overlay is a homeworld sector (ownership is sector-keyed on the map). */

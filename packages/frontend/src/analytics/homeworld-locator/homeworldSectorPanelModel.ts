@@ -16,7 +16,9 @@ import { formatHomeworldOwnershipPickLabel } from './ownershipPickLabel'
 import { findHomeworldSectorAtMapPoint } from './resolveOwnershipAssertTarget'
 import {
   homeworldSectorsPresentOnMap,
+  isHomeworldPlanetEnvelopeOverlay,
   isHomeworldSectorOverlay,
+  parseHomeworldPlanetEnvelopePlanetId,
   parseHomeworldSectorIndex,
 } from './homeworldSectorIndex'
 import type { HomeworldCandidateRecord } from './wireSchema'
@@ -182,21 +184,6 @@ function preferredCandidateRank(row: HomeworldCandidateRecord): number {
   return 2
 }
 
-/**
- * Whether a candidate belongs in a player-tile sidebar section for ``playerOrdinal``.
- * Machine definite + slot-anchored, or location assert with known ownership bind
- * (``perspective`` matches the player -- asserted or observed).
- * Keep in sync with Core ``is_homeworld_sidebar_player_candidate`` (planet envelopes).
- */
-export function isHomeworldSidebarPlayerCandidate(
-  row: HomeworldCandidateRecord,
-  playerOrdinal: number
-): boolean {
-  if (row.perspective !== playerOrdinal) return false
-  if (row.confidenceTier === CONFIDENCE_DEFINITE) return true
-  return row.locationAsserted === true
-}
-
 /** Roster players sorted by host ``playerId`` ascending (stable on ties by ordinal). */
 export function sortRosterByPlayerIdAscending(
   roster: readonly PerspectiveRow[]
@@ -206,6 +193,22 @@ export function sortRosterByPlayerIdAscending(
     if (idDiff !== 0) return idDiff
     return a.ordinal - b.ordinal
   })
+}
+
+/**
+ * Planet ids from Core-emitted ``homeworld-planet-envelope`` overlays.
+ * Core owns sidebar-qualifying policy; FE only parses envelope ids.
+ */
+export function planetIdsFromHomeworldPlanetEnvelopes(
+  overlays: readonly MapRegionOverlay[]
+): ReadonlySet<number> {
+  const planetIds = new Set<number>()
+  for (const overlay of overlays) {
+    if (!isHomeworldPlanetEnvelopeOverlay(overlay)) continue
+    const planetId = parseHomeworldPlanetEnvelopePlanetId(overlay.id)
+    if (planetId != null) planetIds.add(planetId)
+  }
+  return planetIds
 }
 
 /**
@@ -219,7 +222,7 @@ export function buildHomeworldSectorPanelModel(
   roster: readonly PerspectiveRow[] = []
 ): HomeworldSectorPanelModel {
   if (!homeworldSectorsPresentOnMap(overlays)) {
-    return buildHomeworldPlayersPanelModel(rows, roster)
+    return buildHomeworldPlayersPanelModel(rows, roster, overlays)
   }
 
   const orderedSectors = sortHomeworldSectorsNorthernmostClockwise(overlays)
@@ -275,15 +278,21 @@ export function buildHomeworldSectorPanelModel(
   }
 }
 
-/** Player-tile model: all roster players, sparse pinned/asserted candidates only. */
+/**
+ * Player-tile model: all roster players; membership from Core planet-envelope
+ * overlay ids plus ``row.perspective === player.ordinal``.
+ */
 export function buildHomeworldPlayersPanelModel(
   rows: readonly HomeworldCandidateRecord[],
-  roster: readonly PerspectiveRow[]
+  roster: readonly PerspectiveRow[],
+  overlays: readonly MapRegionOverlay[]
 ): HomeworldSectorPanelModel {
+  const envelopePlanetIds = planetIdsFromHomeworldPlanetEnvelopes(overlays)
   const sections: HomeworldPlayerPanelSection[] = sortRosterByPlayerIdAscending(roster).map(
     (player) => {
-      const qualifying = rows.filter((row) =>
-        isHomeworldSidebarPlayerCandidate(row, player.ordinal)
+      const qualifying = rows.filter(
+        (row) =>
+          envelopePlanetIds.has(row.planetId) && row.perspective === player.ordinal
       )
       return {
         playerOrdinal: player.ordinal,

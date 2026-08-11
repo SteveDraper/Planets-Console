@@ -7,5 +7,6 @@ export {
   homeworldSectorsPresentOnMap,
   isHomeworldPlanetEnvelopeOverlay,
   isHomeworldSectorOverlay,
+  parseHomeworldPlanetEnvelopePlanetId,
   parseHomeworldSectorIndex,
 } from '../../lib/homeworldSectorIndex'

@@ -42,6 +42,32 @@ const SECTOR_OVERLAY: MapRegionOverlay = {
   },
 }
 
+/** Core-emitted planet envelope for sidebar-qualifying candidate planet 12. */
+const PLANET_ENVELOPE_12: MapRegionOverlay = {
+  kind: 'homeworld-planet-envelope' as const,
+  id: 'homeworld-planet-envelope-12',
+  fillColor: '#f97316',
+  fillOpacity: 0,
+  geometry: {
+    type: 'boundary' as const,
+    vertices: [
+      { x: 81, y: 0 },
+      { x: 0, y: 81 },
+      { x: -81, y: 0 },
+      { x: 0, y: -81 },
+    ],
+    edges: [
+      { type: 'arc' as const, centerX: 0, centerY: 0, clockwise: false },
+      { type: 'arc' as const, centerX: 0, centerY: 0, clockwise: false },
+      { type: 'arc' as const, centerX: 0, centerY: 0, clockwise: false },
+      { type: 'arc' as const, centerX: 0, centerY: 0, clockwise: false },
+    ],
+  },
+  isPinned: true,
+  status: 'ok',
+  candidateCount: 1,
+}
+
 const CANDIDATE_ROW = {
   planetId: 12,
   perspective: 1,
@@ -130,7 +156,7 @@ describe('HomeworldLocatorPanel', () => {
       perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
       perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
     ]
-    renderPanel(roster)
+    renderPanel(roster, { overlays: [PLANET_ENVELOPE_12] })
 
     expect(await screen.findByRole('status')).toHaveTextContent(/Baseline degraded/)
     // playerId order: alice then bob
