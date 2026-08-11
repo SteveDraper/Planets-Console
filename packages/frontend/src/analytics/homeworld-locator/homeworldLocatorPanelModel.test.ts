@@ -296,7 +296,7 @@ describe('homeworldLocatorPanelModel', () => {
       [100, { x: 150, y: 0 }], // east
       [101, { x: 0, y: 150 }], // north
     ])
-    const model = buildHomeworldSectorPanelModel(rows, [east, north], positions)
+    const model = buildHomeworldSectorPanelModel(rows, [east, north], positions, [])
     expect(model.kind).toBe('sectors')
     if (model.kind === 'sectors') {
       expect(model.sections.map((s) => s.title)).toEqual(['north-owner', 'Unknown'])

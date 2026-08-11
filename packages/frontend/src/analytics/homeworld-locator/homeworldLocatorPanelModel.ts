@@ -219,7 +219,7 @@ export function buildHomeworldSectorPanelModel(
   rows: readonly HomeworldCandidateRecord[],
   overlays: readonly MapRegionOverlay[],
   planetPositions: ReadonlyMap<number, { x: number; y: number }>,
-  roster: readonly PerspectiveRow[] = []
+  roster: readonly PerspectiveRow[]
 ): HomeworldSectorPanelModel {
   if (!homeworldSectorsPresentOnMap(overlays)) {
     return buildHomeworldPlayersPanelModel(rows, roster, overlays)
