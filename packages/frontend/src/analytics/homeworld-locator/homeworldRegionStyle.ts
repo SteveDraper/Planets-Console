@@ -15,8 +15,10 @@ const HOMEWORLD_SECTOR_STROKE = '#fdba74'
 const HOMEWORLD_ERROR_SECTOR_STROKE = '#fca5a5'
 const HOMEWORLD_ASSERTED_SECTOR_STROKE = '#fbbf24'
 const HOMEWORLD_SELECTED_SECTOR_STROKE = '#38bdf8'
-const HOMEWORLD_SECTOR_STROKE_WIDTH = 1.5
-const HOMEWORLD_ASSERTED_SECTOR_STROKE_WIDTH = 2.25
+/** Pinned (definite or asserted ownership): heavier outline. */
+const HOMEWORLD_PINNED_SECTOR_STROKE_WIDTH = 2.25
+/** Unpinned sectors: ~half the former default (1.5). */
+const HOMEWORLD_UNPINNED_SECTOR_STROKE_WIDTH = 0.75
 const HOMEWORLD_ENVELOPE_STROKE_WIDTH = 1.75
 
 function homeworldEnvelopeStrokeColor(radiusLy: number): string {
@@ -40,6 +42,12 @@ export function homeworldSectorHasAssertedOwnership(overlay: MapRegionOverlay): 
   return collectAssertedOwnerSlots(overlay).length > 0
 }
 
+function homeworldSectorStrokeWidth(overlay: MapRegionOverlay): number {
+  return overlay.isPinned === true
+    ? HOMEWORLD_PINNED_SECTOR_STROKE_WIDTH
+    : HOMEWORLD_UNPINNED_SECTOR_STROKE_WIDTH
+}
+
 /** Paint metadata for one homeworld sector overlay (stroke-only sectors + envelopes). */
 export function homeworldSectorPaint(
   overlay: MapRegionOverlay,
@@ -48,13 +56,14 @@ export function homeworldSectorPaint(
   const hasAssertedOwnership = homeworldSectorHasAssertedOwnership(overlay)
   const isSelected = options?.isSelected === true
   const diskStrokes = homeworldEnvelopeDiskStrokes(overlay)
+  const baseStrokeWidth = homeworldSectorStrokeWidth(overlay)
   if (isSelected && hasAssertedOwnership) {
     return {
       fillOpacity: 0,
       boundaryStrokes: [
         {
           strokeColor: HOMEWORLD_ASSERTED_SECTOR_STROKE,
-          strokeWidth: HOMEWORLD_ASSERTED_SECTOR_STROKE_WIDTH,
+          strokeWidth: baseStrokeWidth,
         },
         {
           strokeColor: HOMEWORLD_SELECTED_SECTOR_STROKE,
@@ -67,10 +76,9 @@ export function homeworldSectorPaint(
   }
   let strokeColor =
     overlay.status === 'error' ? HOMEWORLD_ERROR_SECTOR_STROKE : HOMEWORLD_SECTOR_STROKE
-  let strokeWidth = HOMEWORLD_SECTOR_STROKE_WIDTH
+  let strokeWidth = baseStrokeWidth
   if (hasAssertedOwnership) {
     strokeColor = HOMEWORLD_ASSERTED_SECTOR_STROKE
-    strokeWidth = HOMEWORLD_ASSERTED_SECTOR_STROKE_WIDTH
   }
   if (isSelected) {
     strokeColor = HOMEWORLD_SELECTED_SECTOR_STROKE

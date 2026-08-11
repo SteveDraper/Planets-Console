@@ -68,12 +68,18 @@ describe('homeworldRegionStyle', () => {
     expect(styledSector!.paint).toEqual({
       fillOpacity: 0,
       strokeColor: '#fdba74',
-      strokeWidth: 1.5,
+      strokeWidth: 0.75,
       diskStrokes: [
         { strokeColor: '#38bdf8', strokeWidth: 1.75 },
         { strokeColor: '#c084fc', strokeWidth: 1.75 },
       ],
     })
+  })
+
+  it('uses heavy stroke for pinned sectors without asserted ownership', () => {
+    const paint = homeworldSectorPaint(sectorOverlay({ isPinned: true }))
+    expect(paint.strokeColor).toBe('#fdba74')
+    expect(paint.strokeWidth).toBe(2.25)
   })
 
   it('styles planet envelopes as disk strokes only', () => {
@@ -126,9 +132,10 @@ describe('homeworldRegionStyle', () => {
     expect(paint.diskStrokes).toEqual([{ strokeColor: '#e2e8f0', strokeWidth: 1.75 }])
   })
 
-  it('uses asserted ownership stroke when possibleOwners include asserted', () => {
+  it('uses asserted color on pinned sectors with asserted ownership', () => {
     const paint = homeworldSectorPaint(
       sectorOverlay({
+        isPinned: true,
         possibleOwners: [
           {
             ownerSlot: 2,
@@ -142,6 +149,23 @@ describe('homeworldRegionStyle', () => {
     expect(paint.strokeWidth).toBe(2.25)
   })
 
+  it('keeps light stroke for unpinned asserted ownership (color only)', () => {
+    const paint = homeworldSectorPaint(
+      sectorOverlay({
+        isPinned: false,
+        possibleOwners: [
+          {
+            ownerSlot: 2,
+            provenanceKinds: ['asserted'],
+            playerLabel: 'alice (The Federation)',
+          },
+        ],
+      })
+    )
+    expect(paint.strokeColor).toBe('#fbbf24')
+    expect(paint.strokeWidth).toBe(0.75)
+  })
+
   it('highlights a selected sector with cyan stroke', () => {
     const [styled] = applyHomeworldRegionStyle([sectorOverlay()], {
       selectedSectorIndex: 0,
@@ -151,6 +175,7 @@ describe('homeworldRegionStyle', () => {
 
   it('layers asserted amber under cyan selection dash when both apply', () => {
     const assertedSector = sectorOverlay({
+      isPinned: true,
       possibleOwners: [
         {
           ownerSlot: 2,
@@ -176,11 +201,11 @@ describe('homeworldRegionStyle', () => {
   })
 
   it('preserves homeworld visual behavior through shared blit', () => {
-    const styled = applyHomeworldRegionStyle([sectorOverlay({ status: 'ok' })])
+    const styled = applyHomeworldRegionStyle([sectorOverlay({ status: 'ok', isPinned: true })])
     const group = buildMapRegionOverlayPaneShapes(styled, viewport).groups[0]!
     expect(group.fillOpacity).toBe(0)
     expect(group.strokeColor).toBe('#fdba74')
-    expect(group.strokeWidth).toBe(1.5)
+    expect(group.strokeWidth).toBe(2.25)
     expect(group.disks).toHaveLength(0)
     expect(group.strokeDisks.map((d) => d.strokeColor)).toEqual(['#38bdf8', '#c084fc'])
   })
