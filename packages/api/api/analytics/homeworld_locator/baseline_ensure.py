@@ -334,15 +334,22 @@ def materialize_homeworld_candidates(
         row.planet_id for row in game_state.asserted_location_provenances
     )
     merged = merge_homeworld_evidence_above_read(game_state=game_state, aggregate=aggregate)
+    asserted_location_planet_ids = tuple(
+        row.planet_id for row in game_state.asserted_location_provenances
+    )
     adjusted = apply_unique_owner_orphan_bind(
         seeded,
         replace(aggregate, sector_owner_sets=merged.sector_owner_sets),
         turn=shell_turn,
+        shell_perspective=services.perspective,
+        asserted_location_planet_ids=asserted_location_planet_ids,
     )
     partition = build_homeworld_sector_partition(
         shell_turn,
         candidates=adjusted,
         baseline_turn=baseline_turn,
+        shell_perspective=services.perspective,
+        asserted_location_planet_ids=asserted_location_planet_ids,
     )
     adjusted = derive_candidates_from_merged_evidence(
         adjusted,
@@ -391,6 +398,7 @@ def materialize_homeworld_candidates(
         origin_distance_observations=effective_observations,
         origin_distance_evidence_lambda=evidence_lambda,
         previous_most_probable_planet_ids=previous_most_probable,
+        shell_perspective=services.perspective,
     )
     most_probable_ids = tuple(sorted(row.planet_id for row in annotated if row.is_most_probable))
     services.persistence.put_evidence_aggregate(

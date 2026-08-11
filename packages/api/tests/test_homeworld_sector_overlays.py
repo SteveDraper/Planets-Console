@@ -418,12 +418,18 @@ def test_incomplete_with_candidates_prefers_candidate_center(template_planet) ->
 def test_resolve_viewpoint_pin_planet(template_planet) -> None:
     pin = _planet(template_planet, planet_id=42, x=1, y=2)
     other = _planet(template_planet, planet_id=99, x=3, y=4)
+    rival = _planet(template_planet, planet_id=7, x=5, y=6)
     view = HomeworldCandidateView(
         candidates=(
             HomeworldCandidateRecord(
                 planet_id=99,
                 perspective=None,
                 confidence_tier=CONFIDENCE_POSSIBLE,
+            ),
+            HomeworldCandidateRecord(
+                planet_id=7,
+                perspective=3,
+                confidence_tier=CONFIDENCE_DEFINITE,
             ),
             HomeworldCandidateRecord(
                 planet_id=42,
@@ -435,8 +441,45 @@ def test_resolve_viewpoint_pin_planet(template_planet) -> None:
         baseline_degraded=False,
         available=True,
     )
-    assert resolve_viewpoint_pin_planet(view, [pin, other]) is pin
+    # Prefer the shell perspective owner's observed (definite) homeworld.
+    assert resolve_viewpoint_pin_planet(view, [pin, other, rival], shell_perspective=1) is pin
     assert resolve_viewpoint_pin_planet(view, [other]) is None
+    # Without shell perspective, first definite slot-anchored wins (stable by walk order).
+    assert resolve_viewpoint_pin_planet(view, [pin, other, rival]) is rival
+
+
+def test_resolve_viewpoint_pin_spectator_uses_asserted_location(template_planet) -> None:
+    """Pseudo-observer (spectator) pin bootstraps from any asserted homeworld."""
+    from api.analytics.homeworld_locator.constants import SPECTATOR_PERSPECTIVE
+
+    asserted = _planet(template_planet, planet_id=45, x=1, y=2)
+    other = _planet(template_planet, planet_id=182, x=3, y=4)
+    view = HomeworldCandidateView(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=45,
+                perspective=None,
+                confidence_tier=CONFIDENCE_POSSIBLE,
+                location_asserted=True,
+            ),
+            HomeworldCandidateRecord(
+                planet_id=182,
+                perspective=None,
+                confidence_tier=CONFIDENCE_POSSIBLE,
+                location_asserted=True,
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=False,
+        available=True,
+    )
+    pin = resolve_viewpoint_pin_planet(
+        view,
+        [asserted, other],
+        shell_perspective=SPECTATOR_PERSPECTIVE,
+        asserted_location_planet_ids=(182, 45),
+    )
+    assert pin is asserted  # lowest planet id for stability
 
 
 def test_stub_asset_band_used_by_builder(template_planet) -> None:

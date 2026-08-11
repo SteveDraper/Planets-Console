@@ -97,6 +97,9 @@ def accumulate_ownership_evidence_for_turn(
         candidates=candidates,
         baseline_turn=prior.baseline_turn,
         layout_asset=layout_asset,
+        asserted_location_planet_ids=tuple(
+            row.planet_id for row in candidates if row.location_asserted
+        ),
     )
     if context is None:
         return prior.sector_owner_sets, prior.owner_possible_sectors
@@ -205,6 +208,8 @@ def apply_unique_owner_orphan_bind(
     *,
     turn: TurnInfo,
     layout_asset: LayoutDistributionsAsset | None = None,
+    shell_perspective: int | None = None,
+    asserted_location_planet_ids: Sequence[int] = (),
 ) -> tuple[HomeworldCandidateRecord, ...]:
     """Bind orphan candidates when a sector has exactly one possible homeworld owner."""
     sector_owner_sets = sector_owner_sets_to_dict(aggregate.sector_owner_sets)
@@ -216,6 +221,8 @@ def apply_unique_owner_orphan_bind(
         candidates=candidates,
         baseline_turn=aggregate.baseline_turn,
         layout_asset=layout_asset,
+        shell_perspective=shell_perspective,
+        asserted_location_planet_ids=asserted_location_planet_ids,
     )
     if context is None:
         return tuple(candidates)

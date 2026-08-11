@@ -125,15 +125,53 @@ def homeworld_sector_emission_eligible(
 def resolve_viewpoint_pin_planet(
     view: HomeworldCandidateView,
     planets: Sequence[Planet],
+    *,
+    shell_perspective: int | None = None,
+    asserted_location_planet_ids: Sequence[int] = (),
 ) -> Planet | None:
-    """Viewpoint definite slot-anchored candidate planet, if present on the map."""
+    """Resolve the planet that fixes homeworld sector ring rotation.
+
+    Preference:
+    1. Spectator / pseudo-observer (``shell_perspective == 0``): any asserted
+       location planet on the map (lowest id), else a definite slot-anchored
+       candidate.
+    2. Normal shell: definite slot-anchored matching ``shell_perspective``
+       (viewpoint owner's observed HW), else any definite slot-anchored.
+    """
+    from api.analytics.homeworld_locator.constants import SPECTATOR_PERSPECTIVE
+
     planet_by_id = {planet.id: planet for planet in planets}
+
+    def _planet_if_present(planet_id: int) -> Planet | None:
+        return planet_by_id.get(planet_id)
+
+    if shell_perspective == SPECTATOR_PERSPECTIVE:
+        for planet_id in sorted(set(asserted_location_planet_ids)):
+            planet = _planet_if_present(planet_id)
+            if planet is not None:
+                return planet
+        for row in view.candidates:
+            if row.location_asserted:
+                planet = _planet_if_present(row.planet_id)
+                if planet is not None:
+                    return planet
+
+    if shell_perspective is not None and shell_perspective != SPECTATOR_PERSPECTIVE:
+        for row in view.candidates:
+            if row.confidence_tier != CONFIDENCE_DEFINITE:
+                continue
+            if row.perspective != shell_perspective:
+                continue
+            planet = _planet_if_present(row.planet_id)
+            if planet is not None:
+                return planet
+
     for row in view.candidates:
         if row.confidence_tier != CONFIDENCE_DEFINITE:
             continue
         if row.perspective is None:
             continue
-        planet = planet_by_id.get(row.planet_id)
+        planet = _planet_if_present(row.planet_id)
         if planet is not None:
             return planet
     return None
@@ -632,7 +670,14 @@ def build_homeworld_sector_overlays_for_turn(
     sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Emit sector overlays for a shell turn when the emission gate passes."""
-    pin = resolve_viewpoint_pin_planet(view, turn.planets)
+    pin = resolve_viewpoint_pin_planet(
+        view,
+        turn.planets,
+        shell_perspective=shell_perspective,
+        asserted_location_planet_ids=tuple(
+            row.planet_id for row in view.candidates if row.location_asserted
+        ),
+    )
     player_count = len(players_by_id(turn))
     if pin is None or not homeworld_sector_emission_eligible(
         turn, pin=pin, player_count=player_count

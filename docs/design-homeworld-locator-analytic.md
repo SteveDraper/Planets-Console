@@ -279,7 +279,7 @@ Opinionated joint set over **homeworld sectors** (same eligibility gate as secto
 
 ### 4.4 User assertion (#37)
 
-**Two independent axes.** Users may assert **ownership** (whose sector / whose planet) and **location** (which planet is the HW) separately or together. Each axis keeps a provenance list; kinds map to **homeworld evidence strength class** (`weak` < `strong` < `asserted`). Display/decision state uses **homeworld evidence strength resolution** (max strength wins; same-strength conflicts stay ambiguous / possible). ADR: [0010](adr/0010-homeworld-assertion-provenance-strength.md).
+**Two independent axes.** Users may assert **ownership** (whose sector / whose planet) and **location** (which planet is the HW) separately or together. Each axis keeps a provenance list; kinds map to **homeworld evidence strength class** (`weak` < `strong` < `asserted`). Display/decision state uses **homeworld evidence strength resolution** (max strength wins; same-strength conflicts stay ambiguous / possible). **Location** resolve is **per homeworld sector** when a sector partition exists (one definite ≈ per player); without sectors it remains global. ADR: [0010](adr/0010-homeworld-assertion-provenance-strength.md).
 
 **Kind → strength (v1):**
 
@@ -310,7 +310,7 @@ Geometry / co-sector / definite-neighborhood culls do not mint provenances.
 
 | Kind | When |
 |------|------|
-| **Definite** | Winning **location** strength is **strong** or **asserted** and that class resolves to one planet (baseline profile, single-SB new-build, or UI location assert) |
+| **Definite** | Winning **location** strength is **strong** or **asserted** and that class resolves to one planet **per homeworld sector** when sectors exist (baseline profile, single-SB new-build, or UI location assert). Same-strength conflicts only within a sector stay possible. Without a sector partition (non-circular), resolve stays global over all location provenances |
 | **Possible** | Only **weak** location evidence, or winning-class location conflict |
 | **Most probable** (`isMostProbable`) | Selection status on one **possible** per unpinned sector under layout prior -- **not** a confidence tier |
 
@@ -537,3 +537,4 @@ Grill locks: §4.2 FE display row, §10 (this doc). CONTEXT: **homeworld region 
 | 2026-08-03 | #283: sector accordion panel + region selection (Pinned/Unpinned/Selected, default Selected, initial set = all) + Show overlays checkbox; thin FE hovers; candidate flash/pan; replaces #35 display mode; §4.2 / §10 / §11.7 |
 | 2026-08-05 | #283 docs: region selection ownership -- Pinned/Unpinned derive-at-read (empty persist); MapGraph-only materialize; Tile overlay query + read/action selection hook (§4.2 / §10 / CONTEXT) |
 | 2026-08-06 | Ownership: Privateer `ship_travel_envelope` strength demoted to weak (Rob/tow-capture); Crystal tow-capture left strong by product choice |
+| 2026-08-11 | Location definite resolve is **per sector** when partitioned (cross-sector asserts do not conflict); viewpoint pin prefers observed HW, spectator bootstraps from any asserted location; ADR 0010 |

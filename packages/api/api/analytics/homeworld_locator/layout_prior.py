@@ -137,6 +137,7 @@ def try_layout_prior_problem(
     map_center: tuple[float, float] | None = None,
     origin_distance_observations: Sequence[OriginDistanceObservation] | None = None,
     origin_distance_evidence_lambda: float | None = None,
+    shell_perspective: int | None = None,
 ) -> LayoutPriorProblem | None:
     """Build a solver problem from turn + view, or ``None`` when the emission gate fails.
 
@@ -148,7 +149,14 @@ def try_layout_prior_problem(
     config when omitted (absolute-turn update weight ``w(t)=λ^t``).
     """
     resolved_count = player_count if player_count is not None else len(players_by_id(turn))
-    pin = resolve_viewpoint_pin_planet(view, turn.planets)
+    pin = resolve_viewpoint_pin_planet(
+        view,
+        turn.planets,
+        shell_perspective=shell_perspective,
+        asserted_location_planet_ids=tuple(
+            row.planet_id for row in view.candidates if row.location_asserted
+        ),
+    )
     if pin is None or not homeworld_sector_emission_eligible(
         turn, pin=pin, player_count=resolved_count
     ):
@@ -223,6 +231,7 @@ def apply_layout_prior_most_probable(
     origin_distance_observations: Sequence[OriginDistanceObservation] | None = None,
     origin_distance_evidence_lambda: float | None = None,
     previous_most_probable_planet_ids: Sequence[int] | None = None,
+    shell_perspective: int | None = None,
 ) -> tuple[HomeworldCandidateRecord, ...]:
     """Annotate ``is_most_probable`` after evidence culls when the emission gate passes.
 
@@ -241,6 +250,7 @@ def apply_layout_prior_most_probable(
         map_center=map_center,
         origin_distance_observations=origin_distance_observations,
         origin_distance_evidence_lambda=origin_distance_evidence_lambda,
+        shell_perspective=shell_perspective,
     )
     if problem is None:
         return tuple(
