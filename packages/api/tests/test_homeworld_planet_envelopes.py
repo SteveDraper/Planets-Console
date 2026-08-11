@@ -35,6 +35,7 @@ def sample_turn():
     raw = json.loads((ASSETS_DIR / "turn_sample.json").read_text(encoding="utf-8"))
     return turn_info_from_json(raw, settings_defaults=raw["settings"])
 
+
 def test_disks_to_boundary_overlay_requires_disks() -> None:
     with pytest.raises(ValueError, match="at least one disk"):
         disks_to_boundary_overlay(

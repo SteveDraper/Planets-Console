@@ -249,6 +249,7 @@ def test_disks_only_boundary_wire():
         ],
     }
 
+
 def test_possible_owners_wire_includes_optional_player_label():
     overlay = boundary_to_overlay(
         kind="homeworld-sector",

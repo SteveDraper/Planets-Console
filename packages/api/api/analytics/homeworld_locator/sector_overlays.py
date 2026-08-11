@@ -79,9 +79,7 @@ ENVELOPE_RADII_LY: tuple[float, float] = (
 def envelope_disks_at(x: float, y: float) -> tuple[MapRegionOverlayDisk, ...]:
     """81/162 LY envelope disks centered on ``(x, y)`` (rounded to int ly)."""
     ix, iy = int(round(x)), int(round(y))
-    return tuple(
-        MapRegionOverlayDisk(x=ix, y=iy, radius=radius) for radius in ENVELOPE_RADII_LY
-    )
+    return tuple(MapRegionOverlayDisk(x=ix, y=iy, radius=radius) for radius in ENVELOPE_RADII_LY)
 
 
 def homeworld_layout_asset_category(
