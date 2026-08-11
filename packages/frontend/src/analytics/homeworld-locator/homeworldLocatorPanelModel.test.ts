@@ -1,5 +1,5 @@
 /**
- * Unit tests for homeworld sector accordion panel model helpers.
+ * Unit tests for homeworld locator sidebar panel model helpers.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -11,7 +11,7 @@ import {
   parseHomeworldPlanetEnvelopePlanetId,
 } from './homeworldSectorIndex'
 import {
-  buildHomeworldSectorPanelModel,
+  buildHomeworldLocatorPanelModel,
   clockwiseFromNorthSortKey,
   homeworldSectorAccordionTitle,
   planetIdsFromHomeworldPlanetEnvelopes,
@@ -202,7 +202,7 @@ describe('homeworldLocatorPanelModel', () => {
     ]
     // Core emits envelopes only for sidebar-qualifying planets (10, 20).
     const envelopes = [planetEnvelope(10), planetEnvelope(20)]
-    const model = buildHomeworldSectorPanelModel(rows, envelopes, new Map(), roster)
+    const model = buildHomeworldLocatorPanelModel(rows, envelopes, new Map(), roster)
     expect(model.kind).toBe('players')
     if (model.kind !== 'players') return
     // playerId ascending: alice (2) then bob (847)
@@ -227,7 +227,7 @@ describe('homeworldLocatorPanelModel', () => {
       }),
     ]
     // Envelope only for 10 -- FE must not re-apply Core qualifying policy.
-    const model = buildHomeworldSectorPanelModel(
+    const model = buildHomeworldLocatorPanelModel(
       rows,
       [planetEnvelope(10)],
       new Map(),
@@ -247,7 +247,7 @@ describe('homeworldLocatorPanelModel', () => {
       candidate({ planetId: 10, perspective: 1, confidenceTier: 'definite' }),
       candidate({ planetId: 10, perspective: 2, confidenceTier: 'definite' }),
     ]
-    const model = buildHomeworldSectorPanelModel(
+    const model = buildHomeworldLocatorPanelModel(
       rows,
       [planetEnvelope(10)],
       new Map(),
@@ -296,7 +296,7 @@ describe('homeworldLocatorPanelModel', () => {
       [100, { x: 150, y: 0 }], // east
       [101, { x: 0, y: 150 }], // north
     ])
-    const model = buildHomeworldSectorPanelModel(rows, [east, north], positions, [])
+    const model = buildHomeworldLocatorPanelModel(rows, [east, north], positions, [])
     expect(model.kind).toBe('sectors')
     if (model.kind === 'sectors') {
       expect(model.sections.map((s) => s.title)).toEqual(['north-owner', 'Unknown'])

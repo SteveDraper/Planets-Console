@@ -172,6 +172,61 @@ describe('HomeworldLocatorPanel', () => {
     expect(screen.queryByLabelText(/assert ownership/i)).not.toBeInTheDocument()
   })
 
+  it('renders player tiles without waiting on base-map planet positions', async () => {
+    const user = userEvent.setup()
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [CANDIDATE_ROW],
+    })
+
+    const roster = [
+      perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
+    ]
+    renderPanel(roster, {
+      overlays: [PLANET_ENVELOPE_12],
+      homeworldMapOverlaysQuerySucceeded: true,
+      positionsReady: false,
+      positionsError: null,
+      planetPositions: EMPTY_POSITIONS,
+    })
+
+    expect(await screen.findByText('alice (The Federation)')).toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /expand player alice/i }))
+    expect(screen.getByText('12')).toBeInTheDocument()
+  })
+
+  it('keeps player tiles when base-map positions fail', async () => {
+    const user = userEvent.setup()
+    vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
+      analyticId: 'homeworld-locator',
+      available: true,
+      inactiveReason: null,
+      baselineDegraded: false,
+      rows: [CANDIDATE_ROW],
+    })
+
+    const roster = [
+      perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
+    ]
+    renderPanel(roster, {
+      overlays: [PLANET_ENVELOPE_12],
+      homeworldMapOverlaysQuerySucceeded: true,
+      positionsReady: false,
+      positionsError: new Error('base map unavailable'),
+      planetPositions: EMPTY_POSITIONS,
+    })
+
+    expect(await screen.findByText('alice (The Federation)')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /expand player alice/i }))
+    expect(screen.getByText('12')).toBeInTheDocument()
+  })
+
   it('holds sector accordion on Loading… while overlays are not ready', async () => {
     vi.mocked(fetchHomeworldLocatorTable).mockResolvedValue({
       analyticId: 'homeworld-locator',

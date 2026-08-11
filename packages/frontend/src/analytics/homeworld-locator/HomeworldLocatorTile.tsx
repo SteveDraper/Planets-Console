@@ -112,7 +112,8 @@ export function HomeworldLocatorTile({
     toggleSectorIndex,
   } = useHomeworldRegionSelection({ overlays })
 
-  const needsPlanetPositions = overlays.length > 0
+  // Sector accordion groups by map position; planet envelopes do not need base-map.
+  const needsPlanetPositions = homeworldSectorsPresentOnMap(overlays)
   const { planetPositions, positionsReady, positionsError } = useBaseMapPlanetPositions({
     analyticScope,
     fetchEnabled: canExpand && needsPlanetPositions,

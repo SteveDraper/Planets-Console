@@ -38,7 +38,7 @@ export type HomeworldPlayerPanelSection = {
   candidates: readonly HomeworldCandidateRecord[]
 }
 
-export type HomeworldSectorPanelModel =
+export type HomeworldLocatorPanelModel =
   | {
       kind: 'sectors'
       sections: readonly HomeworldSectorPanelSection[]
@@ -215,12 +215,12 @@ export function planetIdsFromHomeworldPlanetEnvelopes(
  * Build accordion model: per-sector sections when homeworld-sector overlays exist,
  * otherwise one player tile per roster player (no flat candidate dump).
  */
-export function buildHomeworldSectorPanelModel(
+export function buildHomeworldLocatorPanelModel(
   rows: readonly HomeworldCandidateRecord[],
   overlays: readonly MapRegionOverlay[],
   planetPositions: ReadonlyMap<number, { x: number; y: number }>,
   roster: readonly PerspectiveRow[]
-): HomeworldSectorPanelModel {
+): HomeworldLocatorPanelModel {
   if (!homeworldSectorsPresentOnMap(overlays)) {
     return buildHomeworldPlayersPanelModel(rows, roster, overlays)
   }
@@ -286,7 +286,7 @@ export function buildHomeworldPlayersPanelModel(
   rows: readonly HomeworldCandidateRecord[],
   roster: readonly PerspectiveRow[],
   overlays: readonly MapRegionOverlay[]
-): HomeworldSectorPanelModel {
+): HomeworldLocatorPanelModel {
   const envelopePlanetIds = planetIdsFromHomeworldPlanetEnvelopes(overlays)
   const sections: HomeworldPlayerPanelSection[] = sortRosterByPlayerIdAscending(roster).map(
     (player) => {

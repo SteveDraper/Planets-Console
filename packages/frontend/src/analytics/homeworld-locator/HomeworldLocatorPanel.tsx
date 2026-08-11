@@ -18,7 +18,8 @@ import {
   HomeworldPlayerAccordion,
   HomeworldSectorAccordion,
 } from './HomeworldLocatorAccordion'
-import { buildHomeworldSectorPanelModel } from './homeworldLocatorPanelModel'
+import { buildHomeworldLocatorPanelModel } from './homeworldLocatorPanelModel'
+import { homeworldSectorsPresentOnMap } from './homeworldSectorIndex'
 import { useHomeworldLocatorRefreshMutation } from './useHomeworldLocatorMutations'
 import type { HomeworldCandidateRecord } from './wireSchema'
 
@@ -75,19 +76,21 @@ export function HomeworldLocatorPanel({
   // is not "awaiting" (surface overlaysError instead of perpetual Loading).
   const awaitingOverlays =
     !homeworldMapOverlaysQuerySucceeded && overlaysError == null
-  // Sector grouping needs planet positions. Until they are ready, do not build
-  // a sectors model (empty positions would dump every candidate into Unassigned).
-  const needsBaseMap = homeworldMapOverlaysQuerySucceeded && overlays.length > 0
+  // Sector grouping needs planet positions. Planet-envelope / player mode does not.
+  // Until positions are ready, do not build a sectors model (empty positions would
+  // dump every candidate into Unassigned).
+  const needsBaseMap =
+    homeworldMapOverlaysQuerySucceeded && homeworldSectorsPresentOnMap(overlays)
   const awaitingBaseMapForSectors = needsBaseMap && !positionsReady
-  const awaitingSectorModel = awaitingOverlays || awaitingBaseMapForSectors
+  const awaitingPanelModel = awaitingOverlays || awaitingBaseMapForSectors
 
   const panelModel = useMemo(() => {
-    if (awaitingSectorModel) return null
+    if (awaitingPanelModel) return null
     const rows: readonly HomeworldCandidateRecord[] = tableQuery.data?.rows ?? []
-    return buildHomeworldSectorPanelModel(rows, overlays, planetPositions, roster)
+    return buildHomeworldLocatorPanelModel(rows, overlays, planetPositions, roster)
   }, [
     tableQuery.data?.rows,
-    awaitingSectorModel,
+    awaitingPanelModel,
     overlays,
     planetPositions,
     roster,
@@ -152,7 +155,7 @@ export function HomeworldLocatorPanel({
           {errorDetailFromUnknown(positionsError)}
         </p>
       ) : null}
-      {awaitingSectorModel ? (
+      {awaitingPanelModel ? (
         awaitingBaseMapForSectors && positionsError != null ? null : (
           <p className="px-0.5 text-[11px] text-slate-400">Loading…</p>
         )
