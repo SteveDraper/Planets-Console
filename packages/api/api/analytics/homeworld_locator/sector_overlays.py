@@ -52,6 +52,7 @@ from api.concepts.map_region_coverage import (
 from api.concepts.stellar_cartography.nebula_visibility import NebulaCenter, distance_ly
 from api.concepts.visibility_coverage import planet_scan_origins, visibility_owner_ids
 from api.concepts.warp_well import planet_is_planetoid
+from api.config import get_config
 from api.errors import ValidationError
 from api.models.game import GameInfo, TurnInfo
 from api.models.planet import Planet
@@ -670,6 +671,8 @@ def build_homeworld_sector_overlays_for_turn(
     sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None = None,
 ) -> tuple[MapRegionOverlay, ...]:
     """Emit sector overlays for a shell turn when the emission gate passes."""
+    if get_config().homeworld_locator.use_player_homeworld_sidebar:
+        return ()
     pin = resolve_viewpoint_pin_planet(
         view,
         turn.planets,

@@ -388,6 +388,7 @@ Under Core `api` config (**homeworld locator config**):
 | `origin_distance_evidence_lambda` | Absolute-turn soft OD weight base λ (`w(t)=λ^t`; default **0.95**; range `(0, 1]`) |
 | Soft OD ship-limit freeze | Not a YAML knob: sticky `originDistanceEvidenceThroughTurn = T_limit - 1` at earliest shared scoreboard ship-limit crossing (see §4.3.3) |
 | `layout_prior_solver` / `layout_prior_budget_ms` | Anneal vs enumerate; wall-clock SA budget **per inline solve** (turn `> 1` dual-seed ≈ 2×) |
+| `use_player_homeworld_sidebar` | When true, sector overlay emission returns empty (player-sidebar mode; circular/epic behave like no-sector for map wedges). Default **false**. |
 
 Origin distances (81 LY pod, warp table) and the shared ship-limit gate stay in **game concepts**. Hard definite from location evidence is **single-starbase new-build only** -- there is no evidence-hit promotion threshold.
 
@@ -434,7 +435,7 @@ Hybrid phases (each independently reviewable):
 
 1. **Shared region boundary** -- discriminate `regionOverlays` coverage vs boundary; FE normalize + pane; MapGraph Visibility-pref isolation; ADR 0008; CONTEXT/design grill locks (this section / §4.2).
 2. **Layout distribution asset** -- committed Normal mean/std plus empirical support extremes (epic/standard); loader; support extremes for paint band; ``-log`` density cost for layout prior. Shipped at `assets/analytics/homeworld-locator/layout_distributions.json` (schema v2). Regenerate: build gitignored `local/homeworld_distributions.json` from `local/sampled_homeworlds.csv` + `.sampler_data` via `scripts/visualize_homeworld_distributions.py`, then `… distill --report local/homeworld_distributions.json`.
-3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes (`regionOverlays` boundary entries; FE display-mode filter is phase 4).
+3. **Core sector emission** -- annular sectors + envelopes on map GET when emission gate passes (`regionOverlays` boundary entries; FE display-mode filter is phase 4). Gate also honors `use_player_homeworld_sidebar` (when true, emission is empty).
 4. **FE display mode + hover** -- preference store, merge/filter, hit-test structured overlay facts; FE formats hover lines. (**Superseded for visibility controls by [#283](https://github.com/SteveDraper/Planets-Console/issues/283)** region selection -- keep hover facts.)
 
 ### 11.3 Issue #36 phased plan

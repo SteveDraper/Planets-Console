@@ -36,6 +36,15 @@ class HomeworldLocatorConfig:
     Absent YAML key uses ``1.0``.
     """
 
+    use_player_homeworld_sidebar: bool = False
+    """When true, suppress homeworld sector ``regionOverlays`` emission.
+
+    Circular/epic games then behave like no-sector games for map paint (player
+    sidebar UX). Layout-prior and sector partition keep their geometry gates;
+    only overlay emission is forced empty. Default false preserves legacy
+    sector wedges.
+    """
+
 
 @dataclass(frozen=True)
 class ApiConfig:
@@ -69,7 +78,7 @@ class ApiConfig:
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
 
     homeworld_locator: HomeworldLocatorConfig = field(default_factory=HomeworldLocatorConfig)
-    """Homeworld locator policy (baseline clans, soft evidence λ, FoW credit, layout-prior)."""
+    """Homeworld locator policy (baseline clans, soft evidence λ, FoW, sidebar, layout-prior)."""
 
 
 def get_config() -> ApiConfig:

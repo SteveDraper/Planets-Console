@@ -294,6 +294,7 @@ def test_load_config_homeworld_locator_defaults():
     assert root.api.homeworld_locator.layout_prior_solver == "anneal"
     assert root.api.homeworld_locator.layout_prior_budget_ms == 1000
     assert root.api.homeworld_locator.cluster_fow_density_credit_multiplier == 1.0
+    assert root.api.homeworld_locator.use_player_homeworld_sidebar is False
 
 
 def test_load_config_homeworld_locator_overrides(tmp_path):
@@ -307,6 +308,7 @@ def test_load_config_homeworld_locator_overrides(tmp_path):
         "    layout_prior_solver: enumerate\n"
         "    layout_prior_budget_ms: 1500\n"
         "    cluster_fow_density_credit_multiplier: 1.25\n"
+        "    use_player_homeworld_sidebar: true\n"
         "bff: {}\n",
         encoding="utf-8",
     )
@@ -316,6 +318,7 @@ def test_load_config_homeworld_locator_overrides(tmp_path):
     assert root.api.homeworld_locator.layout_prior_solver == "enumerate"
     assert root.api.homeworld_locator.layout_prior_budget_ms == 1500
     assert root.api.homeworld_locator.cluster_fow_density_credit_multiplier == 1.25
+    assert root.api.homeworld_locator.use_player_homeworld_sidebar is True
 
 
 def test_load_config_homeworld_locator_leaf_override():
@@ -324,12 +327,14 @@ def test_load_config_homeworld_locator_leaf_override():
         override_specs=[
             "api.homeworld_locator.min_baseline_clans=12000",
             "api.homeworld_locator.layout_prior_budget_ms=1500",
+            "api.homeworld_locator.use_player_homeworld_sidebar=true",
         ],
         default_config_path=base,
     )
     assert root.api.homeworld_locator.min_baseline_clans == 12000
     assert root.api.homeworld_locator.origin_distance_evidence_lambda == 0.95
     assert root.api.homeworld_locator.layout_prior_budget_ms == 1500
+    assert root.api.homeworld_locator.use_player_homeworld_sidebar is True
 
 
 def test_load_config_homeworld_locator_lambda_out_of_range_raises(tmp_path):
@@ -349,4 +354,14 @@ def test_load_config_homeworld_locator_invalid_type_raises(tmp_path):
         encoding="utf-8",
     )
     with pytest.raises(TypeError, match="homeworld_locator"):
+        load_config(default_config_path=cfg)
+
+
+def test_load_config_homeworld_locator_sidebar_non_bool_raises(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "server: {}\napi:\n  homeworld_locator:\n    use_player_homeworld_sidebar: 1\nbff: {}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(TypeError, match="use_player_homeworld_sidebar"):
         load_config(default_config_path=cfg)

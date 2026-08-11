@@ -554,6 +554,87 @@ def test_for_turn_emits_when_gate_passes_and_empty_without_pin(
     )
 
 
+def test_for_turn_suppresses_sectors_when_player_sidebar_config(
+    sample_turn, template_planet
+) -> None:
+    """``use_player_homeworld_sidebar`` forces empty emission even with a valid pin."""
+    from api.config import get_config, set_config
+
+    asset = _stub_layout_asset(support_min=500.0, support_max=600.0)
+    players = [
+        replace(sample_turn.player, id=index + 1, username=f"p{index + 1}") for index in range(11)
+    ]
+    center = (2000.0, 2000.0)
+    pin = _planet(template_planet, planet_id=1, x=2550, y=2000, ownerid=players[0].id)
+    settings = replace(
+        sample_turn.settings,
+        hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+        mapshape=MAP_SHAPE_ROUND,
+        shiplimit=500,
+        endturn=100,
+        campaignmode=False,
+        planetscanrange=10000,
+    )
+    turn = replace(
+        sample_turn,
+        settings=settings,
+        player=players[0],
+        players=players,
+        planets=[pin],
+        ships=[],
+        relations=[],
+    )
+    view = HomeworldCandidateView(
+        candidates=(
+            HomeworldCandidateRecord(
+                planet_id=pin.id,
+                perspective=1,
+                confidence_tier=CONFIDENCE_DEFINITE,
+            ),
+        ),
+        baseline_turn=1,
+        baseline_degraded=False,
+        available=True,
+    )
+    prior = get_config()
+    set_config(
+        replace(
+            prior,
+            homeworld_locator=replace(
+                prior.homeworld_locator,
+                use_player_homeworld_sidebar=True,
+            ),
+        )
+    )
+    try:
+        assert (
+            build_homeworld_sector_overlays_for_turn(
+                turn,
+                view,
+                layout_asset=asset,
+                map_center=center,
+                shell_perspective=1,
+            )
+            == ()
+        )
+        assert homeworld_sector_emission_eligible(turn, pin=pin, player_count=11) is True
+    finally:
+        set_config(prior)
+
+    assert (
+        len(
+            build_homeworld_sector_overlays_for_turn(
+                turn,
+                view,
+                layout_asset=asset,
+                map_center=center,
+                shell_perspective=1,
+            )
+        )
+        == 11
+    )
+
+
 def test_possible_owners_emit_provenance_kind_counts(template_planet) -> None:
     """Ownership hover needs per-kind multiplicity, not only unique kind tags."""
     center = (0.0, 0.0)
