@@ -205,6 +205,32 @@ def resolve_viewpoint_pin_planet(
     )
 
 
+def resolve_sector_geometry_pin(
+    view: HomeworldCandidateView,
+    planets: Sequence[Planet],
+    *,
+    shell_perspective: int | None = None,
+) -> Planet | None:
+    """Resolve the planet that pins sector ring geometry for layout and overlays.
+
+    Prefer ``view.sector_pin_planet_id`` when that planet is present on the map;
+    otherwise fall back to :func:`resolve_viewpoint_pin_planet`.
+    """
+    if view.sector_pin_planet_id is not None:
+        planet_by_id = {planet.id: planet for planet in planets}
+        pin = planet_by_id.get(view.sector_pin_planet_id)
+        if pin is not None:
+            return pin
+    return resolve_viewpoint_pin_planet(
+        view,
+        planets,
+        shell_perspective=shell_perspective,
+        asserted_location_planet_ids=tuple(
+            row.planet_id for row in view.candidates if row.location_asserted
+        ),
+    )
+
+
 def annular_sector_boundary(
     *,
     center: tuple[float, float],
@@ -697,19 +723,11 @@ def build_homeworld_sector_overlays_for_turn(
     """Emit sector overlays for a shell turn when the emission gate passes."""
     if get_config().homeworld_locator.use_player_homeworld_sidebar:
         return ()
-    planet_by_id = {planet.id: planet for planet in turn.planets}
-    pin: Planet | None = None
-    if view.sector_pin_planet_id is not None:
-        pin = planet_by_id.get(view.sector_pin_planet_id)
-    if pin is None:
-        pin = resolve_viewpoint_pin_planet(
-            view,
-            turn.planets,
-            shell_perspective=shell_perspective,
-            asserted_location_planet_ids=tuple(
-                row.planet_id for row in view.candidates if row.location_asserted
-            ),
-        )
+    pin = resolve_sector_geometry_pin(
+        view,
+        turn.planets,
+        shell_perspective=shell_perspective,
+    )
     player_count = len(players_by_id(turn))
     if pin is None or not homeworld_sector_emission_eligible(
         turn, pin=pin, player_count=player_count
