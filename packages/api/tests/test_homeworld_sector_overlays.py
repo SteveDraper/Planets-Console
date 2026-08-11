@@ -472,9 +472,7 @@ def test_resolve_viewpoint_pin_definite_slot_anchored_stable_by_planet_id(
         available=True,
     )
     assert resolve_viewpoint_pin_planet(view, [higher, lower]) is lower
-    assert (
-        resolve_viewpoint_pin_planet(view, [higher, lower], shell_perspective=3) is higher
-    )
+    assert resolve_viewpoint_pin_planet(view, [higher, lower], shell_perspective=3) is higher
 
 
 def test_resolve_viewpoint_pin_prefers_non_location_asserted(template_planet) -> None:
