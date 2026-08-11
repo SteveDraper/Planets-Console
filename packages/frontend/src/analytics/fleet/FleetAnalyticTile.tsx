@@ -5,6 +5,7 @@ import {
   deriveShellTurnMax,
   deriveTurnView,
 } from '../../shell/shellContext'
+import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useTurnRacePlayerLabels } from '../../lib/turnRacePlayerLabels'
 import { cn } from '../../lib/utils'
 import { useSessionStore } from '../../stores/session'
@@ -13,6 +14,7 @@ import {
   FLEET_HEADING_TRAIL_MAX_EXTEND_TURNS,
   useFleetHeadingTrailExtendStore,
 } from '../../stores/fleetHeadingTrailExtend'
+import { usePlayerColor } from '../../stores/playerColors'
 import { useShellStore } from '../../stores/shell'
 import { fleetPlayerDisplayLabel } from './fleetPlayerDisplayLabel'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
@@ -29,6 +31,47 @@ type FleetAnalyticTileProps = {
   supportsMode: boolean
   depressed: boolean
   onToggle: () => void
+}
+
+type FleetPlayerVisibilityRowProps = {
+  player: Pick<PerspectiveRow, 'playerId' | 'name' | 'raceName'>
+  racePlayerLabels: Map<number, string>
+  isVisible: boolean
+  onVisibleChange: (visible: boolean) => void
+}
+
+function FleetPlayerVisibilityRow({
+  player,
+  racePlayerLabels,
+  isVisible,
+  onVisibleChange,
+}: FleetPlayerVisibilityRowProps) {
+  const color = usePlayerColor(player.playerId)
+  const playerLabel = fleetPlayerDisplayLabel(player, racePlayerLabels, undefined)
+
+  return (
+    <label
+      title={playerLabel}
+      className="flex cursor-pointer items-center gap-2"
+    >
+      <input
+        type="checkbox"
+        checked={isVisible}
+        onChange={(event) => onVisibleChange(event.target.checked)}
+        className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+      />
+      <span
+        aria-hidden
+        data-testid={`fleet-player-color-${player.playerId}`}
+        className={cn(
+          'h-2.5 w-2.5 shrink-0 rounded-sm border border-black/40',
+          !isVisible && 'opacity-50'
+        )}
+        style={{ backgroundColor: color }}
+      />
+      <span className="min-w-0 truncate">{playerLabel}</span>
+    </label>
+  )
 }
 
 export function FleetAnalyticTile({
@@ -166,22 +209,15 @@ export function FleetAnalyticTile({
               ))}
             </select>
           </label>
-          {orderedPlayers.map((player) => {
-            const playerLabel = fleetPlayerDisplayLabel(player, racePlayerLabels, undefined)
-            return (
-            <label key={player.playerId} className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={isPlayerVisible(player.playerId)}
-                onChange={(event) =>
-                  setFleetPlayerVisible(player.playerId, event.target.checked)
-                }
-                className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 accent-slate-400"
-              />
-              <span className="min-w-0 truncate">{playerLabel}</span>
-            </label>
-            )
-          })}
+          {orderedPlayers.map((player) => (
+            <FleetPlayerVisibilityRow
+              key={player.playerId}
+              player={player}
+              racePlayerLabels={racePlayerLabels}
+              isVisible={isPlayerVisible(player.playerId)}
+              onVisibleChange={(visible) => setFleetPlayerVisible(player.playerId, visible)}
+            />
+          ))}
         </div>
       ) : null}
     </div>

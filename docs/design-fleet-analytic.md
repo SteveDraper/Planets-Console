@@ -349,6 +349,7 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
 - **Fleet player visibility** checklist: one toggle per **Player** for **both** map and table
 - Default: all **Players** on until the user toggles an override
 - Persisted globally (not per game), same pattern as **Cartography layer**
+- Per-player row includes a small always-visible **player color** swatch (`usePlayerColor`, same paint as map rings/trails) between the checkbox and truncated label; swatch stays when unchecked (dimmed). Row `title` shows the full untruncated label ([#303](https://github.com/SteveDraper/Planets-Console/issues/303))
 
 ### 8.2 Map (fleet stream → location rings)
 
@@ -491,6 +492,7 @@ Critical path: `0 -> 1 -> 2 -> 3 -> 4 -> 5`.
 | **Fleet F7** (ADR 0004) | Per-player persistence, provenance, table stream -- [#163](https://github.com/SteveDraper/Planets-Console/issues/163) epic; section 15 |
 | **#143** | Neutral scores-inference revision for fleet refetch; superseded for refinement updates once F7 stream ships |
 | **Player color Settings** [#289](https://github.com/SteveDraper/Planets-Console/issues/289) | Settings UI for **player color mode** (per-player overrides + diplomacy-family); #128 ships defaults + storage seam; [ADR 0013](adr/0013-player-color-resolution-context.md) |
+| **Fleet sidebar color key** [#303](https://github.com/SteveDraper/Planets-Console/issues/303) | Small always-visible player-color swatch + full-label `title` on fleet player visibility rows (section 8.1) |
 | **Fleet heading trails** [#290](https://github.com/SteveDraper/Planets-Console/issues/290) | Map rays for known heading/speed (observed ships); optional multi-turn forward/back opacity ramp; stream wire enrichment |
 
 ### `$.composition` export branch (#154)
