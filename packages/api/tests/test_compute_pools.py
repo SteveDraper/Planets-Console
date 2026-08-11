@@ -517,6 +517,13 @@ def test_configured_worker_count_reads_environment(monkeypatch: pytest.MonkeyPat
     assert configured_worker_count() == 7
 
 
+def test_configured_worker_count_default_is_eight(monkeypatch: pytest.MonkeyPatch):
+    from api.compute.pools import configured_worker_count
+
+    monkeypatch.delenv("COMPUTE_ORCHESTRATOR_WORKERS", raising=False)
+    assert configured_worker_count() == 8
+
+
 def _single_step_thread_registration() -> TurnAnalyticRegistration:
     return TurnAnalyticRegistration(
         catalog_entry=_catalog_entry(),
