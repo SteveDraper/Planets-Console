@@ -89,6 +89,8 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
             export_services={
                 SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
             },
+            game_id=sample_turn.game.id,
+            perspective=sample_turn.player.id,
         )
         row_complete = row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
@@ -287,6 +289,8 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
             export_services={
                 SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
             },
+            game_id=sample_turn.game.id,
+            perspective=sample_turn.player.id,
         )
         row_complete = row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
@@ -343,6 +347,8 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
         export_services={
             SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
         },
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     row_complete = row_complete_with_summary(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),

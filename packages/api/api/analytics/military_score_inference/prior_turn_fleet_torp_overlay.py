@@ -198,6 +198,8 @@ def _load_prior_turn_fleet_snapshot(
             ctx = make_analytic_query_context(
                 turn,
                 TurnAnalyticsOptions(),
+                game_id=fleet_services.game_id,
+                perspective=fleet_services.perspective,
                 load_turn=load_turn,
                 export_services=export_services,
             )
@@ -336,6 +338,8 @@ def schedule_background_prior_turn_fleet_warm(
     query_context = make_analytic_query_context(
         turn,
         TurnAnalyticsOptions(),
+        game_id=game_id,
+        perspective=perspective,
         load_turn=load_turn,
         export_services=export_services,
     )

@@ -498,6 +498,8 @@ def test_legacy_v1_upgrade_enables_functional_backfill_without_diagnostics():
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_services={"scores": ScoresExportContext(persistence=persistence)},
+        game_id=turn_two.game.id,
+        perspective=turn_two.player.id,
     )
     resolved = held_scores_for_scope(
         ctx,
@@ -547,6 +549,8 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
         sample_turn,
         TurnAnalyticsOptions(),
         export_services={"scores": ScoresExportContext(persistence=persistence)},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     policy = ScoresPersistencePolicy()
     row_complete = row_complete_with_summary(
@@ -627,6 +631,8 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
         sample_turn,
         TurnAnalyticsOptions(),
         export_services={"scores": ScoresExportContext(persistence=persistence)},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     policy = ScoresPersistencePolicy()
     policy.persist(
@@ -699,6 +705,8 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
         sample_turn,
         TurnAnalyticsOptions(),
         export_services={"scores": ScoresExportContext(persistence=persistence)},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     row_complete = row_complete_with_summary(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),

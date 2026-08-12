@@ -530,6 +530,8 @@ def test_functional_backfill_resolves_host_turn_targets_without_diagnostics(samp
         TurnAnalyticsOptions(),
         load_turn=load_turn,
         export_services={"scores": ScoresExportContext(persistence=persistence)},
+        game_id=turn_two.game.id,
+        perspective=turn_two.player.id,
     )
     resolved = held_scores_for_scope(
         ctx,

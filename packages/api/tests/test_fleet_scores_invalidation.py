@@ -844,6 +844,8 @@ def test_orchestrator_fleet_persist_notifies_scores_invalidation(
     ctx = make_analytic_query_context(
         turn_111,
         TurnAnalyticsOptions(),
+        game_id=628580,
+        perspective=1,
         load_turn=load_turn,
         export_services={
             "fleet": FleetComputeServices(
@@ -927,7 +929,13 @@ def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(samp
     from api.compute.registry import build_compute_registry
 
     registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
-    make_analytic_query_context(sample_turn, TurnAnalyticsOptions(), export_services={})
+    make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_services={},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+    )
     orchestrator = ComputeOrchestrator(compute_registry=registry)
 
     fleet_scope = ComputeScope(

@@ -515,7 +515,12 @@ def test_probe_empty_catalog_returns_unavailable(sample_turn):
     from api.analytics import TurnAnalyticsOptions
     from api.analytics.compute_context import make_analytic_compute_context
 
-    ctx = make_analytic_compute_context(sample_turn, TurnAnalyticsOptions())
+    ctx = make_analytic_compute_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+    )
 
     probe = ctx.exports.probe("base-map")
 
@@ -528,12 +533,23 @@ def test_probe_empty_catalog_returns_unavailable(sample_turn):
 def test_get_turn_analytic_wires_query_context(sample_turn):
     from api.analytics import TurnAnalyticsOptions, get_turn_analytic
 
-    data = get_turn_analytic("base-map", sample_turn, TurnAnalyticsOptions())
+    data = get_turn_analytic(
+        "base-map",
+        sample_turn,
+        TurnAnalyticsOptions(),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+    )
     assert data["analyticId"] == "base-map"
 
     from api.analytics.compute_context import make_analytic_compute_context
 
-    ctx = make_analytic_compute_context(sample_turn, TurnAnalyticsOptions())
+    ctx = make_analytic_compute_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+    )
     empty_probe = ctx.exports.probe("base-map")
     assert empty_probe.status == "unavailable"
     assert empty_probe.reason == "empty_catalog"

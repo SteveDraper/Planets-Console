@@ -51,6 +51,8 @@ def make_fixture_query_context(
     return make_analytic_query_context(
         turn,
         TurnAnalyticsOptions(),
+        game_id=turn.game.id,
+        perspective=turn.player.id,
         load_turn=load_turn,
         export_registry=registry,
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,

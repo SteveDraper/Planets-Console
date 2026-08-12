@@ -251,6 +251,8 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
             export_services={
                 SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
             },
+            game_id=sample_turn.game.id,
+            perspective=sample_turn.player.id,
         )
         row_complete = row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
@@ -334,6 +336,8 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
             export_services={
                 SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
             },
+            game_id=sample_turn.game.id,
+            perspective=sample_turn.player.id,
         )
         row_complete = row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),

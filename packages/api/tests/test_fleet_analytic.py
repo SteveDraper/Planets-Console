@@ -31,6 +31,8 @@ def test_registry_dispatches_fleet(sample_turn):
         TurnAnalyticsOptions(),
         load_turn=services.load_turn,
         export_services={ANALYTIC_ID: services},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4

@@ -114,6 +114,8 @@ def scores_query_context(
     return make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
         load_turn=load_turn,
         export_services={
             "scores": scores_services,

@@ -88,7 +88,13 @@ def get_scores_table(
     options: TurnAnalyticsOptions | None = None,
 ) -> dict:
     """Convenience entry for tests and direct callers."""
-    return invoke_analytic_compute(compute_scores_table, turn, options)
+    return invoke_analytic_compute(
+        compute_scores_table,
+        turn,
+        options,
+        game_id=turn.game.id,
+        perspective=turn.player.id,
+    )
 
 
 def iter_scores_table_inference_stream(

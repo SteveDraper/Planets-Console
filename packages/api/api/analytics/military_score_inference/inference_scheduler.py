@@ -744,6 +744,8 @@ def _query_context_for_session(
     return make_analytic_query_context(
         session.turn,
         TurnAnalyticsOptions(),
+        game_id=session.game_id,
+        perspective=session.perspective,
         load_turn=load_turn,
         export_services=export_services,
     )

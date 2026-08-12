@@ -38,14 +38,26 @@ def test_scores_module_returns_structured_score_rows(sample_turn):
 
 
 def test_registry_scores_dispatch_unchanged_without_inference_option(sample_turn):
-    data = get_turn_analytic("scores", sample_turn, TurnAnalyticsOptions())
+    data = get_turn_analytic(
+        "scores",
+        sample_turn,
+        TurnAnalyticsOptions(),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+    )
     assert data["analyticId"] == "scores"
     assert "inference" not in data["rows"][0]
 
 
 def test_registry_rejects_unknown_analytic(sample_turn):
     with pytest.raises(ValidationError, match="Unknown analytic_id"):
-        get_turn_analytic("missing", sample_turn, TurnAnalyticsOptions())
+        get_turn_analytic(
+            "missing",
+            sample_turn,
+            TurnAnalyticsOptions(),
+            game_id=sample_turn.game.id,
+            perspective=sample_turn.player.id,
+        )
 
 
 def test_get_turn_analytic_passes_diagnostics_on_context(sample_turn, monkeypatch):
@@ -59,7 +71,13 @@ def test_get_turn_analytic_passes_diagnostics_on_context(sample_turn, monkeypatc
         return {"analyticId": "scores"}
 
     monkeypatch.setitem(TURN_ANALYTICS, "scores", capture_handler)
-    get_turn_analytic("scores", sample_turn, TurnAnalyticsOptions(diagnostics=diagnostics))
+    get_turn_analytic(
+        "scores",
+        sample_turn,
+        TurnAnalyticsOptions(diagnostics=diagnostics),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+    )
     assert captured["diagnostics"] is diagnostics
 
 

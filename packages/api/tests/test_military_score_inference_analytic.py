@@ -378,6 +378,8 @@ def test_registry_still_exposes_only_scores_analytic(sample_turn):
         "scores",
         sample_turn,
         TurnAnalyticsOptions(),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     assert data["analyticId"] == "scores"
     assert "inference" not in data["rows"][0]

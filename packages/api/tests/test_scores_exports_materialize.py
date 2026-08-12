@@ -43,6 +43,8 @@ def test_turn_not_stored_query_unavailable(sample_turn):
         sample_turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     result = ctx.query(
         "scores",
@@ -63,6 +65,8 @@ def test_turn_not_stored_materialize_asserts(sample_turn):
         sample_turn,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     with pytest.raises(ValidationError, match="not stored"):
         materialize_scores_tree(ctx, player_id)
@@ -331,6 +335,8 @@ def test_materialize_omits_hull_catalog_mask_when_resolver_returns_none(sample_t
         export_services={
             "scores": ScoresExportContext(resolve_hull_catalog_mask=resolve_none_mask),
         },
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     tree, _scope = materialize_scores_tree(ctx, player_id)
     assert "hullCatalogMask" not in tree

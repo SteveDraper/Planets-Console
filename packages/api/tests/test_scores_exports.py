@@ -180,6 +180,8 @@ def test_resolve_scores_services_fails_without_injection(sample_turn):
         load_turn=lambda turn_number: (
             sample_turn if turn_number == sample_turn.settings.turn else None
         ),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     with pytest.raises(RuntimeError, match="requires 'scores' in ctx.export_services"):
         materialize_scores_tree(ctx, player_id)
@@ -194,6 +196,8 @@ def test_resolve_scores_services_fails_on_wrong_type(sample_turn):
             sample_turn if turn_number == sample_turn.settings.turn else None
         ),
         export_services={"scores": object()},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     with pytest.raises(RuntimeError, match="must be ScoresExportContext"):
         materialize_scores_tree(ctx, player_id)

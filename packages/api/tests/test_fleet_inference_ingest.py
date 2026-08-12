@@ -1046,6 +1046,8 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
             SCORES_ANALYTIC_ID: scores_services,
             ANALYTIC_ID: services,
         },
+        game_id=turn.game.id,
+        perspective=turn.player.id,
     )
     record = next(
         rec

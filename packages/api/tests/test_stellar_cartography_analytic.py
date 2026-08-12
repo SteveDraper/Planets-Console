@@ -202,7 +202,13 @@ def test_wormhole_mono_directional_adds_exit_node(stellar_cartography_turn):
 
 
 def test_registry_dispatches_stellar_cartography(stellar_cartography_turn):
-    data = get_turn_analytic(ANALYTIC_ID, stellar_cartography_turn, TurnAnalyticsOptions())
+    data = get_turn_analytic(
+        ANALYTIC_ID,
+        stellar_cartography_turn,
+        TurnAnalyticsOptions(),
+        game_id=stellar_cartography_turn.game.id,
+        perspective=stellar_cartography_turn.player.id,
+    )
     assert data["analyticId"] == ANALYTIC_ID
     assert len(data["overlayCircles"]) > 0
 

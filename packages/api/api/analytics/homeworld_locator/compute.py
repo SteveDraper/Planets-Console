@@ -136,6 +136,8 @@ def get_homeworld_locator(
         compute_homeworld_locator,
         turn,
         options,
+        game_id=turn.game.id,
+        perspective=turn.player.id,
         load_turn=load_turn,
         export_services=export_services,
     )

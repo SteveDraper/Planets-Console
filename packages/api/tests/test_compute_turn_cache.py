@@ -108,6 +108,8 @@ def test_fleet_job_wire_includes_prefetched_turn_wire(sample_turn) -> None:
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: ScoresExportContext(),
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     cache = OrchestratorTurnCache()
 
@@ -153,6 +155,8 @@ def test_fleet_job_wire_prefetches_prior_ledger_from_persistence(sample_turn) ->
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: ScoresExportContext(),
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     player_id = next(row.ownerid for row in sample_turn.scores)
     prior_persisted = PersistedFleetLedger(
@@ -208,6 +212,8 @@ def test_orchestrator_exposes_cached_load_turn(sample_turn) -> None:
         stored_turns[2],
         TurnAnalyticsOptions(),
         load_turn=counting_load,
+        game_id=stored_turns[2].game.id,
+        perspective=stored_turns[2].player.id,
     )
     compute_registry = build_compute_registry(
         (
@@ -264,6 +270,8 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: ScoresExportContext(),
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
@@ -361,6 +369,8 @@ def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> No
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: scores_services,
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     pool = ComputeWorkerPool(worker_count=1)

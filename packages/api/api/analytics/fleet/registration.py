@@ -62,6 +62,8 @@ def get_fleet(turn: TurnInfo) -> dict:
     return invoke_analytic_compute(
         compute_fleet,
         turn,
+        game_id=services.game_id,
+        perspective=services.perspective,
         load_turn=services.load_turn,
         export_services={ANALYTIC_ID: services},
     )

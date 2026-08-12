@@ -12,7 +12,9 @@ from api.compute.scope import WILDCARD
 
 
 def test_table_map_scopes_fan_out_player_axis(sample_turn):
-    ctx = make_analytic_compute_context(sample_turn).exports
+    ctx = make_analytic_compute_context(
+        sample_turn, game_id=sample_turn.game.id, perspective=sample_turn.player.id
+    ).exports
     scopes = table_map_compute_scopes(FLEET_ANALYTIC_ID, ctx, sample_turn)
     roster_ids = tuple(player.id for player in iter_turn_players(sample_turn))
     assert tuple(scope.player_id for scope in scopes) == roster_ids
@@ -38,7 +40,9 @@ def test_table_map_scopes_use_request_perspective_not_rst_player(sample_turn):
 
 
 def test_table_map_scopes_single_unscoped_for_homeworld(sample_turn):
-    ctx = make_analytic_compute_context(sample_turn).exports
+    ctx = make_analytic_compute_context(
+        sample_turn, game_id=sample_turn.game.id, perspective=sample_turn.player.id
+    ).exports
     scopes = table_map_compute_scopes(HOMEWORLD_ANALYTIC_ID, ctx, sample_turn)
     assert len(scopes) == 1
     assert scopes[0].analytic_id == HOMEWORLD_ANALYTIC_ID
@@ -54,7 +58,9 @@ def test_ensure_table_map_compute_skips_scores(sample_turn, monkeypatch):
         "api.compute.runtime.get_compute_orchestrator",
         fail_orchestrator,
     )
-    ctx = make_analytic_compute_context(sample_turn).exports
+    ctx = make_analytic_compute_context(
+        sample_turn, game_id=sample_turn.game.id, perspective=sample_turn.player.id
+    ).exports
     ensure_table_map_compute(ctx, SCORES_ANALYTIC_ID, sample_turn)
 
 
@@ -66,5 +72,7 @@ def test_ensure_table_map_compute_skips_unregistered(sample_turn, monkeypatch):
         "api.compute.runtime.get_compute_orchestrator",
         fail_orchestrator,
     )
-    ctx = make_analytic_compute_context(sample_turn).exports
+    ctx = make_analytic_compute_context(
+        sample_turn, game_id=sample_turn.game.id, perspective=sample_turn.player.id
+    ).exports
     ensure_table_map_compute(ctx, "base-map", sample_turn)

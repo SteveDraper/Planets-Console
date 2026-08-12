@@ -226,7 +226,13 @@ def get_stellar_cartography_map(
     options: TurnAnalyticsOptions | None = None,
 ) -> dict:
     """Convenience entry for tests and direct callers."""
-    return invoke_analytic_compute(compute_stellar_cartography_map, turn, options)
+    return invoke_analytic_compute(
+        compute_stellar_cartography_map,
+        turn,
+        options,
+        game_id=turn.game.id,
+        perspective=turn.player.id,
+    )
 
 
 REGISTRATION = TurnAnalyticRegistration(

@@ -456,6 +456,8 @@ def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, 
             turn_112,
             load_turn=load_turn,
             export_services={"fleet": fleet_services},
+            game_id=fleet_services.game_id,
+            perspective=fleet_services.perspective,
         )
 
     assert chain_calls == roster_size

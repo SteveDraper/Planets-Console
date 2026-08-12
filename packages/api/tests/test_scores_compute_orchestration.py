@@ -217,6 +217,8 @@ def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
                 scheduler=scheduler,
             )
         },
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     player_id = sample_turn.scores[0].ownerid
     scope = _scores_scope(sample_turn, player_id)
@@ -976,6 +978,8 @@ def test_scores_persistence_policy_persist_delegates_to_inference_service(
         sample_turn,
         TurnAnalyticsOptions(),
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext(persistence=row_persistence)},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     policy = ScoresPersistencePolicy()
     row_complete = row_complete_with_summary(
@@ -1034,6 +1038,8 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         TurnAnalyticsOptions(),
         export_registry={**EXPORT_REGISTRY, "scores-tier-probe": tier_catalog},
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     tier_registration = TurnAnalyticRegistration(
         catalog_entry=TurnAnalyticCatalogEntry(
@@ -1116,6 +1122,8 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
         TurnAnalyticsOptions(),
         export_registry={**EXPORT_REGISTRY, "scores-tier-probe": tier_catalog},
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
     )
     tier_registration = TurnAnalyticRegistration(
         catalog_entry=TurnAnalyticCatalogEntry(

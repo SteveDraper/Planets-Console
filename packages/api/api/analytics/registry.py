@@ -60,10 +60,10 @@ def get_turn_analytic(
     turn: TurnInfo,
     options: TurnAnalyticsOptions,
     *,
+    game_id: int,
+    perspective: int,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: Mapping[str, object] | None = None,
-    game_id: int | None = None,
-    perspective: int | None = None,
 ) -> dict:
     try:
         handler = TURN_ANALYTICS[analytic_id]
@@ -73,9 +73,9 @@ def get_turn_analytic(
         make_analytic_compute_context(
             turn,
             options,
-            load_turn=load_turn,
-            export_services=export_services,
             game_id=game_id,
             perspective=perspective,
+            load_turn=load_turn,
+            export_services=export_services,
         )
     )

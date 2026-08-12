@@ -207,6 +207,8 @@ def test_persist_writes_refined_option_sets_onto_result_wire(sample_turn):
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: ScoresExportContext(),
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     phase1 = _phase1_persisted_with_placeholders(
         turn, player_id=player_id, game_perspective=game_perspective
@@ -308,6 +310,8 @@ def test_next_leg_prior_from_dependency_outputs_keeps_refined_option_sets(sample
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: ScoresExportContext(),
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
 
     phase1_n = _phase1_persisted_with_placeholders(
@@ -370,6 +374,8 @@ def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: ScoresExportContext(),
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     snapshot = ensure_fleet_baseline(628580, game_perspective, turn_n)
     prior_persisted = PersistedFleetLedger(
@@ -438,6 +444,8 @@ def test_persist_refuses_when_scores_turn_evidence_open(sample_turn):
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: ScoresExportContext(),
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     phase1 = _phase1_persisted_with_placeholders(
         turn, player_id=player_id, game_perspective=game_perspective

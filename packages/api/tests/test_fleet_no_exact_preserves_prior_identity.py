@@ -157,6 +157,8 @@ def _materialize_final_ledger(
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: inference.scores_services,
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     dependency_outputs = DependencyOutputs()
     if prior is not None:
@@ -494,6 +496,8 @@ def test_stale_dependency_prior_must_not_override_final_disk_ledger(sample_turn)
             _FLEET_ANALYTIC_ID: fleet_services,
             SCORES_ANALYTIC_ID: inference.scores_services,
         },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     dependency_outputs = DependencyOutputs()
     dependency_outputs.put(

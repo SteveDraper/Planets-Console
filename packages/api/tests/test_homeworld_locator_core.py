@@ -426,10 +426,10 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
         turn,
         options,
         *,
+        game_id,
+        perspective,
         load_turn,
         export_services,
-        game_id=None,
-        perspective=None,
     ):
         captured["export_services"] = export_services
         return {"analyticId": analytic_id}
@@ -517,6 +517,8 @@ def test_export_ensure_unsatisfied_when_degraded_and_turn_one_present(
         late,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(_services(persistence, turns), turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -541,6 +543,8 @@ def test_export_ensure_requires_shell_evidence_aggregate(persistence, sample_tur
         sample_turn,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -567,6 +571,8 @@ def test_export_ensure_raises_when_shell_turn_not_stored(persistence, sample_tur
         turn_one,
         load_turn=lambda n: {1: turn_one}.get(n),
         export_services=_export_services(services, {1: turn_one}),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -716,6 +722,8 @@ def test_candidate_view_materialize(persistence, sample_turn) -> None:
         sample_turn,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     view = materialize_homeworld_candidate_view(ctx, shell_turn=sample_turn)
     assert view.available is True
@@ -762,6 +770,8 @@ def test_run_homeworld_baseline_persist_round_trip(persistence, sample_turn) -> 
         sample_turn,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -833,6 +843,8 @@ def test_baseline_persist_recompute_clears_shell_evidence(persistence, sample_tu
         late,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -897,6 +909,8 @@ def test_baseline_persist_without_recompute_keeps_shell_evidence(persistence, sa
         sample_turn,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -936,6 +950,8 @@ def test_run_homeworld_baseline_inactive_completes_without_persist(
         inactive,
         load_turn=lambda n: {111: inactive}.get(n),
         export_services=_export_services(services, {111: inactive}),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,

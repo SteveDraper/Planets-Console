@@ -43,7 +43,12 @@ def compute_base_map(ctx: AnalyticComputeContext) -> dict:
 
 def get_base_map(turn: TurnInfo) -> dict:
     """Convenience entry for tests and direct callers that only have a turn."""
-    return invoke_analytic_compute(compute_base_map, turn)
+    return invoke_analytic_compute(
+        compute_base_map,
+        turn,
+        game_id=turn.game.id,
+        perspective=turn.player.id,
+    )
 
 
 REGISTRATION = TurnAnalyticRegistration(
