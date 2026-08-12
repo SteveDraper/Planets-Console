@@ -707,3 +707,88 @@ def test_apply_unique_owner_orphan_bind_preserves_existing_perspective(
         turn=shell,
     )
     assert bound[0].perspective == 9
+
+
+def test_apply_unique_owner_orphan_bind_second_hop_from_bound_location_pin(
+    template_planet,
+) -> None:
+    """A bind-created definite pin must settle that slot so the next sector binds.
+
+    Nearby ownership is weak, so a unique remaining owner does not settle for
+    cross-sector trim until the orphan is bound (definite + perspective). One-shot
+    bind leaves the second-hop sector's orphan unbound while overlay would pin it.
+    """
+    from api.analytics.homeworld_locator.models import OwnershipProvenance, SectorOwnerMember
+    from api.analytics.homeworld_locator.ownership_refine import apply_unique_owner_orphan_bind
+    from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
+
+    center = (2000.0, 2000.0)
+    player_count = 11
+    radius = 550.0
+    planets = []
+    for index in range(player_count):
+        angle = index * (2.0 * math.pi / player_count)
+        planets.append(
+            _planet(
+                template_planet,
+                planet_id=index + 1,
+                x=int(round(center[0] + radius * math.cos(angle))),
+                y=int(round(center[1] + radius * math.sin(angle))),
+            )
+        )
+    shell = _eligible_geometry_turn(template_planet, planets=planets)
+    nearby = OwnershipProvenance(
+        kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+        turn=10,
+        planet_id=99,
+        distance_ly=40.0,
+    )
+    aggregate = HomeworldEvidenceAggregate(
+        turn=10,
+        baseline_turn=1,
+        sector_owner_sets=(
+            (
+                0,
+                (SectorOwnerMember(owner_slot=1, provenances=(nearby,)),),
+            ),
+            (
+                1,
+                (
+                    SectorOwnerMember(owner_slot=1, provenances=(nearby,)),
+                    SectorOwnerMember(owner_slot=6, provenances=(nearby,)),
+                ),
+            ),
+            (
+                2,
+                (
+                    SectorOwnerMember(owner_slot=6, provenances=(nearby,)),
+                    SectorOwnerMember(owner_slot=8, provenances=(nearby,)),
+                ),
+            ),
+        ),
+    )
+    pin = HomeworldCandidateRecord(
+        planet_id=planets[0].id,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    first_hop_orphan = HomeworldCandidateRecord(
+        planet_id=planets[1].id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_DEFINITE,
+        location_asserted=True,
+    )
+    second_hop_orphan = HomeworldCandidateRecord(
+        planet_id=planets[2].id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    bound = apply_unique_owner_orphan_bind(
+        (pin, first_hop_orphan, second_hop_orphan),
+        aggregate,
+        turn=shell,
+    )
+    by_id = {row.planet_id: row for row in bound}
+    assert by_id[pin.planet_id].perspective == 1
+    assert by_id[first_hop_orphan.planet_id].perspective == 6
+    assert by_id[second_hop_orphan.planet_id].perspective == 8

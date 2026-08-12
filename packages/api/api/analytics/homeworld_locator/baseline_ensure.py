@@ -328,7 +328,8 @@ def materialize_homeworld_candidates(
     Single-SB and other machine strong facts affect confidence only via
     location provenances + derive -- not a parallel row-tier promote step.
     Unique-owner orphan bind runs after location derive so projection can use
-    definite location pins (same uniqueness test as overlay ``is_pinned``).
+    definite location pins (same uniqueness test as overlay ``is_pinned``),
+    iterating to fixpoint so a bind-created pin can settle the next sector.
     Definite-keyed culls run after that bind so demoted machine pins near
     asserted definites are dropped; location-asserted planets stay protected.
     """

@@ -23,8 +23,7 @@ from api.analytics.homeworld_locator.models import (
 )
 from api.analytics.homeworld_locator.ownership_projection import (
     SectorOwnerOverlayProjection,
-    project_sector_owner_sets_for_overlays,
-    settled_owner_homes_from_location_pins,
+    project_sector_owner_sets_with_location_pins,
     unique_projected_owner_slot,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateView
@@ -598,17 +597,14 @@ def build_homeworld_sector_overlays(
         index = sector_index_for_angle(angle, pin_angle=pin_angle, player_count=player_count)
         candidates_by_sector[index].append(planet)
 
-    settled_from_location = settled_owner_homes_from_location_pins(
-        [[planet.id for planet in sector_planets] for sector_planets in candidates_by_sector],
+    owner_sets = project_sector_owner_sets_with_location_pins(
+        dict(sector_owner_sets or ()),
+        candidate_planet_ids_by_sector=[
+            [planet.id for planet in sector_planets] for sector_planets in candidates_by_sector
+        ],
         location_definite_planet_ids=location_definite_planet_ids,
         perspective_by_planet_id=perspectives,
-    )
-
-    owner_sets = project_sector_owner_sets_for_overlays(
-        dict(sector_owner_sets or ()),
         race_id_by_owner_slot=race_id_by_owner_slot,
-        location_definite_planet_ids=location_definite_planet_ids,
-        settled_owner_home_by_slot=settled_from_location,
     )
 
     pin_sector = sector_index_for_angle(pin_angle, pin_angle=pin_angle, player_count=player_count)

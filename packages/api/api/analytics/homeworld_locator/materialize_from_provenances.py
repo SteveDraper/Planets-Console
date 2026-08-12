@@ -96,7 +96,8 @@ def derive_candidates_from_merged_evidence(
     When ``planet_sector_index`` is provided, ownership cues use sector-keyed
     merged sets. Unique sector owners bind ``perspective`` via overlay
     projection in ``apply_unique_owner_orphan_bind`` -- not here -- so
-    cross-sector settled trim is the same test as overlay ``is_pinned``.
+    cross-sector settled trim is the same test as overlay ``is_pinned``,
+    iterated to fixpoint.
     Without a sector index, planet-keyed asserted ownership may bind
     ``perspective`` when unique and the row is still unbound.
     ``race_id_by_owner_slot`` is required (empty map allowed when no race context).

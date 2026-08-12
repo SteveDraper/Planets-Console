@@ -204,10 +204,37 @@ def unique_projected_owner_slot(
     return projection.members[0].owner_slot
 
 
+def project_sector_owner_sets_with_location_pins(
+    sector_owner_sets: Mapping[int, Sequence[SectorOwnerMember]],
+    *,
+    candidate_planet_ids_by_sector: Sequence[Sequence[int]],
+    location_definite_planet_ids: frozenset[int],
+    perspective_by_planet_id: Mapping[int, int],
+    race_id_by_owner_slot: Mapping[int, int],
+) -> dict[int, SectorOwnerOverlayProjection]:
+    """Project overlay owner sets, settling homes from definite location pins.
+
+    Overlay emit and unique-owner orphan bind both use this so ``is_pinned``
+    and orphan ``perspective`` share one uniqueness snapshot.
+    """
+    settled = settled_owner_homes_from_location_pins(
+        candidate_planet_ids_by_sector,
+        location_definite_planet_ids=location_definite_planet_ids,
+        perspective_by_planet_id=perspective_by_planet_id,
+    )
+    return project_sector_owner_sets_for_overlays(
+        sector_owner_sets,
+        race_id_by_owner_slot=race_id_by_owner_slot,
+        location_definite_planet_ids=location_definite_planet_ids,
+        settled_owner_home_by_slot=settled,
+    )
+
+
 __all__ = [
     "SectorOwnerOverlayProjection",
     "ownership_winning_strength_for_members",
     "project_sector_owner_sets_for_overlays",
+    "project_sector_owner_sets_with_location_pins",
     "settled_owner_homes_from_location_pins",
     "unique_projected_owner_slot",
 ]
