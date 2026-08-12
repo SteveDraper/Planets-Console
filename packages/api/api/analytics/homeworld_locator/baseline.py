@@ -118,9 +118,9 @@ def cull_co_sector_candidates_after_definites(
 
     kept_definite_ids: set[int] = set()
     for sector_rows in definites_by_sector.values():
-        user_asserted = [row for row in sector_rows if _is_protected(row)]
-        if user_asserted:
-            kept_definite_ids.update(row.planet_id for row in user_asserted)
+        protected = [row for row in sector_rows if _is_protected(row)]
+        if protected:
+            kept_definite_ids.update(row.planet_id for row in protected)
             continue
         inferred = [row for row in sector_rows if not _is_protected(row)]
         if not inferred:

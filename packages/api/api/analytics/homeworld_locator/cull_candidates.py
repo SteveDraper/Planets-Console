@@ -16,7 +16,7 @@ class CullableCandidate(Protocol):
     def confidence_tier(self) -> str: ...
 
     @property
-    def attribution(self) -> str: ...
+    def location_asserted(self) -> bool: ...
 
     @property
     def perspective(self) -> int | None: ...
@@ -40,7 +40,7 @@ def candidate_is_assert_protected(
     """
     if row.planet_id in protected_planet_ids:
         return True
-    return bool(getattr(row, "location_asserted", False))
+    return row.location_asserted
 
 
 __all__ = [
