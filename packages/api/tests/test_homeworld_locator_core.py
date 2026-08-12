@@ -421,7 +421,16 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
 
     captured: dict[str, object] = {}
 
-    def fake_get_turn_analytic(analytic_id, turn, options, *, load_turn, export_services):
+    def fake_get_turn_analytic(
+        analytic_id,
+        turn,
+        options,
+        *,
+        load_turn,
+        export_services,
+        game_id=None,
+        perspective=None,
+    ):
         captured["export_services"] = export_services
         return {"analyticId": analytic_id}
 
