@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from api.analytics import TurnAnalyticsOptions, get_turn_analytic
+from api.analytics import TurnAnalyticsOptions
 from api.analytics.compute_context import make_analytic_compute_context
 from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.compute_services import FleetComputeServices
@@ -14,6 +14,7 @@ from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
+from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.batch_compute import ensure_table_map_compute
@@ -153,15 +154,7 @@ class TurnAnalyticService:
             perspective=perspective,
         )
         ensure_table_map_compute(compute_ctx.exports, analytic_id, turn)
-        return get_turn_analytic(
-            analytic_id,
-            turn,
-            options,
-            load_turn=load_turn,
-            export_services=export_services,
-            game_id=game_id,
-            perspective=perspective,
-        )
+        return dispatch_turn_analytic(analytic_id, compute_ctx)
 
     def _turn_export_services(
         self,

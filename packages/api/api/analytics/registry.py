@@ -7,7 +7,7 @@ from api.analytics.catalog import (
     TURN_ANALYTIC_CATALOG,
     tuple_aligned_with_turn_analytic_catalog,
 )
-from api.analytics.compute_context import make_analytic_compute_context
+from api.analytics.compute_context import AnalyticComputeContext, make_analytic_compute_context
 from api.analytics.connections import REGISTRATION as CONNECTIONS_REGISTRATION
 from api.analytics.fleet.registration import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.homeworld_locator.registration import (
@@ -55,6 +55,15 @@ TURN_ANALYTICS: dict[str, TurnAnalyticHandler] = {
 }
 
 
+def dispatch_turn_analytic(analytic_id: str, ctx: AnalyticComputeContext) -> dict:
+    """Invoke the registered handler with an already-built compute context."""
+    try:
+        handler = TURN_ANALYTICS[analytic_id]
+    except KeyError as err:
+        raise ValidationError(f"Unknown analytic_id: {analytic_id!r}") from err
+    return handler(ctx)
+
+
 def get_turn_analytic(
     analytic_id: str,
     turn: TurnInfo,
@@ -65,11 +74,8 @@ def get_turn_analytic(
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: Mapping[str, object] | None = None,
 ) -> dict:
-    try:
-        handler = TURN_ANALYTICS[analytic_id]
-    except KeyError as err:
-        raise ValidationError(f"Unknown analytic_id: {analytic_id!r}") from err
-    return handler(
+    return dispatch_turn_analytic(
+        analytic_id,
         make_analytic_compute_context(
             turn,
             options,
@@ -77,5 +83,5 @@ def get_turn_analytic(
             perspective=perspective,
             load_turn=load_turn,
             export_services=export_services,
-        )
+        ),
     )

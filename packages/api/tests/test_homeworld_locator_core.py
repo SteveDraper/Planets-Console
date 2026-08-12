@@ -421,17 +421,8 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
 
     captured: dict[str, object] = {}
 
-    def fake_get_turn_analytic(
-        analytic_id,
-        turn,
-        options,
-        *,
-        game_id,
-        perspective,
-        load_turn,
-        export_services,
-    ):
-        captured["export_services"] = export_services
+    def fake_dispatch_turn_analytic(analytic_id, ctx):
+        captured["export_services"] = ctx.exports.export_services
         return {"analyticId": analytic_id}
 
     monkeypatch.setattr(
@@ -439,8 +430,8 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        "api.services.turn_analytic_service.get_turn_analytic",
-        fake_get_turn_analytic,
+        "api.services.turn_analytic_service.dispatch_turn_analytic",
+        fake_dispatch_turn_analytic,
     )
 
     svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="captain")
