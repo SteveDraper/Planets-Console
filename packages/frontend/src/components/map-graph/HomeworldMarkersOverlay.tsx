@@ -13,7 +13,7 @@ const MARKER_DIAMETER_PX = 12
 /**
  * Homeworld locator planet decorations on the base map.
  * Solid ring = definite; dashed/lighter ring = possible; double dotted = most probable;
- * amber outer ring = asserted cue; cyan halo = panel/table selection;
+ * amber outer ring = location-asserted pin; cyan halo = panel/table selection;
  * pulse = ephemeral in-place ring scale flash after candidate row click.
  */
 export function HomeworldMarkersOverlay({
@@ -47,10 +47,12 @@ export function HomeworldMarkersOverlay({
           const isFlashing =
             flashTarget != null && flashTarget.planetId === marker.planetId
           const rings = homeworldMarkerRings({
-            ...marker,
+            confidenceTier: marker.confidenceTier,
+            isMostProbable: marker.isMostProbable,
+            locationAsserted: marker.locationAsserted,
             isSelected,
           })
-          const markerKey = `hw-${marker.planetId}-${marker.perspective ?? 'o'}-${marker.confidenceTier}-${marker.assertedCue ? 'a' : 'n'}-${marker.isMostProbable ? 'mp' : 'n'}`
+          const markerKey = `hw-${marker.planetId}-${marker.perspective ?? 'o'}-${marker.confidenceTier}-${marker.locationAsserted ? 'a' : 'n'}-${marker.isMostProbable ? 'mp' : 'n'}`
           return (
             <g
               key={isFlashing ? `${markerKey}-flash-${flashTarget.token}` : markerKey}
