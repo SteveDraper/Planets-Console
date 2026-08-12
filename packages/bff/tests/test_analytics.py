@@ -33,8 +33,8 @@ def _setup_storage_for_core_calls(monkeypatch):
     """Seed Core storage so BFF can call Core via ASGI transport.
 
     Table/map REST ensure waits on the process-wide fleet/scores DAG. These
-    tests assert response shape; compute() still materializes via the snapshot
-    chain when ensure is a no-op (same split as Core unit tests).
+    tests assert response shape, so ensure is a no-op and the fixture seeds a
+    durable host-turn fleet snapshot for ``compute()`` to read.
     """
     reset_orchestrators_for_tests()
     monkeypatch.setattr(

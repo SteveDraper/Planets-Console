@@ -549,10 +549,9 @@ def test_turn_analytic_service_fleet_miss_submits_batch_ensure(
 ):
     """REST cache miss fans out fleet scopes through ensure before compute().
 
-    Full orchestrator gap-fill for all roster players is covered by export-ensure
-    tests; this asserts the table/map caller submits the batch and still returns
-    the roster wire (compute falls back to the snapshot chain when ensure is
-    skipped in this unit test).
+    Full orchestrator gap-fill is covered by export-ensure tests. This unit test
+    stubs ensure after capturing the batch, then asserts compute reads
+    persistence (or fails) without rematerializing via the snapshot chain.
     """
     from api.compute.batch_compute import table_map_compute_scopes
 
@@ -568,18 +567,22 @@ def test_turn_analytic_service_fleet_miss_submits_batch_ensure(
         scopes = table_map_compute_scopes(analytic_id, ctx, turn)
         captured.append((analytic_id, len(scopes)))
 
+    def fail_chain(*_args, **_kwargs):
+        raise AssertionError("fleet REST miss must not rematerialize via snapshot chain")
+
     monkeypatch.setattr(
         "api.services.turn_analytic_service.ensure_table_map_compute",
         spy_ensure,
     )
+    monkeypatch.setattr(
+        "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
+        fail_chain,
+    )
     _, _, _, _, analytics, _ = build_service_stack(memory_backend)
-    data = analytics.get_turn_analytics(628580, 1, 111, "fleet")
+    with pytest.raises(ValidationError, match="fleet roster snapshot is not durable"):
+        analytics.get_turn_analytics(628580, 1, 111, "fleet")
     assert captured == [("fleet", 4)]
-    assert data["analyticId"] == "fleet"
-    assert len(data["players"]) == 4
-    koshling = next(player for player in data["players"] if player["playerId"] == 8)
-    assert len(koshling["records"]) == 5
-    assert persistence.get_snapshot(628580, 1, 111) is not None
+    assert persistence.get_snapshot(628580, 1, 111) is None
 
 
 def test_turn_analytic_service_fleet_cache_hit_skips_snapshot_chain(

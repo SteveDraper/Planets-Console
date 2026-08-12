@@ -611,10 +611,9 @@ def _materialize_fleet_snapshot_chain(
 ) -> FleetTurnSnapshot:
     """Gap-fill fleet ledgers for every roster player through turn T.
 
-    Temporary multi-turn path for roster snapshot / direct ``compute_fleet``
-    callers that skip REST ensure. REST ``get_turn_analytics`` migrates onto
-    orchestrator ensure (#202). Not the player-scoped export ensure path --
-    see ``ensure_fleet_export``.
+    Multi-turn path for roster snapshot / ``get_fleet`` callers that skip REST
+    ensure. REST ``compute_fleet`` reads the durable snapshot only. Not the
+    player-scoped export ensure path -- see ``ensure_fleet_export``.
     """
     from api.errors import FleetGapFillEpochInvalidated
 
@@ -757,6 +756,34 @@ def get_or_materialize_fleet_ledger_for_player(
         ) from exc
 
 
+def require_fleet_snapshot(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    turn: TurnInfo,
+) -> FleetTurnSnapshot:
+    """Return the durable roster snapshot, or fail if ensure did not satisfy.
+
+    REST ``compute_fleet`` uses this after orchestrator ensure. Direct callers
+    that skip ensure use ``get_or_materialize_fleet_snapshot``.
+    """
+    turn_number = turn.settings.turn
+    snapshot = persistence.get_snapshot(game_id, perspective, turn_number)
+    if snapshot is not None and _is_fleet_snapshot_cache_hit(
+        persistence,
+        game_id,
+        perspective,
+        turn_number,
+        turn,
+        snapshot,
+    ):
+        return snapshot
+    raise ValidationError(
+        f"fleet roster snapshot is not durable for game {game_id} "
+        f"perspective {perspective} turn {turn_number}"
+    )
+
+
 def get_or_materialize_fleet_snapshot(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
@@ -769,10 +796,9 @@ def get_or_materialize_fleet_snapshot(
 ) -> FleetTurnSnapshot:
     """Return a cached snapshot or multi-turn gap-fill for the full roster.
 
-    Roster snapshot / direct ``compute_fleet`` unwind via
-    ``_materialize_fleet_snapshot_chain`` when REST ensure did not already
-    populate final ledgers. Player-scoped leaf
-    ``get_or_materialize_fleet_ledger_for_player`` remains single-turn.
+    Skip-service / ``get_fleet`` unwind via ``_materialize_fleet_snapshot_chain``
+    when a durable ensure-final snapshot is not already present. Player-scoped
+    leaf ``get_or_materialize_fleet_ledger_for_player`` remains single-turn.
     ``query_context`` is retained for call-site compatibility and does not nest
     ensure.
     """

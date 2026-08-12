@@ -419,11 +419,11 @@ def test_per_player_gap_start_independent(persistence, load_turn):
 
 
 def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, load_turn):
-    """compute_fleet snapshot chain gap-fills every roster player."""
+    """Skip-service materialize_fleet snapshot chain gap-fills every roster player."""
     from unittest.mock import patch
 
     from api.analytics.compute_context import invoke_analytic_compute
-    from api.analytics.fleet import compute_fleet
+    from api.analytics.fleet import materialize_fleet
     from api.analytics.fleet.chain import _materialize_fleet_ledger_chain_for_player
     from api.analytics.fleet.compute_services import FleetComputeServices
 
@@ -452,7 +452,7 @@ def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, 
         side_effect=counting_chain,
     ):
         invoke_analytic_compute(
-            compute_fleet,
+            materialize_fleet,
             turn_112,
             load_turn=load_turn,
             export_services={"fleet": fleet_services},

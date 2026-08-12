@@ -444,38 +444,29 @@ def _previous_turn_most_probable_planet_ids(
     return prior.most_probable_planet_ids
 
 
-def materialize_homeworld_candidate_view(
+def read_homeworld_candidate_view(
     ctx: AnalyticQueryContext,
     *,
     shell_turn: TurnInfo,
 ) -> HomeworldCandidateView:
-    """Materialize map/table candidate view after export/DAG evidence ensure."""
+    """Build the map/table candidate view from durable game-global + shell evidence.
+
+    Does not call export ensure. REST ``compute_homeworld_locator`` uses this
+    after orchestrator ensure; skip-service callers use
+    ``materialize_homeworld_candidate_view``.
+    """
     inactive = homeworld_locator_inactive_reason(shell_turn.settings)
     if inactive is not None:
         return empty_candidate_view(inactive_reason=inactive)
 
     services = resolve_homeworld_services(ctx)
-    scope = ExportScope(
-        game_id=services.game_id,
-        perspective=services.perspective,
-        turn=shell_turn.settings.turn,
-    )
-    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
-
-    if not ensure_homeworld_export(ctx, scope):
-        raise ValidationError(
-            "homeworld locator evidence ensure did not satisfy shell scope "
-            f"(game {services.game_id}, perspective {services.perspective}, "
-            f"turn {scope.turn})"
-        )
-
     state = services.persistence.get_game_state(services.game_id)
     if state is None:
         raise ValidationError("homeworld locator game-global state missing after ensure")
     aggregate = evidence_aggregate_at_shell_turn(
         services,
         baseline_turn=state.baseline_turn,
-        shell_turn=scope.turn,
+        shell_turn=shell_turn.settings.turn,
     )
     if aggregate is None:
         raise ValidationError("homeworld locator shell evidence missing after ensure")
@@ -498,3 +489,30 @@ def materialize_homeworld_candidate_view(
         origin_distance_observations=effective_origin_distance_observations(aggregate),
         sector_pin_planet_id=sector_pin_planet_id,
     )
+
+
+def materialize_homeworld_candidate_view(
+    ctx: AnalyticQueryContext,
+    *,
+    shell_turn: TurnInfo,
+) -> HomeworldCandidateView:
+    """Ensure export/DAG evidence, then shape the map/table candidate view."""
+    inactive = homeworld_locator_inactive_reason(shell_turn.settings)
+    if inactive is not None:
+        return empty_candidate_view(inactive_reason=inactive)
+
+    services = resolve_homeworld_services(ctx)
+    scope = ExportScope(
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn=shell_turn.settings.turn,
+    )
+    from api.analytics.homeworld_locator.exports import ensure_homeworld_export
+
+    if not ensure_homeworld_export(ctx, scope):
+        raise ValidationError(
+            "homeworld locator evidence ensure did not satisfy shell scope "
+            f"(game {services.game_id}, perspective {services.perspective}, "
+            f"turn {scope.turn})"
+        )
+    return read_homeworld_candidate_view(ctx, shell_turn=shell_turn)

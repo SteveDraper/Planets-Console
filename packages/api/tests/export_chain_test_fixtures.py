@@ -151,7 +151,11 @@ def seed_storage_analytics_fixture(
     perspective: int = 1,
     seed_player_ids: tuple[int, ...] | None = None,
 ) -> None:
-    """Seed game info, turns 1..host_turn, and export prerequisites in durable storage."""
+    """Seed game info, turns 1..host_turn, and durable fleet/scores through host_turn.
+
+    Table/map ``compute()`` reads persistence after ensure. Callers that stub
+    ensure (BFF shape tests) still need a durable host-turn fleet snapshot.
+    """
     with open(assets_dir / "game_info_sample.json") as handle:
         storage.put(f"games/{game_id}/info", json.load(handle))
 
@@ -205,6 +209,6 @@ def seed_storage_analytics_fixture(
                 "fleet": fleet_services,
             },
         ),
-        through_turn=host_turn,
+        through_turn=host_turn + 1,
         player_id=seed_player_ids,
     )

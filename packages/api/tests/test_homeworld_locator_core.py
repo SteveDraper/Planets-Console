@@ -20,7 +20,7 @@ from api.analytics.homeworld_locator.baseline_ensure import (
     needs_baseline_recompute,
     resolve_baseline_turn,
 )
-from api.analytics.homeworld_locator.compute import get_homeworld_locator
+from api.analytics.homeworld_locator.compute import compute_homeworld_locator, get_homeworld_locator
 from api.analytics.homeworld_locator.compute_services import build_ephemeral_homeworld_services
 from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
@@ -710,6 +710,31 @@ def test_inactive_map_table_payload(persistence, sample_turn) -> None:
     assert payload["rows"] == []
     assert payload["regionOverlays"] == []
     assert persistence.get_game_state(628580) is None
+
+
+def test_compute_homeworld_locator_does_not_call_export_ensure(
+    persistence, sample_turn, monkeypatch
+) -> None:
+    from api.analytics.compute_context import invoke_analytic_compute
+
+    def fail_ensure(*_args, **_kwargs):
+        raise AssertionError("REST compute_homeworld_locator must not call export ensure")
+
+    monkeypatch.setattr(
+        "api.analytics.homeworld_locator.exports.ensure_homeworld_export",
+        fail_ensure,
+    )
+    turns = {111: sample_turn}
+    services = _services(persistence, turns)
+    with pytest.raises(ValidationError, match="game-global state missing after ensure"):
+        invoke_analytic_compute(
+            compute_homeworld_locator,
+            sample_turn,
+            load_turn=lambda n: turns.get(n),
+            export_services=_export_services(services, turns),
+            game_id=services.game_id,
+            perspective=services.perspective,
+        )
 
 
 def test_candidate_view_materialize(persistence, sample_turn) -> None:
