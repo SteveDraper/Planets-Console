@@ -611,9 +611,10 @@ def _materialize_fleet_snapshot_chain(
 ) -> FleetTurnSnapshot:
     """Gap-fill fleet ledgers for every roster player through turn T.
 
-    Temporary multi-turn path for roster snapshot / legacy ``compute_fleet``
-    until REST compute migrates onto ensure (#204 out-of-scope). Not the
-    player-scoped export ensure path -- see ``ensure_fleet_export``.
+    Temporary multi-turn path for roster snapshot / direct ``compute_fleet``
+    callers that skip REST ensure. REST ``get_turn_analytics`` migrates onto
+    orchestrator ensure (#202). Not the player-scoped export ensure path --
+    see ``ensure_fleet_export``.
     """
     from api.errors import FleetGapFillEpochInvalidated
 
@@ -768,9 +769,9 @@ def get_or_materialize_fleet_snapshot(
 ) -> FleetTurnSnapshot:
     """Return a cached snapshot or multi-turn gap-fill for the full roster.
 
-    Roster snapshot / legacy ``compute_fleet`` unwind via
-    ``_materialize_fleet_snapshot_chain`` (temporary until REST compute migrates
-    onto ensure -- #204 out-of-scope). Player-scoped leaf
+    Roster snapshot / direct ``compute_fleet`` unwind via
+    ``_materialize_fleet_snapshot_chain`` when REST ensure did not already
+    populate final ledgers. Player-scoped leaf
     ``get_or_materialize_fleet_ledger_for_player`` remains single-turn.
     ``query_context`` is retained for call-site compatibility and does not nest
     ensure.

@@ -443,3 +443,67 @@ def test_ensure_scope_timeout_leaves_inflight_running(sample_turn):
         result_wire={"result": SHARED_ID},
     )
     assert late.wait(timeout=1.0).state == "complete"
+
+
+def test_ensure_scopes_submits_all_before_wait(sample_turn):
+    """Batch ensure must fan out pool work before waiting on any handle (#202)."""
+    from api.analytics.turn_roster import iter_turn_players
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    player_ids = [player.id for player in iter_turn_players(sample_turn)][:2]
+    assert len(player_ids) == 2
+    scopes = tuple(
+        ComputeScope(
+            analytic_id=SHARED_ID,
+            game_id=sample_turn.game.id,
+            perspective=1,
+            turn=sample_turn.settings.turn,
+            player_id=player_id,
+        )
+        for player_id in player_ids
+    )
+    submitted: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        submitted.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
+        pool_submitter=pool_submitter,
+    )
+
+    done = threading.Event()
+    errors: list[BaseException] = []
+
+    def wait_batch() -> None:
+        try:
+            orchestrator.ensure_scopes(
+                tuple(
+                    ComputeRequest(
+                        ctx=ctx,
+                        scope=scope,
+                        priority_band="interactive_ensure",
+                    )
+                    for scope in scopes
+                ),
+                timeout=2.0,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=wait_batch, daemon=True)
+    thread.start()
+    time.sleep(0.1)
+    assert not done.is_set()
+    assert set(submitted) == set(scopes)
+
+    for scope in scopes:
+        orchestrator.complete_pool_step(scope, result_wire={"result": SHARED_ID})
+    assert done.wait(timeout=2.0)
+    assert errors == []
+    thread.join(timeout=1.0)

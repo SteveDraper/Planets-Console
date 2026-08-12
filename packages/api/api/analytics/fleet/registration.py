@@ -32,9 +32,10 @@ def _run_fleet_finalization_leg(job_wire: dict[str, object]) -> StepResult:
 def compute_fleet(ctx: AnalyticComputeContext) -> dict:
     """Return the fleet acquisition ledger for the shell turn.
 
-    Materializes via the roster snapshot path (multi-turn unwind without
-    orchestrator ensure-wait). Export ensure remains the durable player-scoped
-    path; REST compute migration onto ensure is #204 out-of-scope.
+    REST ``get_turn_analytics`` ensures per-player scopes through the
+    orchestrator first (#202); this handler then reads the roster snapshot
+    (cache hit) or falls back to the snapshot chain for direct callers that
+    skip the service.
     """
     from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
     from api.analytics.fleet.compute_services import resolve_fleet_compute_services

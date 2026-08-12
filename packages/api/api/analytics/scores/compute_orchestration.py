@@ -51,6 +51,10 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
         ComputeStepSpec(step_kind=SCORES_MATERIALIZE, backend="inline"),
         ComputeStepSpec(step_kind=SCORES_TIER_SOLVE, backend="thread"),
     ),
+    # REST table is a TurnInfo projection. Inference ensure/stream is a
+    # different caller; routing table GET through ensure would wait on
+    # fleet@(N-1) and turn scores into a gap-fill barrier.
+    route_table_map=False,
 )
 
 

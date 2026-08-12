@@ -114,6 +114,7 @@ def _register_run(sample_turn, *, player_id: int | None = None) -> RowRun:
 def test_scores_registration_includes_tier_solve_step() -> None:
     step_kinds = tuple(step.step_kind for step in SCORES_REGISTRATION.compute_profile.steps)
     assert step_kinds == ("materialize", SCORES_TIER_SOLVE)
+    assert SCORES_REGISTRATION.compute_profile.route_table_map is False
     assert build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
 
 

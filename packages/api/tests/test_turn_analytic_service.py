@@ -58,6 +58,29 @@ class TestTurnAnalytics:
         assert first["military"] == {"value": 2509092, "change": -53869}
         assert first["priorityPoints"] == {"value": 217, "change": 54}
 
+    def test_scores_table_does_not_submit_orchestrator(self, analytics_service, monkeypatch):
+        def fail_orchestrator(**_kwargs):
+            raise AssertionError("scores REST must not submit table/map compute")
+
+        monkeypatch.setattr(
+            "api.compute.runtime.get_compute_orchestrator",
+            fail_orchestrator,
+        )
+        data = analytics_service.get_turn_analytics(628580, 1, 111, "scores")
+        assert data["analyticId"] == "scores"
+        assert len(data["rows"]) == 3
+
+    def test_base_map_does_not_submit_orchestrator(self, analytics_service, monkeypatch):
+        def fail_orchestrator(**_kwargs):
+            raise AssertionError("base-map REST must not submit table/map compute")
+
+        monkeypatch.setattr(
+            "api.compute.runtime.get_compute_orchestrator",
+            fail_orchestrator,
+        )
+        data = analytics_service.get_turn_analytics(628580, 1, 111, "base-map")
+        assert data["analyticId"] == "base-map"
+
     def test_scores_inference_stream_wrapper_forwards_export_services(
         self,
         sample_turn,

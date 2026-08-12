@@ -50,7 +50,7 @@ Think of the backend as two cooperating planes:
 
 **Persistence** is conceptually a durable cache of `compute scope → result`, but **schema, write gates, merge, and invalidation** stay per analytic via registered **persistence policy** hooks. The orchestrator coordinates *when* to persist; analytics own *what* and *how*.
 
-**North star:** all Core compute callers (export ensure, streams, table/map handlers, later BFF and MCP) submit through the **same process-wide** orchestrator. There is one scheduler and one DAG per process -- not one orchestrator per stream or **analytic query context**. v1 migrates export-ensure and table-stream execution; routing batch `compute()` handlers is a follow-on phase. Singleton migration: [#209](https://github.com/SteveDraper/Planets-Console/issues/209).
+**North star:** all Core compute callers (export ensure, streams, table/map handlers, later BFF and MCP) submit through the **same process-wide** orchestrator. There is one scheduler and one DAG per process -- not one orchestrator per stream or **analytic query context**. v1 migrates export-ensure and table-stream execution; routing batch `compute()` handlers is [#202](https://github.com/SteveDraper/Planets-Console/issues/202). Singleton migration: [#209](https://github.com/SteveDraper/Planets-Console/issues/209).
 
 ---
 
@@ -65,7 +65,6 @@ Think of the backend as two cooperating planes:
 Non-goals (v1 / #190 epic):
 
 - Separate worker service or containers.
-- Rewiring every `TurnAnalyticService.compute()` handler (phase 2).
 - BFF/MCP uniform proxy (phase 3).
 - Connections parameter keying (ships with [#110](https://github.com/SteveDraper/Planets-Console/issues/110); mechanism defined here).
 
@@ -470,10 +469,14 @@ Cancel silence is one operation (`stream_drain.seal_canceled`) with two justifie
 | Phase | Callers routed through orchestrator |
 |-------|-------------------------------------|
 | **v1 (#190 epic)** | Export ensure materialization; fleet/scores table-stream steps; internal wire builders for `ctx.query` |
-| **Phase 2** | `TurnAnalyticService.get_turn_analytics` batch compute |
+| **Phase 2 ([#202](https://github.com/SteveDraper/Planets-Console/issues/202))** | `TurnAnalyticService.get_turn_analytics` batch compute |
 | **Phase 3** | BFF uniform proxy; analytic MCP `query_compute` |
 
-Until phase 2, table/map REST responses may still call `compute()` handlers directly; export ensure and streams migrate first.
+Phase 2: `get_turn_analytics` builds the analytic query context, then `ensure_table_map_compute` fans out to roster player scopes when `player_id` is in the scope key (fleet) or one unscoped node (homeworld-locator). It calls `ensure_scopes` (`interactive_ensure`, submit-all-then-wait) so cache misses share the DAG instead of serializing per player. Durable hits short-circuit on the **inline** backend via `PersistencePolicy.is_satisfied`. `compute()` then shapes the table/map wire from persistence / `TurnInfo`.
+
+Scores REST sets `AnalyticComputeProfile.route_table_map=False`: the scoreboard table is a `TurnInfo` projection; inference remains stream/ensure-only. Analytics with no compute profile (base-map, connections, visibility, stellar-cartography) skip ensure and keep calling `compute()` directly.
+
+BFF table/map contracts are unchanged.
 
 ### Export ensure migration ([#204](https://github.com/SteveDraper/Planets-Console/issues/204))
 

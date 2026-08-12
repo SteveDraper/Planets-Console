@@ -426,6 +426,10 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
         return {"analyticId": analytic_id}
 
     monkeypatch.setattr(
+        "api.services.turn_analytic_service.ensure_table_map_compute",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
         "api.services.turn_analytic_service.get_turn_analytic",
         fake_get_turn_analytic,
     )

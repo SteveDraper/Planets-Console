@@ -111,7 +111,8 @@ class ComputeOrchestrator(
     instance exists per process.
 
     Designated in-process ensure callers use :meth:`ensure_scope` (submit +
-    :meth:`ComputeHandle.wait`); pool workers and leaf ``run_step`` never wait.
+    :meth:`ComputeHandle.wait`) or :meth:`ensure_scopes` for batch table/map
+    fan-out; pool workers and leaf ``run_step`` never wait.
 
     Observer registration (dispatch gates, lifecycle listeners, etc.) lives on
     :attr:`observers` -- call ``orchestrator.observers.register_*`` directly.
