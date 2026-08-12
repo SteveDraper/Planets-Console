@@ -96,16 +96,14 @@ class FileStorageBackend:
         ``FileNotFoundError`` with the destination path (e.g. ``fleet.json``).
         """
         validate_no_reserved_at_keys(value)
-        last_error: FileNotFoundError | None = None
-        for _ in range(attempts):
+        for attempt in range(attempts):
             try:
                 self._write_replaced(file_path, value)
                 return
-            except FileNotFoundError as exc:
-                last_error = exc
-        if last_error is not None:
-            raise last_error
-        self._write_replaced(file_path, value)
+            except FileNotFoundError:
+                if attempt + 1 >= attempts:
+                    relative_path = file_path.relative_to(self._root).as_posix()
+                    raise NotFoundError(f"Document not found: {relative_path!r}") from None
 
     def _prune_empty_dirs(self, start: Path) -> None:
         current = start

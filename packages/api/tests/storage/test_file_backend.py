@@ -143,6 +143,21 @@ def test_atomic_write_retries_replace_file_not_found(backend, storage_root):
     assert json.loads(target.read_text(encoding="utf-8")) == {"name": "A"}
 
 
+def test_atomic_write_exhausted_retries_map_to_not_found(backend, storage_root):
+    """Persistent parent-prune race after retries is NotFoundError, not errno."""
+    calls = {"n": 0}
+
+    def always_missing(src, dst):
+        calls["n"] += 1
+        raise FileNotFoundError(2, "No such file or directory", str(dst))
+
+    with patch("api.storage.file.os.replace", side_effect=always_missing):
+        with pytest.raises(NotFoundError, match="Document not found"):
+            backend.put(GAME_INFO, {"name": "A"})
+
+    assert calls["n"] == 8
+
+
 def test_delete_maps_concurrent_unlink_to_not_found(backend, storage_root):
     backend.put(GAME_INFO, {"name": "A"})
     real_unlink = Path.unlink
