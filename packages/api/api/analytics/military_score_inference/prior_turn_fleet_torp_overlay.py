@@ -280,8 +280,8 @@ def resolve_prior_turn_fleet_torp_overlay(
         return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
 
     scope = ExportScope(
-        game_id=turn.game.id,
-        perspective=turn.player.id,
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
         turn=prior_turn,
         player_id=player_id,
     )

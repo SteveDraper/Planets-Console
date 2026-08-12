@@ -197,6 +197,61 @@ def test_resolve_prior_turn_overlay_readonly_uses_persisted_snapshot(sample_turn
     assert isinstance(resolution.max_tech_by_axis, dict)
 
 
+def test_resolve_prior_turn_overlay_uses_storage_viewpoint_not_rst_player(sample_turn):
+    """Overlay load keys fleet by fleet_services viewpoint, not turn.player.id.
+
+    Sample RST is koshling (player 8) stored under perspective 1. Looking up
+    ledgers at the RST player id misses the storage slot.
+    """
+    player_id = 8
+    host_turn, stored_turns = host_turn_at(sample_turn, HOST_TURN)
+    fleet_services = build_ephemeral_fleet_compute_services(
+        host_turn,
+        stored_turns=stored_turns,
+    )
+    assert host_turn.player.id != fleet_services.perspective
+    prior_turn = HOST_TURN - 1
+    prior_turn_info = fleet_services.load_turn(prior_turn)
+    assert prior_turn_info is not None
+    fleet_services.persistence.put_ledger(
+        fleet_services.game_id,
+        fleet_services.perspective,
+        prior_turn,
+        player_id,
+        PersistedFleetLedger(
+            ledger=FleetAcquisitionLedger(
+                player_id=player_id,
+                records=[
+                    FleetShipRecord(
+                        record_id="inferred",
+                        disposition="active",
+                        fields=FleetShipRecordFields(launchers=FleetFieldUnknown()),
+                        build_option_sets=[
+                            FleetBuildOptionSet(torp_id=4, label="Mk IV"),
+                        ],
+                    ),
+                ],
+            ),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
+
+    resolution = resolve_prior_turn_fleet_torp_overlay(
+        turn=host_turn,
+        player_id=player_id,
+        load_turn=fleet_services.load_turn,
+        export_services={"fleet": fleet_services},
+        ensure=False,
+    )
+
+    assert resolution.input_status == "applied"
+    assert resolution.overlay is not None
+    assert resolution.overlay.belief_set.torp_ids == frozenset({4})
+
+
 def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, persistence):
     from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
     from api.analytics.military_score_inference.analytic import build_inference_observation
