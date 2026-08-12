@@ -328,7 +328,8 @@ def materialize_homeworld_candidates(
     Single-SB and other machine strong facts affect confidence only via
     location provenances + derive -- not a parallel row-tier promote step.
     Definite-keyed culls run after location strength derive so demoted machine
-    pins near asserted definites are dropped; asserted planets stay protected.
+    pins near asserted definites are dropped; location-asserted planets stay
+    protected.
     """
     seeded = ensure_candidates_for_asserted_locations(
         inferred=candidates,

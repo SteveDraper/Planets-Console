@@ -83,12 +83,12 @@ def cull_co_sector_candidates_after_definites(
     Once a sector has a definite, other inferred possibles in that wedge are not
     competing HW sites. Evidence promotion can create additional inferred definites
     in the same sector; those are also dropped so neighborhood cull does not treat
-    them as true HWs. User-asserted rows are never culled. Applies only when
+    them as true HWs. Location-asserted rows are never culled. Applies only when
     ``player_count >= 2``.
 
     Inferred definite precedence within a sector: slot-anchored (``perspective`` set)
-    over orphans; ties by lower planet id. Any user-asserted definite in the sector
-    suppresses all inferred definites there.
+    over orphans; ties by lower planet id. Any location-asserted definite in the
+    sector suppresses all inferred definites there.
     """
     if player_count < 2 or not candidates:
         return tuple(candidates)

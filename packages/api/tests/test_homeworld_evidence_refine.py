@@ -760,6 +760,28 @@ def test_neighborhood_cull_preserves_durable_assert_location_shell(template_plan
     assert [row.planet_id for row in with_keys] == [1, 2]
 
 
+def test_neighborhood_cull_drops_ownership_cued_possible(template_planet) -> None:
+    """Ownership-only asserted_cue must not protect a possible from neighborhood cull."""
+    definite = _planet(template_planet, planet_id=1, x=0, y=0)
+    too_close = _planet(template_planet, planet_id=2, x=100, y=0)
+    planets_by_id = {1: definite, 2: too_close}
+    candidates = (
+        HomeworldCandidateRecord(planet_id=1, perspective=1, confidence_tier=CONFIDENCE_DEFINITE),
+        HomeworldCandidateRecord(
+            planet_id=2,
+            perspective=1,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            asserted_cue=True,
+        ),
+    )
+    culled = cull_definite_neighborhood_candidates(
+        candidates,
+        planets_by_id,
+        min_separation_ly=430.0,
+    )
+    assert [row.planet_id for row in culled] == [1]
+
+
 def test_culls_after_strength_resolve_drop_demoted_machine_near_assert(
     template_planet, sample_settings
 ) -> None:
@@ -942,6 +964,103 @@ def test_materialize_homeworld_candidates_culls_after_assert_wins(
     assert [row.planet_id for row in materialized] == [2]
     assert materialized[0].confidence_tier == CONFIDENCE_DEFINITE
     assert materialized[0].asserted_cue is True
+
+
+def test_location_assert_culls_ownership_cued_co_sector_possibles(template_planet) -> None:
+    """Existing co-sector cull must drop ownership-cued possibles after a location pin.
+
+    Sector ownership lights asserted_cue on every candidate in the wedge. That
+    cue must not protect them. Revoking the location pin leaves no definite, so
+    the same cull is a no-op and the possibles return.
+    """
+    from api.analytics.homeworld_locator.baseline import (
+        cull_co_sector_candidates_after_definites,
+    )
+    from api.analytics.homeworld_locator.materialize_from_provenances import (
+        derive_candidates_from_merged_evidence,
+    )
+    from api.analytics.homeworld_locator.merge_above_read import MergedHomeworldEvidence
+    from api.analytics.homeworld_locator.models import (
+        PROVENANCE_ASSERTED,
+        LocationProvenance,
+        OwnershipProvenance,
+        SectorOwnerMember,
+    )
+
+    planets_by_id = {
+        45: _planet(template_planet, planet_id=45, x=500, y=0),
+        69: _planet(template_planet, planet_id=69, x=550, y=20),
+        87: _planet(template_planet, planet_id=87, x=520, y=30),
+        130: _planet(template_planet, planet_id=130, x=480, y=25),
+    }
+    inferred = tuple(
+        HomeworldCandidateRecord(
+            planet_id=planet_id,
+            perspective=None,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+        )
+        for planet_id in (45, 69, 87, 130)
+    )
+    sector_index = {45: 0, 69: 0, 87: 0, 130: 0}
+    ownership = (
+        (
+            0,
+            (
+                SectorOwnerMember(
+                    owner_slot=1,
+                    provenances=(OwnershipProvenance(kind=PROVENANCE_ASSERTED, turn=5),),
+                ),
+            ),
+        ),
+    )
+
+    with_location = derive_candidates_from_merged_evidence(
+        inferred,
+        MergedHomeworldEvidence(
+            location_provenances=(
+                LocationProvenance(kind=PROVENANCE_ASSERTED, turn=5, planet_id=45),
+            ),
+            sector_owner_sets=ownership,
+            planet_owner_sets=(),
+        ),
+        race_id_by_owner_slot={},
+        planet_sector_index=sector_index,
+    )
+    by_planet = {row.planet_id: row for row in with_location}
+    assert by_planet[45].confidence_tier == CONFIDENCE_DEFINITE
+    assert by_planet[45].location_asserted is True
+    assert all(by_planet[pid].asserted_cue is True for pid in (45, 69, 87, 130))
+    assert all(by_planet[pid].location_asserted is False for pid in (69, 87, 130))
+
+    culled = cull_co_sector_candidates_after_definites(
+        with_location,
+        planets_by_id,
+        center=(0.0, 0.0),
+        player_count=4,
+        pin_angle=0.0,
+        protected_planet_ids=frozenset({45}),
+    )
+    assert [row.planet_id for row in culled] == [45]
+
+    after_revoke = derive_candidates_from_merged_evidence(
+        inferred,
+        MergedHomeworldEvidence(
+            location_provenances=(),
+            sector_owner_sets=ownership,
+            planet_owner_sets=(),
+        ),
+        race_id_by_owner_slot={},
+        planet_sector_index=sector_index,
+    )
+    restored = cull_co_sector_candidates_after_definites(
+        after_revoke,
+        planets_by_id,
+        center=(0.0, 0.0),
+        player_count=4,
+        pin_angle=0.0,
+    )
+    assert {row.planet_id for row in restored} == {45, 69, 87, 130}
+    assert all(row.confidence_tier == CONFIDENCE_POSSIBLE for row in restored)
 
 
 def test_neighborhood_cull_skipped_when_layout_ineligible(template_planet, sample_settings) -> None:

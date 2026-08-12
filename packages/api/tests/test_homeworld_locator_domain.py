@@ -679,7 +679,62 @@ def test_cull_co_sector_drops_extra_inferred_definites(template_planet) -> None:
     assert pin_row.confidence_tier == CONFIDENCE_DEFINITE
 
 
-def test_cull_preserves_asserted_cue_co_sector_possible(template_planet) -> None:
+def test_cull_drops_ownership_cued_co_sector_possibles(template_planet) -> None:
+    """Sector ownership lights asserted_cue on every candidate; that must not block cull."""
+    from api.analytics.homeworld_locator.baseline import (
+        cull_co_sector_candidates_after_definites,
+    )
+    from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+    from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
+
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=45, x=500, y=0)
+    other_a = _planet(template_planet, planet_id=69, x=550, y=20)
+    other_b = _planet(template_planet, planet_id=87, x=520, y=30)
+    other_c = _planet(template_planet, planet_id=130, x=480, y=25)
+    rows = (
+        HomeworldCandidateRecord(
+            planet_id=45,
+            perspective=1,
+            confidence_tier=CONFIDENCE_DEFINITE,
+            attribution=ATTRIBUTION_INFERRED,
+            asserted_cue=True,
+            location_asserted=True,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=69,
+            perspective=1,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            attribution=ATTRIBUTION_INFERRED,
+            asserted_cue=True,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=87,
+            perspective=1,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            attribution=ATTRIBUTION_INFERRED,
+            asserted_cue=True,
+        ),
+        HomeworldCandidateRecord(
+            planet_id=130,
+            perspective=1,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            attribution=ATTRIBUTION_INFERRED,
+            asserted_cue=True,
+        ),
+    )
+    culled = cull_co_sector_candidates_after_definites(
+        rows,
+        {45: pin, 69: other_a, 87: other_b, 130: other_c},
+        center=center,
+        player_count=4,
+        pin_angle=0.0,
+        protected_planet_ids=frozenset({45}),
+    )
+    assert {row.planet_id for row in culled} == {45}
+
+
+def test_cull_preserves_location_asserted_co_sector_possible(template_planet) -> None:
     from api.analytics.homeworld_locator.baseline import (
         cull_co_sector_candidates_after_definites,
     )
@@ -701,7 +756,7 @@ def test_cull_preserves_asserted_cue_co_sector_possible(template_planet) -> None
             perspective=None,
             confidence_tier=CONFIDENCE_POSSIBLE,
             attribution=ATTRIBUTION_INFERRED,
-            asserted_cue=True,
+            location_asserted=True,
         ),
     )
     culled = cull_co_sector_candidates_after_definites(
@@ -712,6 +767,41 @@ def test_cull_preserves_asserted_cue_co_sector_possible(template_planet) -> None
         pin_angle=0.0,
     )
     assert {row.planet_id for row in culled} == {1, 2}
+
+
+def test_cull_is_noop_when_location_assert_revoked_leaves_no_definite(
+    template_planet,
+) -> None:
+    """Revoke drops the definite pin; co-sector cull then keeps ownership-cued possibles."""
+    from api.analytics.homeworld_locator.baseline import (
+        cull_co_sector_candidates_after_definites,
+    )
+    from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+    from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
+
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=45, x=500, y=0)
+    other_a = _planet(template_planet, planet_id=69, x=550, y=20)
+    other_b = _planet(template_planet, planet_id=87, x=520, y=30)
+    other_c = _planet(template_planet, planet_id=130, x=480, y=25)
+    rows = tuple(
+        HomeworldCandidateRecord(
+            planet_id=planet_id,
+            perspective=1,
+            confidence_tier=CONFIDENCE_POSSIBLE,
+            attribution=ATTRIBUTION_INFERRED,
+            asserted_cue=True,
+        )
+        for planet_id in (45, 69, 87, 130)
+    )
+    culled = cull_co_sector_candidates_after_definites(
+        rows,
+        {45: pin, 69: other_a, 87: other_b, 130: other_c},
+        center=center,
+        player_count=4,
+        pin_angle=0.0,
+    )
+    assert {row.planet_id for row in culled} == {45, 69, 87, 130}
 
 
 def test_cull_preserves_durable_assert_location_shell_without_cue(template_planet) -> None:
