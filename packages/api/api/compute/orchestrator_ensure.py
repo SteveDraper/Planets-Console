@@ -66,16 +66,18 @@ class OrchestratorEnsureMixin:
         """Bring many scopes to terminal quality, submitting all before waiting.
 
         Same per-request semantics as :meth:`ensure_scope` (satisfaction
-        short-circuit, hollow-terminal drop). Batch table/map callers fan out to
-        N player scopes and must not wait on the first before submitting the rest
-        -- that would serialize cross-player DAG work.
+        short-circuit, hollow-terminal drop). The returned tuple is aligned to
+        ``requests``: ``handles[i]`` is the terminal handle for ``requests[i]``.
+        Batch table/map callers fan out to N player scopes and must not wait on
+        the first before submitting the rest -- that would serialize cross-player
+        DAG work.
         """
         if not requests:
             return ()
 
-        satisfied_handles: list[ComputeHandle] = []
-        unsatisfied: list[ComputeRequest] = []
-        for request in requests:
+        handles_by_index: dict[int, ComputeHandle] = {}
+        unsatisfied: list[tuple[int, ComputeRequest]] = []
+        for index, request in enumerate(requests):
             bundle = self._require_bundle(request)
             ctx = self._ctx_for_bundle(bundle)
             registration = self._compute_registry[request.scope.analytic_id]
@@ -84,16 +86,15 @@ class OrchestratorEnsureMixin:
                 request.scope,
             )
             if already_satisfied:
-                satisfied_handles.append(self.submit(request))
+                handles_by_index[index] = self.submit(request)
             else:
-                unsatisfied.append(request)
+                unsatisfied.append((index, request))
 
-        unsatisfied_handles: list[ComputeHandle] = []
         if unsatisfied:
             pending_inline: list[PendingInlineExecution] = []
             pending_pool: list[PendingPoolSubmission] = []
             with self._condition:
-                for request in unsatisfied:
+                for index, request in unsatisfied:
                     existing = self._nodes.get(request.scope)
                     # Hollow terminal: durable gone, node still complete/failed. Drop so
                     # default force_fresh=False can plan fresh work (F1). Leave non-terminal
@@ -106,7 +107,7 @@ class OrchestratorEnsureMixin:
                             "ensure submit_locked returned None without wake_if_parked_only"
                         )
                     handle, inlines, pools = submission
-                    unsatisfied_handles.append(handle)
+                    handles_by_index[index] = handle
                     pending_inline.extend(inlines)
                     pending_pool.extend(pools)
             self._execute_pending_inlines(tuple(pending_inline))
@@ -114,6 +115,6 @@ class OrchestratorEnsureMixin:
             self._observers.drain_post_lock_callbacks()
 
         return tuple(
-            _wait_ensure_handle(handle, timeout=timeout)
-            for handle in (*satisfied_handles, *unsatisfied_handles)
+            _wait_ensure_handle(handles_by_index[index], timeout=timeout)
+            for index in range(len(requests))
         )
