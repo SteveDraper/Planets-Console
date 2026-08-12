@@ -370,6 +370,7 @@ function ConsoleShell() {
           stellarCartographyGates={stellarCartographyGates}
           ionStormCount={ionStormCount}
           homeworldInactiveReason={homeworldInactiveReason}
+          turnDataReady={turnDataReady}
         />
         {isPending ? (
           <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">

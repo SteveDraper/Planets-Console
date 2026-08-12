@@ -105,7 +105,7 @@ export function HomeworldLocatorPanel({
       </p>
     )
   }
-  if (tableQuery.isPending) {
+  if (!fetchEnabled || tableQuery.isPending) {
     return <p className="px-0.5 text-[11px] text-slate-400">Loading…</p>
   }
   if (tableQuery.error) {

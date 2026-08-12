@@ -84,6 +84,8 @@ describe('HomeworldLocatorTile', () => {
       regionOverlays: [],
       markers: [],
     })
+    vi.mocked(fetchHomeworldLocatorTable).mockClear()
+    vi.mocked(fetchHomeworldLocatorMap).mockClear()
   })
 
   it('disables the toggle and shows an inactive hint when unavailable', () => {
@@ -95,6 +97,7 @@ describe('HomeworldLocatorTile', () => {
         depressed={false}
         onToggle={() => undefined}
         inactiveReason="nohomeworld"
+        turnDataReady
       />
     )
     const checkbox = screen.getByRole('checkbox')
@@ -112,6 +115,7 @@ describe('HomeworldLocatorTile', () => {
         depressed
         onToggle={() => undefined}
         inactiveReason="nohomeworld"
+        turnDataReady
       />
     )
     const checkbox = screen.getByRole('checkbox')
@@ -128,6 +132,7 @@ describe('HomeworldLocatorTile', () => {
         depressed={false}
         onToggle={() => undefined}
         inactiveReason={null}
+        turnDataReady
       />
     )
     expect(screen.getByRole('checkbox')).not.toBeDisabled()
@@ -143,6 +148,7 @@ describe('HomeworldLocatorTile', () => {
         depressed
         onToggle={() => undefined}
         inactiveReason={null}
+        turnDataReady
       />
     )
 
@@ -200,6 +206,7 @@ describe('HomeworldLocatorTile', () => {
         depressed
         onToggle={() => undefined}
         inactiveReason={null}
+        turnDataReady
       />
     )
 
@@ -212,5 +219,26 @@ describe('HomeworldLocatorTile', () => {
     await user.click(screen.getByRole('radio', { name: 'Pinned' }))
     expect(useHomeworldRegionSelectionStore.getState().regionSelectionPreset).toBe('pinned')
     expect(localStorage.getItem(HOMEWORLD_REGION_SELECTION_STORAGE_KEY)).toContain('pinned')
+  })
+
+  it('does not fetch homeworld analytics until turn data is in storage', async () => {
+    const user = userEvent.setup()
+    seedShellForAnalyticScope()
+    renderTile(
+      <HomeworldLocatorTile
+        name="Homeworld locator"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => undefined}
+        inactiveReason={null}
+        turnDataReady={false}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /expand homeworld/i }))
+    expect(screen.getByText(/loading/i)).toBeInTheDocument()
+    expect(fetchHomeworldLocatorTable).not.toHaveBeenCalled()
+    expect(fetchHomeworldLocatorMap).not.toHaveBeenCalled()
   })
 })
