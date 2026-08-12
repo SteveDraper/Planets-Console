@@ -342,7 +342,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         if job_wire.get("evidenceClosed") is True:
             # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn
             # evidence is already closed -- no CP-SAT.
-            return StepResult(outcome="complete", payload={})
+            return StepResult(outcome="complete")
         raise RuntimeError(
             "scores tier_solve received open-evidence wait wire without runId; "
             "wire build must attach a RowRun or emit evidenceClosed skip"
