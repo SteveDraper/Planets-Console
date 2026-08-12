@@ -2001,6 +2001,45 @@ def test_continue_payload_kept_when_terminal_complete_has_no_payload(sample_turn
     assert handle.result_wire == {"exportTree": {"ok": True}}
 
 
+def test_complete_without_payload_defaults_empty_result_wire(sample_turn):
+    """Terminal complete with no prior continue payload must still be snapshotable.
+
+    Fleet persist-deferred force_fresh scores at tier_solve; evidenceClosed skip
+    used to complete with ``result_wire is None`` and fleet dispatch hung.
+    """
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+
+    def run_tier(_job):
+        return StepResult(outcome="complete")
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="tier_solve", backend="inline"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("tier_solve", run_tier),),
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((registration,)),
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+
+    assert handle.state == "complete"
+    assert handle.result_wire == {}
+
+
 def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample_turn):
     """Pause and freeze gates coexist; clearing one leaves the other."""
     ctx = make_fixture_query_context(

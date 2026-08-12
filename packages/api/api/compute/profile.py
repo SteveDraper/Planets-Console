@@ -23,3 +23,7 @@ class AnalyticComputeProfile:
     """Declared step kinds and worker backends for one analytic."""
 
     steps: tuple[ComputeStepSpec, ...]
+    # When False, table/map REST (`get_turn_analytics`) does not ensure through
+    # the orchestrator. Scores uses this: the REST table is a TurnInfo projection
+    # and inference lives on the table stream, not batch compute.
+    route_table_map: bool = True

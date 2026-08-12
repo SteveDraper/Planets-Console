@@ -40,10 +40,13 @@ class FileStorageBackend:
 
     def _load_document(self, breakpoint_path: str) -> JSONValue:
         file_path = self._document_file(breakpoint_path)
-        if not file_path.is_file():
-            raise NotFoundError(f"Document not found: {breakpoint_path!r}")
-        with open(file_path, encoding="utf-8") as handle:
-            return json.load(handle)
+        try:
+            with open(file_path, encoding="utf-8") as handle:
+                return json.load(handle)
+        except FileNotFoundError:
+            # Concurrent delete/prune can unlink between a peer's write and this
+            # open (same race as ``_ensure_dir`` after a persistence clear).
+            raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
 
     @staticmethod
     def _ensure_dir(path: Path, *, attempts: int = 8) -> None:
@@ -71,8 +74,7 @@ class FileStorageBackend:
             raise last_error
         path.mkdir(parents=True, exist_ok=True)
 
-    def _atomic_write(self, file_path: Path, value: JSONValue) -> None:
-        validate_no_reserved_at_keys(value)
+    def _write_replaced(self, file_path: Path, value: JSONValue) -> None:
         self._ensure_dir(file_path.parent)
         temp_path = file_path.with_name(
             f".{file_path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
@@ -83,14 +85,33 @@ class FileStorageBackend:
                 handle.write("\n")
             os.replace(temp_path, file_path)
         finally:
-            if temp_path.exists():
-                temp_path.unlink()
+            temp_path.unlink(missing_ok=True)
+
+    def _atomic_write(self, file_path: Path, value: JSONValue, *, attempts: int = 8) -> None:
+        """Write ``value`` via temp + replace, retrying when a peer prunes the parent.
+
+        After a persistence clear, concurrent fleet/scores puts share
+        ``…/turns/N/analytics``. A pruner can remove that directory after
+        ``_ensure_dir`` and before ``open`` / ``os.replace``, which raises
+        ``FileNotFoundError`` with the destination path (e.g. ``fleet.json``).
+        """
+        validate_no_reserved_at_keys(value)
+        for attempt in range(attempts):
+            try:
+                self._write_replaced(file_path, value)
+                return
+            except FileNotFoundError:
+                if attempt + 1 >= attempts:
+                    relative_path = file_path.relative_to(self._root).as_posix()
+                    raise NotFoundError(f"Document not found: {relative_path!r}") from None
 
     def _prune_empty_dirs(self, start: Path) -> None:
         current = start
         while current != self._root and current.is_dir():
             try:
                 next(current.iterdir())
+            except FileNotFoundError:
+                break
             except StopIteration:
                 try:
                     current.rmdir()
@@ -106,17 +127,22 @@ class FileStorageBackend:
 
     def _delete_document(self, breakpoint_path: str) -> None:
         file_path = self._document_file(breakpoint_path)
-        if not file_path.is_file():
-            raise NotFoundError(f"Document not found: {breakpoint_path!r}")
-        file_path.unlink()
+        try:
+            file_path.unlink()
+        except FileNotFoundError:
+            raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
         self._prune_empty_dirs(file_path.parent)
 
     def _list_filesystem_prefix(self, prefix: str) -> list[str]:
         dir_path = self._root if prefix == "" else self._root / prefix
         if not dir_path.is_dir():
             raise NotFoundError(f"Path does not exist: {prefix!r}")
+        try:
+            entries = tuple(dir_path.iterdir())
+        except FileNotFoundError:
+            raise NotFoundError(f"Path does not exist: {prefix!r}") from None
         names: list[str] = []
-        for entry in dir_path.iterdir():
+        for entry in entries:
             if entry.name.startswith("."):
                 continue
             if entry.is_dir():
@@ -147,9 +173,9 @@ class FileStorageBackend:
             self._atomic_write(file_path, value_copy)
             return
 
-        if file_path.is_file():
+        try:
             document = self._load_document(breakpoint_path)
-        else:
+        except NotFoundError:
             document = {}
 
         if not isinstance(document, dict):
@@ -228,11 +254,10 @@ class FileStorageBackend:
         if suffix is not None and is_prefix_of_longer_breakpoint(path):
             return self._list_filesystem_prefix(path)
 
-        file_path = self._document_file(breakpoint_path)
-        if not file_path.is_file():
-            raise NotFoundError(f"Path does not exist: {path!r}")
-
-        document = self._load_document(breakpoint_path)
+        try:
+            document = self._load_document(breakpoint_path)
+        except NotFoundError:
+            raise NotFoundError(f"Path does not exist: {path!r}") from None
         if suffix is None:
             return list_children(document)
         node = resolve_path(document, suffix)

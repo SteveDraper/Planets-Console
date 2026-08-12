@@ -36,7 +36,7 @@ The system is structured as four layers, each only ever depending on the layer(s
 
 ## Turn analytics: orchestrator parity
 
-Turn-scoped analytics that run through the **compute orchestrator** (table streams today; export ensure and batch compute in later phases) must follow the **same template** for analogous concerns. Fleet ([#199](https://github.com/SteveDraper/Planets-Console/issues/199)) and scores inference ([#200](https://github.com/SteveDraper/Planets-Console/issues/200)) are the reference pair.
+Turn-scoped analytics that run through the **compute orchestrator** (export ensure, table streams, and table/map batch compute) must follow the **same template** for analogous concerns. Fleet ([#199](https://github.com/SteveDraper/Planets-Console/issues/199)) and scores inference ([#200](https://github.com/SteveDraper/Planets-Console/issues/200)) are the reference pair.
 
 | Concern | Shared pattern | Analytic-specific |
 |---------|----------------|-------------------|

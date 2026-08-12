@@ -1026,7 +1026,7 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
         ],
     )
     from api.analytics.compute_context import invoke_analytic_compute
-    from api.analytics.fleet import ANALYTIC_ID, compute_fleet
+    from api.analytics.fleet import ANALYTIC_ID, materialize_fleet
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 
     scores_services = ScoresExportContext(
@@ -1039,13 +1039,15 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
         inference=FleetInferenceSupport(scores_services=scores_services),
     )
     payload = invoke_analytic_compute(
-        compute_fleet,
+        materialize_fleet,
         turn,
         load_turn=services.load_turn,
         export_services={
             SCORES_ANALYTIC_ID: scores_services,
             ANALYTIC_ID: services,
         },
+        game_id=turn.game.id,
+        perspective=turn.player.id,
     )
     record = next(
         rec

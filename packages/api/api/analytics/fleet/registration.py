@@ -30,12 +30,28 @@ def _run_fleet_finalization_leg(job_wire: dict[str, object]) -> StepResult:
 
 
 def compute_fleet(ctx: AnalyticComputeContext) -> dict:
-    """Return the fleet acquisition ledger for the shell turn.
+    """Shape the fleet table/map wire from the durable roster snapshot.
 
-    Materializes via the roster snapshot path (multi-turn unwind without
-    orchestrator ensure-wait). Export ensure remains the durable player-scoped
-    path; REST compute migration onto ensure is #204 out-of-scope.
+    REST ``get_turn_analytics`` ensures per-player scopes through the
+    orchestrator first. This handler reads that snapshot or fails if it is
+    missing. Direct callers that skip ensure use ``get_fleet``.
     """
+    from api.analytics.fleet.chain import require_fleet_snapshot
+    from api.analytics.fleet.compute_services import resolve_fleet_compute_services
+    from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
+
+    services = resolve_fleet_compute_services(ctx)
+    snapshot = require_fleet_snapshot(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        ctx.turn,
+    )
+    return fleet_turn_snapshot_to_compute_wire(snapshot)
+
+
+def materialize_fleet(ctx: AnalyticComputeContext) -> dict:
+    """Gap-fill the roster snapshot, then shape the same table/map wire as REST."""
     from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
     from api.analytics.fleet.compute_services import resolve_fleet_compute_services
     from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
@@ -54,13 +70,15 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
 
 
 def get_fleet(turn: TurnInfo) -> dict:
-    """Convenience entry for tests and direct callers without durable persistence."""
+    """Convenience entry for tests and direct callers without REST ensure."""
     from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 
     services = build_ephemeral_fleet_compute_services(turn)
     return invoke_analytic_compute(
-        compute_fleet,
+        materialize_fleet,
         turn,
+        game_id=services.game_id,
+        perspective=services.perspective,
         load_turn=services.load_turn,
         export_services={ANALYTIC_ID: services},
     )

@@ -457,12 +457,20 @@ def make_analytic_query_context(
     turn: TurnInfo,
     options: TurnAnalyticsOptions,
     *,
+    game_id: int,
+    perspective: int,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
     enforce_inline_ensure_threshold: bool = True,
     export_services: Mapping[str, object] | None = None,
 ) -> AnalyticQueryContext:
-    """Build query context with ambient scope from one loaded turn."""
+    """Build query context keyed to an explicit storage viewpoint.
+
+    ``game_id`` / ``perspective`` are the storage identity for orchestrator
+    scopes and persisted analytic documents. Callers that only have an RST
+    pass ``turn.game.id`` and ``turn.player.id``; callers that already have a
+    storage viewpoint (REST, stream, seed) must pass that viewpoint.
+    """
     from api.analytics.exports.registry import EXPORT_REGISTRY
 
     if load_turn is None:
@@ -477,8 +485,8 @@ def make_analytic_query_context(
         resolved_load_turn = load_turn
 
     return AnalyticQueryContext(
-        game_id=turn.game.id,
-        perspective=turn.player.id,
+        game_id=game_id,
+        perspective=perspective,
         ambient_turn=turn.settings.turn,
         options=options,
         load_turn=resolved_load_turn,

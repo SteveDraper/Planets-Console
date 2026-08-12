@@ -353,6 +353,8 @@ def main(
     )
     ctx = make_analytic_compute_context(
         shell_turn,
+        game_id=game_id,
+        perspective=resolved_perspective,
         load_turn=lambda n: turn_load.get_turn_info(game_id, resolved_perspective, n),
         export_services={ANALYTIC_ID: services},
     ).exports

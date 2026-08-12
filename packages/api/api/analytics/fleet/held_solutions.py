@@ -61,6 +61,8 @@ class FleetInferenceSupport:
                 TurnAnalyticsOptions(),
                 load_turn=load_turn,
                 export_services={SCORES_ANALYTIC_ID: self.scores_services},
+                game_id=game_id,
+                perspective=perspective,
             )
             scope = ExportScope(
                 game_id=game_id,

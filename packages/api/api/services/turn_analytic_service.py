@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from api.analytics import TurnAnalyticsOptions, get_turn_analytic
+from api.analytics import TurnAnalyticsOptions
+from api.analytics.compute_context import make_analytic_compute_context
 from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
@@ -13,8 +14,10 @@ from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
+from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.batch_compute import ensure_table_map_compute
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import LoginCredentialsRequiredError, NotFoundError, UpstreamPlanetsError
 from api.models.game import TurnInfo
@@ -119,28 +122,39 @@ class TurnAnalyticService:
     ) -> dict:
         """Dispatch a registered turn analytic.
 
+        Analytics with a compute profile and ``route_table_map=True`` are
+        ensured through the orchestrator first (batch fan-out, cache-hit
+        inline short-circuit). ``compute()`` then shapes the table/map wire.
+
         ``username`` is an optional turn-load credential for analytics that may
-        auto-ensure missing turns (stored account API key lookup). Empty skips ensure.
+        auto-ensure missing turns (stored account API key lookup). Empty skips
+        turn-load ensure.
         """
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        return get_turn_analytic(
-            analytic_id,
-            turn,
-            TurnAnalyticsOptions(
-                connection_warp_speed=connection_warp_speed,
-                connection_gravitonic_movement=connection_gravitonic_movement,
-                connection_flare_mode=connection_flare_mode,
-                connection_flare_depth=connection_flare_depth,
-                connection_include_illustrative_routes=connection_include_illustrative_routes,
-                diagnostics=diagnostics,
-            ),
-            load_turn=self._load_scoreboard_turn(game_id, perspective),
-            export_services=self._turn_export_services(
-                game_id,
-                perspective,
-                username=username,
-            ),
+        options = TurnAnalyticsOptions(
+            connection_warp_speed=connection_warp_speed,
+            connection_gravitonic_movement=connection_gravitonic_movement,
+            connection_flare_mode=connection_flare_mode,
+            connection_flare_depth=connection_flare_depth,
+            connection_include_illustrative_routes=connection_include_illustrative_routes,
+            diagnostics=diagnostics,
         )
+        load_turn = self._load_scoreboard_turn(game_id, perspective)
+        export_services = self._turn_export_services(
+            game_id,
+            perspective,
+            username=username,
+        )
+        compute_ctx = make_analytic_compute_context(
+            turn,
+            options,
+            load_turn=load_turn,
+            export_services=export_services,
+            game_id=game_id,
+            perspective=perspective,
+        )
+        ensure_table_map_compute(compute_ctx.exports, analytic_id, turn)
+        return dispatch_turn_analytic(analytic_id, compute_ctx)
 
     def _turn_export_services(
         self,

@@ -10,6 +10,7 @@ _LAZY_EXPORTS = frozenset(
         "compute_fleet",
         "get_fleet",
         "iter_fleet_table_stream",
+        "materialize_fleet",
     }
 )
 

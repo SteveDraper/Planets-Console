@@ -541,6 +541,8 @@ def test_refresh_rebuilds_accelerated_evidence_chain_after_prior_ensure(
         turns[shell],
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=shell))
     assert persistence.get_evidence_aggregate(628580, 1, shell) is not None

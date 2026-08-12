@@ -255,6 +255,7 @@ def test_fleet_compute_profile_uses_interpreter_backend():
     assert len(FLEET_COMPUTE_PROFILE.steps) == 2
     assert FLEET_COMPUTE_PROFILE.steps[0].backend == "interpreter"
     assert FLEET_COMPUTE_PROFILE.steps[1].backend == "inline"
+    assert FLEET_COMPUTE_PROFILE.route_table_map is True
 
 
 def test_fleet_materialization_leg_import_does_not_load_transport_stack():

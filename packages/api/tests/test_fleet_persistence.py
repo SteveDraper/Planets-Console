@@ -544,18 +544,67 @@ def test_turn_store_invalidates_fleet_snapshots(memory_backend):
     assert persistence.get_snapshot(628580, 1, 112) is None
 
 
-def test_turn_analytic_service_materializes_persisted_fleet(memory_backend, load_turn):
+def test_turn_analytic_service_fleet_miss_submits_batch_ensure(
+    memory_backend, load_turn, monkeypatch
+):
+    """REST cache miss fans out fleet scopes through ensure before compute().
+
+    Full orchestrator gap-fill is covered by export-ensure tests. This unit test
+    stubs ensure after capturing the batch, then asserts compute reads
+    persistence (or fails) without rematerializing via the snapshot chain.
+    """
+    from api.compute.batch_compute import table_map_compute_scopes
+
     persistence = FleetSnapshotPersistenceService(memory_backend)
     turn_110 = load_turn(110)
     assert turn_110 is not None
     _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    captured: list[tuple[str, int]] = []
+
+    def spy_ensure(ctx, analytic_id, turn) -> None:
+        scopes = table_map_compute_scopes(analytic_id, ctx, turn)
+        captured.append((analytic_id, len(scopes)))
+
+    def fail_chain(*_args, **_kwargs):
+        raise AssertionError("fleet REST miss must not rematerialize via snapshot chain")
+
+    monkeypatch.setattr(
+        "api.services.turn_analytic_service.ensure_table_map_compute",
+        spy_ensure,
+    )
+    monkeypatch.setattr(
+        "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
+        fail_chain,
+    )
+    _, _, _, _, analytics, _ = build_service_stack(memory_backend)
+    with pytest.raises(ValidationError, match="fleet roster snapshot is not durable"):
+        analytics.get_turn_analytics(628580, 1, 111, "fleet")
+    assert captured == [("fleet", 4)]
+    assert persistence.get_snapshot(628580, 1, 111) is None
+
+
+def test_turn_analytic_service_fleet_cache_hit_skips_snapshot_chain(
+    memory_backend, load_turn, monkeypatch
+):
+    persistence = FleetSnapshotPersistenceService(memory_backend)
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_111)
+    _seed_scores_rows_for_all_players(InferenceRowPersistenceService(memory_backend), turn_111)
+
+    def fail_chain(*_args, **_kwargs):
+        raise AssertionError("fleet REST cache hit must not rematerialize via snapshot chain")
+
+    monkeypatch.setattr(
+        "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
+        fail_chain,
+    )
     _, _, _, _, analytics, _ = build_service_stack(memory_backend)
     data = analytics.get_turn_analytics(628580, 1, 111, "fleet")
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4
-    koshling = next(player for player in data["players"] if player["playerId"] == 8)
-    assert len(koshling["records"]) == 5
-    assert persistence.get_snapshot(628580, 1, 111) is not None
 
 
 def _wired_fleet_inference_services(memory_backend):

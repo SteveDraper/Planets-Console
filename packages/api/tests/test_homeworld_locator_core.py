@@ -20,7 +20,7 @@ from api.analytics.homeworld_locator.baseline_ensure import (
     needs_baseline_recompute,
     resolve_baseline_turn,
 )
-from api.analytics.homeworld_locator.compute import get_homeworld_locator
+from api.analytics.homeworld_locator.compute import compute_homeworld_locator, get_homeworld_locator
 from api.analytics.homeworld_locator.compute_services import build_ephemeral_homeworld_services
 from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
@@ -421,13 +421,17 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
 
     captured: dict[str, object] = {}
 
-    def fake_get_turn_analytic(analytic_id, turn, options, *, load_turn, export_services):
-        captured["export_services"] = export_services
+    def fake_dispatch_turn_analytic(analytic_id, ctx):
+        captured["export_services"] = ctx.exports.export_services
         return {"analyticId": analytic_id}
 
     monkeypatch.setattr(
-        "api.services.turn_analytic_service.get_turn_analytic",
-        fake_get_turn_analytic,
+        "api.services.turn_analytic_service.ensure_table_map_compute",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "api.services.turn_analytic_service.dispatch_turn_analytic",
+        fake_dispatch_turn_analytic,
     )
 
     svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="captain")
@@ -504,6 +508,8 @@ def test_export_ensure_unsatisfied_when_degraded_and_turn_one_present(
         late,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(_services(persistence, turns), turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -528,6 +534,8 @@ def test_export_ensure_requires_shell_evidence_aggregate(persistence, sample_tur
         sample_turn,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -554,6 +562,8 @@ def test_export_ensure_raises_when_shell_turn_not_stored(persistence, sample_tur
         turn_one,
         load_turn=lambda n: {1: turn_one}.get(n),
         export_services=_export_services(services, {1: turn_one}),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ExportScope(game_id=628580, perspective=1, turn=111)
     assert is_homeworld_export_ensure_satisfied(ctx, scope) is False
@@ -693,6 +703,31 @@ def test_inactive_map_table_payload(persistence, sample_turn) -> None:
     assert persistence.get_game_state(628580) is None
 
 
+def test_compute_homeworld_locator_does_not_call_export_ensure(
+    persistence, sample_turn, monkeypatch
+) -> None:
+    from api.analytics.compute_context import invoke_analytic_compute
+
+    def fail_ensure(*_args, **_kwargs):
+        raise AssertionError("REST compute_homeworld_locator must not call export ensure")
+
+    monkeypatch.setattr(
+        "api.analytics.homeworld_locator.exports.ensure_homeworld_export",
+        fail_ensure,
+    )
+    turns = {111: sample_turn}
+    services = _services(persistence, turns)
+    with pytest.raises(ValidationError, match="game-global state missing after ensure"):
+        invoke_analytic_compute(
+            compute_homeworld_locator,
+            sample_turn,
+            load_turn=lambda n: turns.get(n),
+            export_services=_export_services(services, turns),
+            game_id=services.game_id,
+            perspective=services.perspective,
+        )
+
+
 def test_candidate_view_materialize(persistence, sample_turn) -> None:
     from api.analytics.compute_context import make_analytic_compute_context
 
@@ -703,6 +738,8 @@ def test_candidate_view_materialize(persistence, sample_turn) -> None:
         sample_turn,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     view = materialize_homeworld_candidate_view(ctx, shell_turn=sample_turn)
     assert view.available is True
@@ -749,6 +786,8 @@ def test_run_homeworld_baseline_persist_round_trip(persistence, sample_turn) -> 
         sample_turn,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -820,6 +859,8 @@ def test_baseline_persist_recompute_clears_shell_evidence(persistence, sample_tu
         late,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -884,6 +925,8 @@ def test_baseline_persist_without_recompute_keeps_shell_evidence(persistence, sa
         sample_turn,
         load_turn=lambda n: turns.get(n),
         export_services=_export_services(services, turns),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
@@ -923,6 +966,8 @@ def test_run_homeworld_baseline_inactive_completes_without_persist(
         inactive,
         load_turn=lambda n: {111: inactive}.get(n),
         export_services=_export_services(services, {111: inactive}),
+        game_id=services.game_id,
+        perspective=services.perspective,
     ).exports
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,

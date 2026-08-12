@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
-from api.analytics.homeworld_locator.baseline_ensure import materialize_homeworld_candidate_view
+from api.analytics.compute_context import AnalyticComputeContext, make_analytic_compute_context
+from api.analytics.homeworld_locator.baseline_ensure import (
+    materialize_homeworld_candidate_view,
+    read_homeworld_candidate_view,
+)
 from api.analytics.homeworld_locator.compute_services import resolve_homeworld_services
 from api.analytics.homeworld_locator.constants import (
     ANALYTIC_ID,
@@ -24,7 +27,6 @@ from api.analytics.homeworld_locator.sector_overlays import (
 from api.analytics.homeworld_locator.serialization import homeworld_candidate_record_to_json
 from api.analytics.homeworld_locator.types import HomeworldCandidateRecord, HomeworldCandidateView
 from api.analytics.options import TurnAnalyticsOptions
-from api.concepts.homeworld_layout import homeworld_locator_inactive_reason
 from api.concepts.map_region_coverage import map_region_overlay_to_wire
 from api.models.game import TurnInfo
 
@@ -75,27 +77,20 @@ def _view_to_wire(
     }
 
 
-def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
-    """Return candidate view for map markers, sector overlays, and tabular rows."""
-    inactive = homeworld_locator_inactive_reason(ctx.turn.settings)
-    if inactive is not None:
-        return _view_to_wire(
-            HomeworldCandidateView(
-                candidates=(),
-                baseline_turn=0,
-                baseline_degraded=False,
-                available=False,
-                inactive_reason=inactive,
-            )
-        )
+def _homeworld_locator_wire_from_view(
+    ctx: AnalyticComputeContext,
+    view: HomeworldCandidateView,
+) -> dict:
+    """Shape map/table wire from an already-built candidate view."""
+    if not view.available:
+        return _view_to_wire(view)
 
     services = resolve_homeworld_services(ctx.exports)
-    view = materialize_homeworld_candidate_view(ctx.exports, shell_turn=ctx.turn)
     state = services.persistence.get_game_state(services.game_id)
     sector_owner_sets = None
     if state is not None:
-        # Same merge-above-read as materialize: overlays must not re-open the
-        # game-global vs aggregate storage split (ADR 0010).
+        # Same merge-above-read as the candidate view: overlays must not re-open
+        # the game-global vs aggregate storage split (ADR 0010).
         aggregate = evidence_aggregate_at_shell_turn(
             services,
             baseline_turn=state.baseline_turn,
@@ -124,6 +119,17 @@ def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
     )
 
 
+def compute_homeworld_locator(ctx: AnalyticComputeContext) -> dict:
+    """Shape map/table wire from durable homeworld state.
+
+    REST ``get_turn_analytics`` ensures the scope through the orchestrator
+    first. This handler reads that state or fails if it is missing. Direct
+    callers that skip ensure use ``get_homeworld_locator``.
+    """
+    view = read_homeworld_candidate_view(ctx.exports, shell_turn=ctx.turn)
+    return _homeworld_locator_wire_from_view(ctx, view)
+
+
 def get_homeworld_locator(
     turn: TurnInfo,
     options: TurnAnalyticsOptions | None = None,
@@ -131,11 +137,14 @@ def get_homeworld_locator(
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: dict[str, object] | None = None,
 ) -> dict:
-    """Convenience entry for tests and direct callers."""
-    return invoke_analytic_compute(
-        compute_homeworld_locator,
+    """Convenience entry for tests and direct callers without REST ensure."""
+    ctx = make_analytic_compute_context(
         turn,
         options,
+        game_id=turn.game.id,
+        perspective=turn.player.id,
         load_turn=load_turn,
         export_services=export_services,
     )
+    view = materialize_homeworld_candidate_view(ctx.exports, shell_turn=ctx.turn)
+    return _homeworld_locator_wire_from_view(ctx, view)

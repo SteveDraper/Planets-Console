@@ -443,3 +443,141 @@ def test_ensure_scope_timeout_leaves_inflight_running(sample_turn):
         result_wire={"result": SHARED_ID},
     )
     assert late.wait(timeout=1.0).state == "complete"
+
+
+def test_ensure_scopes_submits_all_before_wait(sample_turn):
+    """Batch ensure must fan out pool work before waiting on any handle (#202)."""
+    from api.analytics.turn_roster import iter_turn_players
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    player_ids = [player.id for player in iter_turn_players(sample_turn)][:2]
+    assert len(player_ids) == 2
+    scopes = tuple(
+        ComputeScope(
+            analytic_id=SHARED_ID,
+            game_id=sample_turn.game.id,
+            perspective=1,
+            turn=sample_turn.settings.turn,
+            player_id=player_id,
+        )
+        for player_id in player_ids
+    )
+    submitted: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        submitted.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
+        pool_submitter=pool_submitter,
+    )
+
+    done = threading.Event()
+    errors: list[BaseException] = []
+
+    def wait_batch() -> None:
+        try:
+            orchestrator.ensure_scopes(
+                tuple(
+                    ComputeRequest(
+                        ctx=ctx,
+                        scope=scope,
+                        priority_band="interactive_ensure",
+                    )
+                    for scope in scopes
+                ),
+                timeout=2.0,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=wait_batch, daemon=True)
+    thread.start()
+    time.sleep(0.1)
+    assert not done.is_set()
+    assert set(submitted) == set(scopes)
+
+    for scope in scopes:
+        orchestrator.complete_pool_step(scope, result_wire={"result": SHARED_ID})
+    assert done.wait(timeout=2.0)
+    assert errors == []
+    thread.join(timeout=1.0)
+
+
+def test_ensure_scopes_returns_handles_in_request_order(sample_turn):
+    """Mixed durable hits and misses must zip to the request sequence."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    base_player_id = first_player_id(sample_turn)
+    miss_first, hit, miss_last = (
+        ComputeScope(
+            analytic_id=SHARED_ID,
+            game_id=sample_turn.game.id,
+            perspective=1,
+            turn=sample_turn.settings.turn,
+            player_id=player_id,
+        )
+        for player_id in (base_player_id, base_player_id + 10_000, base_player_id + 20_000)
+    )
+    scopes = (miss_first, hit, miss_last)
+    hit_player_id = hit.player_id
+
+    class _MixedPersistencePolicy(_StubPersistencePolicy):
+        def is_satisfied(self, _ctx, scope) -> bool:
+            return scope.player_id == hit_player_id
+
+        def satisfied_result_wire(self, _ctx, scope) -> dict:
+            return {"satisfied": True, "player_id": scope.player_id}
+
+    submitted: list[ComputeScope] = []
+
+    def pool_submitter(node, _step) -> None:
+        submitted.append(node.scope)
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry(
+            (_thread_registration(SHARED_ID, persistence_policy=_MixedPersistencePolicy()),)
+        ),
+        pool_submitter=pool_submitter,
+    )
+
+    requests = tuple(
+        ComputeRequest(ctx=ctx, scope=scope, priority_band="interactive_ensure") for scope in scopes
+    )
+    result_box: list[tuple[object, ...]] = []
+    errors: list[BaseException] = []
+    done = threading.Event()
+
+    def wait_batch() -> None:
+        try:
+            result_box.append(orchestrator.ensure_scopes(requests, timeout=2.0))
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=wait_batch, daemon=True)
+    thread.start()
+    time.sleep(0.1)
+    assert not done.is_set()
+    assert submitted == [miss_first, miss_last]
+
+    for scope in (miss_first, miss_last):
+        orchestrator.complete_pool_step(scope, result_wire={"result": scope.player_id})
+    assert done.wait(timeout=2.0)
+    assert errors == []
+    thread.join(timeout=1.0)
+
+    assert len(result_box) == 1
+    handles = result_box[0]
+    assert tuple(handle.scope for handle in handles) == scopes
+    assert handles[0].result_wire == {"result": miss_first.player_id}
+    assert handles[1].result_wire == {"satisfied": True, "player_id": hit_player_id}
+    assert handles[2].result_wire == {"result": miss_last.player_id}

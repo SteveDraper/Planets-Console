@@ -55,7 +55,9 @@ def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> Non
 
 
 def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -> None:
-    assert run_scores_tier_solve({"runId": None, "evidenceClosed": True}).outcome == "complete"
+    skip = run_scores_tier_solve({"runId": None, "evidenceClosed": True})
+    assert skip.outcome == "complete"
+    assert skip.payload is None
     with pytest.raises(RuntimeError, match="open-evidence wait wire"):
         run_scores_tier_solve({"runId": None})
 

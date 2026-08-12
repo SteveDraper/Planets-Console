@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 import pytest
+from api.compute.runtime import reset_orchestrators_for_tests
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
 from api.storage import clear_backend_cache, get_storage
@@ -28,8 +29,18 @@ ASSETS_DIR = REPO_PACKAGES_DIR / "api" / "api" / "storage" / "assets"
 
 
 @pytest.fixture(autouse=True)
-def _setup_storage_for_core_calls():
-    """Seed Core storage so BFF can call Core via ASGI transport."""
+def _setup_storage_for_core_calls(monkeypatch):
+    """Seed Core storage so BFF can call Core via ASGI transport.
+
+    Table/map REST ensure waits on the process-wide fleet/scores DAG. These
+    tests assert response shape, so ensure is a no-op and the fixture seeds a
+    durable host-turn fleet snapshot for ``compute()`` to read.
+    """
+    reset_orchestrators_for_tests()
+    monkeypatch.setattr(
+        "api.services.turn_analytic_service.ensure_table_map_compute",
+        lambda *_args, **_kwargs: None,
+    )
     clear_backend_cache()
     clear_core_client_cache()
     set_api_config(
@@ -50,6 +61,7 @@ def _setup_storage_for_core_calls():
     yield
     clear_core_client_cache()
     clear_backend_cache()
+    reset_orchestrators_for_tests()
 
 
 def test_list_analytics_returns_analytics_list():

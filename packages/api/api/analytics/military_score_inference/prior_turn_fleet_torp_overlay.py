@@ -198,6 +198,8 @@ def _load_prior_turn_fleet_snapshot(
             ctx = make_analytic_query_context(
                 turn,
                 TurnAnalyticsOptions(),
+                game_id=fleet_services.game_id,
+                perspective=fleet_services.perspective,
                 load_turn=load_turn,
                 export_services=export_services,
             )
@@ -278,8 +280,8 @@ def resolve_prior_turn_fleet_torp_overlay(
         return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
 
     scope = ExportScope(
-        game_id=turn.game.id,
-        perspective=turn.player.id,
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
         turn=prior_turn,
         player_id=player_id,
     )
@@ -336,6 +338,8 @@ def schedule_background_prior_turn_fleet_warm(
     query_context = make_analytic_query_context(
         turn,
         TurnAnalyticsOptions(),
+        game_id=game_id,
+        perspective=perspective,
         load_turn=load_turn,
         export_services=export_services,
     )

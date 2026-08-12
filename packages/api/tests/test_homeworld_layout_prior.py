@@ -155,6 +155,8 @@ def _materialize_ctx(services, turn, turns: dict[int, object] | None = None):
     stored = turns if turns is not None else {turn.settings.turn: turn}
     return make_analytic_compute_context(
         turn,
+        game_id=services.game_id,
+        perspective=services.perspective,
         load_turn=lambda n: stored.get(n),
         export_services={ANALYTIC_ID: services},
     ).exports

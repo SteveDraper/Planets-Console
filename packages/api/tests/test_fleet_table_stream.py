@@ -821,6 +821,8 @@ def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
         TurnAnalyticsOptions(),
         load_turn=fleet_services.load_turn,
         export_services={ANALYTIC_ID: fleet_services},
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
     scheduler = FleetTableStreamScheduler()
     scheduler._stream_bindings["tok"] = _FleetStreamOrchestratorBinding(

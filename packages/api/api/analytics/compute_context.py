@@ -28,6 +28,8 @@ def make_analytic_compute_context(
     turn: TurnInfo,
     options: TurnAnalyticsOptions | None = None,
     *,
+    game_id: int,
+    perspective: int,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: Mapping[str, object] | None = None,
 ) -> AnalyticComputeContext:
@@ -40,6 +42,8 @@ def make_analytic_compute_context(
         exports=make_analytic_query_context(
             turn,
             resolved,
+            game_id=game_id,
+            perspective=perspective,
             load_turn=load_turn,
             export_services=export_services,
         ),
@@ -51,6 +55,8 @@ def invoke_analytic_compute(
     turn: TurnInfo,
     options: TurnAnalyticsOptions | None = None,
     *,
+    game_id: int,
+    perspective: int,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: Mapping[str, object] | None = None,
 ) -> dict:
@@ -59,6 +65,8 @@ def invoke_analytic_compute(
         make_analytic_compute_context(
             turn,
             options,
+            game_id=game_id,
+            perspective=perspective,
             load_turn=load_turn,
             export_services=export_services,
         )

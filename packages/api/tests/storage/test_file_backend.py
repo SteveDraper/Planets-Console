@@ -89,6 +89,89 @@ def test_ensure_dir_raises_when_path_is_a_file(backend, storage_root):
         FileStorageBackend._ensure_dir(blocker)
 
 
+def test_get_maps_file_not_found_during_open_to_not_found(backend, storage_root):
+    """Peer unlink between exists-check and open must be NotFoundError, not errno."""
+    backend.put(GAME_INFO, {"name": "A"})
+    target = storage_root / "games" / "628580" / "info.json"
+    real_open = open
+
+    def racing_open(path, *args, **kwargs):
+        if Path(path) == target:
+            raise FileNotFoundError(2, "No such file or directory", str(target))
+        return real_open(path, *args, **kwargs)
+
+    with patch("api.storage.file.open", side_effect=racing_open):
+        with pytest.raises(NotFoundError, match="Document not found"):
+            backend.get(GAME_INFO)
+
+
+def test_put_nested_treats_vanished_document_as_empty(backend, storage_root):
+    """Suffix put must create a new document when a peer unlinked during load."""
+    backend.put(GAME_INFO, {"keep": 1})
+    target = storage_root / "games" / "628580" / "info.json"
+    real_open = open
+
+    def unlink_on_read(path, *args, **kwargs):
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if Path(path) == target and "w" not in str(mode):
+            target.unlink()
+            raise FileNotFoundError(2, "No such file or directory", str(target))
+        return real_open(path, *args, **kwargs)
+
+    with patch("api.storage.file.open", side_effect=unlink_on_read):
+        backend.put(f"{GAME_INFO}/settings", {"x": 1})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"settings": {"x": 1}}
+
+
+def test_atomic_write_retries_replace_file_not_found(backend, storage_root):
+    """Parent prune between mkdir and replace is retried, matching _ensure_dir."""
+    calls = {"n": 0}
+    original_replace = __import__("os").replace
+
+    def flaky_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise FileNotFoundError(2, "No such file or directory", str(dst))
+        return original_replace(src, dst)
+
+    with patch("api.storage.file.os.replace", side_effect=flaky_replace):
+        backend.put(GAME_INFO, {"name": "A"})
+
+    assert calls["n"] == 2
+    target = storage_root / "games" / "628580" / "info.json"
+    assert json.loads(target.read_text(encoding="utf-8")) == {"name": "A"}
+
+
+def test_atomic_write_exhausted_retries_map_to_not_found(backend, storage_root):
+    """Persistent parent-prune race after retries is NotFoundError, not errno."""
+    calls = {"n": 0}
+
+    def always_missing(src, dst):
+        calls["n"] += 1
+        raise FileNotFoundError(2, "No such file or directory", str(dst))
+
+    with patch("api.storage.file.os.replace", side_effect=always_missing):
+        with pytest.raises(NotFoundError, match="Document not found"):
+            backend.put(GAME_INFO, {"name": "A"})
+
+    assert calls["n"] == 8
+
+
+def test_delete_maps_concurrent_unlink_to_not_found(backend, storage_root):
+    backend.put(GAME_INFO, {"name": "A"})
+    real_unlink = Path.unlink
+
+    def racing_unlink(self, *args, **kwargs):
+        if self.name == "info.json":
+            raise FileNotFoundError(2, "No such file or directory", str(self))
+        return real_unlink(self, *args, **kwargs)
+
+    with patch.object(Path, "unlink", racing_unlink):
+        with pytest.raises(NotFoundError, match="Document not found"):
+            backend.delete(GAME_INFO)
+
+
 def test_atomic_write_uses_unique_temp_name_per_write(backend, storage_root):
     temp_names: list[str] = []
     original_replace = __import__("os").replace
