@@ -219,7 +219,10 @@ class OrchestratorLifecycleMixin:
             return
 
         if step_result.outcome == "persist":
-            node.result_wire = step_result.payload
+            if step_result.payload is not None:
+                node.result_wire = step_result.payload
+            elif node.result_wire is None:
+                node.result_wire = {}
             self._metrics.persist_calls += 1
             # Persist must not run under the orchestrator lock: fleet refine/scores
             # probes take the inference scheduler lock, and scheduler paths call back
@@ -284,9 +287,13 @@ class OrchestratorLifecycleMixin:
 
         if step_result.outcome == "complete":
             # Keep a provisional continue payload when the terminal step has none
-            # (e.g. scores materialize export tree then tier_solve skip).
+            # (e.g. scores materialize export tree then tier_solve skip). Fleet
+            # persist-deferred can enter scores at tier_solve, so there is no
+            # continue payload -- still leave ``{}`` so dependents can dispatch.
             if step_result.payload is not None:
                 node.result_wire = step_result.payload
+            elif node.result_wire is None:
+                node.result_wire = {}
             self._complete_node(node)
             return
 

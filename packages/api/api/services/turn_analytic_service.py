@@ -149,6 +149,8 @@ class TurnAnalyticService:
             options,
             load_turn=load_turn,
             export_services=export_services,
+            game_id=game_id,
+            perspective=perspective,
         )
         ensure_table_map_compute(compute_ctx.exports, analytic_id, turn)
         return get_turn_analytic(
@@ -157,6 +159,8 @@ class TurnAnalyticService:
             options,
             load_turn=load_turn,
             export_services=export_services,
+            game_id=game_id,
+            perspective=perspective,
         )
 
     def _turn_export_services(

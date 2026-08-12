@@ -86,6 +86,8 @@ def export_chain_query_context(
             "scores": scores_services,
             "fleet": fleet_services,
         },
+        game_id=GAME_ID,
+        perspective=perspective_id,
     )
     if seed_fleet_prerequisites_for is not None:
         seed_fleet_unwind_through(

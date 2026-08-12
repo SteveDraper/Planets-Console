@@ -464,6 +464,8 @@ def _query_context_for_services(
         TurnAnalyticsOptions(),
         load_turn=fleet_services.load_turn,
         export_services=export_services,
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
     )
 
 

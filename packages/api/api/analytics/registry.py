@@ -62,6 +62,8 @@ def get_turn_analytic(
     *,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: Mapping[str, object] | None = None,
+    game_id: int | None = None,
+    perspective: int | None = None,
 ) -> dict:
     try:
         handler = TURN_ANALYTICS[analytic_id]
@@ -73,5 +75,7 @@ def get_turn_analytic(
             options,
             load_turn=load_turn,
             export_services=export_services,
+            game_id=game_id,
+            perspective=perspective,
         )
     )
