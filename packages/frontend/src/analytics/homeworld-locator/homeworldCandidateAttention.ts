@@ -1,16 +1,14 @@
 /**
- * Panel candidate click → assert-focus selection + shared map attention request.
+ * Panel candidate click → shared map attention request (pulse / conditional pan).
  */
 
 import { requestMapAttention } from '../../stores/mapAttentionRequest'
-import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 
 /**
- * Select a candidate planet for assert-focus and request map pulse / conditional pan.
+ * Request map pulse / conditional pan for a candidate planet.
  * Pan and pulse lifetime are owned by ``MapAttentionOrchestrator``.
  */
 export function selectHomeworldCandidateForMapAttention(planetId: number): void {
-  useHomeworldLocatorSelectionStore.getState().setSelection({ kind: 'planet', planetId })
   requestMapAttention({
     kind: 'homeworld-planet',
     planetId,

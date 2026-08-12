@@ -191,9 +191,23 @@ def ownership_winning_strength_for_members(
     return resolution.winning_strength
 
 
+def unique_projected_owner_slot(
+    projection: SectorOwnerOverlayProjection,
+) -> int | None:
+    """Owner slot when the projected set has exactly one member, else None.
+
+    This is the sole sector-pin test: overlay ``is_pinned``, unique-owner
+    orphan bind, and display uniqueness all use this helper.
+    """
+    if len(projection.members) != 1:
+        return None
+    return projection.members[0].owner_slot
+
+
 __all__ = [
     "SectorOwnerOverlayProjection",
     "ownership_winning_strength_for_members",
     "project_sector_owner_sets_for_overlays",
     "settled_owner_homes_from_location_pins",
+    "unique_projected_owner_slot",
 ]

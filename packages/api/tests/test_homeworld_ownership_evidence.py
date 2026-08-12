@@ -577,3 +577,133 @@ def test_apply_unique_owner_orphan_bind_sets_perspective(template_planet) -> Non
     )
     by_id = {row.planet_id: row for row in bound}
     assert by_id[orphan.planet_id].perspective == 4
+
+
+def test_apply_unique_owner_orphan_bind_uses_projected_uniqueness(
+    template_planet,
+) -> None:
+    """Two durable members still bind after the other slot is settled elsewhere."""
+    from api.analytics.homeworld_locator.models import OwnershipProvenance, SectorOwnerMember
+    from api.analytics.homeworld_locator.ownership_refine import apply_unique_owner_orphan_bind
+    from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
+
+    center = (2000.0, 2000.0)
+    player_count = 11
+    radius = 550.0
+    planets = []
+    for index in range(player_count):
+        angle = index * (2.0 * math.pi / player_count)
+        planets.append(
+            _planet(
+                template_planet,
+                planet_id=index + 1,
+                x=int(round(center[0] + radius * math.cos(angle))),
+                y=int(round(center[1] + radius * math.sin(angle))),
+            )
+        )
+    shell = _eligible_geometry_turn(template_planet, planets=planets)
+    nearby = OwnershipProvenance(
+        kind=PROVENANCE_NEARBY_PLANET_OWNERSHIP,
+        turn=10,
+        planet_id=99,
+        distance_ly=40.0,
+    )
+    aggregate = HomeworldEvidenceAggregate(
+        turn=10,
+        baseline_turn=1,
+        sector_owner_sets=(
+            (
+                0,
+                (
+                    SectorOwnerMember(
+                        owner_slot=1,
+                        provenances=(nearby,),
+                    ),
+                ),
+            ),
+            (
+                1,
+                (
+                    SectorOwnerMember(owner_slot=1, provenances=(nearby,)),
+                    SectorOwnerMember(owner_slot=6, provenances=(nearby,)),
+                ),
+            ),
+        ),
+    )
+    definite = HomeworldCandidateRecord(
+        planet_id=planets[0].id,
+        perspective=1,
+        confidence_tier=CONFIDENCE_DEFINITE,
+    )
+    orphan = HomeworldCandidateRecord(
+        planet_id=planets[1].id,
+        perspective=None,
+        confidence_tier=CONFIDENCE_DEFINITE,
+        location_asserted=True,
+    )
+    bound = apply_unique_owner_orphan_bind(
+        (definite, orphan),
+        aggregate,
+        turn=shell,
+    )
+    by_id = {row.planet_id: row for row in bound}
+    assert by_id[orphan.planet_id].perspective == 6
+    assert by_id[definite.planet_id].perspective == 1
+
+
+def test_apply_unique_owner_orphan_bind_preserves_existing_perspective(
+    template_planet,
+) -> None:
+    from api.analytics.homeworld_locator.models import OwnershipProvenance, SectorOwnerMember
+    from api.analytics.homeworld_locator.ownership_refine import apply_unique_owner_orphan_bind
+    from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
+
+    center = (2000.0, 2000.0)
+    player_count = 11
+    radius = 550.0
+    planets = []
+    for index in range(player_count):
+        angle = index * (2.0 * math.pi / player_count)
+        planets.append(
+            _planet(
+                template_planet,
+                planet_id=index + 1,
+                x=int(round(center[0] + radius * math.cos(angle))),
+                y=int(round(center[1] + radius * math.sin(angle))),
+            )
+        )
+    shell = _eligible_geometry_turn(template_planet, planets=planets)
+    aggregate = HomeworldEvidenceAggregate(
+        turn=10,
+        baseline_turn=1,
+        sector_owner_sets=(
+            (
+                1,
+                (
+                    SectorOwnerMember(
+                        owner_slot=4,
+                        provenances=(
+                            OwnershipProvenance(
+                                kind=PROVENANCE_SHIP_TRAVEL_ENVELOPE,
+                                turn=10,
+                                ship_id=1,
+                                radius_ly=50.0,
+                                age_source=AGE_SOURCE_FLEET_BUILT_TURN,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    already_bound = HomeworldCandidateRecord(
+        planet_id=planets[1].id,
+        perspective=9,
+        confidence_tier=CONFIDENCE_POSSIBLE,
+    )
+    bound = apply_unique_owner_orphan_bind(
+        (already_bound,),
+        aggregate,
+        turn=shell,
+    )
+    assert bound[0].perspective == 9

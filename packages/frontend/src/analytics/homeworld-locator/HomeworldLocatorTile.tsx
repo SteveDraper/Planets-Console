@@ -7,7 +7,6 @@ import { DisplayModeControl } from '../DisplayModeControl'
 import { deriveAnalyticScope } from '../../shell/shellContext'
 import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
-import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import { homeworldInactiveHint } from './constants'
 import { selectHomeworldCandidateForMapAttention } from './homeworldCandidateAttention'
 import {
@@ -89,8 +88,6 @@ export function HomeworldLocatorTile({
   const loginName = useSessionStore((s) => s.name)
   const perspectives = gameInfoContext?.perspectives
   const roster = perspectives ?? EMPTY_ROSTER
-  const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
-  const selectedPlanetId = selection?.kind === 'planet' ? selection.planetId : null
 
   const analyticScope = deriveAnalyticScope({
     selectedGameId,
@@ -211,7 +208,6 @@ export function HomeworldLocatorTile({
             analyticScope={analyticScope}
             fetchEnabled={fetchEnabled}
             roster={roster}
-            selectedPlanetId={selectedPlanetId}
             onSelectPlanet={selectHomeworldCandidateForMapAttention}
             selectedSectorIndexes={selectedSectorIndexSet}
             onToggleSectorIndex={toggleSectorIndex}

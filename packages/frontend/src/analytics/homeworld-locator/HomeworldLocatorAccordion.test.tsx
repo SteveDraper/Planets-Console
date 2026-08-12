@@ -102,7 +102,6 @@ describe('HomeworldSectorAccordion', () => {
         baselineDegraded={false}
         baselineTurn={null}
         roster={[perspectiveRow(1, 'alice', { raceName: 'The Federation' })]}
-        selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
         selectedSectorIndexes={new Set([1])}
         onToggleSectorIndex={vi.fn()}
@@ -144,7 +143,6 @@ describe('HomeworldSectorAccordion', () => {
         baselineDegraded={false}
         baselineTurn={null}
         roster={[perspectiveRow(1, 'alice', { raceName: 'The Federation' })]}
-        selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
         selectedSectorIndexes={new Set([1])}
         onToggleSectorIndex={vi.fn()}
@@ -188,7 +186,6 @@ describe('HomeworldSectorAccordion', () => {
         baselineDegraded={false}
         baselineTurn={null}
         roster={[]}
-        selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
         selectedSectorIndexes={new Set([1])}
         onToggleSectorIndex={onToggle}
@@ -220,7 +217,6 @@ describe('HomeworldSectorAccordion', () => {
         baselineDegraded={true}
         baselineTurn={4}
         roster={[perspectiveRow(1, 'alice', { raceName: 'The Federation' })]}
-        selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
         selectedSectorIndexes={new Set([1])}
         onToggleSectorIndex={vi.fn()}
@@ -254,7 +250,6 @@ describe('HomeworldSectorAccordion', () => {
           perspectiveRow(1, 'alice', { raceName: 'The Federation' }),
           perspectiveRow(2, 'bob', { raceName: 'The Lizards' }),
         ]}
-        selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
         selectedSectorIndexes={new Set([1])}
         onToggleSectorIndex={vi.fn()}
@@ -299,7 +294,6 @@ describe('HomeworldPlayerAccordion', () => {
           perspectiveRow(1, 'alice', { playerId: 2, raceName: 'The Federation' }),
           perspectiveRow(2, 'bob', { playerId: 847, raceName: 'The Lizards' }),
         ]}
-        selectedPlanetId={null}
         onSelectPlanet={vi.fn()}
         compact
       />

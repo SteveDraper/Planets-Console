@@ -14,6 +14,7 @@ from api.analytics.homeworld_locator.ownership_projection import (
     ownership_winning_strength_for_members,
     project_sector_owner_sets_for_overlays,
     settled_owner_homes_from_location_pins,
+    unique_projected_owner_slot,
 )
 from api.concepts.races import PRIVATEER_RACE_ID
 
@@ -218,3 +219,22 @@ def test_winning_strength_omitted_for_ambiguous_preferred_upgrade() -> None:
         )
         == "strong"
     )
+
+
+def test_unique_projected_owner_slot_is_exactly_one_member() -> None:
+    unique = project_sector_owner_sets_for_overlays(
+        {0: (_member(4, PROVENANCE_SHIP_TRAVEL_ENVELOPE),)},
+        race_id_by_owner_slot={},
+    )
+    assert unique_projected_owner_slot(unique[0]) == 4
+
+    ambiguous = project_sector_owner_sets_for_overlays(
+        {
+            0: (
+                _member(2, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
+                _member(6, PROVENANCE_SHIP_TRAVEL_ENVELOPE),
+            )
+        },
+        race_id_by_owner_slot={},
+    )
+    assert unique_projected_owner_slot(ambiguous[0]) is None

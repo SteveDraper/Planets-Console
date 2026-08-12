@@ -3,7 +3,6 @@ import { homeworldMarkerRings } from '../../analytics/homeworld-locator/homeworl
 import type { HomeworldMapMarkerDisplay } from '../../analytics/homeworld-locator/mapAnalytic'
 import { isHomeworldPlanetAttention } from '../../lib/mapAttention'
 import { useMapAttentionRequestStore } from '../../stores/mapAttentionRequest'
-import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 
@@ -13,7 +12,7 @@ const MARKER_DIAMETER_PX = 12
 /**
  * Homeworld locator planet decorations on the base map.
  * Solid ring = definite; dashed/lighter ring = possible; double dotted = most probable;
- * amber outer ring = location-asserted pin; cyan halo = panel/table selection;
+ * amber outer ring = location-asserted pin;
  * pulse = ephemeral in-place ring scale flash after candidate row click.
  */
 export function HomeworldMarkersOverlay({
@@ -24,7 +23,6 @@ export function HomeworldMarkersOverlay({
   const domNode = useStore((s) => s.domNode ?? null)
   const transform = useStore((s) => s.transform)
   const { width, height } = useOverlayPaneSize(domNode)
-  const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const pending = useMapAttentionRequestStore((s) => s.pending)
   const flashTarget = isHomeworldPlanetAttention(pending) ? pending : null
 
@@ -42,15 +40,12 @@ export function HomeworldMarkersOverlay({
           const { cx, cy } = flowCenterFromMapNode({ x: marker.x, y: marker.y })
           const paneX = cx * scale + tx
           const paneY = cy * scale + ty
-          const isSelected =
-            selection?.kind === 'planet' && selection.planetId === marker.planetId
           const isFlashing =
             flashTarget != null && flashTarget.planetId === marker.planetId
           const rings = homeworldMarkerRings({
             confidenceTier: marker.confidenceTier,
             isMostProbable: marker.isMostProbable,
             locationAsserted: marker.locationAsserted,
-            isSelected,
           })
           const markerKey = `hw-${marker.planetId}-${marker.perspective ?? 'o'}-${marker.confidenceTier}-${marker.locationAsserted ? 'a' : 'n'}-${marker.isMostProbable ? 'mp' : 'n'}`
           return (

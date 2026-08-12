@@ -6,7 +6,6 @@ const POSSIBLE_STROKE = '#94a3b8'
 const MOST_PROBABLE_STROKE = '#cbd5e1'
 /** Location-asserted pin -- distinct from inferred definite (warm amber). */
 const ASSERTED_STROKE = '#fbbf24'
-const SELECTED_STROKE = '#38bdf8'
 
 export type HomeworldMarkerRing = {
   radiusScale: number
@@ -19,10 +18,7 @@ export type HomeworldMarkerRing = {
 export type HomeworldMarkerRingInput = Pick<
   HomeworldMapMarker,
   'confidenceTier' | 'isMostProbable' | 'locationAsserted'
-> & {
-  /** Ephemeral UI highlight when the panel/table row is focused. */
-  isSelected?: boolean
-}
+>
 
 function confidenceRings(
   marker: Pick<HomeworldMapMarker, 'confidenceTier' | 'isMostProbable'>
@@ -68,7 +64,7 @@ function confidenceRings(
 
 /**
  * SVG ring paint for one homeworld map marker.
- * Location-asserted pin adds an outer amber ring; selection adds a cyan halo.
+ * Location-asserted pin adds an outer amber ring.
  */
 export function homeworldMarkerRings(marker: HomeworldMarkerRingInput): HomeworldMarkerRing[] {
   const rings = confidenceRings(marker)
@@ -78,15 +74,6 @@ export function homeworldMarkerRings(marker: HomeworldMarkerRingInput): Homeworl
       stroke: ASSERTED_STROKE,
       strokeWidth: 2,
       opacity: 1,
-    })
-  }
-  if (marker.isSelected) {
-    rings.unshift({
-      radiusScale: marker.locationAsserted ? 1.65 : 1.4,
-      stroke: SELECTED_STROKE,
-      strokeWidth: 1.5,
-      strokeDasharray: '2 2',
-      opacity: 0.95,
     })
   }
   return rings

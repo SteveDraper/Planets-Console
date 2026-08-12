@@ -6,9 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 
 from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
-from api.analytics.homeworld_locator.cull_candidates import candidate_is_assert_protected
 from api.analytics.homeworld_locator.layout_distributions_asset import LayoutDistributionsAsset
-from api.analytics.homeworld_locator.models import SectorOwnerMember
+from api.analytics.homeworld_locator.models import CONFIDENCE_DEFINITE, SectorOwnerMember
 from api.analytics.homeworld_locator.ownership_evidence import (
     apply_nearby_planet_ownership,
     apply_preferred_candidate_ownership,
@@ -20,11 +19,17 @@ from api.analytics.homeworld_locator.ownership_evidence import (
     resolve_ship_built_turn,
     travel_envelope_radius_ly,
 )
+from api.analytics.homeworld_locator.ownership_projection import (
+    project_sector_owner_sets_for_overlays,
+    settled_owner_homes_from_location_pins,
+    unique_projected_owner_slot,
+)
 from api.analytics.homeworld_locator.sector_partition import build_homeworld_sector_partition
 from api.analytics.homeworld_locator.types import (
     HomeworldCandidateRecord,
     HomeworldEvidenceAggregate,
 )
+from api.analytics.turn_roster import race_id_by_owner_slot
 from api.concepts.ship_limit import total_reported_ships
 from api.models.game import TurnInfo
 
@@ -211,7 +216,12 @@ def apply_unique_owner_orphan_bind(
     shell_perspective: int | None = None,
     asserted_location_planet_ids: Sequence[int] = (),
 ) -> tuple[HomeworldCandidateRecord, ...]:
-    """Bind orphan candidates when a sector has exactly one possible homeworld owner."""
+    """Bind unbound candidates when a sector has a unique projected owner.
+
+    Uniqueness is the overlay projection: max-strength contenders, then drop
+    slots already uniquely settled on another sector. Same test as overlay
+    ``is_pinned``. Existing ``perspective`` values are preserved.
+    """
     sector_owner_sets = sector_owner_sets_to_dict(aggregate.sector_owner_sets)
     if not sector_owner_sets:
         return tuple(candidates)
@@ -227,17 +237,38 @@ def apply_unique_owner_orphan_bind(
     if context is None:
         return tuple(candidates)
 
+    location_definite_planet_ids = frozenset(
+        row.planet_id for row in candidates if row.confidence_tier == CONFIDENCE_DEFINITE
+    )
+    perspective_by_planet_id = {
+        row.planet_id: row.perspective for row in candidates if row.perspective is not None
+    }
+    settled = settled_owner_homes_from_location_pins(
+        [
+            [planet.id for planet in sector_planets]
+            for sector_planets in context.candidate_planets_by_sector
+        ],
+        location_definite_planet_ids=location_definite_planet_ids,
+        perspective_by_planet_id=perspective_by_planet_id,
+    )
+    projected = project_sector_owner_sets_for_overlays(
+        sector_owner_sets,
+        race_id_by_owner_slot=race_id_by_owner_slot(turn),
+        location_definite_planet_ids=location_definite_planet_ids,
+        settled_owner_home_by_slot=settled,
+    )
     unique_owner_by_sector: dict[int, int] = {}
-    for sector_index, members in sector_owner_sets.items():
-        if len(members) == 1:
-            unique_owner_by_sector[sector_index] = members[0].owner_slot
+    for sector_index, projection in projected.items():
+        owner_slot = unique_projected_owner_slot(projection)
+        if owner_slot is not None:
+            unique_owner_by_sector[sector_index] = owner_slot
 
     if not unique_owner_by_sector:
         return tuple(candidates)
 
     bound: list[HomeworldCandidateRecord] = []
     for row in candidates:
-        if row.perspective is not None or candidate_is_assert_protected(row):
+        if row.perspective is not None:
             bound.append(row)
             continue
         sector_index = context.planet_sector_index.get(row.planet_id)

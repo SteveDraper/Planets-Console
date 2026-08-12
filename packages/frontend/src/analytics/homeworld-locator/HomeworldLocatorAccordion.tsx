@@ -21,7 +21,6 @@ type AccordionCommonProps = {
   baselineDegraded: boolean
   baselineTurn: number | null | undefined
   roster: readonly PerspectiveRow[]
-  selectedPlanetId: number | null
   onSelectPlanet: (planetId: number) => void
   /** Compact layout for the narrow sidebar panel. */
   compact?: boolean
@@ -145,7 +144,6 @@ export function HomeworldSectorAccordion(props: HomeworldSectorAccordionProps) {
     baselineDegraded,
     baselineTurn,
     roster,
-    selectedPlanetId,
     onSelectPlanet,
     selectedSectorIndexes,
     onToggleSectorIndex,
@@ -156,7 +154,6 @@ export function HomeworldSectorAccordion(props: HomeworldSectorAccordionProps) {
     baselineDegraded: false as const,
     baselineTurn,
     roster,
-    selectedPlanetId,
     onSelectPlanet,
     compact,
     showHeader: !compact,
@@ -243,7 +240,6 @@ export function HomeworldPlayerAccordion({
   baselineDegraded,
   baselineTurn,
   roster,
-  selectedPlanetId,
   onSelectPlanet,
   compact = false,
 }: HomeworldPlayerAccordionProps) {
@@ -271,7 +267,6 @@ export function HomeworldPlayerAccordion({
             baselineDegraded={false}
             baselineTurn={baselineTurn}
             roster={roster}
-            selectedPlanetId={selectedPlanetId}
             onSelectPlanet={onSelectPlanet}
             compact={compact}
             showHeader={!compact}

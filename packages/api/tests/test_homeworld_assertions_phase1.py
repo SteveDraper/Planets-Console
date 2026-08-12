@@ -494,7 +494,7 @@ def test_derive_candidates_sets_definite_and_asserted_cue() -> None:
     assert by_planet[20].asserted_cue is True
     assert by_planet[20].location_asserted is True
     assert by_planet[20].attribution == ATTRIBUTION_INFERRED
-    assert by_planet[20].perspective == 7
+    assert by_planet[20].perspective is None
     # Planet 10 is outside the sector index; its own unassigned-bucket baseline
     # profile resolve stays definite and is not wiped by sector-0's assert.
     assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
@@ -719,20 +719,17 @@ def test_derive_empty_location_list_keeps_prior_tier() -> None:
 
 
 @pytest.mark.parametrize(
-    ("keying", "prior_perspective", "expected_perspective"),
+    ("prior_perspective", "expected_perspective"),
     [
-        ("sector", None, 7),
-        ("planet", None, 7),
-        ("sector", 3, 3),
-        ("planet", 3, 3),
+        (None, 7),
+        (3, 3),
     ],
 )
-def test_derive_unique_ownership_bind_preserves_existing_perspective(
-    keying: str,
+def test_derive_planet_keyed_unique_ownership_bind_preserves_existing_perspective(
     prior_perspective: int | None,
     expected_perspective: int,
 ) -> None:
-    """Sector- and planet-keyed unique ownership share the None-guard bind policy."""
+    """Planet-keyed unique ownership binds only when perspective is still None."""
     from api.analytics.homeworld_locator.materialize_from_provenances import (
         derive_candidates_from_merged_evidence,
     )
@@ -751,27 +748,12 @@ def test_derive_unique_ownership_bind_preserves_existing_perspective(
             confidence_tier=CONFIDENCE_POSSIBLE,
         ),
     )
-    if keying == "sector":
-        merged = MergedHomeworldEvidence(
-            location_provenances=(),
-            sector_owner_sets=((0, unique_owner),),
-            planet_owner_sets=(),
-        )
-        derived = derive_candidates_from_merged_evidence(
-            candidates,
-            merged,
-            race_id_by_owner_slot={},
-            planet_sector_index={20: 0},
-        )
-    else:
-        merged = MergedHomeworldEvidence(
-            location_provenances=(),
-            sector_owner_sets=(),
-            planet_owner_sets=((20, unique_owner),),
-        )
-        derived = derive_candidates_from_merged_evidence(
-            candidates, merged, race_id_by_owner_slot={}
-        )
+    merged = MergedHomeworldEvidence(
+        location_provenances=(),
+        sector_owner_sets=(),
+        planet_owner_sets=((20, unique_owner),),
+    )
+    derived = derive_candidates_from_merged_evidence(candidates, merged, race_id_by_owner_slot={})
 
     assert len(derived) == 1
     assert derived[0].perspective == expected_perspective

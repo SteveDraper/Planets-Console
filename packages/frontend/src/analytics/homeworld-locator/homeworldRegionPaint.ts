@@ -1,20 +1,15 @@
 /**
  * Map paint pipeline for homeworld region overlays.
- * Multi-select visibility + envelope toggle are separate from assert-focus highlight.
+ * Multi-select visibility + envelope toggle; no persistent planet/sector focus chrome.
  */
 
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import type { HomeworldLocatorSelection } from '../../stores/homeworldLocatorSelection'
 import {
   isHomeworldPlanetEnvelopeOverlay,
   isHomeworldSectorOverlay,
   parseHomeworldSectorIndex,
 } from './homeworldSectorIndex'
 import { applyHomeworldRegionStyle } from './homeworldRegionStyle'
-import {
-  resolveHomeworldSelectedSectorIndex,
-  type HomeworldSelectedSectorMarker,
-} from './resolveHomeworldSelectedSectorIndex'
 
 export type HomeworldRegionPaintInput = {
   /** Overlays after visibility-kind preferences (homeworld sectors pass through). */
@@ -29,12 +24,6 @@ export type HomeworldRegionPaintInput = {
    * planet-envelope overlays when sector wedges are absent.
    */
   showEnvelopeOverlays: boolean
-  /**
-   * Assert-focus selection (panel/map highlight). Distinct from
-   * region-selection outline multi-select.
-   */
-  assertFocusSelection: HomeworldLocatorSelection
-  homeworldMarkers: readonly HomeworldSelectedSectorMarker[]
 }
 
 /**
@@ -79,13 +68,11 @@ export function applyHomeworldRegionSelection(
 }
 
 /**
- * Filter homeworld sectors for map paint, then attach stroke style including
- * assert-focus highlight when the focused sector remains visible.
+ * Filter homeworld sectors for map paint, then attach stroke style.
  *
  * - Outlines: ``effectiveSelectedSectorIndexes`` (caller-resolved)
  * - Sector envelope disks: only when ``showEnvelopeOverlays`` and sector selected
  * - Planet envelopes: only when ``showEnvelopeOverlays`` (no sector selection)
- * - Assert-focus cyan/amber stroke: from ``assertFocusSelection``, not multi-select
  */
 export function buildHomeworldRegionOverlaysForPaint(
   input: HomeworldRegionPaintInput
@@ -95,12 +82,5 @@ export function buildHomeworldRegionOverlaysForPaint(
     input.effectiveSelectedSectorIndexes,
     input.showEnvelopeOverlays
   )
-  const assertFocusSectorIndex = resolveHomeworldSelectedSectorIndex(
-    input.assertFocusSelection,
-    input.homeworldMarkers,
-    filtered
-  )
-  return applyHomeworldRegionStyle(filtered, {
-    selectedSectorIndex: assertFocusSectorIndex,
-  })
+  return applyHomeworldRegionStyle(filtered)
 }

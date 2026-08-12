@@ -103,7 +103,6 @@ function panelElement(
       analyticScope={{ gameId: '628580', turn: 5, perspective: 1, username: 'alice' }}
       fetchEnabled
       roster={roster}
-      selectedPlanetId={null}
       onSelectPlanet={() => undefined}
       selectedSectorIndexes={new Set()}
       onToggleSectorIndex={() => undefined}
