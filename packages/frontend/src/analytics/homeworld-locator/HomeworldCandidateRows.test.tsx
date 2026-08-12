@@ -76,18 +76,29 @@ describe('HomeworldCandidateRows', () => {
     expect(screen.getByText('Orphan')).toBeInTheDocument()
   })
 
-  it('folds assertedCue into the Confidence cell', () => {
+  it('folds locationAsserted into the Confidence cell, not ownership-only assertedCue', () => {
     render(
       <HomeworldCandidateRows
         rows={[
-          candidateRow({ planetId: 1, confidenceTier: 'definite', assertedCue: true }),
+          candidateRow({
+            planetId: 1,
+            confidenceTier: 'definite',
+            assertedCue: true,
+            locationAsserted: true,
+          }),
           candidateRow({
             planetId: 2,
             confidenceTier: 'possible',
             isMostProbable: true,
             assertedCue: true,
+            locationAsserted: true,
           }),
-          candidateRow({ planetId: 3, confidenceTier: 'possible', assertedCue: false }),
+          candidateRow({
+            planetId: 3,
+            confidenceTier: 'possible',
+            assertedCue: true,
+            locationAsserted: false,
+          }),
         ]}
         baselineDegraded={false}
         baselineTurn={null}

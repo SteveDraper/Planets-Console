@@ -61,7 +61,7 @@ export function formatHomeworldPlanetHover(
     parts.push(row.attribution)
   }
 
-  if (row.assertedCue === true && ownershipSummary !== 'asserted') {
+  if (row.locationAsserted === true && ownershipSummary !== 'asserted') {
     parts.push('asserted')
   }
 

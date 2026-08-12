@@ -12,13 +12,17 @@ export type HomeworldCandidateLabelCasing = 'title' | 'lower'
 
 export type FormatHomeworldCandidateConfidenceLabelOptions = {
   casing?: HomeworldCandidateLabelCasing
-  /** When true, fold assertedCue into the label (table UI). Hover keeps asserted separate. */
+  /**
+   * When true, fold locationAsserted into the label (sidebar Confidence cell).
+   * Ownership-only assertedCue must not read as a homeworld pin. Hover keeps
+   * asserted as a separate token.
+   */
   includeAsserted?: boolean
 }
 
 type CandidateConfidenceFields = Pick<
   HomeworldCandidateRecord,
-  'confidenceTier' | 'isMostProbable' | 'assertedCue'
+  'confidenceTier' | 'isMostProbable' | 'locationAsserted'
 >
 
 const CONFIDENCE_LABELS = {
@@ -51,7 +55,7 @@ export function formatHomeworldCandidateConfidenceLabel(
     label = CONFIDENCE_LABELS.possible[casing]
   }
 
-  if (includeAsserted && row.assertedCue === true) {
+  if (includeAsserted && row.locationAsserted === true) {
     if (row.isMostProbable && row.confidenceTier !== CONFIDENCE_DEFINITE) {
       return CONFIDENCE_LABELS.possibleMostProbableAsserted[casing]
     }
