@@ -84,6 +84,14 @@ _Avoid_: MCP session, MCP user, MCP token, session credentials (when meaning the
 The cap on what an **MCP login identity** may read: the same **viewpoint** eligibility as the SPA for that login, and within an allowed **perspective** only that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Not another perspective's **TurnInfo** when the SPA would disable that viewpoint, not **account API key** material, not **compute diagnostics**. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md).
 _Avoid_: storage-wide dump, cross-perspective union, MCP session ACL
 
+**MCP TurnInfo fallback**:
+Stored **TurnInfo** on MCP as a last-resort read of a named object's fields when no distilled query covers them. Not a search, filter, geometry, or collection-compute interface; those uses are capability holes. See [ADR 0016](docs/adr/0016-mcp-turninfo-fallback-and-disk-proximity.md).
+_Avoid_: dump the turn, raw RST as the advisor API, LLM distance over turn JSON
+
+**MCP disk proximity**:
+A distilled query: ships, planets, and cartography features within a light-year radius of a map coordinate. Required for the first MCP slice so agents do not scan **TurnInfo** for nearness. See [ADR 0016](docs/adr/0016-mcp-turninfo-fallback-and-disk-proximity.md).
+_Avoid_: LLM geometry over turn JSON, planets-only spatial index as the product query
+
 **Log out**:
 Clearing client **session credentials** and the remembered last login name so **silent login restore** does not run on the next page load. By default the server **account API key** remains stored. The user may optionally also perform **account API key drop** for the current name.
 _Avoid_: ending an HTTP session, revoking Planets.nu’s own key globally

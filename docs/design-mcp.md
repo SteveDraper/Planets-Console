@@ -38,3 +38,25 @@ Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 
 How game, turn, and perspective (and the login name on the wire) are bound: [How MCP binds game, turn, and perspective](https://github.com/SteveDraper/Planets-Console/issues/318). Must stay per-call and stateless.
 
 Shared eligibility rule (today SPA-only): [Shared viewpoint eligibility below the SPA for MCP and the shell](https://github.com/SteveDraper/Planets-Console/issues/323).
+
+---
+
+## First-slice human-parity
+
+[What human-parity means for the first MCP slice](https://github.com/SteveDraper/Planets-Console/issues/316). [ADR 0016](adr/0016-mcp-turninfo-fallback-and-disk-proximity.md). Inventory: [console-human-visible-surfaces.md](research/console-human-visible-surfaces.md).
+
+v1 is read-only advisor information at human *analysis* parity -- not every SPA pixel, not BFF table/map JSON.
+
+**In v1**
+
+- Stored-game list, **GameInfo** (stored + refresh), **turn-ensure**, stored perspectives
+- All catalog analytics' *information*: **base-map**, **scores**, **connections**, **stellar-cartography**, **fleet**, **visibility**, **homeworld-locator**
+- All existing concept HTTP, including warp-well point/cells and flare points
+- Stored **TurnInfo** as **MCP TurnInfo fallback** (named-object fields only; MCP descriptions steer to distilled queries)
+- **MCP disk proximity** (ships, planets, and cartography features within X ly of a coordinate). Core has no such product query today; wrap-only cannot close the gap ([Whether v1 MCP wraps only existing Core concepts or adds new query helpers](https://github.com/SteveDraper/Planets-Console/issues/321))
+
+**Out of this map's MCP:** operator diagnostics (request trees, solver telemetry, compute freeze); **login exchange**, passwords, and credential management (already [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md)).
+
+**Later, not never:** **load-all**; homeworld assertions/refresh; hull-mask edits; inference pause/recompute. Other collection-scan holes (minefields-in-disk, FC search, fuel, combat) stay holes under the fallback rule but are not v1 gates.
+
+**Not this section:** catalog shape ([MCP catalog shape: named gameplay tools vs generic query vs resources](https://github.com/SteveDraper/Planets-Console/issues/317)); stream and trigger-vs-persisted compute ([How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319)).
