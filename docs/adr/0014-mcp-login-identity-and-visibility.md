@@ -7,7 +7,7 @@ A local MCP surface on the Planets Console process needs a Planets.nu identity w
 ## Decision
 
 - Each MCP call names an **MCP login identity** (planets.nu account name). The server **credential probe**s that name and fails closed. No OAuth, no extra MCP secret, no password on MCP. **Login exchange** stays on the SPA/BFF path ([ADR 0007](0007-account-api-key-and-silent-login.md)).
-- Auth is **login identity** only. **Viewpoint** is not an MCP auth binding; it is **shell context** ([How MCP binds game, turn, and perspective](https://github.com/SteveDraper/Planets-Console/issues/318)). The client may name a different login identity on the next call. MCP is per-request: no sticky MCP session.
+- Auth is **login identity** only. **Viewpoint** is not an MCP auth binding; it is **shell context** ([ADR 0018](0018-mcp-shell-context-binding.md)). The client may send a different login header on the next call. MCP is per-request: no sticky MCP session.
 - **MCP visibility ceiling:** the same **viewpoint** eligibility as the SPA for that login (in-progress: own slot or spectator; finished: all slots). For an allowed **perspective**: that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Never another perspective's **TurnInfo** when the SPA would disable that viewpoint, never **account API key** material, never **compute diagnostics**. MCP has no **storage-only load** path.
 
 ## Considered options
@@ -22,7 +22,7 @@ A local MCP surface on the Planets Console process needs a Planets.nu identity w
 
 ## Consequences
 
-- How the login name rides on the wire (tool argument vs header vs `_meta`) is decided with game/turn/perspective binding, and must stay per-call.
+- The login name rides as an HTTP header, not a tool argument or `_meta` ([ADR 0018](0018-mcp-shell-context-binding.md)).
 - Viewpoint eligibility today lives only in the SPA (`deriveShellViewpoints`). MCP cannot import that. Follow-on: [Shared viewpoint eligibility below the SPA for MCP and the shell](https://github.com/SteveDraper/Planets-Console/issues/323).
 - Glossary: **MCP login identity**, **MCP visibility ceiling** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md).
 

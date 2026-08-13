@@ -35,7 +35,13 @@ Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 
 - Auth is login identity only. **Viewpoint** is not an MCP auth binding. The client may switch login identity per call. No MCP session.
 - **MCP visibility ceiling** matches SPA **viewpoint** eligibility. Allowed **perspective**: that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Never another perspective's **TurnInfo** when the SPA would hide it, never **account API key**s, never **compute diagnostics**. No **storage-only load** on MCP.
 
-How game, turn, and perspective (and the login name on the wire) are bound: [How MCP binds game, turn, and perspective](https://github.com/SteveDraper/Planets-Console/issues/318). Must stay per-call and stateless.
+## Shell context binding
+
+[How MCP binds game, turn, and perspective](https://github.com/SteveDraper/Planets-Console/issues/318). [ADR 0018](adr/0018-mcp-shell-context-binding.md).
+
+- Split wire: **MCP login identity** is an HTTP header (client-pinned, still per request). Game id, turn, and **perspective** are tool arguments. Not `_meta`, not an MCP resource, no server memory of the selection.
+- Always explicit: turn-scoped tools require the full **shell context** triple; game-scoped tools require game id; catalog/list tools need login only. No "latest turn" or "login's slot" inference. Flat required fields, not a partial nested object.
+- The agent names **perspective** (1-based slot, or `0` for spectator), not a **viewpoint** name.
 
 Shared eligibility rule (today SPA-only): [Shared viewpoint eligibility below the SPA for MCP and the shell](https://github.com/SteveDraper/Planets-Console/issues/323).
 

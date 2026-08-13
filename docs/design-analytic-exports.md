@@ -525,7 +525,7 @@ The hatch **must** expose an MCP **tool** that returns the **analytic export cat
 - `list_analytic_exports(analytic_id)` -- schema + path-prefix rules + ensure dependencies (**required describe tool**)
 - `query_analytic_export(analytic_id, scope, paths[])` -- same result envelope as in-process
 
-No second implementation path. Auth and identity for the adapter: [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md) (**MCP login identity**, **MCP visibility ceiling**). First-slice human-parity (TurnInfo is **MCP TurnInfo fallback**, not the advisor API): [ADR 0016](adr/0016-mcp-turninfo-fallback-and-disk-proximity.md). Design index: [design-mcp.md](design-mcp.md).
+No second implementation path. Auth and identity for the adapter: [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md) (**MCP login identity**, **MCP visibility ceiling**). Scope on hatch tools is the same per-call **shell context** as other turn-scoped MCP tools ([ADR 0018](adr/0018-mcp-shell-context-binding.md)). First-slice human-parity (TurnInfo is **MCP TurnInfo fallback**, not the advisor API): [ADR 0016](adr/0016-mcp-turninfo-fallback-and-disk-proximity.md). Design index: [design-mcp.md](design-mcp.md).
 
 ### Deferred: truncated pseudo-baseline
 

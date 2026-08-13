@@ -31,8 +31,8 @@ The SPA chrome -- header bar, analytics selector, and main display area -- plus 
 _Avoid_: layout, chrome (without "shell" context)
 
 **Shell context**:
-The working set that scopes turn-scoped work: selected **game id**, **turn**, and **perspective** (resolved **viewpoint**). Held in client state; each HTTP request is handled without server-side session memory of the user's selection.
-_Avoid_: session context (ambiguous with login credentials), query scope (implementation term)
+The working set that scopes turn-scoped work: selected **game id**, **turn**, and **perspective** (resolved **viewpoint**, including spectator slot `0`). The caller holds it (SPA client state, or explicit MCP tool arguments); the server has no session memory of the selection.
+_Avoid_: session context (ambiguous with login credentials), query scope (implementation term), MCP context resource, inferred latest turn, inferred login slot, viewpoint name as the MCP argument
 
 ### Login and shell controls
 
@@ -77,8 +77,8 @@ Adopting a login name into **session credentials** without a password after a su
 _Avoid_: passwordless Planets.nu login, anonymous access
 
 **MCP login identity**:
-The **login identity** an MCP call acts as -- a planets.nu account name sent with the call and proven by **credential probe** (fail closed). Not **session credentials**, not a protocol session, and not **viewpoint**. The next call may name a different login identity. MCP never accepts a password; **login exchange** stays on the SPA/BFF path. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md).
-_Avoid_: MCP session, MCP user, MCP token, session credentials (when meaning the MCP caller)
+The **login identity** an MCP call acts as -- a planets.nu account name sent as an HTTP header on the call and proven by **credential probe** (fail closed). Not a tool argument, not `_meta`, not **session credentials**, not a protocol session, and not **viewpoint** / **shell context**. The MCP client may send a different header on the next call; the server does not remember it. MCP never accepts a password; **login exchange** stays on the SPA/BFF path. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md) and [ADR 0018](docs/adr/0018-mcp-shell-context-binding.md).
+_Avoid_: MCP session, MCP user, MCP token, session credentials (when meaning the MCP caller), login as a tool argument, login in `_meta`
 
 **MCP visibility ceiling**:
 The cap on what an **MCP login identity** may read: the same **viewpoint** eligibility as the SPA for that login, and within an allowed **perspective** only that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Not another perspective's **TurnInfo** when the SPA would disable that viewpoint, not **account API key** material, not **compute diagnostics**. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md).
