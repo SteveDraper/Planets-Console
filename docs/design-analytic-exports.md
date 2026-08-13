@@ -523,7 +523,7 @@ Same materializers and catalog metadata; transport adapter exposes:
 - `list_analytic_exports(analytic_id)` -- schema + path-prefix rules + ensure dependencies
 - `query_analytic_export(analytic_id, scope, paths[])` -- same result envelope as in-process
 
-No second implementation path.
+No second implementation path. Auth and identity for the adapter: [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md) (**MCP login identity**, **MCP visibility ceiling**). Design index: [design-mcp.md](design-mcp.md).
 
 ### Deferred: truncated pseudo-baseline
 

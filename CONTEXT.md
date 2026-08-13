@@ -14,6 +14,10 @@ _Avoid_: API layer (ambiguous with BFF), backend (when meaning the whole Python 
 The Backend-for-Frontend mounted at `/bff/...`. Aggregates and reshapes Core responses into SPA-oriented contracts. The frontend calls only the BFF, never Core routes directly.
 _Avoid_: API gateway, middleware layer
 
+**MCP adapter**:
+The agent-facing adapter mounted at `/mcp` on the root FastAPI app. A sibling of the **BFF**, not a layer inside Core or the BFF. Exposes game state and analytic output to agents; calls the **Core REST API** in-process. Owns no domain logic of its own. See [ADR 0015](docs/adr/0015-mcp-adapter-package.md).
+_Avoid_: analytic MCP inside Core, BFF HTTP export-query routes, standalone MCP process
+
 **BFF contract codegen slice**:
 A domain-scoped generated TypeScript module produced from part of the BFF OpenAPI document. Slices exist so **regeneration** after a route change rewrites only the contract types for that domain, not the entire SPA API surface in one file.
 _Avoid_: schema chunk (implementation), splitting by line count
@@ -65,12 +69,20 @@ At-rest protection for an **account API key** using AES-GCM (via the `cryptograp
 _Avoid_: password encryption, full disk encryption, KMS, sealed secrets, home-rolled XOR obfuscation, hostname/MAC fingerprinting, Fernet for new account-key wraps
 
 **Login exchange**:
-Submitting a login name and password to the server so it obtains a Planets.nu **account API key** and stores it (**machine-bound obfuscated**). When a password is provided, the server always calls Planets.nu login and replaces any existing key for that name. The SPA’s primary path for writing keys; operational Planets.nu-backed calls from the SPA send username only after exchange or **name-only identity switch**. Non-SPA clients may still send a password on operational endpoints, which writes/replaces a key under the same rules. Distinct from **credential probe** and from name-only identity switch.
+Submitting a login name and password to the server so it obtains a Planets.nu **account API key** and stores it (**machine-bound obfuscated**). When a password is provided, the server always calls Planets.nu login and replaces any existing key for that name. The SPA's primary path for writing keys; operational Planets.nu-backed calls from the SPA send username only after exchange or **name-only identity switch**. Non-SPA HTTP clients of BFF/Core operational endpoints may still send a password, which writes/replaces a key under the same rules. **MCP** never accepts a password -- see **MCP login identity**. Distinct from **credential probe** and from name-only identity switch.
 _Avoid_: server login session, sign-in cookie
 
 **Name-only identity switch**:
 Adopting a login name into **session credentials** without a password after a successful **credential probe** for that name (e.g. from the login modal with an empty password, or **silent login restore**). Fails closed to requiring a **login exchange** when the probe fails.
 _Avoid_: passwordless Planets.nu login, anonymous access
+
+**MCP login identity**:
+The **login identity** an MCP call acts as -- a planets.nu account name sent with the call and proven by **credential probe** (fail closed). Not **session credentials**, not a protocol session, and not **viewpoint**. The next call may name a different login identity. MCP never accepts a password; **login exchange** stays on the SPA/BFF path. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md).
+_Avoid_: MCP session, MCP user, MCP token, session credentials (when meaning the MCP caller)
+
+**MCP visibility ceiling**:
+The cap on what an **MCP login identity** may read: the same **viewpoint** eligibility as the SPA for that login, and within an allowed **perspective** only that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Not another perspective's **TurnInfo** when the SPA would disable that viewpoint, not **account API key** material, not **compute diagnostics**. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md).
+_Avoid_: storage-wide dump, cross-perspective union, MCP session ACL
 
 **Log out**:
 Clearing client **session credentials** and the remembered last login name so **silent login restore** does not run on the next page load. By default the server **account API key** remains stored. The user may optionally also perform **account API key drop** for the current name.
