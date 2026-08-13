@@ -13,7 +13,7 @@ Write path / submitting orders is out of scope. Same host, new endpoint(s), not 
 
 [MCP 2026-07-28 protocol and Python SDK for an in-process host](https://github.com/SteveDraper/Planets-Console/issues/311). Findings: [mcp-2026-07-28-protocol.md](research/mcp-2026-07-28-protocol.md).
 
-Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 is optional for localhost; bind plus Origin validation remain the network floor. Tools are the primary surface.
+Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 is optional for localhost; bind plus Origin validation remain the network floor. Tools are the primary surface. Catalog shape of those tools: [ADR 0017](adr/0017-mcp-catalog-named-tools-and-export-hatch.md).
 
 ---
 
@@ -59,4 +59,16 @@ v1 is read-only advisor information at human *analysis* parity -- not every SPA 
 
 **Later, not never:** **load-all**; homeworld assertions/refresh; hull-mask edits; inference pause/recompute. Other collection-scan holes (minefields-in-disk, FC search, fuel, combat) stay holes under the fallback rule but are not v1 gates.
 
-**Not this section:** catalog shape ([MCP catalog shape: named gameplay tools vs generic query vs resources](https://github.com/SteveDraper/Planets-Console/issues/317)); stream and trigger-vs-persisted compute ([How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319)).
+**Not this section:** stream and trigger-vs-persisted compute ([How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319)).
+
+---
+
+## Catalog shape
+
+[MCP catalog shape: named gameplay tools vs generic query vs resources](https://github.com/SteveDraper/Planets-Console/issues/317). [ADR 0017](adr/0017-mcp-catalog-named-tools-and-export-hatch.md).
+
+v1 declares **tools only** -- no MCP `resources`, no `prompts`. `server/discover` must not advertise capabilities we do not implement.
+
+- **MCP named gameplay tool**s are the advisor API. Names and arguments are the question the agent asks (wrapping Core), not 1:1 HTTP twins and not family mega-tools with a `kind` enum. Descriptions are written for an agent that already understands Planets.nu: when to use the tool, when to prefer it over **MCP TurnInfo fallback**.
+- The only generic hatch is the **MCP export query hatch** (JSONPath + scope over an **analytic export catalog**). The hatch **must** include an MCP **tool** that returns that catalog (value schema, path-prefix rules, ordering semantics) so the agent can form paths such as `$.solutions[0]`. Exact tool names, ensure, and streams: [How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319) -- not query-only.
+- Exact named-tool list: after [Whether v1 MCP wraps only existing Core concepts or adds new query helpers](https://github.com/SteveDraper/Planets-Console/issues/321).

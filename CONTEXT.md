@@ -92,6 +92,14 @@ _Avoid_: dump the turn, raw RST as the advisor API, LLM distance over turn JSON
 A distilled query: ships, planets, and cartography features within a light-year radius of a map coordinate. Required for the first MCP slice so agents do not scan **TurnInfo** for nearness. See [ADR 0016](docs/adr/0016-mcp-turninfo-fallback-and-disk-proximity.md).
 _Avoid_: LLM geometry over turn JSON, planets-only spatial index as the product query
 
+**MCP named gameplay tool**:
+An MCP tool whose name and arguments are the gameplay or concept question the agent asks, wrapping Core underneath -- not a 1:1 BFF or Core HTTP twin. **MCP TurnInfo fallback** is also a named tool, not a generic scan. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md).
+_Avoid_: BFF route as the tool name, family mega-tool with a kind enum, JSONPath over TurnInfo, resource URI as the query, one named tool per **analytic export path**
+
+**MCP export query hatch**:
+The generic JSONPath + scope query over an **analytic export catalog**, including an MCP **tool** that returns that catalog (**analytic export value schema**, path-prefix rules, ordering semantics) so the agent can form paths. Complements **MCP named gameplay tool**s; not a JSONPath over **TurnInfo** or concept dumps. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md).
+_Avoid_: mega-query, JSONPath over TurnInfo, one named tool per export path, schema only in the query tool description, catalog as an MCP resource
+
 **Log out**:
 Clearing client **session credentials** and the remembered last login name so **silent login restore** does not run on the next page load. By default the server **account API key** remains stored. The user may optionally also perform **account API key drop** for the current name.
 _Avoid_: ending an HTTP session, revoking Planets.nu’s own key globally

@@ -518,12 +518,14 @@ See [design-military-score-build-inference-implementation.md](design-military-sc
 
 ## Future MCP
 
-Same materializers and catalog metadata; transport adapter exposes:
+Same materializers and catalog metadata. The MCP surface is a hybrid ([ADR 0017](adr/0017-mcp-catalog-named-tools-and-export-hatch.md)): **MCP named gameplay tool**s for distilled questions, plus this **MCP export query hatch** -- not a JSONPath over **TurnInfo**, not a named tool per export path.
 
-- `list_analytic_exports(analytic_id)` -- schema + path-prefix rules + ensure dependencies
+The hatch **must** expose an MCP **tool** that returns the **analytic export catalog** (value schema, path-prefix rules, ordering semantics, ensure dependencies) so an agent can form paths. A query tool alone is not enough. Provisional names (exact names, ensure vs persisted, and streams remain [How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319)):
+
+- `list_analytic_exports(analytic_id)` -- schema + path-prefix rules + ensure dependencies (**required describe tool**)
 - `query_analytic_export(analytic_id, scope, paths[])` -- same result envelope as in-process
 
-No second implementation path. Auth and identity for the adapter: [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md) (**MCP login identity**, **MCP visibility ceiling**). First-slice human-parity (TurnInfo is **MCP TurnInfo fallback**, not the advisor API): [ADR 0016](adr/0016-mcp-turninfo-fallback-and-disk-proximity.md). Design index: [design-mcp.md](design-mcp.md). Catalog shape of those export tools vs named gameplay queries remains open on the map.
+No second implementation path. Auth and identity for the adapter: [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md) (**MCP login identity**, **MCP visibility ceiling**). First-slice human-parity (TurnInfo is **MCP TurnInfo fallback**, not the advisor API): [ADR 0016](adr/0016-mcp-turninfo-fallback-and-disk-proximity.md). Design index: [design-mcp.md](design-mcp.md).
 
 ### Deferred: truncated pseudo-baseline
 
