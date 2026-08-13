@@ -257,8 +257,8 @@ def apply_definite_keyed_candidate_culls(
     """Co-sector then definite-neighborhood cull using current confidence tiers.
 
     Callers that resolve location strength (derive) must run this *after* that
-    resolution so culls key off the strength-derived definite set. Asserted
-    location planets stay via ``protected_planet_ids`` and/or ``asserted_cue``.
+    resolution so culls key off the strength-derived definite set. Location-
+    asserted planets stay via ``protected_planet_ids`` and/or ``location_asserted``.
 
     Shell map/table serving uses ``materialize_homeworld_candidates``, which
     derives strength-resolved tiers then applies these culls so post-assert

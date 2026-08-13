@@ -27,7 +27,6 @@ export type HomeworldLocatorPanelProps = {
   analyticScope: AnalyticShellScope | null
   fetchEnabled: boolean
   roster: readonly PerspectiveRow[]
-  selectedPlanetId: number | null
   onSelectPlanet: (planetId: number) => void
   /** Region selection from Tile (single selection-API owner under the sidebar). */
   selectedSectorIndexes: ReadonlySet<number>
@@ -55,7 +54,6 @@ export function HomeworldLocatorPanel({
   analyticScope,
   fetchEnabled,
   roster,
-  selectedPlanetId,
   onSelectPlanet,
   selectedSectorIndexes,
   onToggleSectorIndex,
@@ -105,7 +103,7 @@ export function HomeworldLocatorPanel({
       </p>
     )
   }
-  if (tableQuery.isPending) {
+  if (!fetchEnabled || tableQuery.isPending) {
     return <p className="px-0.5 text-[11px] text-slate-400">Loading…</p>
   }
   if (tableQuery.error) {
@@ -166,7 +164,6 @@ export function HomeworldLocatorPanel({
           baselineDegraded={data.baselineDegraded}
           baselineTurn={data.baselineTurn}
           roster={roster}
-          selectedPlanetId={selectedPlanetId}
           onSelectPlanet={onSelectPlanet}
           compact
           selectedSectorIndexes={selectedSectorIndexes}
@@ -178,7 +175,6 @@ export function HomeworldLocatorPanel({
           baselineDegraded={data.baselineDegraded}
           baselineTurn={data.baselineTurn}
           roster={roster}
-          selectedPlanetId={selectedPlanetId}
           onSelectPlanet={onSelectPlanet}
           compact
         />

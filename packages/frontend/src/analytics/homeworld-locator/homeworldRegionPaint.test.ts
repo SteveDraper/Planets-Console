@@ -107,8 +107,6 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       overlays,
       effectiveSelectedSectorIndexes: [0],
       showEnvelopeOverlays: true,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
     })
     expect(painted.map((o) => o.id)).toEqual(['homeworld-sector-0', 'vis-1'])
   })
@@ -122,8 +120,6 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       ],
       effectiveSelectedSectorIndexes: [0, 2],
       showEnvelopeOverlays: true,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
     })
     expect(painted.map((o) => o.id)).toEqual([
       'homeworld-sector-0',
@@ -137,8 +133,6 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       overlays: [sector('homeworld-sector-0', { disks }), visibilityOverlay()],
       effectiveSelectedSectorIndexes: [],
       showEnvelopeOverlays: true,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
     })
     expect(painted.map((o) => o.id)).toEqual(['vis-1'])
   })
@@ -148,8 +142,6 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       overlays: [sector('homeworld-sector-0', { disks }), visibilityOverlay()],
       effectiveSelectedSectorIndexes: [0],
       showEnvelopeOverlays: false,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
     })
     const hw = painted.find((o) => o.id === 'homeworld-sector-0')
     expect(hw).toBeDefined()
@@ -167,8 +159,6 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       overlays: [sector('homeworld-sector-0', { disks })],
       effectiveSelectedSectorIndexes: [0],
       showEnvelopeOverlays: true,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
     })
     const group = buildMapRegionOverlayPaneShapes(painted, viewport).groups[0]!
     expect(group.strokeDisks.map((d) => d.strokeColor)).toEqual(['#38bdf8', '#c084fc'])
@@ -182,69 +172,8 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       ],
       effectiveSelectedSectorIndexes: [1],
       showEnvelopeOverlays: true,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
     })
     expect(painted.map((o) => o.id)).toEqual(['homeworld-sector-1'])
-  })
-
-  it('applies assert-focus cyan stroke independently of multi-select membership', () => {
-    const painted = buildHomeworldRegionOverlaysForPaint({
-      overlays: [
-        sector('homeworld-sector-0', { disks }),
-        sector('homeworld-sector-1', { disks }),
-      ],
-      effectiveSelectedSectorIndexes: [0, 1],
-      showEnvelopeOverlays: false,
-      assertFocusSelection: { kind: 'sector', sectorIndex: 1 },
-      homeworldMarkers: [],
-    })
-    const focused = painted.find((o) => o.id === 'homeworld-sector-1')
-    const other = painted.find((o) => o.id === 'homeworld-sector-0')
-    expect(focused!.paint?.strokeColor).toBe('#38bdf8')
-    expect(other!.paint?.strokeColor).toBe('#fdba74')
-  })
-
-  it('does not invent assert-focus outline when the focused sector is not multi-selected', () => {
-    const painted = buildHomeworldRegionOverlaysForPaint({
-      overlays: [
-        sector('homeworld-sector-0', { disks }),
-        sector('homeworld-sector-1', { disks }),
-      ],
-      effectiveSelectedSectorIndexes: [0],
-      showEnvelopeOverlays: true,
-      assertFocusSelection: { kind: 'sector', sectorIndex: 1 },
-      homeworldMarkers: [],
-    })
-    expect(painted.map((o) => o.id)).toEqual(['homeworld-sector-0'])
-    expect(painted[0]!.paint?.strokeColor).toBe('#fdba74')
-  })
-
-  it('resolves assert-focus from a selected planet marker hit-test', () => {
-    const boxSector: MapRegionOverlay = {
-      kind: HOMEWORLD_SECTOR_KIND,
-      id: 'homeworld-sector-0',
-      fillColor: '#f97316',
-      fillOpacity: 0,
-      geometry: {
-        type: 'boundary',
-        vertices: [
-          { x: 0, y: 0 },
-          { x: 10, y: 0 },
-          { x: 10, y: 10 },
-          { x: 0, y: 10 },
-        ],
-        edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }, { type: 'line' }],
-      },
-    }
-    const painted = buildHomeworldRegionOverlaysForPaint({
-      overlays: [boxSector],
-      effectiveSelectedSectorIndexes: [0],
-      showEnvelopeOverlays: true,
-      assertFocusSelection: { kind: 'planet', planetId: 42 },
-      homeworldMarkers: [{ planetId: 42, x: 5, y: 5 }],
-    })
-    expect(painted[0]!.paint?.strokeColor).toBe('#38bdf8')
   })
 
   it('paints planet envelopes when Show overlays is on and strips them when off', () => {
@@ -261,8 +190,6 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       overlays: envelopes,
       effectiveSelectedSectorIndexes: [],
       showEnvelopeOverlays: true,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
     })
     expect(paintedOn.map((o) => o.id)).toEqual(['homeworld-planet-envelope-7', 'vis-1'])
     const group = buildMapRegionOverlayPaneShapes(
@@ -276,8 +203,6 @@ describe('buildHomeworldRegionOverlaysForPaint', () => {
       overlays: envelopes,
       effectiveSelectedSectorIndexes: [],
       showEnvelopeOverlays: false,
-      assertFocusSelection: null,
-      homeworldMarkers: [],
     })
     expect(paintedOff.map((o) => o.id)).toEqual(['vis-1'])
   })

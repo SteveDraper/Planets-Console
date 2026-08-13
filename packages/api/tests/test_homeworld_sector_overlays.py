@@ -87,6 +87,13 @@ def _planet(
     )
 
 
+def _owner_member(slot: int, kind: str = PROVENANCE_NEARBY_PLANET_OWNERSHIP) -> SectorOwnerMember:
+    return SectorOwnerMember(
+        owner_slot=slot,
+        provenances=(OwnershipProvenance(kind=kind, turn=1, planet_id=1),),
+    )
+
+
 def _stub_layout_asset(*, support_min: float = 500.0, support_max: float = 600.0):
     mid = 0.5 * (support_min + support_max)
     metric = SmoothedMetricDistribution(
@@ -198,10 +205,11 @@ def test_build_overlays_sector_count_band_and_pin(template_planet) -> None:
         scan_origins=origins,
         race_id_by_owner_slot={},
         nebulas=(),
-        pinned_player_label_by_planet_id={pin.id: "koshling (The Lizard Alliance)"},
+        sector_owner_sets={0: (_owner_member(1),)},
+        possible_owner_label_by_slot={1: "koshling (The Lizard Alliance)"},
     )
     assert len(overlays) == player_count
-    # isPinned = HW determined + owning player known (slot-anchored), not mere orphans.
+    # isPinned = unique projected owner after settled-sector elimination.
     pinned = [overlay for overlay in overlays if overlay.is_pinned]
     assert len(pinned) == 1
     assert pinned[0].id == "homeworld-sector-0"
@@ -248,6 +256,8 @@ def test_fully_observed_zero_candidates_error_no_disks(template_planet) -> None:
         scan_origins=origins,
         race_id_by_owner_slot={},
         nebulas=(),
+        sector_owner_sets={0: (_owner_member(1),)},
+        possible_owner_label_by_slot={1: "koshling (The Lizard Alliance)"},
     )
     assert len(overlays) == 4
     pinned = next(overlay for overlay in overlays if overlay.is_pinned)
@@ -263,6 +273,27 @@ def test_fully_observed_zero_candidates_error_no_disks(template_planet) -> None:
         assert overlay.fill_color.startswith("#ef")
         assert overlay.fill_opacity == 0.0
     assert all(overlay.fill_opacity == 0.0 for overlay in overlays)
+
+
+def test_slot_anchored_without_unique_owner_is_not_pinned(template_planet) -> None:
+    """Slot-anchored candidates do not pin a sector; unique projected owner does."""
+    center = (0.0, 0.0)
+    pin = _planet(template_planet, planet_id=1, x=550, y=0)
+    origins = [CoverageOrigin(x=0, y=0, base_range=5000)]
+    overlays = build_homeworld_sector_overlays(
+        center=center,
+        pin=pin,
+        player_count=4,
+        r_inner=500.0,
+        r_outer=600.0,
+        planets=[pin],
+        candidate_planet_ids=frozenset({pin.id}),
+        slot_anchored_planet_ids=frozenset({pin.id}),
+        scan_origins=origins,
+        race_id_by_owner_slot={},
+        nebulas=(),
+    )
+    assert all(overlay.is_pinned is False for overlay in overlays)
 
 
 def test_incomplete_observation_uses_unobserved_point(template_planet) -> None:
@@ -645,6 +676,7 @@ def test_for_turn_emits_when_gate_passes_and_empty_without_pin(
         layout_asset=asset,
         map_center=center,
         shell_perspective=1,
+        sector_owner_sets={0: (_owner_member(1),)},
     )
     assert len(overlays) == 11
     pinned = next(overlay for overlay in overlays if overlay.is_pinned)
@@ -964,8 +996,12 @@ def test_cross_sector_trim_applied_through_overlay_builder(template_planet) -> N
     weaker_wire = map_region_overlay_to_wire(weaker)
     assert [owner["ownerSlot"] for owner in settled_wire["possibleOwners"]] == [3]
     assert settled_wire["ownershipWinningStrength"] == "strong"
+    assert settled.is_pinned is True
+    assert settled.player_label == "enlar (The Privateers)"
     assert [owner["ownerSlot"] for owner in weaker_wire["possibleOwners"]] == [5]
     assert weaker_wire["ownershipWinningStrength"] == "weak"
+    assert weaker.is_pinned is True
+    assert weaker.player_label == "koshling (Lizards)"
 
 
 def test_possible_owners_emit_asserted_winning_strength(template_planet) -> None:

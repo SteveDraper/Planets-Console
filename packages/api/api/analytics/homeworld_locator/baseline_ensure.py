@@ -317,7 +317,7 @@ def materialize_homeworld_candidates(
     baseline_turn: int,
     baseline_degraded: bool,
 ) -> tuple[tuple[HomeworldCandidateRecord, ...], int | None]:
-    """Ordered shell materialize: ownership, derive, cull, layout prior.
+    """Ordered shell materialize: derive, unique-owner bind, cull, layout prior.
 
     Returns ``(candidates, sector_pin_planet_id)``. The pin is the planet that
     fixed homeworld sector rotation during partition (before ownership derive);
@@ -327,8 +327,11 @@ def materialize_homeworld_candidates(
     Asserted provenances merge above the evidence aggregate (ADR 0010).
     Single-SB and other machine strong facts affect confidence only via
     location provenances + derive -- not a parallel row-tier promote step.
-    Definite-keyed culls run after location strength derive so demoted machine
-    pins near asserted definites are dropped; asserted planets stay protected.
+    Unique-owner orphan bind runs after location derive so projection can use
+    definite location pins (same uniqueness test as overlay ``is_pinned``),
+    iterating to fixpoint so a bind-created pin can settle the next sector.
+    Definite-keyed culls run after that bind so demoted machine pins near
+    asserted definites are dropped; location-asserted planets stay protected.
     """
     seeded = ensure_candidates_for_asserted_locations(
         inferred=candidates,
@@ -341,28 +344,28 @@ def materialize_homeworld_candidates(
     asserted_location_planet_ids = tuple(
         row.planet_id for row in game_state.asserted_location_provenances
     )
-    adjusted = apply_unique_owner_orphan_bind(
-        seeded,
-        replace(aggregate, sector_owner_sets=merged.sector_owner_sets),
-        turn=shell_turn,
-        shell_perspective=services.perspective,
-        asserted_location_planet_ids=asserted_location_planet_ids,
-    )
     partition = build_homeworld_sector_partition(
         shell_turn,
-        candidates=adjusted,
+        candidates=seeded,
         baseline_turn=baseline_turn,
         shell_perspective=services.perspective,
         asserted_location_planet_ids=asserted_location_planet_ids,
     )
     sector_pin_planet_id = partition.pin.id if partition is not None else None
     adjusted = derive_candidates_from_merged_evidence(
-        adjusted,
+        seeded,
         merged,
         race_id_by_owner_slot=race_id_by_owner_slot(shell_turn),
         planet_sector_index=(
             dict(partition.planet_sector_index) if partition is not None else None
         ),
+    )
+    adjusted = apply_unique_owner_orphan_bind(
+        adjusted,
+        replace(aggregate, sector_owner_sets=merged.sector_owner_sets),
+        turn=shell_turn,
+        shell_perspective=services.perspective,
+        asserted_location_planet_ids=asserted_location_planet_ids,
     )
     adjusted = apply_definite_keyed_candidate_culls(
         adjusted,

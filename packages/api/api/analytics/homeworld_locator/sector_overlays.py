@@ -23,8 +23,8 @@ from api.analytics.homeworld_locator.models import (
 )
 from api.analytics.homeworld_locator.ownership_projection import (
     SectorOwnerOverlayProjection,
-    project_sector_owner_sets_for_overlays,
-    settled_owner_homes_from_location_pins,
+    project_sector_owner_sets_with_location_pins,
+    unique_projected_owner_slot,
 )
 from api.analytics.homeworld_locator.types import HomeworldCandidateView
 from api.analytics.turn_roster import players_by_id, race_id_by_owner_slot
@@ -379,14 +379,16 @@ def closest_unobserved_band_point(
 
 @dataclass(frozen=True)
 class _SectorOverlayDecision:
-    """Per-sector status, envelope, color, and ownership facts for one overlay emission."""
+    """Per-sector status, envelope, and fill for one overlay emission.
 
-    is_pinned: bool
+    Pin / player identity are not decided here -- those come from unique
+    projected ownership on the overlay builder.
+    """
+
     envelope_center: tuple[float, float] | None
     status: str
     fill_color: str
     candidate_count: int
-    player_label: str | None = None
 
 
 def _planet_closest_to_sector_mid(
@@ -424,18 +426,15 @@ def _decide_sector_overlay(
     angle_end: float,
     r_inner: float,
     r_outer: float,
-    label_by_planet: Mapping[int, str],
     most_probable_planet_ids: frozenset[int] = frozenset(),
 ) -> _SectorOverlayDecision:
-    """Pinned / orphan / incomplete / error → one decision for overlay emission."""
-    is_pinned = len(slot_anchored) > 0
+    """Envelope / status / fill for one sector. Pin is decided from projected owners."""
     candidate_count = len(sector_candidates)
 
-    if is_pinned:
-        # Slot-anchored: viewpoint pin in its sector, else closest to sector mid.
+    if sector_candidates:
         if is_viewpoint_sector:
             anchor = pin
-        else:
+        elif slot_anchored:
             anchor = _planet_closest_to_sector_mid(
                 slot_anchored,
                 center=center,
@@ -444,47 +443,34 @@ def _decide_sector_overlay(
                 r_inner=r_inner,
                 r_outer=r_outer,
             )
-        status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
-        return _SectorOverlayDecision(
-            is_pinned=True,
-            envelope_center=(float(anchor.x), float(anchor.y)),
-            status=status,
-            fill_color=SECTOR_COLOR,
-            candidate_count=candidate_count,
-            player_label=label_by_planet.get(anchor.id),
-        )
-
-    if sector_candidates:
-        # Orphans: prefer layout-prior most-probable so envelopes match markers;
-        # else candidate closest to sector mid (not map center C).
-        most_probable = [
-            planet for planet in sector_candidates if planet.id in most_probable_planet_ids
-        ]
-        if most_probable:
-            anchor = (
-                most_probable[0]
-                if len(most_probable) == 1
-                else _planet_closest_to_sector_mid(
-                    most_probable,
+        else:
+            most_probable = [
+                planet for planet in sector_candidates if planet.id in most_probable_planet_ids
+            ]
+            if most_probable:
+                anchor = (
+                    most_probable[0]
+                    if len(most_probable) == 1
+                    else _planet_closest_to_sector_mid(
+                        most_probable,
+                        center=center,
+                        angle_start=angle_start,
+                        angle_end=angle_end,
+                        r_inner=r_inner,
+                        r_outer=r_outer,
+                    )
+                )
+            else:
+                anchor = _planet_closest_to_sector_mid(
+                    sector_candidates,
                     center=center,
                     angle_start=angle_start,
                     angle_end=angle_end,
                     r_inner=r_inner,
                     r_outer=r_outer,
                 )
-            )
-        else:
-            anchor = _planet_closest_to_sector_mid(
-                sector_candidates,
-                center=center,
-                angle_start=angle_start,
-                angle_end=angle_end,
-                r_inner=r_inner,
-                r_outer=r_outer,
-            )
         status = STATUS_INCOMPLETE if is_incomplete else STATUS_OK
         return _SectorOverlayDecision(
-            is_pinned=False,
             envelope_center=(float(anchor.x), float(anchor.y)),
             status=status,
             fill_color=SECTOR_COLOR,
@@ -494,7 +480,6 @@ def _decide_sector_overlay(
     if is_incomplete:
         # Fog placeholder: geometric band center (not closest-to-C sample).
         return _SectorOverlayDecision(
-            is_pinned=False,
             envelope_center=sector_band_geometric_center(
                 center=center,
                 angle_start=angle_start,
@@ -508,7 +493,6 @@ def _decide_sector_overlay(
         )
 
     return _SectorOverlayDecision(
-        is_pinned=False,
         envelope_center=None,
         status=STATUS_ERROR,
         fill_color=ERROR_SECTOR_COLOR,
@@ -558,7 +542,6 @@ def build_homeworld_sector_overlays(
     scan_origins: Sequence[CoverageOrigin],
     race_id_by_owner_slot: Mapping[int, int],
     nebulas: Sequence[NebulaCenter] = (),
-    pinned_player_label_by_planet_id: Mapping[int, str] | None = None,
     most_probable_planet_ids: frozenset[int] = frozenset(),
     sector_owner_sets: Mapping[int, tuple[SectorOwnerMember, ...]] | None = None,
     possible_owner_label_by_slot: Mapping[int, str] | None = None,
@@ -567,18 +550,18 @@ def build_homeworld_sector_overlays(
 ) -> tuple[MapRegionOverlay, ...]:
     """Build one boundary overlay per equal angular sector.
 
-    ``is_pinned`` means the homeworld is determined and the owning player is
-    known (a slot-anchored candidate planet lies in the sector). Orphan-only
-    or empty sectors are un-pinned for display-mode filtering.
+    ``is_pinned`` means the projected possible-owner set has exactly one
+    member (max-strength contenders, then drop slots uniquely settled on
+    another sector). Slot-anchored candidates are not a pin test; they only
+    prefer envelope placement when present.
 
-    ``pinned_player_label_by_planet_id`` maps slot-anchored planet ids to
-    roster identity strings (``username (race)``) for wire ``playerLabel``.
+    ``possible_owner_label_by_slot`` maps ownership-evidence owner slots to
+    roster identity strings (``username (race)``) for ``possibleOwners`` and
+    for pinned-sector ``playerLabel``.
 
-    ``possible_owner_label_by_slot`` maps ownership-evidence owner slots to the
-    same roster identity strings for ``possibleOwners[].playerLabel``.
-
-    ``most_probable_planet_ids`` are layout-prior selections; orphan envelopes
-    center on those when present so disks align with most-probable markers.
+    ``most_probable_planet_ids`` are layout-prior selections; envelopes with
+    no slot-anchored planet center on those when present so disks align with
+    most-probable markers.
 
     ``location_definite_planet_ids`` upgrades preferred-candidate ownership
     strength for overlay projection (ADR 0010). Sector ``possibleOwners`` are
@@ -593,7 +576,6 @@ def build_homeworld_sector_overlays(
     if r_outer < r_inner:
         raise ValueError("r_outer must be >= r_inner")
 
-    label_by_planet = dict(pinned_player_label_by_planet_id or ())
     owner_labels = dict(possible_owner_label_by_slot or ())
     perspectives = dict(perspective_by_planet_id or ())
     center_x, center_y = center
@@ -615,17 +597,14 @@ def build_homeworld_sector_overlays(
         index = sector_index_for_angle(angle, pin_angle=pin_angle, player_count=player_count)
         candidates_by_sector[index].append(planet)
 
-    settled_from_location = settled_owner_homes_from_location_pins(
-        [[planet.id for planet in sector_planets] for sector_planets in candidates_by_sector],
+    owner_sets = project_sector_owner_sets_with_location_pins(
+        dict(sector_owner_sets or ()),
+        candidate_planet_ids_by_sector=[
+            [planet.id for planet in sector_planets] for sector_planets in candidates_by_sector
+        ],
         location_definite_planet_ids=location_definite_planet_ids,
         perspective_by_planet_id=perspectives,
-    )
-
-    owner_sets = project_sector_owner_sets_for_overlays(
-        dict(sector_owner_sets or ()),
         race_id_by_owner_slot=race_id_by_owner_slot,
-        location_definite_planet_ids=location_definite_planet_ids,
-        settled_owner_home_by_slot=settled_from_location,
     )
 
     pin_sector = sector_index_for_angle(pin_angle, pin_angle=pin_angle, player_count=player_count)
@@ -666,7 +645,6 @@ def build_homeworld_sector_overlays(
             angle_end=angle_end,
             r_inner=r_inner,
             r_outer=r_outer,
-            label_by_planet=label_by_planet,
             most_probable_planet_ids=most_probable_planet_ids,
         )
 
@@ -686,6 +664,7 @@ def build_homeworld_sector_overlays(
             index,
             SectorOwnerOverlayProjection(members=(), winning_strength=None),
         )
+        owner_slot = unique_projected_owner_slot(projection)
         overlays.append(
             boundary_to_overlay(
                 kind=KIND_HOMEWORLD_SECTOR,
@@ -695,10 +674,10 @@ def build_homeworld_sector_overlays(
                 vertices=vertices,
                 edges=edges,
                 disks=disks,
-                is_pinned=decision.is_pinned,
+                is_pinned=owner_slot is not None,
                 status=decision.status,
                 candidate_count=decision.candidate_count,
-                player_label=decision.player_label,
+                player_label=(owner_labels.get(owner_slot) if owner_slot is not None else None),
                 possible_owners=_possible_owners_for_sector(
                     projection.members,
                     label_by_slot=owner_labels,
@@ -760,13 +739,6 @@ def build_homeworld_sector_overlays_for_turn(
         row.planet_id: row.perspective for row in view.candidates if row.perspective is not None
     }
     resolved_game_id = game_id if game_id is not None else turn.settings.id
-    labels = pinned_player_labels_for_view(
-        turn,
-        view,
-        shell_perspective=shell_perspective,
-        game_info=game_info,
-        game_id=resolved_game_id,
-    )
     owner_slot_labels = possible_owner_labels_for_sets(
         turn,
         sector_owner_sets,
@@ -785,7 +757,6 @@ def build_homeworld_sector_overlays_for_turn(
         slot_anchored_planet_ids=slot_anchored_ids,
         scan_origins=origins,
         nebulas=turn.nebulas,
-        pinned_player_label_by_planet_id=labels,
         most_probable_planet_ids=most_probable_ids,
         sector_owner_sets=sector_owner_sets,
         possible_owner_label_by_slot=owner_slot_labels,
@@ -796,7 +767,7 @@ def build_homeworld_sector_overlays_for_turn(
 
 
 def format_pinned_player_label(player: Player, races_by_id: Mapping[int, Race]) -> str:
-    """Roster identity ``username (race name)`` for pinned-sector ``playerLabel``."""
+    """Roster identity ``username (race name)`` for sector owner labels."""
     race = races_by_id.get(player.raceid)
     if race is not None and race.name:
         return f"{player.username} ({race.name})"
@@ -825,33 +796,6 @@ def player_for_homeworld_perspective(
     if shell_perspective is not None and perspective == shell_perspective:
         return turn.player
     return roster.get(perspective)
-
-
-def pinned_player_labels_for_view(
-    turn: TurnInfo,
-    view: HomeworldCandidateView,
-    *,
-    shell_perspective: int | None = None,
-    game_info: GameInfo | None = None,
-    game_id: int | None = None,
-) -> dict[int, str]:
-    """Map slot-anchored candidate planet ids to roster identity labels."""
-    races_by_id = {race.id: race for race in turn.races}
-    labels: dict[int, str] = {}
-    for row in view.candidates:
-        if row.perspective is None:
-            continue
-        player = player_for_homeworld_perspective(
-            turn,
-            row.perspective,
-            shell_perspective=shell_perspective,
-            game_info=game_info,
-            game_id=game_id,
-        )
-        if player is None:
-            continue
-        labels[row.planet_id] = format_pinned_player_label(player, races_by_id)
-    return labels
 
 
 def possible_owner_labels_for_sets(

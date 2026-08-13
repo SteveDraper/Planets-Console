@@ -14,8 +14,7 @@ const HOMEWORLD_ENVELOPE_STROKE_BY_RADIUS_LY: Record<number, string> = {
 const HOMEWORLD_SECTOR_STROKE = '#fdba74'
 const HOMEWORLD_ERROR_SECTOR_STROKE = '#fca5a5'
 const HOMEWORLD_ASSERTED_SECTOR_STROKE = '#fbbf24'
-const HOMEWORLD_SELECTED_SECTOR_STROKE = '#38bdf8'
-/** Pinned (definite or asserted ownership): heavier outline. */
+/** Pinned (unique projected owner): heavier outline. */
 const HOMEWORLD_PINNED_SECTOR_STROKE_WIDTH = 2.25
 /** Unpinned sectors: ~half the former default (1.5). */
 const HOMEWORLD_UNPINNED_SECTOR_STROKE_WIDTH = 0.75
@@ -49,40 +48,14 @@ function homeworldSectorStrokeWidth(overlay: MapRegionOverlay): number {
 }
 
 /** Paint metadata for one homeworld sector overlay (stroke-only sectors + envelopes). */
-export function homeworldSectorPaint(
-  overlay: MapRegionOverlay,
-  options?: { isSelected?: boolean }
-): MapRegionOverlayPaint {
+export function homeworldSectorPaint(overlay: MapRegionOverlay): MapRegionOverlayPaint {
   const hasAssertedOwnership = homeworldSectorHasAssertedOwnership(overlay)
-  const isSelected = options?.isSelected === true
   const diskStrokes = homeworldEnvelopeDiskStrokes(overlay)
-  const baseStrokeWidth = homeworldSectorStrokeWidth(overlay)
-  if (isSelected && hasAssertedOwnership) {
-    return {
-      fillOpacity: 0,
-      boundaryStrokes: [
-        {
-          strokeColor: HOMEWORLD_ASSERTED_SECTOR_STROKE,
-          strokeWidth: baseStrokeWidth,
-        },
-        {
-          strokeColor: HOMEWORLD_SELECTED_SECTOR_STROKE,
-          strokeWidth: 1.5,
-          strokeDasharray: '2 2',
-        },
-      ],
-      diskStrokes,
-    }
-  }
+  const strokeWidth = homeworldSectorStrokeWidth(overlay)
   let strokeColor =
     overlay.status === 'error' ? HOMEWORLD_ERROR_SECTOR_STROKE : HOMEWORLD_SECTOR_STROKE
-  let strokeWidth = baseStrokeWidth
   if (hasAssertedOwnership) {
     strokeColor = HOMEWORLD_ASSERTED_SECTOR_STROKE
-  }
-  if (isSelected) {
-    strokeColor = HOMEWORLD_SELECTED_SECTOR_STROKE
-    strokeWidth = Math.max(strokeWidth, 2.5)
   }
   return {
     fillOpacity: 0,
@@ -105,20 +78,16 @@ export function homeworldPlanetEnvelopePaint(overlay: MapRegionOverlay): MapRegi
  * Non-homeworld overlays pass through unchanged.
  */
 export function applyHomeworldRegionStyle(
-  overlays: readonly MapRegionOverlay[],
-  options?: { selectedSectorIndex?: number | null }
+  overlays: readonly MapRegionOverlay[]
 ): MapRegionOverlay[] {
-  const selectedSectorIndex = options?.selectedSectorIndex ?? null
   return overlays.map((overlay) => {
     if (isHomeworldPlanetEnvelopeOverlay(overlay)) {
       return { ...overlay, paint: homeworldPlanetEnvelopePaint(overlay) }
     }
     if (!isHomeworldSectorOverlay(overlay)) return overlay
-    const sectorMatch =
-      selectedSectorIndex != null && overlay.id === `homeworld-sector-${selectedSectorIndex}`
     return {
       ...overlay,
-      paint: homeworldSectorPaint(overlay, { isSelected: sectorMatch }),
+      paint: homeworldSectorPaint(overlay),
     }
   })
 }

@@ -19,7 +19,7 @@ import { useShellStore } from './stores/shell'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
 import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
 import { withoutInactiveHomeworldLocator } from './analytics/homeworld-locator/homeworldAvailability'
-import { useClearHomeworldLocatorSelectionOnShellChange } from './analytics/homeworld-locator/useClearHomeworldLocatorSelectionOnShellChange'
+import { useClearHomeworldLocatorAttentionOnShellChange } from './analytics/homeworld-locator/useClearHomeworldLocatorAttentionOnShellChange'
 import {
   applyShellGameBootstrapResult,
   fetchShellGameBootstrap,
@@ -94,7 +94,7 @@ function ConsoleShell() {
     stepTurn,
   } = useShellContext({ reportShellError: addShellError })
 
-  useClearHomeworldLocatorSelectionOnShellChange({
+  useClearHomeworldLocatorAttentionOnShellChange({
     gameId: selectedGameId,
     turn: selectedTurn,
     perspective: shellSelectedViewpointOrdinal,
@@ -370,6 +370,7 @@ function ConsoleShell() {
           stellarCartographyGates={stellarCartographyGates}
           ionStormCount={ionStormCount}
           homeworldInactiveReason={homeworldInactiveReason}
+          turnDataReady={turnDataReady}
         />
         {isPending ? (
           <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">

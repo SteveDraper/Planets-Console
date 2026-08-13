@@ -7,7 +7,6 @@ import { DisplayModeControl } from '../DisplayModeControl'
 import { deriveAnalyticScope } from '../../shell/shellContext'
 import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
-import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import { homeworldInactiveHint } from './constants'
 import { selectHomeworldCandidateForMapAttention } from './homeworldCandidateAttention'
 import {
@@ -31,6 +30,11 @@ type HomeworldLocatorTileProps = {
   onToggle: () => void
   /** When set, catalog is greyed and toggle is disabled (no traditional homeworlds). */
   inactiveReason: string | null
+  /**
+   * True when the shell turn blob is in storage (ensure succeeded).
+   * Sidebar table/map GETs must wait for this -- same gate as MainArea.
+   */
+  turnDataReady: boolean
 }
 
 function HomeworldRegionSelectionControl({
@@ -64,6 +68,7 @@ export function HomeworldLocatorTile({
   depressed,
   onToggle,
   inactiveReason,
+  turnDataReady,
 }: HomeworldLocatorTileProps) {
   const available = inactiveReason == null
   const canToggle = supportsMode && available
@@ -72,6 +77,7 @@ export function HomeworldLocatorTile({
 
   const [expanded, setExpanded] = useState(false)
   const canExpand = canToggle && enabled
+  const fetchEnabled = canExpand && turnDataReady
 
   const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
@@ -82,8 +88,6 @@ export function HomeworldLocatorTile({
   const loginName = useSessionStore((s) => s.name)
   const perspectives = gameInfoContext?.perspectives
   const roster = perspectives ?? EMPTY_ROSTER
-  const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
-  const selectedPlanetId = selection?.kind === 'planet' ? selection.planetId : null
 
   const analyticScope = deriveAnalyticScope({
     selectedGameId,
@@ -100,7 +104,7 @@ export function HomeworldLocatorTile({
   const { overlays, homeworldMapOverlaysQuerySucceeded, overlaysError } =
     useHomeworldLocatorMapOverlays({
       analyticScope,
-      fetchEnabled: canExpand,
+      fetchEnabled,
     })
 
   const {
@@ -116,7 +120,7 @@ export function HomeworldLocatorTile({
   const needsPlanetPositions = homeworldSectorsPresentOnMap(overlays)
   const { planetPositions, positionsReady, positionsError } = useBaseMapPlanetPositions({
     analyticScope,
-    fetchEnabled: canExpand && needsPlanetPositions,
+    fetchEnabled: fetchEnabled && needsPlanetPositions,
   })
 
   const showExpandedBody = canExpand && expanded
@@ -202,9 +206,8 @@ export function HomeworldLocatorTile({
           ) : null}
           <HomeworldLocatorPanel
             analyticScope={analyticScope}
-            fetchEnabled={canExpand}
+            fetchEnabled={fetchEnabled}
             roster={roster}
-            selectedPlanetId={selectedPlanetId}
             onSelectPlanet={selectHomeworldCandidateForMapAttention}
             selectedSectorIndexes={selectedSectorIndexSet}
             onToggleSectorIndex={toggleSectorIndex}

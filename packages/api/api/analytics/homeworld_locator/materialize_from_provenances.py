@@ -93,10 +93,13 @@ def derive_candidates_from_merged_evidence(
     player). Same-strength conflicts only within a sector stay ambiguous.
     Without a sector index (non-circular / no partition), resolve stays global.
 
-    When ``planet_sector_index`` is provided, ownership cues/bind use sector-keyed
-    merged sets. Otherwise planet-keyed asserted ownership is used. Unique
-    ownership binds ``perspective`` only when the row is still unbound
-    (``perspective is None``) -- both keying modes share that preserve policy.
+    When ``planet_sector_index`` is provided, ownership cues use sector-keyed
+    merged sets. Unique sector owners bind ``perspective`` via overlay
+    projection in ``apply_unique_owner_orphan_bind`` -- not here -- so
+    cross-sector settled trim is the same test as overlay ``is_pinned``,
+    iterated to fixpoint.
+    Without a sector index, planet-keyed asserted ownership may bind
+    ``perspective`` when unique and the row is still unbound.
     ``race_id_by_owner_slot`` is required (empty map allowed when no race context).
     """
     location_buckets = _location_buckets(merged.location_provenances, planet_sector_index)
@@ -134,13 +137,6 @@ def derive_candidates_from_merged_evidence(
             sector_index = planet_sector_index.get(row.planet_id)
             if sector_index is not None:
                 ownership_for_cue = sector_members.get(sector_index, ())
-                ownership_resolution = resolve_ownership_axis(
-                    ownership_for_cue,
-                    race_id_by_owner_slot=race_id_by_owner_slot,
-                    location_definite_planet_ids=definite_ids,
-                )
-                if ownership_resolution.is_unique and perspective is None:
-                    perspective = ownership_resolution.resolved_owner_slot
         elif row.planet_id in planet_members:
             ownership_for_cue = planet_members[row.planet_id]
             ownership_resolution = resolve_ownership_axis(

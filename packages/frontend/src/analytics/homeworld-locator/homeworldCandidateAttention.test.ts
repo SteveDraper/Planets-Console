@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import {
   requestMapAttention,
   useMapAttentionRequestStore,
@@ -8,16 +7,11 @@ import { selectHomeworldCandidateForMapAttention } from './homeworldCandidateAtt
 
 describe('selectHomeworldCandidateForMapAttention', () => {
   afterEach(() => {
-    useHomeworldLocatorSelectionStore.getState().clearSelection()
     useMapAttentionRequestStore.getState().clearAttention()
   })
 
-  it('sets planet selection and a homeworld map attention request', () => {
+  it('sets a homeworld map attention request', () => {
     selectHomeworldCandidateForMapAttention(42)
-    expect(useHomeworldLocatorSelectionStore.getState().selection).toEqual({
-      kind: 'planet',
-      planetId: 42,
-    })
     const pending = useMapAttentionRequestStore.getState().pending
     expect(pending).toMatchObject({
       kind: 'homeworld-planet',

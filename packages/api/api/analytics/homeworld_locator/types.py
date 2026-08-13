@@ -124,6 +124,7 @@ def candidate_records_from_inferred(
             perspective=row.perspective,
             confidence_tier=row.confidence_tier,
             attribution=row.attribution,
+            location_asserted=row.location_asserted,
         )
         for row in inferred
     )

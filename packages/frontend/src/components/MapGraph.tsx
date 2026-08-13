@@ -46,7 +46,6 @@ import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibi
 import { homeworldOverlaysReadyForMaterialize } from '../lib/homeworldRegionSelection'
 import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
-import { useHomeworldLocatorSelectionStore } from '../stores/homeworldLocatorSelection'
 import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
@@ -234,7 +233,6 @@ function MapGraphFlow({
   )
   const edges = useMemo(() => toEdges(displayMapEdges), [displayMapEdges])
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
-  const selection = useHomeworldLocatorSelectionStore((s) => s.selection)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
@@ -274,7 +272,7 @@ function MapGraphFlow({
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays
 
-  // Visibility prefs → region selection + envelope toggle → assert-focus.
+  // Visibility prefs → region selection + envelope toggle.
   const regionOverlays = useMemo(
     () =>
       buildHomeworldRegionOverlaysForPaint({
@@ -284,16 +282,12 @@ function MapGraphFlow({
         ),
         effectiveSelectedSectorIndexes: selectedSectorIndexes,
         showEnvelopeOverlays,
-        assertFocusSelection: selection,
-        homeworldMarkers: data.homeworldMarkers,
       }),
     [
       data.regionOverlays,
-      data.homeworldMarkers,
       visibilityKinds,
       selectedSectorIndexes,
       showEnvelopeOverlays,
-      selection,
     ]
   )
 

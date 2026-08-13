@@ -33,16 +33,45 @@ describe('formatHomeworldCandidateConfidenceLabel', () => {
     ).toBe('Possible')
     expect(
       formatHomeworldCandidateConfidenceLabel(
-        candidate({ confidenceTier: 'definite', assertedCue: true }),
+        candidate({
+          confidenceTier: 'definite',
+          assertedCue: true,
+          locationAsserted: true,
+        }),
         { includeAsserted: true }
       )
     ).toBe('Definite (asserted)')
     expect(
       formatHomeworldCandidateConfidenceLabel(
-        candidate({ confidenceTier: 'possible', isMostProbable: true, assertedCue: true }),
+        candidate({
+          confidenceTier: 'possible',
+          isMostProbable: true,
+          assertedCue: true,
+          locationAsserted: true,
+        }),
         { includeAsserted: true }
       )
     ).toBe('Possible (most probable, asserted)')
+  })
+
+  it('does not fold ownership-only assertedCue into the confidence label', () => {
+    expect(
+      formatHomeworldCandidateConfidenceLabel(
+        candidate({
+          confidenceTier: 'possible',
+          isMostProbable: true,
+          assertedCue: true,
+          locationAsserted: false,
+        }),
+        { includeAsserted: true }
+      )
+    ).toBe('Possible (most probable)')
+    expect(
+      formatHomeworldCandidateConfidenceLabel(
+        candidate({ confidenceTier: 'possible', assertedCue: true, locationAsserted: false }),
+        { includeAsserted: true }
+      )
+    ).toBe('Possible')
   })
 
   it('uses lowercase for hover without folding asserted', () => {

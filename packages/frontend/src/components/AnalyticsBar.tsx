@@ -24,6 +24,8 @@ type AnalyticsBarProps = {
   ionStormCount: number | null
   /** When set, Homeworld locator catalog entry is greyed with a hint. */
   homeworldInactiveReason: string | null
+  /** Shell turn blob is in storage; homeworld sidebar must not GET analytics before this. */
+  turnDataReady: boolean
 }
 
 function supportsCurrentMode(a: AnalyticItem, viewMode: ViewMode): boolean {
@@ -47,6 +49,7 @@ export function AnalyticsBar({
   stellarCartographyGates,
   ionStormCount,
   homeworldInactiveReason,
+  turnDataReady,
 }: AnalyticsBarProps) {
   const list = selectableAnalytics(analytics)
   return (
@@ -152,6 +155,7 @@ export function AnalyticsBar({
                   depressed={depressed}
                   onToggle={() => onToggle(a.id)}
                   inactiveReason={homeworldInactiveReason}
+                  turnDataReady={turnDataReady}
                 />
               </li>
             )

@@ -83,12 +83,12 @@ def cull_co_sector_candidates_after_definites(
     Once a sector has a definite, other inferred possibles in that wedge are not
     competing HW sites. Evidence promotion can create additional inferred definites
     in the same sector; those are also dropped so neighborhood cull does not treat
-    them as true HWs. User-asserted rows are never culled. Applies only when
+    them as true HWs. Location-asserted rows are never culled. Applies only when
     ``player_count >= 2``.
 
     Inferred definite precedence within a sector: slot-anchored (``perspective`` set)
-    over orphans; ties by lower planet id. Any user-asserted definite in the sector
-    suppresses all inferred definites there.
+    over orphans; ties by lower planet id. Any location-asserted definite in the
+    sector suppresses all inferred definites there.
     """
     if player_count < 2 or not candidates:
         return tuple(candidates)
@@ -118,9 +118,9 @@ def cull_co_sector_candidates_after_definites(
 
     kept_definite_ids: set[int] = set()
     for sector_rows in definites_by_sector.values():
-        user_asserted = [row for row in sector_rows if _is_protected(row)]
-        if user_asserted:
-            kept_definite_ids.update(row.planet_id for row in user_asserted)
+        protected = [row for row in sector_rows if _is_protected(row)]
+        if protected:
+            kept_definite_ids.update(row.planet_id for row in protected)
             continue
         inferred = [row for row in sector_rows if not _is_protected(row)]
         if not inferred:

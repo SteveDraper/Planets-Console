@@ -112,7 +112,7 @@ export function formatHomeworldSectorHoverLine(
   const possibleOwners = overlay.possibleOwners ?? []
   const winningStrength = overlay.ownershipWinningStrength
 
-  // Pinned: determined-HW player identity first; still surface ownership
+  // Pinned: unique projected owner identity first; still surface ownership
   // observation counts from possibleOwners without repeating the owner label.
   if (overlay.isPinned) {
     if (overlay.playerLabel != null && overlay.playerLabel !== '') {

@@ -22,7 +22,6 @@ export type HomeworldCandidateRowsProps = {
   baselineDegraded: boolean
   baselineTurn: number | null | undefined
   roster: readonly PerspectiveRow[]
-  selectedPlanetId: number | null
   onSelectPlanet: (planetId: number) => void
   /** Compact layout for the narrow sidebar panel. */
   compact?: boolean
@@ -50,7 +49,6 @@ export function HomeworldCandidateRows({
   baselineDegraded,
   baselineTurn,
   roster,
-  selectedPlanetId,
   onSelectPlanet,
   compact = false,
   showHeader = true,
@@ -101,14 +99,11 @@ export function HomeworldCandidateRows({
               </thead>
             ) : null}
             <tbody>
-              {rows.map((row) => {
-                const selected = selectedPlanetId === row.planetId
-                return (
+              {rows.map((row) => (
                   <tr
                     key={`${row.planetId}-${row.perspective ?? 'orphan'}-${row.confidenceTier}`}
                     className={cn(
                       'border-b border-[#52575d]/60',
-                      selected && 'bg-sky-500/15',
                       'cursor-pointer'
                     )}
                     title={formatHomeworldPlanetHover(row, roster, {
@@ -116,7 +111,6 @@ export function HomeworldCandidateRows({
                       ownershipWinningStrength,
                     })}
                     onClick={() => onSelectPlanet(row.planetId)}
-                    aria-selected={selected}
                   >
                     <td className={cn(cellPad, 'text-slate-200 tabular-nums')}>{row.planetId}</td>
                     {showOwnerColumn ? (
@@ -128,8 +122,7 @@ export function HomeworldCandidateRows({
                       {formatHomeworldCandidateConfidenceLabel(row, { includeAsserted: true })}
                     </td>
                   </tr>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         </div>

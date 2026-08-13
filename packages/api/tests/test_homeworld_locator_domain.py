@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import math
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 from api.analytics.homeworld_locator import (
@@ -34,9 +32,12 @@ from api.concepts.homeworld_layout import (
 from api.concepts.map_region_coverage import CoverageOrigin
 from api.config import HomeworldLocatorConfig
 from api.models.planet import Planet
-from api.serialization.turn import turn_info_from_json
 
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
+from tests.homeworld_locator_test_helpers import (
+    _planet,
+    load_sample_template_planet,
+    load_sample_turn,
+)
 
 # Wide scan reach so FoW density credit stays ~0 (pre-credit cluster parity).
 _FULL_CHART_SCAN_ORIGINS: tuple[CoverageOrigin, ...] = (
@@ -46,40 +47,12 @@ _FULL_CHART_SCAN_ORIGINS: tuple[CoverageOrigin, ...] = (
 
 @pytest.fixture
 def template_planet() -> Planet:
-    raw = json.loads((ASSETS_DIR / "turn_sample.json").read_text(encoding="utf-8"))
-    turn = turn_info_from_json(raw, settings_defaults=raw["settings"])
-    return turn.planets[0]
+    return load_sample_template_planet()
 
 
 @pytest.fixture
 def sample_settings():
-    raw = json.loads((ASSETS_DIR / "turn_sample.json").read_text(encoding="utf-8"))
-    turn = turn_info_from_json(raw, settings_defaults=raw["settings"])
-    return turn.settings
-
-
-def _planet(
-    template: Planet,
-    *,
-    planet_id: int,
-    x: int,
-    y: int,
-    ownerid: int = 0,
-    clans: int = 0,
-    temp: int = 0,
-    debrisdisk: int = 0,
-) -> Planet:
-    return replace(
-        template,
-        id=planet_id,
-        name=f"P{planet_id}",
-        x=x,
-        y=y,
-        ownerid=ownerid,
-        clans=clans,
-        temp=temp,
-        debrisdisk=debrisdisk,
-    )
+    return load_sample_turn().settings
 
 
 def _stub_layout_asset(*, support_min: float = 500.0, support_max: float = 600.0):
@@ -677,41 +650,6 @@ def test_cull_co_sector_drops_extra_inferred_definites(template_planet) -> None:
     assert {row.planet_id for row in culled} == {182, 54}
     pin_row = next(row for row in culled if row.planet_id == 182)
     assert pin_row.confidence_tier == CONFIDENCE_DEFINITE
-
-
-def test_cull_preserves_asserted_cue_co_sector_possible(template_planet) -> None:
-    from api.analytics.homeworld_locator.baseline import (
-        cull_co_sector_candidates_after_definites,
-    )
-    from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
-    from api.analytics.homeworld_locator.types import HomeworldCandidateRecord
-
-    center = (0.0, 0.0)
-    pin = _planet(template_planet, planet_id=1, x=500, y=0)
-    asserted = _planet(template_planet, planet_id=2, x=550, y=20)
-    rows = (
-        HomeworldCandidateRecord(
-            planet_id=1,
-            perspective=1,
-            confidence_tier=CONFIDENCE_DEFINITE,
-            attribution=ATTRIBUTION_INFERRED,
-        ),
-        HomeworldCandidateRecord(
-            planet_id=2,
-            perspective=None,
-            confidence_tier=CONFIDENCE_POSSIBLE,
-            attribution=ATTRIBUTION_INFERRED,
-            asserted_cue=True,
-        ),
-    )
-    culled = cull_co_sector_candidates_after_definites(
-        rows,
-        {1: pin, 2: asserted},
-        center=center,
-        player_count=4,
-        pin_angle=0.0,
-    )
-    assert {row.planet_id for row in culled} == {1, 2}
 
 
 def test_cull_preserves_durable_assert_location_shell_without_cue(template_planet) -> None:

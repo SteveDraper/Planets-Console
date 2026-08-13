@@ -35,6 +35,9 @@ class InferredHomeworldCandidate:
     attribution: str = ATTRIBUTION_INFERRED
     """``inferred`` for baseline-emitted candidates."""
 
+    location_asserted: bool = False
+    """Always false at baseline; durable location asserts apply after inference."""
+
 
 EVIDENCE_KIND_SINGLE_STARBASE_NEW_BUILD = "single_starbase_new_build"
 

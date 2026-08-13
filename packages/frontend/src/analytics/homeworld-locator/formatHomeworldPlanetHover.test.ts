@@ -24,6 +24,7 @@ describe('formatHomeworldPlanetHover', () => {
         candidate({
           attribution: 'user_asserted',
           assertedCue: true,
+          locationAsserted: true,
         }),
         [perspectiveRow(1, 'alice', { raceName: 'The Federation' })]
       )
@@ -44,6 +45,36 @@ describe('formatHomeworldPlanetHover', () => {
         })
       )
     ).toBe('planet 44 · possible (most probable) · owner: orphan · inferred')
+  })
+
+  it('does not treat ownership-only assertedCue as a homeworld location pin', () => {
+    expect(
+      formatHomeworldPlanetHover(
+        candidate({
+          planetId: 45,
+          perspective: 2,
+          confidenceTier: 'possible',
+          isMostProbable: true,
+          attribution: 'user_asserted',
+          assertedCue: true,
+          locationAsserted: false,
+        }),
+        [perspectiveRow(2, 'dead', { raceName: 'The Solar Federation' })],
+        {
+          ownershipWinningStrength: 'asserted',
+          possibleOwners: [
+            {
+              ownerSlot: 2,
+              provenanceKinds: ['asserted'],
+              playerLabel: 'dead (The Solar Federation)',
+              provenanceKindCounts: { asserted: 1 },
+            },
+          ],
+        }
+      )
+    ).toBe(
+      'planet 45 · possible (most probable) · owner: dead (The Solar Federation) · asserted'
+    )
   })
 
   it('expands inferred ownership with observation counts from sector evidence', () => {

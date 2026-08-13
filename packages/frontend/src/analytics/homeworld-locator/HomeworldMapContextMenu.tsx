@@ -41,7 +41,6 @@ import {
   useHomeworldLocatorAssertionMutation,
   useHomeworldLocatorAssertionPending,
 } from './useHomeworldLocatorMutations'
-import { useHomeworldLocatorSelectionStore } from '../../stores/homeworldLocatorSelection'
 import type { HomeworldMapMarker } from './wireSchema'
 
 const PLANET_MENU_RADIUS_PX = 16
@@ -181,7 +180,6 @@ export function HomeworldMapContextMenu({
   const assertMutation = useHomeworldLocatorAssertionMutation(analyticScope)
   const assertPending = useHomeworldLocatorAssertionPending(analyticScope)
   const assertError = useHomeworldLocatorAssertionError(analyticScope)
-  const setSelection = useHomeworldLocatorSelectionStore((s) => s.setSelection)
   const dismissMenuOnAssertSuccess = { onSuccess: () => setMenu(null) }
 
   const planetById = useMemo(() => {
@@ -228,7 +226,6 @@ export function HomeworldMapContextMenu({
               Number(node.x),
               Number(node.y)
             )
-            setSelection({ kind: 'planet', planetId })
             setMenu({
               kind: 'planet',
               planetId,
@@ -247,7 +244,6 @@ export function HomeworldMapContextMenu({
         const sectorIndex = parseHomeworldSectorIndex(sector.id)
         if (ownership != null && sectorIndex != null) {
           event.preventDefault()
-          setSelection({ kind: 'sector', sectorIndex })
           setMenu({
             kind: 'sector',
             sectorIndex,
@@ -289,7 +285,6 @@ export function HomeworldMapContextMenu({
     planetMapNodes,
     planetById,
     ownershipRegionOverlays,
-    setSelection,
   ])
 
   if (!enabled || menu == null || analyticScope == null) return null

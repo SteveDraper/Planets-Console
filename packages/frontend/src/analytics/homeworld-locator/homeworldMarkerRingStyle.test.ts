@@ -8,7 +8,7 @@ describe('homeworldMarkerRings', () => {
       homeworldMarkerRings({
         confidenceTier: CONFIDENCE_DEFINITE,
         isMostProbable: false,
-        assertedCue: false,
+        locationAsserted: false,
       })
     ).toEqual([
       {
@@ -25,7 +25,7 @@ describe('homeworldMarkerRings', () => {
       homeworldMarkerRings({
         confidenceTier: CONFIDENCE_POSSIBLE,
         isMostProbable: false,
-        assertedCue: false,
+        locationAsserted: false,
       })
     ).toEqual([
       {
@@ -42,7 +42,7 @@ describe('homeworldMarkerRings', () => {
     const rings = homeworldMarkerRings({
       confidenceTier: CONFIDENCE_POSSIBLE,
       isMostProbable: true,
-      assertedCue: false,
+      locationAsserted: false,
     })
     expect(rings).toHaveLength(2)
     expect(rings[0]).toMatchObject({
@@ -60,16 +60,16 @@ describe('homeworldMarkerRings', () => {
       homeworldMarkerRings({
         confidenceTier: CONFIDENCE_DEFINITE,
         isMostProbable: true,
-        assertedCue: false,
+        locationAsserted: false,
       })
     ).toHaveLength(1)
   })
 
-  it('adds an amber outer ring when assertedCue is set', () => {
+  it('adds an amber outer ring when locationAsserted is set', () => {
     const rings = homeworldMarkerRings({
       confidenceTier: CONFIDENCE_DEFINITE,
       isMostProbable: false,
-      assertedCue: true,
+      locationAsserted: true,
     })
     expect(rings[0]).toMatchObject({
       radiusScale: 1.35,
@@ -82,16 +82,19 @@ describe('homeworldMarkerRings', () => {
     })
   })
 
-  it('adds a cyan selection halo when isSelected', () => {
-    const rings = homeworldMarkerRings({
-      confidenceTier: CONFIDENCE_POSSIBLE,
+  it('does not treat ownership-only assertedCue as a homeworld location pin', () => {
+    const ownershipOnly = {
+      confidenceTier: CONFIDENCE_DEFINITE,
       isMostProbable: false,
-      assertedCue: false,
-      isSelected: true,
-    })
+      assertedCue: true,
+      locationAsserted: false,
+    }
+    const rings = homeworldMarkerRings(ownershipOnly)
+    expect(rings).toHaveLength(1)
     expect(rings[0]).toMatchObject({
-      stroke: '#38bdf8',
-      strokeDasharray: '2 2',
+      radiusScale: 1,
+      stroke: '#f8fafc',
     })
+    expect(rings.some((ring) => ring.stroke === '#fbbf24')).toBe(false)
   })
 })

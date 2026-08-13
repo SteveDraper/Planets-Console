@@ -16,7 +16,7 @@ class CullableCandidate(Protocol):
     def confidence_tier(self) -> str: ...
 
     @property
-    def attribution(self) -> str: ...
+    def location_asserted(self) -> bool: ...
 
     @property
     def perspective(self) -> int | None: ...
@@ -32,12 +32,15 @@ def candidate_is_assert_protected(
 ) -> bool:
     """True when culls must keep this row.
 
-    Prefer durable asserted location planet ids. ``asserted_cue`` covers
-    already-derived candidate views; ``attribution`` is not authority (ADR 0010).
+    Prefer durable asserted location planet ids. ``location_asserted`` covers
+    already-derived candidate views. Ownership-only ``asserted_cue`` does not
+    protect: a sector ownership assert lights that cue on every candidate in
+    the sector, which would otherwise block co-sector cull after a location pin.
+    ``attribution`` is not authority (ADR 0010).
     """
     if row.planet_id in protected_planet_ids:
         return True
-    return bool(getattr(row, "asserted_cue", False))
+    return row.location_asserted
 
 
 __all__ = [
