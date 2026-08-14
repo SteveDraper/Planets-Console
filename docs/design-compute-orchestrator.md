@@ -50,7 +50,7 @@ Think of the backend as two cooperating planes:
 
 **Persistence** is conceptually a durable cache of `compute scope → result`, but **schema, write gates, merge, and invalidation** stay per analytic via registered **persistence policy** hooks. The orchestrator coordinates *when* to persist; analytics own *what* and *how*.
 
-**North star:** all Core compute callers (export ensure, streams, table/map handlers, later BFF and MCP) submit through the **same process-wide** orchestrator. There is one scheduler and one DAG per process -- not one orchestrator per stream or **analytic query context**. v1 migrates export-ensure and table-stream execution; routing batch `compute()` handlers is [#202](https://github.com/SteveDraper/Planets-Console/issues/202). Singleton migration: [#209](https://github.com/SteveDraper/Planets-Console/issues/209).
+**North star:** all Core compute callers (export ensure, streams, table/map handlers, later BFF HTTP, **MCP** hatch ensure) submit through the **same process-wide** orchestrator. There is one scheduler and one DAG per process -- not one orchestrator per stream or **analytic query context**. MCP never exposes `ComputeRequest`; it calls Core **analytic export ensure** in-process ([How this MCP product relates to orchestrator phase 3](https://github.com/SteveDraper/Planets-Console/issues/320)). v1 migrates export-ensure and table-stream execution; routing batch `compute()` handlers is [#202](https://github.com/SteveDraper/Planets-Console/issues/202). Singleton migration: [#209](https://github.com/SteveDraper/Planets-Console/issues/209).
 
 ---
 
@@ -60,12 +60,12 @@ Think of the backend as two cooperating planes:
 2. **True parallelism** -- cross-analytic and cross-player work shares cores; no pool starvation from blocking `ensure_export` inside workers.
 3. **Declarative execution** -- backends (`inline`, `thread`, `interpreter`, `process`) and scope key axes declared on registration, not hardcoded in the orchestrator.
 4. **Explicit dependency data** -- dependents receive ancestor outputs on job wire, not live `ctx.query()` in parallel workers.
-5. **Uniform API trajectory** -- same `ComputeRequest` surface for ensure jobs, streams, and (later) table/map compute and MCP.
+5. **Uniform API trajectory** -- same `ComputeRequest` surface for ensure jobs, streams, and (later) table/map compute and BFF HTTP. The **MCP adapter** is an in-process Core caller of **analytic export ensure**, not a `ComputeRequest` API ([How this MCP product relates to orchestrator phase 3](https://github.com/SteveDraper/Planets-Console/issues/320)).
 
 Non-goals (v1 / #190 epic):
 
 - Separate worker service or containers.
-- BFF/MCP uniform proxy (phase 3).
+- BFF uniform HTTP proxy (phase 3).
 - Connections parameter keying (ships with [#110](https://github.com/SteveDraper/Planets-Console/issues/110); mechanism defined here).
 
 ---
@@ -534,7 +534,7 @@ Tracked under [#190](https://github.com/SteveDraper/Planets-Console/issues/190):
 | Process-scoped export services | [#239](https://github.com/SteveDraper/Planets-Console/issues/239) | Retire per-node sticky `export_services` bags |
 | Origin-set prune | [#240](https://github.com/SteveDraper/Planets-Console/issues/240) | Interest tracking; cancel when no origins remain |
 | Phase 2 | [#202](https://github.com/SteveDraper/Planets-Console/issues/202) | Route table/map `compute()` through orchestrator |
-| Phase 3 | [#203](https://github.com/SteveDraper/Planets-Console/issues/203) | BFF / MCP uniform compute API |
+| Phase 3 | [#203](https://github.com/SteveDraper/Planets-Console/issues/203) | BFF uniform compute API (HTTP). MCP is in-process Core ensure, not this slice ([How this MCP product relates to orchestrator phase 3](https://github.com/SteveDraper/Planets-Console/issues/320)) |
 
 ---
 
