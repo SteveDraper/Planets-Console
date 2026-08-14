@@ -65,11 +65,22 @@ v1 is read-only advisor information at human *analysis* parity -- not every SPA 
 - All catalog analytics' *information*: **base-map**, **scores**, **connections**, **stellar-cartography**, **fleet**, **visibility**, **homeworld-locator**
 - All existing concept HTTP, including warp-well point/cells and flare points
 - Stored **TurnInfo** as **MCP TurnInfo fallback** (named-object fields only; MCP descriptions steer to distilled queries)
-- **MCP disk proximity** (ships, planets, and cartography features within X ly of a coordinate). Core has no such product query today; wrap-only cannot close the gap ([Whether v1 MCP wraps only existing Core concepts or adds new query helpers](https://github.com/SteveDraper/Planets-Console/issues/321))
+- **MCP disk proximity** (ships, planets, and cartography features within X ly of a coordinate) -- the only new Core helper in v1 ([ADR 0021](adr/0021-mcp-v1-wrap-existing-gated-fills.md))
 
 **Out of this map's MCP:** operator diagnostics (request trees, solver telemetry, compute freeze); **login exchange**, passwords, and credential management (already [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md)).
 
-**Later, not never:** **load-all**; homeworld assertions/refresh; hull-mask edits; inference pause/recompute. Other collection-scan holes (minefields-in-disk, FC search, fuel, combat) stay holes under the fallback rule but are not v1 gates. Hatch query of incomplete/partial export trees with an explicit non-final indicator is later ([ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md)).
+**Later, not never:** **load-all**; homeworld assertions/refresh; hull-mask edits; inference pause/recompute. Other collection-scan holes (minefields-in-disk, FC search, fuel, combat, host-order) stay holes under the fallback rule and are not v1 Core work ([ADR 0021](adr/0021-mcp-v1-wrap-existing-gated-fills.md)). Hatch query of incomplete/partial export trees with an explicit non-final indicator is later ([ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md)).
+
+---
+
+## v1 wrap vs new Core helpers
+
+[Whether v1 MCP wraps only existing Core concepts or adds new query helpers](https://github.com/SteveDraper/Planets-Console/issues/321). [ADR 0021](adr/0021-mcp-v1-wrap-existing-gated-fills.md).
+
+- Wrap means the query math already lives in `api/concepts/` (HTTP or not). A new **MCP named gameplay tool** over an in-process-only concept is a wrap, not a fill.
+- New Core helper only when a v1 gate requires it. Today that is **MCP disk proximity** alone.
+- Filling a gap is a Core **game concept**, never `mcp_adapter` math.
+- This map does not add concept HTTP. MCP calls Core in-process.
 
 ---
 
@@ -81,7 +92,7 @@ v1 declares **tools only** -- no MCP `resources`, no `prompts`. `server/discover
 
 - **MCP named gameplay tool**s are the advisor API. Names and arguments are the question the agent asks (wrapping Core), not 1:1 HTTP twins and not family mega-tools with a `kind` enum. Descriptions are written for an agent that already understands Planets.nu: when to use the tool, when to prefer it over **MCP TurnInfo fallback**.
 - The only generic hatch is the **MCP export query hatch** (JSONPath + scope over an **analytic export catalog**). Hatch tools, ensure, and no MCP streams: [ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md).
-- Exact named-tool list: after [Whether v1 MCP wraps only existing Core concepts or adds new query helpers](https://github.com/SteveDraper/Planets-Console/issues/321).
+- Exact named-tool list: [Exact v1 named gameplay tool list](https://github.com/SteveDraper/Planets-Console/issues/324).
 
 ---
 

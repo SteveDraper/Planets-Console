@@ -6,7 +6,7 @@ An MCP advisor that treats stored **TurnInfo** as the primary interface will spe
 
 **TurnInfo** remains available under the **MCP visibility ceiling** ([ADR 0014](0014-mcp-login-identity-and-visibility.md)), but only as **MCP TurnInfo fallback**: a last-resort read of a *named* object's fields when no distilled query covers them. Scan, filter, geometry, or other compute over a collection is a capability hole, not a reason to dump the turn. MCP tool descriptions must steer agents to distilled queries.
 
-The first slice is incomplete without **MCP disk proximity**: ships, planets, and cartography features within a light-year radius of a map coordinate. Core has no such product query today (`iter_planets_within_radius` is planets-only and internal; `sample_at` is a point). Filling that gap is a Core concept, not MCP-layer logic, and means wrap-only existing helpers cannot finish v1 ([Whether v1 MCP wraps only existing Core concepts or adds new query helpers](https://github.com/SteveDraper/Planets-Console/issues/321)).
+The first slice is incomplete without **MCP disk proximity**: ships, planets, and cartography features within a light-year radius of a map coordinate. Core has no such product query today (`iter_planets_within_radius` is planets-only and internal; `sample_at` is a point). Filling that gap is a Core concept, not MCP-layer logic, and is the only new Core helper in v1 ([ADR 0021](0021-mcp-v1-wrap-existing-gated-fills.md)).
 
 ## Considered options
 
@@ -19,7 +19,7 @@ The first slice is incomplete without **MCP disk proximity**: ships, planets, an
 ## Consequences
 
 - First-slice contents (read-only analysis parity, existing concept HTTP, **turn-ensure** / **GameInfo** refresh, diagnostics never, mutations and **load-all** later) live in [design-mcp.md](../design-mcp.md), not this ADR.
-- Catalog shape is [ADR 0017](0017-mcp-catalog-named-tools-and-export-hatch.md) (named gameplay tools plus **MCP export query hatch**; tools only). Hatch tools, ensure vs query, and no MCP streams: [ADR 0020](0020-mcp-export-hatch-describe-query-ensure.md).
+- Catalog shape is [ADR 0017](0017-mcp-catalog-named-tools-and-export-hatch.md) (named gameplay tools plus **MCP export query hatch**; tools only). Hatch tools, ensure vs query, and no MCP streams: [ADR 0020](0020-mcp-export-hatch-describe-query-ensure.md). Wrap vs new Core helpers: [ADR 0021](0021-mcp-v1-wrap-existing-gated-fills.md).
 - Glossary: **MCP TurnInfo fallback**, **MCP disk proximity** in [CONTEXT.md](../../CONTEXT.md).
 
 Map: [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310). Ticket: [What human-parity means for the first MCP slice](https://github.com/SteveDraper/Planets-Console/issues/316).

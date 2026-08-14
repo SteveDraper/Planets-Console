@@ -93,12 +93,12 @@ Stored **TurnInfo** on MCP as a last-resort read of a named object's fields when
 _Avoid_: dump the turn, raw RST as the advisor API, LLM distance over turn JSON
 
 **MCP disk proximity**:
-A distilled query: ships, planets, and cartography features within a light-year radius of a map coordinate. Required for the first MCP slice so agents do not scan **TurnInfo** for nearness. See [ADR 0016](docs/adr/0016-mcp-turninfo-fallback-and-disk-proximity.md).
+A distilled query: ships, planets, and cartography features within a light-year radius of a map coordinate. Required for the first MCP slice so agents do not scan **TurnInfo** for nearness; the only new Core helper in that slice. See [ADR 0016](docs/adr/0016-mcp-turninfo-fallback-and-disk-proximity.md) and [ADR 0021](docs/adr/0021-mcp-v1-wrap-existing-gated-fills.md).
 _Avoid_: LLM geometry over turn JSON, planets-only spatial index as the product query
 
 **MCP named gameplay tool**:
-An MCP tool whose name and arguments are the gameplay or concept question the agent asks, wrapping Core underneath -- not a 1:1 BFF or Core HTTP twin. **MCP TurnInfo fallback** is also a named tool, not a generic scan. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md).
-_Avoid_: BFF route as the tool name, family mega-tool with a kind enum, JSONPath over TurnInfo, resource URI as the query, one named tool per **analytic export path**
+An MCP tool whose name and arguments are the gameplay or concept question the agent asks, wrapping a Core **game concept** in-process -- not a 1:1 BFF or Core HTTP twin. **MCP TurnInfo fallback** is also a named tool, not a generic scan. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md) and [ADR 0021](docs/adr/0021-mcp-v1-wrap-existing-gated-fills.md).
+_Avoid_: BFF route as the tool name, family mega-tool with a kind enum, JSONPath over TurnInfo, resource URI as the query, one named tool per **analytic export path**, new Core math without a slice gate
 
 **MCP export query hatch**:
 The generic MCP analytic-result surface beside **MCP named gameplay tool**s: a describe tool (optional `analytic_id`; **MCP export catalog summary** or full **analytic export catalog**), a query tool (JSONPath + **shell context**, no new **analytic export ensure**), and an ensure tool (optional `dry_run` = **analytic export ensure probe**) that admits work. Hatch query materializes only when the scope is persisted / ensure-final; otherwise `unavailable` with `needs_ensure` (not admitted) or `in_progress` (admitted, not yet final). The agent polls query until `ok`. Not a JSONPath over **TurnInfo** or concept dumps, not **turn analytic wire contract**s or **table stream**s. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md) and [ADR 0020](docs/adr/0020-mcp-export-hatch-describe-query-ensure.md).
