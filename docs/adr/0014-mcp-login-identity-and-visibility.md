@@ -8,7 +8,7 @@ A local MCP surface on the Planets Console process needs a Planets.nu identity w
 
 - Each MCP call names an **MCP login identity** (planets.nu account name). The server **credential probe**s that name and fails closed. No OAuth, no extra MCP secret, no password on MCP. **Login exchange** stays on the SPA/BFF path ([ADR 0007](0007-account-api-key-and-silent-login.md)).
 - Auth is **login identity** only. **Viewpoint** is not an MCP auth binding; it is **shell context** ([ADR 0018](0018-mcp-shell-context-binding.md)). The client may send a different login header on the next call. MCP is per-request: no sticky MCP session.
-- **MCP visibility ceiling:** the same **viewpoint** eligibility as the SPA for that login (in-progress: own slot or spectator; finished: all slots). For an allowed **perspective**: that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Never another perspective's **TurnInfo** when the SPA would disable that viewpoint, never **account API key** material, never **compute diagnostics**. MCP has no **storage-only load** path.
+- **MCP visibility ceiling:** the same **viewpoint eligibility** as the SPA for that login ([ADR 0019](0019-viewpoint-eligibility-in-core.md)): in-progress XOR (player -> own slot; non-player -> spectator `0`); finished -> all player slots `1..N`, not `0`. For an allowed **perspective**: that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Never another perspective's **TurnInfo** when eligibility would refuse that slot, never **account API key** material, never **compute diagnostics**. MCP has no **storage-only load** path.
 
 ## Considered options
 
@@ -23,7 +23,7 @@ A local MCP surface on the Planets Console process needs a Planets.nu identity w
 ## Consequences
 
 - The login name rides as an HTTP header, not a tool argument or `_meta` ([ADR 0018](0018-mcp-shell-context-binding.md)).
-- Viewpoint eligibility today lives only in the SPA (`deriveShellViewpoints`). MCP cannot import that. Follow-on: [Shared viewpoint eligibility below the SPA for MCP and the shell](https://github.com/SteveDraper/Planets-Console/issues/323).
-- Glossary: **MCP login identity**, **MCP visibility ceiling** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md).
+- **Viewpoint eligibility** is a Core service; the SPA consumes it via the BFF ([ADR 0019](0019-viewpoint-eligibility-in-core.md)).
+- Glossary: **MCP login identity**, **MCP visibility ceiling**, **viewpoint eligibility** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md).
 
 Map: [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310). Ticket: [How an MCP agent authenticates and which identity it acts as](https://github.com/SteveDraper/Planets-Console/issues/314).

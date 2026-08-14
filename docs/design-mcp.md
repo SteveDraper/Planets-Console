@@ -33,7 +33,7 @@ Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 
 
 - Each call names an **MCP login identity**. **Credential probe** fail-closed. No password on MCP. **Login exchange** stays on SPA/BFF.
 - Auth is login identity only. **Viewpoint** is not an MCP auth binding. The client may switch login identity per call. No MCP session.
-- **MCP visibility ceiling** matches SPA **viewpoint** eligibility. Allowed **perspective**: that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Never another perspective's **TurnInfo** when the SPA would hide it, never **account API key**s, never **compute diagnostics**. No **storage-only load** on MCP.
+- **MCP visibility ceiling** matches SPA **viewpoint eligibility** ([ADR 0019](adr/0019-viewpoint-eligibility-in-core.md)). Allowed **perspective**: that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Never another perspective's **TurnInfo** when eligibility would refuse that slot, never **account API key**s, never **compute diagnostics**. No **storage-only load** on MCP.
 
 ## Shell context binding
 
@@ -43,7 +43,13 @@ Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 
 - Always explicit: turn-scoped tools require the full **shell context** triple; game-scoped tools require game id; catalog/list tools need login only. No "latest turn" or "login's slot" inference. Flat required fields, not a partial nested object.
 - The agent names **perspective** (1-based slot, or `0` for spectator), not a **viewpoint** name.
 
-Shared eligibility rule (today SPA-only): [Shared viewpoint eligibility below the SPA for MCP and the shell](https://github.com/SteveDraper/Planets-Console/issues/323).
+## Viewpoint eligibility
+
+[Shared viewpoint eligibility below the SPA for MCP and the shell](https://github.com/SteveDraper/Planets-Console/issues/323). [ADR 0019](adr/0019-viewpoint-eligibility-in-core.md).
+
+- Core service next to `GameService` owns the allowed **perspective** set. MCP calls it in-process. Not `concepts/`, not BFF, not a copy inside `mcp_adapter`.
+- XOR matching the SPA: live + player -> `{own slot}`; live + non-player -> `{0}`; finished -> `{1..N}`, no `0`.
+- SPA consumes the set via the BFF (login-keyed; refetch on identity switch) and applies chrome. **Storage-only load** stays SPA-only. Load-all's expected-perspective set is a different policy.
 
 ---
 

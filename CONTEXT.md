@@ -80,8 +80,12 @@ _Avoid_: passwordless Planets.nu login, anonymous access
 The **login identity** an MCP call acts as -- a planets.nu account name sent as an HTTP header on the call and proven by **credential probe** (fail closed). Not a tool argument, not `_meta`, not **session credentials**, not a protocol session, and not **viewpoint** / **shell context**. The MCP client may send a different header on the next call; the server does not remember it. MCP never accepts a password; **login exchange** stays on the SPA/BFF path. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md) and [ADR 0018](docs/adr/0018-mcp-shell-context-binding.md).
 _Avoid_: MCP session, MCP user, MCP token, session credentials (when meaning the MCP caller), login as a tool argument, login in `_meta`
 
+**Viewpoint eligibility**:
+Which **perspective** slots a **login identity** may read for a given game. A Core domain rule. In-progress: the login's own slot if they are a player, otherwise spectator `0` only (XOR, not a free choice). Finished: every player slot `1..N`, not spectator `0`. The SPA consumes this set via the BFF (login-keyed; refetch on identity switch) and applies chrome; it does not keep a second predicate. Distinct from **storage-only load** eligibility (SPA-only; MCP has no such path), from dropdown chrome (display names, default selection, disabled rows), and from load-all's expected-perspective set (what to bulk-fetch). See [ADR 0019](docs/adr/0019-viewpoint-eligibility-in-core.md).
+_Avoid_: deriveShellViewpoints (SPA function), dropdown disabled flags, load-all expected perspectives, storage-only as a Core input, in-progress player also spectating, spectator on a finished game, TypeScript port of the Core predicate
+
 **MCP visibility ceiling**:
-The cap on what an **MCP login identity** may read: the same **viewpoint** eligibility as the SPA for that login, and within an allowed **perspective** only that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Not another perspective's **TurnInfo** when the SPA would disable that viewpoint, not **account API key** material, not **compute diagnostics**. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md).
+The cap on what an **MCP login identity** may read: the same **viewpoint eligibility** as the SPA for that login, and within an allowed **perspective** only that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Not another perspective's **TurnInfo** when eligibility would refuse that slot, not **account API key** material, not **compute diagnostics**. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md) and [ADR 0019](docs/adr/0019-viewpoint-eligibility-in-core.md).
 _Avoid_: storage-wide dump, cross-perspective union, MCP session ACL
 
 **MCP TurnInfo fallback**:
@@ -109,7 +113,7 @@ User-requested deletion of this server’s stored **account API key** material f
 _Avoid_: remote password reset, Planets.nu account deletion
 
 **Viewpoint**:
-The player whose position is analyzed and displayed. Resolved to a **perspective** slot; defaults from **login identity** and may be overridden in the header when the game allows.
+The player whose position is analyzed and displayed. Resolved to a **perspective** slot inside **viewpoint eligibility**; defaults from **login identity** and may be overridden in the header only to another eligible slot.
 _Avoid_: perspective (when meaning the UI choice -- use viewpoint), player slot (use perspective)
 
 **Game info refresh**:
@@ -155,8 +159,8 @@ Domain model for the **`rst`** object from planets.nu **Load Turn Data** -- plan
 _Avoid_: turn blob (informal), RST (use TurnInfo in project prose; `rst` is the upstream field name)
 
 **Perspective**:
-A **1-based player slot number** in a game (`1` .. `11`). Used in storage paths and Core routes (`games/{gameId}/{perspective}/turns/{turn}`). Stable for a given player for the life of the game.
-_Avoid_: player id (ambiguous with in-game entity ids), viewpoint (the UI-facing player choice)
+A player slot in a game: `1` .. `11` for participants, or `0` for spectator. Used in storage paths and Core routes (`games/{gameId}/{perspective}/turns/{turn}`). Participant slots are stable for the life of the game. Spectator `0` is readable only when **viewpoint eligibility** allows it (live game, login not a player).
+_Avoid_: player id (ambiguous with in-game entity ids), viewpoint (the UI-facing player choice), pseudo-viewpoint (SPA implementation name)
 
 **Player**:
 A participant entity in **GameInfo** or **TurnInfo** (the `Player` dataclass) -- username, race, resources, and related fields. Identified by in-payload ids and names; located in the game by **perspective** slot, not by those ids alone.
@@ -1138,7 +1142,7 @@ Use **homeworld planet** in Console prose and UI for map inference. Do not say "
 
 **Player vs perspective vs viewpoint vs homeworld owner**:
 - **Player** -- the domain entity (name, race, scores) inside **GameInfo** / **TurnInfo**.
-- **Perspective** -- the 1-based **slot number** used in paths and Core routes (`…/3/turns/111`) for whose **TurnInfo** is stored/read.
+- **Perspective** -- the **slot number** used in paths and Core routes (`…/3/turns/111`) for whose **TurnInfo** is stored/read (`1`..`11` for participants, `0` for spectator).
 - **Viewpoint** -- which **Player** the shell is showing, resolved to a perspective.
 - **Homeworld owner** -- which **Player**/slot a **homeworld candidate** or **homeworld sector** is attributed to (whose HW it is). Same slot id space as **perspective**, different meaning.
 
@@ -1159,7 +1163,7 @@ For Console **Visibility analytic** geometry, nebula modulation for planet visib
 **Expert:** A **turn analytic** -- game id, turn, and **perspective** from **shell context**. The SPA must wait for **turn ensure** so **TurnInfo** is in storage before any analytic GET runs.
 
 **Dev:** The header says viewpoint "Alice" but storage path uses `3`. Which is which?  
-**Expert:** **Viewpoint** is the player name shown in the UI. **Perspective** is her 1-based slot (`3`). Core routes and storage paths always use the slot; the shell resolves name ↔ slot from **GameInfo** after refresh.
+**Expert:** **Viewpoint** is the player name shown in the UI. **Perspective** is her slot (`3`, or `0` for spectator). Core routes and storage paths always use the slot; the shell resolves name ↔ slot from **GameInfo** after refresh, inside **viewpoint eligibility**.
 
 **Dev:** Where does turn 111 for game 628580 live on disk?  
 **Expert:** Logical path `games/628580/1/turns/111` -- a **breakpoint** match -- so one JSON **document** with the whole **TurnInfo**. Settings under `games/628580/info/settings` share the same file as `games/628580/info` because there is no deeper breakpoint.
@@ -1174,7 +1178,7 @@ For Console **Visibility analytic** geometry, nebula modulation for planet visib
 **Expert:** No. The SPA talks only to the **BFF**. Core owns **turn analytics**; the shell never bypasses that layer.
 
 **Dev:** Game info lists a Player with `id: 42`. Is that perspective 42?  
-**Expert:** No. **Player** ids come from the planets.nu payload. **Perspective** is the slot index (`1`..`11`) in path segments like `games/628580/3/turns/111`. Match name to slot via **GameInfo** player order, not via `Player.id`.
+**Expert:** No. **Player** ids come from the planets.nu payload. **Perspective** is the slot index (`1`..`11`, or `0` for spectator) in path segments like `games/628580/3/turns/111`. Match name to slot via **GameInfo** player order, not via `Player.id`.
 
 **Dev:** Turn ensure failed -- where should the message go?  
 **Expert:** The **shell error bar**, not inline on the header control. Include which BFF endpoint failed so it is actionable.
