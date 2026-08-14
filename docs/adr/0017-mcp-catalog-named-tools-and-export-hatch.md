@@ -19,7 +19,7 @@ v1 is a **hybrid**. Advisor questions are **MCP named gameplay tool**s: gameplay
 ## Consequences
 
 - Exact named-tool list still graduates after [Whether v1 MCP wraps only existing Core concepts or adds new query helpers](https://github.com/SteveDraper/Planets-Console/issues/321).
-- Exact hatch tool names, ensure vs persisted, and streams remain [How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319) -- but that ticket must include a describe tool, not query-only.
+- Hatch tool names, ensure vs persisted, and no MCP streams: [ADR 0020](0020-mcp-export-hatch-describe-query-ensure.md).
 - Glossary: **MCP named gameplay tool**, **MCP export query hatch** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md). Export Future MCP: [design-analytic-exports.md](../design-analytic-exports.md).
 
 Map: [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310). Ticket: [MCP catalog shape: named gameplay tools vs generic query vs resources](https://github.com/SteveDraper/Planets-Console/issues/317).

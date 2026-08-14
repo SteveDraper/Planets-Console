@@ -101,8 +101,12 @@ An MCP tool whose name and arguments are the gameplay or concept question the ag
 _Avoid_: BFF route as the tool name, family mega-tool with a kind enum, JSONPath over TurnInfo, resource URI as the query, one named tool per **analytic export path**
 
 **MCP export query hatch**:
-The generic JSONPath + scope query over an **analytic export catalog**, including an MCP **tool** that returns that catalog (**analytic export value schema**, path-prefix rules, ordering semantics) so the agent can form paths. Complements **MCP named gameplay tool**s; not a JSONPath over **TurnInfo** or concept dumps. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md).
-_Avoid_: mega-query, JSONPath over TurnInfo, one named tool per export path, schema only in the query tool description, catalog as an MCP resource
+The generic MCP analytic-result surface beside **MCP named gameplay tool**s: a describe tool (optional `analytic_id`; **MCP export catalog summary** or full **analytic export catalog**), a query tool (JSONPath + **shell context**, no new **analytic export ensure**), and an ensure tool (optional `dry_run` = **analytic export ensure probe**) that admits work. Hatch query materializes only when the scope is persisted / ensure-final; otherwise `unavailable` with `needs_ensure` (not admitted) or `in_progress` (admitted, not yet final). The agent polls query until `ok`. Not a JSONPath over **TurnInfo** or concept dumps, not **turn analytic wire contract**s or **table stream**s. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md) and [ADR 0020](docs/adr/0020-mcp-export-hatch-describe-query-ensure.md).
+_Avoid_: mega-query, JSONPath over TurnInfo, one named tool per export path, schema only in the query tool description, catalog as an MCP resource, table/map GET as MCP tools, MCP table stream, query that starts ensure, treating in-flight attach as a final hatch result
+
+**MCP export catalog summary**:
+Browse payload from the hatch describe tool: `analytic_id`, catalog `name`, root export `description` (or empty-catalog), and whether the catalog is empty. Not the **analytic export value schema** tree, path-prefix rules, ordering semantics, or **analytic export ensure dependency** list. Omit `analytic_id` defaults to summary for every analytic; a named id defaults to full catalog.
+_Avoid_: SPA `supports_table` / `supports_map` on MCP, full schema as the explore list
 
 **Log out**:
 Clearing client **session credentials** and the remembered last login name so **silent login restore** does not run on the next page load. By default the server **account API key** remains stored. The user may optionally also perform **account API key drop** for the current name.
@@ -233,7 +237,7 @@ A queryable surface one **turn analytic** exposes as a single **analytic export 
 _Avoid_: analytic API, internal getter, wire payload reuse, flat scalar export per field
 
 **Analytic export catalog**:
-The self-describing **analytic export value schema** tree and path-prefix scope rules registered by one **turn analytic**. One schema tree per analytic; scope is not baked into separate root shapes. Every turn analytic implements the pattern; an empty catalog is valid. Aggregated at the Core layer for discovery (future analytic MCP: describe tree, query JSONPath + scope).
+The self-describing **analytic export value schema** tree and path-prefix scope rules registered by one **turn analytic**. One schema tree per analytic; scope is not baked into separate root shapes. Every turn analytic implements the pattern; an empty catalog is valid. Aggregated at the Core layer for discovery (**MCP export query hatch**: summary or full catalog, then JSONPath query).
 _Avoid_: multiple scope-specific root schemas per analytic, OpenAPI per path (v1)
 
 **Concept-shim analytic**:

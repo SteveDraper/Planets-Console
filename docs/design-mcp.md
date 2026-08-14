@@ -69,9 +69,7 @@ v1 is read-only advisor information at human *analysis* parity -- not every SPA 
 
 **Out of this map's MCP:** operator diagnostics (request trees, solver telemetry, compute freeze); **login exchange**, passwords, and credential management (already [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md)).
 
-**Later, not never:** **load-all**; homeworld assertions/refresh; hull-mask edits; inference pause/recompute. Other collection-scan holes (minefields-in-disk, FC search, fuel, combat) stay holes under the fallback rule but are not v1 gates.
-
-**Not this section:** stream and trigger-vs-persisted compute ([How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319)).
+**Later, not never:** **load-all**; homeworld assertions/refresh; hull-mask edits; inference pause/recompute. Other collection-scan holes (minefields-in-disk, FC search, fuel, combat) stay holes under the fallback rule but are not v1 gates. Hatch query of incomplete/partial export trees with an explicit non-final indicator is later ([ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md)).
 
 ---
 
@@ -82,5 +80,17 @@ v1 is read-only advisor information at human *analysis* parity -- not every SPA 
 v1 declares **tools only** -- no MCP `resources`, no `prompts`. `server/discover` must not advertise capabilities we do not implement.
 
 - **MCP named gameplay tool**s are the advisor API. Names and arguments are the question the agent asks (wrapping Core), not 1:1 HTTP twins and not family mega-tools with a `kind` enum. Descriptions are written for an agent that already understands Planets.nu: when to use the tool, when to prefer it over **MCP TurnInfo fallback**.
-- The only generic hatch is the **MCP export query hatch** (JSONPath + scope over an **analytic export catalog**). The hatch **must** include an MCP **tool** that returns that catalog (value schema, path-prefix rules, ordering semantics) so the agent can form paths such as `$.solutions[0]`. Exact tool names, ensure, and streams: [How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319) -- not query-only.
+- The only generic hatch is the **MCP export query hatch** (JSONPath + scope over an **analytic export catalog**). Hatch tools, ensure, and no MCP streams: [ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md).
 - Exact named-tool list: after [Whether v1 MCP wraps only existing Core concepts or adds new query helpers](https://github.com/SteveDraper/Planets-Console/issues/321).
+
+---
+
+## Export query hatch
+
+[How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319). [ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md). Export Future MCP: [design-analytic-exports.md](design-analytic-exports.md).
+
+v1 analytic *results* on MCP are this hatch plus **MCP named gameplay tool**s -- not table/map GET twins, not **table stream**s. Same materializers and catalog metadata; no second path.
+
+- `list_analytic_exports` -- optional `analytic_id`; `detail=summary|full`. Omit id defaults to **MCP export catalog summary** for every analytic; named id defaults to full **analytic export catalog**. Login only.
+- `query_analytic_export` -- JSONPath + **shell context**; same result envelope as in-process. Does not admit new **analytic export ensure**. Materializes only persisted / ensure-final. Otherwise `unavailable` with `needs_ensure` or `in_progress` (plus existing reasons). Agent polls until `ok`.
+- `ensure_analytic_export` -- optional `dry_run` = **analytic export ensure probe**. Live call returns immediately `already_satisfied` or `accepted`. How admit talks to the **compute orchestrator**: [How this MCP product relates to orchestrator phase 3](https://github.com/SteveDraper/Planets-Console/issues/320). No MCP Tasks in v1.

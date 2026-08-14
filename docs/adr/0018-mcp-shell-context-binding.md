@@ -23,7 +23,7 @@ Game, turn, and **perspective** on MCP must stay per-call and stateless, matchin
 - Exact header string and argument names are implementation.
 - How the MCP client sets the login header (`mcp.json` vs in-app) remains the map's client connection story -- not this ADR.
 - **Viewpoint eligibility** of the named **perspective** is [ADR 0019](0019-viewpoint-eligibility-in-core.md).
-- The **MCP export query hatch** takes the same **shell context** arguments as other turn-scoped tools ([How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319)).
+- Hatch query and ensure take the same **shell context** arguments as other turn-scoped tools; list is login-only ([ADR 0020](0020-mcp-export-hatch-describe-query-ensure.md)).
 - Glossary: **shell context**, **MCP login identity** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md).
 
 Map: [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310). Ticket: [How MCP binds game, turn, and perspective](https://github.com/SteveDraper/Planets-Console/issues/318).

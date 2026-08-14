@@ -19,7 +19,7 @@ The first slice is incomplete without **MCP disk proximity**: ships, planets, an
 ## Consequences
 
 - First-slice contents (read-only analysis parity, existing concept HTTP, **turn-ensure** / **GameInfo** refresh, diagnostics never, mutations and **load-all** later) live in [design-mcp.md](../design-mcp.md), not this ADR.
-- Catalog shape is [ADR 0017](0017-mcp-catalog-named-tools-and-export-hatch.md) (named gameplay tools plus **MCP export query hatch**; tools only). Stream and trigger-vs-persisted compute remain [How analytic exports and live analytics appear on MCP](https://github.com/SteveDraper/Planets-Console/issues/319).
+- Catalog shape is [ADR 0017](0017-mcp-catalog-named-tools-and-export-hatch.md) (named gameplay tools plus **MCP export query hatch**; tools only). Hatch tools, ensure vs query, and no MCP streams: [ADR 0020](0020-mcp-export-hatch-describe-query-ensure.md).
 - Glossary: **MCP TurnInfo fallback**, **MCP disk proximity** in [CONTEXT.md](../../CONTEXT.md).
 
 Map: [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310). Ticket: [What human-parity means for the first MCP slice](https://github.com/SteveDraper/Planets-Console/issues/316).
