@@ -107,8 +107,9 @@ def ensure_evidence_floor_algorithm_current(
     """Rewrite+persist the baseline floor when ``evidenceAlgorithmVersion`` is stale.
 
     Sole owner of floor algorithm rewrites (export DAG skips ensuring turn 1 as
-    baseline). Clears sticky ownership before re-accumulate, then stamps the
-    current version. Returns True when a rewrite was persisted.
+    a refine node; new floors accumulate ownership inside baseline write).
+    Clears sticky ownership before re-accumulate, then stamps the current
+    version. Returns True when a rewrite was persisted.
     """
     state = services.persistence.get_game_state(services.game_id)
     if state is None:
