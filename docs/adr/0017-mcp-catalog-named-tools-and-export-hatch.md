@@ -18,8 +18,8 @@ v1 is a **hybrid**. Advisor questions are **MCP named gameplay tool**s: gameplay
 
 ## Consequences
 
-- Exact named-tool list: [Exact v1 named gameplay tool list](https://github.com/SteveDraper/Planets-Console/issues/324). Wrap vs new Core helpers: [ADR 0021](0021-mcp-v1-wrap-existing-gated-fills.md).
+- Exact named-tool list: [ADR 0022](0022-mcp-v1-named-tool-catalog.md) and [design-mcp.md](../design-mcp.md). Wrap vs new Core helpers: [ADR 0021](0021-mcp-v1-wrap-existing-gated-fills.md).
 - Hatch tool names, ensure vs persisted, and no MCP streams: [ADR 0020](0020-mcp-export-hatch-describe-query-ensure.md).
-- Glossary: **MCP named gameplay tool**, **MCP export query hatch** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md). Export Future MCP: [design-analytic-exports.md](../design-analytic-exports.md).
+- Glossary: **MCP named gameplay tool**, **MCP export query hatch**, **MCP shell tool** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md). Export Future MCP: [design-analytic-exports.md](../design-analytic-exports.md).
 
 Map: [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310). Ticket: [MCP catalog shape: named gameplay tools vs generic query vs resources](https://github.com/SteveDraper/Planets-Console/issues/317).

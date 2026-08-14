@@ -69,7 +69,7 @@ v1 is read-only advisor information at human *analysis* parity -- not every SPA 
 
 **Out of this map's MCP:** operator diagnostics (request trees, solver telemetry, compute freeze); **login exchange**, passwords, and credential management (already [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md)).
 
-**Later, not never:** **load-all**; homeworld assertions/refresh; hull-mask edits; inference pause/recompute. Other collection-scan holes (minefields-in-disk, FC search, fuel, combat, host-order) stay holes under the fallback rule and are not v1 Core work ([ADR 0021](adr/0021-mcp-v1-wrap-existing-gated-fills.md)). Hatch query of incomplete/partial export trees with an explicit non-final indicator is later ([ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md)).
+**Later, not never:** **load-all**; homeworld assertions/refresh; hull-mask edits; inference pause/recompute. Other collection-scan holes (minefields-in-disk, FC search, fuel, combat, host-order, planet reachability from an arbitrary map coordinate) stay holes under the fallback rule and are not v1 Core work ([ADR 0021](adr/0021-mcp-v1-wrap-existing-gated-fills.md), [ADR 0022](adr/0022-mcp-v1-named-tool-catalog.md)). Hatch query of incomplete/partial export trees with an explicit non-final indicator is later ([ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md)).
 
 ---
 
@@ -91,8 +91,60 @@ v1 is read-only advisor information at human *analysis* parity -- not every SPA 
 v1 declares **tools only** -- no MCP `resources`, no `prompts`. `server/discover` must not advertise capabilities we do not implement.
 
 - **MCP named gameplay tool**s are the advisor API. Names and arguments are the question the agent asks (wrapping Core), not 1:1 HTTP twins and not family mega-tools with a `kind` enum. Descriptions are written for an agent that already understands Planets.nu: when to use the tool, when to prefer it over **MCP TurnInfo fallback**.
+- **MCP shell tool**s are the same catalog, wrapping Core services rather than **game concept**s.
 - The only generic hatch is the **MCP export query hatch** (JSONPath + scope over an **analytic export catalog**). Hatch tools, ensure, and no MCP streams: [ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md).
-- Exact named-tool list: [Exact v1 named gameplay tool list](https://github.com/SteveDraper/Planets-Console/issues/324).
+- Exact named-tool list: [Exact v1 named gameplay tool list](https://github.com/SteveDraper/Planets-Console/issues/324) / [ADR 0022](adr/0022-mcp-v1-named-tool-catalog.md) (next section).
+
+---
+
+## v1 named tool list
+
+[Exact v1 named gameplay tool list](https://github.com/SteveDraper/Planets-Console/issues/324). [ADR 0022](adr/0022-mcp-v1-named-tool-catalog.md).
+
+Argument names for **shell context**: `game_id`, `turn`, `perspective` (1-based slot, or `0` for spectator). No defaults. Login is the **MCP login identity** header, not a tool argument ([ADR 0018](adr/0018-mcp-shell-context-binding.md)).
+
+**Scopes**
+
+- Login only: no shell-context args
+- Game: `game_id`
+- Game+turn: `game_id`, `turn`
+- Full **shell context**: `game_id`, `turn`, `perspective`
+
+Turn-scoped tools do not auto-ensure. Missing stored turn: `unavailable` / `needs_ensure` (same as hatch query). Ineligible **perspective**: **viewpoint eligibility** refusal ([ADR 0019](adr/0019-viewpoint-eligibility-in-core.md)).
+
+### MCP shell tools
+
+| Tool | Scope | Extra args | Wraps |
+|---|---|---|---|
+| `list_stored_games` | Login only | -- | `GameService.list_stored_games` |
+| `get_game_info` | Game | -- | `GameService.get_game_info` |
+| `refresh_game_info` | Game | -- | `GameService.refresh_game_info` |
+| `ensure_turn` | Full shell context | -- | `TurnLoadService.ensure_turn_loaded`. Returns `{ "status": "already_stored" \| "loaded" }` only -- never the **TurnInfo** body. Synchronous (waits for loadturn). |
+| `list_stored_perspectives` | Game+turn | -- | `TurnLoadService.list_stored_turn_perspectives` |
+
+### MCP named gameplay tools
+
+| Tool | Scope | Extra args | Wraps |
+|---|---|---|---|
+| `point_in_warp_well` | Full shell context | `planet_id`, `x`, `y`, `well_kind` (`normal`/`hyperjump`) | `coordinate_in_warp_well` |
+| `warp_well_cells` | Full shell context | `planet_id`, `well_kind` | `map_cell_indices_in_warp_well` |
+| `flare_endpoints` | Login only | `x`, `y`, `warp_speed`, `movement_kind` (`regular`/`gravitonic`) | `flare_points_for_warp` plus origin (map endpoints, not raw offsets) |
+| `sample_stellar_cartography` | Full shell context | `x`, `y` | `sample_at` |
+| `stellar_cartography_summary` | Full shell context | -- | `stellar_cartography_turn_summary` |
+| `disk_proximity` | Full shell context | `x`, `y`, `radius_ly`, optional `include` (`ships`/`planets`/`cartography`, repeatable; omit = all three) | **MCP disk proximity** (new Core helper). Hits: `kind`, `id`, `x`, `y`, plus radius when the feature is a disk. Cartography kinds on hits: `ion_storm`, `nebula`, `star_cluster`, `black_hole`, `wormhole`, `debris_disk`. Minefields are not in this result set. |
+| `hyperjump_landing` | Full shell context | `ship_id` | `ship_is_performing_hyperjump`, `hyperjump_landing_xy`. `{ "jumping": false, "reason": ... }` or `{ "jumping": true, "x", "y" }`. Landing is **before warp-well snap**. The tool `description` must state that explicitly and nudge the agent to consider well pull via `point_in_warp_well` / `warp_well_cells`. |
+| `distance_ly` | Login only | `x1`, `y1`, `x2`, `y2` | `nebula_visibility.distance_ly` |
+| `reachable_planets` | Full shell context | `from_planet_id`, `warp_speed`, `gravitonic_movement`, `flare_mode` (`off`/`include`/`only`), optional `flare_depth` (default 1) | **Connections engine** (`connection_routes_with_options`), then keep routes where `from_planet_id` is an endpoint. No illustrative routes. No point-origin / ship-location args (later Core fill). |
+| `get_ship` | Full shell context | `ship_id` | Named **TurnInfo** ship (whole entity) |
+| `get_planet` | Full shell context | `planet_id` | Named **TurnInfo** planet (whole entity) plus optional starbase adjunct (`starbase: object \| null`). Locate the base by planet id, not RST `starbase.id`. `buildingstarbase` stays on the planet. No standalone `get_starbase`. |
+| `get_minefield` | Full shell context | `minefield_id` | Named **TurnInfo** minefield |
+| `get_ion_storm` | Full shell context | `ion_storm_id` | Named **TurnInfo** ion storm |
+| `get_wormhole` | Full shell context | `wormhole_id` | Named **TurnInfo** wormhole |
+| `get_player` | Full shell context | `player_id` (`Player.id`, not **perspective**) | Named **TurnInfo** player; strip `email` and `savekey` |
+
+Fallback tools return the whole stored entity for that id in this **perspective**'s **TurnInfo**. Missing id: not found (absent from this RST, including fog). No list/search/filter tools.
+
+Hatch tools (`list_analytic_exports`, `query_analytic_export`, `ensure_analytic_export`) are [ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md), not this table.
 
 ---
 

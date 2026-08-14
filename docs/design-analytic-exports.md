@@ -518,7 +518,7 @@ See [design-military-score-build-inference-implementation.md](design-military-sc
 
 ## Future MCP
 
-Same materializers and catalog metadata. The MCP surface is a hybrid ([ADR 0017](adr/0017-mcp-catalog-named-tools-and-export-hatch.md)): **MCP named gameplay tool**s for distilled questions, plus this **MCP export query hatch** -- not a JSONPath over **TurnInfo**, not a named tool per export path.
+Same materializers and catalog metadata. The MCP surface is a hybrid ([ADR 0017](adr/0017-mcp-catalog-named-tools-and-export-hatch.md)): **MCP named gameplay tool**s and **MCP shell tool**s for distilled questions, plus this **MCP export query hatch** -- not a JSONPath over **TurnInfo**, not a named tool per export path. Exact v1 names: [ADR 0022](adr/0022-mcp-v1-named-tool-catalog.md).
 
 The hatch is three tools ([ADR 0020](adr/0020-mcp-export-hatch-describe-query-ensure.md)) -- not table/map GET twins, not **table stream**s, not a query that starts ensure:
 
