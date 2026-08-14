@@ -19,7 +19,7 @@ HOMEWORLD_BASELINE_ALGORITHM_VERSION = 1
 # origin-distance / single-SB rules that rewrite aggregates). Checked in
 # evidence_refined_through_shell so shell ensure re-runs the chain after deploys.
 # 0 on disk = pre-version / legacy aggregates.
-HOMEWORLD_EVIDENCE_ALGORITHM_VERSION = 4
+HOMEWORLD_EVIDENCE_ALGORITHM_VERSION = 5
 
 # Bump when layout-prior cost, caps, stand-in policy, tie-break, or default
 # solver identity changes (e.g. soft evidence family, anneal default). Post-derive/cull

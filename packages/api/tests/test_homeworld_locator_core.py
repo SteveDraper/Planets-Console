@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 
@@ -32,6 +33,14 @@ from api.analytics.homeworld_locator.exports import (
     ensure_homeworld_export,
     is_homeworld_export_ensure_satisfied,
 )
+from api.analytics.homeworld_locator.models import (
+    CONFIDENCE_DEFINITE,
+    PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP,
+)
+from api.analytics.homeworld_locator.ownership_projection import (
+    project_sector_owner_sets_with_location_pins,
+    unique_projected_owner_slot,
+)
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.serialization import homeworld_locator_game_state_from_json
 from api.analytics.homeworld_locator.types import (
@@ -44,10 +53,12 @@ from api.analytics.persistence_paths import (
     game_global_analytic_document_key,
     turn_scoped_analytic_document_key,
 )
-from api.analytics.turn_roster import iter_turn_players
+from api.analytics.turn_roster import iter_turn_players, race_id_by_owner_slot
 from api.concepts.homeworld_layout import (
+    HW_DISTRIBUTION_CIRCULAR,
     INACTIVE_REASON_NO_HOMEWORLD,
     INACTIVE_REASON_WANDERING_TRIBES,
+    MAP_SHAPE_ROUND,
     homeworld_locator_inactive_reason,
     homeworld_settings_fingerprint,
     is_homeworld_locator_available,
@@ -352,6 +363,90 @@ def test_baseline_ensure_writes_floor_not_shell_aggregate(persistence, sample_tu
     assert persistence.has_baseline_floor(628580, 1) is True
     # No copy-forward: shell turn 111 aggregate absent when only floor at 1 exists.
     assert persistence.get_evidence_aggregate(628580, 1, 111) is None
+
+
+def test_baseline_floor_pins_viewpoint_homeworld_ownership(persistence, sample_turn) -> None:
+    """Turn-1 floor refine must mint preferred-candidate ownership for the viewpoint HW.
+
+    Evidence refine is not a DAG node at the baseline turn, so overlay ``isPinned``
+    would otherwise stay false despite a definite slot-anchored homeworld.
+    """
+    center = (2000.0, 2000.0)
+    radius = 550.0
+    template = sample_turn.planets[0]
+    planets = []
+    for index in range(11):
+        angle = index * (2.0 * math.pi / 11)
+        is_hw = index == 0
+        planets.append(
+            replace(
+                template,
+                id=index + 1,
+                name=f"P{index + 1}",
+                x=int(round(center[0] + radius * math.cos(angle))),
+                y=int(round(center[1] + radius * math.sin(angle))),
+                ownerid=1 if is_hw else 0,
+                clans=25_000 if is_hw else 0,
+                temp=50 if is_hw else 0,
+                debrisdisk=0,
+            )
+        )
+    players = [
+        replace(sample_turn.player, id=slot, username=f"p{slot}", raceid=1) for slot in range(1, 12)
+    ]
+    starbase = replace(sample_turn.starbases[0], planetid=1)
+    turn_one = replace(
+        sample_turn,
+        settings=replace(
+            sample_turn.settings,
+            turn=1,
+            hwdistribution=HW_DISTRIBUTION_CIRCULAR,
+            mapshape=MAP_SHAPE_ROUND,
+            shiplimit=500,
+            endturn=100,
+            campaignmode=False,
+            homeworldhasstarbase=True,
+        ),
+        player=players[0],
+        players=players,
+        planets=planets,
+        ships=[],
+        starbases=[starbase],
+    )
+    services = _services(persistence, {1: turn_one})
+    result = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    assert result.recomputed is True
+    definite = [row for row in result.game_state.candidates if row.planet_id == 1]
+    assert len(definite) == 1
+    assert definite[0].confidence_tier == CONFIDENCE_DEFINITE
+    assert definite[0].perspective == 1
+
+    floor = result.floor_aggregate
+    preferred_slots = {
+        member.owner_slot
+        for _sector, members in floor.sector_owner_sets
+        for member in members
+        if any(
+            provenance.kind == PROVENANCE_PREFERRED_CANDIDATE_OWNERSHIP
+            and provenance.planet_id == 1
+            for provenance in member.provenances
+        )
+    }
+    assert preferred_slots == {1}
+
+    projected = project_sector_owner_sets_with_location_pins(
+        dict(floor.sector_owner_sets),
+        candidate_planet_ids_by_sector=[[1] if index == 0 else [] for index in range(11)],
+        location_definite_planet_ids=frozenset({1}),
+        perspective_by_planet_id={1: 1},
+        race_id_by_owner_slot=race_id_by_owner_slot(turn_one),
+    )
+    pinned = {
+        sector_index: unique_projected_owner_slot(projection)
+        for sector_index, projection in projected.items()
+        if unique_projected_owner_slot(projection) is not None
+    }
+    assert 1 in pinned.values()
 
 
 def test_baseline_degraded_when_turn_one_missing(persistence, sample_turn) -> None:

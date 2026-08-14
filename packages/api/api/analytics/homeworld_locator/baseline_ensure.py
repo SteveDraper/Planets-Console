@@ -20,6 +20,8 @@ from api.analytics.homeworld_locator.constants import (
 from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
 from api.analytics.homeworld_locator.evidence_refine import (
     apply_definite_keyed_candidate_culls,
+    candidate_planet_ids_from_records,
+    refine_homeworld_evidence_aggregate,
 )
 from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
 from api.analytics.homeworld_locator.evidence_refine_timing_history import record_baseline_report
@@ -68,6 +70,43 @@ def _starbase_planet_ids(turn: TurnInfo) -> set[int]:
 
 def _player_count(turn: TurnInfo) -> int:
     return len(players_by_id(turn))
+
+
+def _floor_aggregate_with_baseline_ownership(
+    services: HomeworldLocatorComputeServices,
+    *,
+    baseline_turn: int,
+    baseline_turn_info: TurnInfo,
+    candidates: tuple[HomeworldCandidateRecord, ...],
+) -> HomeworldEvidenceAggregate:
+    """Seed the baseline floor, then run one evidence refine on that same turn.
+
+    Refine is skipped when shell == baseline (the DAG does not ensure turn 1 as a
+    refine node). Ownership accumulate -- including preferred-candidate ownership
+    on the viewpoint definite HW -- must therefore run as part of floor write so
+    overlay ``isPinned`` can unique-resolve that slot on turn 1. Fleet
+    ``built_turn`` ages are not required here: T1 envelopes have zero travel
+    turns; later shell turns still refine with fleet via the DAG.
+    """
+    stub = HomeworldEvidenceAggregate(
+        turn=baseline_turn,
+        baseline_turn=baseline_turn,
+        location_provenances=baseline_profile_location_provenances(
+            baseline_turn=baseline_turn,
+            definite_planet_ids=tuple(
+                row.planet_id for row in candidates if row.confidence_tier == CONFIDENCE_DEFINITE
+            ),
+        ),
+        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+    )
+    return refine_homeworld_evidence_aggregate(
+        stub,
+        turn=baseline_turn_info,
+        candidates=candidates,
+        candidate_planet_ids_set=candidate_planet_ids_from_records(candidates),
+        planets_by_id={planet.id: planet for planet in baseline_turn_info.planets},
+        load_turn=services.load_turn,
+    ).aggregate
 
 
 def _durable_viewpoint_perspective(
@@ -154,6 +193,10 @@ def compute_homeworld_baseline(
     Orchestrator ``run_homeworld_baseline`` uses this so ``PersistencePolicy.persist``
     owns the write after epoch checks. Map/table/export call
     :func:`ensure_homeworld_baseline`, which computes then persists.
+
+    The floor is one evidence-refine step on the baseline turn (preferred-candidate
+    / nearby ownership, origin-distance, single-SB) so shell == baseline does not
+    skip ownership accumulate. See ``_floor_aggregate_with_baseline_ownership``.
     """
     total_t0 = time.perf_counter()
     settings_source = shell_turn if shell_turn is not None else None
@@ -252,16 +295,11 @@ def compute_homeworld_baseline(
             existing.asserted_planet_ownership if existing is not None else ()
         ),
     )
-    floor = HomeworldEvidenceAggregate(
-        turn=baseline_turn,
+    floor = _floor_aggregate_with_baseline_ownership(
+        services,
         baseline_turn=baseline_turn,
-        location_provenances=baseline_profile_location_provenances(
-            baseline_turn=baseline_turn,
-            definite_planet_ids=tuple(
-                row.planet_id for row in inferred if row.confidence_tier == CONFIDENCE_DEFINITE
-            ),
-        ),
-        evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+        baseline_turn_info=baseline_turn_info,
+        candidates=candidates,
     )
     record_baseline_report(
         build_baseline_report(
