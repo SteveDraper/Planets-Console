@@ -1,6 +1,6 @@
 # Design: Agent MCP surface
 
-**Status:** Wayfinding (decisions land here as map tickets resolve; not an implementation brief yet)  
+**Status:** Accepted v1 design (implementation not started)  
 **Map:** [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310)  
 **Spec:** [MCP 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)  
 **Glossary:** [CONTEXT.md](../CONTEXT.md)
@@ -190,3 +190,27 @@ v1 does not declare MCP protocol pagination (list operations only; `tools/call` 
 Hatch query dialect is Core's JSONPath subset (`$`, dotted names, `[index]`, `[*]`). No slices or filters. Top-K is a batched index list (`$.solutions[0]` .. `[K-1]`). After Core `ok`, the adapter enforces **MCP hatch result budget** (65536 UTF-8 bytes of the serialized success envelope). Over budget: `isError`, `reason: "result_too_large"`, `bytes`, `budget_bytes`, narrowing hint, zero path values -- not Core `unavailable`. Empty `paths` is invalid input. No separate max-path-count.
 
 Live hatch ensure does not wait. Descriptions tell the agent to `dry_run` first; the protocol does not enforce it. No extra timeout, threshold, or concurrent-root cap.
+
+---
+
+## Testing and contract
+
+[MCP testing and contract strategy](https://github.com/SteveDraper/Planets-Console/issues/328). [ADR 0025](adr/0025-mcp-testing-and-contract.md).
+
+v1 does not add OpenAPI for `/mcp`. The contract is SDK tool registration: `server/discover` plus `tools/list` input schemas. Tests lock the exact v1 name set (5 **MCP shell tool**s + 15 **MCP named gameplay tool**s + 3 hatch tools) and required input properties. Do not freeze free-text `description`s except ADR-mandated phrases (`hyperjump_landing` pre-well-snap nudge; ensure `dry_run` first). Hatch value trees stay Core **analytic export catalog** goldens.
+
+**Layers**
+
+- `packages/api` -- hatch-read contract (ensure-final materialize; `unavailable` with `needs_ensure` / `in_progress`); fixture alpha/beta gates; `ctx.query` still admits ensure. Concept math, including **MCP disk proximity**, stays here.
+- `packages/mcp_adapter` -- in-process tool handlers (not HTTP). Wrap mapping only. Catalog name/inputSchema lock. Thin equality of `query_analytic_export` to the Core hatch-read function (one fixture case plus **connections**). Adapter-only errors: `result_too_large`, `catalog_too_broad`, missing **MCP login identity**, missing **shell context**, **viewpoint eligibility** refuse.
+- `packages/server` -- thin Streamable HTTP smoke: `POST /mcp` `server/discover` is tools-only, root `session_manager` lifespan, Origin 403, login fail-closed. Not one HTTP test per tool.
+
+**Hatch parity**
+
+MCP `query_analytic_export` matches the Core hatch-read envelope when the scope is persisted / ensure-final -- same registry, same JSONPath, same `ok` / `value`. It does **not** equal `ctx.query` (that path admits ensure). When not final, MCP returns `needs_ensure` or `in_progress`; Core tests own that gate. Over **MCP hatch result budget** is an adapter error with zero path values, not Core `unavailable`. `ensure_analytic_export` `dry_run` matches **analytic export ensure probe**; live returns `already_satisfied` | `accepted` and does not wait.
+
+**Make targets** (when the package exists)
+
+- `test_mcp_adapter` -- `packages/mcp_adapter/tests`; wired into `test`, `ci`, and `ci_full`
+- `test_server` -- existing; HTTP smoke lives here
+- `lint` -- include `packages/mcp_adapter`
