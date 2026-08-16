@@ -22,7 +22,7 @@ A local MCP surface on the Planets Console process needs a Planets.nu identity w
 
 ## Consequences
 
-- The login name rides as an HTTP header, not a tool argument or `_meta` ([ADR 0018](0018-mcp-shell-context-binding.md)).
+- The login name rides as the HTTP header `X-Planets-Nu-Login`, not a tool argument or `_meta` ([ADR 0018](0018-mcp-shell-context-binding.md)). v1 Cursor packaging: [ADR 0023](0023-mcp-v1-client-connection.md).
 - **Viewpoint eligibility** is a Core service; the SPA consumes it via the BFF ([ADR 0019](0019-viewpoint-eligibility-in-core.md)).
 - Glossary: **MCP login identity**, **MCP visibility ceiling**, **viewpoint eligibility** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md).
 

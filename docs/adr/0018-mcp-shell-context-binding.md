@@ -20,8 +20,8 @@ Game, turn, and **perspective** on MCP must stay per-call and stateless, matchin
 
 ## Consequences
 
-- Exact header string and argument names are implementation.
-- How the MCP client sets the login header (`mcp.json` vs in-app) remains the map's client connection story -- not this ADR.
+- The login header name is `X-Planets-Nu-Login`. Tool argument names for **shell context** are `game_id`, `turn`, `perspective` ([ADR 0022](0022-mcp-v1-named-tool-catalog.md)).
+- How the MCP client sets the login header (v1 Cursor `mcp.json`) is [ADR 0023](0023-mcp-v1-client-connection.md).
 - **Viewpoint eligibility** of the named **perspective** is [ADR 0019](0019-viewpoint-eligibility-in-core.md).
 - Hatch query and ensure take the same **shell context** arguments as other turn-scoped tools; list is login-only ([ADR 0020](0020-mcp-export-hatch-describe-query-ensure.md)).
 - Glossary: **shell context**, **MCP login identity** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md).

@@ -31,7 +31,7 @@ Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 
 
 [How an MCP agent authenticates and which identity it acts as](https://github.com/SteveDraper/Planets-Console/issues/314). [ADR 0014](adr/0014-mcp-login-identity-and-visibility.md).
 
-- Each call names an **MCP login identity**. **Credential probe** fail-closed. No password on MCP. **Login exchange** stays on SPA/BFF.
+- Each call names an **MCP login identity** as the HTTP header `X-Planets-Nu-Login`. **Credential probe** fail-closed. No password on MCP. **Login exchange** stays on SPA/BFF. v1 Cursor packaging: [ADR 0023](adr/0023-mcp-v1-client-connection.md).
 - Auth is login identity only. **Viewpoint** is not an MCP auth binding. The client may switch login identity per call. No MCP session.
 - **MCP visibility ceiling** matches SPA **viewpoint eligibility** ([ADR 0019](adr/0019-viewpoint-eligibility-in-core.md)). Allowed **perspective**: that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Never another perspective's **TurnInfo** when eligibility would refuse that slot, never **account API key**s, never **compute diagnostics**. No **storage-only load** on MCP.
 
@@ -42,6 +42,27 @@ Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 
 - Split wire: **MCP login identity** is an HTTP header (client-pinned, still per request). Game id, turn, and **perspective** are tool arguments. Not `_meta`, not an MCP resource, no server memory of the selection.
 - Always explicit: turn-scoped tools require the full **shell context** triple; game-scoped tools require game id; catalog/list tools need login only. No "latest turn" or "login's slot" inference. Flat required fields, not a partial nested object.
 - The agent names **perspective** (1-based slot, or `0` for spectator), not a **viewpoint** name.
+
+## Client connection (v1)
+
+[How an MCP client connects in v1 (Cursor mcp.json vs in-app)](https://github.com/SteveDraper/Planets-Console/issues/326). [ADR 0023](adr/0023-mcp-v1-client-connection.md).
+
+v1 documents Cursor desktop/CLI as the reference client. Any spec-compliant Streamable HTTP client may hit `/mcp`. The console process must already be running (default bind `127.0.0.1:8000`). Cloud Agents are out of v1. Do not commit `.cursor/mcp.json`. Set `PLANETS_NU_LOGIN` in the environment, then copy into user `~/.cursor/mcp.json` or a local project file:
+
+```json
+{
+  "mcpServers": {
+    "planets-console": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "X-Planets-Nu-Login": "${env:PLANETS_NU_LOGIN}"
+      }
+    }
+  }
+}
+```
+
+A second identity is another server entry or a changed env var. v1 does not add CORS or a Vite Origin allowlist. An SPA-embedded advisor is a follow-on: [SPA-embedded advisor panel on the MCP surface](https://github.com/SteveDraper/Planets-Console/issues/329).
 
 ## Viewpoint eligibility
 
