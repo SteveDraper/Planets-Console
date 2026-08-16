@@ -175,6 +175,18 @@ Hatch tools (`list_analytic_exports`, `query_analytic_export`, `ensure_analytic_
 
 v1 analytic *results* on MCP are this hatch plus **MCP named gameplay tool**s -- not table/map GET twins, not **table stream**s. Same materializers and catalog metadata; no second path.
 
-- `list_analytic_exports` -- optional `analytic_id`; `detail=summary|full`. Omit id defaults to **MCP export catalog summary** for every analytic; named id defaults to full **analytic export catalog**. Login only.
-- `query_analytic_export` -- JSONPath + **shell context**; same result envelope as in-process. Does not admit new **analytic export ensure**. Materializes only persisted / ensure-final. Otherwise `unavailable` with `needs_ensure` or `in_progress` (plus existing reasons). Agent polls until `ok`.
-- `ensure_analytic_export` -- optional `dry_run` = **analytic export ensure probe**. Live call returns immediately `already_satisfied` or `accepted`. Admit is Core **analytic export ensure** in-process (orchestrator via [Export ensure + gap-fill migration](https://github.com/SteveDraper/Planets-Console/issues/204)); not a `ComputeRequest` tool and not blocked on [Compute orchestrator (phase 3): uniform BFF compute API](https://github.com/SteveDraper/Planets-Console/issues/203). [How this MCP product relates to orchestrator phase 3](https://github.com/SteveDraper/Planets-Console/issues/320). No MCP Tasks in v1.
+- `list_analytic_exports` -- optional `analytic_id`; `detail=summary|full`. Omit id defaults to **MCP export catalog summary** for every analytic; named id defaults to full **analytic export catalog**. Omit-id + `detail=full` is refused (`catalog_too_broad`). Login only.
+- `query_analytic_export` -- non-empty `paths` list (**batched export query**) + **shell context**; same result envelope as in-process. Does not admit new **analytic export ensure**. Materializes only persisted / ensure-final. Otherwise `unavailable` with `needs_ensure` or `in_progress` (plus existing reasons). Agent polls until `ok`. Successful payloads are capped by the **MCP hatch result budget**.
+- `ensure_analytic_export` -- optional `dry_run` = **analytic export ensure probe**. Live call returns immediately `already_satisfied` or `accepted`. Admit is Core **analytic export ensure** in-process at `background` (orchestrator via [Export ensure + gap-fill migration](https://github.com/SteveDraper/Planets-Console/issues/204)); not a waiter, not a `ComputeRequest` tool, and not blocked on [Compute orchestrator (phase 3): uniform BFF compute API](https://github.com/SteveDraper/Planets-Console/issues/203). [How this MCP product relates to orchestrator phase 3](https://github.com/SteveDraper/Planets-Console/issues/320). No MCP Tasks in v1.
+
+## Result size and query cost
+
+[MCP pagination, result size, and query-cost controls](https://github.com/SteveDraper/Planets-Console/issues/327). [ADR 0024](adr/0024-mcp-result-size-and-query-cost.md).
+
+v1 does not declare MCP protocol pagination (list operations only; `tools/call` is not paged).
+
+**MCP shell tool**s, **MCP named gameplay tool**s, and **MCP TurnInfo fallback** have no extra cap, pagination, or truncation. `ensure_turn` stays synchronous loadturn.
+
+Hatch query dialect is Core's JSONPath subset (`$`, dotted names, `[index]`, `[*]`). No slices or filters. Top-K is a batched index list (`$.solutions[0]` .. `[K-1]`). After Core `ok`, the adapter enforces **MCP hatch result budget** (65536 UTF-8 bytes of the serialized success envelope). Over budget: `isError`, `reason: "result_too_large"`, `bytes`, `budget_bytes`, narrowing hint, zero path values -- not Core `unavailable`. Empty `paths` is invalid input. No separate max-path-count.
+
+Live hatch ensure does not wait. Descriptions tell the agent to `dry_run` first; the protocol does not enforce it. No extra timeout, threshold, or concurrent-root cap.

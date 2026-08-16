@@ -20,7 +20,7 @@ v1 analytic *results* on MCP are this hatch plus **MCP named gameplay tool**s --
 ## Consequences
 
 - `UnavailableReason` gains `needs_ensure` and `in_progress` (Core-visible, one vocabulary -- not an MCP-only enum).
-- `list_analytic_exports` omit-id defaults to **MCP export catalog summary**; named id defaults to full catalog. Explicit `detail` overrides. Omit-id + full is allowed and large.
+- `list_analytic_exports` omit-id defaults to **MCP export catalog summary**; named id defaults to full catalog. Explicit `detail` overrides. Omit-id + full is refused ([ADR 0024](0024-mcp-result-size-and-query-cost.md)).
 - Query and ensure are turn-scoped (**shell context**); list is login-only ([ADR 0018](0018-mcp-shell-context-binding.md)).
 - Glossary: **MCP export query hatch**, **MCP export catalog summary** in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md). Export Future MCP: [design-analytic-exports.md](../design-analytic-exports.md).
 
