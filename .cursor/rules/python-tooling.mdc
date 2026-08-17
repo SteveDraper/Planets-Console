@@ -6,7 +6,7 @@ alwaysApply: false
 
 # Python Tooling Conventions
 
-These conventions apply across all Python packages (`api`, `bff`) and scripts.
+These conventions apply across all Python packages (`api`, `bff`, `mcp_adapter`, `server`) and scripts.
 
 ## Environment & Packaging (uv)
 
@@ -17,7 +17,7 @@ These conventions apply across all Python packages (`api`, `bff`) and scripts.
 ```toml
 # Root pyproject.toml
 [tool.uv.workspace]
-members = ["packages/api", "packages/bff"]
+members = ["packages/api", "packages/bff", "packages/mcp_adapter"]
 
 # packages/api/pyproject.toml
 [project]

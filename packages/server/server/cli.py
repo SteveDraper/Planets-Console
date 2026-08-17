@@ -26,7 +26,7 @@ def main(
         help=CONFIG_OPTION_HELP,
     ),
 ):
-    """Run the Planets Console server (API + BFF)."""
+    """Run the Planets Console server (API + BFF + MCP)."""
     if ctx.invoked_subcommand is not None:
         return
     root = load_config(override_specs=config if config else None)

@@ -17,7 +17,7 @@ cd Planets-Console
 uv sync
 ```
 
-This creates a virtual environment and installs the workspace (server, api, bff).
+This creates a virtual environment and installs the workspace (server, api, bff, mcp_adapter).
 
 ### 2. Install frontend
 
@@ -46,6 +46,7 @@ uv run serve
 - Core API: http://127.0.0.1:8000/api  
 - BFF (for the SPA): http://127.0.0.1:8000/bff  
 - BFF OpenAPI (for frontend codegen): http://127.0.0.1:8000/bff/openapi.json  
+- MCP (Streamable HTTP): http://127.0.0.1:8000/mcp -- Cursor `mcp.json` in [design-mcp.md](docs/design-mcp.md) (do not commit `.cursor/mcp.json`)  
 
 Options: `--host`, `--port`, `--reload` (e.g. `uv run serve --reload`).
 

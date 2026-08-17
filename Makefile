@@ -1,15 +1,15 @@
-.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe
+.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_mcp_adapter test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe
 
 # Use workspace venv (Python 3.14) and ensure dev deps (pytest, ruff) are installed.
 # `test` runs lint and unit tests (API fast suite; see `test_api_full` for solver/corpus integration).
 # `ci` also runs the full frontend `tsc -b` (see `typecheck_frontend`).
-test: lint test_bff test_api test_server test_scripts test_frontend
+test: lint test_bff test_api test_server test_mcp_adapter test_scripts test_frontend
 
 # Fast PR/iteration loop: lint, schema checks, typecheck, tests excluding @pytest.mark.slow API cases.
-ci: lint check_frontend_api_slices check_frontend_api_no_monolithic_schema typecheck_frontend test_bff test_api test_server test_scripts test_frontend
+ci: lint check_frontend_api_slices check_frontend_api_no_monolithic_schema typecheck_frontend test_bff test_api test_server test_mcp_adapter test_scripts test_frontend
 
 # Full validation including slow OR-Tools / inference-corpus integration tests (`test_api_full`).
-ci_full: lint check_frontend_api_slices check_frontend_api_no_monolithic_schema typecheck_frontend test_bff test_api_full test_server test_scripts test_frontend
+ci_full: lint check_frontend_api_slices check_frontend_api_no_monolithic_schema typecheck_frontend test_bff test_api_full test_server test_mcp_adapter test_scripts test_frontend
 
 # Regenerate checked-in artefacts from source (BFF OpenAPI -> frontend TypeScript types).
 generate: generate_frontend_api
@@ -34,8 +34,8 @@ typecheck_frontend:
 
 lint:
 	uv sync --extra dev
-	uv run ruff check packages/api packages/bff packages/server scripts
-	uv run ruff format --check packages/api packages/bff packages/server scripts
+	uv run ruff check packages/api packages/bff packages/server packages/mcp_adapter scripts
+	uv run ruff format --check packages/api packages/bff packages/server packages/mcp_adapter scripts
 
 test_bff:
 	uv sync --extra dev
@@ -51,7 +51,11 @@ test_api_full:
 
 test_server:
 	uv sync --extra dev
-	PYTHONPATH=packages/server:packages/api:packages/bff uv run python -m pytest packages/server/tests
+	PYTHONPATH=packages/server:packages/api:packages/bff:packages/mcp_adapter uv run python -m pytest packages/server/tests
+
+test_mcp_adapter:
+	uv sync --extra dev
+	PYTHONPATH=packages/mcp_adapter:packages/api uv run python -m pytest packages/mcp_adapter/tests
 
 test_scripts:
 	uv sync --extra dev

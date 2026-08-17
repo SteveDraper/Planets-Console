@@ -1,6 +1,6 @@
 # Design: Agent MCP surface
 
-**Status:** Accepted v1 design (implementation not started)  
+**Status:** Accepted v1 design (tracer shipped: package, `/mcp` mount, login, `list_stored_games`)  
 **Map:** [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310)  
 **Spec:** [MCP 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)  
 **Glossary:** [CONTEXT.md](../CONTEXT.md)
@@ -47,7 +47,7 @@ Streamable HTTP on the existing root FastAPI process via `mcp` 2.0.0. OAuth 2.1 
 
 [How an MCP client connects in v1 (Cursor mcp.json vs in-app)](https://github.com/SteveDraper/Planets-Console/issues/326). [ADR 0023](adr/0023-mcp-v1-client-connection.md).
 
-v1 documents Cursor desktop/CLI as the reference client. Any spec-compliant Streamable HTTP client may hit `/mcp`. The console process must already be running (default bind `127.0.0.1:8000`). Cloud Agents are out of v1. Do not commit `.cursor/mcp.json`. Set `PLANETS_NU_LOGIN` in the environment, then copy into user `~/.cursor/mcp.json` or a local project file:
+v1 documents Cursor desktop/CLI as the reference client. Any spec-compliant Streamable HTTP client may hit `/mcp` (with or without a trailing slash; the process rewrites `/mcp` to `/mcp/` so clients that do not follow POST redirects still reach Streamable HTTP). The console process must already be running (default bind `127.0.0.1:8000`). Cloud Agents are out of v1. Do not commit `.cursor/mcp.json`. Set `PLANETS_NU_LOGIN` in the environment, then copy into user `~/.cursor/mcp.json` or a local project file:
 
 ```json
 {
@@ -209,7 +209,7 @@ v1 does not add OpenAPI for `/mcp`. The contract is SDK tool registration: `serv
 
 MCP `query_analytic_export` matches the Core hatch-read envelope when the scope is persisted / ensure-final -- same registry, same JSONPath, same `ok` / `value`. It does **not** equal `ctx.query` (that path admits ensure). When not final, MCP returns `needs_ensure` or `in_progress`; Core tests own that gate. Over **MCP hatch result budget** is an adapter error with zero path values, not Core `unavailable`. `ensure_analytic_export` `dry_run` matches **analytic export ensure probe**; live returns `already_satisfied` | `accepted` and does not wait.
 
-**Make targets** (when the package exists)
+**Make targets**
 
 - `test_mcp_adapter` -- `packages/mcp_adapter/tests`; wired into `test`, `ci`, and `ci_full`
 - `test_server` -- existing; HTTP smoke lives here
