@@ -26,10 +26,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
+from api.concepts.stellar_cartography.debris_disks import debris_disk_seed_radius
 from api.concepts.stellar_cartography.nebula_visibility import distance_ly
 from api.concepts.stellar_cartography.star_clusters import halo_radius_ly
+from api.concepts.stellar_cartography.wormholes import wormhole_has_known_target
 from api.models.game import TurnInfo
-from api.models.planet import Planet
 from api.models.space import Star, Wormhole
 
 INCLUDE_SHIPS = "ships"
@@ -196,7 +197,7 @@ def _cartography_hits(
             hits.append(hit)
     hits.extend(_wormhole_hits(turn.wormholes, qx, qy, radius_ly))
     for planet in turn.planets:
-        disk_radius = _debris_disk_radius(planet)
+        disk_radius = debris_disk_seed_radius(planet)
         if disk_radius is None:
             continue
         hit = _disk_hit(
@@ -211,17 +212,6 @@ def _star_cluster_disk_radius(star: Star) -> float:
     return max(float(star.radius), halo_radius_ly(star.mass))
 
 
-def _debris_disk_radius(planet: Planet) -> int | None:
-    """Seed planets carry border radius in ``debrisdisk`` (values > 1)."""
-    if planet.debrisdisk <= 1:
-        return None
-    return planet.debrisdisk
-
-
-def _wormhole_has_known_target(wormhole: Wormhole) -> bool:
-    return not (wormhole.targetx == 0 and wormhole.targety == 0)
-
-
 def _wormhole_hits(
     wormholes: list[Wormhole], qx: float, qy: float, radius_ly: float
 ) -> list[DiskProximityHit]:
@@ -231,7 +221,7 @@ def _wormhole_hits(
     for wormhole in wormholes:
         points = [(wormhole.x, wormhole.y)]
         target = (wormhole.targetx, wormhole.targety)
-        if _wormhole_has_known_target(wormhole) and target not in entrance_cells:
+        if wormhole_has_known_target(wormhole) and target not in entrance_cells:
             points.append(target)
         for px, py in points:
             key = (wormhole.id, px, py)
