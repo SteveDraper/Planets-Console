@@ -34,5 +34,6 @@ Planets Console needs Planets.nu upstream access without re-entering a password 
 - Shell startup gains probe → silent restore → unfinished game info refresh; game switch refresh behavior for unfinished games stays aligned.
 - Operators who copy `.data` to a new host must expect credential probe failure and a fresh **login exchange** (unless they also move a configured secret and matching derivation inputs intentionally).
 - Glossary terms live in [CONTEXT.md](../../CONTEXT.md): **session credentials**, **silent login restore**, **credential probe**, **login exchange**, **name-only identity switch**, **account API key**, **machine-bound obfuscation**, **lazy credential migrate**, **account API key invalidation**, **account API key drop**, **log out**, **game info refresh**.
+- MCP uses name-only **credential probe** and never accepts a password; **login exchange** remains SPA/BFF. See [ADR 0014](0014-mcp-login-identity-and-visibility.md).
 
 See also: [design-account-api-key-and-silent-login.md](../design-account-api-key-and-silent-login.md) (implementation brief), [ADR 0001](0001-breakpoint-file-storage.md), [design-issue-12-login-identity.md](../design-issue-12-login-identity.md), [design-frontend-and-backend-state.md](../design-frontend-and-backend-state.md).

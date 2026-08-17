@@ -14,6 +14,10 @@ _Avoid_: API layer (ambiguous with BFF), backend (when meaning the whole Python 
 The Backend-for-Frontend mounted at `/bff/...`. Aggregates and reshapes Core responses into SPA-oriented contracts. The frontend calls only the BFF, never Core routes directly.
 _Avoid_: API gateway, middleware layer
 
+**MCP adapter**:
+The agent-facing adapter mounted at `/mcp` on the root FastAPI app. A sibling of the **BFF**, not a layer inside Core or the BFF. Exposes game state and analytic output to agents; calls the **Core REST API** in-process. Owns no domain logic of its own. Not a **compute request** API -- hatch ensure admits via Core **analytic export ensure**. See [ADR 0015](docs/adr/0015-mcp-adapter-package.md) and [ADR 0005](docs/adr/0005-compute-orchestrator.md).
+_Avoid_: analytic MCP inside Core, BFF HTTP export-query routes, standalone MCP process, MCP compute API, ComputeRequest as an MCP tool or resource
+
 **BFF contract codegen slice**:
 A domain-scoped generated TypeScript module produced from part of the BFF OpenAPI document. Slices exist so **regeneration** after a route change rewrites only the contract types for that domain, not the entire SPA API surface in one file.
 _Avoid_: schema chunk (implementation), splitting by line count
@@ -27,8 +31,8 @@ The SPA chrome -- header bar, analytics selector, and main display area -- plus 
 _Avoid_: layout, chrome (without "shell" context)
 
 **Shell context**:
-The working set that scopes turn-scoped work: selected **game id**, **turn**, and **perspective** (resolved **viewpoint**). Held in client state; each HTTP request is handled without server-side session memory of the user's selection.
-_Avoid_: session context (ambiguous with login credentials), query scope (implementation term)
+The working set that scopes turn-scoped work: selected **game id**, **turn**, and **perspective** (resolved **viewpoint**, including spectator slot `0`). The caller holds it (SPA client state, or explicit MCP tool arguments); the server has no session memory of the selection.
+_Avoid_: session context (ambiguous with login credentials), query scope (implementation term), MCP context resource, inferred latest turn, inferred login slot, viewpoint name as the MCP argument
 
 ### Login and shell controls
 
@@ -65,12 +69,52 @@ At-rest protection for an **account API key** using AES-GCM (via the `cryptograp
 _Avoid_: password encryption, full disk encryption, KMS, sealed secrets, home-rolled XOR obfuscation, hostname/MAC fingerprinting, Fernet for new account-key wraps
 
 **Login exchange**:
-Submitting a login name and password to the server so it obtains a Planets.nu **account API key** and stores it (**machine-bound obfuscated**). When a password is provided, the server always calls Planets.nu login and replaces any existing key for that name. The SPA’s primary path for writing keys; operational Planets.nu-backed calls from the SPA send username only after exchange or **name-only identity switch**. Non-SPA clients may still send a password on operational endpoints, which writes/replaces a key under the same rules. Distinct from **credential probe** and from name-only identity switch.
+Submitting a login name and password to the server so it obtains a Planets.nu **account API key** and stores it (**machine-bound obfuscated**). When a password is provided, the server always calls Planets.nu login and replaces any existing key for that name. The SPA's primary path for writing keys; operational Planets.nu-backed calls from the SPA send username only after exchange or **name-only identity switch**. Non-SPA HTTP clients of BFF/Core operational endpoints may still send a password, which writes/replaces a key under the same rules. **MCP** never accepts a password -- see **MCP login identity**. Distinct from **credential probe** and from name-only identity switch.
 _Avoid_: server login session, sign-in cookie
 
 **Name-only identity switch**:
 Adopting a login name into **session credentials** without a password after a successful **credential probe** for that name (e.g. from the login modal with an empty password, or **silent login restore**). Fails closed to requiring a **login exchange** when the probe fails.
 _Avoid_: passwordless Planets.nu login, anonymous access
+
+**MCP login identity**:
+The **login identity** an MCP call acts as -- a planets.nu account name sent as the HTTP header `X-Planets-Nu-Login` on the call and proven by **credential probe** (fail closed). Not a tool argument, not `_meta`, not **session credentials**, not a protocol session, and not **viewpoint** / **shell context**. The MCP client may send a different header on the next call; the server does not remember it. MCP never accepts a password; **login exchange** stays on the SPA/BFF path. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md), [ADR 0018](docs/adr/0018-mcp-shell-context-binding.md), and [ADR 0023](docs/adr/0023-mcp-v1-client-connection.md).
+_Avoid_: MCP session, MCP user, MCP token, session credentials (when meaning the MCP caller), login as a tool argument, login in `_meta`, Authorization Bearer (the value is a name, not a token)
+
+**Viewpoint eligibility**:
+Which **perspective** slots a **login identity** may read for a given game. A Core domain rule. In-progress: the login's own slot if they are a player, otherwise spectator `0` only (XOR, not a free choice). Finished: every player slot `1..N`, not spectator `0`. The SPA consumes this set via the BFF (login-keyed; refetch on identity switch) and applies chrome; it does not keep a second predicate. Distinct from **storage-only load** eligibility (SPA-only; MCP has no such path), from dropdown chrome (display names, default selection, disabled rows), and from load-all's expected-perspective set (what to bulk-fetch). See [ADR 0019](docs/adr/0019-viewpoint-eligibility-in-core.md).
+_Avoid_: deriveShellViewpoints (SPA function), dropdown disabled flags, load-all expected perspectives, storage-only as a Core input, in-progress player also spectating, spectator on a finished game, TypeScript port of the Core predicate
+
+**MCP visibility ceiling**:
+The cap on what an **MCP login identity** may read: the same **viewpoint eligibility** as the SPA for that login, and within an allowed **perspective** only that slot's **TurnInfo**, **GameInfo**, and analytics derived from them. Not another perspective's **TurnInfo** when eligibility would refuse that slot, not **account API key** material, not **compute diagnostics**. See [ADR 0014](docs/adr/0014-mcp-login-identity-and-visibility.md) and [ADR 0019](docs/adr/0019-viewpoint-eligibility-in-core.md).
+_Avoid_: storage-wide dump, cross-perspective union, MCP session ACL
+
+**MCP TurnInfo fallback**:
+Stored **TurnInfo** on MCP as a last-resort read of a named object's fields when no distilled query covers them. Not a search, filter, geometry, or collection-compute interface; those uses are capability holes. See [ADR 0016](docs/adr/0016-mcp-turninfo-fallback-and-disk-proximity.md).
+_Avoid_: dump the turn, raw RST as the advisor API, LLM distance over turn JSON
+
+**MCP disk proximity**:
+A distilled query: ships, planets, and cartography features within a light-year radius of a map coordinate. Required for the first MCP slice so agents do not scan **TurnInfo** for nearness; the only new Core helper in that slice. See [ADR 0016](docs/adr/0016-mcp-turninfo-fallback-and-disk-proximity.md) and [ADR 0021](docs/adr/0021-mcp-v1-wrap-existing-gated-fills.md).
+_Avoid_: LLM geometry over turn JSON, planets-only spatial index as the product query
+
+**MCP shell tool**:
+An MCP tool that wraps Core shell/session services -- stored-game list, **GameInfo**, **turn-ensure**, stored perspectives -- not a **game concept**. Sibling of **MCP named gameplay tool** on the same tools catalog. See [ADR 0022](docs/adr/0022-mcp-v1-named-tool-catalog.md).
+_Avoid_: calling list-games a gameplay question, treating shell ops as hatch, login as a tool argument
+
+**MCP named gameplay tool**:
+An MCP tool whose name and arguments are the gameplay or concept question the agent asks, wrapping a Core **game concept** in-process -- not a 1:1 BFF or Core HTTP twin, not an **MCP shell tool**. **MCP TurnInfo fallback** is also a named tool, not a generic scan. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md), [ADR 0021](docs/adr/0021-mcp-v1-wrap-existing-gated-fills.md), and [ADR 0022](docs/adr/0022-mcp-v1-named-tool-catalog.md).
+_Avoid_: BFF route as the tool name, family mega-tool with a kind enum, JSONPath over TurnInfo, resource URI as the query, one named tool per **analytic export path**, new Core math without a slice gate, listing stored games as a gameplay tool
+
+**MCP export query hatch**:
+The generic MCP analytic-result surface beside **MCP named gameplay tool**s: a describe tool (optional `analytic_id`; **MCP export catalog summary** or full **analytic export catalog**), a query tool (**batched export query** `paths` + **shell context**, no new **analytic export ensure**), and an ensure tool (optional `dry_run` = **analytic export ensure probe**) that admits work via Core **analytic export ensure** in-process at `background` (orchestrator DAG, not a **compute request** tool). Hatch query materializes only when the scope is persisted / ensure-final; otherwise `unavailable` with `needs_ensure` (not admitted) or `in_progress` (admitted, not yet final). The agent polls query until `ok`. Successful query payloads are capped by the **MCP hatch result budget**. Not a JSONPath over **TurnInfo** or concept dumps, not **turn analytic wire contract**s or **table stream**s. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md), [ADR 0020](docs/adr/0020-mcp-export-hatch-describe-query-ensure.md), [ADR 0024](docs/adr/0024-mcp-result-size-and-query-cost.md), and [ADR 0025](docs/adr/0025-mcp-testing-and-contract.md).
+_Avoid_: mega-query, JSONPath over TurnInfo, one named tool per export path, schema only in the query tool description, catalog as an MCP resource, table/map GET as MCP tools, MCP table stream, query that starts ensure, treating in-flight attach as a final hatch result, MCP compute API, ComputeRequest as an MCP tool, slice or filter JSONPath, hatch ensure at `interactive_ensure`
+
+**MCP export catalog summary**:
+Browse payload from the hatch describe tool: `analytic_id`, catalog `name`, root export `description` (or empty-catalog), and whether the catalog is empty. Not the **analytic export value schema** tree, path-prefix rules, ordering semantics, or **analytic export ensure dependency** list. Omit `analytic_id` defaults to summary for every analytic; named id defaults to full catalog. Omit-id + `detail=full` is refused (`catalog_too_broad`). See [ADR 0024](docs/adr/0024-mcp-result-size-and-query-cost.md).
+_Avoid_: SPA `supports_table` / `supports_map` on MCP, full schema as the explore list, omit-id full catalog dump
+
+**MCP hatch result budget**:
+Adapter-enforced cap on the serialized successful `query_analytic_export` payload (v1: 65536 UTF-8 bytes). Exceeding it is an MCP tool error with no path values, not Core `unavailable` and not a truncated tree. In-process `ctx.query` is uncapped. See [ADR 0024](docs/adr/0024-mcp-result-size-and-query-cost.md).
+_Avoid_: Core UnavailableReason for oversize, JSON truncation, protocol pagination of tools/call, byte cap on named/shell/fallback tools, tool-argument budget override
 
 **Log out**:
 Clearing client **session credentials** and the remembered last login name so **silent login restore** does not run on the next page load. By default the server **account API key** remains stored. The user may optionally also perform **account API key drop** for the current name.
@@ -81,7 +125,7 @@ User-requested deletion of this server’s stored **account API key** material f
 _Avoid_: remote password reset, Planets.nu account deletion
 
 **Viewpoint**:
-The player whose position is analyzed and displayed. Resolved to a **perspective** slot; defaults from **login identity** and may be overridden in the header when the game allows.
+The player whose position is analyzed and displayed. Resolved to a **perspective** slot inside **viewpoint eligibility**; defaults from **login identity** and may be overridden in the header only to another eligible slot.
 _Avoid_: perspective (when meaning the UI choice -- use viewpoint), player slot (use perspective)
 
 **Game info refresh**:
@@ -127,8 +171,8 @@ Domain model for the **`rst`** object from planets.nu **Load Turn Data** -- plan
 _Avoid_: turn blob (informal), RST (use TurnInfo in project prose; `rst` is the upstream field name)
 
 **Perspective**:
-A **1-based player slot number** in a game (`1` .. `11`). Used in storage paths and Core routes (`games/{gameId}/{perspective}/turns/{turn}`). Stable for a given player for the life of the game.
-_Avoid_: player id (ambiguous with in-game entity ids), viewpoint (the UI-facing player choice)
+A player slot in a game: `1` .. `11` for participants, or `0` for spectator. Used in storage paths and Core routes (`games/{gameId}/{perspective}/turns/{turn}`). Participant slots are stable for the life of the game. Spectator `0` is readable only when **viewpoint eligibility** allows it (live game, login not a player).
+_Avoid_: player id (ambiguous with in-game entity ids), viewpoint (the UI-facing player choice), pseudo-viewpoint (SPA implementation name)
 
 **Player**:
 A participant entity in **GameInfo** or **TurnInfo** (the `Player` dataclass) -- username, race, resources, and related fields. Identified by in-payload ids and names; located in the game by **perspective** slot, not by those ids alone.
@@ -201,7 +245,7 @@ A queryable surface one **turn analytic** exposes as a single **analytic export 
 _Avoid_: analytic API, internal getter, wire payload reuse, flat scalar export per field
 
 **Analytic export catalog**:
-The self-describing **analytic export value schema** tree and path-prefix scope rules registered by one **turn analytic**. One schema tree per analytic; scope is not baked into separate root shapes. Every turn analytic implements the pattern; an empty catalog is valid. Aggregated at the Core layer for discovery (future analytic MCP: describe tree, query JSONPath + scope).
+The self-describing **analytic export value schema** tree and path-prefix scope rules registered by one **turn analytic**. One schema tree per analytic; scope is not baked into separate root shapes. Every turn analytic implements the pattern; an empty catalog is valid. Aggregated at the Core layer for discovery (**MCP export query hatch**: summary or full catalog, then JSONPath query).
 _Avoid_: multiple scope-specific root schemas per analytic, OpenAPI per path (v1)
 
 **Concept-shim analytic**:
@@ -209,7 +253,7 @@ A **turn analytic** whose primary job is to expose **game concept** results as *
 _Avoid_: fake analytic, concept wrapper module (when meaning the registered turn analytic)
 
 **Analytic query context**:
-The in-process Core facility passed into **turn analytic** computation through which one analytic requests **analytic exports** from another. Owns scope validation (game, turn, **perspective**, optional **Player**), per-request memoization, **analytic export ensure**, **analytic export ensure probe**, and cycle detection. `query(...)` runs ensure then materialize; `probe(...)` walks declared export dependencies and reports missing steps without starting expensive compute. v1: export queries run only through this context during Core compute -- not nested HTTP export-query routes. A future analytic MCP reuses the same export handler implementations with an HTTP/JSON adapter. The **compute orchestrator** does not own a long-lived **analytic query context**; callers supply per-**compute request** orchestration needs (see **compute orchestrator** -- orchestration bundle on the node). Full query-context memoization remains a caller/session concern, not the process-wide scheduler's bound state.
+The in-process Core facility passed into **turn analytic** computation through which one analytic requests **analytic exports** from another. Owns scope validation (game, turn, **perspective**, optional **Player**), per-request memoization, **analytic export ensure**, **analytic export ensure probe**, and cycle detection. `query(...)` runs ensure then materialize; `probe(...)` walks declared export dependencies and reports missing steps without starting expensive compute. v1: export queries run only through this context during Core compute -- not nested HTTP export-query routes. The **MCP adapter** reuses the same export handler implementations in-process (hatch query / ensure), not an HTTP adapter. The **compute orchestrator** does not own a long-lived **analytic query context**; callers supply per-**compute request** orchestration needs (see **compute orchestrator** -- orchestration bundle on the node). Full query-context memoization remains a caller/session concern, not the process-wide scheduler's bound state.
 _Avoid_: export microservice, cross-analytic REST (v1); binding one **analytic query context** for the lifetime of the **compute orchestrator**
 
 **Analytic export ensure**:
@@ -805,8 +849,8 @@ Canonical identity for one cacheable orchestrator work unit: `analytic_id`, `gam
 _Avoid_: using nullable axes alone without WILDCARD semantics; duplicating connection options in memo keys outside declared parameter_fields
 
 **Compute orchestrator**:
-Core API unified execution layer: one process-wide scheduler owning the dependency DAG from `ENSURE_DEPENDENCIES`, singleflight (`attach_inflight`), declarative step backends (`inline`, `thread`, `interpreter`, `process`), global priority pool, job wire with explicit dependency outputs, and epoch-checked persist coordination. Analytics own persistence policy hooks. Duplicate work for the same **compute scope** is deduped only by in-orchestrator singleflight -- not by a separate process-wide scope lease across multiple orchestrator bindings. When a higher-priority **compute request** attaches to an in-flight node (for example `stream_attached` joining `background` warm), the node's priority band may adopt upward under the same not-yet-executing rule the former scope lease used. Callers submit **compute request**s; orchestration-plane work (wire build, ensure/materialize side effects, `invalidation_generation`, `persist`) uses a per-node retained **orchestration bundle** from the submitting leader -- analytic export service injections and ensure-memo ownership -- not a long-lived bound **analytic query context** and not into parallel compute workers. The bundle outlives the submitting stream session: stream teardown unregisters listeners and gates only; in-flight **analytic compute node**s keep their bundle until terminal. Table-stream adapters attach via process-wide observer registration on the singleton (scoped filters in the listener), not by owning a per-stream orchestrator instance. Perspective-visible turn loading is keyed by `(game_id, perspective)` / shell, not by which caller submitted; the orchestration-plane turn cache is process-wide and keyed by `(game_id, perspective, turn)`. Fleet ledger persist notifications correlate to in-DAG completion via **compute scope** and materialization/generation identity, not `AnalyticQueryContext` object identity. A request may name an entry `step_kind` so one registration profile serves multiple callers (e.g. scores `materialize` for export ensure, `tier_solve` for inference stream). By default duplicate submissions reuse terminal (`complete`/`failed`) node outcomes; `force_fresh=True` supersedes terminal nodes and re-plans the DAG without breaking singleflight for in-flight work. Repeatable step kinds (scores `tier_solve`) re-queue the same step until the result wire signals terminal completion; `step_index` counts within-node executions for pool fairness. Each step returns a **compute step outcome** on the result wire: `continue` (re-queue same step), `persist` (invoke analytic `persist` then complete the node), or `complete` (terminal node completion without `persist`). Analytics own what `persist` writes and how readers gate on terminal quality (e.g. fleet `provenance.is_final`, scores persistable statuses only). North-star uniform compute API for ensure, streams, table/map compute, BFF, and MCP. [design-compute-orchestrator.md](docs/design-compute-orchestrator.md), [ADR 0005](docs/adr/0005-compute-orchestrator.md).
-_Avoid_: per-analytic worker schedulers as the platform model; one orchestrator instance per stream / **analytic query context**; process-wide scope lease / `parked` cross-binding claims once a single DAG owns singleflight; `ctx.query()` inside parallel workers; orchestrator-owned persistence schemas; assuming every submission runs from profile step 0 when callers need a later step_kind; completing a node after one repeatable step when the ladder is unfinished; always calling `persist` on every pool step completion; holding the orchestrator lock across `pool.submit`, job-wire builders / inline execution, or `PersistencePolicy.persist` (deadlocks with pool→diagnostics controller and with inference scheduler→orchestrator); stamping fleet persist notifications with `id(AnalyticQueryContext)` as causal origin
+Core API unified execution layer: one process-wide scheduler owning the dependency DAG from `ENSURE_DEPENDENCIES`, singleflight (`attach_inflight`), declarative step backends (`inline`, `thread`, `interpreter`, `process`), global priority pool, job wire with explicit dependency outputs, and epoch-checked persist coordination. Analytics own persistence policy hooks. Duplicate work for the same **compute scope** is deduped only by in-orchestrator singleflight -- not by a separate process-wide scope lease across multiple orchestrator bindings. When a higher-priority **compute request** attaches to an in-flight node (for example `stream_attached` joining `background` warm), the node's priority band may adopt upward under the same not-yet-executing rule the former scope lease used. Callers submit **compute request**s; orchestration-plane work (wire build, ensure/materialize side effects, `invalidation_generation`, `persist`) uses a per-node retained **orchestration bundle** from the submitting leader -- analytic export service injections and ensure-memo ownership -- not a long-lived bound **analytic query context** and not into parallel compute workers. The bundle outlives the submitting stream session: stream teardown unregisters listeners and gates only; in-flight **analytic compute node**s keep their bundle until terminal. Table-stream adapters attach via process-wide observer registration on the singleton (scoped filters in the listener), not by owning a per-stream orchestrator instance. Perspective-visible turn loading is keyed by `(game_id, perspective)` / shell, not by which caller submitted; the orchestration-plane turn cache is process-wide and keyed by `(game_id, perspective, turn)`. Fleet ledger persist notifications correlate to in-DAG completion via **compute scope** and materialization/generation identity, not `AnalyticQueryContext` object identity. A request may name an entry `step_kind` so one registration profile serves multiple callers (e.g. scores `materialize` for export ensure, `tier_solve` for inference stream). By default duplicate submissions reuse terminal (`complete`/`failed`) node outcomes; `force_fresh=True` supersedes terminal nodes and re-plans the DAG without breaking singleflight for in-flight work. Repeatable step kinds (scores `tier_solve`) re-queue the same step until the result wire signals terminal completion; `step_index` counts within-node executions for pool fairness. Each step returns a **compute step outcome** on the result wire: `continue` (re-queue same step), `persist` (invoke analytic `persist` then complete the node), or `complete` (terminal node completion without `persist`). Analytics own what `persist` writes and how readers gate on terminal quality (e.g. fleet `provenance.is_final`, scores persistable statuses only). North star: every Core compute caller (export ensure, streams, table/map compute, later BFF HTTP, **MCP** hatch ensure) submits through this orchestrator. Phase 3 is BFF HTTP **compute request** transport; MCP never exposes that surface. [design-compute-orchestrator.md](docs/design-compute-orchestrator.md), [ADR 0005](docs/adr/0005-compute-orchestrator.md).
+_Avoid_: per-analytic worker schedulers as the platform model; MCP compute API; ComputeRequest as an MCP tool; one orchestrator instance per stream / **analytic query context**; process-wide scope lease / `parked` cross-binding claims once a single DAG owns singleflight; `ctx.query()` inside parallel workers; orchestrator-owned persistence schemas; assuming every submission runs from profile step 0 when callers need a later step_kind; completing a node after one repeatable step when the ladder is unfinished; always calling `persist` on every pool step completion; holding the orchestrator lock across `pool.submit`, job-wire builders / inline execution, or `PersistencePolicy.persist` (deadlocks with pool→diagnostics controller and with inference scheduler→orchestrator); stamping fleet persist notifications with `id(AnalyticQueryContext)` as causal origin
 
 **Compute step**:
 One schedulable pool unit inside a **compute node** (e.g. one **inference search tier** execution for scores, fleet one-turn materialization leg). A **compute step continuation** is the next pool submission for the same node after the prior step returns (e.g. scores tier *n+1*). For repeatable step kinds such as scores `tier_solve`, the orchestrator re-queues the same `step_kind` until the result wire signals terminal completion; `step_index` counts executions within the node (0 = tier-1, greater = continuations) for pool fairness. Backend declared on `ComputeStepSpec`; not hardcoded in orchestrator.
@@ -1110,7 +1154,7 @@ Use **homeworld planet** in Console prose and UI for map inference. Do not say "
 
 **Player vs perspective vs viewpoint vs homeworld owner**:
 - **Player** -- the domain entity (name, race, scores) inside **GameInfo** / **TurnInfo**.
-- **Perspective** -- the 1-based **slot number** used in paths and Core routes (`…/3/turns/111`) for whose **TurnInfo** is stored/read.
+- **Perspective** -- the **slot number** used in paths and Core routes (`…/3/turns/111`) for whose **TurnInfo** is stored/read (`1`..`11` for participants, `0` for spectator).
 - **Viewpoint** -- which **Player** the shell is showing, resolved to a perspective.
 - **Homeworld owner** -- which **Player**/slot a **homeworld candidate** or **homeworld sector** is attributed to (whose HW it is). Same slot id space as **perspective**, different meaning.
 
@@ -1131,7 +1175,7 @@ For Console **Visibility analytic** geometry, nebula modulation for planet visib
 **Expert:** A **turn analytic** -- game id, turn, and **perspective** from **shell context**. The SPA must wait for **turn ensure** so **TurnInfo** is in storage before any analytic GET runs.
 
 **Dev:** The header says viewpoint "Alice" but storage path uses `3`. Which is which?  
-**Expert:** **Viewpoint** is the player name shown in the UI. **Perspective** is her 1-based slot (`3`). Core routes and storage paths always use the slot; the shell resolves name ↔ slot from **GameInfo** after refresh.
+**Expert:** **Viewpoint** is the player name shown in the UI. **Perspective** is her slot (`3`, or `0` for spectator). Core routes and storage paths always use the slot; the shell resolves name ↔ slot from **GameInfo** after refresh, inside **viewpoint eligibility**.
 
 **Dev:** Where does turn 111 for game 628580 live on disk?  
 **Expert:** Logical path `games/628580/1/turns/111` -- a **breakpoint** match -- so one JSON **document** with the whole **TurnInfo**. Settings under `games/628580/info/settings` share the same file as `games/628580/info` because there is no deeper breakpoint.
@@ -1146,7 +1190,7 @@ For Console **Visibility analytic** geometry, nebula modulation for planet visib
 **Expert:** No. The SPA talks only to the **BFF**. Core owns **turn analytics**; the shell never bypasses that layer.
 
 **Dev:** Game info lists a Player with `id: 42`. Is that perspective 42?  
-**Expert:** No. **Player** ids come from the planets.nu payload. **Perspective** is the slot index (`1`..`11`) in path segments like `games/628580/3/turns/111`. Match name to slot via **GameInfo** player order, not via `Player.id`.
+**Expert:** No. **Player** ids come from the planets.nu payload. **Perspective** is the slot index (`1`..`11`, or `0` for spectator) in path segments like `games/628580/3/turns/111`. Match name to slot via **GameInfo** player order, not via `Player.id`.
 
 **Dev:** Turn ensure failed -- where should the message go?  
 **Expert:** The **shell error bar**, not inline on the header control. Include which BFF endpoint failed so it is actionable.
