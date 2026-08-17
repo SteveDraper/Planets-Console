@@ -201,13 +201,13 @@ v1 does not add OpenAPI for `/mcp`. The contract is SDK tool registration: `serv
 
 **Layers**
 
-- `packages/api` -- hatch-read contract (ensure-final materialize; `unavailable` with `needs_ensure` / `in_progress`); fixture alpha/beta gates; `ctx.query` still admits ensure. Concept math, including **MCP disk proximity**, stays here.
-- `packages/mcp_adapter` -- in-process tool handlers (not HTTP). Wrap mapping only. Catalog name/inputSchema lock. Thin equality of `query_analytic_export` to the Core hatch-read function (one fixture case plus **connections**). Adapter-only errors: `result_too_large`, `catalog_too_broad`, missing **MCP login identity**, missing **shell context**, **viewpoint eligibility** refuse.
+- `packages/api` -- **analytic export hatch-read** (`AnalyticQueryContext.hatch_read`: ensure-final materialize; `unavailable` with `needs_ensure` / `in_progress`); fixture alpha/beta gates; `ctx.query` still admits ensure. Concept math, including **MCP disk proximity**, stays here.
+- `packages/mcp_adapter` -- in-process tool handlers (not HTTP). Wrap mapping only. Catalog name/inputSchema lock. Thin equality of `query_analytic_export` to `AnalyticQueryContext.hatch_read` (one fixture case plus **connections**). Adapter-only errors: `result_too_large`, `catalog_too_broad`, missing **MCP login identity**, missing **shell context**, **viewpoint eligibility** refuse.
 - `packages/server` -- thin Streamable HTTP smoke: `POST /mcp` `server/discover` is tools-only, root `session_manager` lifespan, Origin 403, login fail-closed. Not one HTTP test per tool.
 
 **Hatch parity**
 
-MCP `query_analytic_export` matches the Core hatch-read envelope when the scope is persisted / ensure-final -- same registry, same JSONPath, same `ok` / `value`. It does **not** equal `ctx.query` (that path admits ensure). When not final, MCP returns `needs_ensure` or `in_progress`; Core tests own that gate. Over **MCP hatch result budget** is an adapter error with zero path values, not Core `unavailable`. `ensure_analytic_export` `dry_run` matches **analytic export ensure probe**; live returns `already_satisfied` | `accepted` and does not wait.
+MCP `query_analytic_export` matches `AnalyticQueryContext.hatch_read` when the scope is persisted / ensure-final -- same registry, same JSONPath, same `ok` / `value`. It does **not** equal `ctx.query` (that path admits ensure). When not final, MCP returns `needs_ensure` or `in_progress`; Core tests own that gate. Over **MCP hatch result budget** is an adapter error with zero path values, not Core `unavailable`. `ensure_analytic_export` `dry_run` matches **analytic export ensure probe**; live returns `already_satisfied` | `accepted` and does not wait.
 
 **Make targets**
 

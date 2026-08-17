@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 from api.analytics.export_dependency_walk import (
     DependencyWalkResult,
+    is_export_scope_ensure_satisfied,
     walk_dependency_tree,
 )
 from api.analytics.export_errors import ExportCycleDetectedError
@@ -215,15 +216,47 @@ class AnalyticQueryContext:
         self._resolution_stack.append(resolution_key)
         try:
             self._ensure_query_root(analytic_id, scope, walk_result)
-            tree = self._materialize_tree(analytic_id, scope, catalog)
-            path_results = {
-                path: self._resolve_path_result(catalog, scope, tree, path) for path in paths
-            }
-            result = ExportQueryResult(status="ok", paths=path_results)
-            self._memo[resolution_key] = result
-            return result
+            return self._ok_path_result(analytic_id, scope, catalog, paths, resolution_key)
         finally:
             self._resolution_stack.pop()
+
+    def hatch_read(
+        self,
+        analytic_id: str,
+        paths: list[str] | tuple[str, ...],
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None = None,
+    ) -> ExportQueryResult:
+        """Materialize an export query only when the scope is persisted / ensure-final.
+
+        Does not admit analytic export ensure. Missing work is ``needs_ensure``;
+        admitted but not-yet-final work is ``in_progress``. Same envelope as
+        :meth:`query` when the scope is already final.
+        """
+        normalized_paths = tuple(sorted(paths))
+        prep = self._prepare_export_request(analytic_id, scope_overrides)
+        if not isinstance(prep, PreparedExportRequest):
+            return self._unavailable(prep)
+
+        scope = prep.scope
+        catalog = prep.catalog
+        unavailable = self._scope_unavailable_reason(catalog, scope, normalized_paths)
+        if unavailable is not None:
+            return self._unavailable(unavailable)
+
+        if not is_export_scope_ensure_satisfied(self, analytic_id, scope, catalog):
+            if self._export_scope_in_progress(analytic_id, scope, catalog):
+                return self._unavailable("in_progress")
+            return self._unavailable("needs_ensure")
+
+        resolution_key = ResolutionKey(
+            analytic_id=analytic_id,
+            scope=scope,
+            paths=normalized_paths,
+        )
+        cached = self._memo.get(resolution_key)
+        if cached is not None and cached.status == "ok":
+            return cached
+        return self._ok_path_result(analytic_id, scope, catalog, paths, resolution_key)
 
     def _plan_ensure_walk(
         self,
@@ -395,6 +428,52 @@ class AnalyticQueryContext:
                 continue
             if catalog.ensure_export(self, scope):
                 self.mark_scope_ensured(analytic_id, scope)
+
+    def _ok_path_result(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog,
+        paths: list[str] | tuple[str, ...],
+        resolution_key: ResolutionKey,
+    ) -> ExportQueryResult:
+        tree = self._materialize_tree(analytic_id, scope, catalog)
+        path_results = {
+            path: self._resolve_path_result(catalog, scope, tree, path) for path in paths
+        }
+        result = ExportQueryResult(status="ok", paths=path_results)
+        self._memo[resolution_key] = result
+        return result
+
+    def _export_scope_in_progress(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog,
+    ) -> bool:
+        """True when ensure work is admitted for ``scope`` but not yet ensure-final."""
+        if catalog.is_in_progress is not None:
+            return catalog.is_in_progress(self, scope)
+        from api.compute.export_ensure import analytic_has_compute_registration
+
+        if not analytic_has_compute_registration(analytic_id):
+            return False
+        from api.compute.registry import COMPUTE_REGISTRY
+        from api.compute.runtime import get_compute_orchestrator
+        from api.compute.scope import normalize_export_scope_to_compute_scope
+
+        registration = COMPUTE_REGISTRY.get(analytic_id)
+        if registration is None:
+            return False
+        try:
+            compute_scope = normalize_export_scope_to_compute_scope(
+                scope,
+                analytic_id=analytic_id,
+                scope_key_spec=registration.scope_key_spec,
+            )
+        except ValueError:
+            return False
+        return get_compute_orchestrator().has_nonterminal_scope_work(compute_scope)
 
     def _materialize_tree(
         self,
