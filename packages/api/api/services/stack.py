@@ -113,3 +113,19 @@ def build_default_service_stack() -> ServiceStack:
     from api.storage import get_storage
 
     return build_service_stack(get_storage())
+
+
+def build_game_credential_services(
+    storage: StorageBackend,
+) -> tuple[GameService, CredentialService]:
+    """CredentialService and GameService for ``storage`` (stored-game listing and login probe)."""
+    credentials = CredentialService(storage)
+    games = GameService(storage, credentials)
+    return games, credentials
+
+
+def build_default_game_credential_services() -> tuple[GameService, CredentialService]:
+    """CredentialService and GameService for the active process storage backend."""
+    from api.storage import get_storage
+
+    return build_game_credential_services(get_storage())

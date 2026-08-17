@@ -5,7 +5,6 @@ from typing import Annotated, TypedDict
 
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
-from api.services.stack import build_default_service_stack
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context, Resolve
 
@@ -45,31 +44,19 @@ def _advertise_tools_only(mcp: MCPServer) -> None:
 
 def build_mcp_server(
     *,
-    game_service: GameService | None = None,
+    game_service: GameService,
     credential_service: CredentialService | None = None,
     resolve_login: Callable[[Context], str] | None = None,
 ) -> MCPServer:
     """Build an MCPServer with the tracer catalog (list_stored_games only)."""
-    need_default_stack = game_service is None or (
-        credential_service is None and resolve_login is None
-    )
-    if need_default_stack:
-        stack = build_default_service_stack()
-        if game_service is None:
-            game_service = stack.games
-        if credential_service is None:
-            credential_service = stack.credentials
-
-    login_resolver = resolve_login
-    if login_resolver is None:
+    if resolve_login is None:
         if credential_service is None:
             raise TypeError("credential_service is required when resolve_login is omitted")
 
         def login_resolver(ctx: Context) -> str:
             return require_login_identity(ctx.headers, credential_service.probe)
-
-    if game_service is None:
-        raise TypeError("game_service is required")
+    else:
+        login_resolver = resolve_login
 
     mcp = MCPServer("Planets Console MCP")
     _register_list_stored_games(mcp, game_service, login_resolver)
