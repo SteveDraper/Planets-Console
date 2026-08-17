@@ -55,5 +55,5 @@ app = typer.Typer()
 @app.command()
 def serve(config: str = typer.Option(None, help="Path to config file")):
     cfg = load_config(config)
-    uvicorn.run("server.app:app", host=cfg.host, port=cfg.port)
+    uvicorn.run("server.app:create_app", host=cfg.host, port=cfg.port, factory=True)
 ```

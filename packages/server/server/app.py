@@ -121,6 +121,3 @@ def create_app() -> FastAPI:
                 return FileResponse(str(index))
 
     return root
-
-
-app = create_app()

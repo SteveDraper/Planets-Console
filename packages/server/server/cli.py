@@ -33,10 +33,11 @@ def main(
     api_config.set_config(root.api)
     bff_config.set_config(root.bff)
     uvicorn.run(
-        "server.app:app",
+        "server.app:create_app",
         host=root.server.host,
         port=root.server.port,
         reload=reload,
+        factory=True,
     )
 
 

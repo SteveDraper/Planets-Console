@@ -46,6 +46,8 @@ def test_serve_calls_load_config_with_config_args():
     assert "override_specs" in call_kw
     assert call_kw["override_specs"] == ["server.port=9000"]
     mock_uvicorn.assert_called_once()
+    assert mock_uvicorn.call_args[0][0] == "server.app:create_app"
+    assert mock_uvicorn.call_args[1]["factory"] is True
     assert mock_uvicorn.call_args[1]["port"] == 8000  # from fake_root
 
 
@@ -60,8 +62,11 @@ def test_serve_passes_loaded_host_port_to_uvicorn():
         patch("uvicorn.run") as mock_uvicorn,
     ):
         runner.invoke(app, [])
+    assert mock_uvicorn.call_args[0][0] == "server.app:create_app"
     assert mock_uvicorn.call_args[1]["host"] == "0.0.0.0"
     assert mock_uvicorn.call_args[1]["port"] == 9000
+    assert mock_uvicorn.call_args[1]["reload"] is False
+    assert mock_uvicorn.call_args[1]["factory"] is True
 
 
 def test_serve_config_subcommand_help():
