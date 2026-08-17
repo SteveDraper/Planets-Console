@@ -143,7 +143,7 @@ describe('useShellContext', () => {
     })
   })
 
-  it('sets turnBlockedNoLogin when scope exists without login or storage-only path', () => {
+  it('fails closed without login when not storage-only', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     useSessionStore.setState({ name: '', password: '' })
     useShellStore.setState({
@@ -164,8 +164,10 @@ describe('useShellContext', () => {
       wrapper: createWrapper(client),
     })
 
-    expect(result.current.analyticScope).not.toBeNull()
-    expect(result.current.turnBlockedNoLogin).toBe(true)
+    expect(result.current.analyticScope).toBeNull()
+    expect(result.current.selectedViewpointOrdinal).toBeNull()
+    expect(result.current.shellViewpoints.every((row) => row.disabled)).toBe(true)
+    expect(result.current.turnBlockedNoLogin).toBe(false)
     expect(result.current.turnEnsureEnabled).toBe(false)
   })
 

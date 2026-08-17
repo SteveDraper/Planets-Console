@@ -244,7 +244,6 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       if (
         !isViewpointChangeAllowed(
           ordinal,
-          gameInfoContext,
           loginName,
           storageOnlyLoad,
           storageAvailablePerspectives,
@@ -256,7 +255,6 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       setPerspectiveOverrideOrdinal(ordinal)
     },
     [
-      gameInfoContext,
       loginName,
       setPerspectiveOverrideOrdinal,
       storageOnlyLoad,
