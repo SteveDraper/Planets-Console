@@ -445,36 +445,6 @@ class AnalyticQueryContext:
         self._memo[resolution_key] = result
         return result
 
-    def _export_scope_in_progress(
-        self,
-        analytic_id: str,
-        scope: ExportScope,
-        catalog: AnalyticExportCatalog,
-    ) -> bool:
-        """True when ensure work is admitted for ``scope`` but not yet ensure-final."""
-        if catalog.is_in_progress is not None:
-            return catalog.is_in_progress(self, scope)
-        from api.compute.export_ensure import analytic_has_compute_registration
-
-        if not analytic_has_compute_registration(analytic_id):
-            return False
-        from api.compute.registry import COMPUTE_REGISTRY
-        from api.compute.runtime import get_compute_orchestrator
-        from api.compute.scope import normalize_export_scope_to_compute_scope
-
-        registration = COMPUTE_REGISTRY.get(analytic_id)
-        if registration is None:
-            return False
-        try:
-            compute_scope = normalize_export_scope_to_compute_scope(
-                scope,
-                analytic_id=analytic_id,
-                scope_key_spec=registration.scope_key_spec,
-            )
-        except ValueError:
-            return False
-        return get_compute_orchestrator().has_nonterminal_scope_work(compute_scope)
-
     def _materialize_tree(
         self,
         analytic_id: str,

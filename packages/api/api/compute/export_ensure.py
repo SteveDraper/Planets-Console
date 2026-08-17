@@ -72,6 +72,20 @@ def export_scope_is_ensure_final(
     return catalog.is_persisted(ctx, scope)
 
 
+def export_scope_has_nonterminal_work(analytic_id: str, scope: ExportScope) -> bool:
+    """True when the compute orchestrator holds nonterminal work for ``scope``."""
+    from api.compute.runtime import get_compute_orchestrator
+
+    try:
+        resolved = _registered_compute_scope(analytic_id, scope)
+    except ValueError:
+        return False
+    if resolved is None:
+        return False
+    _, compute_scope = resolved
+    return get_compute_orchestrator().has_nonterminal_scope_work(compute_scope)
+
+
 def classify_hatch_read_scope(
     ctx: AnalyticQueryContext,
     analytic_id: str,
@@ -81,16 +95,18 @@ def classify_hatch_read_scope(
     """Classify hatch-read readiness with one predicate order.
 
     Ensure-final materializes as ``ok``. Otherwise admitted-not-terminal work
-    (admit-skip, catalog ``is_in_progress``, or orchestrator nonterminal) is
+    (catalog ``is_in_progress``, admit-skip, or orchestrator nonterminal) is
     ``in_progress``; missing work is ``needs_ensure``.
     """
     from api.analytics.export_dependency_walk import is_export_scope_ensure_satisfied
 
     if export_scope_is_ensure_final(ctx, analytic_id, scope, catalog):
         return "final"
+    if catalog.is_in_progress is not None and catalog.is_in_progress(ctx, scope):
+        return "in_progress"
     if is_export_scope_ensure_satisfied(ctx, analytic_id, scope, catalog):
         return "in_progress"
-    if ctx._export_scope_in_progress(analytic_id, scope, catalog):
+    if export_scope_has_nonterminal_work(analytic_id, scope):
         return "in_progress"
     return "needs_ensure"
 
