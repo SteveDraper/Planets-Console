@@ -6,6 +6,7 @@ from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.concepts.stellar_cartography.black_holes import ergosphere_outer_radius
+from api.concepts.stellar_cartography.debris_disks import debris_disk_seed_radius
 from api.concepts.stellar_cartography.layers import (
     LAYER_BLACK_HOLES,
     LAYER_DEBRIS_DISKS,
@@ -18,7 +19,9 @@ from api.concepts.stellar_cartography.star_clusters import (
     star_cluster_layer,
     stars_grouped_by_name,
 )
+from api.concepts.stellar_cartography.wormholes import wormhole_has_known_target
 from api.models.game import TurnInfo
+from api.models.planet import Planet
 from api.models.space import IonStorm, Wormhole
 
 ANALYTIC_ID = "stellar-cartography"
@@ -53,10 +56,6 @@ def _ion_storm_overlay(storm: IonStorm) -> dict:
     }
 
 
-def _wormhole_has_known_target(wormhole: Wormhole) -> bool:
-    return not (wormhole.targetx == 0 and wormhole.targety == 0)
-
-
 def _find_reverse_wormhole(
     wormhole: Wormhole, by_entrance: dict[tuple[int, int, int, int], Wormhole]
 ) -> Wormhole | None:
@@ -80,7 +79,7 @@ def _wormhole_nodes_and_edges(wormholes: list[Wormhole]) -> tuple[list[dict], li
             }
         )
 
-        if not _wormhole_has_known_target(wormhole):
+        if not wormhole_has_known_target(wormhole):
             continue
 
         partner = _find_reverse_wormhole(wormhole, by_entrance)
@@ -125,16 +124,16 @@ def _wormhole_nodes_and_edges(wormholes: list[Wormhole]) -> tuple[list[dict], li
     return nodes, edges
 
 
-def _debris_disk_overlay(planet) -> dict | None:
-    """Disk seed planets carry border radius in ``debrisdisk`` (values > 1)."""
-    if planet.debrisdisk <= 1:
+def _debris_disk_overlay(planet: Planet) -> dict | None:
+    radius = debris_disk_seed_radius(planet)
+    if radius is None:
         return None
     return {
         "layer": LAYER_DEBRIS_DISKS,
         "id": f"dd-{planet.id}",
         "x": planet.x,
         "y": planet.y,
-        "radius": planet.debrisdisk,
+        "radius": radius,
         "name": planet.name,
         "planetId": planet.id,
     }
@@ -201,7 +200,9 @@ def compute_stellar_cartography_map(ctx: AnalyticComputeContext) -> dict:
     wormhole_nodes, wormhole_edges = _wormhole_nodes_and_edges(turn.wormholes)
 
     meta = {
-        "debrisDisks": sum(1 for planet in turn.planets if planet.debrisdisk > 1),
+        "debrisDisks": sum(
+            1 for planet in turn.planets if debris_disk_seed_radius(planet) is not None
+        ),
         "nebulae": len(turn.nebulas),
         "ionStorms": len(turn.ionstorms),
         "nuIonStorms": turn.settings.nuionstorms,
