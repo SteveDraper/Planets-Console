@@ -221,3 +221,57 @@ def test_hatch_read_compute_in_flight_is_in_progress(sample_turn, persistence):
 
     assert result.status == "unavailable"
     assert result.reason == "in_progress"
+
+
+def test_hatch_read_scores_scheduler_held_row_is_in_progress(sample_turn):
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.exports import EXPORT_CATALOG
+    from api.compute.export_ensure import export_scope_is_ensure_final
+
+    from tests.scores_exports_helpers import first_player_id as scores_player_id
+    from tests.scores_exports_helpers import schedule_row_with_ladder, scores_query_context
+
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    player_id = scores_player_id(sample_turn)
+    schedule_row_with_ladder(
+        scheduler,
+        sample_turn,
+        player_id,
+        merged_solutions=[],
+    )
+    ctx = scores_query_context(sample_turn, scheduler=scheduler)
+    scope = ExportScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=sample_turn.settings.turn,
+        player_id=player_id,
+    )
+    paths = ["$.meta.searchStatus"]
+
+    assert EXPORT_CATALOG.is_ensure_satisfied is not None
+    assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
+    assert export_scope_is_ensure_final(ctx, "scores", scope, EXPORT_CATALOG) is False
+
+    with patch.object(
+        export_ensure_module,
+        "ensure_export_scope_via_orchestrator",
+        side_effect=AssertionError("hatch_read must not submit ensure"),
+    ):
+        hatch = ctx.hatch_read("scores", paths, {"player_id": player_id})
+
+    assert hatch.status == "unavailable"
+    assert hatch.reason == "in_progress"
+
+    queried = ctx.query(
+        "scores",
+        paths,
+        {"player_id": player_id},
+        force_inline_ensure=True,
+    )
+    assert queried.status == "ok"
+    assert queried.paths["$.meta.searchStatus"].value == "in_progress"
+    assert hatch != queried

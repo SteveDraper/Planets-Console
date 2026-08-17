@@ -8,7 +8,6 @@ from typing import Any, TypeVar
 
 from api.analytics.export_dependency_walk import (
     DependencyWalkResult,
-    is_export_scope_ensure_satisfied,
     walk_dependency_tree,
 )
 from api.analytics.export_errors import ExportCycleDetectedError
@@ -243,10 +242,11 @@ class AnalyticQueryContext:
         if unavailable is not None:
             return self._unavailable(unavailable)
 
-        if not is_export_scope_ensure_satisfied(self, analytic_id, scope, catalog):
-            if self._export_scope_in_progress(analytic_id, scope, catalog):
-                return self._unavailable("in_progress")
-            return self._unavailable("needs_ensure")
+        from api.compute.export_ensure import classify_hatch_read_scope
+
+        classification = classify_hatch_read_scope(self, analytic_id, scope, catalog)
+        if classification != "final":
+            return self._unavailable(classification)
 
         resolution_key = ResolutionKey(
             analytic_id=analytic_id,
