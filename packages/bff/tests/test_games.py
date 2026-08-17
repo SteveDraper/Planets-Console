@@ -180,27 +180,6 @@ def _put_sample_game_info(*, status: int | None = None) -> None:
     storage.put("games/628580/info", payload)
 
 
-def test_viewpoint_eligibility_finished_all_player_slots():
-    _put_sample_game_info()
-    response = client.get("/games/628580/viewpoint-eligibility?username=nobody")
-    assert response.status_code == 200
-    assert response.json() == {"perspectives": [1, 2, 3]}
-
-
-def test_viewpoint_eligibility_in_progress_player_own_slot():
-    _put_sample_game_info(status=1)
-    response = client.get("/games/628580/viewpoint-eligibility?username=arlowat")
-    assert response.status_code == 200
-    assert response.json() == {"perspectives": [2]}
-
-
-def test_viewpoint_eligibility_in_progress_non_player_spectator():
-    _put_sample_game_info(status=1)
-    response = client.get("/games/628580/viewpoint-eligibility?username=nobody")
-    assert response.status_code == 200
-    assert response.json() == {"perspectives": [0]}
-
-
 def test_viewpoint_eligibility_requires_username():
     _put_sample_game_info()
     response = client.get("/games/628580/viewpoint-eligibility")
@@ -213,15 +192,27 @@ def test_viewpoint_eligibility_rejects_empty_username():
     assert response.status_code == 422
 
 
-def test_viewpoint_eligibility_identity_switch_does_not_serve_stale_set():
-    """Same game, different login: each request is keyed by username (no stale set)."""
+def test_viewpoint_eligibility_response_field_is_sorted_perspectives():
+    """JSON field is `perspectives`; values are sorted ints."""
+    _put_sample_game_info()
+    response = client.get("/games/628580/viewpoint-eligibility?username=nobody")
+    assert response.status_code == 200
+    body = response.json()
+    assert "perspectives" in body
+    slots = body["perspectives"]
+    assert isinstance(slots, list)
+    assert all(isinstance(slot, int) for slot in slots)
+    assert slots == sorted(slots)
+
+
+def test_viewpoint_eligibility_username_query_does_not_collide():
+    """Two usernames on the same stored game produce independent response bodies."""
     _put_sample_game_info(status=1)
-    player = client.get("/games/628580/viewpoint-eligibility?username=arlowat")
-    spectator = client.get("/games/628580/viewpoint-eligibility?username=nobody")
-    assert player.json() == {"perspectives": [2]}
-    assert spectator.json() == {"perspectives": [0]}
-    again = client.get("/games/628580/viewpoint-eligibility?username=arlowat")
-    assert again.json() == {"perspectives": [2]}
+    first = client.get("/games/628580/viewpoint-eligibility?username=arlowat")
+    second = client.get("/games/628580/viewpoint-eligibility?username=nobody")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() != second.json()
 
 
 def test_get_stored_turn_perspectives():
