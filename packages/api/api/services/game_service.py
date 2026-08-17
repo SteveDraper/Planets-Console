@@ -49,15 +49,25 @@ class GameService:
         return info.game.status == GameStatus.FINISHED
 
     @staticmethod
-    def perspective_for_username(info: GameInfo, username: str, game_id: int) -> int:
-        """1-based perspective slot for a player username; raises if not in the game."""
+    def perspective_for_username_or_none(info: GameInfo, username: str) -> int | None:
+        """1-based perspective slot for a player username, or None when not in the game."""
         needle = username.strip().lower()
         if not needle:
-            raise ValidationError("username is required to resolve the player perspective.")
+            return None
         for index, player in enumerate(info.players):
             if player.username.strip().lower() == needle:
                 return index + 1
-        raise ValidationError(f"Login {username!r} is not a player in game {game_id}.")
+        return None
+
+    @staticmethod
+    def perspective_for_username(info: GameInfo, username: str, game_id: int) -> int:
+        """1-based perspective slot for a player username; raises if not in the game."""
+        if not username.strip():
+            raise ValidationError("username is required to resolve the player perspective.")
+        slot = GameService.perspective_for_username_or_none(info, username)
+        if slot is None:
+            raise ValidationError(f"Login {username!r} is not a player in game {game_id}.")
+        return slot
 
     @staticmethod
     def player_id_for_perspective(info: GameInfo, perspective: int, game_id: int) -> int:

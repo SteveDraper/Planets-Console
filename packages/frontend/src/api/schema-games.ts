@@ -46,6 +46,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/viewpoint-eligibility": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Viewpoint Eligibility
+         * @description Allowed perspective slots for this login (login-keyed; not storage-only).
+         */
+        get: operations["get_viewpoint_eligibility_games__game_id__viewpoint_eligibility_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/info": {
         parameters: {
             query?: never;
@@ -415,6 +435,7 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        ViewpointEligibilityResponse: unknown;
         /** WarpWellCellsResponse */
         WarpWellCellsResponse: {
             /** Cells */
@@ -486,6 +507,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoredTurnPerspectivesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_viewpoint_eligibility_games__game_id__viewpoint_eligibility_get: {
+        parameters: {
+            query: {
+                username: string;
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewpointEligibilityResponse"];
                 };
             };
             /** @description Validation Error */

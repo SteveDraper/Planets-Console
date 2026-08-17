@@ -5,11 +5,9 @@ import {
   getLatestTurnFromGameInfo,
   getSectorDisplayNameFromGameInfo,
   isGameFinishedFromGameInfo,
-  isLoginAmongGamePlayers,
   perspectiveOrdinalForName,
   perspectiveNameForOrdinal,
   playerIdForViewpointName,
-  shouldUsePseudoViewpointForLogin,
   selectableTurnMaxForShell,
   SPECTATOR_VIEWPOINT_NAME,
   viewpointNameForStoredPerspective,
@@ -206,43 +204,6 @@ describe('viewpointNameForStoredPerspective', () => {
 
   it('returns player name for 1-based slots', () => {
     expect(viewpointNameForStoredPerspective(2, p)).toBe('Beta')
-  })
-})
-
-describe('isLoginAmongGamePlayers', () => {
-  const p = [perspectiveRow(1, 'Alpha'), perspectiveRow(2, 'Beta')]
-
-  it('is false when login empty', () => {
-    expect(isLoginAmongGamePlayers(p, null)).toBe(false)
-    expect(isLoginAmongGamePlayers(p, '   ')).toBe(false)
-  })
-
-  it('matches login case-insensitively', () => {
-    expect(isLoginAmongGamePlayers(p, 'beta')).toBe(true)
-  })
-
-  it('is false when login not in list', () => {
-    expect(isLoginAmongGamePlayers(p, 'nobody')).toBe(false)
-  })
-})
-
-describe('shouldUsePseudoViewpointForLogin', () => {
-  const p = [perspectiveRow(1, 'Alpha'), perspectiveRow(2, 'Beta')]
-
-  it('is true for in-progress game when login is not a player', () => {
-    expect(shouldUsePseudoViewpointForLogin(p, 'nobody', false)).toBe(true)
-  })
-
-  it('is false when login matches a player', () => {
-    expect(shouldUsePseudoViewpointForLogin(p, 'Beta', false)).toBe(false)
-  })
-
-  it('is false when game is finished', () => {
-    expect(shouldUsePseudoViewpointForLogin(p, 'nobody', true)).toBe(false)
-  })
-
-  it('is false when login is empty', () => {
-    expect(shouldUsePseudoViewpointForLogin(p, '', false)).toBe(false)
   })
 })
 

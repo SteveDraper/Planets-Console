@@ -171,6 +171,59 @@ def test_get_stored_game_info():
     assert response.json()["game"]["id"] == 628580
 
 
+def _put_sample_game_info(*, status: int | None = None) -> None:
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        payload = json.load(f)
+    if status is not None:
+        payload["game"]["status"] = status
+    storage.put("games/628580/info", payload)
+
+
+def test_viewpoint_eligibility_finished_all_player_slots():
+    _put_sample_game_info()
+    response = client.get("/games/628580/viewpoint-eligibility?username=nobody")
+    assert response.status_code == 200
+    assert response.json() == {"perspectives": [1, 2, 3]}
+
+
+def test_viewpoint_eligibility_in_progress_player_own_slot():
+    _put_sample_game_info(status=1)
+    response = client.get("/games/628580/viewpoint-eligibility?username=arlowat")
+    assert response.status_code == 200
+    assert response.json() == {"perspectives": [2]}
+
+
+def test_viewpoint_eligibility_in_progress_non_player_spectator():
+    _put_sample_game_info(status=1)
+    response = client.get("/games/628580/viewpoint-eligibility?username=nobody")
+    assert response.status_code == 200
+    assert response.json() == {"perspectives": [0]}
+
+
+def test_viewpoint_eligibility_requires_username():
+    _put_sample_game_info()
+    response = client.get("/games/628580/viewpoint-eligibility")
+    assert response.status_code == 422
+
+
+def test_viewpoint_eligibility_rejects_empty_username():
+    _put_sample_game_info()
+    response = client.get("/games/628580/viewpoint-eligibility?username=")
+    assert response.status_code == 422
+
+
+def test_viewpoint_eligibility_identity_switch_does_not_serve_stale_set():
+    """Same game, different login: each request is keyed by username (no stale set)."""
+    _put_sample_game_info(status=1)
+    player = client.get("/games/628580/viewpoint-eligibility?username=arlowat")
+    spectator = client.get("/games/628580/viewpoint-eligibility?username=nobody")
+    assert player.json() == {"perspectives": [2]}
+    assert spectator.json() == {"perspectives": [0]}
+    again = client.get("/games/628580/viewpoint-eligibility?username=arlowat")
+    assert again.json() == {"perspectives": [2]}
+
+
 def test_get_stored_turn_perspectives():
     """GET /games/{id}/turns/{turn}/stored-perspectives lists slots with stored turn data."""
     storage = get_storage()

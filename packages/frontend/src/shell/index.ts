@@ -14,6 +14,7 @@ export {
   type TurnView,
 } from './shellContext'
 export { useShellContext, type ShellContext, type UseShellContextOptions } from './useShellContext'
+export { useEligiblePerspectives } from './useEligiblePerspectives'
 export {
   useShellGameSelection,
   type LoadAllTurnsVars,

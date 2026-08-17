@@ -68,9 +68,9 @@ A second identity is another server entry or a changed env var. v1 does not add 
 
 [Shared viewpoint eligibility below the SPA for MCP and the shell](https://github.com/SteveDraper/Planets-Console/issues/323). [ADR 0019](adr/0019-viewpoint-eligibility-in-core.md).
 
-- Core service next to `GameService` owns the allowed **perspective** set. MCP calls it in-process. Not `concepts/`, not BFF, not a copy inside `mcp_adapter`.
+- Core `ViewpointEligibilityService.eligible_perspectives` (next to `GameService`) owns the allowed **perspective** set. MCP calls it in-process. Not `concepts/`, not BFF, not a copy inside `mcp_adapter`.
 - XOR matching the SPA: live + player -> `{own slot}`; live + non-player -> `{0}`; finished -> `{1..N}`, no `0`.
-- SPA consumes the set via the BFF (login-keyed; refetch on identity switch) and applies chrome. **Storage-only load** stays SPA-only. Load-all's expected-perspective set is a different policy.
+- SPA consumes the set via BFF `GET /games/{game_id}/viewpoint-eligibility?username=` (JSON `perspectives`; login-keyed; refetch on identity switch) and applies chrome. **Storage-only load** stays SPA-only. Load-all's expected-perspective set is a different policy.
 
 ---
 

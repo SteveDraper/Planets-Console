@@ -157,31 +157,6 @@ export function isSpectatorViewpointName(name: string | null): boolean {
   return name === SPECTATOR_VIEWPOINT_NAME
 }
 
-/** True when login name matches a player in the game (case-insensitive). */
-export function isLoginAmongGamePlayers(
-  perspectives: PerspectiveRow[],
-  loginName: string | null
-): boolean {
-  const n = loginName?.trim().toLowerCase() ?? ''
-  if (!n) {
-    return false
-  }
-  return perspectives.some((p) => p.name.toLowerCase() === n)
-}
-
-/** Use pseudo-viewpoint 0 for turn load when login is set but not among game players. */
-export function shouldUsePseudoViewpointForLogin(
-  perspectives: PerspectiveRow[],
-  loginName: string | null,
-  isGameFinished: boolean
-): boolean {
-  const loginTrimmed = loginName?.trim() ?? ''
-  if (isGameFinished || loginTrimmed === '' || perspectives.length === 0) {
-    return false
-  }
-  return !isLoginAmongGamePlayers(perspectives, loginName)
-}
-
 /**
  * Highest turn selectable in the shell (latest turn from game info when known).
  */

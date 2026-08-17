@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { renderHook } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 import { seedShellViewpoint } from './fleetTestShell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
+
+function createWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  }
+}
 
 describe('useOrderedFleetPlayers', () => {
   beforeEach(() => {
@@ -21,7 +30,9 @@ describe('useOrderedFleetPlayers', () => {
   it('orders players with the viewpoint first', () => {
     seedShellViewpoint(2)
 
-    const { result } = renderHook(() => useOrderedFleetPlayers())
+    const { result } = renderHook(() => useOrderedFleetPlayers(), {
+      wrapper: createWrapper(),
+    })
 
     expect(result.current.players.map((player) => player.name)).toEqual(['Bob', 'Alice'])
     expect(result.current.viewpointPlayerId).toBe(9)
@@ -31,7 +42,9 @@ describe('useOrderedFleetPlayers', () => {
     seedShellViewpoint(1)
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
 
-    const { result } = renderHook(() => useOrderedFleetPlayers())
+    const { result } = renderHook(() => useOrderedFleetPlayers(), {
+      wrapper: createWrapper(),
+    })
 
     expect(result.current.players.map((player) => player.playerId)).toEqual([8, 9])
     expect(result.current.isPlayerVisible(9)).toBe(false)
@@ -41,7 +54,9 @@ describe('useOrderedFleetPlayers', () => {
     seedShellViewpoint(1)
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)
 
-    const { result } = renderHook(() => useOrderedFleetPlayers({ visibleOnly: true }))
+    const { result } = renderHook(() => useOrderedFleetPlayers({ visibleOnly: true }), {
+      wrapper: createWrapper(),
+    })
 
     expect(result.current.players.map((player) => player.name)).toEqual(['Alice'])
   })
@@ -50,7 +65,9 @@ describe('useOrderedFleetPlayers', () => {
     seedShellViewpoint(2)
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(8, false)
 
-    const { result } = renderHook(() => useOrderedFleetPlayers({ visibleOnly: true }))
+    const { result } = renderHook(() => useOrderedFleetPlayers({ visibleOnly: true }), {
+      wrapper: createWrapper(),
+    })
 
     expect(result.current.players.map((player) => player.name)).toEqual(['Bob'])
   })

@@ -5,6 +5,7 @@ import {
   deriveShellTurnMax,
   deriveTurnView,
 } from '../../shell/shellContext'
+import { useEligiblePerspectives } from '../../shell/useEligiblePerspectives'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useTurnRacePlayerLabels } from '../../lib/turnRacePlayerLabels'
 import { cn } from '../../lib/utils'
@@ -89,6 +90,7 @@ export function FleetAnalyticTile({
   const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
   const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
   const loginName = useSessionStore((s) => s.name)
+  const eligiblePerspectives = useEligiblePerspectives()
   const { players: orderedPlayers, isPlayerVisible } = useOrderedFleetPlayers()
   const setFleetPlayerVisible = useFleetPlayerVisibilityStore((state) => state.setFleetPlayerVisible)
   const trailExtendTurns = useFleetHeadingTrailExtendStore((state) => state.extendTurns)
@@ -111,6 +113,7 @@ export function FleetAnalyticTile({
         loginName,
         storageOnlyLoad,
         storageAvailablePerspectives,
+        eligiblePerspectives,
         viewedDataTurn: selectedTurn,
         turnUsernamesByPlayerId: null,
       }),
@@ -122,6 +125,7 @@ export function FleetAnalyticTile({
       loginName,
       storageOnlyLoad,
       storageAvailablePerspectives,
+      eligiblePerspectives,
     ]
   )
   const racePlayerLabels = useTurnRacePlayerLabels(analyticScope, supportsMode && enabled)

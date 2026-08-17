@@ -5,6 +5,7 @@ import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { tileClassName } from '../tileChrome'
 import { DisplayModeControl } from '../DisplayModeControl'
 import { deriveAnalyticScope } from '../../shell/shellContext'
+import { useEligiblePerspectives } from '../../shell/useEligiblePerspectives'
 import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
 import { homeworldInactiveHint } from './constants'
@@ -86,6 +87,7 @@ export function HomeworldLocatorTile({
   const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
   const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
   const loginName = useSessionStore((s) => s.name)
+  const eligiblePerspectives = useEligiblePerspectives()
   const perspectives = gameInfoContext?.perspectives
   const roster = perspectives ?? EMPTY_ROSTER
 
@@ -97,6 +99,7 @@ export function HomeworldLocatorTile({
     loginName,
     storageOnlyLoad,
     storageAvailablePerspectives,
+    eligiblePerspectives,
     viewedDataTurn: selectedTurn,
     turnUsernamesByPlayerId: null,
   })

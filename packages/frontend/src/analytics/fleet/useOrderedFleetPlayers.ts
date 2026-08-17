@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import { playerIdForPerspectiveOrdinal } from '../../lib/gameInfoShell'
 import { deriveSelectedViewpointOrdinal } from '../../shell/shellContext'
+import { useEligiblePerspectives } from '../../shell/useEligiblePerspectives'
 import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
@@ -23,6 +24,7 @@ export function useOrderedFleetPlayers(options: UseOrderedFleetPlayersOptions = 
   const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
   const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
   const loginName = useSessionStore((s) => s.name)
+  const eligiblePerspectives = useEligiblePerspectives()
   const visibilityOverrides = useFleetPlayerVisibilityStore((state) => state.overrides)
 
   const shellPlayers = gameInfoContext?.perspectives ?? []
@@ -35,6 +37,7 @@ export function useOrderedFleetPlayers(options: UseOrderedFleetPlayersOptions = 
       loginName,
       storageOnlyLoad,
       storageAvailablePerspectives,
+      eligiblePerspectives,
       viewedDataTurn: selectedTurn,
       turnUsernamesByPlayerId: null,
     })
@@ -47,6 +50,7 @@ export function useOrderedFleetPlayers(options: UseOrderedFleetPlayersOptions = 
     loginName,
     storageOnlyLoad,
     storageAvailablePerspectives,
+    eligiblePerspectives,
     shellPlayers,
   ])
 
