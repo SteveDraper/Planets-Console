@@ -254,6 +254,8 @@ def test_hatch_read_scores_scheduler_held_row_is_in_progress(sample_turn):
 
     assert EXPORT_CATALOG.is_ensure_satisfied is not None
     assert EXPORT_CATALOG.is_ensure_satisfied(ctx, scope) is True
+    assert EXPORT_CATALOG.is_in_progress is not None
+    assert EXPORT_CATALOG.is_in_progress(ctx, scope) is True
     assert export_scope_is_ensure_final(ctx, "scores", scope, EXPORT_CATALOG) is False
 
     with patch.object(
@@ -275,3 +277,22 @@ def test_hatch_read_scores_scheduler_held_row_is_in_progress(sample_turn):
     assert queried.status == "ok"
     assert queried.paths["$.meta.searchStatus"].value == "in_progress"
     assert hatch != queried
+
+
+def test_hatch_read_vacuous_fleet_root_without_player_id_is_needs_ensure(sample_turn):
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+    )
+
+    with patch.object(
+        export_ensure_module,
+        "ensure_export_scope_via_orchestrator",
+        side_effect=AssertionError("hatch_read must not submit ensure"),
+    ):
+        result = ctx.hatch_read("fleet", ["$"])
+
+    assert result.status == "unavailable"
+    assert result.reason == "needs_ensure"

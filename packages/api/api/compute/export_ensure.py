@@ -94,17 +94,18 @@ def classify_hatch_read_scope(
 ) -> HatchReadClassification:
     """Classify hatch-read readiness with one predicate order.
 
-    Ensure-final materializes as ``ok``. Otherwise admitted-not-terminal work
-    (catalog ``is_in_progress``, admit-skip, or orchestrator nonterminal) is
-    ``in_progress``; missing work is ``needs_ensure``.
+    Ensure-final materializes as ``ok``. Otherwise not-yet-final work (catalog
+    ``is_in_progress`` or orchestrator nonterminal) is ``in_progress``.
+    Un-normalizable compute scope and missing work are ``needs_ensure``.
     """
-    from api.analytics.export_dependency_walk import is_export_scope_ensure_satisfied
+    try:
+        _registered_compute_scope(analytic_id, scope)
+    except ValueError:
+        return "needs_ensure"
 
     if export_scope_is_ensure_final(ctx, analytic_id, scope, catalog):
         return "final"
     if catalog.is_in_progress is not None and catalog.is_in_progress(ctx, scope):
-        return "in_progress"
-    if is_export_scope_ensure_satisfied(ctx, analytic_id, scope, catalog):
         return "in_progress"
     if export_scope_has_nonterminal_work(analytic_id, scope):
         return "in_progress"

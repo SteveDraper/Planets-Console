@@ -229,18 +229,44 @@ def classify_scores_export_decision(
     return ScoresExportDecision("empty", "not_started", needs_ensure_work=True)
 
 
+def _scores_export_decision_from_snapshot(
+    snapshot: ScoresInferenceSnapshot,
+    *,
+    resolution_context: ScoresExportResolutionContext,
+) -> ScoresExportDecision:
+    functional_payload = _resolve_functional_payload(snapshot, resolution_context)
+    return classify_scores_export_decision(
+        snapshot,
+        resolution_context=resolution_context,
+        functional_payload=functional_payload,
+    )
+
+
 def is_scores_export_ensure_satisfied_from_snapshot(
     snapshot: ScoresInferenceSnapshot,
     *,
     resolution_context: ScoresExportResolutionContext,
 ) -> bool:
     """True when probe/ensure walks should skip this scope (no further ensure work)."""
-    functional_payload = _resolve_functional_payload(snapshot, resolution_context)
-    return not classify_scores_export_decision(
+    return not _scores_export_decision_from_snapshot(
         snapshot,
         resolution_context=resolution_context,
-        functional_payload=functional_payload,
     ).needs_ensure_work
+
+
+def is_scores_export_in_progress_from_snapshot(
+    snapshot: ScoresInferenceSnapshot,
+    *,
+    resolution_context: ScoresExportResolutionContext,
+) -> bool:
+    """True when precedence holds a live scheduler ``RowRun`` (not yet terminal)."""
+    return (
+        _scores_export_decision_from_snapshot(
+            snapshot,
+            resolution_context=resolution_context,
+        ).branch
+        == "scheduler"
+    )
 
 
 def is_scores_export_turn_evidence_closed_from_snapshot(
@@ -253,11 +279,9 @@ def is_scores_export_turn_evidence_closed_from_snapshot(
     Distinct from ``is_scores_export_ensure_satisfied_from_snapshot``: an in-progress
     scheduler ``RowRun`` satisfies ensure admit but does not close turn evidence.
     """
-    functional_payload = _resolve_functional_payload(snapshot, resolution_context)
-    return classify_scores_export_decision(
+    return _scores_export_decision_from_snapshot(
         snapshot,
         resolution_context=resolution_context,
-        functional_payload=functional_payload,
     ).is_turn_evidence_closed
 
 

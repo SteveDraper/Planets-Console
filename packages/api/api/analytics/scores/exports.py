@@ -25,12 +25,14 @@ from api.analytics.scores.export_precedence import (
     ScoresExportResolved,
     is_scores_export_authoritatively_persisted,
     is_scores_export_ensure_satisfied_from_snapshot,
+    is_scores_export_in_progress_from_snapshot,
     is_scores_export_turn_evidence_closed_from_snapshot,
     resolve_scores_export,
 )
 from api.analytics.scores.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
 from api.analytics.scores.export_snapshot import (
+    ScoresInferenceSnapshot,
     gather_scores_ensure_probe_snapshot,
     gather_scores_inference_snapshot,
     scores_inference_stream_scope,
@@ -170,18 +172,20 @@ def is_scores_export_persisted(ctx: AnalyticQueryContext, scope: ExportScope) ->
     return is_scores_export_authoritatively_persisted(resolved)
 
 
-def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    """Probe/ensure hook: classify gathered state only; no inference or payload build."""
+def _scores_ensure_probe_snapshot_for_scope(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> tuple[ScoresInferenceSnapshot, ScoresExportResolutionContext] | None:
     if scope.player_id is None:
-        return True
+        return None
     if scope.turn <= 1:
         # Game-start neutral priors; fleet@0 is not a valid ensure target.
-        return True
+        return None
 
     services = resolve_scores_services(ctx)
     turn = ctx.load_turn(scope.turn)
     if turn is None:
-        return True
+        return None
 
     snapshot = gather_scores_ensure_probe_snapshot(
         ctx,
@@ -189,8 +193,28 @@ def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportSc
         scope,
         turn,
     )
-    resolution_context = _scores_resolution_context(ctx, services, scope, turn)
+    return snapshot, _scores_resolution_context(ctx, services, scope, turn)
+
+
+def is_scores_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Probe/ensure hook: classify gathered state only; no inference or payload build."""
+    probed = _scores_ensure_probe_snapshot_for_scope(ctx, scope)
+    if probed is None:
+        return True
+    snapshot, resolution_context = probed
     return is_scores_export_ensure_satisfied_from_snapshot(
+        snapshot,
+        resolution_context=resolution_context,
+    )
+
+
+def is_scores_export_in_progress(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """Probe hook: true when scores precedence is the live scheduler branch."""
+    probed = _scores_ensure_probe_snapshot_for_scope(ctx, scope)
+    if probed is None:
+        return False
+    snapshot, resolution_context = probed
+    return is_scores_export_in_progress_from_snapshot(
         snapshot,
         resolution_context=resolution_context,
     )
@@ -506,4 +530,5 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     materialize_export_tree=materialize_scores_export_tree,
     is_persisted=is_scores_export_persisted,
     is_ensure_satisfied=is_scores_export_ensure_satisfied,
+    is_in_progress=is_scores_export_in_progress,
 )
