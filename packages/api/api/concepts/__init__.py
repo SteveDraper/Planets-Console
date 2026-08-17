@@ -7,6 +7,7 @@ Race-specific ``raceid`` constants and mechanics live in ``races.py`` (see CONTE
 **Race-specific game concept** and docs/design-analytics-structure.md).
 """
 
+from api.concepts.disk_proximity import DiskProximityHit, disk_proximity
 from api.concepts.flare_points import (
     FLARE_POINT_TUPLES_GRAVITONIC_MOVEMENT,
     FLARE_POINT_TUPLES_REGULAR_MOVEMENT,
@@ -32,6 +33,8 @@ from api.concepts.warp_well import (
 __all__ = [
     "GAME_CATEGORY_RULES_VERSION",
     "GameCategory",
+    "DiskProximityHit",
+    "disk_proximity",
     "EVIL_EMPIRE_RACE_ID",
     "FLARE_POINT_TUPLES_GRAVITONIC_MOVEMENT",
     "FLARE_POINT_TUPLES_REGULAR_MOVEMENT",
