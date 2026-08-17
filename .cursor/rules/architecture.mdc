@@ -7,14 +7,14 @@ alwaysApply: true
 
 ## Layer Hierarchy
 
-The system is structured as four layers, each only ever depending on the layer(s) below it:
+The system is layered so each piece only depends on the layer(s) below it. The **MCP adapter** is a sibling of the BFF (both call Core in-process; only root `server` mounts MCP):
 
 ```
 ┌─────────────────────────────┐
 │         Frontend            │  packages/frontend/   React SPA
-├─────────────────────────────┤
-│            BFF              │  packages/bff/        Backend-for-Frontend
-├─────────────────────────────┤
+├──────────────┬──────────────┤
+│     BFF      │ MCP adapter  │  packages/bff/  |  packages/mcp_adapter/
+├──────────────┴──────────────┤
 │       Core REST API         │  packages/api/        Data model + business logic
 │  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │
 │     Storage sub-layer       │  packages/api/storage/  Abstract storage interface + impls
@@ -25,11 +25,13 @@ The system is structured as four layers, each only ever depending on the layer(s
 |---|---|---|
 | Frontend | `packages/frontend` | React SPA. Never calls Core REST API — always via BFF. |
 | BFF | `packages/bff` | SPA-optimized endpoints. Aggregates/reshapes Core REST API responses. No business logic. |
+| MCP adapter | `packages/mcp_adapter` | Agent Streamable HTTP at `/mcp`. Thin wrap of Core in-process APIs. No domain logic. Import `mcp_adapter`, never `mcp`. |
 | Core REST API | `packages/api` | Data model + business logic. No UI semantics. No knowledge of the SPA. |
 | Storage | `packages/api/storage/` | Abstract `StorageBackend` protocol + concrete implementations. Never referenced directly outside this sub-package. |
 
 **Do not leak UI concerns into the Core REST API layer.**
 **Do not put business logic in the BFF layer.**
+**Do not put business logic in the MCP adapter.** It must not import `bff.*`, `api.storage.*`, Core routers / `api.app`, or `api.handlers.*`. Only `server` may import `mcp_adapter`.
 **Do not reference a concrete storage implementation outside `packages/api/storage/`.**
 **Shared primitives live below features.** If two analytics need the same lookup, codec, or scope filter, extract to `concepts/`, `serialization/`, or a dedicated shared module -- never import analytic A from analytic B for convenience.
 **One policy, one encoding.** Branching precedence, export classification, and similar policy must not be duplicated in parallel functions; share a decision record or table.
@@ -59,7 +61,8 @@ planets-console/
 ├── packages/
 │   ├── api/          # Core REST API layer (routers, models, services, storage/)
 │   ├── bff/          # BFF layer (FastAPI routers shaped for the SPA)
-│   ├── server/       # Root FastAPI app that mounts the api/ and bff/ sub-apps
+│   ├── mcp_adapter/  # MCP adapter (Streamable HTTP at /mcp)
+│   ├── server/       # Root FastAPI app that mounts api, bff, and mcp
 │   └── frontend/     # React SPA (Vite)
 ├── scripts/          # Auxiliary scripts (Typer CLI)
 ├── pyproject.toml    # Root uv workspace config
@@ -85,12 +88,13 @@ Do not implement semantic validation by walking a raw `dict` before deserializat
 
 ## Preferred FastAPI App Composition
 
-Use one Python process, but structure it as three FastAPI app objects:
+Use one Python process, but structure it as a root FastAPI app plus mounted sub-apps:
 
 - a root app for process-level wiring (middleware, shared startup/shutdown, top-level health endpoints)
 - the root app lives in `packages/server/app.py`
 - a Core REST API sub-app mounted under `/api`
 - a BFF sub-app mounted under `/bff`
+- an MCP Streamable HTTP sub-app mounted under `/mcp` (session manager runs in the **root** lifespan)
 
 This keeps deployment simple while giving each layer its own routing and OpenAPI surface. The preferred frontend codegen source is the BFF sub-app schema endpoint, e.g. `/bff/openapi.json`.
 
@@ -139,6 +143,6 @@ Do **not** maintain the same wire shape in both `components['schemas'][...]` imp
 
 - **Features should always have unit tests.** New or changed behaviour must be covered by tests in the appropriate package.
 - **Run linting for all changes.** Backend (Python) linting is provided by Ruff; run `make lint` to check all backend packages and scripts. The top-level `test` target depends on `lint`, so `make test` runs lint then all package tests — use it before committing or in CI.
-- **Each package that has tests has its own Makefile target.** For example: `test_bff`, `test_api`, `test_frontend`, `test_scripts` (auxiliary scripts under `scripts/`). The target runs that package’s test suite (e.g. `cd packages/<pkg> && uv run pytest` for Python packages).
+- **Each package that has tests has its own Makefile target.** For example: `test_bff`, `test_api`, `test_mcp_adapter`, `test_frontend`, `test_scripts` (auxiliary scripts under `scripts/`). The target runs that package’s test suite (e.g. `cd packages/<pkg> && uv run pytest` for Python packages).
 - **When adding a new package that has unit tests, add a corresponding `test_<package>` target to the Makefile** and wire it so the package’s tests run from that package directory (or equivalent).
-- **The top-level `test` target in the Makefile must run every package’s tests.** It should depend on `lint` and all per-package test targets (e.g. `test: lint test_bff test_api test_scripts test_frontend`) so that `make test` runs the full suite.
+- **The top-level `test` target in the Makefile must run every package’s tests.** It should depend on `lint` and all per-package test targets (e.g. `test: lint test_bff test_api test_server test_mcp_adapter test_scripts test_frontend`) so that `make test` runs the full suite.

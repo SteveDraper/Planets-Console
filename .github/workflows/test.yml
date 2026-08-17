@@ -31,10 +31,11 @@ jobs:
         run: uv sync --all-packages
         working-directory: .
 
-      - name: Install dev dependencies (api, bff)
+      - name: Install dev dependencies (api, bff, mcp_adapter)
         run: |
           uv sync --package api --extra dev
           uv sync --package bff --extra dev
+          uv sync --package mcp_adapter --extra dev
         working-directory: .
 
       - name: Set up Node.js
