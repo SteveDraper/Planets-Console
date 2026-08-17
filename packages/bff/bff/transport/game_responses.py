@@ -118,6 +118,14 @@ class StoredTurnPerspectivesResponse(OmitNullDiagnosticsBase):
     perspectives: list[int] = Field(default_factory=list)
 
 
+class ViewpointEligibilityResponse(OmitNullDiagnosticsBase):
+    """Allowed **perspective** slots for the given **login identity** (ADR 0019)."""
+
+    perspectives: list[int] = Field(
+        description="Allowed perspective slots; includes spectator 0 when that slot is eligible.",
+    )
+
+
 class StellarCartographyTurnSummaryResponse(OmitNullDiagnosticsBase):
     """Lightweight turn facts for Stellar Cartography sidebar state."""
 
@@ -138,4 +146,5 @@ __all__ = [
     "OmitNullDiagnosticsBase",
     "StoredTurnPerspectivesResponse",
     "StellarCartographyTurnSummaryResponse",
+    "ViewpointEligibilityResponse",
 ]

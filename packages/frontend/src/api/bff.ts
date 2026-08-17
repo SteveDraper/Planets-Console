@@ -382,6 +382,25 @@ export async function fetchStoredTurnPerspectives(
   return r.json()
 }
 
+export type ViewpointEligibilityResponse = {
+  perspectives: number[]
+}
+
+/** Allowed perspective slots for this login (Core viewpoint eligibility via BFF). */
+export async function fetchViewpointEligibility(
+  gameId: string,
+  username: string
+): Promise<ViewpointEligibilityResponse> {
+  const params = new URLSearchParams({ username })
+  const path = `/bff/games/${encodeURIComponent(gameId)}/viewpoint-eligibility?${params}`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, undefined, endpointLabel)
+  if (!r.ok) {
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
+  }
+  return r.json()
+}
+
 export type LoadAllTurnsRequestBody = components['schemas']['LoadAllTurnsRequest']
 
 export type LoadAllTurnsStatusResponse = components['schemas']['LoadAllTurnsStatusResponse']

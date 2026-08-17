@@ -171,6 +171,50 @@ def test_get_stored_game_info():
     assert response.json()["game"]["id"] == 628580
 
 
+def _put_sample_game_info(*, status: int | None = None) -> None:
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as f:
+        payload = json.load(f)
+    if status is not None:
+        payload["game"]["status"] = status
+    storage.put("games/628580/info", payload)
+
+
+def test_viewpoint_eligibility_requires_username():
+    _put_sample_game_info()
+    response = client.get("/games/628580/viewpoint-eligibility")
+    assert response.status_code == 422
+
+
+def test_viewpoint_eligibility_rejects_empty_username():
+    _put_sample_game_info()
+    response = client.get("/games/628580/viewpoint-eligibility?username=")
+    assert response.status_code == 422
+
+
+def test_viewpoint_eligibility_response_field_is_sorted_perspectives():
+    """JSON field is `perspectives`; values are sorted ints."""
+    _put_sample_game_info()
+    response = client.get("/games/628580/viewpoint-eligibility?username=nobody")
+    assert response.status_code == 200
+    body = response.json()
+    assert "perspectives" in body
+    slots = body["perspectives"]
+    assert isinstance(slots, list)
+    assert all(isinstance(slot, int) for slot in slots)
+    assert slots == sorted(slots)
+
+
+def test_viewpoint_eligibility_username_query_does_not_collide():
+    """Two usernames on the same stored game produce independent response bodies."""
+    _put_sample_game_info(status=1)
+    first = client.get("/games/628580/viewpoint-eligibility?username=arlowat")
+    second = client.get("/games/628580/viewpoint-eligibility?username=nobody")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() != second.json()
+
+
 def test_get_stored_turn_perspectives():
     """GET /games/{id}/turns/{turn}/stored-perspectives lists slots with stored turn data."""
     storage = get_storage()

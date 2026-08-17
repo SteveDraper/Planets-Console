@@ -8,7 +8,9 @@ export const FLEET_TEST_SHELL_PLAYERS = [
 
 export type FleetTestViewpointOrdinal = (typeof FLEET_TEST_SHELL_PLAYERS)[number]['ordinal']
 
+/** Seeds a selected viewpoint from storage-only slots (no BFF eligibility fetch). */
 export function seedShellViewpoint(viewpointOrdinal: FleetTestViewpointOrdinal) {
+  const stored = FLEET_TEST_SHELL_PLAYERS.map((player) => player.ordinal)
   useShellStore.setState({
     selectedGameId: '628580',
     gameInfoContext: {
@@ -21,7 +23,7 @@ export function seedShellViewpoint(viewpointOrdinal: FleetTestViewpointOrdinal) 
     },
     selectedTurn: 5,
     perspectiveOverrideOrdinal: viewpointOrdinal,
-    storageOnlyLoad: false,
-    storageAvailablePerspectives: null,
+    storageOnlyLoad: true,
+    storageAvailablePerspectives: stored,
   })
 }

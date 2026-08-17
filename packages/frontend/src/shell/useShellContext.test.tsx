@@ -25,10 +25,11 @@ vi.mock('../api/bff', async (importOriginal) => {
       turnRelations: [],
     }),
     fetchStoredTurnPerspectives: vi.fn().mockResolvedValue({ perspectives: [1] }),
+    fetchViewpointEligibility: vi.fn().mockResolvedValue({ perspectives: [1] }),
   }
 })
 
-import { ensureTurnData, fetchStoredTurnPerspectives } from '../api/bff'
+import { ensureTurnData, fetchStoredTurnPerspectives, fetchViewpointEligibility } from '../api/bff'
 
 function createWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -41,6 +42,13 @@ describe('useShellContext', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(ensureTurnData).mockResolvedValue({
+      ready: true,
+      turnUsernamesByPlayerId: new Map(),
+      turnRelations: [],
+    })
+    vi.mocked(fetchViewpointEligibility).mockResolvedValue({ perspectives: [1, 2, 3] })
+    vi.mocked(fetchStoredTurnPerspectives).mockResolvedValue({ perspectives: [1] })
     resetPlayerColorsStoreState()
     resetPlayerColorResolutionPort()
     installPlayerColorsStorePort()
@@ -135,7 +143,7 @@ describe('useShellContext', () => {
     })
   })
 
-  it('sets turnBlockedNoLogin when scope exists without login or storage-only path', () => {
+  it('fails closed without login when not storage-only', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     useSessionStore.setState({ name: '', password: '' })
     useShellStore.setState({
@@ -156,8 +164,10 @@ describe('useShellContext', () => {
       wrapper: createWrapper(client),
     })
 
-    expect(result.current.analyticScope).not.toBeNull()
-    expect(result.current.turnBlockedNoLogin).toBe(true)
+    expect(result.current.analyticScope).toBeNull()
+    expect(result.current.selectedViewpointOrdinal).toBeNull()
+    expect(result.current.shellViewpoints.every((row) => row.disabled)).toBe(true)
+    expect(result.current.turnBlockedNoLogin).toBe(false)
     expect(result.current.turnEnsureEnabled).toBe(false)
   })
 
@@ -494,5 +504,45 @@ describe('useShellContext', () => {
     })
     expect(usePlayerColorsStore.getState().rosterPlayerIds).toEqual([])
     expect(usePlayerColorsStore.getState().inboundRelationFromByPlayerId.size).toBe(0)
+  })
+
+  it('refetches viewpoint eligibility on identity switch and offers spectator iff 0 is in the set', async () => {
+    vi.mocked(fetchViewpointEligibility).mockImplementation(async (_gameId, username) => {
+      if (username === 'Alice') return { perspectives: [1] }
+      return { perspectives: [0] }
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    useShellStore.setState({
+      selectedGameId: '628580',
+      gameInfoContext: {
+        turn: 10,
+        perspectives: [perspectiveRow(1, 'Alice'), perspectiveRow(2, 'Bob')],
+        isGameFinished: false,
+        sectorDisplayName: null,
+        stellarCartographyGates: { ...EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES },
+        homeworldInactiveReason: null,
+      },
+      selectedTurn: 5,
+    })
+
+    const { result } = renderHook(() => useShellContext({ reportShellError }), {
+      wrapper: createWrapper(client),
+    })
+
+    await waitFor(() => {
+      expect(fetchViewpointEligibility).toHaveBeenCalledWith('628580', 'Alice')
+      expect(result.current.selectedViewpointOrdinal).toBe(1)
+    })
+    expect(result.current.shellViewpoints.some((row) => row.ordinal === 0)).toBe(false)
+
+    act(() => {
+      useSessionStore.setState({ name: 'Unknown' })
+    })
+
+    await waitFor(() => {
+      expect(fetchViewpointEligibility).toHaveBeenCalledWith('628580', 'Unknown')
+      expect(result.current.selectedViewpointOrdinal).toBe(0)
+    })
+    expect(result.current.shellViewpoints[0]?.ordinal).toBe(0)
   })
 })

@@ -11,7 +11,9 @@ optional ``sectorName`` from in-process memo or ``games/{id}/info`` (empty list 
 ``games`` prefix is absent).
 
 **POST /games/{game_id}/info** refreshes game info from Planets.nu. **POST .../turns/ensure**
-loads a turn when missing. Warp-well and Stellar Cartography routes use shared Core handlers.
+loads a turn when missing. **GET .../viewpoint-eligibility** returns the Core allowed
+**perspective** set for a login (username query required). Warp-well and Stellar Cartography
+routes use shared Core handlers.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ from bff.transport.game_responses import (
     LoadAllTurnsStatusResponse,
     StellarCartographyTurnSummaryResponse,
     StoredTurnPerspectivesResponse,
+    ViewpointEligibilityResponse,
 )
 
 router = APIRouter()
@@ -92,6 +95,34 @@ def get_stored_turn_perspectives(
         "get_stored_turn_perspectives",
         "total",
         lambda: core.list_stored_turn_perspectives(game_id, turn_number),
+    )
+    return finish_response(result, root)
+
+
+@router.get(
+    "/{game_id}/viewpoint-eligibility",
+    response_model=ViewpointEligibilityResponse,
+)
+def get_viewpoint_eligibility(
+    game_id: int,
+    username: Annotated[str, Query(min_length=1)],
+    include: IncludeDiagnostics = False,
+    *,
+    core: CoreClientDep,
+) -> object:
+    """Allowed perspective slots for this login (login-keyed; not storage-only)."""
+    root = optional_request_root(
+        include,
+        "GET",
+        f"/games/{game_id}/viewpoint-eligibility",
+        gameId=game_id,
+        handler="get_viewpoint_eligibility",
+    )
+    result = with_timed_child(
+        root,
+        "get_viewpoint_eligibility",
+        "total",
+        lambda: core.viewpoint_eligibility(game_id, username),
     )
     return finish_response(result, root)
 

@@ -23,6 +23,14 @@ vi.mock('./api', () => ({
   postHomeworldLocatorRefresh: vi.fn(),
 }))
 
+vi.mock('../../api/bff', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/bff')>()
+  return {
+    ...actual,
+    fetchViewpointEligibility: vi.fn().mockResolvedValue({ perspectives: [1, 2] }),
+  }
+})
+
 function renderTile(ui: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(ui, {

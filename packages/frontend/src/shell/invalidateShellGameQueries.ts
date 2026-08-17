@@ -9,4 +9,7 @@ export function invalidateShellGameQueries(
   void queryClient.invalidateQueries({
     queryKey: ['bff', 'games', gameId, 'load-all-status'],
   })
+  void queryClient.invalidateQueries({
+    queryKey: ['bff', 'games', gameId, 'viewpoint-eligibility'],
+  })
 }

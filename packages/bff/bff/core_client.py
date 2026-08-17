@@ -23,6 +23,7 @@ from api.services.stack import build_default_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
+from api.services.viewpoint_eligibility import ViewpointEligibilityService
 from api.transport.concept_stellar_cartography import (
     StellarCartographySampleResponse,
     StellarCartographyTurnSummaryResponse,
@@ -47,6 +48,7 @@ from bff.transport.game_responses import (
 )
 from bff.transport.game_responses import (
     StoredTurnPerspectivesResponse,
+    ViewpointEligibilityResponse,
 )
 
 T = TypeVar("T")
@@ -112,6 +114,14 @@ class CoreClient:
 
     def get_stored_game_info(self, game_id: int) -> GameInfo:
         return self._invoke(lambda: self._games.get_game_info(game_id))
+
+    def viewpoint_eligibility(self, game_id: int, username: str) -> ViewpointEligibilityResponse:
+        def work() -> ViewpointEligibilityResponse:
+            info = self._games.get_game_info(game_id)
+            allowed = ViewpointEligibilityService.eligible_perspectives(info, username)
+            return ViewpointEligibilityResponse(perspectives=sorted(allowed))
+
+        return self._invoke(work)
 
     def refresh_game_info(self, game_id: int, body: GameInfoUpdateRequest) -> GameInfo:
         planets = self._planets_client_factory()

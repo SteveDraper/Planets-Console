@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement, ReactNode } from 'react'
 import { FleetPlayerTableTile } from './FleetPlayerTableTile'
 import { FleetTableView } from './FleetTableView'
 import { pendingFleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
@@ -170,6 +172,15 @@ describe('FleetTableView', () => {
     })
   })
 
+  function renderTable(ui: ReactElement) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(ui, {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+  }
+
   it('sorts the viewpoint player tile first', () => {
     seedShellViewpoint(2)
 
@@ -178,7 +189,7 @@ describe('FleetTableView', () => {
       [9, pendingFleetPlayerStreamSlice()],
     ])
 
-    render(
+    renderTable(
       <FleetTableView
         componentCatalog={testComponentCatalog}
         streamPlayersById={streamPlayersById}
@@ -215,7 +226,7 @@ describe('FleetTableView', () => {
     const streamPlayersById = new Map([[8, pendingFleetPlayerStreamSlice()]])
     const racePlayerLabels = new Map([[8, 'The Solar Federation (dougp314)']])
 
-    render(
+    renderTable(
       <FleetTableView
         componentCatalog={testComponentCatalog}
         streamPlayersById={streamPlayersById}
@@ -253,7 +264,7 @@ describe('FleetTableView', () => {
       [9, pendingFleetPlayerStreamSlice()],
     ])
 
-    render(
+    renderTable(
       <FleetTableView
         componentCatalog={testComponentCatalog}
         streamPlayersById={streamPlayersById}
@@ -274,7 +285,7 @@ describe('FleetTableView', () => {
       [9, pendingFleetPlayerStreamSlice()],
     ])
 
-    render(
+    renderTable(
       <FleetTableView
         componentCatalog={testComponentCatalog}
         streamPlayersById={streamPlayersById}

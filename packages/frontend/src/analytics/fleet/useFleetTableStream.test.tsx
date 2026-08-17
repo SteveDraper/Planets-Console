@@ -1,4 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AnalyticShellScope } from '../../api/bff'
 import * as bff from '../../api/bff'
@@ -12,6 +14,13 @@ const scope: AnalyticShellScope = {
   gameId: '628580',
   turn: 111,
   perspective: 1,
+}
+
+function createWrapper() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  }
 }
 
 const refinedRecord: FleetTableRecord = {
@@ -61,7 +70,9 @@ describe('useFleetTableStream', () => {
       async () => new Promise(() => {})
     )
 
-    const { result } = renderHook(() => useFleetTableStream(scope, true))
+    const { result } = renderHook(() => useFleetTableStream(scope, true), {
+      wrapper: createWrapper(),
+    })
 
     await waitFor(() => {
       expect(result.current.streamPlayersById.get(8)?.isPending).toBe(true)
@@ -131,7 +142,9 @@ describe('useFleetTableStream', () => {
       }
     )
 
-    const { result } = renderHook(() => useFleetTableStream(scope, true))
+    const { result } = renderHook(() => useFleetTableStream(scope, true), {
+      wrapper: createWrapper(),
+    })
 
     await waitFor(() => {
       const slice = result.current.streamPlayersById.get(8)
@@ -177,7 +190,9 @@ describe('useFleetTableStream', () => {
       }
     )
 
-    const { result } = renderHook(() => useFleetTableStream(scope, true))
+    const { result } = renderHook(() => useFleetTableStream(scope, true), {
+      wrapper: createWrapper(),
+    })
 
     await waitFor(() => {
       expect(result.current.streamPlayersById.get(8)?.records).toEqual([refinedRecord])
@@ -209,7 +224,7 @@ describe('useFleetTableStream', () => {
 
     const { rerender } = renderHook(
       ({ enabled }) => useFleetTableStream(scope, enabled),
-      { initialProps: { enabled: true } }
+      { initialProps: { enabled: true }, wrapper: createWrapper() }
     )
 
     await waitFor(() => {
@@ -229,7 +244,7 @@ describe('useFleetTableStream', () => {
   it('does not connect when disabled', () => {
     const fetchSpy = vi.spyOn(bff, 'fetchFleetTableStream').mockResolvedValue()
 
-    renderHook(() => useFleetTableStream(scope, false))
+    renderHook(() => useFleetTableStream(scope, false), { wrapper: createWrapper() })
 
     expect(fetchSpy).not.toHaveBeenCalled()
   })

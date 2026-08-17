@@ -43,6 +43,7 @@ function baseInputs(overrides: Partial<ShellContextInputs> = {}): ShellContextIn
     loginName: 'Alice',
     storageOnlyLoad: false,
     storageAvailablePerspectives: null,
+    eligiblePerspectives: [1, 2, 3],
     viewedDataTurn: 5,
     turnUsernamesByPlayerId: null,
     ...overrides,
@@ -109,29 +110,35 @@ describe('deriveShellViewpoints', () => {
     ).toEqual([])
   })
 
-  it('enables all viewpoints when game is finished', () => {
+  it('enables all player slots in the eligible set', () => {
     const rows = deriveShellViewpoints(baseInputs())
     expect(rows).toEqual([
       { ordinal: 1, displayName: 'Alice', raceName: 'Feds', disabled: false },
       { ordinal: 2, displayName: 'Bob', raceName: 'Lizards', disabled: false },
       { ordinal: 3, displayName: 'Carol', raceName: null, disabled: false },
     ])
+    expect(rows.some((r) => r.ordinal === 0)).toBe(false)
   })
 
-  it('disables non-login viewpoints when game is in progress', () => {
+  it('disables player rows outside the eligible set', () => {
     const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     const rows = deriveShellViewpoints(
-      baseInputs({ gameInfoContext: ctx, loginName: 'Bob' })
+      baseInputs({ gameInfoContext: ctx, loginName: 'Bob', eligiblePerspectives: [2] })
     )
     expect(rows.find((r) => r.ordinal === 2)?.disabled).toBe(false)
     expect(rows.find((r) => r.ordinal === 1)?.disabled).toBe(true)
     expect(rows.find((r) => r.ordinal === 3)?.disabled).toBe(true)
+    expect(rows.some((r) => r.ordinal === 0)).toBe(false)
   })
 
-  it('adds spectator viewpoint when in-progress and login is not a player', () => {
+  it('adds spectator viewpoint iff 0 is in the eligible set', () => {
     const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     const rows = deriveShellViewpoints(
-      baseInputs({ gameInfoContext: ctx, loginName: 'Unknown' })
+      baseInputs({
+        gameInfoContext: ctx,
+        loginName: 'Unknown',
+        eligiblePerspectives: [0],
+      })
     )
     expect(rows[0]).toEqual({
       ordinal: 0,
@@ -143,12 +150,57 @@ describe('deriveShellViewpoints', () => {
     expect(rows.find((r) => r.ordinal === 2)?.disabled).toBe(true)
   })
 
+  it('does not offer spectator when 0 is absent from the eligible set', () => {
+    const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
+    const rows = deriveShellViewpoints(
+      baseInputs({
+        gameInfoContext: ctx,
+        loginName: 'Unknown',
+        eligiblePerspectives: [1],
+      })
+    )
+    expect(rows.some((r) => r.ordinal === 0)).toBe(false)
+  })
+
+  it('fails closed while the eligible set is loading', () => {
+    const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
+    const rows = deriveShellViewpoints(
+      baseInputs({
+        gameInfoContext: ctx,
+        loginName: 'Unknown',
+        eligiblePerspectives: null,
+      })
+    )
+    expect(rows.some((r) => r.ordinal === 0)).toBe(false)
+    expect(rows.every((r) => r.disabled)).toBe(true)
+  })
+
+  it('fails closed with no login when the eligible set is absent', () => {
+    const finished = baseInputs({
+      loginName: '',
+      storageOnlyLoad: false,
+      eligiblePerspectives: null,
+    })
+    const inProgress = baseInputs({
+      loginName: '',
+      storageOnlyLoad: false,
+      eligiblePerspectives: null,
+      gameInfoContext: shellContext({ isGameFinished: false, sectorDisplayName: null }),
+    })
+    for (const inputs of [finished, inProgress]) {
+      const rows = deriveShellViewpoints(inputs)
+      expect(rows.some((r) => r.ordinal === 0)).toBe(false)
+      expect(rows.every((r) => r.disabled)).toBe(true)
+    }
+  })
+
   it('filters by stored perspectives in storage-only mode without login', () => {
     const rows = deriveShellViewpoints(
       baseInputs({
         loginName: '',
         storageOnlyLoad: true,
         storageAvailablePerspectives: [2],
+        eligiblePerspectives: null,
       })
     )
     expect(rows.find((r) => r.ordinal === 2)?.disabled).toBe(false)
@@ -161,6 +213,7 @@ describe('deriveShellViewpoints', () => {
         loginName: '',
         storageOnlyLoad: true,
         storageAvailablePerspectives: [0],
+        eligiblePerspectives: null,
       })
     )
     expect(rows[0]).toEqual({
@@ -201,25 +254,82 @@ describe('deriveSelectedViewpointOrdinal', () => {
     ).toBeNull()
   })
 
-  it('uses login-matched player for in-progress games', () => {
+  it('ignores override outside the eligible set', () => {
     const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
       deriveSelectedViewpointOrdinal(
-        baseInputs({ gameInfoContext: ctx, loginName: 'Bob', perspectiveOverrideOrdinal: 1 })
+        baseInputs({
+          gameInfoContext: ctx,
+          loginName: 'Bob',
+          perspectiveOverrideOrdinal: 1,
+          eligiblePerspectives: [2],
+        })
       )
     ).toBe(2)
   })
 
-  it('selects spectator when in-progress and login is not a player', () => {
+  it('prefers the login slot as default among allowed slots', () => {
+    expect(
+      deriveSelectedViewpointOrdinal(
+        baseInputs({
+          loginName: 'Bob',
+          perspectiveOverrideOrdinal: null,
+          eligiblePerspectives: [1, 2, 3],
+        })
+      )
+    ).toBe(2)
+  })
+
+  it('selects spectator when 0 is in the eligible set', () => {
     const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
       deriveSelectedViewpointOrdinal(
-        baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideOrdinal: 1 })
+        baseInputs({
+          gameInfoContext: ctx,
+          loginName: 'Unknown',
+          perspectiveOverrideOrdinal: 1,
+          eligiblePerspectives: [0],
+        })
       )
     ).toBe(0)
   })
 
-  it('uses override when game is finished', () => {
+  it('returns null while the eligible set is loading', () => {
+    const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
+    expect(
+      deriveSelectedViewpointOrdinal(
+        baseInputs({
+          gameInfoContext: ctx,
+          loginName: 'Unknown',
+          eligiblePerspectives: null,
+        })
+      )
+    ).toBeNull()
+  })
+
+  it('returns null with no login when the eligible set is absent', () => {
+    expect(
+      deriveSelectedViewpointOrdinal(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: false,
+          eligiblePerspectives: null,
+        })
+      )
+    ).toBeNull()
+    expect(
+      deriveSelectedViewpointOrdinal(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: false,
+          eligiblePerspectives: null,
+          gameInfoContext: shellContext({ isGameFinished: false, sectorDisplayName: null }),
+        })
+      )
+    ).toBeNull()
+  })
+
+  it('uses override when it is in the eligible set', () => {
     expect(
       deriveSelectedViewpointOrdinal(baseInputs({ perspectiveOverrideOrdinal: 3 }))
     ).toBe(3)
@@ -233,6 +343,7 @@ describe('deriveSelectedViewpointOrdinal', () => {
           storageOnlyLoad: true,
           storageAvailablePerspectives: [2],
           perspectiveOverrideOrdinal: 2,
+          eligiblePerspectives: null,
         })
       )
     ).toBe(2)
@@ -246,6 +357,7 @@ describe('deriveSelectedViewpointOrdinal', () => {
           storageOnlyLoad: true,
           storageAvailablePerspectives: [3],
           perspectiveOverrideOrdinal: null,
+          eligiblePerspectives: null,
         })
       )
     ).toBe(3)
@@ -259,6 +371,7 @@ describe('deriveSelectedViewpointOrdinal', () => {
           storageOnlyLoad: true,
           storageAvailablePerspectives: [0],
           perspectiveOverrideOrdinal: null,
+          eligiblePerspectives: null,
         })
       )
     ).toBe(0)
@@ -272,6 +385,7 @@ describe('deriveSelectedViewpointOrdinal', () => {
           storageOnlyLoad: true,
           storageAvailablePerspectives: [0, 2],
           perspectiveOverrideOrdinal: 0,
+          eligiblePerspectives: null,
         })
       )
     ).toBe(0)
@@ -332,11 +446,16 @@ describe('deriveAnalyticScope', () => {
     })
   })
 
-  it('uses pseudo-viewpoint 0 when in-progress and login is not a player', () => {
+  it('uses spectator perspective when 0 is in the eligible set', () => {
     const ctx = shellContext({ isGameFinished: false, sectorDisplayName: null })
     expect(
       deriveAnalyticScope(
-        baseInputs({ gameInfoContext: ctx, loginName: 'Unknown', perspectiveOverrideOrdinal: 1 })
+        baseInputs({
+          gameInfoContext: ctx,
+          loginName: 'Unknown',
+          perspectiveOverrideOrdinal: 1,
+          eligiblePerspectives: [0],
+        })
       )
     ).toEqual({
       gameId: '628580',
@@ -344,6 +463,18 @@ describe('deriveAnalyticScope', () => {
       perspective: 0,
       username: 'Unknown',
     })
+  })
+
+  it('returns null with no login when the eligible set is absent', () => {
+    expect(
+      deriveAnalyticScope(
+        baseInputs({
+          loginName: '',
+          storageOnlyLoad: false,
+          eligiblePerspectives: null,
+        })
+      )
+    ).toBeNull()
   })
 
   it('omits username when login name is empty', () => {
@@ -354,6 +485,7 @@ describe('deriveAnalyticScope', () => {
           storageOnlyLoad: true,
           storageAvailablePerspectives: [1],
           perspectiveOverrideOrdinal: 1,
+          eligiblePerspectives: null,
         })
       )
     ).toEqual({
@@ -371,6 +503,7 @@ describe('deriveAnalyticScope', () => {
           storageOnlyLoad: true,
           storageAvailablePerspectives: [0],
           perspectiveOverrideOrdinal: null,
+          eligiblePerspectives: null,
         })
       )
     ).toEqual({
@@ -412,53 +545,50 @@ describe('turn ensure gating', () => {
 })
 
 describe('shouldClearInProgressPerspectiveOverride', () => {
-  const inProgress = shellContext({ isGameFinished: false, sectorDisplayName: null })
-
-  it('clears override that does not match login for in-progress game', () => {
-    expect(
-      shouldClearInProgressPerspectiveOverride(inProgress, 'Bob', 1)
-    ).toBe(true)
+  it('clears override that is not in the eligible set', () => {
+    expect(shouldClearInProgressPerspectiveOverride([2], 1)).toBe(true)
   })
 
-  it('keeps matching override', () => {
-    expect(
-      shouldClearInProgressPerspectiveOverride(inProgress, 'Bob', 2)
-    ).toBe(false)
+  it('keeps override that is in the eligible set', () => {
+    expect(shouldClearInProgressPerspectiveOverride([2], 2)).toBe(false)
   })
 
-  it('does nothing for finished games', () => {
-    expect(
-      shouldClearInProgressPerspectiveOverride(baseInputs().gameInfoContext, 'Bob', 1)
-    ).toBe(false)
+  it('does not clear when the eligible set is not loaded', () => {
+    expect(shouldClearInProgressPerspectiveOverride(null, 1)).toBe(false)
+  })
+
+  it('clears spectator override when 0 is not eligible', () => {
+    expect(shouldClearInProgressPerspectiveOverride([1, 2, 3], 0)).toBe(true)
   })
 })
 
 describe('isViewpointChangeAllowed', () => {
-  const inProgress = shellContext({ isGameFinished: false, sectorDisplayName: null })
-
-  it('allows spectator only when login is not a player during in-progress game', () => {
-    expect(isViewpointChangeAllowed(0, inProgress, 'Unknown', false, null)).toBe(true)
-    expect(isViewpointChangeAllowed(1, inProgress, 'Unknown', false, null)).toBe(false)
+  it('allows spectator only when 0 is in the eligible set', () => {
+    expect(isViewpointChangeAllowed(0, 'Unknown', false, null, [0])).toBe(true)
+    expect(isViewpointChangeAllowed(1, 'Unknown', false, null, [0])).toBe(false)
   })
 
-  it('allows login player only during in-progress game', () => {
-    expect(isViewpointChangeAllowed(2, inProgress, 'Bob', false, null)).toBe(true)
-    expect(isViewpointChangeAllowed(1, inProgress, 'Bob', false, null)).toBe(false)
+  it('allows only slots in the eligible set', () => {
+    expect(isViewpointChangeAllowed(2, 'Bob', false, null, [2])).toBe(true)
+    expect(isViewpointChangeAllowed(1, 'Bob', false, null, [2])).toBe(false)
   })
 
   it('allows stored perspectives in storage-only mode', () => {
-    expect(isViewpointChangeAllowed(2, baseInputs().gameInfoContext, '', true, [2])).toBe(true)
-    expect(isViewpointChangeAllowed(1, baseInputs().gameInfoContext, '', true, [2])).toBe(false)
+    expect(isViewpointChangeAllowed(2, '', true, [2], null)).toBe(true)
+    expect(isViewpointChangeAllowed(1, '', true, [2], null)).toBe(false)
   })
 
   it('allows spectator in storage-only mode when slot 0 is stored', () => {
-    expect(isViewpointChangeAllowed(0, baseInputs().gameInfoContext, '', true, [0])).toBe(true)
-    expect(isViewpointChangeAllowed(1, baseInputs().gameInfoContext, '', true, [0])).toBe(false)
+    expect(isViewpointChangeAllowed(0, '', true, [0], null)).toBe(true)
+    expect(isViewpointChangeAllowed(1, '', true, [0], null)).toBe(false)
   })
 
-  it('allows any player when game is finished', () => {
-    expect(isViewpointChangeAllowed(3, baseInputs().gameInfoContext, 'Alice', false, null)).toBe(
-      true
-    )
+  it('allows any slot in the eligible set', () => {
+    expect(isViewpointChangeAllowed(3, 'Alice', false, null, [1, 2, 3])).toBe(true)
+  })
+
+  it('does not allow change while the eligible set is absent', () => {
+    expect(isViewpointChangeAllowed(1, 'Alice', false, null, null)).toBe(false)
+    expect(isViewpointChangeAllowed(1, '', false, null, null)).toBe(false)
   })
 })

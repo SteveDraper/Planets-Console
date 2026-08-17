@@ -29,7 +29,8 @@ That XOR is what the SPA already does. [ADR 0014](0014-mcp-login-identity-and-vi
 
 ## Consequences
 
-- Exact BFF field vs thin sibling, and Core function names, are implementation. The cache key must include login so **name-only identity switch** does not serve a stale set.
+- Core: `ViewpointEligibilityService.eligible_perspectives(game_info, login_identity) -> frozenset[int]`. Empty login raises `ValidationError`.
+- BFF: `GET /games/{game_id}/viewpoint-eligibility?username=` returns `{ "perspectives": [...] }` (sorted slots). The cache key must include login so **name-only identity switch** does not serve a stale set.
 - `shouldUsePseudoViewpointForLogin` is not a second policy once the SPA reads the BFF set.
 - Glossary: **viewpoint eligibility**, **perspective** (includes spectator `0`) in [CONTEXT.md](../../CONTEXT.md). Design index: [design-mcp.md](../design-mcp.md).
 

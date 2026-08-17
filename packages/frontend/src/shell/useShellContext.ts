@@ -29,6 +29,7 @@ import {
   shouldClearInProgressPerspectiveOverride,
   type ShellViewpointRow,
 } from './shellContext'
+import { useEligiblePerspectives } from './useEligiblePerspectives'
 
 export type UseShellContextOptions = {
   reportShellError: (message: string) => void
@@ -79,6 +80,9 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
 
   const { dataTurn, futureOffset: futureTurnOffset, isFuture } = turnView
 
+  const loginTrimmed = loginName?.trim() ?? ''
+  const eligiblePerspectives = useEligiblePerspectives()
+
   const scopeInputs = useMemo(
     () => ({
       selectedGameId,
@@ -88,6 +92,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       loginName,
       storageOnlyLoad,
       storageAvailablePerspectives,
+      eligiblePerspectives,
       viewedDataTurn: dataTurn,
       turnUsernamesByPlayerId: null as ReadonlyMap<number, string> | null,
     }),
@@ -99,6 +104,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       loginName,
       storageOnlyLoad,
       storageAvailablePerspectives,
+      eligiblePerspectives,
       dataTurn,
     ]
   )
@@ -108,7 +114,6 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     [scopeInputs]
   )
 
-  const loginTrimmed = loginName?.trim() ?? ''
   const turnEnsureEnabled = deriveTurnEnsureEnabled(
     analyticScopeForEnsure,
     loginName,
@@ -160,6 +165,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       loginName,
       storageOnlyLoad,
       storageAvailablePerspectives,
+      eligiblePerspectives,
       viewedDataTurn: dataTurn,
       turnUsernamesByPlayerId,
     }),
@@ -171,6 +177,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       loginName,
       storageOnlyLoad,
       storageAvailablePerspectives,
+      eligiblePerspectives,
       dataTurn,
       turnUsernamesByPlayerId,
     ]
@@ -220,16 +227,14 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
   useEffect(() => {
     if (
       shouldClearInProgressPerspectiveOverride(
-        gameInfoContext,
-        loginName,
+        eligiblePerspectives,
         perspectiveOverrideOrdinal
       )
     ) {
       setPerspectiveOverrideOrdinal(null)
     }
   }, [
-    gameInfoContext,
-    loginName,
+    eligiblePerspectives,
     perspectiveOverrideOrdinal,
     setPerspectiveOverrideOrdinal,
   ])
@@ -239,10 +244,10 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       if (
         !isViewpointChangeAllowed(
           ordinal,
-          gameInfoContext,
           loginName,
           storageOnlyLoad,
-          storageAvailablePerspectives
+          storageAvailablePerspectives,
+          eligiblePerspectives
         )
       ) {
         return
@@ -250,11 +255,11 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
       setPerspectiveOverrideOrdinal(ordinal)
     },
     [
-      gameInfoContext,
       loginName,
       setPerspectiveOverrideOrdinal,
       storageOnlyLoad,
       storageAvailablePerspectives,
+      eligiblePerspectives,
     ]
   )
 
