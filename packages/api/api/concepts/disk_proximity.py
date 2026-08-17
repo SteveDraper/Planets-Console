@@ -157,44 +157,21 @@ def _cartography_hits(
     turn: TurnInfo, qx: float, qy: float, radius_ly: float
 ) -> list[DiskProximityHit]:
     hits: list[DiskProximityHit] = []
-    for storm in turn.ionstorms:
-        hit = _disk_hit(
-            KIND_ION_STORM, storm.id, storm.x, storm.y, float(storm.radius), qx, qy, radius_ly
-        )
-        if hit is not None:
-            hits.append(hit)
-    for nebula in turn.nebulas:
-        hit = _disk_hit(
-            KIND_NEBULA, nebula.id, nebula.x, nebula.y, float(nebula.radius), qx, qy, radius_ly
-        )
-        if hit is not None:
-            hits.append(hit)
-    for star in turn.stars:
-        hit = _disk_hit(
-            KIND_STAR_CLUSTER,
-            star.id,
-            star.x,
-            star.y,
-            _star_cluster_disk_radius(star),
-            qx,
-            qy,
-            radius_ly,
-        )
-        if hit is not None:
-            hits.append(hit)
-    for hole in turn.blackholes:
-        hit = _disk_hit(
+    disk_scans = (
+        (turn.ionstorms, KIND_ION_STORM, lambda storm: float(storm.radius)),
+        (turn.nebulas, KIND_NEBULA, lambda nebula: float(nebula.radius)),
+        (turn.stars, KIND_STAR_CLUSTER, _star_cluster_disk_radius),
+        (
+            turn.blackholes,
             KIND_BLACK_HOLE,
-            hole.id,
-            hole.x,
-            hole.y,
-            float(ergosphere_outer_radius(hole.coreradius, hole.bandradius)),
-            qx,
-            qy,
-            radius_ly,
-        )
-        if hit is not None:
-            hits.append(hit)
+            lambda hole: float(ergosphere_outer_radius(hole.coreradius, hole.bandradius)),
+        ),
+    )
+    for objects, kind, radius_fn in disk_scans:
+        for obj in objects:
+            hit = _disk_hit(kind, obj.id, obj.x, obj.y, radius_fn(obj), qx, qy, radius_ly)
+            if hit is not None:
+                hits.append(hit)
     hits.extend(_wormhole_hits(turn.wormholes, qx, qy, radius_ly))
     for planet in turn.planets:
         disk_radius = debris_disk_seed_radius(planet)
