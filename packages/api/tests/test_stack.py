@@ -10,6 +10,7 @@ from api.services.stack import (
     clear_process_service_stack,
     get_process_service_stack,
 )
+from api.storage import clear_backend_cache
 from api.storage.memory_asset import MemoryAssetBackend
 
 
@@ -72,5 +73,29 @@ def test_get_process_service_stack_is_a_singleton(monkeypatch):
         assert first is second
         assert first.games is second.games
         assert first.turns is second.turns
+    finally:
+        clear_process_service_stack()
+
+
+def test_clear_backend_cache_drops_process_service_stack(monkeypatch):
+    storage = MemoryAssetBackend(initial={})
+    monkeypatch.setattr("api.storage.get_storage", lambda: storage)
+    clear_process_service_stack()
+    try:
+        first = get_process_service_stack()
+        shutdown_calls: list[bool] = []
+        original_shutdown = first.analytics.shutdown_background_workers
+
+        def tracking_shutdown() -> None:
+            shutdown_calls.append(True)
+            original_shutdown()
+
+        monkeypatch.setattr(first.analytics, "shutdown_background_workers", tracking_shutdown)
+        clear_backend_cache()
+        assert shutdown_calls == [True]
+        rebuilt = get_process_service_stack()
+        assert rebuilt is not first
+        assert rebuilt.games is not first.games
+        assert rebuilt.turns is not first.turns
     finally:
         clear_process_service_stack()

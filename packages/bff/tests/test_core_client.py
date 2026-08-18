@@ -6,6 +6,7 @@ import pytest
 from api.errors import NotFoundError, ValidationError
 from api.models.game_info_operations import GameInfoUpdateOperation
 from api.services.game_service import GameService, clear_sector_title_cache
+from api.services.stack import clear_process_service_stack, get_process_service_stack
 from api.transport.concept_warp_well import CoordinateInWarpWellRequest, WarpWellTypeParam
 from api.transport.game_info_update import GameInfoUpdateRequest
 from api.transport.turn_ensure import TurnEnsureRequest
@@ -30,9 +31,11 @@ def _core_client(**overrides: object) -> CoreClient:
 def _clear_sector_cache():
     clear_sector_title_cache()
     clear_core_client_cache()
+    clear_process_service_stack()
     yield
     clear_sector_title_cache()
     clear_core_client_cache()
+    clear_process_service_stack()
 
 
 def test_get_core_client_returns_process_singleton():
@@ -42,12 +45,23 @@ def test_get_core_client_returns_process_singleton():
 
 
 def test_get_core_client_shares_process_service_stack():
-    from api.services.stack import get_process_service_stack
-
     client = get_core_client()
     stack = get_process_service_stack()
     assert client._games is stack.games
     assert client._turns is stack.turns
+
+
+def test_clear_core_client_cache_drops_facade_not_process_stack():
+    client = get_core_client()
+    stack = get_process_service_stack()
+
+    clear_core_client_cache()
+
+    rebuilt = get_core_client()
+    assert rebuilt is not client
+    assert get_process_service_stack() is stack
+    assert rebuilt._games is stack.games
+    assert rebuilt._turns is stack.turns
 
 
 def test_get_turn_analytics_maps_core_errors_to_http():

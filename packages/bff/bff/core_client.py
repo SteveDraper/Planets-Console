@@ -448,12 +448,13 @@ _core_client_singleton: CoreClient | None = None
 
 
 def clear_core_client_cache() -> None:
-    """Drop the cached client (tests after ``clear_backend_cache`` / config change)."""
+    """Drop the cached BFF facade (tests after ``clear_backend_cache`` / config change).
+
+    Does not tear down the process service graph; that dies with storage via
+    ``clear_backend_cache``.
+    """
     global _core_client_singleton
     _core_client_singleton = None
-    from api.services.stack import clear_process_service_stack
-
-    clear_process_service_stack()
 
 
 def _build_core_client() -> CoreClient:
