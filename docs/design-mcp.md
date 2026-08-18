@@ -1,6 +1,6 @@
 # Design: Agent MCP surface
 
-**Status:** Accepted v1 design (tracer shipped: package, `/mcp` mount, login, `list_stored_games`)  
+**Status:** Accepted v1 design (tracer shipped: package, `/mcp` mount, login, five **MCP shell tool**s)  
 **Map:** [Epic: agent MCP surface for game state and analytics](https://github.com/SteveDraper/Planets-Console/issues/310)  
 **Spec:** [MCP 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)  
 **Glossary:** [CONTEXT.md](../CONTEXT.md)

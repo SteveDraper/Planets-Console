@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock
 
 from api.services.game_service import GameService
 from mcp import Client
-from mcp.server.mcpserver import Context
 from mcp_adapter.server import LIST_STORED_GAMES_TOOL, build_mcp_server
 
-
-def _run(coro):
-    return asyncio.run(coro)
+from tests.mcp_test_support import build_test_mcp, resolve_as, run_coro
 
 
 def test_missing_login_is_adapter_error():
     games = MagicMock(spec=GameService)
     creds = MagicMock()
     creds.probe.return_value = True
-    mcp = build_mcp_server(game_service=games, credential_service=creds)
+    mcp = build_mcp_server(
+        game_service=games,
+        turn_load_service=MagicMock(),
+        credential_service=creds,
+    )
 
     async def body() -> None:
         async with Client(mcp) as client:
@@ -29,18 +29,14 @@ def test_missing_login_is_adapter_error():
         assert "X-Planets-Nu-Login" in text
         games.list_stored_games.assert_not_called()
 
-    _run(body())
+    run_coro(body())
 
 
 def test_list_stored_games_wraps_game_service():
     games = MagicMock(spec=GameService)
     payload = {"games": [{"id": "628580", "sectorName": "Serada 9 Sector"}]}
     games.list_stored_games.return_value = payload
-
-    def resolve_login(_ctx: Context) -> str:
-        return "alice"
-
-    mcp = build_mcp_server(game_service=games, resolve_login=resolve_login)
+    mcp = build_test_mcp(game_service=games, resolve_login=resolve_as("alice"))
 
     async def body() -> None:
         async with Client(mcp) as client:
@@ -49,4 +45,4 @@ def test_list_stored_games_wraps_game_service():
         assert result.structured_content == payload
         games.list_stored_games.assert_called_once_with()
 
-    _run(body())
+    run_coro(body())

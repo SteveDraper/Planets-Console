@@ -108,11 +108,35 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
     )
 
 
+_process_stack: ServiceStack | None = None
+
+
 def build_default_service_stack() -> ServiceStack:
     """Service graph for the active process storage backend (BFF in-process adapter, tests)."""
     from api.storage import get_storage
 
     return build_service_stack(get_storage())
+
+
+def get_process_service_stack() -> ServiceStack:
+    """Process-singleton service graph for the active storage backend.
+
+    BFF and the MCP adapter share this so mutating shell tools (game-info refresh,
+    turn-ensure) fire the same invalidation hooks as the SPA path.
+    """
+    global _process_stack
+    if _process_stack is None:
+        _process_stack = build_default_service_stack()
+    return _process_stack
+
+
+def clear_process_service_stack() -> None:
+    """Drop the cached stack (tests after storage or config change)."""
+    global _process_stack
+    stack = _process_stack
+    _process_stack = None
+    if stack is not None:
+        stack.analytics.shutdown_background_workers()
 
 
 def build_game_credential_services(
