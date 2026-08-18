@@ -112,6 +112,13 @@ def _make_is_persisted(analytic_id: str) -> Callable[[object, ExportScope], bool
     return is_persisted
 
 
+def _make_is_in_progress(analytic_id: str) -> Callable[[object, ExportScope], bool]:
+    def is_in_progress(_ctx: object, scope: ExportScope) -> bool:
+        return FIXTURE_EXPORT_STATE.is_in_progress(analytic_id, scope)
+
+    return is_in_progress
+
+
 def _make_ensure_export(analytic_id: str) -> Callable[[object, ExportScope], bool]:
     def ensure_export(_ctx: object, scope: ExportScope) -> bool:
         FIXTURE_EXPORT_STATE.ensure_calls.append((analytic_id, scope))
@@ -176,4 +183,5 @@ def make_fixture_catalog(
         ensure_export=_make_ensure_export(analytic_id),
         materialize_export_tree=materialize_export_tree,
         is_persisted=_make_is_persisted(analytic_id),
+        is_in_progress=_make_is_in_progress(analytic_id),
     )

@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypedDict
 
+# Hatch-read uses ``needs_ensure`` when the scope is not ensure-final and no
+# work is admitted, and ``in_progress`` when work is admitted but not yet
+# final. ``query`` admits ensure instead of returning those reasons.
 UnavailableReason = Literal[
     "turn_not_stored",
     "invalid_scope",
@@ -12,6 +15,8 @@ UnavailableReason = Literal[
     "ensure_blocked",
     "ensure_cycle",
     "unknown_analytic",
+    "needs_ensure",
+    "in_progress",
 ]
 
 PathResultKind = Literal["value", "none", "invalid_path"]

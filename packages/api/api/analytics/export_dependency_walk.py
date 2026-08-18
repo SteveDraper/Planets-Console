@@ -245,7 +245,7 @@ def _dependency_needs_processing(
     """
     if catalog is None or catalog.is_empty:
         return False
-    if _is_ensure_satisfied(ctx, analytic_id, scope, catalog):
+    if is_export_scope_ensure_satisfied(ctx, analytic_id, scope, catalog):
         return False
     return True
 
@@ -260,7 +260,7 @@ def is_ensure_dependency_satisfied(
     if catalog is None or catalog.is_empty:
         return True
     return all(
-        _is_ensure_satisfied(
+        is_export_scope_ensure_satisfied(
             ctx,
             dependency.analytic_id,
             dependency_scope,
@@ -271,7 +271,7 @@ def is_ensure_dependency_satisfied(
     )
 
 
-def _is_ensure_satisfied(
+def is_export_scope_ensure_satisfied(
     ctx: AnalyticQueryContext,
     analytic_id: str,
     scope: ExportScope,

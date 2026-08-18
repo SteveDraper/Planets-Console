@@ -19,6 +19,7 @@ EnsureExportFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 MaterializeExportFn = Callable[["AnalyticQueryContext", ExportScope], dict[str, Any]]
 ProbePersistedFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 ProbeEnsureSatisfiedFn = Callable[["AnalyticQueryContext", ExportScope], bool]
+ProbeInProgressFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class AnalyticExportCatalog:
     materialize_export_tree: MaterializeExportFn | None = None
     is_persisted: ProbePersistedFn | None = None
     is_ensure_satisfied: ProbeEnsureSatisfiedFn | None = None
+    is_in_progress: ProbeInProgressFn | None = None
     is_empty: bool = False
 
     def requires_player_id_for_path(self, path: str) -> bool:

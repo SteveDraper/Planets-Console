@@ -215,15 +215,48 @@ class AnalyticQueryContext:
         self._resolution_stack.append(resolution_key)
         try:
             self._ensure_query_root(analytic_id, scope, walk_result)
-            tree = self._materialize_tree(analytic_id, scope, catalog)
-            path_results = {
-                path: self._resolve_path_result(catalog, scope, tree, path) for path in paths
-            }
-            result = ExportQueryResult(status="ok", paths=path_results)
-            self._memo[resolution_key] = result
-            return result
+            return self._ok_path_result(analytic_id, scope, catalog, paths, resolution_key)
         finally:
             self._resolution_stack.pop()
+
+    def hatch_read(
+        self,
+        analytic_id: str,
+        paths: list[str] | tuple[str, ...],
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None = None,
+    ) -> ExportQueryResult:
+        """Materialize an export query only when the scope is persisted / ensure-final.
+
+        Does not admit analytic export ensure. Missing work is ``needs_ensure``;
+        admitted but not-yet-final work is ``in_progress``. Same envelope as
+        :meth:`query` when the scope is already final.
+        """
+        normalized_paths = tuple(sorted(paths))
+        prep = self._prepare_export_request(analytic_id, scope_overrides)
+        if not isinstance(prep, PreparedExportRequest):
+            return self._unavailable(prep)
+
+        scope = prep.scope
+        catalog = prep.catalog
+        unavailable = self._scope_unavailable_reason(catalog, scope, normalized_paths)
+        if unavailable is not None:
+            return self._unavailable(unavailable)
+
+        from api.compute.export_ensure import classify_hatch_read_scope
+
+        classification = classify_hatch_read_scope(self, analytic_id, scope, catalog)
+        if classification != "final":
+            return self._unavailable(classification)
+
+        resolution_key = ResolutionKey(
+            analytic_id=analytic_id,
+            scope=scope,
+            paths=normalized_paths,
+        )
+        cached = self._memo.get(resolution_key)
+        if cached is not None and cached.status == "ok":
+            return cached
+        return self._ok_path_result(analytic_id, scope, catalog, paths, resolution_key)
 
     def _plan_ensure_walk(
         self,
@@ -395,6 +428,22 @@ class AnalyticQueryContext:
                 continue
             if catalog.ensure_export(self, scope):
                 self.mark_scope_ensured(analytic_id, scope)
+
+    def _ok_path_result(
+        self,
+        analytic_id: str,
+        scope: ExportScope,
+        catalog: AnalyticExportCatalog,
+        paths: list[str] | tuple[str, ...],
+        resolution_key: ResolutionKey,
+    ) -> ExportQueryResult:
+        tree = self._materialize_tree(analytic_id, scope, catalog)
+        path_results = {
+            path: self._resolve_path_result(catalog, scope, tree, path) for path in paths
+        }
+        result = ExportQueryResult(status="ok", paths=path_results)
+        self._memo[resolution_key] = result
+        return result
 
     def _materialize_tree(
         self,
