@@ -100,6 +100,22 @@ _Avoid_: LLM geometry over turn JSON, planets-only spatial index as the product 
 An MCP tool that wraps Core shell/session services -- stored-game list, **GameInfo**, **turn-ensure**, stored perspectives -- not a **game concept**. Sibling of **MCP named gameplay tool** on the same tools catalog. See [ADR 0022](docs/adr/0022-mcp-v1-named-tool-catalog.md).
 _Avoid_: calling list-games a gameplay question, treating shell ops as hatch, login as a tool argument
 
+**MCP document view**:
+The typed advisor-shaped subset of a stored document that MCP advertises as `outputSchema` and returns by default. Not the full stored JSON, not a BFF DTO, and not a named **TurnInfo** entity (**MCP TurnInfo fallback** stays whole-entity). The GameInfo instance is the **MCP GameInfo view**. Keys keep RST/Core names and nesting; the view does not flatten, rename, or compute fields.
+_Avoid_: projection (compute/UI term), sanitized blob, MCP GameInfo (ambiguous with the stored **GameInfo** document), computed perspective on GameInfo
+
+**MCP document-view asset**:
+A checked-in JSON tree of names, nesting, and descriptions that selects **MCP document view** keys and supplies `outputSchema` descriptions. Types are inferred from the Core dataclass at those paths, not stored in the asset. Unknown paths and secret-bearing paths fail at startup. Not a golden of `tools/list`.
+_Avoid_: checked-in tools/list dump, second OpenAPI, JSON Schema as a parallel type owner
+
+**Secret redaction**:
+Always-on stripping of secret-bearing fields (`email`, `savekey`, `password`, `gamepassword`) from MCP returns of stored documents. Applies to both the **MCP document view** and the **stored-document hatch**. Distinct from choosing which non-secret fields belong in the view.
+_Avoid_: sanitization, projection
+
+**Stored-document hatch**:
+A sibling MCP tool that returns the stored document after **secret redaction**, advertised as an opaque object (`additionalProperties`), not a full JSON Schema of **GameSettings**. Not the **MCP export query hatch**.
+_Avoid_: escape hatch, raw blob, include_raw on the view tool
+
 **MCP named gameplay tool**:
 An MCP tool whose name and arguments are the gameplay or concept question the agent asks, wrapping a Core **game concept** in-process -- not a 1:1 BFF or Core HTTP twin, not an **MCP shell tool**. **MCP TurnInfo fallback** is also a named tool, not a generic scan. See [ADR 0017](docs/adr/0017-mcp-catalog-named-tools-and-export-hatch.md), [ADR 0021](docs/adr/0021-mcp-v1-wrap-existing-gated-fills.md), and [ADR 0022](docs/adr/0022-mcp-v1-named-tool-catalog.md).
 _Avoid_: BFF route as the tool name, family mega-tool with a kind enum, JSONPath over TurnInfo, resource URI as the query, one named tool per **analytic export path**, new Core math without a slice gate, listing stored games as a gameplay tool
