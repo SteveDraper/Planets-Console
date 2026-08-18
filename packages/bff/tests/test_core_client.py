@@ -41,6 +41,15 @@ def test_get_core_client_returns_process_singleton():
     assert first is second
 
 
+def test_get_core_client_shares_process_service_stack():
+    from api.services.stack import get_process_service_stack
+
+    client = get_core_client()
+    stack = get_process_service_stack()
+    assert client._games is stack.games
+    assert client._turns is stack.turns
+
+
 def test_get_turn_analytics_maps_core_errors_to_http():
     analytics = MagicMock()
     analytics.get_turn_analytics.side_effect = ValidationError("bad scope")

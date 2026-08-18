@@ -63,7 +63,9 @@ def clear_backend_cache() -> None:
     from api.analytics.military_score_inference.inference_table_stream_registry import (
         reset_inference_table_stream_registry_for_tests,
     )
+    from api.services.stack import clear_process_service_stack
 
+    clear_process_service_stack()
     reset_inference_row_scheduler_for_tests()
     reset_inference_table_stream_registry_for_tests()
     reset_fleet_table_stream_scheduler_for_tests()

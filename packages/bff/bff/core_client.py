@@ -19,7 +19,7 @@ from api.planets_nu import PlanetsNuClient
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.load_all_turns import LoadAllTurnsService
-from api.services.stack import build_default_service_stack
+from api.services.stack import get_process_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
@@ -450,13 +450,14 @@ _core_client_singleton: CoreClient | None = None
 def clear_core_client_cache() -> None:
     """Drop the cached client (tests after ``clear_backend_cache`` / config change)."""
     global _core_client_singleton
-    if _core_client_singleton is not None:
-        _core_client_singleton._analytics.shutdown_background_workers()
     _core_client_singleton = None
+    from api.services.stack import clear_process_service_stack
+
+    clear_process_service_stack()
 
 
 def _build_core_client() -> CoreClient:
-    stack = build_default_service_stack()
+    stack = get_process_service_stack()
     return CoreClient(
         game_service=stack.games,
         turn_load_service=stack.turns,
