@@ -7,6 +7,18 @@ from api.services.viewpoint_eligibility import ViewpointEligibilityService
 from mcp_adapter.errors import ViewpointEligibilityRefusedError
 
 
+def _game_info_and_eligible_perspectives(
+    game_service: GameService,
+    *,
+    login_identity: str,
+    game_id: int,
+) -> tuple[GameInfo, frozenset[int]]:
+    """One stored GameInfo fetch and one Core eligibility call."""
+    info = game_service.get_game_info(game_id)
+    allowed = ViewpointEligibilityService.eligible_perspectives(info, login_identity)
+    return info, allowed
+
+
 def eligible_perspectives_for_login(
     game_service: GameService,
     *,
@@ -14,8 +26,12 @@ def eligible_perspectives_for_login(
     game_id: int,
 ) -> frozenset[int]:
     """Allowed perspective slots for this login, from stored GameInfo."""
-    info = game_service.get_game_info(game_id)
-    return ViewpointEligibilityService.eligible_perspectives(info, login_identity)
+    _, allowed = _game_info_and_eligible_perspectives(
+        game_service,
+        login_identity=login_identity,
+        game_id=game_id,
+    )
+    return allowed
 
 
 def require_eligible_perspective(
@@ -26,8 +42,11 @@ def require_eligible_perspective(
     perspective: int,
 ) -> GameInfo:
     """Return stored GameInfo, or refuse when the named slot is not allowed."""
-    info = game_service.get_game_info(game_id)
-    allowed = ViewpointEligibilityService.eligible_perspectives(info, login_identity)
+    info, allowed = _game_info_and_eligible_perspectives(
+        game_service,
+        login_identity=login_identity,
+        game_id=game_id,
+    )
     if perspective not in allowed:
         raise ViewpointEligibilityRefusedError(
             game_id=game_id,
