@@ -23,7 +23,6 @@ from mcp.server.mcpserver import Context, Resolve
 from mcp.types import CallToolResult, TextContent
 
 from mcp_adapter.eligibility import require_eligible_perspective
-from mcp_adapter.errors import CatalogTooBroadError, EmptyHatchPathsError
 from mcp_adapter.shell_context import SHELL_CONTEXT_PROPERTIES
 
 LIST_ANALYTIC_EXPORTS_TOOL = "list_analytic_exports"
@@ -53,6 +52,10 @@ RESULT_TOO_LARGE_HINT = (
     "Narrow the query with a tighter JSONPath or a batched index list "
     "(for example $.solutions[0], $.solutions[1])."
 )
+CATALOG_TOO_BROAD_TEXT = (
+    "detail=full requires analytic_id; omit-id lists MCP export catalog summaries only."
+)
+EMPTY_HATCH_PATHS_TEXT = "paths must be a non-empty list of JSONPath selectors."
 
 CatalogDetailArg = Literal["summary", "full"]
 
@@ -110,7 +113,7 @@ def _register_list_analytic_exports(
             if resolved_detail == "full":
                 return _adapter_tool_error(
                     reason="catalog_too_broad",
-                    text=str(CatalogTooBroadError()),
+                    text=CATALOG_TOO_BROAD_TEXT,
                 )
             return {
                 "exports": [
@@ -155,7 +158,7 @@ def _register_query_analytic_export(
         if not paths:
             return _adapter_tool_error(
                 reason="invalid_input",
-                text=str(EmptyHatchPathsError()),
+                text=EMPTY_HATCH_PATHS_TEXT,
             )
         ctx = _hatch_query_context(
             game_service,
