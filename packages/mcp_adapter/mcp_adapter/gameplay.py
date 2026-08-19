@@ -25,10 +25,17 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context, Resolve
 
 from mcp_adapter.shell_context import (
+    SHELL_CONTEXT_PROPERTIES,
     is_needs_ensure,
     load_stored_turn,
     planet_on_turn,
     ship_on_turn,
+)
+from mcp_adapter.turninfo_fallback import (
+    FALLBACK_TOOL_NAMES,
+    FALLBACK_TOOL_OPTIONAL_PROPERTIES,
+    FALLBACK_TOOL_REQUIRED_PROPERTIES,
+    register_turninfo_fallback_tools,
 )
 
 POINT_IN_WARP_WELL_TOOL = "point_in_warp_well"
@@ -41,7 +48,7 @@ HYPERJUMP_LANDING_TOOL = "hyperjump_landing"
 DISTANCE_LY_TOOL = "distance_ly"
 REACHABLE_PLANETS_TOOL = "reachable_planets"
 
-GAMEPLAY_TOOL_NAMES = (
+CONCEPT_TOOL_NAMES = (
     POINT_IN_WARP_WELL_TOOL,
     WARP_WELL_CELLS_TOOL,
     FLARE_ENDPOINTS_TOOL,
@@ -53,7 +60,7 @@ GAMEPLAY_TOOL_NAMES = (
     REACHABLE_PLANETS_TOOL,
 )
 
-SHELL_CONTEXT_PROPERTIES = frozenset({"game_id", "turn", "perspective"})
+GAMEPLAY_TOOL_NAMES = CONCEPT_TOOL_NAMES + FALLBACK_TOOL_NAMES
 
 GAMEPLAY_TOOL_REQUIRED_PROPERTIES: dict[str, frozenset[str]] = {
     POINT_IN_WARP_WELL_TOOL: SHELL_CONTEXT_PROPERTIES
@@ -67,6 +74,7 @@ GAMEPLAY_TOOL_REQUIRED_PROPERTIES: dict[str, frozenset[str]] = {
     DISTANCE_LY_TOOL: frozenset({"x1", "y1", "x2", "y2"}),
     REACHABLE_PLANETS_TOOL: SHELL_CONTEXT_PROPERTIES
     | frozenset({"from_planet_id", "warp_speed", "gravitonic_movement", "flare_mode"}),
+    **FALLBACK_TOOL_REQUIRED_PROPERTIES,
 }
 
 GAMEPLAY_TOOL_OPTIONAL_PROPERTIES: dict[str, frozenset[str]] = {
@@ -79,6 +87,7 @@ GAMEPLAY_TOOL_OPTIONAL_PROPERTIES: dict[str, frozenset[str]] = {
     HYPERJUMP_LANDING_TOOL: frozenset(),
     DISTANCE_LY_TOOL: frozenset(),
     REACHABLE_PLANETS_TOOL: frozenset({"flare_depth"}),
+    **FALLBACK_TOOL_OPTIONAL_PROPERTIES,
 }
 
 HYPERJUMP_NOT_JUMPING_REASON = "Ship is not performing a hyperjump."
@@ -96,7 +105,7 @@ def register_gameplay_tools(
     turn_load_service: TurnLoadService,
     resolve_login: Callable[[Context], str],
 ) -> None:
-    """Register the v1 MCP named gameplay tools that wrap Core concepts."""
+    """Register the v1 MCP named gameplay tools (concept wraps and TurnInfo fallback)."""
     _register_point_in_warp_well(mcp, game_service, turn_load_service, resolve_login)
     _register_warp_well_cells(mcp, game_service, turn_load_service, resolve_login)
     _register_flare_endpoints(mcp, resolve_login)
@@ -106,6 +115,12 @@ def register_gameplay_tools(
     _register_hyperjump_landing(mcp, game_service, turn_load_service, resolve_login)
     _register_distance_ly(mcp, resolve_login)
     _register_reachable_planets(mcp, game_service, turn_load_service, resolve_login)
+    register_turninfo_fallback_tools(
+        mcp,
+        game_service=game_service,
+        turn_load_service=turn_load_service,
+        resolve_login=resolve_login,
+    )
 
 
 def _load_turn(

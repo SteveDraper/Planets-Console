@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
+from api.models.game import GameInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
 from api.services.turn_load_service import TurnLoadService
@@ -43,3 +44,18 @@ def build_test_mcp(**overrides):
     }
     defaults.update(overrides)
     return build_mcp_server(**defaults)
+
+
+def stored_turn_mcp(running_game_info: GameInfo, turn: object, *, login: str = "arlowat"):
+    """MCP server whose TurnLoadService already has this turn stored."""
+    games = MagicMock(spec=GameService)
+    games.get_game_info.return_value = running_game_info
+    turns = MagicMock(spec=TurnLoadService)
+    turns.is_turn_stored.return_value = True
+    turns.get_turn_info.return_value = turn
+    mcp = build_test_mcp(
+        game_service=games,
+        turn_load_service=turns,
+        resolve_login=resolve_as(login),
+    )
+    return mcp, games, turns

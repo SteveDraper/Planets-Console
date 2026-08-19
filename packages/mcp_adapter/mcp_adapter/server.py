@@ -35,6 +35,14 @@ from mcp_adapter.shell import (
     SHELL_TOOL_REQUIRED_PROPERTIES,
     register_shell_tools,
 )
+from mcp_adapter.turninfo_fallback import (
+    GET_ION_STORM_TOOL,
+    GET_MINEFIELD_TOOL,
+    GET_PLANET_TOOL,
+    GET_PLAYER_TOOL,
+    GET_SHIP_TOOL,
+    GET_WORMHOLE_TOOL,
+)
 
 # MCPServer always registers empty prompt/resource handlers. Dropping them is how
 # server/discover stays tools-only.
@@ -105,6 +113,12 @@ __all__ = [
     "GAMEPLAY_TOOL_OPTIONAL_PROPERTIES",
     "GAMEPLAY_TOOL_REQUIRED_PROPERTIES",
     "GET_GAME_INFO_TOOL",
+    "GET_ION_STORM_TOOL",
+    "GET_MINEFIELD_TOOL",
+    "GET_PLANET_TOOL",
+    "GET_PLAYER_TOOL",
+    "GET_SHIP_TOOL",
+    "GET_WORMHOLE_TOOL",
     "HYPERJUMP_LANDING_TOOL",
     "LIST_STORED_GAMES_TOOL",
     "LIST_STORED_PERSPECTIVES_TOOL",

@@ -27,7 +27,7 @@ from mcp_adapter.server import (
 )
 from mcp_adapter.shell_context import NEEDS_ENSURE_RESULT
 
-from tests.mcp_test_support import build_test_mcp, call_tool, resolve_as
+from tests.mcp_test_support import build_test_mcp, call_tool, resolve_as, stored_turn_mcp
 
 _GAME_ID = 628580
 _TURN = 111
@@ -35,26 +35,12 @@ _PERSPECTIVE = 2
 _SHELL = {"game_id": _GAME_ID, "turn": _TURN, "perspective": _PERSPECTIVE}
 
 
-def _stored_turn_mcp(running_game_info: GameInfo, turn, *, login: str = "arlowat"):
-    games = MagicMock(spec=GameService)
-    games.get_game_info.return_value = running_game_info
-    turns = MagicMock(spec=TurnLoadService)
-    turns.is_turn_stored.return_value = True
-    turns.get_turn_info.return_value = turn
-    mcp = build_test_mcp(
-        game_service=games,
-        turn_load_service=turns,
-        resolve_login=resolve_as(login),
-    )
-    return mcp, games, turns
-
-
 def test_point_in_warp_well_wraps_coordinate_in_warp_well(running_game_info: GameInfo):
     planet = MagicMock()
     planet.id = 17
     turn = MagicMock()
     turn.planets = [planet]
-    mcp, _, turns = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, turns = stored_turn_mcp(running_game_info, turn)
 
     with patch("mcp_adapter.gameplay.coordinate_in_warp_well", return_value=True) as concept:
         result = call_tool(
@@ -74,7 +60,7 @@ def test_warp_well_cells_maps_cell_indices(running_game_info: GameInfo):
     planet.id = 3
     turn = MagicMock()
     turn.planets = [planet]
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     with patch(
         "mcp_adapter.gameplay.map_cell_indices_in_warp_well",
@@ -122,7 +108,7 @@ def test_flare_endpoints_adds_origin_to_offsets():
 def test_sample_stellar_cartography_returns_sample_at(running_game_info: GameInfo):
     turn = MagicMock()
     payload = {"x": 4, "y": 5, "entries": [{"layer": "nebulae", "lines": ["fog"]}]}
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     with patch("mcp_adapter.gameplay.sample_at", return_value=payload) as concept:
         result = call_tool(mcp, SAMPLE_STELLAR_CARTOGRAPHY_TOOL, {**_SHELL, "x": 4, "y": 5})
@@ -135,7 +121,7 @@ def test_sample_stellar_cartography_returns_sample_at(running_game_info: GameInf
 def test_stellar_cartography_summary_returns_turn_summary(running_game_info: GameInfo):
     turn = MagicMock()
     payload = {"ion_storm_count": 2, "nu_ion_storms": True}
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     with patch(
         "mcp_adapter.gameplay.stellar_cartography_turn_summary",
@@ -150,7 +136,7 @@ def test_stellar_cartography_summary_returns_turn_summary(running_game_info: Gam
 
 def test_disk_proximity_omits_include_and_serializes_hits(running_game_info: GameInfo):
     turn = MagicMock()
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
     hits = [
         DiskProximityHit(kind="ship", id=11, x=100, y=100),
         DiskProximityHit(kind="nebula", id=33, x=105, y=100, radius=20.0),
@@ -175,7 +161,7 @@ def test_disk_proximity_omits_include_and_serializes_hits(running_game_info: Gam
 
 def test_disk_proximity_passes_include_subset(running_game_info: GameInfo):
     turn = MagicMock()
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     with patch("mcp_adapter.gameplay.query_disk_proximity", return_value=[]) as concept:
         result = call_tool(
@@ -198,7 +184,7 @@ def test_hyperjump_landing_jumping_returns_pre_snap_xy(running_game_info: GameIn
     turn = MagicMock()
     turn.ships = [ship]
     turn.hulls = [hull]
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     with (
         patch("mcp_adapter.gameplay.ship_is_performing_hyperjump", return_value=True) as jumping,
@@ -221,7 +207,7 @@ def test_hyperjump_landing_not_jumping_returns_reason(running_game_info: GameInf
     turn = MagicMock()
     turn.ships = [ship]
     turn.hulls = [hull]
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     with (
         patch("mcp_adapter.gameplay.ship_is_performing_hyperjump", return_value=False),
@@ -257,7 +243,7 @@ def test_reachable_planets_filters_routes_to_origin_endpoint(running_game_info: 
     planet.id = 10
     turn = MagicMock()
     turn.planets = [planet]
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
     outcome = ConnectionRoutesOutcome(
         routes=[
             {"fromPlanetId": 10, "toPlanetId": 20, "viaFlare": False},
@@ -304,7 +290,7 @@ def test_reachable_planets_passes_flare_depth(running_game_info: GameInfo):
     planet.id = 1
     turn = MagicMock()
     turn.planets = [planet]
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     with patch(
         "mcp_adapter.gameplay.connection_routes_with_options",
@@ -391,7 +377,7 @@ def test_turn_scoped_gameplay_tool_refuses_ineligible_perspective(
 def test_missing_planet_is_not_found(running_game_info: GameInfo):
     turn = MagicMock()
     turn.planets = []
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     result = call_tool(
         mcp,
@@ -406,7 +392,7 @@ def test_missing_planet_is_not_found(running_game_info: GameInfo):
 def test_missing_ship_is_not_found(running_game_info: GameInfo):
     turn = MagicMock()
     turn.ships = []
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     result = call_tool(mcp, HYPERJUMP_LANDING_TOOL, {**_SHELL, "ship_id": 99})
 
