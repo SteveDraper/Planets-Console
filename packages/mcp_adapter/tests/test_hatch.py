@@ -207,6 +207,7 @@ def test_query_over_budget_is_result_too_large_with_zero_path_values(
         status="ok",
         paths={"$": PathResult(kind="value", value="x" * 200)},
     )
+    expected_bytes = len(json.dumps(dataclass_to_json(huge), ensure_ascii=False).encode("utf-8"))
     monkeypatch.setattr("mcp_adapter.hatch.HATCH_RESULT_BUDGET_BYTES", 32)
 
     with patch(
@@ -223,6 +224,7 @@ def test_query_over_budget_is_result_too_large_with_zero_path_values(
     payload = result.structured_content
     assert payload["reason"] == "result_too_large"
     assert payload["budget_bytes"] == 32
+    assert payload["bytes"] == expected_bytes
     assert payload["bytes"] > 32
     assert payload["paths"] == {}
     assert payload["hint"] == RESULT_TOO_LARGE_HINT

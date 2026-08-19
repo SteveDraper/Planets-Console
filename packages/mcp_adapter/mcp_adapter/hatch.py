@@ -173,10 +173,10 @@ def _register_query_analytic_export(
                 dataclass_to_json(ExportQueryResult(status="unavailable", reason="turn_not_stored"))
             )
         result = ctx.hatch_read(analytic_id, paths, _scope_overrides(player_id))
-        envelope = _json_ready(dataclass_to_json(result))
+        payload = dataclass_to_json(result)
         if result.status != "ok":
-            return envelope
-        return _enforce_hatch_result_budget(envelope)
+            return _json_ready(payload)
+        return _enforce_hatch_result_budget(payload)
 
 
 def _register_ensure_analytic_export(
@@ -311,19 +311,27 @@ def _full_entry(analytic_id: str, catalog: AnalyticExportCatalog) -> dict[str, A
     }
 
 
-def _json_ready(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a JSON-native dict (tuples become lists; matches MCP structured content)."""
-    loaded = json.loads(json.dumps(payload))
+def _hatch_json_text(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _json_object(serialized: str) -> dict[str, Any]:
+    loaded = json.loads(serialized)
     if not isinstance(loaded, dict):
         raise TypeError("hatch payload must serialize to a JSON object")
     return loaded
 
 
-def _enforce_hatch_result_budget(envelope: dict[str, Any]) -> dict[str, Any] | CallToolResult:
-    payload = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    byte_count = len(payload)
+def _json_ready(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON-native dict (tuples become lists; matches MCP structured content)."""
+    return _json_object(_hatch_json_text(payload))
+
+
+def _enforce_hatch_result_budget(payload: dict[str, Any]) -> dict[str, Any] | CallToolResult:
+    serialized = _hatch_json_text(payload)
+    byte_count = len(serialized.encode("utf-8"))
     if byte_count <= HATCH_RESULT_BUDGET_BYTES:
-        return envelope
+        return _json_object(serialized)
     return _adapter_tool_error(
         reason="result_too_large",
         text=(
