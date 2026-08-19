@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
 from api.services.turn_load_service import TurnLoadService
+from mcp import Client
 from mcp.server.mcpserver import Context
 from mcp_adapter.server import build_mcp_server
 
@@ -22,6 +23,14 @@ def resolve_as(name: str) -> Callable[[Context], str]:
         return name
 
     return resolve_login
+
+
+def call_tool(mcp, name: str, arguments: dict):
+    async def body():
+        async with Client(mcp) as client:
+            return await client.call_tool(name, arguments)
+
+    return run_coro(body())
 
 
 def build_test_mcp(**overrides):
