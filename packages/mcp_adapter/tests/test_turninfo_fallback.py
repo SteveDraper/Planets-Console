@@ -19,10 +19,17 @@ from mcp_adapter.server import (
     GET_SHIP_TOOL,
     GET_WORMHOLE_TOOL,
 )
-from mcp_adapter.shell_context import NEEDS_ENSURE_RESULT
+from mcp_adapter.shell_context import (
+    NEEDS_ENSURE_RESULT,
+    ion_storm_on_turn,
+    minefield_on_turn,
+    planet_on_turn,
+    player_on_turn,
+    ship_on_turn,
+)
 from mcp_adapter.turninfo_fallback import PLAYER_SECRET_FIELDS
 
-from tests.mcp_test_support import build_test_mcp, call_tool, resolve_as
+from tests.mcp_test_support import build_test_mcp, call_tool, resolve_as, stored_turn_mcp
 
 _GAME_ID = 628580
 _TURN = 111
@@ -37,40 +44,6 @@ _ION_STORM_ID = 17
 _PLAYER_ID = 1
 
 
-def _stored_turn_mcp(running_game_info: GameInfo, turn: TurnInfo, *, login: str = "arlowat"):
-    games = MagicMock(spec=GameService)
-    games.get_game_info.return_value = running_game_info
-    turns = MagicMock(spec=TurnLoadService)
-    turns.is_turn_stored.return_value = True
-    turns.get_turn_info.return_value = turn
-    mcp = build_test_mcp(
-        game_service=games,
-        turn_load_service=turns,
-        resolve_login=resolve_as(login),
-    )
-    return mcp, games, turns
-
-
-def _ship(turn: TurnInfo, ship_id: int):
-    return next(ship for ship in turn.ships if ship.id == ship_id)
-
-
-def _planet(turn: TurnInfo, planet_id: int):
-    return next(planet for planet in turn.planets if planet.id == planet_id)
-
-
-def _minefield(turn: TurnInfo, minefield_id: int):
-    return next(field for field in turn.minefields if field.id == minefield_id)
-
-
-def _ion_storm(turn: TurnInfo, ion_storm_id: int):
-    return next(storm for storm in turn.ionstorms if storm.id == ion_storm_id)
-
-
-def _player(turn: TurnInfo, player_id: int):
-    return next(player for player in turn.players if player.id == player_id)
-
-
 def _turn_with_starbase_id_mismatch(sample_turn: TurnInfo) -> tuple[TurnInfo, Starbase]:
     base = replace(
         sample_turn.starbases[0],
@@ -81,8 +54,8 @@ def _turn_with_starbase_id_mismatch(sample_turn: TurnInfo) -> tuple[TurnInfo, St
 
 
 def test_get_ship_returns_whole_stored_entity(running_game_info: GameInfo, sample_turn: TurnInfo):
-    mcp, _, _ = _stored_turn_mcp(running_game_info, sample_turn)
-    ship = _ship(sample_turn, _SHIP_ID)
+    mcp, _, _ = stored_turn_mcp(running_game_info, sample_turn)
+    ship = ship_on_turn(sample_turn, _SHIP_ID)
 
     result = call_tool(mcp, GET_SHIP_TOOL, {**_SHELL, "ship_id": _SHIP_ID})
 
@@ -94,8 +67,8 @@ def test_get_planet_includes_starbase_keyed_by_planet_id(
     running_game_info: GameInfo, sample_turn: TurnInfo
 ):
     turn, base = _turn_with_starbase_id_mismatch(sample_turn)
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
-    planet = _planet(turn, _PLANET_WITH_BASE_ID)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
+    planet = planet_on_turn(turn, _PLANET_WITH_BASE_ID)
 
     result = call_tool(mcp, GET_PLANET_TOOL, {**_SHELL, "planet_id": _PLANET_WITH_BASE_ID})
 
@@ -113,8 +86,8 @@ def test_get_planet_does_not_match_starbase_by_rst_id(
     running_game_info: GameInfo, sample_turn: TurnInfo
 ):
     turn, _base = _turn_with_starbase_id_mismatch(sample_turn)
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
-    planet = _planet(turn, _PLANET_WITHOUT_BASE_ID)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
+    planet = planet_on_turn(turn, _PLANET_WITHOUT_BASE_ID)
 
     result = call_tool(mcp, GET_PLANET_TOOL, {**_SHELL, "planet_id": _PLANET_WITHOUT_BASE_ID})
 
@@ -127,7 +100,7 @@ def test_get_planet_does_not_match_starbase_by_rst_id(
 def test_get_planet_starbase_null_when_planet_has_no_base(
     running_game_info: GameInfo, sample_turn: TurnInfo
 ):
-    mcp, _, _ = _stored_turn_mcp(running_game_info, sample_turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, sample_turn)
 
     result = call_tool(mcp, GET_PLANET_TOOL, {**_SHELL, "planet_id": _PLANET_WITHOUT_BASE_ID})
 
@@ -139,8 +112,8 @@ def test_get_planet_starbase_null_when_planet_has_no_base(
 def test_get_minefield_returns_whole_stored_entity(
     running_game_info: GameInfo, sample_turn: TurnInfo
 ):
-    mcp, _, _ = _stored_turn_mcp(running_game_info, sample_turn)
-    minefield = _minefield(sample_turn, _MINEFIELD_ID)
+    mcp, _, _ = stored_turn_mcp(running_game_info, sample_turn)
+    minefield = minefield_on_turn(sample_turn, _MINEFIELD_ID)
 
     result = call_tool(mcp, GET_MINEFIELD_TOOL, {**_SHELL, "minefield_id": _MINEFIELD_ID})
 
@@ -151,8 +124,8 @@ def test_get_minefield_returns_whole_stored_entity(
 def test_get_ion_storm_returns_whole_stored_entity(
     running_game_info: GameInfo, sample_turn: TurnInfo
 ):
-    mcp, _, _ = _stored_turn_mcp(running_game_info, sample_turn)
-    storm = _ion_storm(sample_turn, _ION_STORM_ID)
+    mcp, _, _ = stored_turn_mcp(running_game_info, sample_turn)
+    storm = ion_storm_on_turn(sample_turn, _ION_STORM_ID)
 
     result = call_tool(mcp, GET_ION_STORM_TOOL, {**_SHELL, "ion_storm_id": _ION_STORM_ID})
 
@@ -174,7 +147,7 @@ def test_get_wormhole_returns_whole_stored_entity(
         turn=111,
     )
     turn = replace(sample_turn, wormholes=[wormhole])
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     result = call_tool(mcp, GET_WORMHOLE_TOOL, {**_SHELL, "wormhole_id": 7})
 
@@ -184,7 +157,7 @@ def test_get_wormhole_returns_whole_stored_entity(
 
 def test_get_player_strips_email_and_savekey(running_game_info: GameInfo, sample_turn: TurnInfo):
     player = replace(
-        _player(sample_turn, _PLAYER_ID),
+        player_on_turn(sample_turn, _PLAYER_ID),
         email="secret@example.com",
         savekey="order-save-token",
     )
@@ -192,7 +165,7 @@ def test_get_player_strips_email_and_savekey(running_game_info: GameInfo, sample
         sample_turn,
         players=[player if item.id == _PLAYER_ID else item for item in sample_turn.players],
     )
-    mcp, _, _ = _stored_turn_mcp(running_game_info, turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, turn)
 
     result = call_tool(mcp, GET_PLAYER_TOOL, {**_SHELL, "player_id": _PLAYER_ID})
 
@@ -209,8 +182,8 @@ def test_get_player_strips_email_and_savekey(running_game_info: GameInfo, sample
 def test_get_player_uses_player_id_not_perspective(
     running_game_info: GameInfo, sample_turn: TurnInfo
 ):
-    mcp, _, _ = _stored_turn_mcp(running_game_info, sample_turn)
-    player = _player(sample_turn, _PLAYER_ID)
+    mcp, _, _ = stored_turn_mcp(running_game_info, sample_turn)
+    player = player_on_turn(sample_turn, _PLAYER_ID)
 
     result = call_tool(
         mcp,
@@ -224,7 +197,7 @@ def test_get_player_uses_player_id_not_perspective(
 
 
 def test_missing_entity_ids_are_not_found(running_game_info: GameInfo, sample_turn: TurnInfo):
-    mcp, _, _ = _stored_turn_mcp(running_game_info, sample_turn)
+    mcp, _, _ = stored_turn_mcp(running_game_info, sample_turn)
     missing = 99_999
     cases = (
         (GET_SHIP_TOOL, {"ship_id": missing}, "ship id"),
