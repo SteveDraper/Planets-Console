@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from api.analytics import TurnAnalyticsOptions
 from api.analytics.compute_context import make_analytic_compute_context
@@ -39,6 +39,15 @@ from api.transport.homeworld_assertions import (
 if TYPE_CHECKING:
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+
+
+class _QueryComputeContextIngredients(NamedTuple):
+    """Shared turn, load_turn, export_services, and fleet ensure_turn for query/compute context."""
+
+    turn: TurnInfo
+    load_turn: Callable[[int], TurnInfo | None]
+    export_services: dict[str, object]
+    ensure_turn: Callable[[int], TurnInfo | None] | None
 
 
 class TurnAnalyticService:
@@ -107,6 +116,32 @@ class TurnAnalyticService:
 
         return load_scoreboard_turn
 
+    def _query_compute_context_ingredients(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        username: str = "",
+    ) -> _QueryComputeContextIngredients:
+        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+        load_turn = self._load_scoreboard_turn(game_id, perspective)
+        export_services = self._turn_export_services(
+            game_id,
+            perspective,
+            username=username,
+        )
+        fleet_services = export_services[FLEET_ANALYTIC_ID]
+        ensure_turn = (
+            fleet_services.ensure_turn if isinstance(fleet_services, FleetComputeServices) else None
+        )
+        return _QueryComputeContextIngredients(
+            turn=turn,
+            load_turn=load_turn,
+            export_services=export_services,
+            ensure_turn=ensure_turn,
+        )
+
     def get_turn_analytics(
         self,
         game_id: int,
@@ -132,7 +167,12 @@ class TurnAnalyticService:
         auto-ensure missing turns (stored account API key lookup). Empty skips
         turn-load ensure.
         """
-        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+        ingredients = self._query_compute_context_ingredients(
+            game_id,
+            perspective,
+            turn_number,
+            username=username,
+        )
         options = TurnAnalyticsOptions(
             connection_warp_speed=connection_warp_speed,
             connection_gravitonic_movement=connection_gravitonic_movement,
@@ -141,26 +181,16 @@ class TurnAnalyticService:
             connection_include_illustrative_routes=connection_include_illustrative_routes,
             diagnostics=diagnostics,
         )
-        load_turn = self._load_scoreboard_turn(game_id, perspective)
-        export_services = self._turn_export_services(
-            game_id,
-            perspective,
-            username=username,
-        )
-        fleet_services = export_services[FLEET_ANALYTIC_ID]
-        ensure_turn = (
-            fleet_services.ensure_turn if isinstance(fleet_services, FleetComputeServices) else None
-        )
         compute_ctx = make_analytic_compute_context(
-            turn,
+            ingredients.turn,
             options,
-            load_turn=load_turn,
-            export_services=export_services,
+            load_turn=ingredients.load_turn,
+            export_services=ingredients.export_services,
             game_id=game_id,
             perspective=perspective,
-            ensure_turn=ensure_turn,
+            ensure_turn=ingredients.ensure_turn,
         )
-        ensure_table_map_compute(compute_ctx.exports, analytic_id, turn)
+        ensure_table_map_compute(compute_ctx.exports, analytic_id, ingredients.turn)
         return dispatch_turn_analytic(analytic_id, compute_ctx)
 
     def export_query_context(
@@ -177,22 +207,21 @@ class TurnAnalyticService:
         Does not dispatch table/map compute. ``username`` enables login-backed
         dependency-turn fill on live ensure; hatch-read does not auto-load turns.
         """
-        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        load_turn = self._load_scoreboard_turn(game_id, perspective)
-        export_services = self._turn_export_services(game_id, perspective, username=username)
-        fleet_services = export_services[FLEET_ANALYTIC_ID]
-        ensure_turn = (
-            fleet_services.ensure_turn if isinstance(fleet_services, FleetComputeServices) else None
+        ingredients = self._query_compute_context_ingredients(
+            game_id,
+            perspective,
+            turn_number,
+            username=username,
         )
         return make_analytic_query_context(
-            turn,
+            ingredients.turn,
             TurnAnalyticsOptions(),
             game_id=game_id,
             perspective=perspective,
-            load_turn=load_turn,
+            load_turn=ingredients.load_turn,
             export_registry=export_registry,
-            export_services=export_services,
-            ensure_turn=ensure_turn,
+            export_services=ingredients.export_services,
+            ensure_turn=ingredients.ensure_turn,
         )
 
     def _turn_export_services(
