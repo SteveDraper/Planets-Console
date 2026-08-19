@@ -80,10 +80,10 @@ def build_mcp_server(
     *,
     game_service: GameService,
     turn_load_service: TurnLoadService,
+    turn_analytic_service: TurnAnalyticService,
     credential_service: CredentialService | None = None,
     resolve_login: Callable[[Context], str] | None = None,
     planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
-    turn_analytic_service: TurnAnalyticService | None = None,
     export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
 ) -> MCPServer:
     """Build an MCPServer with the v1 MCP shell, gameplay, and hatch catalog."""

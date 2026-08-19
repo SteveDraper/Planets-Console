@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal
 
 from api.analytics.catalog import TURN_ANALYTIC_CATALOG, catalog_entry
-from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import (
     ExportProbeResult,
     ExportQueryResult,
@@ -14,10 +14,7 @@ from api.analytics.export_types import (
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.registry import EXPORT_REGISTRY
-from api.analytics.options import TurnAnalyticsOptions
 from api.compute.export_ensure import admit_export_scope_at_background
-from api.errors import NotFoundError
-from api.models.game import TurnInfo
 from api.serialization.codecs import dataclass_to_json
 from api.services.game_service import GameService
 from api.services.turn_analytic_service import TurnAnalyticService
@@ -67,7 +64,7 @@ def register_hatch_tools(
     game_service: GameService,
     turn_load_service: TurnLoadService,
     resolve_login: Callable[[Context], str],
-    turn_analytic_service: TurnAnalyticService | None = None,
+    turn_analytic_service: TurnAnalyticService,
     export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
 ) -> None:
     """Register the v1 MCP export query hatch tools."""
@@ -136,7 +133,7 @@ def _register_query_analytic_export(
     game_service: GameService,
     turn_load_service: TurnLoadService,
     resolve_login: Callable[[Context], str],
-    turn_analytic_service: TurnAnalyticService | None,
+    turn_analytic_service: TurnAnalyticService,
     registry: Mapping[str, AnalyticExportCatalog],
 ) -> None:
     @mcp.tool(name=QUERY_ANALYTIC_EXPORT_TOOL)
@@ -188,7 +185,7 @@ def _register_ensure_analytic_export(
     game_service: GameService,
     turn_load_service: TurnLoadService,
     resolve_login: Callable[[Context], str],
-    turn_analytic_service: TurnAnalyticService | None,
+    turn_analytic_service: TurnAnalyticService,
     registry: Mapping[str, AnalyticExportCatalog],
 ) -> None:
     @mcp.tool(name=ENSURE_ANALYTIC_EXPORT_TOOL)
@@ -244,7 +241,7 @@ def _register_ensure_analytic_export(
 def _hatch_query_context(
     game_service: GameService,
     turn_load_service: TurnLoadService,
-    turn_analytic_service: TurnAnalyticService | None,
+    turn_analytic_service: TurnAnalyticService,
     registry: Mapping[str, AnalyticExportCatalog],
     *,
     login_identity: str,
@@ -261,39 +258,13 @@ def _hatch_query_context(
     )
     if not turn_load_service.is_turn_stored(game_id, perspective, turn):
         return None
-    if turn_analytic_service is not None:
-        return turn_analytic_service.export_query_context(
-            game_id,
-            perspective,
-            turn,
-            username=username,
-            export_registry=registry,
-        )
-    stored = turn_load_service.get_turn_info(game_id, perspective, turn)
-    return make_analytic_query_context(
-        stored,
-        TurnAnalyticsOptions(),
-        game_id=game_id,
-        perspective=perspective,
-        load_turn=_load_turn_from_service(turn_load_service, game_id, perspective),
+    return turn_analytic_service.export_query_context(
+        game_id,
+        perspective,
+        turn,
+        username=username,
         export_registry=registry,
     )
-
-
-def _load_turn_from_service(
-    turn_load_service: TurnLoadService,
-    game_id: int,
-    perspective: int,
-) -> Callable[[int], TurnInfo | None]:
-    def load_turn(turn_number: int) -> TurnInfo | None:
-        if not turn_load_service.is_turn_stored(game_id, perspective, turn_number):
-            return None
-        try:
-            return turn_load_service.get_turn_info(game_id, perspective, turn_number)
-        except NotFoundError, OSError, ValueError, KeyError:
-            return None
-
-    return load_turn
 
 
 def _scope_overrides(player_id: int | None) -> ExportScopeOverrides:

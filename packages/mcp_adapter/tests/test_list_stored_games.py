@@ -19,6 +19,7 @@ def test_missing_login_is_adapter_error():
         game_service=games,
         turn_load_service=MagicMock(),
         credential_service=creds,
+        turn_analytic_service=MagicMock(),
     )
 
     async def body() -> None:

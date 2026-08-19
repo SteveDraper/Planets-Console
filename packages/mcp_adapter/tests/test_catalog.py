@@ -142,6 +142,7 @@ def test_build_mcp_server_requires_game_service():
         build_mcp_server(
             turn_load_service=MagicMock(),
             credential_service=MagicMock(),
+            turn_analytic_service=MagicMock(),
         )
 
 
@@ -149,6 +150,16 @@ def test_build_mcp_server_requires_turn_load_service():
     with pytest.raises(TypeError, match="turn_load_service"):
         build_mcp_server(
             game_service=MagicMock(),
+            credential_service=MagicMock(),
+            turn_analytic_service=MagicMock(),
+        )
+
+
+def test_build_mcp_server_requires_turn_analytic_service():
+    with pytest.raises(TypeError, match="turn_analytic_service"):
+        build_mcp_server(
+            game_service=MagicMock(),
+            turn_load_service=MagicMock(),
             credential_service=MagicMock(),
         )
 
@@ -158,4 +169,5 @@ def test_build_mcp_server_requires_credential_service_or_resolve_login():
         build_mcp_server(
             game_service=MagicMock(),
             turn_load_service=MagicMock(),
+            turn_analytic_service=MagicMock(),
         )

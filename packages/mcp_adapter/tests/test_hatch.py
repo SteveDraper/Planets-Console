@@ -18,6 +18,7 @@ from api.analytics.exports.registry import merge_export_registry
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import GameInfo
 from api.serialization.codecs import dataclass_to_json
+from api.services.turn_analytic_service import TurnAnalyticService
 from mcp_adapter.hatch import (
     ENSURE_ANALYTIC_EXPORT_TOOL,
     HATCH_RESULT_BUDGET_BYTES,
@@ -307,3 +308,40 @@ def test_ensure_live_returns_immediately_without_waiting(
     assert result.structured_content == {"status": "accepted"}
     admit.assert_called_once()
     handle.wait.assert_not_called()
+
+
+def test_query_uses_empty_username_ensure_uses_login(
+    running_game_info: GameInfo,
+    sample_turn,
+):
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        game_id=sample_turn.game.id,
+        perspective=_OWN_SLOT,
+    )
+    analytics = MagicMock(spec=TurnAnalyticService)
+    analytics.export_query_context.return_value = ctx
+    mcp, games, turns = stored_turn_mcp(running_game_info, sample_turn)
+    mcp = build_test_mcp(
+        game_service=games,
+        turn_load_service=turns,
+        turn_analytic_service=analytics,
+        resolve_login=resolve_as("arlowat"),
+    )
+
+    query = call_tool(
+        mcp,
+        QUERY_ANALYTIC_EXPORT_TOOL,
+        {**_shell(sample_turn), "analytic_id": "connections", "paths": ["$"]},
+    )
+    assert query.is_error is False
+    assert analytics.export_query_context.call_args.kwargs["username"] == ""
+
+    ensure = call_tool(
+        mcp,
+        ENSURE_ANALYTIC_EXPORT_TOOL,
+        {**_shell(sample_turn), "analytic_id": "connections", "dry_run": True},
+    )
+    assert ensure.is_error is False
+    assert analytics.export_query_context.call_args.kwargs["username"] == "arlowat"
