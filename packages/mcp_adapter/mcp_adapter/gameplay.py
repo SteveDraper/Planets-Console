@@ -25,6 +25,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context, Resolve
 
 from mcp_adapter.shell_context import (
+    SHELL_CONTEXT_PROPERTIES,
     is_needs_ensure,
     load_stored_turn,
     planet_on_turn,
@@ -32,12 +33,8 @@ from mcp_adapter.shell_context import (
 )
 from mcp_adapter.turninfo_fallback import (
     FALLBACK_TOOL_NAMES,
-    GET_ION_STORM_TOOL,
-    GET_MINEFIELD_TOOL,
-    GET_PLANET_TOOL,
-    GET_PLAYER_TOOL,
-    GET_SHIP_TOOL,
-    GET_WORMHOLE_TOOL,
+    FALLBACK_TOOL_OPTIONAL_PROPERTIES,
+    FALLBACK_TOOL_REQUIRED_PROPERTIES,
     register_turninfo_fallback_tools,
 )
 
@@ -65,8 +62,6 @@ CONCEPT_TOOL_NAMES = (
 
 GAMEPLAY_TOOL_NAMES = CONCEPT_TOOL_NAMES + FALLBACK_TOOL_NAMES
 
-SHELL_CONTEXT_PROPERTIES = frozenset({"game_id", "turn", "perspective"})
-
 GAMEPLAY_TOOL_REQUIRED_PROPERTIES: dict[str, frozenset[str]] = {
     POINT_IN_WARP_WELL_TOOL: SHELL_CONTEXT_PROPERTIES
     | frozenset({"planet_id", "x", "y", "well_kind"}),
@@ -79,12 +74,7 @@ GAMEPLAY_TOOL_REQUIRED_PROPERTIES: dict[str, frozenset[str]] = {
     DISTANCE_LY_TOOL: frozenset({"x1", "y1", "x2", "y2"}),
     REACHABLE_PLANETS_TOOL: SHELL_CONTEXT_PROPERTIES
     | frozenset({"from_planet_id", "warp_speed", "gravitonic_movement", "flare_mode"}),
-    GET_SHIP_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"ship_id"}),
-    GET_PLANET_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"planet_id"}),
-    GET_MINEFIELD_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"minefield_id"}),
-    GET_ION_STORM_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"ion_storm_id"}),
-    GET_WORMHOLE_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"wormhole_id"}),
-    GET_PLAYER_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"player_id"}),
+    **FALLBACK_TOOL_REQUIRED_PROPERTIES,
 }
 
 GAMEPLAY_TOOL_OPTIONAL_PROPERTIES: dict[str, frozenset[str]] = {
@@ -97,12 +87,7 @@ GAMEPLAY_TOOL_OPTIONAL_PROPERTIES: dict[str, frozenset[str]] = {
     HYPERJUMP_LANDING_TOOL: frozenset(),
     DISTANCE_LY_TOOL: frozenset(),
     REACHABLE_PLANETS_TOOL: frozenset({"flare_depth"}),
-    GET_SHIP_TOOL: frozenset(),
-    GET_PLANET_TOOL: frozenset(),
-    GET_MINEFIELD_TOOL: frozenset(),
-    GET_ION_STORM_TOOL: frozenset(),
-    GET_WORMHOLE_TOOL: frozenset(),
-    GET_PLAYER_TOOL: frozenset(),
+    **FALLBACK_TOOL_OPTIONAL_PROPERTIES,
 }
 
 HYPERJUMP_NOT_JUMPING_REASON = "Ship is not performing a hyperjump."

@@ -27,6 +27,8 @@ NEEDS_ENSURE_RESULT: NeedsEnsureResult = {
     "reason": "needs_ensure",
 }
 
+SHELL_CONTEXT_PROPERTIES = frozenset({"game_id", "turn", "perspective"})
+
 
 class _HasId(Protocol):
     id: int

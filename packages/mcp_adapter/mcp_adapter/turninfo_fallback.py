@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from typing import Annotated, Any
 
+from api.models.game import TurnInfo
+from api.models.planet import Planet
 from api.models.player import Player
 from api.serialization.codecs import dataclass_to_json
 from api.services.game_service import GameService
@@ -11,6 +13,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context, Resolve
 
 from mcp_adapter.shell_context import (
+    SHELL_CONTEXT_PROPERTIES,
     ion_storm_on_turn,
     is_needs_ensure,
     load_stored_turn,
@@ -38,6 +41,19 @@ FALLBACK_TOOL_NAMES = (
     GET_PLAYER_TOOL,
 )
 
+FALLBACK_TOOL_REQUIRED_PROPERTIES: dict[str, frozenset[str]] = {
+    GET_SHIP_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"ship_id"}),
+    GET_PLANET_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"planet_id"}),
+    GET_MINEFIELD_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"minefield_id"}),
+    GET_ION_STORM_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"ion_storm_id"}),
+    GET_WORMHOLE_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"wormhole_id"}),
+    GET_PLAYER_TOOL: SHELL_CONTEXT_PROPERTIES | frozenset({"player_id"}),
+}
+
+FALLBACK_TOOL_OPTIONAL_PROPERTIES: dict[str, frozenset[str]] = {
+    name: frozenset() for name in FALLBACK_TOOL_NAMES
+}
+
 PLAYER_SECRET_FIELDS = ("email", "savekey")
 
 
@@ -57,7 +73,11 @@ def register_turninfo_fallback_tools(
     _register_get_player(mcp, game_service, turn_load_service, resolve_login)
 
 
-def _load_turn(
+def _json_entity(_turn: TurnInfo, entity: object) -> dict[str, Any]:
+    return dataclass_to_json(entity)
+
+
+def _named_entity_payload(
     game_service: GameService,
     turn_load_service: TurnLoadService,
     *,
@@ -65,8 +85,12 @@ def _load_turn(
     game_id: int,
     turn: int,
     perspective: int,
-):
-    return load_stored_turn(
+    lookup: Callable[[TurnInfo, int], Any],
+    entity_id: int,
+    dump: Callable[[TurnInfo, Any], dict[str, Any]] = _json_entity,
+) -> dict[str, Any]:
+    """Load stored turn, then dump the named entity (or return needs_ensure)."""
+    loaded = load_stored_turn(
         game_service,
         turn_load_service,
         login_identity=login,
@@ -74,9 +98,19 @@ def _load_turn(
         turn=turn,
         perspective=perspective,
     )
+    if is_needs_ensure(loaded):
+        return loaded
+    return dump(loaded, lookup(loaded, entity_id))
 
 
-def _player_without_secrets(player: Player) -> dict[str, Any]:
+def _planet_with_starbase(turn: TurnInfo, planet: Planet) -> dict[str, Any]:
+    payload = dataclass_to_json(planet)
+    starbase = starbase_for_planet(turn, planet.id)
+    payload["starbase"] = dataclass_to_json(starbase) if starbase is not None else None
+    return payload
+
+
+def _player_without_secrets(_turn: TurnInfo, player: Player) -> dict[str, Any]:
     payload = dataclass_to_json(player)
     for field in PLAYER_SECRET_FIELDS:
         payload.pop(field, None)
@@ -103,17 +137,16 @@ def _register_get_ship(
         disk_proximity for nearby ships and hyperjump_landing for a HYP landing.
         Not a list, search, or filter.
         """
-        loaded = _load_turn(
+        return _named_entity_payload(
             game_service,
             turn_load_service,
             login=login,
             game_id=game_id,
             turn=turn,
             perspective=perspective,
+            lookup=ship_on_turn,
+            entity_id=ship_id,
         )
-        if is_needs_ensure(loaded):
-            return loaded
-        return dataclass_to_json(ship_on_turn(loaded, ship_id))
 
 
 def _register_get_planet(
@@ -137,20 +170,17 @@ def _register_get_planet(
         Prefer disk_proximity, warp-well tools, and reachable_planets when those
         answer the question. Not a list, search, or filter.
         """
-        loaded = _load_turn(
+        return _named_entity_payload(
             game_service,
             turn_load_service,
             login=login,
             game_id=game_id,
             turn=turn,
             perspective=perspective,
+            lookup=planet_on_turn,
+            entity_id=planet_id,
+            dump=_planet_with_starbase,
         )
-        if is_needs_ensure(loaded):
-            return loaded
-        payload = dataclass_to_json(planet_on_turn(loaded, planet_id))
-        starbase = starbase_for_planet(loaded, planet_id)
-        payload["starbase"] = dataclass_to_json(starbase) if starbase is not None else None
-        return payload
 
 
 def _register_get_minefield(
@@ -172,17 +202,16 @@ def _register_get_minefield(
         Minefields are not in disk_proximity. Use this for named-object fields
         when you already have the id. Not a list, search, geometry, or filter.
         """
-        loaded = _load_turn(
+        return _named_entity_payload(
             game_service,
             turn_load_service,
             login=login,
             game_id=game_id,
             turn=turn,
             perspective=perspective,
+            lookup=minefield_on_turn,
+            entity_id=minefield_id,
         )
-        if is_needs_ensure(loaded):
-            return loaded
-        return dataclass_to_json(minefield_on_turn(loaded, minefield_id))
 
 
 def _register_get_ion_storm(
@@ -205,17 +234,16 @@ def _register_get_ion_storm(
         disk_proximity cartography hits when those answer the question.
         Not a list, search, or filter.
         """
-        loaded = _load_turn(
+        return _named_entity_payload(
             game_service,
             turn_load_service,
             login=login,
             game_id=game_id,
             turn=turn,
             perspective=perspective,
+            lookup=ion_storm_on_turn,
+            entity_id=ion_storm_id,
         )
-        if is_needs_ensure(loaded):
-            return loaded
-        return dataclass_to_json(ion_storm_on_turn(loaded, ion_storm_id))
 
 
 def _register_get_wormhole(
@@ -237,17 +265,16 @@ def _register_get_wormhole(
         Prefer sample_stellar_cartography and disk_proximity cartography hits.
         Not a list, search, or filter.
         """
-        loaded = _load_turn(
+        return _named_entity_payload(
             game_service,
             turn_load_service,
             login=login,
             game_id=game_id,
             turn=turn,
             perspective=perspective,
+            lookup=wormhole_on_turn,
+            entity_id=wormhole_id,
         )
-        if is_needs_ensure(loaded):
-            return loaded
-        return dataclass_to_json(wormhole_on_turn(loaded, wormhole_id))
 
 
 def _register_get_player(
@@ -269,14 +296,14 @@ def _register_get_player(
         player_id is Player.id, not the perspective slot. email and savekey are
         omitted. Not a list, search, or filter.
         """
-        loaded = _load_turn(
+        return _named_entity_payload(
             game_service,
             turn_load_service,
             login=login,
             game_id=game_id,
             turn=turn,
             perspective=perspective,
+            lookup=player_on_turn,
+            entity_id=player_id,
+            dump=_player_without_secrets,
         )
-        if is_needs_ensure(loaded):
-            return loaded
-        return _player_without_secrets(player_on_turn(loaded, player_id))
