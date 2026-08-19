@@ -12,9 +12,14 @@ from api.services.turn_load_service import TurnLoadService
 from mcp_adapter.errors import ViewpointEligibilityRefusedError
 from mcp_adapter.shell_context import (
     NEEDS_ENSURE_RESULT,
+    ion_storm_on_turn,
     load_stored_turn,
+    minefield_on_turn,
     planet_on_turn,
+    player_on_turn,
     ship_on_turn,
+    starbase_for_planet,
+    wormhole_on_turn,
 )
 
 _GAME_ID = 628580
@@ -60,12 +65,38 @@ def test_load_stored_turn_refuses_ineligible_perspective(running_game_info: Game
     turns.is_turn_stored.assert_not_called()
 
 
-def test_planet_on_turn_and_ship_on_turn_raise_not_found():
+def test_named_entities_raise_not_found_when_absent():
     turn = MagicMock()
     turn.planets = []
     turn.ships = []
+    turn.minefields = []
+    turn.ionstorms = []
+    turn.wormholes = []
+    turn.players = []
 
     with pytest.raises(NotFoundError, match="planet id 1"):
         planet_on_turn(turn, 1)
     with pytest.raises(NotFoundError, match="ship id 2"):
         ship_on_turn(turn, 2)
+    with pytest.raises(NotFoundError, match="minefield id 3"):
+        minefield_on_turn(turn, 3)
+    with pytest.raises(NotFoundError, match="ion storm id 4"):
+        ion_storm_on_turn(turn, 4)
+    with pytest.raises(NotFoundError, match="wormhole id 5"):
+        wormhole_on_turn(turn, 5)
+    with pytest.raises(NotFoundError, match="player id 6"):
+        player_on_turn(turn, 6)
+
+
+def test_starbase_for_planet_uses_planetid_not_rst_id():
+    matching = MagicMock()
+    matching.id = 1
+    matching.planetid = 9
+    decoy = MagicMock()
+    decoy.id = 9
+    decoy.planetid = 3
+    turn = MagicMock()
+    turn.starbases = [decoy, matching]
+
+    assert starbase_for_planet(turn, 9) is matching
+    assert starbase_for_planet(turn, 1) is None
