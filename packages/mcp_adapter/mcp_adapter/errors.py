@@ -24,3 +24,19 @@ class ViewpointEligibilityRefusedError(McpAdapterError):
             f"Perspective {perspective} is not allowed for MCP login identity "
             f"{login_identity!r} in game {game_id}."
         )
+
+
+class CatalogTooBroadError(McpAdapterError):
+    """Omit-id list_analytic_exports with detail=full is refused."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "detail=full requires analytic_id; omit-id lists MCP export catalog summaries only."
+        )
+
+
+class EmptyHatchPathsError(McpAdapterError):
+    """query_analytic_export requires a non-empty paths list."""
+
+    def __init__(self) -> None:
+        super().__init__("paths must be a non-empty list of JSONPath selectors.")

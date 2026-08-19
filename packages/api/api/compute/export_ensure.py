@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from api.compute.registry import AnalyticComputeRegistration
 
 HatchReadClassification = Literal["final", "in_progress", "needs_ensure"]
+AdmitExportOutcome = Literal["already_satisfied", "accepted"]
 
 
 def analytic_has_compute_registration(analytic_id: str) -> bool:
@@ -145,3 +146,40 @@ def ensure_export_scope_via_orchestrator(
         timeout=timeout,
     )
     return registration.persistence_policy.is_satisfied(ctx, compute_scope)
+
+
+def admit_export_scope_at_background(
+    ctx: AnalyticQueryContext,
+    analytic_id: str,
+    scope: ExportScope,
+) -> AdmitExportOutcome:
+    """Admit one export scope at ``background`` without waiting.
+
+    Returns ``already_satisfied`` when the scope is already ensure-final.
+    Otherwise submits through the compute orchestrator at ``background`` and
+    returns ``accepted`` immediately. Not the waiter helper
+    (:func:`ensure_export_scope_via_orchestrator`).
+    """
+    from api.compute.runtime import get_compute_orchestrator
+
+    catalog = ctx.export_registry.get(analytic_id)
+    if catalog is None:
+        raise RuntimeError(f"cannot admit {analytic_id!r}: analytic is not in the export registry")
+    if export_scope_is_ensure_final(ctx, analytic_id, scope, catalog):
+        return "already_satisfied"
+
+    resolved = _registered_compute_scope(analytic_id, scope)
+    if resolved is None:
+        raise RuntimeError(
+            f"cannot admit {analytic_id!r} at background: analytic is not in COMPUTE_REGISTRY"
+        )
+    _, compute_scope = resolved
+    get_compute_orchestrator().submit(
+        ComputeRequest(
+            scope=compute_scope,
+            ctx=ctx,
+            priority_band="background",
+            force_fresh=False,
+        )
+    )
+    return "accepted"

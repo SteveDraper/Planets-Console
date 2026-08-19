@@ -7,9 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 from mcp import Client
 from mcp_adapter.server import (
+    ENSURE_ANALYTIC_EXPORT_TOOL,
     GAMEPLAY_TOOL_NAMES,
     GAMEPLAY_TOOL_OPTIONAL_PROPERTIES,
     GAMEPLAY_TOOL_REQUIRED_PROPERTIES,
+    HATCH_TOOL_NAMES,
+    HATCH_TOOL_OPTIONAL_PROPERTIES,
+    HATCH_TOOL_REQUIRED_PROPERTIES,
     HYPERJUMP_LANDING_TOOL,
     SHELL_TOOL_NAMES,
     SHELL_TOOL_REQUIRED_PROPERTIES,
@@ -18,12 +22,17 @@ from mcp_adapter.server import (
 
 from tests.mcp_test_support import build_test_mcp, run_coro
 
-_CATALOG_NAMES = list(SHELL_TOOL_NAMES) + list(GAMEPLAY_TOOL_NAMES)
-_REQUIRED = {**SHELL_TOOL_REQUIRED_PROPERTIES, **GAMEPLAY_TOOL_REQUIRED_PROPERTIES}
+_CATALOG_NAMES = list(SHELL_TOOL_NAMES) + list(GAMEPLAY_TOOL_NAMES) + list(HATCH_TOOL_NAMES)
+_REQUIRED = {
+    **SHELL_TOOL_REQUIRED_PROPERTIES,
+    **GAMEPLAY_TOOL_REQUIRED_PROPERTIES,
+    **HATCH_TOOL_REQUIRED_PROPERTIES,
+}
+_OPTIONAL = {**GAMEPLAY_TOOL_OPTIONAL_PROPERTIES, **HATCH_TOOL_OPTIONAL_PROPERTIES}
 
 
 def _optional_properties(name: str) -> frozenset[str]:
-    return GAMEPLAY_TOOL_OPTIONAL_PROPERTIES.get(name, frozenset())
+    return _OPTIONAL.get(name, frozenset())
 
 
 def _enum_values(schema: dict, name: str) -> set[str]:
@@ -42,7 +51,7 @@ def _enum_values(schema: dict, name: str) -> set[str]:
     raise AssertionError(f"no enum on {name}: {prop}")
 
 
-def test_catalog_locks_shell_and_named_gameplay_tools_and_required_inputs():
+def test_catalog_locks_shell_named_gameplay_and_hatch_tools_and_required_inputs():
     mcp = build_test_mcp()
 
     async def body() -> None:
@@ -78,6 +87,19 @@ def test_catalog_locks_shell_and_named_gameplay_tools_and_required_inputs():
             reachable_required = by_name["reachable_planets"].input_schema.get("required", [])
             assert "include" not in by_name["disk_proximity"].input_schema.get("required", [])
             assert "flare_depth" not in reachable_required
+            assert _enum_values(by_name["list_analytic_exports"].input_schema, "detail") == {
+                "summary",
+                "full",
+            }
+            list_required = by_name["list_analytic_exports"].input_schema.get("required", [])
+            assert "analytic_id" not in list_required
+            assert "detail" not in list_required
+            assert "player_id" not in by_name["query_analytic_export"].input_schema.get(
+                "required", []
+            )
+            ensure_required = by_name["ensure_analytic_export"].input_schema.get("required", [])
+            assert "dry_run" not in ensure_required
+            assert "player_id" not in ensure_required
             assert client.server_capabilities is not None
             assert client.server_capabilities.tools is not None
             assert client.server_capabilities.prompts is None
@@ -97,6 +119,20 @@ def test_hyperjump_landing_description_nudges_pre_well_snap():
             assert "before warp-well snap" in description
             assert "point_in_warp_well" in description
             assert "warp_well_cells" in description
+
+    run_coro(body())
+
+
+def test_ensure_analytic_export_description_requires_dry_run_first():
+    mcp = build_test_mcp()
+
+    async def body() -> None:
+        async with Client(mcp) as client:
+            listed = await client.list_tools()
+            by_name = {tool.name: tool for tool in listed.tools}
+            description = by_name[ENSURE_ANALYTIC_EXPORT_TOOL].description
+            first_sentence = description.split(".")[0]
+            assert "dry_run" in first_sentence
 
     run_coro(body())
 
