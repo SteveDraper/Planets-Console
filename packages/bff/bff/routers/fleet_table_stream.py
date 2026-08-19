@@ -39,6 +39,7 @@ def get_fleet_table_stream(
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=0),
     player_ids: str = Query(..., alias="playerIds"),
+    username: str = Query(""),
 ):
     """Stream fleet table materialization for requested players on one NDJSON connection."""
     parsed_player_ids = tuple(int(part.strip()) for part in player_ids.split(",") if part.strip())
@@ -56,6 +57,7 @@ def get_fleet_table_stream(
                 perspective,
                 turn,
                 filtered_player_ids,
+                username=username,
             )
         ),
         media_type="application/x-ndjson",

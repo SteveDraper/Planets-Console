@@ -684,6 +684,7 @@ export interface operations {
                 turn: number;
                 perspective: number;
                 playerIds: string;
+                username?: string;
             };
             header?: never;
             path?: never;

@@ -168,6 +168,15 @@ def get_fleet_table_stream(
         alias="playerIds",
         description="Comma-separated fleet player ids",
     ),
+    username: Annotated[
+        str,
+        Query(
+            description=(
+                "Optional turn-load credential username so fleet DAG planning can "
+                "auto-fetch missing historical turns (stored account API key)."
+            ),
+        ),
+    ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
 ) -> StreamingResponse:
     """Stream fleet table materialization for requested players (NDJSON)."""
@@ -179,6 +188,7 @@ def get_fleet_table_stream(
                 perspective,
                 turn_number,
                 parsed_player_ids,
+                username=username,
             )
         ),
         media_type="application/x-ndjson",

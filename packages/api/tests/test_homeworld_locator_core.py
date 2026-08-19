@@ -518,6 +518,7 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
 
     def fake_dispatch_turn_analytic(analytic_id, ctx):
         captured["export_services"] = ctx.exports.export_services
+        captured["ctx_ensure_turn"] = ctx.exports.ensure_turn
         return {"analyticId": analytic_id}
 
     monkeypatch.setattr(
@@ -535,10 +536,14 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
     ensured = homeworld.ensure_turn(1)
     assert ensured is turn_one
     assert ensure_calls == [(1, "captain")]
+    fleet = captured["export_services"]["fleet"]
+    assert fleet.ensure_turn is not None
+    assert captured["ctx_ensure_turn"] is fleet.ensure_turn
 
     svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="")
     homeworld_no_user = captured["export_services"][ANALYTIC_ID]
     assert homeworld_no_user.ensure_turn is None
+    assert captured["ctx_ensure_turn"] is None
 
 
 def test_recompute_when_turn_one_appears_after_degraded(persistence, sample_turn) -> None:

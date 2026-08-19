@@ -145,6 +145,10 @@ class TurnAnalyticService:
             perspective,
             username=username,
         )
+        fleet_services = export_services[FLEET_ANALYTIC_ID]
+        ensure_turn = (
+            fleet_services.ensure_turn if isinstance(fleet_services, FleetComputeServices) else None
+        )
         compute_ctx = make_analytic_compute_context(
             turn,
             options,
@@ -152,6 +156,7 @@ class TurnAnalyticService:
             export_services=export_services,
             game_id=game_id,
             perspective=perspective,
+            ensure_turn=ensure_turn,
         )
         ensure_table_map_compute(compute_ctx.exports, analytic_id, turn)
         return dispatch_turn_analytic(analytic_id, compute_ctx)
@@ -171,6 +176,7 @@ class TurnAnalyticService:
                 game_id,
                 perspective,
                 scores_services=scores_services,
+                ensure_turn=ensure_turn,
             ),
             HOMEWORLD_ANALYTIC_ID: self._homeworld_compute_services(
                 game_id,
@@ -232,6 +238,7 @@ class TurnAnalyticService:
         perspective: int,
         *,
         scores_services: ScoresExportContext,
+        ensure_turn: Callable[[int], TurnInfo | None] | None = None,
     ) -> FleetComputeServices:
         load_turn = self._load_scoreboard_turn(game_id, perspective)
         return FleetComputeServices(
@@ -243,6 +250,7 @@ class TurnAnalyticService:
                 inference=FleetInferenceSupport(scores_services=scores_services),
                 load_turn=load_turn,
             ),
+            ensure_turn=ensure_turn,
         )
 
     def _scores_export_context(
@@ -367,6 +375,7 @@ class TurnAnalyticService:
         perspective: int,
         turn_number: int,
         player_ids: tuple[int, ...],
+        username: str = "",
     ):
         from api.analytics.fleet import iter_fleet_table_stream
         from api.analytics.fleet.fleet_table_stream_scheduler import (
@@ -374,7 +383,11 @@ class TurnAnalyticService:
         )
 
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        export_services = self._turn_export_services(game_id, perspective)
+        export_services = self._turn_export_services(
+            game_id,
+            perspective,
+            username=username,
+        )
         fleet_services = export_services[FLEET_ANALYTIC_ID]
         return iter_fleet_table_stream(
             turn,

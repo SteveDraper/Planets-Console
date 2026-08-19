@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.export_turn_fill import prepare_dependency_chain_turns
 from api.compute.dag import PlannedComputeNode, plan_compute_dag
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
@@ -16,11 +18,38 @@ if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
 
 
+def prepare_compute_request_dependency_chain(
+    request: ComputeRequest,
+    *,
+    ctx: AnalyticQueryContext | None = None,
+) -> None:
+    """Fetch missing ENSURE_DEPENDENCIES turns before DAG plan (no orchestrator lock).
+
+    Prefer the orchestrator's cache-spliced ``ctx`` so chain-fill walks share the
+    process-wide turn cache with later ``plan_compute_dag`` / prefetch.
+    """
+    bundle = request.resolved_bundle()
+    if bundle is None:
+        return
+    query_ctx = ctx if ctx is not None else bundle.query_context
+    prepare_dependency_chain_turns(
+        query_ctx,
+        request.scope.analytic_id,
+        compute_scope_to_export_scope(request.scope),
+    )
+
+
 class OrchestratorSubmissionMixin:
     """Submit, wake, attach, and plan compute work under the orchestrator lock."""
 
     def submit(self: ComputeOrchestrator, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""
+        bundle = request.resolved_bundle()
+        if bundle is not None:
+            prepare_compute_request_dependency_chain(
+                request,
+                ctx=self._ctx_for_bundle(bundle),
+            )
         with self._condition:
             submission = self._submit_locked(request, wake_if_parked_only=False)
         return self._finish_submission(submission)

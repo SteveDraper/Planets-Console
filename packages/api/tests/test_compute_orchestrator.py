@@ -2104,3 +2104,53 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
 
     assert pool_submissions == [SHARED_ID, BRANCH_C_ID, BRANCH_B_ID]
     assert orchestrator.nodes[branch_b_scope].state == "running"
+
+
+def _spy_fill_before_plan(monkeypatch) -> list[str]:
+    order: list[str] = []
+    real_plan = plan_compute_dag
+
+    def fake_prepare(*_args, **_kwargs) -> None:
+        order.append("fill")
+
+    def fake_plan(*args, **kwargs):
+        order.append("plan")
+        return real_plan(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "api.compute.orchestrator_submission.prepare_dependency_chain_turns",
+        fake_prepare,
+    )
+    monkeypatch.setattr(
+        "api.compute.orchestrator_submission.plan_compute_dag",
+        fake_plan,
+    )
+    return order
+
+
+def test_submit_prepares_dependency_chain_before_dag_plan(monkeypatch, sample_turn):
+    order = _spy_fill_before_plan(monkeypatch)
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())
+    orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=_compute_scope(ROOT_ID, _export_scope(sample_turn)))
+    )
+    assert order[0] == "fill"
+    assert order.index("fill") < order.index("plan")
+
+
+def test_ensure_scopes_prepares_dependency_chain_before_dag_plan(monkeypatch, sample_turn):
+    order = _spy_fill_before_plan(monkeypatch)
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())
+    orchestrator.ensure_scopes(
+        (ComputeRequest(ctx=ctx, scope=_compute_scope(ROOT_ID, _export_scope(sample_turn))),)
+    )
+    assert order[0] == "fill"
+    assert order.index("fill") < order.index("plan")

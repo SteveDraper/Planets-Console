@@ -32,6 +32,7 @@ def make_analytic_compute_context(
     perspective: int,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: Mapping[str, object] | None = None,
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> AnalyticComputeContext:
     """Build dispatch context; mirrors diagnostics from options when present."""
     resolved = options or TurnAnalyticsOptions()
@@ -46,6 +47,7 @@ def make_analytic_compute_context(
             perspective=perspective,
             load_turn=load_turn,
             export_services=export_services,
+            ensure_turn=ensure_turn,
         ),
     )
 
@@ -59,6 +61,7 @@ def invoke_analytic_compute(
     perspective: int,
     load_turn: Callable[[int], TurnInfo | None] | None = None,
     export_services: Mapping[str, object] | None = None,
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> dict:
     """Run a context-first compute handler for tests and direct callers."""
     return compute(
@@ -69,5 +72,6 @@ def invoke_analytic_compute(
             perspective=perspective,
             load_turn=load_turn,
             export_services=export_services,
+            ensure_turn=ensure_turn,
         )
     )

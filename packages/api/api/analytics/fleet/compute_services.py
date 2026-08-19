@@ -21,6 +21,8 @@ class FleetComputeServices:
     perspective: int
     load_turn: Callable[[int], TurnInfo | None]
     inference_materialization: FleetInferenceMaterialization | None = None
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None
+    """Login-backed hook to load missing TurnInfo into storage for DAG chain fill."""
 
 
 def turn_chain_through(turn: TurnInfo) -> dict[int, TurnInfo]:

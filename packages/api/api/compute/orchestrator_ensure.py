@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest
+from api.compute.orchestrator_submission import prepare_compute_request_dependency_chain
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -91,6 +92,13 @@ class OrchestratorEnsureMixin:
                 unsatisfied.append((index, request))
 
         if unsatisfied:
+            for _index, request in unsatisfied:
+                bundle = request.resolved_bundle()
+                if bundle is not None:
+                    prepare_compute_request_dependency_chain(
+                        request,
+                        ctx=self._ctx_for_bundle(bundle),
+                    )
             pending_inline: list[PendingInlineExecution] = []
             pending_pool: list[PendingPoolSubmission] = []
             with self._condition:
