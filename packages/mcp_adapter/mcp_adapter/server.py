@@ -9,6 +9,21 @@ from api.services.turn_load_service import TurnLoadService
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 
+from mcp_adapter.gameplay import (
+    DISK_PROXIMITY_TOOL,
+    DISTANCE_LY_TOOL,
+    FLARE_ENDPOINTS_TOOL,
+    GAMEPLAY_TOOL_NAMES,
+    GAMEPLAY_TOOL_OPTIONAL_PROPERTIES,
+    GAMEPLAY_TOOL_REQUIRED_PROPERTIES,
+    HYPERJUMP_LANDING_TOOL,
+    POINT_IN_WARP_WELL_TOOL,
+    REACHABLE_PLANETS_TOOL,
+    SAMPLE_STELLAR_CARTOGRAPHY_TOOL,
+    STELLAR_CARTOGRAPHY_SUMMARY_TOOL,
+    WARP_WELL_CELLS_TOOL,
+    register_gameplay_tools,
+)
 from mcp_adapter.identity import require_login_identity
 from mcp_adapter.shell import (
     ENSURE_TURN_TOOL,
@@ -50,7 +65,7 @@ def build_mcp_server(
     resolve_login: Callable[[Context], str] | None = None,
     planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
 ) -> MCPServer:
-    """Build an MCPServer with the v1 MCP shell tool catalog."""
+    """Build an MCPServer with the v1 MCP shell and named gameplay tool catalog."""
     if resolve_login is None:
         if credential_service is None:
             raise TypeError("credential_service is required when resolve_login is omitted")
@@ -71,17 +86,35 @@ def build_mcp_server(
         resolve_login=login_resolver,
         planets_client_factory=planets_client_factory,
     )
+    register_gameplay_tools(
+        mcp,
+        game_service=game_service,
+        turn_load_service=turn_load_service,
+        resolve_login=login_resolver,
+    )
     _advertise_tools_only(mcp)
     return mcp
 
 
 __all__ = [
+    "DISK_PROXIMITY_TOOL",
+    "DISTANCE_LY_TOOL",
     "ENSURE_TURN_TOOL",
+    "FLARE_ENDPOINTS_TOOL",
+    "GAMEPLAY_TOOL_NAMES",
+    "GAMEPLAY_TOOL_OPTIONAL_PROPERTIES",
+    "GAMEPLAY_TOOL_REQUIRED_PROPERTIES",
     "GET_GAME_INFO_TOOL",
+    "HYPERJUMP_LANDING_TOOL",
     "LIST_STORED_GAMES_TOOL",
     "LIST_STORED_PERSPECTIVES_TOOL",
+    "POINT_IN_WARP_WELL_TOOL",
+    "REACHABLE_PLANETS_TOOL",
     "REFRESH_GAME_INFO_TOOL",
+    "SAMPLE_STELLAR_CARTOGRAPHY_TOOL",
     "SHELL_TOOL_NAMES",
     "SHELL_TOOL_REQUIRED_PROPERTIES",
+    "STELLAR_CARTOGRAPHY_SUMMARY_TOOL",
+    "WARP_WELL_CELLS_TOOL",
     "build_mcp_server",
 ]
