@@ -60,6 +60,8 @@ class AnalyticQueryContext:
     export_registry: Mapping[str, AnalyticExportCatalog]
     enforce_inline_ensure_threshold: bool = True
     export_services: Mapping[str, object] = field(default_factory=dict)
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None
+    """Login-backed hook to load a missing TurnInfo into storage (None skips auto-fetch)."""
     # Memo, materialized-tree, and ensure keys use ExportScope (and paths for
     # ResolutionKey) only. TurnAnalyticsOptions connection fields are ambient on
     # ctx.options and are not fingerprinted here (#108 skeleton); connections
@@ -512,6 +514,7 @@ def make_analytic_query_context(
     export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
     enforce_inline_ensure_threshold: bool = True,
     export_services: Mapping[str, object] | None = None,
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> AnalyticQueryContext:
     """Build query context keyed to an explicit storage viewpoint.
 
@@ -519,6 +522,9 @@ def make_analytic_query_context(
     scopes and persisted analytic documents. Callers that only have an RST
     pass ``turn.game.id`` and ``turn.player.id``; callers that already have a
     storage viewpoint (REST, stream, seed) must pass that viewpoint.
+
+    ``ensure_turn`` is the login-backed loadturn hook used by
+    ``prepare_dependency_chain_turns`` before compute DAG planning.
     """
     from api.analytics.exports.registry import EXPORT_REGISTRY
 
@@ -542,4 +548,5 @@ def make_analytic_query_context(
         export_registry=export_registry or EXPORT_REGISTRY,
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
         export_services=export_services or {},
+        ensure_turn=ensure_turn,
     )

@@ -143,13 +143,13 @@ Generic BFF reads (every selectable analytic plus base-map):
 | Route | Layer | SPA | Returns | Turn ensure | Compute |
 |-------|-------|-----|---------|-------------|---------|
 | `GET /bff/analytics` | BFF | Yes | `{analytics: [{id, name, supportsTable, supportsMap, type}]}` | No | No |
-| `GET /bff/analytics/{analytic_id}/table?gameId&turn&perspective&username?` | BFF | Yes for `scores`; fleet tile uses stream instead; homeworld panel uses table GET in map mode | Analytic-specific JSON (see below) | **Requires stored turn** (`get_turn_info`). Homeworld may **auto-ensure other turns** if `username` is set (baseline turn 1). | Fleet + homeworld: orchestrator ensure then shape. Scores: **sync** scoreboard projection. |
-| `GET /bff/analytics/{analytic_id}/map?gameId&turn&perspective&...` | BFF | Yes for all map analytics | Analytic-specific map JSON | Same as table (stored turn; homeworld username auto-ensure) | Fleet + homeworld: orchestrator. Others: sync. |
+| `GET /bff/analytics/{analytic_id}/table?gameId&turn&perspective&username?` | BFF | Yes for `scores`; fleet tile uses stream instead; homeworld panel uses table GET in map mode | Analytic-specific JSON (see below) | **Requires stored turn** (`get_turn_info`). Login `username` auto-fetches missing prior turns on the compute DAG (homeworld chain, fleet self-chain). | Fleet + homeworld: orchestrator ensure then shape. Scores: **sync** scoreboard projection. |
+| `GET /bff/analytics/{analytic_id}/map?gameId&turn&perspective&...` | BFF | Yes for all map analytics | Analytic-specific map JSON | Same as table (stored turn; username auto-fetch of DAG holes) | Fleet + homeworld: orchestrator. Others: sync. |
 | `GET /api/v1/games/{game_id}/{perspective}/turns/{turn_number}/analytics/{analytic_id}` | Core | No | Same Core dict BFF reshapes | Same | Same `TurnAnalyticService.get_turn_analytics` |
 
 Connections map extra query params (BFF aliases): `warpSpeed` (1-9), `gravitonicMovement`, `flareMode` (`off`/`include`/`only`), `flareDepth` (1-3), `includeIllustrativeRoutes`. Scores table extra: `includeBuildInference` (adds stub inference column; live results come from the stream).
 
-Optional `username` on table/map: not a second login. It is the turn-load credential so homeworld compute can `ensure_turn` missing historical turns via the stored account API key.
+Optional `username` on table/map **and** fleet table-stream: not a second login. It is the turn-load credential so compute DAG planning can `ensure_turn` missing historical turns via the stored account API key (homeworld evidence chain, fleet `turn_delta=-1` self-chain, and homeworld's fleet-at-shell-turn dependency).
 
 ### 2.1 Per-analytic table/map payloads
 
@@ -189,7 +189,7 @@ Core twins live under `/api/v1/games/{game_id}/{perspective}/turns/{turn_number}
 
 | Route | Layer | SPA | Returns | Turn ensure | Compute |
 |-------|-------|-----|---------|-------------|---------|
-| `GET /bff/analytics/fleet/table-stream?playerIds=` | BFF | **Yes** (table tile and map overlays) | NDJSON: `ledger_updated`, `record_refined`, `provenance`, `complete`, `error` | Stored turn | **Yes** -- observation + finalization legs |
+| `GET /bff/analytics/fleet/table-stream?playerIds=&username?` | BFF | **Yes** (table tile and map overlays) | NDJSON: `ledger_updated`, `record_refined`, `provenance`, `complete`, `error` | Stored turn; `username` auto-fetches DAG holes | **Yes** -- observation + finalization legs |
 | `GET /bff/analytics/fleet/component-catalog` | BFF | Yes (names without waiting on fleet compute) | `{analyticId, componentCatalog: {hulls, engines, beams, torpedoes}}` from `TurnInfo` | Stored turn (`get_turn_info`) | **No** |
 | `GET /api/v1/games/.../analytics/fleet/table-stream` | Core | No | Same NDJSON | Stored turn | **Yes** |
 

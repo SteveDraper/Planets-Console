@@ -290,12 +290,15 @@ class CoreClient:
         perspective: int,
         turn_number: int,
         player_ids: tuple[int, ...],
+        *,
+        username: str = "",
     ):
         yield from self._analytics.iter_fleet_table_stream(
             game_id,
             perspective,
             turn_number,
             player_ids,
+            username=username,
         )
 
     def get_inference_hull_catalog_mask(

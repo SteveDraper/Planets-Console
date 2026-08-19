@@ -73,8 +73,10 @@ def test_fleet_table_stream_narrows_to_empty_when_freeze_allowlist_empty():
         perspective: int,
         turn_number: int,
         player_ids: tuple[int, ...],
+        *,
+        username: str = "",
     ):
-        del game_id, perspective, turn_number
+        del game_id, perspective, turn_number, username
         captured.append(player_ids)
         yield from ()
 
@@ -111,8 +113,10 @@ def test_fleet_table_stream_narrows_to_allowlisted_players():
         perspective: int,
         turn_number: int,
         player_ids: tuple[int, ...],
+        *,
+        username: str = "",
     ):
-        del game_id, perspective, turn_number
+        del game_id, perspective, turn_number, username
         captured.append(player_ids)
         yield from ()
 
@@ -152,8 +156,10 @@ def test_fleet_table_stream_disarms_previous_game_freeze_on_context_change():
         perspective: int,
         turn_number: int,
         player_ids: tuple[int, ...],
+        *,
+        username: str = "",
     ):
-        del game_id, perspective, turn_number
+        del game_id, perspective, turn_number, username
         captured.append(player_ids)
         yield from ()
 
@@ -176,3 +182,31 @@ def test_fleet_table_stream_disarms_previous_game_freeze_on_context_change():
         )
         is None
     )
+
+
+def test_fleet_table_stream_forwards_username_to_core():
+    captured: list[str] = []
+
+    def _iter_fleet_table_stream(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_ids: tuple[int, ...],
+        *,
+        username: str = "",
+    ):
+        del game_id, perspective, turn_number, player_ids
+        captured.append(username)
+        yield from ()
+
+    mock_core = MagicMock()
+    mock_core.iter_fleet_table_stream = _iter_fleet_table_stream
+
+    with patch("bff.routers.fleet_table_stream.get_core_client", return_value=mock_core):
+        response = client.get(
+            "/analytics/fleet/table-stream"
+            "?gameId=628580&perspective=1&turn=8&playerIds=3&username=captain"
+        )
+
+    assert response.status_code == 200
+    assert captured == ["captain"]

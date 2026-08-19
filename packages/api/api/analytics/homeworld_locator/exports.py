@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import (
-    DependencyChainTurnFill,
-    fill_missing_dependency_chain_turns,
+    DependencyChainFillError,
     missing_dependency_chain_turns,
+    prepare_dependency_chain_turns,
 )
 from api.analytics.export_types import (
     EnsureDependency,
@@ -163,10 +163,10 @@ def _record_ensure_failure_and_raise(
     raise ValidationError(message)
 
 
-def _raise_chain_fill_failure(scope: ExportScope, fill: DependencyChainTurnFill) -> NoReturn:
+def _raise_chain_fill_failure(scope: ExportScope, error: DependencyChainFillError) -> NoReturn:
     """Fail the shell turn when a chain hole could not be auto-fetched."""
-    missing_turn = fill.still_missing
-    if fill.auto_fetch_unavailable:
+    missing_turn = error.missing_turn
+    if error.auto_fetch_unavailable:
         reason = "turn_not_stored"
         message = (
             f"homeworld locator cannot refine turn {scope.turn}: "
@@ -180,8 +180,8 @@ def _raise_chain_fill_failure(scope: ExportScope, fill: DependencyChainTurnFill)
             f"could not load turn {missing_turn} from Planets.nu "
             f"(required for the evidence chain"
         )
-        if fill.fetched_turns:
-            fetched = ",".join(str(turn_number) for turn_number in fill.fetched_turns)
+        if error.fetched_turns:
+            fetched = ",".join(str(turn_number) for turn_number in error.fetched_turns)
             message += f"; auto-fetched turns {fetched} before failure"
         message += ")"
     _record_ensure_failure_and_raise(
@@ -231,21 +231,21 @@ def _prepare_homeworld_ensure_chain(
     services: HomeworldLocatorComputeServices,
 ) -> None:
     """Auto-fetch missing dependency-chain turns before orchestrator DAG plan."""
-    unavailable = ctx.dependency_walk_unavailable(ANALYTIC_ID, scope)
-    if unavailable is None:
-        return
-    if unavailable == "turn_not_stored":
-        fill = fill_missing_dependency_chain_turns(
+    try:
+        prepare_dependency_chain_turns(
             ctx,
+            ANALYTIC_ID,
             scope,
             ensure_turn=services.ensure_turn,
         )
-        if fill.still_missing is not None:
-            _raise_chain_fill_failure(scope, fill)
-        unavailable = ctx.dependency_walk_unavailable(ANALYTIC_ID, scope)
-        if unavailable is None:
-            return
-    _raise_dependency_ensure_unavailable(ctx, scope, unavailable)
+    except DependencyChainFillError as error:
+        if error.auto_fetch_unavailable or error.reason == "turn_fetch_failed":
+            _raise_chain_fill_failure(scope, error)
+        _raise_dependency_ensure_unavailable(
+            ctx,
+            scope,
+            cast(UnavailableReason, error.reason),
+        )
 
 
 def _fleet_built_turns_after_ensure(

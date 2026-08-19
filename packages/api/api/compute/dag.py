@@ -17,6 +17,7 @@ from api.compute.scope import (
     ComputeScope,
     normalize_export_scope_to_compute_scope,
 )
+from api.errors import ValidationError
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,12 @@ def plan_compute_dag(
     compute_registry: Mapping[str, AnalyticComputeRegistration],
     force_root: bool = False,
 ) -> tuple[PlannedComputeNode, ...]:
-    """Plan compute nodes and dependency edges from ENSURE_DEPENDENCIES walk."""
+    """Plan compute nodes and dependency edges from ENSURE_DEPENDENCIES walk.
+
+    Callers must run :func:`api.analytics.export_turn_fill.prepare_dependency_chain_turns`
+    first so missing TurnInfo is fetched outside the orchestrator lock. This
+    function only walks already-stored turns.
+    """
     walk_result = walk_dependency_tree(
         ctx,
         analytic_id,
@@ -51,7 +57,7 @@ def plan_compute_dag(
     if walk_result.turn_unavailable is not None:
         missing = walk_result.unavailable_turn
         missing_suffix = f", missing turn {missing}" if missing is not None else ""
-        raise ValueError(
+        raise ValidationError(
             f"cannot plan compute DAG: turn unavailable ({walk_result.turn_unavailable}"
             f"{missing_suffix})"
         )
