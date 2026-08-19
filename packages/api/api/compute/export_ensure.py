@@ -10,7 +10,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.export_types import ExportScope
+from api.analytics.export_types import (
+    ExportScope,
+    ExportScopeOverrides,
+    ExportScopeOverridesMapping,
+)
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.orchestrator_state import ComputeRequest
 from api.compute.pools import ComputePriorityBand
@@ -151,20 +155,26 @@ def ensure_export_scope_via_orchestrator(
 def admit_export_scope_at_background(
     ctx: AnalyticQueryContext,
     analytic_id: str,
-    scope: ExportScope,
+    scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None = None,
 ) -> AdmitExportOutcome:
     """Admit one export scope at ``background`` without waiting.
 
+    Resolves ``scope_overrides`` the same way as :meth:`AnalyticQueryContext.probe`.
     Returns ``already_satisfied`` when the scope is already ensure-final.
     Otherwise submits through the compute orchestrator at ``background`` and
     returns ``accepted`` immediately. Not the waiter helper
     (:func:`ensure_export_scope_via_orchestrator`).
+
+    Cannot-admit (unknown export catalog, missing compute registration) raises
+    ``RuntimeError``. Un-normalizable scope raises ``ValueError``. Neither is a
+    poll reason.
     """
     from api.compute.runtime import get_compute_orchestrator
 
     catalog = ctx.export_registry.get(analytic_id)
     if catalog is None:
         raise RuntimeError(f"cannot admit {analytic_id!r}: analytic is not in the export registry")
+    scope = ctx.resolve_scope(scope_overrides)
     if export_scope_is_ensure_final(ctx, analytic_id, scope, catalog):
         return "already_satisfied"
 

@@ -307,7 +307,46 @@ def test_ensure_live_returns_immediately_without_waiting(
     assert result.is_error is False
     assert result.structured_content == {"status": "accepted"}
     admit.assert_called_once()
+    _, analytic_id, overrides = admit.call_args.args
+    assert analytic_id == "scores"
+    assert overrides == ExportScopeOverrides(player_id=8)
     handle.wait.assert_not_called()
+
+
+def test_ensure_live_cannot_admit_is_not_needs_ensure(
+    running_game_info: GameInfo,
+    sample_turn,
+):
+    catalog = AnalyticExportCatalog(
+        analytic_id="export-test-no-compute",
+        value_schema={
+            "type": "object",
+            "description": "Fixture catalog with no compute registration.",
+            "properties": {},
+        },
+        materialize_export_tree=lambda _ctx, _scope: {},
+        is_persisted=lambda _ctx, _scope: False,
+    )
+    registry = merge_export_registry(catalog)
+    mcp, games, turns = stored_turn_mcp(running_game_info, sample_turn)
+    mcp = build_test_mcp(
+        game_service=games,
+        turn_load_service=turns,
+        export_registry=registry,
+        resolve_login=resolve_as("arlowat"),
+    )
+
+    result = call_tool(
+        mcp,
+        ENSURE_ANALYTIC_EXPORT_TOOL,
+        {**_shell(sample_turn), "analytic_id": "export-test-no-compute"},
+    )
+
+    assert result.is_error is True
+    assert result.structured_content != {"status": "unavailable", "reason": "needs_ensure"}
+    content_text = result.content[0].text if result.content else ""
+    assert "needs_ensure" not in content_text
+    assert "COMPUTE_REGISTRY" in content_text
 
 
 def test_query_uses_empty_username_ensure_uses_login(

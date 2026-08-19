@@ -9,7 +9,6 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import (
     ExportProbeResult,
     ExportQueryResult,
-    ExportScope,
     ExportScopeOverrides,
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
@@ -225,16 +224,7 @@ def _register_ensure_analytic_export(
             return _json_ready(dataclass_to_json(probe))
         if probe.status != "ok":
             return _json_ready(dataclass_to_json(probe))
-        scope = ExportScope(
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            turn=ctx.ambient_turn if overrides.turn is None else overrides.turn,
-            player_id=overrides.player_id,
-        )
-        try:
-            outcome = admit_export_scope_at_background(ctx, analytic_id, scope)
-        except RuntimeError, ValueError:
-            return {"status": "unavailable", "reason": "needs_ensure"}
+        outcome = admit_export_scope_at_background(ctx, analytic_id, overrides)
         return {"status": outcome}
 
 
