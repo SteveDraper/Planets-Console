@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 from api.analytics import TurnAnalyticsOptions
 from api.analytics.compute_context import AnalyticComputeContext
@@ -39,15 +39,6 @@ from api.transport.homeworld_assertions import (
 if TYPE_CHECKING:
     from api.analytics.exports.catalog import AnalyticExportCatalog
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
-
-
-class _QueryComputeContextIngredients(NamedTuple):
-    """Shared turn, load_turn, export_services, and login-backed ensure_turn for query context."""
-
-    turn: TurnInfo
-    load_turn: Callable[[int], TurnInfo | None]
-    export_services: dict[str, object]
-    ensure_turn: Callable[[int], TurnInfo | None] | None
 
 
 class TurnAnalyticService:
@@ -116,25 +107,6 @@ class TurnAnalyticService:
 
         return load_scoreboard_turn
 
-    def _query_compute_context_ingredients(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-        *,
-        username: str = "",
-    ) -> _QueryComputeContextIngredients:
-        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        load_turn = self._load_scoreboard_turn(game_id, perspective)
-        ensure_turn = self._ensure_turn_loader(game_id, perspective, username)
-        export_services = self._turn_export_services(game_id, perspective)
-        return _QueryComputeContextIngredients(
-            turn=turn,
-            load_turn=load_turn,
-            export_services=export_services,
-            ensure_turn=ensure_turn,
-        )
-
     def _build_analytic_query_context(
         self,
         game_id: int,
@@ -150,23 +122,18 @@ class TurnAnalyticService:
         ``username`` wires ``ctx.ensure_turn`` (login-backed loadturn). Empty
         skips auto-fetch. Compute-service bundles do not carry this hook.
         """
-        ingredients = self._query_compute_context_ingredients(
-            game_id,
-            perspective,
-            turn_number,
-            username=username,
-        )
+        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
         ctx = make_analytic_query_context(
-            ingredients.turn,
+            turn,
             options or TurnAnalyticsOptions(),
             game_id=game_id,
             perspective=perspective,
-            load_turn=ingredients.load_turn,
+            load_turn=self._load_scoreboard_turn(game_id, perspective),
             export_registry=export_registry,
-            export_services=ingredients.export_services,
-            ensure_turn=ingredients.ensure_turn,
+            export_services=self._turn_export_services(game_id, perspective),
+            ensure_turn=self._ensure_turn_loader(game_id, perspective, username),
         )
-        return ingredients.turn, ctx
+        return turn, ctx
 
     def get_turn_analytics(
         self,
