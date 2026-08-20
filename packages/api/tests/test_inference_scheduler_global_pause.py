@@ -23,6 +23,8 @@ from api.compute.orchestrator import ComputeNodeRun
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 
+from tests.scores_exports_helpers import minimal_stream_query_context
+
 
 @pytest.fixture(autouse=True)
 def noop_orchestrator_tier_submit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,6 +49,11 @@ def _session_for_turn(
         game_id=game_id,
         perspective=perspective,
         turn_number=sample_turn.settings.turn,
+        query_context=minimal_stream_query_context(
+            sample_turn,
+            game_id=game_id,
+            perspective=perspective,
+        ),
     )
 
 

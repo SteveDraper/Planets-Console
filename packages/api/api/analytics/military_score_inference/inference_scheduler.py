@@ -6,7 +6,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import replace
 
-from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -38,7 +38,6 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
@@ -728,27 +727,17 @@ def _query_context_for_session(
     """Bind the stream scheduler onto scores export services without dropping ``ensure_turn``.
 
     Production streams pass the factory-built leader ctx on the session. This
-    replaces only the scheduler-bound scores bundle. Sessions constructed
-    without a leader ctx (tests) rebuild from the session bag and do not invent
-    a login-backed hook.
+    replaces only the scheduler-bound scores bundle. Admit raises if that ctx
+    is missing -- tests that never submit a DAG must attach a ctx at the test
+    site rather than reconstructing from the session bag here.
     """
     from api.analytics.scores.export_services import ScoresExportContext
 
     ctx = session.query_context
     if ctx is None:
-        load_turn = session.load_scoreboard_turn
-        if load_turn is None:
-
-            def load_turn(turn_number: int):
-                return session.turn if turn_number == session.turn_number else None
-
-        ctx = make_analytic_query_context(
-            session.turn,
-            TurnAnalyticsOptions(),
-            game_id=session.game_id,
-            perspective=session.perspective,
-            load_turn=load_turn,
-            export_services=dict(session.export_services),
+        raise ValueError(
+            "scores table-stream admit requires AnalyticQueryContext; "
+            "production must pass the TurnAnalyticService factory ctx"
         )
 
     export_services = dict(ctx.export_services)

@@ -9,6 +9,8 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 
+from tests.scores_exports_helpers import minimal_stream_query_context
+
 
 def _session_for_player(
     sample_turn,
@@ -25,6 +27,11 @@ def _session_for_player(
         game_id=game_id,
         perspective=perspective,
         turn_number=sample_turn.settings.turn,
+        query_context=minimal_stream_query_context(
+            sample_turn,
+            game_id=game_id,
+            perspective=perspective,
+        ),
     )
 
 

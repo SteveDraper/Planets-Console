@@ -123,6 +123,21 @@ def scores_query_context(
     )
 
 
+def minimal_stream_query_context(
+    turn,
+    *,
+    game_id: int = GAME_ID,
+    perspective: int = 1,
+):
+    """Leader ctx for tests that admit a scores stream without factory wiring."""
+    return make_analytic_query_context(
+        turn,
+        TurnAnalyticsOptions(),
+        game_id=game_id,
+        perspective=perspective,
+    )
+
+
 def prior_turn_chain(sample_turn, *, prior_turn: int = 110):
     from api.analytics.fleet.compute_services import turn_chain_through
 
@@ -261,6 +276,7 @@ def schedule_row_with_ladder(
         player_id=player_id,
         game_id=game_id,
         perspective=perspective(sample_turn),
+        query_context=scores_query_context(sample_turn, scheduler=scheduler),
     )
     assert scheduled is not None
     stream_scope = stream_scope_for_turn(sample_turn, game_id=game_id)

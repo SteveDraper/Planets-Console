@@ -19,6 +19,8 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.scores.tier_row_run_registry import get_row_run
 
+from tests.scores_exports_helpers import minimal_stream_query_context
+
 
 def _patch_scores_dag_without_fleet_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     from api.compute.dag import PlannedComputeNode
@@ -66,6 +68,11 @@ def _session_for_player(
         game_id=game_id,
         perspective=perspective,
         turn_number=sample_turn.settings.turn,
+        query_context=minimal_stream_query_context(
+            sample_turn,
+            game_id=game_id,
+            perspective=perspective,
+        ),
     )
 
 

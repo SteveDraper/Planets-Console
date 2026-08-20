@@ -39,6 +39,8 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.scores_exports_helpers import minimal_stream_query_context
+
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
 
@@ -103,6 +105,7 @@ def _schedule_player_row(
         game_id=628580,
         perspective=1,
         stream_token=stream_token,
+        query_context=minimal_stream_query_context(sample_turn),
     )
     assert scheduled is not None
     return scheduled
@@ -127,6 +130,7 @@ def _attach_active_table_stream(
         scheduler=scheduler,
         game_id=628580,
         perspective=1,
+        query_context=minimal_stream_query_context(sample_turn),
     )
 
     for player_id in player_ids:
@@ -346,6 +350,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
         scheduler=scheduler,
         game_id=628580,
         perspective=1,
+        query_context=minimal_stream_query_context(sample_turn),
     )
     controller.attach()
 
@@ -859,6 +864,7 @@ def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
         scheduler=scheduler,
         game_id=628580,
         perspective=1,
+        query_context=minimal_stream_query_context(sample_turn),
     )
 
     fresher = _schedule_player_row(
@@ -912,6 +918,7 @@ def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
         scheduler=scheduler,
         game_id=628580,
         perspective=1,
+        query_context=minimal_stream_query_context(sample_turn),
     )
 
     cancelled = _schedule_player_row(
@@ -970,6 +977,7 @@ def test_adopt_admission_rejects_cancelled_connect_run(
         scheduler=scheduler,
         game_id=628580,
         perspective=1,
+        query_context=minimal_stream_query_context(sample_turn),
     )
 
     cancelled = _schedule_player_row(
@@ -1027,6 +1035,7 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
         scheduler=scheduler,
         game_id=628580,
         perspective=1,
+        query_context=minimal_stream_query_context(sample_turn),
     )
     controller.attach()
 

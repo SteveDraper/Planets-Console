@@ -377,9 +377,7 @@ class TurnAnalyticService:
         load_turn = query_ctx.load_turn
 
         schedule_background_prior_turn_fleet_warm(
-            turn=turn,
-            load_turn=load_turn,
-            export_services=export_services,
+            query_context=query_ctx,
             player_ids=player_ids,
         )
 
