@@ -98,7 +98,7 @@ When `settings.acceleratedturns = N` with `N > 0`:
 - **Turn 1** -- no prior host turn (`diagnostics.reason`: `first_turn`).
 - **Unreliable accelerated row** (`turn < N`) when backfill cannot run: no `load_scoreboard_turn`, first reliable turn not stored, player missing on source turn, or no segment for the target host turn (`diagnostics.reason`: `accelerated_backfill_unavailable`).
 
-**Homeworld baseline:** `starting_scoreboard_snapshot(settings)` derives turn-1 military totals from Starmap flags (e.g. `homeworldhasstarbase`, standard homeworld starbase fighters and defense posts, one starting freighter). Shared homeworld constants used by the action catalog (e.g. Evil Empire free starbase fighter caps) also live in this module.
+**Homeworld baseline:** `starting_scoreboard_snapshot(settings)` derives turn-1 military totals from Starmap flags (e.g. `homeworldhasstarbase`, standard homeworld starbase fighters and defense posts, one starting freighter). Shared homeworld constants live in this module.
 
 **Diagnostics (not solver inputs):**
 
@@ -597,7 +597,7 @@ Static YAML steps widen by **strict superset on `techLevels` lists** or by switc
 - `ship_torps_loaded_{torpedo_id}` (per type, with per-type caps)
 - `fighters_starbase_to_ship` / `fighters_ship_to_starbase` (via `fighter_transfers_per_direction`)
 
-**Not** deferred: `evil_empire_free_starbase_fighters` (race-specific, high-probability informational action when EE resources allow).
+**Not** deferred: `evil_empire_free_starbase_fighters` (race-specific, high-probability informational action when EE resources allow). Upper bound is one host turn of free production: `evil_empire_free_starbase_fighters_per_host_turn(settings) × starbases_owned`, intersected with residual-score and configured fighter caps.
 
 #### 8.5.3 v1 ladder (sketch A)
 
