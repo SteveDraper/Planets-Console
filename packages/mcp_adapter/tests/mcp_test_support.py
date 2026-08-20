@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from unittest.mock import MagicMock
 
+from api.analytics.export_context import make_analytic_query_context
+from api.analytics.exports.catalog import AnalyticExportCatalog
+from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import GameInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import GameService
+from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_load_service import TurnLoadService
 from mcp import Client
 from mcp.server.mcpserver import Context
@@ -34,6 +38,32 @@ def call_tool(mcp, name: str, arguments: dict):
     return run_coro(body())
 
 
+def stub_turn_analytic_service(turn_load_service: TurnLoadService) -> MagicMock:
+    """TurnAnalyticService whose export_query_context delegates to Core's factory."""
+    analytics = MagicMock(spec=TurnAnalyticService)
+
+    def export_query_context(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        username: str = "",
+        export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
+    ):
+        _ = username
+        turn = turn_load_service.get_turn_info(game_id, perspective, turn_number)
+        return make_analytic_query_context(
+            turn,
+            TurnAnalyticsOptions(),
+            game_id=game_id,
+            perspective=perspective,
+            export_registry=export_registry,
+        )
+
+    analytics.export_query_context.side_effect = export_query_context
+    return analytics
+
+
 def build_test_mcp(**overrides):
     """Build an MCP server with mocked Core services and a pinned login."""
     defaults = {
@@ -43,6 +73,10 @@ def build_test_mcp(**overrides):
         "planets_client_factory": lambda: MagicMock(spec=PlanetsNuClient),
     }
     defaults.update(overrides)
+    if "turn_analytic_service" not in defaults:
+        defaults["turn_analytic_service"] = stub_turn_analytic_service(
+            defaults["turn_load_service"]
+        )
     return build_mcp_server(**defaults)
 
 

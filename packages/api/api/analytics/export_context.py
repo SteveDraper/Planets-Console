@@ -324,16 +324,17 @@ class AnalyticQueryContext:
             return "unknown_analytic"
         if catalog.is_empty:
             return "empty_catalog"
-        scope = self._resolve_scope(scope_overrides)
+        scope = self.resolve_scope(scope_overrides)
         return PreparedExportRequest(catalog=catalog, scope=scope)
 
     def _catalog_or_none(self, analytic_id: str) -> AnalyticExportCatalog | None:
         return self.export_registry.get(analytic_id)
 
-    def _resolve_scope(
+    def resolve_scope(
         self,
-        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None,
+        scope_overrides: ExportScopeOverrides | ExportScopeOverridesMapping | None = None,
     ) -> ExportScope:
+        """Build a fully resolved export scope from optional probe/query overrides."""
         overrides = self._coerce_overrides(scope_overrides)
         return ExportScope(
             game_id=self.game_id,

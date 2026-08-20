@@ -14,10 +14,12 @@ def test_create_mcp_mount_uses_process_service_stack(monkeypatch):
     games = MagicMock(spec=GameService)
     turns = MagicMock(spec=TurnLoadService)
     credentials = MagicMock(spec=CredentialService)
+    analytics = MagicMock()
     stack = MagicMock()
     stack.games = games
     stack.turns = turns
     stack.credentials = credentials
+    stack.analytics = analytics
     captured: dict[str, object] = {}
 
     def fake_stack():
@@ -30,11 +32,14 @@ def test_create_mcp_mount_uses_process_service_stack(monkeypatch):
         credential_service=None,
         resolve_login=None,
         planets_client_factory=None,
+        turn_analytic_service=None,
+        export_registry=None,
     ):
         captured["game_service"] = game_service
         captured["turn_load_service"] = turn_load_service
         captured["credential_service"] = credential_service
         captured["planets_client_factory"] = planets_client_factory
+        captured["turn_analytic_service"] = turn_analytic_service
         mcp = MagicMock()
         mcp.streamable_http_app.return_value = MagicMock(name="mcp_asgi")
         return mcp
@@ -48,5 +53,6 @@ def test_create_mcp_mount_uses_process_service_stack(monkeypatch):
     assert captured["turn_load_service"] is turns
     assert captured["credential_service"] is credentials
     assert captured["planets_client_factory"] is not None
+    assert captured["turn_analytic_service"] is analytics
     mcp.streamable_http_app.assert_called_once_with(streamable_http_path="/")
     assert asgi is mcp.streamable_http_app.return_value

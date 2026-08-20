@@ -18,6 +18,7 @@ def create_mcp_mount() -> tuple[MCPServer, Starlette]:
         turn_load_service=stack.turns,
         credential_service=stack.credentials,
         planets_client_factory=PlanetsNuClient.from_config,
+        turn_analytic_service=stack.analytics,
     )
     mcp_asgi = mcp.streamable_http_app(streamable_http_path="/")
     return mcp, mcp_asgi

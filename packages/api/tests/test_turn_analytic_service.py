@@ -114,3 +114,11 @@ class TestTurnAnalytics:
 
         assert next(stream) == {"type": "globalPause", "paused": False}
         assert forwarded["export_services"] is export_services
+
+    def test_export_query_context_wires_hatch_read_without_table_compute(self, analytics_service):
+        ctx = analytics_service.export_query_context(628580, 1, 111)
+        result = ctx.hatch_read("connections", ["$"])
+        assert result.status == "unavailable"
+        assert result.reason == "empty_catalog"
+        assert "scores" in ctx.export_services
+        assert "fleet" in ctx.export_services

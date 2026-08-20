@@ -2,7 +2,7 @@
 
 
 class McpAdapterError(Exception):
-    """Adapter-level failure: identity, catalog breadth, or transport limits."""
+    """Adapter-level failure: login identity or viewpoint eligibility."""
 
 
 class MissingLoginIdentityError(McpAdapterError):
