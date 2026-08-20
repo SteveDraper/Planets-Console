@@ -22,7 +22,11 @@ from api.analytics.military_score_inference.prior_weights_resolve import (
 )
 from api.analytics.military_score_inference.scoring import STARBASE_FIGHTER_SCORE_DELTA_2X
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.concepts.races import evil_empire_free_starbase_fighters_per_host_turn
+from api.concepts.races import (
+    EVIL_EMPIRE_RACE_ID,
+    SOLAR_FEDERATION_RACE_ID,
+    evil_empire_free_starbase_fighters_per_host_turn,
+)
 from api.concepts.ship_build_military import (
     ship_build_military_score_delta_2x,
     ship_build_score_delta_2x,
@@ -37,6 +41,23 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 EE_TURN_PATH = REPO_ROOT / ".data" / "games" / "628580" / "8" / "turns" / "3.json"
 P5_TURN6_PATH = REPO_ROOT / ".data" / "games" / "628580" / "5" / "turns" / "6.json"
 GAME_INFO_PATH = REPO_ROOT / ".data" / "games" / "628580" / "info.json"
+_FREE_STARBASE_FIGHTERS_ACTION_ID = "evil_empire_free_starbase_fighters"
+_LARGE_FIGHTER_RESIDUAL_MILITARY_DELTA_2X = 50_000
+
+
+def _player_with_race(sample_turn, *, race_id: int = EVIL_EMPIRE_RACE_ID):
+    return replace(sample_turn.player, raceid=race_id)
+
+
+def _free_starbase_fighter_action(catalog):
+    return next(
+        (
+            action
+            for action in catalog.aggregate_actions
+            if action.id == _FREE_STARBASE_FIGHTERS_ACTION_ID
+        ),
+        None,
+    )
 
 
 def test_generated_actions_have_finite_bounds(synthetic_catalog_build_context):
@@ -340,13 +361,112 @@ def test_evil_empire_catalog_includes_likely_free_starbase_fighters():
     score = next(s for s in turn.scores if s.ownerid == 8)
     observation = build_inference_observation(score, turn)
     catalog = build_action_catalog_from_turn(observation, turn)
-    free_action = next(
-        (
-            action
-            for action in catalog.aggregate_actions
-            if action.id == "evil_empire_free_starbase_fighters"
-        ),
-        None,
-    )
+    free_action = _free_starbase_fighter_action(catalog)
     assert free_action is not None
     assert free_action.upper_bound > 0
+
+
+def test_evil_empire_free_fighters_upper_bound_is_one_host_turn_times_starbases(
+    sample_turn,
+    synthetic_catalog_build_context,
+):
+    turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, freestarbasefighters5adjustment=0),
+    )
+    catalog = build_action_catalog(
+        _observation(
+            military_delta_2x=_LARGE_FIGHTER_RESIDUAL_MILITARY_DELTA_2X,
+            starbases_owned=4,
+        ),
+        turn=turn,
+        player=_player_with_race(sample_turn),
+        **synthetic_catalog_build_context,
+    )
+    free_action = _free_starbase_fighter_action(catalog)
+    assert free_action is not None
+    assert free_action.upper_bound == 20
+
+
+def test_evil_empire_free_fighters_upper_bound_scales_with_settings_adjustment(
+    sample_turn,
+    synthetic_catalog_build_context,
+):
+    turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, freestarbasefighters5adjustment=3),
+    )
+    catalog = build_action_catalog(
+        _observation(
+            military_delta_2x=_LARGE_FIGHTER_RESIDUAL_MILITARY_DELTA_2X,
+            starbases_owned=4,
+        ),
+        turn=turn,
+        player=_player_with_race(sample_turn),
+        **synthetic_catalog_build_context,
+    )
+    free_action = _free_starbase_fighter_action(catalog)
+    assert free_action is not None
+    assert free_action.upper_bound == 32
+
+
+def test_evil_empire_free_fighters_upper_bound_respects_tighter_residual(
+    sample_turn,
+    synthetic_catalog_build_context,
+):
+    turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, freestarbasefighters5adjustment=0),
+    )
+    catalog = build_action_catalog(
+        _observation(military_delta_2x=375, starbases_owned=4),
+        turn=turn,
+        player=_player_with_race(sample_turn),
+        **synthetic_catalog_build_context,
+    )
+    free_action = _free_starbase_fighter_action(catalog)
+    assert free_action is not None
+    assert free_action.upper_bound == 3
+
+
+def test_evil_empire_free_fighters_upper_bound_respects_tighter_configured_cap(
+    sample_turn,
+    synthetic_catalog_build_context,
+):
+    turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, freestarbasefighters5adjustment=0),
+    )
+    catalog = build_action_catalog(
+        _observation(
+            military_delta_2x=_LARGE_FIGHTER_RESIDUAL_MILITARY_DELTA_2X,
+            starbases_owned=4,
+        ),
+        config=ActionCatalogConfig(max_starbase_fighters=2),
+        turn=turn,
+        player=_player_with_race(sample_turn),
+        **synthetic_catalog_build_context,
+    )
+    free_action = _free_starbase_fighter_action(catalog)
+    assert free_action is not None
+    assert free_action.upper_bound == 2
+
+
+def test_evil_empire_free_fighters_action_absent_for_other_races(
+    sample_turn,
+    synthetic_catalog_build_context,
+):
+    turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, freestarbasefighters5adjustment=0),
+    )
+    catalog = build_action_catalog(
+        _observation(
+            military_delta_2x=_LARGE_FIGHTER_RESIDUAL_MILITARY_DELTA_2X,
+            starbases_owned=4,
+        ),
+        turn=turn,
+        player=_player_with_race(sample_turn, race_id=SOLAR_FEDERATION_RACE_ID),
+        **synthetic_catalog_build_context,
+    )
+    assert _free_starbase_fighter_action(catalog) is None

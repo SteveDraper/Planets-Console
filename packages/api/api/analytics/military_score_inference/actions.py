@@ -3,10 +3,6 @@
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from api.analytics.military_score_inference.accelerated_start import (
-    HOMEBASE_STARBASE_FIGHTERS,
-    STANDARD_STARBASE_MAX_FIGHTERS,
-)
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateCatalogCaps,
     resolved_aggregate_cap,
@@ -375,7 +371,13 @@ def _evil_empire_free_starbase_fighter_actions(
     config: ActionCatalogConfig,
     player: Player,
 ) -> list[CandidateAction]:
-    """High-probability free starbase fighters for Evil Empire when resources allow."""
+    """High-probability free starbase fighters for Evil Empire when resources allow.
+
+    Per-turn military-score explanation can attribute at most one host turn of
+    free production: settings rate times owned starbases (including mining
+    stations counted as starbases). Residual score and configured fighter caps
+    may still clip that theoretical max.
+    """
     if not is_evil_empire(player.raceid):
         return []
 
@@ -383,19 +385,14 @@ def _evil_empire_free_starbase_fighter_actions(
     if free_per_host_turn <= 0 or observation.starbases_owned <= 0:
         return []
 
-    host_turns_elapsed = max(0, observation.turn - 1)
-    fighter_room_per_starbase = max(0, STANDARD_STARBASE_MAX_FIGHTERS - HOMEBASE_STARBASE_FIGHTERS)
-    per_starbase_cap = min(
-        free_per_host_turn * host_turns_elapsed,
-        fighter_room_per_starbase,
-    )
+    one_host_turn_cap = free_per_host_turn * observation.starbases_owned
     count_upper = min(
         residual_count_bound(
             observation,
             starbase_fighter_score_delta_2x(),
             config.max_starbase_fighters,
         ),
-        per_starbase_cap * observation.starbases_owned,
+        one_host_turn_cap,
     )
     if count_upper <= 0:
         return []
