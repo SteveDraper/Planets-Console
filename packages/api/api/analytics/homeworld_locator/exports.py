@@ -307,11 +307,7 @@ def materialize_homeworld_export_tree(
         }
 
     services = resolve_homeworld_services(ctx)
-    result = ensure_homeworld_baseline(
-        services,
-        shell_turn=turn,
-        ensure_turn=ctx.ensure_turn,
-    )
+    result = ensure_homeworld_baseline(ctx, shell_turn=turn)
     # Single-step refine at shell; prior turns already ensured via DAG unwind.
     shell_aggregate = ensure_homeworld_evidence_refined(
         services,

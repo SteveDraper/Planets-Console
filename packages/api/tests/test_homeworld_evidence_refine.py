@@ -545,7 +545,7 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
         turn = ctx.load_turn(scope.turn)
         assert turn is not None
         resolved = resolve_homeworld_services(ctx)
-        baseline_result = ensure_homeworld_baseline(resolved, shell_turn=turn)
+        baseline_result = ensure_homeworld_baseline(ctx, shell_turn=turn)
         for refine_turn_number in range(
             baseline_result.game_state.baseline_turn,
             scope.turn + 1,
