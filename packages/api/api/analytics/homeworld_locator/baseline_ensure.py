@@ -136,18 +136,20 @@ def _durable_viewpoint_perspective(
 
 
 def resolve_baseline_turn(
-    services: HomeworldLocatorComputeServices,
+    ctx: AnalyticQueryContext,
 ) -> tuple[TurnInfo, int, bool]:
     """Prefer turn 1 (auto-ensure when possible); else earliest stored (degraded).
 
     Returns ``(turn, baseline_turn_number, baseline_degraded)``.
+    Turn-1 auto-ensure uses ``ctx.ensure_turn`` when the hook is present.
     """
+    services = resolve_homeworld_services(ctx)
     turn_one = services.load_turn(1)
     if turn_one is not None:
         return turn_one, 1, False
 
-    if services.ensure_turn is not None:
-        ensured = services.ensure_turn(1)
+    if ctx.ensure_turn is not None:
+        ensured = ctx.ensure_turn(1)
         if ensured is not None:
             return ensured, 1, False
 
@@ -184,7 +186,7 @@ def needs_baseline_recompute(
 
 
 def compute_homeworld_baseline(
-    services: HomeworldLocatorComputeServices,
+    ctx: AnalyticQueryContext,
     *,
     shell_turn: TurnInfo | None = None,
 ) -> HomeworldBaselineEnsureResult:
@@ -198,6 +200,7 @@ def compute_homeworld_baseline(
     / nearby ownership, origin-distance, single-SB) so shell == baseline does not
     skip ownership accumulate. See ``_floor_aggregate_with_baseline_ownership``.
     """
+    services = resolve_homeworld_services(ctx)
     total_t0 = time.perf_counter()
     settings_source = shell_turn if shell_turn is not None else None
     if settings_source is None:
@@ -243,7 +246,7 @@ def compute_homeworld_baseline(
             recomputed=False,
         )
 
-    baseline_turn_info, baseline_turn, degraded = resolve_baseline_turn(services)
+    baseline_turn_info, baseline_turn, degraded = resolve_baseline_turn(ctx)
     existing = services.persistence.get_game_state(services.game_id)
     hw_cfg = get_config().homeworld_locator
     min_clans = hw_cfg.min_baseline_clans
@@ -320,17 +323,19 @@ def compute_homeworld_baseline(
 
 
 def ensure_homeworld_baseline(
-    services: HomeworldLocatorComputeServices,
+    ctx: AnalyticQueryContext,
     *,
     shell_turn: TurnInfo | None = None,
 ) -> HomeworldBaselineEnsureResult:
     """Run baseline-only ensure: compute then persist game-global + floor.
 
-    Does not copy-forward empty aggregates through the shell turn (#36).
+    Does not copy-forward empty aggregates through the shell turn.
+    Turn-1 auto-ensure reads ``ctx.ensure_turn``.
     """
-    result = compute_homeworld_baseline(services, shell_turn=shell_turn)
+    result = compute_homeworld_baseline(ctx, shell_turn=shell_turn)
     if not result.recomputed:
         return result
+    services = resolve_homeworld_services(ctx)
     services.persistence.invalidate_evidence_from_turn(
         services.game_id,
         services.perspective,

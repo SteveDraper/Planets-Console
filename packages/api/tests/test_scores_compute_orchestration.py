@@ -71,6 +71,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
+from tests.scores_exports_helpers import minimal_stream_query_context
 
 _FLEET_ANALYTIC_ID = "fleet"
 
@@ -82,7 +83,12 @@ def _reset_scores_tier_registry():
     reset_tier_row_run_registry_for_tests()
 
 
-def _session_for_player(sample_turn, *, player_id: int | None = None) -> InferenceRowStreamSession:
+def _session_for_player(
+    sample_turn,
+    *,
+    player_id: int | None = None,
+    query_context=None,
+) -> InferenceRowStreamSession:
     score = next(row for row in sample_turn.scores if player_id is None or row.ownerid == player_id)
     return InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -91,6 +97,9 @@ def _session_for_player(sample_turn, *, player_id: int | None = None) -> Inferen
         game_id=628580,
         perspective=1,
         turn_number=sample_turn.settings.turn,
+        query_context=query_context
+        if query_context is not None
+        else minimal_stream_query_context(sample_turn),
     )
 
 
@@ -1305,6 +1314,22 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
         stored_turns=turns,
         inference=FleetInferenceSupport(scores_services=scores_services),
     )
+
+    def ensure_turn(turn_number: int):
+        return turns.get(turn_number)
+
+    leader_ctx = make_analytic_query_context(
+        host_turn,
+        TurnAnalyticsOptions(),
+        game_id=628580,
+        perspective=1,
+        load_turn=load_turn,
+        export_services={
+            SCORES_ANALYTIC_ID: scores_services,
+            _FLEET_ANALYTIC_ID: fleet_services,
+        },
+        ensure_turn=ensure_turn,
+    )
     session = InferenceRowStreamSession(
         player_id=player_id,
         observation=build_inference_observation(
@@ -1321,8 +1346,10 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
             SCORES_ANALYTIC_ID: scores_services,
             _FLEET_ANALYTIC_ID: fleet_services,
         },
+        query_context=leader_ctx,
     )
     ctx = _query_context_for_session(session, scheduler=scheduler)
+    assert ctx.ensure_turn is leader_ctx.ensure_turn
     scope = _scores_scope(host_turn, player_id)
     prior_fleet_scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -1344,6 +1371,48 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
     assert prior_fleet_scope in planned_by_scope
     assert scope in planned_by_scope
     assert prior_fleet_scope in planned_by_scope[scope].dependency_scopes
+
+
+def test_query_context_for_session_requires_leader_ctx(sample_turn) -> None:
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    with pytest.raises(ValueError, match="AnalyticQueryContext"):
+        _query_context_for_session(session, scheduler=scheduler)
+
+
+def test_enqueue_tier_ladder_requires_query_context_to_submit(sample_turn) -> None:
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    scheduler = InferenceRowScheduler()
+    score = sample_turn.scores[0]
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    try:
+        with pytest.raises(ValueError, match="AnalyticQueryContext"):
+            scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
+    finally:
+        scheduler.detach_inference_stream(scope, (), stream_token=stream_token)
 
 
 def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -> None:
@@ -1435,13 +1504,13 @@ def test_enqueue_without_stream_token_wakes_parked_scores_node(
 
     player_id = sample_turn.scores[0].ownerid
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=False)
-    session = _session_for_player(sample_turn, player_id=player_id)
     ctx = export_chain_query_context(
         sample_turn,
         persistence=persistence,
         scheduler=scheduler,
         seed_fleet_prerequisites_for=player_id,
     )
+    session = _session_for_player(sample_turn, player_id=player_id, query_context=ctx)
     scope = _scores_scope(sample_turn, player_id)
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     submitted_scopes: list[ComputeScope] = []

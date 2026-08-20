@@ -382,7 +382,7 @@ def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> No
             return turn_two
         return None
 
-    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    services = _services(persistence, turns)
     persistence.put_baseline(
         628580,
         1,
@@ -397,6 +397,7 @@ def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> No
         export_services=export_services,
         game_id=services.game_id,
         perspective=services.perspective,
+        ensure_turn=ensure_turn,
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
     assert ensure_calls == [2]
@@ -428,7 +429,7 @@ def test_export_ensure_reports_fetch_failure_after_partial_autofetch(persistence
             return turn_two
         return None  # turn 3 fetch fails
 
-    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    services = _services(persistence, turns)
     persistence.put_baseline(
         628580,
         1,
@@ -441,6 +442,7 @@ def test_export_ensure_reports_fetch_failure_after_partial_autofetch(persistence
         export_services=_export_services(services, turns),
         game_id=services.game_id,
         perspective=services.perspective,
+        ensure_turn=ensure_turn,
     ).exports
     with pytest.raises(ValidationError, match="could not load turn 3"):
         ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
@@ -543,7 +545,7 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
         turn = ctx.load_turn(scope.turn)
         assert turn is not None
         resolved = resolve_homeworld_services(ctx)
-        baseline_result = ensure_homeworld_baseline(resolved, shell_turn=turn)
+        baseline_result = ensure_homeworld_baseline(ctx, shell_turn=turn)
         for refine_turn_number in range(
             baseline_result.game_state.baseline_turn,
             scope.turn + 1,
@@ -603,7 +605,7 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
         fetch_calls.append(turn_number)
         return None
 
-    services = _services(persistence, turns, ensure_turn=ensure_turn)
+    services = _services(persistence, turns)
     persistence.put_baseline(
         628580,
         1,
@@ -625,6 +627,7 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
         export_services=_export_services(services, turns),
         game_id=services.game_id,
         perspective=services.perspective,
+        ensure_turn=ensure_turn,
     ).exports
 
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))

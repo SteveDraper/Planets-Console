@@ -94,7 +94,6 @@ def _services(
     *,
     game_id: int = 628580,
     perspective: int = 1,
-    ensure_turn=None,
     game_info=None,
 ):
     return build_ephemeral_homeworld_services(
@@ -103,7 +102,6 @@ def _services(
         perspective=perspective,
         load_turn=lambda n: turns.get(n),
         list_stored_turns=lambda: sorted(turns),
-        ensure_turn=ensure_turn,
         game_info=game_info,
     )
 
@@ -132,6 +130,27 @@ def _seed_fleet_final_ledgers(
                 player.id,
                 _final_fleet_ledger(player.id),
             )
+
+
+def _baseline_ctx(
+    services,
+    turns: dict[int, TurnInfo],
+    *,
+    shell_turn: TurnInfo | None = None,
+    ensure_turn=None,
+):
+    """Wrap ephemeral homeworld services in query context for baseline ensure."""
+    from api.analytics.compute_context import make_analytic_compute_context
+
+    ambient = shell_turn if shell_turn is not None else turns[max(turns)]
+    return make_analytic_compute_context(
+        ambient,
+        load_turn=lambda n: turns.get(n),
+        export_services={ANALYTIC_ID: services},
+        game_id=services.game_id,
+        perspective=services.perspective,
+        ensure_turn=ensure_turn,
+    ).exports
 
 
 def _export_services(
@@ -355,8 +374,9 @@ def test_invalidate_evidence_from_turn(persistence) -> None:
 def test_baseline_ensure_writes_floor_not_shell_aggregate(persistence, sample_turn) -> None:
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     # Pretend settings.turn is 1 for baseline identity; use as only stored turn.
-    services = _services(persistence, {1: turn_one})
-    result = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    result = ensure_homeworld_baseline(_baseline_ctx(services, turns), shell_turn=turn_one)
     assert result.recomputed is True
     assert result.game_state.baseline_turn == 1
     assert result.game_state.baseline_degraded is False
@@ -413,8 +433,9 @@ def test_baseline_floor_pins_viewpoint_homeworld_ownership(persistence, sample_t
         ships=[],
         starbases=[starbase],
     )
-    services = _services(persistence, {1: turn_one})
-    result = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    result = ensure_homeworld_baseline(_baseline_ctx(services, turns), shell_turn=turn_one)
     assert result.recomputed is True
     definite = [row for row in result.game_state.candidates if row.planet_id == 1]
     assert len(definite) == 1
@@ -451,13 +472,15 @@ def test_baseline_floor_pins_viewpoint_homeworld_ownership(persistence, sample_t
 
 def test_baseline_degraded_when_turn_one_missing(persistence, sample_turn) -> None:
     late = replace(sample_turn, settings=replace(sample_turn.settings, turn=111))
-    services = _services(persistence, {111: late})
-    turn_info, baseline_turn, degraded = resolve_baseline_turn(services)
+    turns = {111: late}
+    services = _services(persistence, turns)
+    ctx = _baseline_ctx(services, turns, shell_turn=late)
+    turn_info, baseline_turn, degraded = resolve_baseline_turn(ctx)
     assert turn_info is late
     assert baseline_turn == 111
     assert degraded is True
 
-    result = ensure_homeworld_baseline(services, shell_turn=late)
+    result = ensure_homeworld_baseline(ctx, shell_turn=late)
     assert result.game_state.baseline_degraded is True
     assert result.game_state.baseline_turn == 111
 
@@ -471,8 +494,12 @@ def test_baseline_auto_ensure_turn_one(persistence, sample_turn) -> None:
         ensure_calls.append(turn_number)
         return turn_one if turn_number == 1 else None
 
-    services = _services(persistence, {111: late}, ensure_turn=ensure_turn)
-    result = ensure_homeworld_baseline(services, shell_turn=late)
+    turns = {111: late}
+    services = _services(persistence, turns)
+    result = ensure_homeworld_baseline(
+        _baseline_ctx(services, turns, shell_turn=late, ensure_turn=ensure_turn),
+        shell_turn=late,
+    )
     assert ensure_calls == [1]
     assert result.game_state.baseline_turn == 1
     assert result.game_state.baseline_degraded is False
@@ -481,7 +508,7 @@ def test_baseline_auto_ensure_turn_one(persistence, sample_turn) -> None:
 def test_turn_analytic_service_wires_ensure_turn_when_username_set(
     persistence, sample_turn, monkeypatch
 ) -> None:
-    """Turn-load username credential installs ensure_turn on homeworld compute services."""
+    """Turn-load username credential installs ensure_turn on the query context only."""
     from api.analytics.homeworld_locator.constants import ANALYTIC_ID
     from api.services.turn_analytic_service import TurnAnalyticService
 
@@ -532,17 +559,16 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
 
     svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="captain")
     homeworld = captured["export_services"][ANALYTIC_ID]
-    assert homeworld.ensure_turn is not None
-    ensured = homeworld.ensure_turn(1)
+    assert not hasattr(homeworld, "ensure_turn")
+    ctx_ensure_turn = captured["ctx_ensure_turn"]
+    assert ctx_ensure_turn is not None
+    ensured = ctx_ensure_turn(1)
     assert ensured is turn_one
     assert ensure_calls == [(1, "captain")]
     fleet = captured["export_services"]["fleet"]
-    assert fleet.ensure_turn is not None
-    assert captured["ctx_ensure_turn"] is fleet.ensure_turn
+    assert not hasattr(fleet, "ensure_turn")
 
     svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="")
-    homeworld_no_user = captured["export_services"][ANALYTIC_ID]
-    assert homeworld_no_user.ensure_turn is None
     assert captured["ctx_ensure_turn"] is None
 
 
@@ -551,11 +577,12 @@ def test_recompute_when_turn_one_appears_after_degraded(persistence, sample_turn
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     turns = {111: late}
     services = _services(persistence, turns)
-    first = ensure_homeworld_baseline(services, shell_turn=late)
+    ctx = _baseline_ctx(services, turns, shell_turn=late)
+    first = ensure_homeworld_baseline(ctx, shell_turn=late)
     assert first.game_state.baseline_degraded is True
 
     turns[1] = turn_one
-    second = ensure_homeworld_baseline(services, shell_turn=late)
+    second = ensure_homeworld_baseline(ctx, shell_turn=late)
     assert second.recomputed is True
     assert second.game_state.baseline_turn == 1
     assert second.game_state.baseline_degraded is False
@@ -566,13 +593,14 @@ def test_recompute_when_baseline_algorithm_version_mismatches(persistence, sampl
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     turns = {1: turn_one}
     services = _services(persistence, turns)
-    first = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    ctx = _baseline_ctx(services, turns, shell_turn=turn_one)
+    first = ensure_homeworld_baseline(ctx, shell_turn=turn_one)
     assert first.recomputed is True
     assert first.game_state.baseline_algorithm_version == HOMEWORLD_BASELINE_ALGORITHM_VERSION
 
     fingerprint = homeworld_settings_fingerprint(turn_one.settings)
     assert needs_baseline_recompute(services, settings_fingerprint=fingerprint) is False
-    second = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    second = ensure_homeworld_baseline(ctx, shell_turn=turn_one)
     assert second.recomputed is False
 
     # 0 is the pre-version sentinel on HomeworldLocatorGameState.
@@ -584,7 +612,7 @@ def test_recompute_when_baseline_algorithm_version_mismatches(persistence, sampl
         HomeworldEvidenceAggregate(turn=1, baseline_turn=1),
     )
     assert needs_baseline_recompute(services, settings_fingerprint=fingerprint) is True
-    third = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    third = ensure_homeworld_baseline(ctx, shell_turn=turn_one)
     assert third.recomputed is True
     assert third.game_state.baseline_algorithm_version == HOMEWORLD_BASELINE_ALGORITHM_VERSION
 
@@ -599,7 +627,10 @@ def test_export_ensure_unsatisfied_when_degraded_and_turn_one_present(
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     turns = {111: late}
     services = _services(persistence, turns)
-    first = ensure_homeworld_baseline(services, shell_turn=late)
+    first = ensure_homeworld_baseline(
+        _baseline_ctx(services, turns, shell_turn=late),
+        shell_turn=late,
+    )
     assert first.game_state.baseline_degraded is True
 
     turns[1] = turn_one
@@ -628,7 +659,7 @@ def test_export_ensure_requires_shell_evidence_aggregate(persistence, sample_tur
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     turns = _turn_ladder(turn_one, sample_turn)
     services = _services(persistence, turns)
-    ensure_homeworld_baseline(services, shell_turn=sample_turn)
+    ensure_homeworld_baseline(_baseline_ctx(services, turns), shell_turn=sample_turn)
 
     ctx = make_analytic_compute_context(
         sample_turn,
@@ -655,13 +686,14 @@ def test_export_ensure_raises_when_shell_turn_not_stored(persistence, sample_tur
     clear_ensure_failure_reports()
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     # Baseline exists so ensure is not already satisfied, but shell turn 111 is absent.
-    services = _services(persistence, {1: turn_one})
-    ensure_homeworld_baseline(services, shell_turn=turn_one)
+    turns = {1: turn_one}
+    services = _services(persistence, turns)
+    ensure_homeworld_baseline(_baseline_ctx(services, turns), shell_turn=turn_one)
 
     ctx = make_analytic_compute_context(
         turn_one,
-        load_turn=lambda n: {1: turn_one}.get(n),
-        export_services=_export_services(services, {1: turn_one}),
+        load_turn=lambda n: turns.get(n),
+        export_services=_export_services(services, turns),
         game_id=services.game_id,
         perspective=services.perspective,
     ).exports
@@ -741,13 +773,14 @@ def test_baseline_ensure_durable_perspective_uses_slot_not_player_id(
         planets=[hw, other],
         starbases=[],
     )
+    turns = {1: turn_one}
     services = _services(
         persistence,
-        {1: turn_one},
+        turns,
         perspective=shell_perspective,
         game_info=game_info,
     )
-    result = ensure_homeworld_baseline(services, shell_turn=turn_one)
+    result = ensure_homeworld_baseline(_baseline_ctx(services, turns), shell_turn=turn_one)
     assert result.recomputed is True
     anchored = [row for row in result.game_state.candidates if row.perspective is not None]
     assert len(anchored) == 1
@@ -901,6 +934,9 @@ def test_run_homeworld_baseline_persist_round_trip(persistence, sample_turn) -> 
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
+    assert job_wire.get("queryContext") is ctx
+    assert "ensureTurn" not in job_wire
+    assert "computeServices" not in job_wire
     result = run_homeworld_baseline(job_wire)
 
     assert result.outcome == "persist"
@@ -941,7 +977,10 @@ def test_baseline_persist_recompute_clears_shell_evidence(persistence, sample_tu
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     turns = {2: late}
     services = _services(persistence, turns)
-    first = ensure_homeworld_baseline(services, shell_turn=late)
+    first = ensure_homeworld_baseline(
+        _baseline_ctx(services, turns, shell_turn=late),
+        shell_turn=late,
+    )
     assert first.game_state.baseline_degraded is True
     persistence.put_evidence_aggregate(
         628580,
@@ -1014,7 +1053,7 @@ def test_baseline_persist_without_recompute_keeps_shell_evidence(persistence, sa
     turn_one = replace(sample_turn, settings=replace(sample_turn.settings, turn=1))
     turns = _turn_ladder(turn_one, sample_turn)
     services = _services(persistence, turns)
-    ensure_homeworld_baseline(services, shell_turn=sample_turn)
+    ensure_homeworld_baseline(_baseline_ctx(services, turns), shell_turn=sample_turn)
     persistence.put_evidence_aggregate(
         628580,
         1,

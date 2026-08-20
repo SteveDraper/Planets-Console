@@ -34,6 +34,7 @@ def test_bff_assertion_proxies_to_core() -> None:
         planet_id=3,
         sector_index=None,
         owner_slot=None,
+        username="",
     )
 
 
@@ -50,4 +51,39 @@ def test_bff_refresh_proxies_to_core() -> None:
             "/analytics/homeworld-locator/refresh?gameId=628580&turn=111&perspective=1",
         )
     assert response.status_code == 200, response.text
-    mock_core.refresh_homeworld_locator.assert_called_once_with(628580, 1, 111)
+    mock_core.refresh_homeworld_locator.assert_called_once_with(628580, 1, 111, username="")
+
+
+def test_bff_assertion_forwards_username_to_core() -> None:
+    mock_core = MagicMock()
+    mock_core.apply_homeworld_assertion.return_value = {
+        "analyticId": "homeworld-locator",
+        "available": True,
+        "rows": [],
+        "markers": [],
+    }
+    with patch("bff.routers.homeworld_locator.get_core_client", return_value=mock_core):
+        response = client.post(
+            "/analytics/homeworld-locator/assertions"
+            "?gameId=628580&turn=111&perspective=1&username=captain",
+            json={"axis": "location", "action": "upsert", "planetId": 3},
+        )
+    assert response.status_code == 200, response.text
+    assert mock_core.apply_homeworld_assertion.call_args.kwargs["username"] == "captain"
+
+
+def test_bff_refresh_forwards_username_to_core() -> None:
+    mock_core = MagicMock()
+    mock_core.refresh_homeworld_locator.return_value = {
+        "analyticId": "homeworld-locator",
+        "available": True,
+        "rows": [],
+        "markers": [],
+    }
+    with patch("bff.routers.homeworld_locator.get_core_client", return_value=mock_core):
+        response = client.post(
+            "/analytics/homeworld-locator/refresh"
+            "?gameId=628580&turn=111&perspective=1&username=captain",
+        )
+    assert response.status_code == 200, response.text
+    mock_core.refresh_homeworld_locator.assert_called_once_with(628580, 1, 111, username="captain")

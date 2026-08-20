@@ -228,7 +228,6 @@ def _raise_dependency_ensure_unavailable(
 def _prepare_homeworld_ensure_chain(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
-    services: HomeworldLocatorComputeServices,
 ) -> None:
     """Auto-fetch missing dependency-chain turns before orchestrator DAG plan."""
     try:
@@ -236,7 +235,6 @@ def _prepare_homeworld_ensure_chain(
             ctx,
             ANALYTIC_ID,
             scope,
-            ensure_turn=services.ensure_turn,
         )
     except DependencyChainFillError as error:
         if error.auto_fetch_unavailable or error.reason == "turn_fetch_failed":
@@ -283,8 +281,7 @@ def ensure_homeworld_export(ctx: AnalyticQueryContext, scope: ExportScope) -> bo
     if not is_homeworld_locator_available(turn.settings):
         return True
 
-    services = resolve_homeworld_services(ctx)
-    _prepare_homeworld_ensure_chain(ctx, scope, services)
+    _prepare_homeworld_ensure_chain(ctx, scope)
 
     from api.compute.export_ensure import ensure_export_scope_via_orchestrator
 
@@ -310,7 +307,7 @@ def materialize_homeworld_export_tree(
         }
 
     services = resolve_homeworld_services(ctx)
-    result = ensure_homeworld_baseline(services, shell_turn=turn)
+    result = ensure_homeworld_baseline(ctx, shell_turn=turn)
     # Single-step refine at shell; prior turns already ensured via DAG unwind.
     shell_aggregate = ensure_homeworld_evidence_refined(
         services,

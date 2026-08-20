@@ -194,9 +194,7 @@ def _run_warm_to_completion(
     timeout_seconds: float = 30.0,
 ) -> None:
     schedule_background_prior_turn_fleet_warm(
-        turn=host_turn,
-        load_turn=ctx.load_turn,
-        export_services=ctx.export_services,
+        query_context=ctx,
         player_ids=player_ids,
     )
     prior_turn = host_turn.settings.turn - 1
@@ -246,9 +244,7 @@ def test_background_warm_submits_orchestrator_background_requests(
     )
 
     schedule_background_prior_turn_fleet_warm(
-        turn=host_turn,
-        load_turn=ctx.load_turn,
-        export_services=ctx.export_services,
+        query_context=ctx,
         player_ids=player_ids,
     )
 
@@ -416,6 +412,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
         export_services=ctx.export_services,
         persistence=inference_persistence,
         scheduler=scheduler,
+        query_context=ctx,
     )
     events: list[dict[str, object]] = []
 
@@ -555,9 +552,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
 
     # Same order as TurnAnalyticService.iter_scores_table_inference_stream.
     schedule_background_prior_turn_fleet_warm(
-        turn=host_turn,
-        load_turn=ctx.load_turn,
-        export_services=ctx.export_services,
+        query_context=ctx,
         player_ids=player_ids,
     )
 
@@ -582,6 +577,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
         export_services=ctx.export_services,
         persistence=inference_persistence,
         scheduler=scheduler,
+        query_context=ctx,
     )
     events: list[dict[str, object]] = []
 

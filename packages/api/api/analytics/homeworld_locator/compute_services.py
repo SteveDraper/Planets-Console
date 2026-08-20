@@ -21,10 +21,6 @@ class HomeworldLocatorComputeServices:
     perspective: int
     load_turn: Callable[[int], TurnInfo | None]
     list_stored_turns: Callable[[], list[int]]
-    ensure_turn: Callable[[int], TurnInfo | None] | None = None
-    """Optional turn-load hook (login-backed). Used for baseline turn 1 and to
-    auto-fetch missing intermediate turns on the evidence ensure chain.
-    Returns the loaded turn, or None when credentials/upstream fail."""
     game_info: GameInfo | None = None
     """Optional roster for Player.id ↔ perspective slot mapping via GameService."""
 
@@ -48,7 +44,6 @@ def build_ephemeral_homeworld_services(
     perspective: int,
     load_turn: Callable[[int], TurnInfo | None],
     list_stored_turns: Callable[[], list[int]] | None = None,
-    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
     game_info: GameInfo | None = None,
 ) -> HomeworldLocatorComputeServices:
     def _list_stored() -> list[int]:
@@ -69,6 +64,5 @@ def build_ephemeral_homeworld_services(
         perspective=perspective,
         load_turn=load_turn,
         list_stored_turns=_list_stored,
-        ensure_turn=ensure_turn,
         game_info=game_info,
     )

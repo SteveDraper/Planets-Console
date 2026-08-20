@@ -25,6 +25,7 @@ from api.analytics.fleet.fleet_table_stream_rows import (
 )
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
+    _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
@@ -103,6 +104,7 @@ def _events_for_players(
         fleet_services=resolved_services,
         persistence=resolved_services.persistence,
         scheduler=scheduler,
+        query_context=_query_context_for_services(resolved_services, host_turn=sample_turn),
     )
     events: list[dict[str, object]] = []
     expected_players = set(player_ids)
@@ -145,6 +147,7 @@ def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn
     )
     player_ids = (player_id,)
 
+    query_context = _query_context_for_services(services, host_turn=sample_turn)
     first = iter_fleet_table_stream_events(
         sample_turn,
         player_ids,
@@ -153,6 +156,7 @@ def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn
         fleet_services=services,
         persistence=services.persistence,
         scheduler=scheduler,
+        query_context=query_context,
     )
     first.close()
 
@@ -164,6 +168,7 @@ def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn
         fleet_services=services,
         persistence=services.persistence,
         scheduler=scheduler,
+        query_context=query_context,
     )
     try:
         first_event = next(second)
@@ -231,6 +236,7 @@ def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample
         perspective=1,
         fleet_services=services,
         persistence=services.persistence,
+        query_context=_query_context_for_services(services, host_turn=sample_turn),
         stream_token=stream_token,
     )
     assert scheduled is not None
@@ -283,6 +289,7 @@ def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
             fleet_services=services,
             persistence=services.persistence,
             scheduler=scheduler,
+            query_context=_query_context_for_services(services, host_turn=sample_turn),
         )
 
     lines: list[str] = []
@@ -598,6 +605,7 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
     )
     stream_token = scheduler.begin_scope(scope)
     try:
+        query_context = _query_context_for_services(services, host_turn=sample_turn)
         first = schedule_fleet_player_run(
             scheduler,
             turn=sample_turn,
@@ -606,6 +614,7 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
             perspective=1,
             fleet_services=services,
             persistence=services.persistence,
+            query_context=query_context,
             stream_token=stream_token,
         )
         second = schedule_fleet_player_run(
@@ -616,6 +625,7 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
             perspective=1,
             fleet_services=services,
             persistence=services.persistence,
+            query_context=query_context,
             stream_token=stream_token,
         )
         assert first is not None
@@ -628,6 +638,44 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
             (),
             stream_token=stream_token,
         )
+
+
+def test_enqueue_player_run_requires_query_context_to_submit(sample_turn):
+    from api.analytics.fleet.fleet_table_player_run import FleetPlayerStreamSession
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    reset_fleet_table_stream_scheduler_for_tests()
+    scheduler = FleetTableStreamScheduler()
+    services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    scope = FleetTableStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
+    session = FleetPlayerStreamSession(
+        player_id=player_id,
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    try:
+        with pytest.raises(ValueError, match="AnalyticQueryContext"):
+            scheduler.enqueue_player_run(
+                session,
+                fleet_services=services,
+                persistence=services.persistence,
+                query_context=None,  # type: ignore[arg-type]
+                stream_token=stream_token,
+            )
+    finally:
+        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
 
 
 def test_tag_fleet_table_stream_event_adds_player_id():

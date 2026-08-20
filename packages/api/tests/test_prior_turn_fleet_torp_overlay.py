@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.chain import (
     ensure_fleet_baseline_for_player,
 )
@@ -20,6 +21,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
     schedule_background_prior_turn_fleet_warm,
 )
+from api.analytics.options import TurnAnalyticsOptions
 
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
 from tests.fleet_chain_test_turns import HOST_TURN
@@ -57,6 +59,18 @@ def _host_turn_context(sample_turn, persistence, *, seed_player_ids: int | None 
         kwargs["seed_fleet_prerequisites_for"] = seed_player_ids
     ctx = export_chain_query_context(host_turn, **kwargs)
     return host_turn, ctx
+
+
+def _warm_query_context(host_turn, fleet_services, *, ensure_turn=None):
+    return make_analytic_query_context(
+        host_turn,
+        TurnAnalyticsOptions(),
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
+        load_turn=fleet_services.load_turn,
+        export_services={"fleet": fleet_services},
+        ensure_turn=ensure_turn,
+    )
 
 
 def test_resolve_prior_turn_overlay_returns_none_on_first_turn(first_turn):
@@ -431,9 +445,7 @@ def test_background_warm_skips_players_with_final_ledger(
     )
 
     schedule_background_prior_turn_fleet_warm(
-        turn=host_turn,
-        load_turn=fleet_services.load_turn,
-        export_services={"fleet": fleet_services},
+        query_context=_warm_query_context(host_turn, fleet_services),
         player_ids=(player_id,),
     )
 
@@ -464,10 +476,12 @@ def test_background_warm_submits_orchestrator_background_requests(
         capture_submit,
     )
 
+    def ensure_turn(turn_number: int):
+        return fleet_services.load_turn(turn_number)
+
+    ctx = _warm_query_context(host_turn, fleet_services, ensure_turn=ensure_turn)
     schedule_background_prior_turn_fleet_warm(
-        turn=host_turn,
-        load_turn=fleet_services.load_turn,
-        export_services={"fleet": fleet_services},
+        query_context=ctx,
         player_ids=(player_id,),
     )
 
@@ -477,3 +491,5 @@ def test_background_warm_submits_orchestrator_background_requests(
     assert request.scope.analytic_id == "fleet"
     assert request.scope.turn == HOST_TURN - 1
     assert request.scope.player_id == player_id
+    assert request.ctx is ctx
+    assert request.ctx.ensure_turn is ensure_turn

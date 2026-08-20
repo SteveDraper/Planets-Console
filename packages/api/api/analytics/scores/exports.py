@@ -380,6 +380,7 @@ def _ensure_admit_inference_row(
         prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
         export_services=ctx.export_services,
         stream_token=inputs.stream_token,
+        query_context=ctx,
     )
     return True
 

@@ -252,6 +252,7 @@ def test_ensure_prior_turn_scheduler_passes_fleet_torp_input_status(sample_turn,
         admit_scores_export_work(ctx, scope)
 
     assert captured.get("fleet_torp_input_status") == "applied"
+    assert captured.get("query_context") is ctx
 
 
 def test_ensure_prior_turn_no_schedule_when_already_persisted(sample_turn, persistence):
@@ -494,6 +495,7 @@ def test_ensure_current_turn_scheduler_passes_fleet_torp_input_status(
         admit_scores_export_work(ctx, scope)
 
     assert captured.get("fleet_torp_input_status") == "applied"
+    assert captured.get("query_context") is ctx
 
 
 def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):

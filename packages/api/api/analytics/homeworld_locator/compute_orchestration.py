@@ -48,6 +48,7 @@ HOMEWORLD_COMPUTE_PROFILE = AnalyticComputeProfile(
 
 # Inline-only job-wire keys (not JSON-serializable across pool boundaries).
 _COMPUTE_SERVICES_KEY = "computeServices"
+_QUERY_CONTEXT_KEY = "queryContext"
 _FLEET_BUILT_TURNS_KEY = "fleetBuiltTurns"
 
 
@@ -60,7 +61,7 @@ def build_homeworld_baseline_job_wire(
 ) -> dict[str, Any]:
     """Assemble a job wire for baseline-only homeworld compute.
 
-    Attaches ``computeServices`` for the inline step (same process; not pool-safe).
+    Attaches ``queryContext`` for the inline step (same process; not pool-safe).
     """
     del dependency_outputs
     if ctx is None:
@@ -81,7 +82,7 @@ def build_homeworld_baseline_job_wire(
         "shellTurn": scope.turn,
         "turnWire": turn_info_to_json(turn),
         "analyticId": ANALYTIC_ID,
-        _COMPUTE_SERVICES_KEY: resolve_homeworld_services(ctx),
+        _QUERY_CONTEXT_KEY: ctx,
     }
 
 
@@ -104,14 +105,14 @@ def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
     if not is_homeworld_locator_available(turn.settings):
         return StepResult(outcome="complete", payload={"available": False})
 
-    services = job_wire.get(_COMPUTE_SERVICES_KEY)
-    if not isinstance(services, HomeworldLocatorComputeServices):
+    ctx = job_wire.get(_QUERY_CONTEXT_KEY)
+    if not isinstance(ctx, AnalyticQueryContext):
         raise TypeError(
-            "homeworld baseline job wire requires computeServices "
-            f"(HomeworldLocatorComputeServices), got {type(services).__name__}"
+            "homeworld baseline job wire requires queryContext "
+            f"(AnalyticQueryContext), got {type(ctx).__name__}"
         )
 
-    result = compute_homeworld_baseline(services, shell_turn=turn)
+    result = compute_homeworld_baseline(ctx, shell_turn=turn)
     return StepResult(
         outcome="persist",
         persist_then_continue=True,

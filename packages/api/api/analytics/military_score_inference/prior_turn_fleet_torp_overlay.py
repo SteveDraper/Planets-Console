@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.export_scope import ledgers_for_scope
@@ -20,9 +20,6 @@ from api.analytics.military_score_inference.tier_policy import resolve_fleet_inf
 from api.analytics.options import TurnAnalyticsOptions
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import TurnInfo
-
-if TYPE_CHECKING:
-    from api.analytics.export_context import AnalyticQueryContext
 
 FleetTorpInputStatus = Literal["not_applicable", "pending", "applied", "unavailable"]
 
@@ -302,25 +299,29 @@ def resolve_prior_turn_fleet_torp_overlay(
 
 def schedule_background_prior_turn_fleet_warm(
     *,
-    turn: TurnInfo,
-    load_turn: Callable[[int], TurnInfo | None],
-    export_services: Mapping[str, object] | None,
+    query_context: AnalyticQueryContext,
     player_ids: tuple[int, ...],
 ) -> None:
-    """Kick off non-blocking per-player materialization of fleet@(host_turn - 1)."""
+    """Kick off non-blocking per-player materialization of fleet@(host_turn - 1).
+
+    Submits with the caller ctx so login-backed ``ensure_turn`` is not dropped.
+    """
+    turn = query_context.load_turn(query_context.ambient_turn)
+    if turn is None:
+        return
     host_turn = turn.settings.turn
     prior_turn = host_turn - 1
     if prior_turn < accelerated_ensure_floor(turn.settings, host_turn) or not player_ids:
         return
 
     fleet_services = _resolve_fleet_services(
-        query_context=None,
-        export_services=export_services,
+        query_context=query_context,
+        export_services=query_context.export_services,
     )
     if fleet_services is None:
         return
 
-    prior_turn_info = load_turn(prior_turn)
+    prior_turn_info = query_context.load_turn(prior_turn)
     if prior_turn_info is None:
         return
 
@@ -335,14 +336,6 @@ def schedule_background_prior_turn_fleet_warm(
     if not players_needing_warm:
         return
 
-    query_context = make_analytic_query_context(
-        turn,
-        TurnAnalyticsOptions(),
-        game_id=game_id,
-        perspective=perspective,
-        load_turn=load_turn,
-        export_services=export_services,
-    )
     from api.compute.orchestrator import ComputeRequest
     from api.compute.runtime import get_compute_orchestrator
     from api.compute.scope import ComputeScope

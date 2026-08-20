@@ -117,6 +117,7 @@ class FleetTableStreamScheduler:
         *,
         fleet_services: FleetComputeServices,
         persistence: FleetSnapshotPersistenceService,
+        query_context: AnalyticQueryContext,
         stream_token: str | None = None,
     ) -> FleetPlayerStreamSession | None:
         """Admit one fleet player run and submit ``force_fresh``.
@@ -167,8 +168,7 @@ class FleetTableStreamScheduler:
             assert stream_token is not None
             binding = self._binding_for_stream_locked(
                 stream_token,
-                host_turn=host_turn,
-                fleet_services=fleet_services,
+                query_context=query_context,
             )
             progress_tracker = FleetLedgerWireProgressTracker(
                 host_turn=host_turn,
@@ -260,13 +260,16 @@ class FleetTableStreamScheduler:
         self,
         stream_token: str,
         *,
-        host_turn: TurnInfo,
-        fleet_services: FleetComputeServices,
+        query_context: AnalyticQueryContext,
     ) -> _FleetStreamOrchestratorBinding:
         existing = self._stream_bindings.get(stream_token)
         if existing is not None:
             return existing
-        query_ctx = _query_context_for_services(fleet_services, host_turn=host_turn)
+        if query_context is None:
+            raise ValueError(
+                "fleet table-stream admit requires AnalyticQueryContext; "
+                "production must pass the TurnAnalyticService factory ctx"
+            )
         orchestrator = get_compute_orchestrator()
         unregister = orchestrator.observers.register_scope_outcome_listener(
             self._on_orchestrator_scope_outcome,
@@ -274,7 +277,7 @@ class FleetTableStreamScheduler:
         binding = _FleetStreamOrchestratorBinding(
             orchestrator=orchestrator,
             unregister_listener=unregister,
-            query_context=query_ctx,
+            query_context=query_context,
         )
         self._stream_bindings[stream_token] = binding
         return binding
@@ -449,7 +452,13 @@ def _query_context_for_services(
     fleet_services: FleetComputeServices,
     *,
     host_turn: TurnInfo,
-):
+) -> AnalyticQueryContext:
+    """Build a query context from existing fleet services for tests.
+
+    Does not invent a login-backed ``ensure_turn``. Production admit must
+    receive the factory ctx from ``TurnAnalyticService``; tests that construct
+    services only call this helper explicitly at the test site.
+    """
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 
@@ -466,7 +475,6 @@ def _query_context_for_services(
         export_services=export_services,
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
-        ensure_turn=fleet_services.ensure_turn,
     )
 
 

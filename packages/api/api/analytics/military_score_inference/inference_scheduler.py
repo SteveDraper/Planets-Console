@@ -6,7 +6,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import replace
 
-from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -38,7 +38,6 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
@@ -725,30 +724,30 @@ def _query_context_for_session(
     *,
     scheduler: InferenceRowScheduler,
 ) -> AnalyticQueryContext:
+    """Bind the stream scheduler onto scores export services without dropping ``ensure_turn``.
+
+    Production streams pass the factory-built leader ctx on the session. This
+    replaces only the scheduler-bound scores bundle. Admit raises if that ctx
+    is missing -- tests that never submit a DAG must attach a ctx at the test
+    site rather than reconstructing from the session bag here.
+    """
     from api.analytics.scores.export_services import ScoresExportContext
 
-    load_turn = session.load_scoreboard_turn
-    if load_turn is None:
+    ctx = session.query_context
+    if ctx is None:
+        raise ValueError(
+            "scores table-stream admit requires AnalyticQueryContext; "
+            "production must pass the TurnAnalyticService factory ctx"
+        )
 
-        def load_turn(turn_number: int):
-            return session.turn if turn_number == session.turn_number else None
-
-    export_services = dict(session.export_services)
+    export_services = dict(ctx.export_services)
     injected_scores_services = export_services.get(SCORES_ANALYTIC_ID)
     if isinstance(injected_scores_services, ScoresExportContext):
         scores_services = replace(injected_scores_services, scheduler=scheduler)
     else:
         scores_services = ScoresExportContext(scheduler=scheduler)
     export_services[SCORES_ANALYTIC_ID] = scores_services
-
-    return make_analytic_query_context(
-        session.turn,
-        TurnAnalyticsOptions(),
-        game_id=session.game_id,
-        perspective=session.perspective,
-        load_turn=load_turn,
-        export_services=export_services,
-    )
+    return replace(ctx, export_services=export_services)
 
 
 def create_inference_row_scheduler(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -57,6 +58,7 @@ class InferenceTableStreamController(
     ) = None
     export_services: Mapping[str, object] = field(default_factory=dict)
     persistence: InferenceRowPersistenceService | None = None
+    query_context: AnalyticQueryContext | None = None
 
     def resolve_row_admission(
         self,
@@ -103,6 +105,7 @@ class InferenceTableStreamController(
             prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
             export_services=self.export_services,
             stream_token=self.stream_token,
+            query_context=self.query_context,
         )
 
     def cancel_player_row(self, player_id: int) -> None:

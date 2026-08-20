@@ -210,3 +210,31 @@ def test_fleet_table_stream_forwards_username_to_core():
 
     assert response.status_code == 200
     assert captured == ["captain"]
+
+
+def test_scores_inference_table_stream_forwards_username_to_core():
+    captured: list[str] = []
+
+    def _iter_scores_table_inference_stream(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_ids: tuple[int, ...],
+        *,
+        username: str = "",
+    ):
+        del game_id, perspective, turn_number, player_ids
+        captured.append(username)
+        yield from ()
+
+    mock_core = MagicMock()
+    mock_core.iter_scores_table_inference_stream = _iter_scores_table_inference_stream
+
+    with patch("bff.routers.scores_inference.get_core_client", return_value=mock_core):
+        response = client.get(
+            "/analytics/scores/inference/table-stream"
+            "?gameId=628580&perspective=1&turn=8&playerIds=3&username=captain"
+        )
+
+    assert response.status_code == 200
+    assert captured == ["captain"]

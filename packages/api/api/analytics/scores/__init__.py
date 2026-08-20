@@ -27,6 +27,7 @@ from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 if TYPE_CHECKING:
+    from api.analytics.export_context import AnalyticQueryContext
     from api.analytics.military_score_inference.hull_catalog_mask import (
         ResolvedHullCatalogMask,
     )
@@ -111,6 +112,7 @@ def iter_scores_table_inference_stream(
     export_services: Mapping[str, object] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
+    query_context: AnalyticQueryContext | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield NDJSON wire events for all scoreboard rows on one stream."""
     from api.analytics.military_score_inference.inference_stream_rows import (
@@ -129,6 +131,7 @@ def iter_scores_table_inference_stream(
         export_services=export_services,
         persistence=persistence,
         scheduler=scheduler,
+        query_context=query_context,
     )
 
 

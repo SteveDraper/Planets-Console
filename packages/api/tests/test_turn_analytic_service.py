@@ -114,6 +114,123 @@ class TestTurnAnalytics:
 
         assert next(stream) == {"type": "globalPause", "paused": False}
         assert forwarded["export_services"] is export_services
+        assert forwarded.get("query_context") is None
+
+    def test_iter_fleet_table_stream_keeps_factory_ctx_ensure_turn(
+        self,
+        analytics_service,
+        monkeypatch,
+    ):
+        from api.analytics.fleet import fleet_table_stream_rows
+
+        captured: dict[str, object] = {}
+
+        def fake_iter(*_args, **kwargs):
+            captured.update(kwargs)
+            yield from ()
+
+        monkeypatch.setattr(
+            fleet_table_stream_rows,
+            "iter_fleet_table_stream_events",
+            fake_iter,
+        )
+        list(analytics_service.iter_fleet_table_stream(628580, 1, 111, (1,), username="captain"))
+        query_ctx = captured["query_context"]
+        assert query_ctx is not None
+        assert query_ctx.ensure_turn is not None
+        assert not hasattr(captured["fleet_services"], "ensure_turn")
+
+        list(analytics_service.iter_fleet_table_stream(628580, 1, 111, (1,), username=""))
+        assert captured["query_context"].ensure_turn is None
+
+    def test_iter_scores_table_inference_stream_keeps_factory_ctx_ensure_turn(
+        self,
+        analytics_service,
+        monkeypatch,
+    ):
+        from api.analytics.military_score_inference import inference_stream_rows
+
+        captured: dict[str, object] = {}
+
+        def fake_iter(*_args, **kwargs):
+            captured.update(kwargs)
+            yield {"type": "globalPause", "paused": False}
+
+        monkeypatch.setattr(
+            inference_stream_rows,
+            "iter_scores_table_inference_events",
+            fake_iter,
+        )
+        stream = analytics_service.iter_scores_table_inference_stream(
+            628580, 1, 111, (8,), username="captain"
+        )
+        assert next(stream) == {"type": "globalPause", "paused": False}
+        query_ctx = captured["query_context"]
+        assert query_ctx is not None
+        assert query_ctx.ensure_turn is not None
+
+        list(
+            analytics_service.iter_scores_table_inference_stream(628580, 1, 111, (8,), username="")
+        )
+        assert captured["query_context"].ensure_turn is None
+
+    def test_factory_ctx_fills_a_fleet_chain_hole_when_username_is_set(self, sample_turn):
+        """Login-backed ctx.ensure_turn auto-fetches a missing prior turn on DAG prepare."""
+        from api.analytics.export_turn_fill import prepare_dependency_chain_turns
+        from api.analytics.export_types import ExportScope
+        from api.analytics.turn_roster import iter_turn_players
+        from api.services.turn_analytic_service import TurnAnalyticService
+        from api.storage.memory_asset import MemoryAssetBackend
+
+        from tests.fixtures.export_framework.harness import clone_turn_at
+
+        turns = {
+            1: clone_turn_at(sample_turn, 1),
+            3: clone_turn_at(sample_turn, 3),
+        }
+        fetched: list[int] = []
+
+        class _Turns:
+            def get_turn_info(self, game_id, perspective, turn_number):
+                del game_id, perspective
+                found = turns.get(turn_number)
+                if found is None:
+                    raise NotFoundError(f"turn {turn_number} is not stored")
+                return found
+
+            def list_stored_turn_numbers(self, game_id, perspective):
+                del game_id, perspective
+                return sorted(turns)
+
+            def ensure_turn_loaded(self, game_id, perspective, turn_number, params, planets):
+                del game_id, perspective, params, planets
+                fetched.append(turn_number)
+                turns[turn_number] = clone_turn_at(sample_turn, turn_number)
+                return turns[turn_number]
+
+        class _FakePlanets:
+            @staticmethod
+            def from_config():
+                return object()
+
+        svc = TurnAnalyticService(
+            _Turns(),  # type: ignore[arg-type]
+            storage=MemoryAssetBackend(initial={}),
+            planets_client_factory=_FakePlanets.from_config,
+        )
+        _turn, ctx = svc._build_analytic_query_context(628580, 1, 3, username="captain")
+        player_id = next(iter_turn_players(sample_turn)).id
+        prepare_dependency_chain_turns(
+            ctx,
+            "fleet",
+            ExportScope(
+                game_id=628580,
+                perspective=1,
+                turn=3,
+                player_id=player_id,
+            ),
+        )
+        assert fetched == [2]
 
     def test_export_query_context_wires_hatch_read_without_table_compute(self, analytics_service):
         ctx = analytics_service.export_query_context(628580, 1, 111)
