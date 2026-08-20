@@ -42,7 +42,7 @@ class FleetTableStreamController(
     scheduler: FleetTableStreamScheduler
     fleet_services: FleetComputeServices
     persistence: FleetSnapshotPersistenceService
-    query_context: AnalyticQueryContext | None = None
+    query_context: AnalyticQueryContext
 
     def current_scheduled_players(self) -> tuple[ScheduledFleetPlayer, ...]:
         return self.current_scheduled_rows()

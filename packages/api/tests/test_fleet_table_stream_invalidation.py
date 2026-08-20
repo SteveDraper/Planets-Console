@@ -21,6 +21,7 @@ from api.analytics.fleet.fleet_table_stream_registry import (
 from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
+    _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
@@ -233,6 +234,7 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
         fleet_services=services,
         persistence=fleet_persistence,
         scheduler=scheduler,
+        query_context=_query_context_for_services(services, host_turn=sample_turn),
     )
     events: list[dict[str, object]] = []
     stream_closed = threading.Event()
@@ -394,6 +396,7 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
         fleet_services=services,
         persistence=fleet_persistence,
         scheduler=scheduler,
+        query_context=_query_context_for_services(services, host_turn=sample_turn),
     )
 
     def consume_stream() -> None:
@@ -525,6 +528,7 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
         perspective=1,
         fleet_services=services,
         persistence=fleet_persistence,
+        query_context=_query_context_for_services(services, host_turn=sample_turn),
     )
 
     def consume_stream() -> None:
@@ -635,6 +639,7 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
         scheduler=scheduler,
         fleet_services=fleet_services,
         persistence=persistence,
+        query_context=_query_context_for_services(fleet_services, host_turn=sample_turn),
     )
     controller.attach()
 
@@ -797,6 +802,7 @@ def test_enqueue_player_run_does_not_hold_scheduler_lock_across_get_ledger(
         session,
         fleet_services=fleet_services,
         persistence=persistence,
+        query_context=_query_context_for_services(fleet_services, host_turn=sample_turn),
         stream_token=stream_token,
     )
     assert result is session

@@ -2,6 +2,7 @@
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.compute_orchestration import (
     FLEET_COMPUTE_PROFILE,
     FLEET_FINALIZATION_LEG,
@@ -98,8 +99,8 @@ def iter_fleet_table_stream(
     perspective: int,
     fleet_services,
     persistence,
+    query_context: AnalyticQueryContext,
     scheduler=None,
-    query_context=None,
 ):
     """Yield NDJSON wire events for fleet table materialization on one stream."""
     from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events

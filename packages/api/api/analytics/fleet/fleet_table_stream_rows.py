@@ -84,8 +84,8 @@ def schedule_fleet_player_run(
     perspective: int,
     fleet_services: FleetComputeServices,
     persistence: FleetSnapshotPersistenceService,
+    query_context: AnalyticQueryContext,
     stream_token: str | None = None,
-    query_context: AnalyticQueryContext | None = None,
 ) -> ScheduledFleetPlayer | None:
     session = FleetPlayerStreamSession(
         player_id=player_id,
@@ -98,8 +98,8 @@ def schedule_fleet_player_run(
         session,
         fleet_services=fleet_services,
         persistence=persistence,
-        stream_token=stream_token,
         query_context=query_context,
+        stream_token=stream_token,
     )
     if stream_token is not None and not scheduler.owns_table_stream(stream_token):
         return None
@@ -189,8 +189,8 @@ def iter_fleet_table_stream_events(
     perspective: int,
     fleet_services: FleetComputeServices,
     persistence: FleetSnapshotPersistenceService,
+    query_context: AnalyticQueryContext,
     scheduler: FleetTableStreamScheduler | None = None,
-    query_context: AnalyticQueryContext | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield tagged fleet table events for all requested players on one NDJSON stream.
 

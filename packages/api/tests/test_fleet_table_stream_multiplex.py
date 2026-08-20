@@ -14,6 +14,7 @@ from api.analytics.fleet.fleet_table_stream_registry import (
 from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
+    _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
@@ -97,6 +98,7 @@ def test_fleet_connect_multiplexes_progress_across_players_before_complete(
             fleet_services=services,
             persistence=services.persistence,
             scheduler=scheduler,
+            query_context=_query_context_for_services(services, host_turn=sample_turn),
         )
         try:
             for event in stream:
