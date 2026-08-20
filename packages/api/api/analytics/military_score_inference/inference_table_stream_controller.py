@@ -57,6 +57,7 @@ class InferenceTableStreamController(
     ) = None
     export_services: Mapping[str, object] = field(default_factory=dict)
     persistence: InferenceRowPersistenceService | None = None
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None
 
     def resolve_row_admission(
         self,
@@ -102,6 +103,7 @@ class InferenceTableStreamController(
             fleet_torp_input_status=fleet_resolution.input_status,
             prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
             export_services=self.export_services,
+            ensure_turn=self.ensure_turn,
             stream_token=self.stream_token,
         )
 

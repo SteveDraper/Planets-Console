@@ -94,7 +94,6 @@ def _services(
     *,
     game_id: int = 628580,
     perspective: int = 1,
-    ensure_turn=None,
     game_info=None,
 ):
     return build_ephemeral_homeworld_services(
@@ -103,7 +102,6 @@ def _services(
         perspective=perspective,
         load_turn=lambda n: turns.get(n),
         list_stored_turns=lambda: sorted(turns),
-        ensure_turn=ensure_turn,
         game_info=game_info,
     )
 
@@ -471,8 +469,12 @@ def test_baseline_auto_ensure_turn_one(persistence, sample_turn) -> None:
         ensure_calls.append(turn_number)
         return turn_one if turn_number == 1 else None
 
-    services = _services(persistence, {111: late}, ensure_turn=ensure_turn)
-    result = ensure_homeworld_baseline(services, shell_turn=late)
+    services = _services(persistence, {111: late})
+    result = ensure_homeworld_baseline(
+        services,
+        shell_turn=late,
+        ensure_turn=ensure_turn,
+    )
     assert ensure_calls == [1]
     assert result.game_state.baseline_turn == 1
     assert result.game_state.baseline_degraded is False
@@ -481,7 +483,7 @@ def test_baseline_auto_ensure_turn_one(persistence, sample_turn) -> None:
 def test_turn_analytic_service_wires_ensure_turn_when_username_set(
     persistence, sample_turn, monkeypatch
 ) -> None:
-    """Turn-load username credential installs ensure_turn on homeworld compute services."""
+    """Turn-load username credential installs ensure_turn on the query context only."""
     from api.analytics.homeworld_locator.constants import ANALYTIC_ID
     from api.services.turn_analytic_service import TurnAnalyticService
 
@@ -532,17 +534,16 @@ def test_turn_analytic_service_wires_ensure_turn_when_username_set(
 
     svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="captain")
     homeworld = captured["export_services"][ANALYTIC_ID]
-    assert homeworld.ensure_turn is not None
-    ensured = homeworld.ensure_turn(1)
+    assert not hasattr(homeworld, "ensure_turn")
+    ctx_ensure_turn = captured["ctx_ensure_turn"]
+    assert ctx_ensure_turn is not None
+    ensured = ctx_ensure_turn(1)
     assert ensured is turn_one
     assert ensure_calls == [(1, "captain")]
     fleet = captured["export_services"]["fleet"]
-    assert fleet.ensure_turn is not None
-    assert captured["ctx_ensure_turn"] is fleet.ensure_turn
+    assert not hasattr(fleet, "ensure_turn")
 
     svc.get_turn_analytics(628580, 1, 111, ANALYTIC_ID, username="")
-    homeworld_no_user = captured["export_services"][ANALYTIC_ID]
-    assert homeworld_no_user.ensure_turn is None
     assert captured["ctx_ensure_turn"] is None
 
 

@@ -99,6 +99,7 @@ def iter_fleet_table_stream(
     fleet_services,
     persistence,
     scheduler=None,
+    query_context=None,
 ):
     """Yield NDJSON wire events for fleet table materialization on one stream."""
     from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events
@@ -111,6 +112,7 @@ def iter_fleet_table_stream(
         fleet_services=fleet_services,
         persistence=persistence,
         scheduler=scheduler,
+        query_context=query_context,
     )
 
 

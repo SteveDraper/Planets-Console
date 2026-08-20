@@ -748,6 +748,7 @@ def _query_context_for_session(
         perspective=session.perspective,
         load_turn=load_turn,
         export_services=export_services,
+        ensure_turn=session.ensure_turn,
     )
 
 

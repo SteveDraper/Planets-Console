@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Literal
 
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.fleet_table_player_run import (
     FleetPlayerStreamSession,
@@ -84,6 +85,7 @@ def schedule_fleet_player_run(
     fleet_services: FleetComputeServices,
     persistence: FleetSnapshotPersistenceService,
     stream_token: str | None = None,
+    query_context: AnalyticQueryContext | None = None,
 ) -> ScheduledFleetPlayer | None:
     session = FleetPlayerStreamSession(
         player_id=player_id,
@@ -97,6 +99,7 @@ def schedule_fleet_player_run(
         fleet_services=fleet_services,
         persistence=persistence,
         stream_token=stream_token,
+        query_context=query_context,
     )
     if stream_token is not None and not scheduler.owns_table_stream(stream_token):
         return None
@@ -187,6 +190,7 @@ def iter_fleet_table_stream_events(
     fleet_services: FleetComputeServices,
     persistence: FleetSnapshotPersistenceService,
     scheduler: FleetTableStreamScheduler | None = None,
+    query_context: AnalyticQueryContext | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield tagged fleet table events for all requested players on one NDJSON stream.
 
@@ -219,6 +223,7 @@ def iter_fleet_table_stream_events(
             scheduler=resolved_scheduler,
             fleet_services=fleet_services,
             persistence=persistence,
+            query_context=query_context,
         )
         return FleetTableStreamConnectPolicy(
             controller=controller,

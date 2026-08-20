@@ -276,12 +276,15 @@ class CoreClient:
         perspective: int,
         turn_number: int,
         player_ids: tuple[int, ...],
+        *,
+        username: str = "",
     ):
         yield from self._analytics.iter_scores_table_inference_stream(
             game_id,
             perspective,
             turn_number,
             player_ids,
+            username=username,
         )
 
     def iter_fleet_table_stream(
@@ -418,6 +421,7 @@ class CoreClient:
         planet_id: int | None = None,
         sector_index: int | None = None,
         owner_slot: int | None = None,
+        username: str = "",
     ) -> dict:
         return self._invoke(
             lambda: self._analytics.apply_homeworld_assertion(
@@ -429,6 +433,7 @@ class CoreClient:
                 planet_id=planet_id,
                 sector_index=sector_index,
                 owner_slot=owner_slot,
+                username=username,
             )
         )
 
@@ -437,12 +442,15 @@ class CoreClient:
         game_id: int,
         perspective: int,
         turn_number: int,
+        *,
+        username: str = "",
     ) -> dict:
         return self._invoke(
             lambda: self._analytics.refresh_homeworld_locator(
                 game_id,
                 perspective,
                 turn_number,
+                username=username,
             )
         )
 

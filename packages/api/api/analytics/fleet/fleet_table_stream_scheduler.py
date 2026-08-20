@@ -118,6 +118,7 @@ class FleetTableStreamScheduler:
         fleet_services: FleetComputeServices,
         persistence: FleetSnapshotPersistenceService,
         stream_token: str | None = None,
+        query_context: AnalyticQueryContext | None = None,
     ) -> FleetPlayerStreamSession | None:
         """Admit one fleet player run and submit ``force_fresh``.
 
@@ -169,6 +170,7 @@ class FleetTableStreamScheduler:
                 stream_token,
                 host_turn=host_turn,
                 fleet_services=fleet_services,
+                query_context=query_context,
             )
             progress_tracker = FleetLedgerWireProgressTracker(
                 host_turn=host_turn,
@@ -262,11 +264,14 @@ class FleetTableStreamScheduler:
         *,
         host_turn: TurnInfo,
         fleet_services: FleetComputeServices,
+        query_context: AnalyticQueryContext | None = None,
     ) -> _FleetStreamOrchestratorBinding:
         existing = self._stream_bindings.get(stream_token)
         if existing is not None:
             return existing
-        query_ctx = _query_context_for_services(fleet_services, host_turn=host_turn)
+        query_ctx = query_context or _query_context_for_services(
+            fleet_services, host_turn=host_turn
+        )
         orchestrator = get_compute_orchestrator()
         unregister = orchestrator.observers.register_scope_outcome_listener(
             self._on_orchestrator_scope_outcome,
@@ -450,6 +455,12 @@ def _query_context_for_services(
     *,
     host_turn: TurnInfo,
 ):
+    """Rebuild a query context from fleet services when the leader ctx was not passed.
+
+    Production ``iter_fleet_table_stream`` passes the factory-built ctx so
+    ``ensure_turn`` is preserved. This fallback is for tests that construct
+    services only; it does not invent a login-backed hook.
+    """
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 
@@ -466,7 +477,6 @@ def _query_context_for_services(
         export_services=export_services,
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
-        ensure_turn=fleet_services.ensure_turn,
     )
 
 

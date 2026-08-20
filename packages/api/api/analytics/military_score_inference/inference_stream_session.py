@@ -33,6 +33,7 @@ class InferenceRowStreamSession:
     turn_number: int
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None
     export_services: Mapping[str, object] = field(default_factory=dict)
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None
     resolved_mask: ResolvedHullCatalogMask | None = None
     fleet_torp_overlay: FleetTorpOverlay | None = None
     fleet_torp_input_status: FleetTorpInputStatus | None = None

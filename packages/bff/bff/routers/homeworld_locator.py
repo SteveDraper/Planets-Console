@@ -18,6 +18,7 @@ def post_homeworld_locator_assertion(
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=0),
+    username: str = Query(""),
 ):
     """Upsert or revoke a homeworld location or ownership assertion."""
     return get_core_client().apply_homeworld_assertion(
@@ -29,6 +30,7 @@ def post_homeworld_locator_assertion(
         planet_id=body.planet_id,
         sector_index=body.sector_index,
         owner_slot=body.owner_slot,
+        username=username,
     )
 
 
@@ -37,10 +39,12 @@ def post_homeworld_locator_refresh(
     game_id: int = Query(..., alias="gameId"),
     turn: int = Query(..., ge=1),
     perspective: int = Query(..., ge=0),
+    username: str = Query(""),
 ):
     """Wipe machine homeworld state and rebuild via ensure (asserts preserved)."""
     return get_core_client().refresh_homeworld_locator(
         game_id,
         perspective,
         turn,
+        username=username,
     )

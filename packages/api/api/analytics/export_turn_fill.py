@@ -109,15 +109,6 @@ class DependencyChainFillError(ValidationError):
         self.auto_fetch_unavailable = auto_fetch_unavailable
 
 
-def _ensure_turn_hook(
-    ctx: AnalyticQueryContext,
-    ensure_turn: Callable[[int], TurnInfo | None] | None,
-) -> Callable[[int], TurnInfo | None] | None:
-    if ensure_turn is not None:
-        return ensure_turn
-    return ctx.ensure_turn
-
-
 def _fill_error(scope: ExportScope, fill: DependencyChainTurnFill) -> DependencyChainFillError:
     missing_turn = fill.still_missing
     if fill.auto_fetch_unavailable:
@@ -179,15 +170,13 @@ def prepare_dependency_chain_turns(
     ctx: AnalyticQueryContext,
     analytic_id: str,
     scope: ExportScope,
-    *,
-    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> None:
     """Fill missing turns on the ensure chain, or raise ``DependencyChainFillError``.
 
     No-op when the dependency walk can already complete. Login-backed
-    ``ensure_turn`` (argument or ``ctx.ensure_turn``) fetches holes from
-    Planets.nu into storage. Callers that plan a compute DAG must invoke this
-    **before** ``plan_compute_dag`` and **outside** the orchestrator lock.
+    ``ctx.ensure_turn`` fetches holes from Planets.nu into storage. Callers
+    that plan a compute DAG must invoke this **before** ``plan_compute_dag``
+    and **outside** the orchestrator lock.
     """
     unavailable = ctx.dependency_walk_unavailable(analytic_id, scope)
     if unavailable is None:
@@ -196,7 +185,7 @@ def prepare_dependency_chain_turns(
         fill = fill_missing_dependency_chain_turns(
             ctx,
             scope,
-            ensure_turn=_ensure_turn_hook(ctx, ensure_turn),
+            ensure_turn=ctx.ensure_turn,
         )
         if fill.still_missing is not None:
             raise _fill_error(scope, fill)

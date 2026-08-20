@@ -141,6 +141,15 @@ def get_scores_table_inference_stream(
         alias="playerIds",
         description="Comma-separated scoreboard player ids",
     ),
+    username: Annotated[
+        str,
+        Query(
+            description=(
+                "Optional turn-load credential username so scores DAG planning can "
+                "auto-fetch missing historical turns (stored account API key)."
+            ),
+        ),
+    ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
 ) -> StreamingResponse:
     """Stream military score build inference for all scoreboard rows (NDJSON)."""
@@ -152,6 +161,7 @@ def get_scores_table_inference_stream(
                 perspective,
                 turn_number,
                 parsed_player_ids,
+                username=username,
             )
         ),
         media_type="application/x-ndjson",
@@ -318,6 +328,15 @@ def post_homeworld_locator_assertion(
     perspective: int,
     turn_number: int,
     body: HomeworldAssertionRequest,
+    username: Annotated[
+        str,
+        Query(
+            description=(
+                "Optional turn-load credential username so rematerialize can "
+                "auto-fetch missing historical turns (stored account API key)."
+            ),
+        ),
+    ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
 ) -> dict:
     """Upsert or revoke a homeworld location or ownership assertion (#37)."""
@@ -330,6 +349,7 @@ def post_homeworld_locator_assertion(
         planet_id=body.planet_id,
         sector_index=body.sector_index,
         owner_slot=body.owner_slot,
+        username=username,
     )
 
 
@@ -338,6 +358,15 @@ def post_homeworld_locator_refresh(
     game_id: int,
     perspective: int,
     turn_number: int,
+    username: Annotated[
+        str,
+        Query(
+            description=(
+                "Optional turn-load credential username so rematerialize can "
+                "auto-fetch missing historical turns (stored account API key)."
+            ),
+        ),
+    ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
 ) -> dict:
     """Wipe machine homeworld state and rebuild via ensure (asserts preserved)."""
@@ -345,6 +374,7 @@ def post_homeworld_locator_refresh(
         game_id,
         perspective,
         turn_number,
+        username=username,
     )
 
 

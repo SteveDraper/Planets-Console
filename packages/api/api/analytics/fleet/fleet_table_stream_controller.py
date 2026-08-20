@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.fleet_table_player_run import ScheduledFleetPlayer
 from api.analytics.fleet.fleet_table_stream_registry import (
@@ -41,6 +42,7 @@ class FleetTableStreamController(
     scheduler: FleetTableStreamScheduler
     fleet_services: FleetComputeServices
     persistence: FleetSnapshotPersistenceService
+    query_context: AnalyticQueryContext | None = None
 
     def current_scheduled_players(self) -> tuple[ScheduledFleetPlayer, ...]:
         return self.current_scheduled_rows()
@@ -69,6 +71,7 @@ class FleetTableStreamController(
             fleet_services=self.fleet_services,
             persistence=self.persistence,
             stream_token=self.stream_token,
+            query_context=self.query_context,
         )
         if scheduled is None:
             return AdmissionDispatch(

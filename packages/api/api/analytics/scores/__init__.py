@@ -111,6 +111,7 @@ def iter_scores_table_inference_stream(
     export_services: Mapping[str, object] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield NDJSON wire events for all scoreboard rows on one stream."""
     from api.analytics.military_score_inference.inference_stream_rows import (
@@ -129,6 +130,7 @@ def iter_scores_table_inference_stream(
         export_services=export_services,
         persistence=persistence,
         scheduler=scheduler,
+        ensure_turn=ensure_turn,
     )
 
 

@@ -127,7 +127,6 @@ def test_prepare_fetches_holes_then_fleet_walk_succeeds(sample_turn):
     from api.compute.registry import COMPUTE_REGISTRY
 
     turns = {1: clone_turn_at(sample_turn, 1), 3: clone_turn_at(sample_turn, 3)}
-    ctx = _fleet_prepare_context(turns)
     player_id = first_player_id(sample_turn)
     requested: list[int] = []
 
@@ -136,11 +135,12 @@ def test_prepare_fetches_holes_then_fleet_walk_succeeds(sample_turn):
         turns[turn_number] = clone_turn_at(sample_turn, turn_number)
         return turns[turn_number]
 
+    ctx = _fleet_prepare_context(turns)
+    ctx.ensure_turn = ensure_turn
     prepare_dependency_chain_turns(
         ctx,
         "fleet",
         _fleet_scope(ctx, 3, player_id),
-        ensure_turn=ensure_turn,
     )
 
     assert requested == [2]

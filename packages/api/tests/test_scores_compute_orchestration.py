@@ -1321,8 +1321,10 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
             SCORES_ANALYTIC_ID: scores_services,
             _FLEET_ANALYTIC_ID: fleet_services,
         },
+        ensure_turn=lambda turn_number: turns.get(turn_number),
     )
     ctx = _query_context_for_session(session, scheduler=scheduler)
+    assert ctx.ensure_turn is session.ensure_turn
     scope = _scores_scope(host_turn, player_id)
     prior_fleet_scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,

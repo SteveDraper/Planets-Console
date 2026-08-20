@@ -378,6 +378,7 @@ export interface operations {
                 turn: number;
                 perspective: number;
                 playerIds: string;
+                username?: string;
             };
             header?: never;
             path?: never;
@@ -719,6 +720,7 @@ export interface operations {
                 gameId: number;
                 turn: number;
                 perspective: number;
+                username?: string;
             };
             header?: never;
             path?: never;
@@ -756,6 +758,7 @@ export interface operations {
                 gameId: number;
                 turn: number;
                 perspective: number;
+                username?: string;
             };
             header?: never;
             path?: never;

@@ -149,7 +149,7 @@ Generic BFF reads (every selectable analytic plus base-map):
 
 Connections map extra query params (BFF aliases): `warpSpeed` (1-9), `gravitonicMovement`, `flareMode` (`off`/`include`/`only`), `flareDepth` (1-3), `includeIllustrativeRoutes`. Scores table extra: `includeBuildInference` (adds stub inference column; live results come from the stream).
 
-Optional `username` on table/map **and** fleet table-stream: not a second login. It is the turn-load credential so compute DAG planning can `ensure_turn` missing historical turns via the stored account API key (homeworld evidence chain, fleet `turn_delta=-1` self-chain, and homeworld's fleet-at-shell-turn dependency).
+Optional `username` on table/map **and** every table-stream that admits compute (fleet and scores): not a second login. It is the turn-load credential so compute DAG planning can `ensure_turn` missing historical turns via the stored account API key (homeworld evidence chain, fleet `turn_delta=-1` self-chain, scores prior-turn fleet, and homeworld's fleet-at-shell-turn dependency). Homeworld assertion/refresh rematerialize takes the same query param.
 
 ### 2.1 Per-analytic table/map payloads
 
@@ -174,7 +174,7 @@ These are first-class human surfaces: the Scores tile, Fleet tile, and Homeworld
 | Route | Layer | SPA | Returns | Turn ensure | Compute |
 |-------|-------|-----|---------|-------------|---------|
 | `GET /bff/analytics/scores/inference?gameId&turn&perspective&playerId` | BFF | Client exists; **tile uses table-stream**, not this GET | One row: `displayStatus`, `status`, `summary`, `solutionCount`, `isComplete`, `solutions[]`, diagnostics, optional fleet-torp overlay fields | Stored turn | Orchestrator inference for that player |
-| `GET /bff/analytics/scores/inference/table-stream?playerIds=` | BFF | **Yes** (primary) | NDJSON: `solution`, `progress`, `complete`, `error`, `globalPause` | Stored turn | **Yes** -- scores `materialize` + `tier_solve` |
+| `GET /bff/analytics/scores/inference/table-stream?playerIds=&username?` | BFF | **Yes** (primary) | NDJSON: `solution`, `progress`, `complete`, `error`, `globalPause` | Stored turn; `username` auto-fetches DAG holes | **Yes** -- scores `materialize` + `tier_solve` |
 | `GET /bff/analytics/scores/inference/hull-catalog?playerId=` | BFF | Yes (inference detail) | Master hull catalog + user/effective masks | Stored turn | No (catalog/mask read) |
 | `PUT /bff/analytics/scores/inference/hull-catalog` | BFF | Yes | Same mask after persist | No | Invalidates / reschedules inference |
 | `DELETE /bff/analytics/scores/inference/hull-catalog` | BFF | Yes | Mask reset to game-type defaults | No | Invalidates / reschedules |
@@ -201,8 +201,8 @@ Catalog marks homeworld **map-only**, but the map-mode accordion calls **GET tab
 
 | Route | Layer | SPA | Returns | Turn ensure | Compute |
 |-------|-------|-----|---------|-------------|---------|
-| `POST /bff/analytics/homeworld-locator/assertions` | BFF | Yes (map context menu / panel) | Same locator payload after upsert/revoke. Body: `{axis: location\|ownership, action: upsert\|revoke, planetId?, sectorIndex?, ownerSlot?}` | Stored turn | Recompute/view after assertion |
-| `POST /bff/analytics/homeworld-locator/refresh` | BFF | Yes | Same payload after wipe of machine state (asserts kept) | **Yes** -- rebuild via ensure (historical turns) | **Yes** |
+| `POST /bff/analytics/homeworld-locator/assertions?username?` | BFF | Yes (map context menu / panel) | Same locator payload after upsert/revoke. Body: `{axis: location\|ownership, action: upsert\|revoke, planetId?, sectorIndex?, ownerSlot?}` | Stored turn; `username` auto-fetches DAG holes on rematerialize | Recompute/view after assertion |
+| `POST /bff/analytics/homeworld-locator/refresh?username?` | BFF | Yes | Same payload after wipe of machine state (asserts kept) | **Yes** -- rebuild via ensure (historical turns); `username` auto-fetches DAG holes | **Yes** |
 | Core `POST .../analytics/homeworld-locator/assertions` | Core | No | Same | Same | Same |
 | Core `POST .../analytics/homeworld-locator/refresh` | Core | No | Same | Same | Same |
 

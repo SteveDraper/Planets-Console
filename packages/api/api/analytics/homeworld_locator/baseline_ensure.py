@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import replace
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -137,17 +138,20 @@ def _durable_viewpoint_perspective(
 
 def resolve_baseline_turn(
     services: HomeworldLocatorComputeServices,
+    *,
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> tuple[TurnInfo, int, bool]:
     """Prefer turn 1 (auto-ensure when possible); else earliest stored (degraded).
 
     Returns ``(turn, baseline_turn_number, baseline_degraded)``.
+    ``ensure_turn`` is the login-backed hook from ``AnalyticQueryContext``.
     """
     turn_one = services.load_turn(1)
     if turn_one is not None:
         return turn_one, 1, False
 
-    if services.ensure_turn is not None:
-        ensured = services.ensure_turn(1)
+    if ensure_turn is not None:
+        ensured = ensure_turn(1)
         if ensured is not None:
             return ensured, 1, False
 
@@ -187,6 +191,7 @@ def compute_homeworld_baseline(
     services: HomeworldLocatorComputeServices,
     *,
     shell_turn: TurnInfo | None = None,
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> HomeworldBaselineEnsureResult:
     """Compute baseline game-global + floor aggregate without a durable write.
 
@@ -243,7 +248,10 @@ def compute_homeworld_baseline(
             recomputed=False,
         )
 
-    baseline_turn_info, baseline_turn, degraded = resolve_baseline_turn(services)
+    baseline_turn_info, baseline_turn, degraded = resolve_baseline_turn(
+        services,
+        ensure_turn=ensure_turn,
+    )
     existing = services.persistence.get_game_state(services.game_id)
     hw_cfg = get_config().homeworld_locator
     min_clans = hw_cfg.min_baseline_clans
@@ -323,12 +331,18 @@ def ensure_homeworld_baseline(
     services: HomeworldLocatorComputeServices,
     *,
     shell_turn: TurnInfo | None = None,
+    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> HomeworldBaselineEnsureResult:
     """Run baseline-only ensure: compute then persist game-global + floor.
 
     Does not copy-forward empty aggregates through the shell turn (#36).
+    ``ensure_turn`` is the login-backed hook from ``AnalyticQueryContext``.
     """
-    result = compute_homeworld_baseline(services, shell_turn=shell_turn)
+    result = compute_homeworld_baseline(
+        services,
+        shell_turn=shell_turn,
+        ensure_turn=ensure_turn,
+    )
     if not result.recomputed:
         return result
     services.persistence.invalidate_evidence_from_turn(

@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 from api.analytics import TurnAnalyticsOptions
-from api.analytics.compute_context import make_analytic_compute_context
+from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.compute_services import FleetComputeServices
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 
 class _QueryComputeContextIngredients(NamedTuple):
-    """Shared turn, load_turn, export_services, and fleet ensure_turn for query/compute context."""
+    """Shared turn, load_turn, export_services, and login-backed ensure_turn for query context."""
 
     turn: TurnInfo
     load_turn: Callable[[int], TurnInfo | None]
@@ -126,21 +126,47 @@ class TurnAnalyticService:
     ) -> _QueryComputeContextIngredients:
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
         load_turn = self._load_scoreboard_turn(game_id, perspective)
-        export_services = self._turn_export_services(
-            game_id,
-            perspective,
-            username=username,
-        )
-        fleet_services = export_services[FLEET_ANALYTIC_ID]
-        ensure_turn = (
-            fleet_services.ensure_turn if isinstance(fleet_services, FleetComputeServices) else None
-        )
+        ensure_turn = self._ensure_turn_loader(game_id, perspective, username)
+        export_services = self._turn_export_services(game_id, perspective)
         return _QueryComputeContextIngredients(
             turn=turn,
             load_turn=load_turn,
             export_services=export_services,
             ensure_turn=ensure_turn,
         )
+
+    def _build_analytic_query_context(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        username: str = "",
+        options: TurnAnalyticsOptions | None = None,
+        export_registry: Mapping[str, AnalyticExportCatalog] | None = None,
+    ) -> tuple[TurnInfo, AnalyticQueryContext]:
+        """Build the shared query context for all in-process compute callers.
+
+        ``username`` wires ``ctx.ensure_turn`` (login-backed loadturn). Empty
+        skips auto-fetch. Compute-service bundles do not carry this hook.
+        """
+        ingredients = self._query_compute_context_ingredients(
+            game_id,
+            perspective,
+            turn_number,
+            username=username,
+        )
+        ctx = make_analytic_query_context(
+            ingredients.turn,
+            options or TurnAnalyticsOptions(),
+            game_id=game_id,
+            perspective=perspective,
+            load_turn=ingredients.load_turn,
+            export_registry=export_registry,
+            export_services=ingredients.export_services,
+            ensure_turn=ingredients.ensure_turn,
+        )
+        return ingredients.turn, ctx
 
     def get_turn_analytics(
         self,
@@ -167,12 +193,6 @@ class TurnAnalyticService:
         auto-ensure missing turns (stored account API key lookup). Empty skips
         turn-load ensure.
         """
-        ingredients = self._query_compute_context_ingredients(
-            game_id,
-            perspective,
-            turn_number,
-            username=username,
-        )
         options = TurnAnalyticsOptions(
             connection_warp_speed=connection_warp_speed,
             connection_gravitonic_movement=connection_gravitonic_movement,
@@ -181,16 +201,20 @@ class TurnAnalyticService:
             connection_include_illustrative_routes=connection_include_illustrative_routes,
             diagnostics=diagnostics,
         )
-        compute_ctx = make_analytic_compute_context(
-            ingredients.turn,
-            options,
-            load_turn=ingredients.load_turn,
-            export_services=ingredients.export_services,
-            game_id=game_id,
-            perspective=perspective,
-            ensure_turn=ingredients.ensure_turn,
+        turn, exports = self._build_analytic_query_context(
+            game_id,
+            perspective,
+            turn_number,
+            username=username,
+            options=options,
         )
-        ensure_table_map_compute(compute_ctx.exports, analytic_id, ingredients.turn)
+        compute_ctx = AnalyticComputeContext(
+            turn=turn,
+            options=options,
+            exports=exports,
+            diagnostics=options.diagnostics,
+        )
+        ensure_table_map_compute(exports, analytic_id, turn)
         return dispatch_turn_analytic(analytic_id, compute_ctx)
 
     def export_query_context(
@@ -207,44 +231,31 @@ class TurnAnalyticService:
         Does not dispatch table/map compute. ``username`` enables login-backed
         dependency-turn fill on live ensure; hatch-read does not auto-load turns.
         """
-        ingredients = self._query_compute_context_ingredients(
+        _turn, ctx = self._build_analytic_query_context(
             game_id,
             perspective,
             turn_number,
             username=username,
-        )
-        return make_analytic_query_context(
-            ingredients.turn,
-            TurnAnalyticsOptions(),
-            game_id=game_id,
-            perspective=perspective,
-            load_turn=ingredients.load_turn,
             export_registry=export_registry,
-            export_services=ingredients.export_services,
-            ensure_turn=ingredients.ensure_turn,
         )
+        return ctx
 
     def _turn_export_services(
         self,
         game_id: int,
         perspective: int,
-        *,
-        username: str = "",
     ) -> dict[str, object]:
         scores_services = self._scores_export_context(game_id, perspective)
-        ensure_turn = self._ensure_turn_loader(game_id, perspective, username)
         return {
             SCORES_ANALYTIC_ID: scores_services,
             FLEET_ANALYTIC_ID: self._fleet_compute_services(
                 game_id,
                 perspective,
                 scores_services=scores_services,
-                ensure_turn=ensure_turn,
             ),
             HOMEWORLD_ANALYTIC_ID: self._homeworld_compute_services(
                 game_id,
                 perspective,
-                ensure_turn=ensure_turn,
             ),
         }
 
@@ -278,8 +289,6 @@ class TurnAnalyticService:
         self,
         game_id: int,
         perspective: int,
-        *,
-        ensure_turn: Callable[[int], TurnInfo | None] | None = None,
     ) -> HomeworldLocatorComputeServices:
         load_turn = self._load_scoreboard_turn(game_id, perspective)
 
@@ -292,7 +301,6 @@ class TurnAnalyticService:
             perspective=perspective,
             load_turn=load_turn,
             list_stored_turns=list_stored_turns,
-            ensure_turn=ensure_turn,
         )
 
     def _fleet_compute_services(
@@ -301,7 +309,6 @@ class TurnAnalyticService:
         perspective: int,
         *,
         scores_services: ScoresExportContext,
-        ensure_turn: Callable[[int], TurnInfo | None] | None = None,
     ) -> FleetComputeServices:
         load_turn = self._load_scoreboard_turn(game_id, perspective)
         return FleetComputeServices(
@@ -313,7 +320,6 @@ class TurnAnalyticService:
                 inference=FleetInferenceSupport(scores_services=scores_services),
                 load_turn=load_turn,
             ),
-            ensure_turn=ensure_turn,
         )
 
     def _scores_export_context(
@@ -377,6 +383,7 @@ class TurnAnalyticService:
         perspective: int,
         turn_number: int,
         player_ids: tuple[int, ...],
+        username: str = "",
     ):
         from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
             PriorTurnFleetTorpResolution,
@@ -385,7 +392,12 @@ class TurnAnalyticService:
         )
         from api.analytics.scores import iter_scores_table_inference_stream
 
-        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
+        turn, query_ctx = self._build_analytic_query_context(
+            game_id,
+            perspective,
+            turn_number,
+            username=username,
+        )
 
         def resolve_mask_for_player(player_id: int):
             return self._hull_catalog_masks.resolve_mask_for_player_on_turn(
@@ -394,8 +406,8 @@ class TurnAnalyticService:
                 player_id,
             )
 
-        export_services = self._turn_export_services(game_id, perspective)
-        load_turn = self._load_scoreboard_turn(game_id, perspective)
+        export_services = query_ctx.export_services
+        load_turn = query_ctx.load_turn
 
         schedule_background_prior_turn_fleet_warm(
             turn=turn,
@@ -430,6 +442,7 @@ class TurnAnalyticService:
             export_services=export_services,
             persistence=self._inference_persistence,
             scheduler=self._inference_scheduler_instance(),
+            ensure_turn=query_ctx.ensure_turn,
         )
 
     def iter_fleet_table_stream(
@@ -445,13 +458,13 @@ class TurnAnalyticService:
             get_fleet_table_stream_scheduler,
         )
 
-        turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        export_services = self._turn_export_services(
+        turn, query_ctx = self._build_analytic_query_context(
             game_id,
             perspective,
+            turn_number,
             username=username,
         )
-        fleet_services = export_services[FLEET_ANALYTIC_ID]
+        fleet_services = query_ctx.export_services[FLEET_ANALYTIC_ID]
         return iter_fleet_table_stream(
             turn,
             player_ids,
@@ -460,6 +473,7 @@ class TurnAnalyticService:
             fleet_services=fleet_services,
             persistence=self._fleet_persistence,
             scheduler=get_fleet_table_stream_scheduler(),
+            query_context=query_ctx,
         )
 
     def _inference_scheduler_instance(self) -> InferenceRowScheduler:
@@ -611,6 +625,8 @@ class TurnAnalyticService:
         self,
         game_id: int,
         perspective: int,
+        *,
+        username: str = "",
     ):
         load_turn = self._load_scoreboard_turn(game_id, perspective)
 
@@ -620,6 +636,7 @@ class TurnAnalyticService:
                 perspective,
                 turn_number,
                 HOMEWORLD_ANALYTIC_ID,
+                username=username,
             )
 
         return HomeworldAssertionService(
@@ -641,8 +658,13 @@ class TurnAnalyticService:
         planet_id: int | None = None,
         sector_index: int | None = None,
         owner_slot: int | None = None,
+        username: str = "",
     ) -> dict:
-        return self._homeworld_assertion_service(game_id, perspective).apply_assertion(
+        return self._homeworld_assertion_service(
+            game_id,
+            perspective,
+            username=username,
+        ).apply_assertion(
             axis=axis,
             action=action,
             turn_number=turn_number,
@@ -656,7 +678,13 @@ class TurnAnalyticService:
         game_id: int,
         perspective: int,
         turn_number: int,
+        *,
+        username: str = "",
     ) -> dict:
-        return self._homeworld_assertion_service(game_id, perspective).refresh(
+        return self._homeworld_assertion_service(
+            game_id,
+            perspective,
+            username=username,
+        ).refresh(
             turn_number=turn_number,
         )
