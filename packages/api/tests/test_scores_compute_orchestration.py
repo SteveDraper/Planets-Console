@@ -1305,6 +1305,22 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
         stored_turns=turns,
         inference=FleetInferenceSupport(scores_services=scores_services),
     )
+
+    def ensure_turn(turn_number: int):
+        return turns.get(turn_number)
+
+    leader_ctx = make_analytic_query_context(
+        host_turn,
+        TurnAnalyticsOptions(),
+        game_id=628580,
+        perspective=1,
+        load_turn=load_turn,
+        export_services={
+            SCORES_ANALYTIC_ID: scores_services,
+            _FLEET_ANALYTIC_ID: fleet_services,
+        },
+        ensure_turn=ensure_turn,
+    )
     session = InferenceRowStreamSession(
         player_id=player_id,
         observation=build_inference_observation(
@@ -1321,10 +1337,10 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
             SCORES_ANALYTIC_ID: scores_services,
             _FLEET_ANALYTIC_ID: fleet_services,
         },
-        ensure_turn=lambda turn_number: turns.get(turn_number),
+        query_context=leader_ctx,
     )
     ctx = _query_context_for_session(session, scheduler=scheduler)
-    assert ctx.ensure_turn is session.ensure_turn
+    assert ctx.ensure_turn is leader_ctx.ensure_turn
     scope = _scores_scope(host_turn, player_id)
     prior_fleet_scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,

@@ -114,7 +114,7 @@ class TestTurnAnalytics:
 
         assert next(stream) == {"type": "globalPause", "paused": False}
         assert forwarded["export_services"] is export_services
-        assert forwarded.get("ensure_turn") is None
+        assert forwarded.get("query_context") is None
 
     def test_iter_fleet_table_stream_keeps_factory_ctx_ensure_turn(
         self,
@@ -143,7 +143,7 @@ class TestTurnAnalytics:
         list(analytics_service.iter_fleet_table_stream(628580, 1, 111, (1,), username=""))
         assert captured["query_context"].ensure_turn is None
 
-    def test_iter_scores_table_inference_stream_keeps_factory_ensure_turn(
+    def test_iter_scores_table_inference_stream_keeps_factory_ctx_ensure_turn(
         self,
         analytics_service,
         monkeypatch,
@@ -165,12 +165,14 @@ class TestTurnAnalytics:
             628580, 1, 111, (8,), username="captain"
         )
         assert next(stream) == {"type": "globalPause", "paused": False}
-        assert captured["ensure_turn"] is not None
+        query_ctx = captured["query_context"]
+        assert query_ctx is not None
+        assert query_ctx.ensure_turn is not None
 
         list(
             analytics_service.iter_scores_table_inference_stream(628580, 1, 111, (8,), username="")
         )
-        assert captured["ensure_turn"] is None
+        assert captured["query_context"].ensure_turn is None
 
     def test_factory_ctx_fills_a_fleet_chain_hole_when_username_is_set(self, sample_turn):
         """Login-backed ctx.ensure_turn auto-fetches a missing prior turn on DAG prepare."""

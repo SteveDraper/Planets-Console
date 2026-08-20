@@ -725,31 +725,40 @@ def _query_context_for_session(
     *,
     scheduler: InferenceRowScheduler,
 ) -> AnalyticQueryContext:
+    """Bind the stream scheduler onto scores export services without dropping ``ensure_turn``.
+
+    Production streams pass the factory-built leader ctx on the session. This
+    replaces only the scheduler-bound scores bundle. Sessions constructed
+    without a leader ctx (tests) rebuild from the session bag and do not invent
+    a login-backed hook.
+    """
     from api.analytics.scores.export_services import ScoresExportContext
 
-    load_turn = session.load_scoreboard_turn
-    if load_turn is None:
+    ctx = session.query_context
+    if ctx is None:
+        load_turn = session.load_scoreboard_turn
+        if load_turn is None:
 
-        def load_turn(turn_number: int):
-            return session.turn if turn_number == session.turn_number else None
+            def load_turn(turn_number: int):
+                return session.turn if turn_number == session.turn_number else None
 
-    export_services = dict(session.export_services)
+        ctx = make_analytic_query_context(
+            session.turn,
+            TurnAnalyticsOptions(),
+            game_id=session.game_id,
+            perspective=session.perspective,
+            load_turn=load_turn,
+            export_services=dict(session.export_services),
+        )
+
+    export_services = dict(ctx.export_services)
     injected_scores_services = export_services.get(SCORES_ANALYTIC_ID)
     if isinstance(injected_scores_services, ScoresExportContext):
         scores_services = replace(injected_scores_services, scheduler=scheduler)
     else:
         scores_services = ScoresExportContext(scheduler=scheduler)
     export_services[SCORES_ANALYTIC_ID] = scores_services
-
-    return make_analytic_query_context(
-        session.turn,
-        TurnAnalyticsOptions(),
-        game_id=session.game_id,
-        perspective=session.perspective,
-        load_turn=load_turn,
-        export_services=export_services,
-        ensure_turn=session.ensure_turn,
-    )
+    return replace(ctx, export_services=export_services)
 
 
 def create_inference_row_scheduler(

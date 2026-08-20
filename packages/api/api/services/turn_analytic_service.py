@@ -442,7 +442,7 @@ class TurnAnalyticService:
             export_services=export_services,
             persistence=self._inference_persistence,
             scheduler=self._inference_scheduler_instance(),
-            ensure_turn=query_ctx.ensure_turn,
+            query_context=query_ctx,
         )
 
     def iter_fleet_table_stream(

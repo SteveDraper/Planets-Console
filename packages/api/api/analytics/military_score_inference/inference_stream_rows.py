@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
@@ -198,8 +199,8 @@ def schedule_inference_row(
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
     export_services: Mapping[str, object] | None = None,
-    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
     stream_token: str | None = None,
+    query_context: AnalyticQueryContext | None = None,
 ) -> ScheduledInferenceRow | None:
     observation = build_inference_observation(
         score,
@@ -221,7 +222,7 @@ def schedule_inference_row(
         turn_number=turn_number,
         load_scoreboard_turn=load_scoreboard_turn,
         export_services=export_services if export_services is not None else {},
-        ensure_turn=ensure_turn,
+        query_context=query_context,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         fleet_torp_input_status=fleet_torp_input_status,
@@ -320,7 +321,7 @@ def iter_scores_table_inference_events(
     export_services: Mapping[str, object] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     scheduler: InferenceRowScheduler | None = None,
-    ensure_turn: Callable[[int], TurnInfo | None] | None = None,
+    query_context: AnalyticQueryContext | None = None,
 ) -> Iterator[dict[str, object]]:
     """Yield tagged inference events for all scoreboard rows on one NDJSON stream."""
     from api.analytics.military_score_inference.inference_table_stream_controller import (
@@ -354,7 +355,7 @@ def iter_scores_table_inference_events(
             resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
             export_services=export_services if export_services is not None else {},
             persistence=persistence,
-            ensure_turn=ensure_turn,
+            query_context=query_context,
         )
         return InferenceTableStreamConnectPolicy(
             controller=controller,
