@@ -100,6 +100,24 @@ Corpus and regression fixtures for accelerated games (e.g. game `628580`) should
 
 **Race-specific candidate actions** (e.g. Evil Empire free starbase fighters) use Planets.nu race ids and settings from **`api.concepts.races`**. **`accelerated_start.py`** holds only cross-race accelerated-start and homeworld baseline logic. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
 
+### 3.4 Inference admission skip
+
+Rows in the **inference admission skip** set never submit `tier_solve`. This is identity or visibility **before** the scoreboard delta, distinct from the **hopeless classifier** (post-admission, cheap tiers still run). Locked in [Inference admission skip set](https://github.com/SteveDraper/Planets-Console/issues/356):
+
+| Skip | Detector | Why certain before the delta |
+|------|----------|------------------------------|
+| Viewpoint owner | `player_id ==` shell **perspective** for slots `1..N` | That **TurnInfo** is the empire's RST. Spectator `0` has no owner row. |
+| Dead | `is_eliminated_at_turn` inclusive of the elimination turn | Host Dead/vacant-ineligible flag, not 0 planets. Death-turn ship strip is administrative, not a build. |
+| Live inbound Full Alliance | Mutual `relationfrom` and `relationto` at Full Alliance, or team-locked FA | Hull and mounts are already on the turn; scoreboard inference adds little. One-way FA does not skip. Share Intel does not skip. |
+| Stealth Mode | `settings.stealthmode` | Military column unpublished for every row (including the viewpoint). **Scores** stays available; **Include build inference** greys out. |
+| Horwasp | Race identity | Catalog does not model the race; never search. |
+| `no_prior_turn` | Turn 1, or accelerated window with no backfill | No comparable prior scoreboard. Backfill/split when turn `N` is stored still solve. |
+| `player_not_found` | No scoreboard row for that `player_id` | No observation. |
+
+Not in the set: inbound Share Intel (hull locks constrain a later follow-on), 0-planet living players, idle/missed turns, fog-of-war, mine/moderate residual, hopeless.
+
+Cheap skip terminals persist as fallback-complete so fleet evidence can close. Mixed-table chrome: keep the build-inference column; muted skip cell and tooltip; no red X; no modal. Stealth uses **build inference availability** instead of per-row skip hover.
+
 ---
 
 ## 4. Problem formulation
@@ -433,6 +451,7 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Batch / corpus time limits | Retained on batch JSON path; probe orchestration cap (`--probe-time-limit-seconds`) |
 | Solve interrupt (v1) | Sub-step boundaries + `StopSearch()`; UNKNOWN sub-step retry follow-on if needed |
 | Accelerated-start rows (#71) | Same stream and scheduler as normal rows; segments internal to row path |
+| Inference admission skip (#356) | Never `tier_solve` for owner, Dead (inclusive), live inbound Full Alliance, Stealth (grey inference, keep Scores), Horwasp, `no_prior_turn`, `player_not_found`. Persist fallback-complete. Share Intel is not a skip. |
 
 ### Still open
 

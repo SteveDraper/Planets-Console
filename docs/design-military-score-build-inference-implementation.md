@@ -91,6 +91,8 @@ When `settings.acceleratedturns = N` with `N > 0`:
 | `POLICY_LADDER` | Normal rows with a prior scoreboard row | Single `solve_with_policy_ladder` call |
 | `CORPUS_PREBUILT` | Corpus harness passes a prebuilt catalog | Single solve on supplied catalog |
 
+**Inference admission skip** ([#356](https://github.com/SteveDraper/Planets-Console/issues/356)) is a cheaper gate than this path enum: viewpoint owner, Dead (elimination turn inclusive), live inbound Full Alliance, Stealth Mode, Horwasp, `no_prior_turn`, and `player_not_found` never submit `tier_solve`. Stealth greys **Include build inference** and keeps the Scores table. Share Intel is not a skip. See [design-military-score-build-inference.md](design-military-score-build-inference.md) §3.4.
+
 **Accelerated backfill:** Unreliable accelerated rows (`turn < N`) can still produce inference when the game store holds turn `N`. `inference_target.py` loads the first reliable scoreboard turn via `load_scoreboard_turn`, recomputes `accelerated_inference_segments` from that stored row, and `analytic.py` runs the same split solve once. The row's host turn (`turn - 1`) selects which segment's solutions and catalog are returned. Diagnostics include `accelerated_backfill`, `accelerated_backfill_source_turn`, and `accelerated_backfill_host_turn`. The scores analytic supplies `load_scoreboard_turn` when storage is available; callers without it (e.g. bare `infer_military_score_build`) cannot backfill.
 
 **When `no_prior_turn` still applies:**
