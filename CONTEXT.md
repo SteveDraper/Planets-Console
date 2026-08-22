@@ -757,11 +757,11 @@ A host-turn event that reduces military score or warship/freighter counts. A sib
 _Avoid_: noise (unqualified), negative slack (solver mechanism)
 
 **Mine-score residual**:
-Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination. Inference does not split observed vs unobserved minefields and does not exact-model this channel.
+Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status after **inference expensive-tier abort** for that regime (decrease-shaped remainder beyond the **inference moderate residual** floor, **mine-residual sticky prior**, or **large minefield observation**). Inference does not split observed vs unobserved minefields and does not exact-model this channel.
 _Avoid_: mine noise, mine slack, observed-mine decay
 
 **Inference moderate residual**:
-A small unmodeled remainder (for example display floor of 5.5-point posts) that makes an exact action list the wrong contract. User-facing outcome is status and residual size plus count-constrained placeholders, not a band action list.
+Unexplained military leftover of 1-11 points after the ship/freighter construction envelope (two 5.5-point posts / rounding cluster). Cheap-unsat takes **inference expensive-tier abort** but does not start **mine-residual sticky prior**. User-facing outcome is status and residual size plus count-constrained placeholders, not a band action list.
 _Avoid_: approximate solution (as a user-facing action list), inference score band (internal seed only)
 
 **Inference admission skip**:
@@ -773,12 +773,24 @@ Whether **military score build inference** may run for the loaded game. Inactive
 _Avoid_: greying the Scores analytic for Stealth, treating Stealth as Homeworld locator availability
 
 **Hopeless classifier**:
-Post-admission judgment that an exact build story is unlikely enough to refuse expensive **inference search tiers**. Must stay strict enough that ordinary ships+torps+defense-posts rows still climb.
+Post-admission, post-cheap judgment that an exact build story is unlikely enough to trigger **inference expensive-tier abort**. Fires on cheap-unsat when any of: decrease-shaped unexplained military beyond the **inference moderate residual** floor; **mine-residual sticky prior**; **large minefield observation**. Distinct from **inference admission skip**. Must stay strict enough that ordinary ships+torps+defense-posts rows still climb cheap tiers.
 _Avoid_: skip (unqualified), early-stop (any-exact / ship-only ladder gates)
 
 **Inference expensive-tier abort**:
-Stopping the ladder after cheap exact **inference search tiers** when the **hopeless classifier** fires, rather than skipping the row or adding unconstrained negative slack.
-_Avoid_: cancel, admission skip, no_exact_solution (terminal status after a search we meant to finish)
+Stopping after cheap exact **inference search tiers** (through the last modest-cap ship-polish step; production `full_components`) when the **hopeless classifier** fires, so fighter / starbase-post / raised-cap steps do not run. Does not skip cheap tiers or the row. Not `no_exact_solution` (terminal after a search we meant to finish).
+_Avoid_: cancel, admission skip, no_exact_solution
+
+**Mine-residual sticky prior**:
+Per-player carry that this scoreboard row is in the mine-contaminated regime. Set or kept when the turn is **mine-score residual**; cleared when cheap tiers find a hard-equality exact. While set, a later cheap-unsat of either sign is enough for **inference expensive-tier abort**. Distinct from **recent minefield observation**.
+_Avoid_: muddy flag, hopeless latch, no_exact_solution sticky
+
+**Recent minefield observation**:
+Viewpoint-RST evidence that this owner appeared in stored `minefields` inside a short host-turn window (default 3, overridable on the **inference tier policy asset**). Not "laid this turn" and not a decay estimate. A cheap exact drops carry-forward of that window; a later turn may open a new window from its own RST.
+_Avoid_: minefield scan (unqualified), observed vs unobserved mines
+
+**Large minefield observation**:
+A **recent minefield observation** whose largest seen field for that owner is at least a policy minimum (default 1000 units, overridable on the **inference tier policy asset**). After cheap-unsat, sufficient for **inference expensive-tier abort** of either remainder sign. Sub-threshold probes do not themselves fire the **hopeless classifier**.
+_Avoid_: estimated decay, using RST units as a residual term
 
 **Generic freighter combo**:
 Solver-only ship-build combo (hull id 0) standing for some **true freighter** when freighter hulls are score-indistinguishable.

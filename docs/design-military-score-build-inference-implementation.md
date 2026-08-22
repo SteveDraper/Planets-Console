@@ -578,6 +578,8 @@ Top-level `solverThresholds` (required ints unless noted):
 | `shipOnlyExactEarlyStopMinPlausibility` | Minimum `objectiveValue` for ship-only exact early-stop (#226). |
 | `noNewExactSignaturesEarlyStopMinPlausibility` | Minimum best-held `objectiveValue` before a catalog-noop / no-new-signature step may halt the ladder (#236). Production YAML uses the same value as ship-only exact early-stop. |
 | `nearBestObjectiveThreshold` | Default within-tier near-best band width T (ranking obj in `[Z*-T, sliding max]` after first maximize). Defaults to **250** when omitted. Individual steps may override with the same key; omit on a step to inherit this global default. |
+| `recentMinefieldObservationTurns` | Decided default **3** ([Mine-score residual likelihood and expensive-tier abort](https://github.com/SteveDraper/Planets-Console/issues/357)); not yet in production YAML. Host-turn window for **recent minefield observation**. |
+| `largeMinefieldObservationMinUnits` | Decided default **1000** (same ticket); not yet in production YAML. Max seen `units` gate for **large minefield observation**. |
 
 **`filters` object:** required keys `hulls`, `engines`, `beams`, `launchers`. Each value uses the same shape:
 
@@ -663,6 +665,7 @@ Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
 7. Band-feasible results are **internal**; they do not appear in the UI unless the full ladder produces zero exact solutions (see section 8.5.5).
 8. **Ship-only exact early-stop (#226):** after a step completes, if that step's `allowShipOnlyExactEarlyStop` is `true` **and** the best held solution is a ship-builds-only exact whose objective meets `solverThresholds.shipOnlyExactEarlyStopMinPlausibility`, stop climbing. Steps with the flag `false` never early-stop on this rule (even when a plausible Valiant-only exact is already held).
 9. **No-new-signatures early-stop (#236):** after a step completes with held exact(s), if the step added neither new ship-build combo ids nor new aggregate action ids **and** admitted no new exact signatures, stop climbing **only when** the best held solution's objective meets `solverThresholds.noNewExactSignaturesEarlyStopMinPlausibility`. Below that floor the ladder continues so later aggregate-widening tiers can still run (e.g. empty-belief `admit_ship_torpedoes` must not cut off planet/SB defense). Production YAML uses the same numeric floor as ship-only exact early-stop (`-300`).
+10. **Inference expensive-tier abort (decided, not shipped):** after cheap steps through `full_components`, if there is no hard-equality exact and the **hopeless classifier** fires, do not enter `admit_starbase_defense_posts` / `torp_escape_tier` / `full_catalog_exact`. Classifier, window, and size gate: design §3.5 and [Mine-score residual likelihood and expensive-tier abort](https://github.com/SteveDraper/Planets-Console/issues/357). Distinct from items 8-9 and from [#244](https://github.com/SteveDraper/Planets-Console/issues/244) per-step entry gates.
 
 Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved constraint snapshot, `alpha`, `comboCount`, seed count, band residual when used, and (for `collision_hull_widen`) twin overlay diagnostics.
 
@@ -672,6 +675,7 @@ Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved const
 |---------|-----|
 | At least one **exact** solution from any policy step | **Inference solution count indicator** with **N** = held top-K size; merged top-K across steps |
 | Full ladder, zero exact | Red cross / `no_exact_solution`; diagnostics include best band residual from internal retries |
+| **Inference moderate residual** / **mine-score residual** (decided, not shipped) | Expensive-tier abort after cheap unsat; persist/chrome in [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). Production today still collapses these into `no_exact_solution` / red X. |
 | Stream cancelled (#71 implicit cancel) | `status: stopped` when applicable; count badge when **N > 0** on the terminal wire event (not preserved server-side across reconnect) |
 | Band near-solution | Never shown directly; seeds next step only |
 
