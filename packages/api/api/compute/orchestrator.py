@@ -368,9 +368,10 @@ class ComputeOrchestrator(
 
         Prefer :class:`ComputeScopeAbortedError` for intentional cancels: the node
         becomes ``failed`` for force_fresh replacement, but dependents do **not**
-        cascade-fail (they stay ``waiting_deps`` on the singleton DAG). A later
-        ``force_fresh`` attach of a waiter recreates abort-failed dependencies
-        along the ``waiting_deps`` chain so the DAG cannot idle forever.
+        cascade-fail (they stay ``waiting_deps`` on the singleton DAG). Abort
+        itself does not recreate those dependencies. A later ``force_fresh``
+        attach of a ``waiting_deps`` waiter recreates abort-failed dependencies
+        along the ``waiting_deps`` chain.
         """
         with self._condition:
             node = self._nodes.get(scope)

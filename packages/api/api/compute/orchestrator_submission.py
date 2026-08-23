@@ -177,9 +177,9 @@ class OrchestratorSubmissionMixin:
         """Replace abort-failed deps reachable through ``waiting_deps`` waiters.
 
         Abort does not cascade-fail dependents (fleet waiting on cancelled scores).
-        A later ``force_fresh`` attach of the waiter used to no-op while those
-        deps stayed ``failed``, leaving the DAG idle. Walk the ``waiting_deps``
-        chain so a later-turn fleet attach can restart aborted prior-turn scores.
+        A ``force_fresh`` attach of a ``waiting_deps`` waiter walks the
+        ``waiting_deps`` chain and recreates abort-failed dependencies so a
+        later-turn fleet attach can restart aborted prior-turn scores.
         Do not recreate on abort itself -- that would fight an in-flight cancel.
         Caller holds the orchestrator lock; submits run after release.
         """
