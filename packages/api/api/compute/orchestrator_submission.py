@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import prepare_dependency_chain_turns
 from api.compute.dag import PlannedComputeNode, plan_compute_dag
+from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun, ComputeRequest
@@ -182,8 +183,6 @@ class OrchestratorSubmissionMixin:
         Do not recreate on abort itself -- that would fight an in-flight cancel.
         Caller holds the orchestrator lock; submits run after release.
         """
-        from api.compute.errors import ComputeScopeAbortedError
-
         to_recreate: dict[ComputeScope, tuple[OrchestrationBundle, ComputePriorityBand]] = {}
         seen: set[ComputeScope] = set()
         stack = [node]
