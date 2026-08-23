@@ -1960,6 +1960,75 @@ def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
     assert orchestrator.nodes[branch_b_scope].state == "complete"
 
 
+def test_recreate_aborted_dependencies_enqueues_shared_dep_once(sample_turn):
+    """Two waiting_deps parents of one abort-failed dep enqueue one recreate."""
+    from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.orchestration_bundle import OrchestrationBundle
+    from api.compute.orchestrator import ComputeNodeRun
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    bundle = OrchestrationBundle.from_context(ctx)
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    abort_error = ComputeScopeAbortedError("scores inference row run cancelled")
+
+    shared = ComputeNodeRun(
+        scope=shared_scope,
+        dependency_scopes=(),
+        state="failed",
+        error=abort_error,
+        bundle=bundle,
+    )
+    branch_b = ComputeNodeRun(
+        scope=branch_b_scope,
+        dependency_scopes=(shared_scope,),
+        state="waiting_deps",
+        bundle=bundle,
+    )
+    branch_c = ComputeNodeRun(
+        scope=branch_c_scope,
+        dependency_scopes=(shared_scope,),
+        state="waiting_deps",
+        bundle=bundle,
+    )
+    root = ComputeNodeRun(
+        scope=root_scope,
+        dependency_scopes=(branch_b_scope, branch_c_scope),
+        state="waiting_deps",
+        bundle=bundle,
+        priority_band="stream_attached",
+    )
+
+    orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())
+    orchestrator._nodes[shared_scope] = shared
+    orchestrator._nodes[branch_b_scope] = branch_b
+    orchestrator._nodes[branch_c_scope] = branch_c
+    orchestrator._nodes[root_scope] = root
+
+    recreate_requests: list[ComputeRequest] = []
+
+    def capture_submit(request: ComputeRequest):
+        recreate_requests.append(request)
+        return None
+
+    orchestrator.submit = capture_submit  # type: ignore[method-assign]
+
+    with orchestrator._condition:
+        orchestrator._schedule_recreate_aborted_dependencies(root)
+    orchestrator._observers.drain_post_lock_callbacks()
+
+    assert [request.scope for request in recreate_requests] == [shared_scope]
+    assert recreate_requests[0].force_fresh is True
+    assert recreate_requests[0].priority_band == "stream_attached"
+    assert recreate_requests[0].bundle is bundle
+
+
 def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_turn):
     """Diagnostics must read nodes and ready queue atomically, not via live mappings."""
     ctx = make_fixture_query_context(

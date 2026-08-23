@@ -184,7 +184,7 @@ class OrchestratorSubmissionMixin:
         """
         from api.compute.errors import ComputeScopeAbortedError
 
-        to_recreate: list[tuple[ComputeScope, OrchestrationBundle, ComputePriorityBand]] = []
+        to_recreate: dict[ComputeScope, tuple[OrchestrationBundle, ComputePriorityBand]] = {}
         seen: set[ComputeScope] = set()
         stack = [node]
         while stack:
@@ -199,17 +199,19 @@ class OrchestratorSubmissionMixin:
                 if dependency.state == "failed" and isinstance(
                     dependency.error, ComputeScopeAbortedError
                 ):
+                    if dependency_scope in to_recreate:
+                        continue
                     bundle = dependency.bundle if dependency.bundle is not None else node.bundle
                     if bundle is None:
                         continue
-                    to_recreate.append((dependency_scope, bundle, node.priority_band))
+                    to_recreate[dependency_scope] = (bundle, node.priority_band)
                 elif dependency.state == "waiting_deps":
                     stack.append(dependency)
         if not to_recreate:
             return
 
         def _recreate() -> None:
-            for scope, bundle, priority_band in to_recreate:
+            for scope, (bundle, priority_band) in to_recreate.items():
                 self.submit(
                     ComputeRequest(
                         scope=scope,
