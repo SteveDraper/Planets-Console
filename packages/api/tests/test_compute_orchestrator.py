@@ -1862,6 +1862,104 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
     assert orchestrator.nodes[branch_b_scope].state == "complete"
 
 
+def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
+    """Aborting a persist-deferred dependency must not leave the waiter hung.
+
+    Production hang (game 683364 birds/privateer): fleet@t5 persist-deferred onto
+    scores@t5, then scores was aborted (turn 5→6 stream cancel / turn-store
+    reschedule). Later force_fresh attach of fleet never replaced the aborted
+    scores node, so fleet stayed waiting_deps with an idle pool.
+    """
+    from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    recovery = PersistDependencyRecovery(
+        dependency_scope=shared_scope,
+        force_fresh=True,
+        step_kind="materialize",
+    )
+
+    class _DeferredOncePersistence(_StubPersistencePolicy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            self.calls += 1
+            if self.calls == 1:
+                raise PersistDeferredError(
+                    "dependency evidence still open",
+                    recovery=recovery,
+                )
+
+    deferred_persistence = _DeferredOncePersistence()
+    pool_submissions: list[tuple[str, str | None]] = []
+
+    def pool_submitter(node, step) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.step_kind))
+
+    registry = build_compute_registry(
+        (
+            _pool_compute_registration(SHARED_ID, backend="thread"),
+            _pool_compute_registration(
+                BRANCH_B_ID,
+                backend="thread",
+                persistence_policy=deferred_persistence,
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[shared_scope].state == "running"
+
+    assert orchestrator.abort_scope(
+        shared_scope,
+        ComputeScopeAbortedError("scores inference row run cancelled"),
+    )
+    assert orchestrator.nodes[shared_scope].state == "failed"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+
+    # Same recovery the live UI actually attempted: force_fresh the waiter
+    # (later-turn stream / reconnect), not the aborted scores scope itself.
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope, force_fresh=True))
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "running"
+
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert deferred_persistence.calls == 2
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
+
+
 def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_turn):
     """Diagnostics must read nodes and ready queue atomically, not via live mappings."""
     ctx = make_fixture_query_context(

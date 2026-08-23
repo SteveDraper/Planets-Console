@@ -101,6 +101,8 @@ class OrchestratorSubmissionMixin:
                     # dependent missed the dependency-terminal callback).
                     if existing.state in {"waiting_deps", "ready"}:
                         self._refresh_node_readiness(existing)
+                        if existing.state == "waiting_deps":
+                            self._schedule_recreate_aborted_dependencies(existing)
                 handle = self._attach_to_existing(existing, request)
                 pending_inline, pending_pool = self._dispatch()
             else:
@@ -166,6 +168,58 @@ class OrchestratorSubmissionMixin:
         if bundle is None:
             raise ValueError("ComputeRequest requires bundle= or ctx= for new work")
         return bundle
+
+    def _schedule_recreate_aborted_dependencies(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+    ) -> None:
+        """Replace abort-failed deps reachable through ``waiting_deps`` waiters.
+
+        Abort does not cascade-fail dependents (fleet waiting on cancelled scores).
+        A later ``force_fresh`` attach of the waiter used to no-op while those
+        deps stayed ``failed``, leaving the DAG idle. Walk the ``waiting_deps``
+        chain so a later-turn fleet attach can restart aborted prior-turn scores.
+        Do not recreate on abort itself -- that would fight an in-flight cancel.
+        Caller holds the orchestrator lock; submits run after release.
+        """
+        from api.compute.errors import ComputeScopeAbortedError
+
+        to_recreate: list[tuple[ComputeScope, OrchestrationBundle, ComputePriorityBand]] = []
+        seen: set[ComputeScope] = set()
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            if current.scope in seen:
+                continue
+            seen.add(current.scope)
+            for dependency_scope in current.dependency_scopes:
+                dependency = self._nodes.get(dependency_scope)
+                if dependency is None:
+                    continue
+                if dependency.state == "failed" and isinstance(
+                    dependency.error, ComputeScopeAbortedError
+                ):
+                    bundle = dependency.bundle if dependency.bundle is not None else node.bundle
+                    if bundle is None:
+                        continue
+                    to_recreate.append((dependency_scope, bundle, node.priority_band))
+                elif dependency.state == "waiting_deps":
+                    stack.append(dependency)
+        if not to_recreate:
+            return
+
+        def _recreate() -> None:
+            for scope, bundle, priority_band in to_recreate:
+                self.submit(
+                    ComputeRequest(
+                        scope=scope,
+                        priority_band=priority_band,
+                        force_fresh=True,
+                        bundle=bundle,
+                    )
+                )
+
+        self._observers.schedule_post_lock(_recreate)
 
     def _attach_to_existing(
         self: ComputeOrchestrator,
