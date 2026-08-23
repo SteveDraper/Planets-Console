@@ -256,7 +256,7 @@ When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `str
 
 ### Terminal reuse and `force_fresh`
 
-`ComputeRequest.force_fresh` controls whether a duplicate submission for an already-terminal scope starts new work or reuses the cached node outcome.
+`ComputeRequest.force_fresh` controls terminal reuse vs supersede, parked wake, and whether a `waiting_deps` attach recreates abort-failed dependencies.
 
 | `force_fresh` | Existing node state | Behavior |
 |---------------|---------------------|----------|
@@ -265,9 +265,10 @@ When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `str
 | `False` (default) | `parked` | Attach / singleflight; node stays `parked` (no wake without `force_fresh`). |
 | `True` | `complete` or `failed` | **Supersede** the terminal node: remove it from the orchestrator map, clear any waiters, re-plan the DAG from the request's entry `step_kind`, and dispatch fresh work. |
 | `True` | `parked` | **Wake** the soft-parked node: re-ready if deps complete, else `waiting_deps`; then attach / dispatch. |
-| `True` | other non-terminal | Same as default -- singleflight preserved; in-flight work is never superseded. |
+| `True` | `waiting_deps`, `ready` | Singleflight attach; in-flight work is never superseded. Refresh readiness. If the node stays `waiting_deps`, walk the `waiting_deps` chain and `force_fresh`-submit abort-failed dependencies (`ComputeScopeAbortedError`). Abort does not cascade-fail dependents and does not recreate on abort itself. |
+| `True` | `running` | Same as default -- singleflight preserved; in-flight work is never superseded. |
 
-Default behavior treats terminal nodes as a **cache hit**: repeat callers for the same normalized `ComputeScope` get the prior outcome without re-execution. Opt-in `force_fresh=True` is the generic lifecycle primitive for callers that need a new run after terminal completion or failure (for example scores inference stream reschedule paths that must re-enter `tier_solve` on an already-failed or completed scope).
+Default behavior treats terminal nodes as a **cache hit**: repeat callers for the same normalized `ComputeScope` get the prior outcome without re-execution. Opt-in `force_fresh=True` is the generic lifecycle primitive for callers that need a new run after terminal completion or failure (for example scores inference stream reschedule paths that must re-enter `tier_solve` on an already-failed or completed scope), and for a later-turn attach of a `waiting_deps` waiter (fleet after scores row-run cancel) that must restart abort-failed dependencies.
 
 Supersession clears orchestrator node state only; analytic persistence invalidation and reader gates remain the analytic's responsibility.
 
