@@ -1862,6 +1862,481 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
     assert orchestrator.nodes[branch_b_scope].state == "complete"
 
 
+def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
+    """Aborting a persist-deferred dependency must not leave the waiter hung.
+
+    Production hang (game 683364 birds/privateer): fleet@t5 persist-deferred onto
+    scores@t5, then scores was aborted (turn 5→6 stream cancel / turn-store
+    reschedule). Later force_fresh attach of fleet never replaced the aborted
+    scores node, so fleet stayed waiting_deps with an idle pool.
+    """
+    from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    recovery = PersistDependencyRecovery(
+        dependency_scope=shared_scope,
+        force_fresh=True,
+        step_kind="materialize",
+    )
+
+    class _DeferredOncePersistence(_StubPersistencePolicy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            self.calls += 1
+            if self.calls == 1:
+                raise PersistDeferredError(
+                    "dependency evidence still open",
+                    recovery=recovery,
+                )
+
+    deferred_persistence = _DeferredOncePersistence()
+    pool_submissions: list[tuple[str, str | None]] = []
+
+    def pool_submitter(node, step) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.step_kind))
+
+    registry = build_compute_registry(
+        (
+            _pool_compute_registration(SHARED_ID, backend="thread"),
+            _pool_compute_registration(
+                BRANCH_B_ID,
+                backend="thread",
+                persistence_policy=deferred_persistence,
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[shared_scope].state == "running"
+
+    assert orchestrator.abort_scope(
+        shared_scope,
+        ComputeScopeAbortedError("scores inference row run cancelled"),
+    )
+    assert orchestrator.nodes[shared_scope].state == "failed"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+
+    # Same recovery the live UI actually attempted: force_fresh the waiter
+    # (later-turn stream / reconnect), not the aborted scores scope itself.
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope, force_fresh=True))
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "running"
+
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert deferred_persistence.calls == 2
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
+
+
+def test_recreate_aborted_dependencies_enqueues_shared_dep_once(sample_turn):
+    """Two waiting_deps parents of one abort-failed dep enqueue one recreate."""
+    from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.orchestration_bundle import OrchestrationBundle
+    from api.compute.orchestrator import ComputeNodeRun
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    bundle = OrchestrationBundle.from_context(ctx)
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    abort_error = ComputeScopeAbortedError("scores inference row run cancelled")
+
+    shared = ComputeNodeRun(
+        scope=shared_scope,
+        dependency_scopes=(),
+        state="failed",
+        error=abort_error,
+        bundle=bundle,
+    )
+    branch_b = ComputeNodeRun(
+        scope=branch_b_scope,
+        dependency_scopes=(shared_scope,),
+        state="waiting_deps",
+        bundle=bundle,
+    )
+    branch_c = ComputeNodeRun(
+        scope=branch_c_scope,
+        dependency_scopes=(shared_scope,),
+        state="waiting_deps",
+        bundle=bundle,
+    )
+    root = ComputeNodeRun(
+        scope=root_scope,
+        dependency_scopes=(branch_b_scope, branch_c_scope),
+        state="waiting_deps",
+        bundle=bundle,
+        priority_band="stream_attached",
+    )
+
+    orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())
+    orchestrator._nodes[shared_scope] = shared
+    orchestrator._nodes[branch_b_scope] = branch_b
+    orchestrator._nodes[branch_c_scope] = branch_c
+    orchestrator._nodes[root_scope] = root
+
+    recreate_requests: list[ComputeRequest] = []
+
+    def capture_submit(request: ComputeRequest):
+        recreate_requests.append(request)
+        return None
+
+    orchestrator.submit = capture_submit  # type: ignore[method-assign]
+
+    with orchestrator._condition:
+        orchestrator._schedule_recreate_aborted_dependencies(root)
+    orchestrator._observers.drain_post_lock_callbacks()
+
+    assert [request.scope for request in recreate_requests] == [shared_scope]
+    assert recreate_requests[0].force_fresh is True
+    assert recreate_requests[0].priority_band == "stream_attached"
+    assert recreate_requests[0].bundle is bundle
+
+
+def test_force_fresh_diamond_recreates_shared_abort_failed_dep_once(sample_turn):
+    """Two waiting_deps parents of one abort-failed dep recreate that dep once.
+
+    force_fresh of the diamond root walks both waiting_deps branches; the shared
+    abort-failed dependency is pool-submitted once, not twice.
+    """
+    from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    recovery = PersistDependencyRecovery(
+        dependency_scope=shared_scope,
+        force_fresh=True,
+        step_kind="materialize",
+    )
+
+    class _DeferredOncePersistence(_StubPersistencePolicy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            self.calls += 1
+            if self.calls == 1:
+                raise PersistDeferredError(
+                    "dependency evidence still open",
+                    recovery=recovery,
+                )
+
+    deferred_b = _DeferredOncePersistence()
+    deferred_c = _DeferredOncePersistence()
+    pool_submissions: list[tuple[str, str | None]] = []
+
+    def pool_submitter(node, step) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.step_kind))
+
+    registry = build_compute_registry(
+        (
+            _pool_compute_registration(SHARED_ID, backend="thread"),
+            _pool_compute_registration(
+                BRANCH_B_ID,
+                backend="thread",
+                persistence_policy=deferred_b,
+            ),
+            _pool_compute_registration(
+                BRANCH_C_ID,
+                backend="thread",
+                persistence_policy=deferred_c,
+            ),
+            _pool_compute_registration(ROOT_ID, backend="thread"),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    assert orchestrator.nodes[branch_b_scope].state == "running"
+    orchestrator.dispatch_ready_work()
+    assert orchestrator.nodes[branch_c_scope].state == "running"
+
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    orchestrator.complete_pool_step(
+        branch_c_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_C_ID}),
+    )
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[branch_c_scope].state == "waiting_deps"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+    assert orchestrator.nodes[shared_scope].state == "running"
+
+    assert orchestrator.abort_scope(
+        shared_scope,
+        ComputeScopeAbortedError("scores inference row run cancelled"),
+    )
+    assert orchestrator.nodes[shared_scope].state == "failed"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[branch_c_scope].state == "waiting_deps"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+
+    submissions_after_abort = list(pool_submissions)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope, force_fresh=True))
+    assert pool_submissions[len(submissions_after_abort) :] == [(SHARED_ID, "materialize")]
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[branch_c_scope].state == "waiting_deps"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+
+
+def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn):
+    """force_fresh of A walks A waiting_deps on B waiting_deps on abort-failed C.
+
+    Recreates C; A stays waiting_deps until C then B complete.
+    """
+    from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = _compute_scope(ROOT_ID, export_scope)
+    recovery = PersistDependencyRecovery(
+        dependency_scope=shared_scope,
+        force_fresh=True,
+        step_kind="materialize",
+    )
+
+    class _DeferredOncePersistence(_StubPersistencePolicy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            self.calls += 1
+            if self.calls == 1:
+                raise PersistDeferredError(
+                    "dependency evidence still open",
+                    recovery=recovery,
+                )
+
+    deferred_b = _DeferredOncePersistence()
+    pool_submissions: list[tuple[str, str | None]] = []
+
+    def pool_submitter(node, step) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.step_kind))
+
+    registry = build_compute_registry(
+        (
+            _pool_compute_registration(SHARED_ID, backend="thread"),
+            _pool_compute_registration(
+                BRANCH_B_ID,
+                backend="thread",
+                persistence_policy=deferred_b,
+            ),
+            _pool_compute_registration(BRANCH_C_ID, backend="thread"),
+            _pool_compute_registration(ROOT_ID, backend="thread"),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    orchestrator.dispatch_ready_work()
+    orchestrator.complete_pool_step(
+        branch_c_scope,
+        result_wire={"result": BRANCH_C_ID},
+    )
+    assert orchestrator.nodes[branch_c_scope].state == "complete"
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+    assert orchestrator.nodes[shared_scope].state == "running"
+
+    assert orchestrator.abort_scope(
+        shared_scope,
+        ComputeScopeAbortedError("scores inference row run cancelled"),
+    )
+    assert orchestrator.nodes[shared_scope].state == "failed"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope, force_fresh=True))
+    assert orchestrator.nodes[shared_scope].state == "running"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    assert orchestrator.nodes[shared_scope].state == "complete"
+    assert orchestrator.nodes[branch_b_scope].state == "running"
+    assert orchestrator.nodes[root_scope].state == "waiting_deps"
+
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert deferred_b.calls == 2
+    assert orchestrator.nodes[branch_b_scope].state == "complete"
+    assert orchestrator.nodes[root_scope].state == "running"
+
+    orchestrator.complete_pool_step(
+        root_scope,
+        result_wire={"result": ROOT_ID},
+    )
+    assert orchestrator.nodes[root_scope].state == "complete"
+
+
+def test_force_fresh_waiting_deps_does_not_recreate_non_abort_failed_dep(sample_turn):
+    """A non-abort failed dependency is not recreated on force_fresh of the waiter.
+
+    Readiness refresh may cascade-fail the waiter via ``_failed_dependency_error``;
+    neither the waiter nor the dependency is re-run.
+    """
+    from api.compute.errors import ComputeScopeAbortedError
+    from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    recovery = PersistDependencyRecovery(
+        dependency_scope=shared_scope,
+        force_fresh=True,
+        step_kind="materialize",
+    )
+
+    class _DeferredOncePersistence(_StubPersistencePolicy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist(self, _ctx, scope, result_wire):
+            del scope, result_wire
+            self.calls += 1
+            if self.calls == 1:
+                raise PersistDeferredError(
+                    "dependency evidence still open",
+                    recovery=recovery,
+                )
+
+    deferred_persistence = _DeferredOncePersistence()
+    pool_submissions: list[tuple[str, str | None]] = []
+
+    def pool_submitter(node, step) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.step_kind))
+
+    registry = build_compute_registry(
+        (
+            _pool_compute_registration(SHARED_ID, backend="thread"),
+            _pool_compute_registration(
+                BRANCH_B_ID,
+                backend="thread",
+                persistence_policy=deferred_persistence,
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry,
+        pool_submitter=pool_submitter,
+    )
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
+    orchestrator.complete_pool_step(
+        shared_scope,
+        result_wire={"result": SHARED_ID},
+    )
+    orchestrator.complete_pool_step(
+        branch_b_scope,
+        result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
+    )
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    assert orchestrator.nodes[shared_scope].state == "running"
+
+    # abort_scope leaves the waiter waiting_deps. A non-abort error on the
+    # settled dep makes force_fresh attach refresh cascade-fail the waiter
+    # instead of recreating the dep.
+    assert orchestrator.abort_scope(
+        shared_scope,
+        ComputeScopeAbortedError("scores inference row run cancelled"),
+    )
+    assert orchestrator.nodes[shared_scope].state == "failed"
+    assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
+    non_abort_error = RuntimeError("shared step failed")
+    orchestrator.nodes[shared_scope].error = non_abort_error
+
+    submissions_after_fail = list(pool_submissions)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope, force_fresh=True))
+    assert pool_submissions == submissions_after_fail
+    assert orchestrator.nodes[shared_scope].state == "failed"
+    assert orchestrator.nodes[shared_scope].error is non_abort_error
+    assert orchestrator.nodes[branch_b_scope].state == "failed"
+    assert orchestrator.nodes[branch_b_scope].error is non_abort_error
+
+
 def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_turn):
     """Diagnostics must read nodes and ready queue atomically, not via live mappings."""
     ctx = make_fixture_query_context(

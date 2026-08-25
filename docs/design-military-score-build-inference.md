@@ -100,6 +100,49 @@ Corpus and regression fixtures for accelerated games (e.g. game `628580`) should
 
 **Race-specific candidate actions** (e.g. Evil Empire free starbase fighters) use Planets.nu race ids and settings from **`api.concepts.races`**. **`accelerated_start.py`** holds only cross-race accelerated-start and homeworld baseline logic. See [design-analytics-structure.md](design-analytics-structure.md) (race-specific rules).
 
+### 3.4 Inference admission skip
+
+Rows in the **inference admission skip** set never submit `tier_solve`. This is identity or visibility **before** the scoreboard delta, distinct from the **hopeless classifier** (post-admission, cheap tiers still run). Locked in [Inference admission skip set](https://github.com/SteveDraper/Planets-Console/issues/356):
+
+| Skip | Detector | Why certain before the delta |
+|------|----------|------------------------------|
+| Viewpoint owner | `player_id ==` shell **perspective** for slots `1..N` | That **TurnInfo** is the empire's RST. Spectator `0` has no owner row. |
+| Dead | `is_eliminated_at_turn` inclusive of the elimination turn | Host Dead/vacant-ineligible flag, not 0 planets. Death-turn ship strip is administrative, not a build. |
+| Live inbound Full Alliance | Mutual `relationfrom` and `relationto` at Full Alliance, or team-locked FA | Hull and mounts are already on the turn; scoreboard inference adds little. One-way FA does not skip. Share Intel does not skip. |
+| Stealth Mode | `settings.stealthmode` | Military column unpublished for every row (including the viewpoint). **Scores** stays available; **Include build inference** greys out. |
+| Horwasp | Race identity | Catalog does not model the race; never search. |
+| `no_prior_turn` | Turn 1, or accelerated window with no backfill | No comparable prior scoreboard. Backfill/split when turn `N` is stored still solve. |
+| `player_not_found` | No scoreboard row for that `player_id` | No observation. |
+
+Not in the set: inbound Share Intel (hull locks constrain a later follow-on), 0-planet living players, idle/missed turns, fog-of-war, mine/moderate residual, hopeless.
+
+Cheap skip terminals persist as fallback-complete so fleet evidence can close. Mixed-table chrome: keep the build-inference column; muted skip cell and tooltip; no red X; no modal. Stealth uses **build inference availability** instead of per-row skip hover.
+
+### 3.5 Hopeless classifier and expensive-tier abort
+
+Locked in [Mine-score residual likelihood and expensive-tier abort](https://github.com/SteveDraper/Planets-Console/issues/357). Cheap exact **inference search tiers** always run through `full_components` (ships + belief torps + modest planet posts + last modest-cap ship polish). **Inference expensive-tier abort** refuses `admit_starbase_defense_posts`, `torp_escape_tier`, and `full_catalog_exact`. It does not skip the row and does not add unconstrained negative slack.
+
+The **hopeless classifier** is evaluated only after that cheap run. A hard-equality exact from cheap tiers is kept; the classifier does not fire, and **mine-residual sticky prior** plus N-window carry-forward both clear. T+1 may open a new observation window from its own RST.
+
+On cheap-unsat, any one of the following is sufficient for expensive-tier abort (planet/SB **count** drops and race vetoes still block the scoreboard mine-shaped path; a warship-count drop is not mine-shaped -- see [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359)):
+
+1. Decrease-shaped unexplained military beyond the **inference moderate residual** floor (1-11 after the ship/freighter construction envelope).
+2. **Mine-residual sticky prior** (previous turn for that player was **mine-score residual** / expensive-tier abort -- not raw `no_exact_solution`, not **inference admission skip**).
+3. **Large minefield observation**: max `units` among that owner's fields in the **recent minefield observation** window (default 3 host turns, default minimum 1000 units). Classifier-only RST existence and size; not a decay model and not an observed vs unobserved solver split. Sub-threshold probes do not fire. Remainder sign does not matter.
+
+Window length and minimum units are overridable on the **inference tier policy asset** (`solverThresholds`). Suggested keys (not yet in production YAML): `recentMinefieldObservationTurns`, `largeMinefieldObservationMinUnits`.
+
+| This turn after cheap | Expensive tail | Status this contract names | Sticky prior |
+|----------------------|----------------|----------------------------|--------------|
+| Hard-equality exact | Already exact | `exact` | Clear; drop N-window carry-forward |
+| Unsat, leftover 1-11, no sticky, no large observation | Expensive-tier abort | **inference moderate residual** | Do not start |
+| Unsat, decrease-shaped >11 | Expensive-tier abort | **mine-score residual** | Start / keep |
+| Unsat, sticky prior, remainder either sign | Expensive-tier abort | **mine-score residual** | Keep |
+| Unsat, large observation in N-window, remainder either sign | Expensive-tier abort | **mine-score residual** | Start / keep |
+| Unsat, positive leftover, no sticky, no large observation | Climb expensive | Then `exact`, junk-exact, or `no_exact_solution` | Unchanged |
+
+Abort is the anti-junk mechanism. Classifier misses that still get slack-padded expensive exacts remain a named **junk-exact** failure; no second slack-ratio detector here. Persist, stream, and SPA chrome for the new statuses belong to [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). This abort is not [Scores inference: unify ladder early-stop into optional per-tier entry gates](https://github.com/SteveDraper/Planets-Console/issues/244) (that issue's per-step entry gates stay a leftover for hygiene).
+
 ---
 
 ## 4. Problem formulation
@@ -433,6 +476,8 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Batch / corpus time limits | Retained on batch JSON path; probe orchestration cap (`--probe-time-limit-seconds`) |
 | Solve interrupt (v1) | Sub-step boundaries + `StopSearch()`; UNKNOWN sub-step retry follow-on if needed |
 | Accelerated-start rows (#71) | Same stream and scheduler as normal rows; segments internal to row path |
+| Inference admission skip (#356) | Never `tier_solve` for owner, Dead (inclusive), live inbound Full Alliance, Stealth (grey inference, keep Scores), Horwasp, `no_prior_turn`, `player_not_found`. Persist fallback-complete. Share Intel is not a skip. |
+| Hopeless classifier / expensive-tier abort (#357) | Cheap always through `full_components`. Abort `admit_starbase_defense_posts`+ on cheap-unsat if decrease-shaped >11, sticky prior, or large RST minefield (N=3 / 1000 units, YAML-overridable). Moderate 1-11 aborts expensive without starting sticky. Not #244. |
 
 ### Still open
 

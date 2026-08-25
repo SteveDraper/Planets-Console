@@ -750,7 +750,55 @@ _Avoid_: reusing the per-player preset for out-of-circle paint
 
 **Military score build inference**:
 Core **turn analytic** behavior (optional on the **Scores** analytic) that explains one player's scoreboard deltas on a turn as a ranked set of feasible build and load actions, not a single proved history. Requests run **per scoreboard row** with top-K **20**. No fixed row time budget once **#71** ships -- SPA runs continue until the ladder finishes, **inference global pause** freezes them, or the stream is **cancelled** (scope change, disable build inference, explicit cancel/recompute -- **not** disconnect). Disconnect is detach-only; see **Inference stream cancellation**. See [design-military-score-build-inference.md](docs/design-military-score-build-inference.md).
-_Avoid_: build solver, score guesser, treating disconnect as cancel
+_Avoid_: build solver, score guesser, treating disconnect as cancel, scoreboard inference (use this term)
+
+**Score-decreasing effect**:
+A host-turn event that reduces military score or warship/freighter counts. A sibling workstream of hopeless search and high-slack padding, not a name for either. Exact-modeled families in the current quality bar are ship loss, gift, and trade; mine decay/sweep/mutual elimination are **mine-score residual**, not catalog families.
+_Avoid_: noise (unqualified), negative slack (solver mechanism)
+
+**Mine-score residual**:
+Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status after **inference expensive-tier abort** for that regime (decrease-shaped remainder beyond the **inference moderate residual** floor, **mine-residual sticky prior**, or **large minefield observation**). Inference does not split observed vs unobserved minefields and does not exact-model this channel.
+_Avoid_: mine noise, mine slack, observed-mine decay
+
+**Inference moderate residual**:
+Unexplained military leftover of 1-11 points after the ship/freighter construction envelope (two 5.5-point posts / rounding cluster). Cheap-unsat takes **inference expensive-tier abort** but does not start **mine-residual sticky prior**. User-facing outcome is status and residual size plus count-constrained placeholders, not a band action list.
+_Avoid_: approximate solution (as a user-facing action list), inference score band (internal seed only)
+
+**Inference admission skip**:
+Not submitting **military score build inference** for a scoreboard row for identity or visibility reasons, before inspecting the delta. The set is the **viewpoint** owner (perspective slots `1..N`), Dead from the elimination turn inclusive, live inbound **Full Alliance**, **Stealth Mode** (every row), Horwasp, `no_prior_turn`, and `player_not_found`. See [Inference admission skip set](https://github.com/SteveDraper/Planets-Console/issues/356).
+_Avoid_: hopeless skip, pointless inference (ticket nickname), ally skip (use live inbound Full Alliance), Share Intel skip, 0-planet as Dead, one-way Full Alliance, Visibility either-direction partners
+
+**Build inference availability**:
+Whether **military score build inference** may run for the loaded game. Inactive when **Stealth Mode** unpublished the Military column: grey **Include build inference** with a hint, no inference stream. The **Scores** analytic stays available (planet counts still publish). Distinct from per-row **inference admission skip** chrome on a mixed table.
+_Avoid_: greying the Scores analytic for Stealth, treating Stealth as Homeworld locator availability
+
+**Hopeless classifier**:
+Post-admission, post-cheap judgment that an exact build story is unlikely enough to trigger **inference expensive-tier abort**. Fires on cheap-unsat when any of: decrease-shaped unexplained military beyond the **inference moderate residual** floor; **mine-residual sticky prior**; **large minefield observation**. Distinct from **inference admission skip**. Must stay strict enough that ordinary ships+torps+defense-posts rows still climb cheap tiers.
+_Avoid_: skip (unqualified), early-stop (any-exact / ship-only ladder gates)
+
+**Inference expensive-tier abort**:
+Stopping after cheap exact **inference search tiers** (through the last modest-cap ship-polish step; production `full_components`) when the **hopeless classifier** fires, so fighter / starbase-post / raised-cap steps do not run. Does not skip cheap tiers or the row. Not `no_exact_solution` (terminal after a search we meant to finish).
+_Avoid_: cancel, admission skip, no_exact_solution
+
+**Mine-residual sticky prior**:
+Per-player carry that this scoreboard row is in the mine-contaminated regime. Set or kept when the turn is **mine-score residual**; cleared when cheap tiers find a hard-equality exact. While set, a later cheap-unsat of either sign is enough for **inference expensive-tier abort**. Distinct from **recent minefield observation**.
+_Avoid_: muddy flag, hopeless latch, no_exact_solution sticky
+
+**Recent minefield observation**:
+Viewpoint-RST evidence that this owner appeared in stored `minefields` inside a short host-turn window (default 3, overridable on the **inference tier policy asset**). Not "laid this turn" and not a decay estimate. A cheap exact drops carry-forward of that window; a later turn may open a new window from its own RST.
+_Avoid_: minefield scan (unqualified), observed vs unobserved mines
+
+**Large minefield observation**:
+A **recent minefield observation** whose largest seen field for that owner is at least a policy minimum (default 1000 units, overridable on the **inference tier policy asset**). After cheap-unsat, sufficient for **inference expensive-tier abort** of either remainder sign. Sub-threshold probes do not themselves fire the **hopeless classifier**.
+_Avoid_: estimated decay, using RST units as a residual term
+
+**Generic freighter combo**:
+Solver-only ship-build combo (hull id 0) standing for some **true freighter** when freighter hulls are score-indistinguishable.
+_Avoid_: hull id 0 as a host hull, unknown freighter
+
+**Unknown military ship**:
+Count-constrained placeholder in an inference explanation for an unexplained warship, parallel to the **generic freighter combo**, with military-score upper and lower bounds when hull identity is unknown. Emitted when there is no exact action list (including **inference moderate residual**, **mine-score residual**, and **no_exact_solution**) so ship and priority-point constraints still surface.
+_Avoid_: mystery hull, generic warship
 
 **Inference search tier**:
 One staged step in **military score build inference** catalog construction and solving. The ladder has no fixed length; each tier declares how much of the action inventory is in play for that attempt. Later tiers are strict supersets of earlier ones on every dimension they control (permitted actions, per-action caps, ship-build component eligibility, constraint strictness). The solver walks the list until time runs out or a tier adds no new distinct exact explanation signatures to **inference merged top-K** (the ladder continues when K is full; see K-best retention there).
@@ -1145,7 +1193,7 @@ Server-side cached output for a **turn analytic** that must not recompute on eve
 _Avoid_: analytic cache at game root, `{gameId}/homeworld-locator`, nesting computed cache inside **TurnInfo** documents, treating homeworld evidence as a single non-turn perspective blob
 
 **Scores inference row persistence**:
-Server-side terminal **military score build inference** result for one scoreboard row, keyed by game, shell **perspective**, **inference host turn**, and target **Player** (`playerId`). Stored at logical path `games/{gameId}/{perspective}/turns/{turn}/analytics/scores/inference_rows/{playerId}` inside document `games/{gameId}/{perspective}/turns/{turn}/analytics/scores.json`. Durable payload is the functional row only: status, summary, solutions, and **host turn functional targets** -- enough to render the **Scores** table row and **inference solution detail modal** without reopening the scheduler. Solver **diagnostics** (including full action catalogs / ship-build combo lists) are wire and in-memory only and are not written to storage. Written only when a row completes with status **`exact`** or **`no_exact_solution`**; not written for `stopped`, `fetch_error`, immediate path terminals (`no_prior_turn`, `player_not_found`), or in-progress / `paused` rows. After orchestrator migration (**#200**), terminal `tier_solve` writes go through **`ScoresPersistencePolicy.persist`** (same pattern as fleet ledger persist); the inference stream adapter node-complete listener emits wire events only. Dropped or marked stale on **scores inference row invalidation**. Distinct from game-global hull catalog mask overrides at `games/{gameId}/analytics/scores/inference_hull_catalog_masks/{playerId}`.
+Server-side terminal **military score build inference** result for one scoreboard row, keyed by game, shell **perspective**, **inference host turn**, and target **Player** (`playerId`). Stored at logical path `games/{gameId}/{perspective}/turns/{turn}/analytics/scores/inference_rows/{playerId}` inside document `games/{gameId}/{perspective}/turns/{turn}/analytics/scores.json`. Durable payload is the functional row only: status, summary, solutions, and **host turn functional targets** -- enough to render the **Scores** table row and **inference solution detail modal** without reopening the scheduler. Solver **diagnostics** (including full action catalogs / ship-build combo lists) are wire and in-memory only and are not written to storage. Written when a row completes with status **`exact`** or **`no_exact_solution`**, and for cheap **inference admission skip** terminals (fallback-complete, so fleet turn evidence can close). Not written for `fetch_error` or in-progress / `paused` rows. Product-status names for new residuals are [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). After orchestrator migration (**#200**), terminal `tier_solve` writes go through **`ScoresPersistencePolicy.persist`** (same pattern as fleet ledger persist); the inference stream adapter node-complete listener emits wire events only. Dropped or marked stale on **scores inference row invalidation**. Distinct from game-global hull catalog mask overrides at `games/{gameId}/analytics/scores/inference_hull_catalog_masks/{playerId}`.
 _Avoid_: SPA-only inference cache, duplicating turn in the in-document key when the breakpoint already scopes by turn, persisting cancellation or transient error outcomes, adapter-owned terminal persist callbacks (legacy pre-#200), persisting full action catalogs or other solver diagnostics on disk
 
 **Shallow store read**:
