@@ -65,13 +65,14 @@ The first version should model these action families:
 The first version should not try to explain:
 
 - mine laying or mine scooping,
-- ship trades, captures, or losses,
 - planet losses, including planets with defense posts,
 - starbase losses, including bases with fighters or defense,
-- ship destruction or combat ammo use,
-- hard prior constraints from known inventory, minerals, cash, or ship locations.
+- ship destruction or combat ammo use (as distinct families -- unmatched **ship loss** in §3.7 does not split combat vs recycle vs glory),
+- hard prior constraints from minerals, cash, or ship locations (departing **ships** are **prior-fleet decrease candidate**s in §3.7).
 
-The design should still make those extensions natural. Deferred effects should be added as new action families and constraints, not as special-case patches to the solver.
+Ship trades, captures, and losses for this quality bar are §3.7 (decided, not shipped) -- not deferred into [extended action families](https://github.com/SteveDraper/Planets-Console/issues/49).
+
+The design should still make remaining extensions natural. Deferred effects should be added as new action families and constraints, not as special-case patches to the solver.
 
 ### 3.3 Accelerated start scoreboard
 
@@ -159,7 +160,7 @@ When the row has no exact action list (**inference moderate residual**, **mine-s
 
 **Generic freighter on the same row**
 
-- Observation-derived post-unsat **generic freighter combo** (hull id 0) for unexplained positive `freighterchange`. Same sentinel as the solver combo; not a ranked solution. Exact 0-military solves still emit `combo_freighter` in `solutions[]` as today. Negative freighter count waits for [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359).
+- Observation-derived post-unsat **generic freighter combo** (hull id 0) for unexplained positive `freighterchange`. Same sentinel as the solver combo; not a ranked solution. Exact 0-military solves still emit `combo_freighter` in `solutions[]` as today. Negative freighter count is unmatched **ship loss** / outgoing **gift** / **trade** in §3.7 (not a negative placeholder).
 
 **Wire**
 
@@ -173,6 +174,31 @@ When the row has no exact action list (**inference moderate residual**, **mine-s
 When fleet later consumes this, explode `count = N` to N unit **fleet inferred acquisition** rows and copy the per-unit envelope onto each. Do not introduce multi-ship fleet rows. Option-set / envelope field mapping is not this contract.
 
 Persist and status names remain [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360).
+
+### 3.7 Ship loss, gift, and trade
+
+Locked in [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). Product/solver contract; not shipped.
+
+**Distinguishability** uses **public scoreboard pairing** (other players' public `shipchange` / `freighterchange` / `militarychange` as observations). The CP-SAT stays per scoreboard row -- not a joint multi-player solve, not RST ship-id identity, not a new **fleet analytic** feature.
+
+| Fingerprint | Family | Notes |
+|-------------|--------|-------|
+| Net count drop, no compatible counter-delta | **Ship loss** | Combat, recycle, glory, mines, black hole are not split. Recycle `+1` PP is off the idle-dock lattice, so PP is skipped that row. |
+| Net count drop + compatible +count / +military elsewhere | **Gift** | Includes capture (tow, combat prize, Force Surrender). Host **trade** is two gifts. |
+| Counts flat, military swapped and/or warship↔freighter columns flip | **Trade** | Pairing fingerprint, not a host mechanic. |
+| Matched incoming hull on this row | **Acquired ship** | Score-increasing. Not a **ship build combo**. |
+
+Several compatible counterparties are distinct ranked **inference explanation signature**s. Counterparty player id is on the explanation when pairing pins one row.
+
+**Catalog.** Departures are **prior-fleet decrease candidate**s: **active** **fleet ship record**s on that player's prior-turn **fleet acquisition ledger**. Hull-known or option-set-bounded records contribute that military; unknown-hull inferred records contribute only that record's envelope. Cannot lose more warships or freighters than prior active rows of that class. Do **not** invert the ship-build combo catalog as `warship_delta = -1` fills (junk-exact). Missing or non-final prior ledger uses the same wait / **scores inference row invalidation** path as today's prior-turn fleet overlay.
+
+These families are ranked `solutions[]` actions (counts + pairing when it exists), not post-unsat placeholders. **Unknown military ship** still only for unexplained **positive** remainder after them (`N <= 0` does not emit). Same-row negative freighter count is a departure family, not a negative generic-freighter placeholder.
+
+**Idle-dock PP equality** binds on the same steps: pre-limit PQ/PPQ, planet/SB counts did not drop, observed PP on `2 × (starbases − ships built)`. Off-lattice or planet/SB count drop: skip PP enforcement; still admit decrease families. Classic PBP and PLS: no idle-dock constraint. After ship-limit: [Post-limit PP accounting for military score build inference](https://github.com/SteveDraper/Planets-Console/issues/364).
+
+**Cheap ladder.** Decrease families and lattice-gated idle-dock PP enter at the first ship-bearing cheap step (`early_game_bands` / ship-only); every later step is a superset. They are not delayed to `full_components` or the expensive tail -- otherwise ship-only exact can empty-exact a loss+replace (`shipchange = 0`) and fighters/SB posts can junk-pad. Loss count is bounded by prior active rows, not an unbounded slack action. A warship-count drop is still not mine-shaped ([§3.5](#35-hopeless-classifier-and-expensive-tier-abort)).
+
+**#49.** This bar takes **ship loss**, **gift**, **trade**, and **acquired ship**. Mines, ammo spend, negative defense, and planet/SB loss stay out of this map ([Hygiene: remaining inference tickets vs this quality bar](https://github.com/SteveDraper/Planets-Console/issues/361) restates [extended action families](https://github.com/SteveDraper/Planets-Console/issues/49)). Prior inventory on #49 shrinks to minerals/cash/locations. Per-location defense/fighters and fleet-histogram priors stay on #49. Post-limit PP is #364, not #49.
 
 ---
 
@@ -425,13 +451,13 @@ This keeps the first implementation independent of whether the backend is CP-SAT
 
 The design should grow by adding action families and constraints:
 
-- **Mine laying:** add minefield-score actions with negative torpedo inventory and positive minefield score.
-- **Ship trades and captures:** add ownership-transfer actions with paired loss/gain effects across players.
-- **Ship losses:** add negative ship and score actions, constrained by prior known or inferred fleet state.
-- **Planet losses:** add negative planet defense-post score and planet-count changes.
-- **Starbase losses:** add negative base fighter and defense score, plus starbase-count changes.
-- **Prior inventory:** add upper bounds from known ships, starbases, torpedoes, fighters, planets, and resources.
+- **Mine laying:** add minefield-score actions with negative torpedo inventory and positive minefield score (out of this quality bar; **mine-score residual**).
+- **Ship trades, captures, and losses:** §3.7 (decided, not shipped). Per-row **public scoreboard pairing** plus **prior-fleet decrease candidate**s; not a joint multi-player CP-SAT.
+- **Planet losses:** add negative planet defense-post score and planet-count changes (out of this quality bar).
+- **Starbase losses:** add negative base fighter and defense score, plus starbase-count changes (out of this quality bar).
+- **Prior inventory:** minerals, cash, and locations remain deferred; departing ships are **prior-fleet decrease candidate**s (§3.7).
 - **Resource feasibility:** add mineral, cash, supply, and tech-level constraints when enough data is known.
+- **Post-limit PP:** [Post-limit PP accounting for military score build inference](https://github.com/SteveDraper/Planets-Console/issues/364). Pre-limit PQ/PPQ is **idle-dock PP equality** (§3.7).
 
 The important rule is that every new phenomenon becomes either:
 
@@ -497,7 +523,7 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | User-facing exact | Any policy step may contribute exact solutions to top-K; band results never shown directly |
 | Policy overlay | **#78** cancelled; step-local widens (`includeComponentIds` for collision twins, #226) |
 | Score-equivalent combos | Solver-side merge for feasibility; distinct top-K when probability differs |
-| Priority points | Diagnostic-only until production-queue model assigns per-build PP deltas |
+| Priority points | Diagnostic-only except **idle-dock PP equality** (§3.7 / #359) on pre-limit PQ/PPQ lattice-gated rows. Post-limit: [#364](https://github.com/SteveDraper/Planets-Console/issues/364). |
 | Fleet-informed ranking | **#87** torp admission + misalignment prior; **#156** component tech-gap prior; tunables in `fleetInferenceTuning` (tier policy YAML). Catalog filter widens are step-local (#226), not a parallel #78 overlay. Absent fleet overlay == empty belief set. |
 | SPA streaming (#71) | One multiplexed **inference table stream** per shell scope |
 | Cross-row scheduling (#71) | **Inference row scheduler**: thin orchestrator adapter; `tier_solve` via process-wide compute pool ([design-compute-orchestrator.md](design-compute-orchestrator.md)) |
@@ -510,6 +536,7 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Inference admission skip (#356) | Never `tier_solve` for owner, Dead (inclusive), live inbound Full Alliance, Stealth (grey inference, keep Scores), Horwasp, `no_prior_turn`, `player_not_found`. Persist fallback-complete. Share Intel is not a skip. |
 | Hopeless classifier / expensive-tier abort (#357) | Cheap always through `full_components`. Abort `admit_starbase_defense_posts`+ on cheap-unsat if decrease-shaped >11, sticky prior, or large RST minefield (N=3 / 1000 units, YAML-overridable). Moderate 1-11 aborts expensive without starting sticky. Not #244. |
 | Unknown military ship placeholder (#358) | Post-unsat artifact, not a catalog combo or ranked solution. One row `count = N` unexplained +warships; per-unit race construction envelope in `score_delta_2x`; residual stays on the row. Dedicated collection, hull sentinel `-1`. Same-row post-unsat **generic freighter combo** for +freighters. Fleet explodes to N unit inferred rows. |
+| Ship loss, gift, and trade (#359) | Per-row **public scoreboard pairing**; departures from **prior-fleet decrease candidate**s (not inverted build catalog). **Gift** includes capture. Incoming matched hull is **acquired ship**, not a **ship build combo**. **Idle-dock PP equality** pre-limit PQ/PPQ lattice-gated. Families from first ship-bearing cheap step. **Unknown military ship** still `N > 0` only. Post-limit PP: #364. #49 no longer owns these families. |
 
 ### Still open
 
