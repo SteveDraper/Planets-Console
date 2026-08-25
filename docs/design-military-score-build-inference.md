@@ -143,6 +143,37 @@ Window length and minimum units are overridable on the **inference tier policy a
 
 Abort is the anti-junk mechanism. Classifier misses that still get slack-padded expensive exacts remain a named **junk-exact** failure; no second slack-ratio detector here. Persist, stream, and SPA chrome for the new statuses belong to [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). This abort is not [Scores inference: unify ladder early-stop into optional per-tier entry gates](https://github.com/SteveDraper/Planets-Console/issues/244) (that issue's per-step entry gates stay a leftover for hygiene).
 
+### 3.6 Unknown military ship placeholder
+
+Locked in [Unknown military ship placeholder contract](https://github.com/SteveDraper/Planets-Console/issues/358).
+
+When the row has no exact action list (**inference moderate residual**, **mine-score residual**, `no_exact_solution`), inference emits count-constrained **post-unsat** placeholders so ship and priority-point constraints still surface. These are not CP-SAT catalog combos and not ranked `solutions[]` entries.
+
+**Unknown military ship**
+
+- One row, `count = N` unexplained **positive** `shipchange` remainder after any exact families on that row.
+- No emit when `N <= 0`, or when the player's legal-warship construction envelope is empty (catalog hole / decrease-family miss, not a fake range).
+- Per-unit military bounds: race construction envelope in `score_delta_2x` (min cheapest legal warship fill, max most expensive legal fill; engines fill every slot; weapons may be below max; carriers count at 0 beams). Residual size stays on the row; leftover (including mine leftover) is not assigned to the ships.
+- Starbase slots: `build_slot_usage = 1` per unit, matching the **generic freighter combo**. Priority-point equality is not a hard constraint; observed `prioritypointchange` surfaces on the row. Optional per-unit PP envelope (`1 + ceil(mass/50)`, mass cap 1000 KT) is display-only metadata.
+- Residual / no-exact rows do not emit cheap-tier aggregates, band seeds, or junk-exact padding.
+
+**Generic freighter on the same row**
+
+- Observation-derived post-unsat **generic freighter combo** (hull id 0) for unexplained positive `freighterchange`. Same sentinel as the solver combo; not a ranked solution. Exact 0-military solves still emit `combo_freighter` in `solutions[]` as today. Negative freighter count waits for [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359).
+
+**Wire**
+
+- Dedicated row-level collection (not `solutions[].shipBuilds`).
+- Typed id `unknown_military_ship`; hull sentinel `-1` (not generic-freighter `0`).
+- Fields: `count`, per-unit `militaryScoreDelta2xMin` / `Max`, `buildSlotUsage: 1`, optional PP envelope. No `probability_weight` / rank.
+- Label "Unknown military ship" / `Nx …`. Not a proved hull, not a mine explanation.
+
+**Fleet cardinality interface**
+
+When fleet later consumes this, explode `count = N` to N unit **fleet inferred acquisition** rows and copy the per-unit envelope onto each. Do not introduce multi-ship fleet rows. Option-set / envelope field mapping is not this contract.
+
+Persist and status names remain [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360).
+
 ---
 
 ## 4. Problem formulation
@@ -478,6 +509,7 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Accelerated-start rows (#71) | Same stream and scheduler as normal rows; segments internal to row path |
 | Inference admission skip (#356) | Never `tier_solve` for owner, Dead (inclusive), live inbound Full Alliance, Stealth (grey inference, keep Scores), Horwasp, `no_prior_turn`, `player_not_found`. Persist fallback-complete. Share Intel is not a skip. |
 | Hopeless classifier / expensive-tier abort (#357) | Cheap always through `full_components`. Abort `admit_starbase_defense_posts`+ on cheap-unsat if decrease-shaped >11, sticky prior, or large RST minefield (N=3 / 1000 units, YAML-overridable). Moderate 1-11 aborts expensive without starting sticky. Not #244. |
+| Unknown military ship placeholder (#358) | Post-unsat artifact, not a catalog combo or ranked solution. One row `count = N` unexplained +warships; per-unit race construction envelope in `score_delta_2x`; residual stays on the row. Dedicated collection, hull sentinel `-1`. Same-row post-unsat **generic freighter combo** for +freighters. Fleet explodes to N unit inferred rows. |
 
 ### Still open
 

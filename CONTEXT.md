@@ -793,12 +793,12 @@ A **recent minefield observation** whose largest seen field for that owner is at
 _Avoid_: estimated decay, using RST units as a residual term
 
 **Generic freighter combo**:
-Solver-only ship-build combo (hull id 0) standing for some **true freighter** when freighter hulls are score-indistinguishable.
-_Avoid_: hull id 0 as a host hull, unknown freighter
+Hull-id-0 identity standing for some **true freighter** when hulls are score-indistinguishable. On exact rows it is the solver-only **ship build combo**; on no-exact-list rows it is an observation-derived post-unsat placeholder with the same sentinel.
+_Avoid_: hull id 0 as a host hull, unknown freighter, treating the residual emission as a ranked solution
 
 **Unknown military ship**:
-Count-constrained placeholder in an inference explanation for an unexplained warship, parallel to the **generic freighter combo**, with military-score upper and lower bounds when hull identity is unknown. Emitted when there is no exact action list (including **inference moderate residual**, **mine-score residual**, and **no_exact_solution**) so ship and priority-point constraints still surface.
-_Avoid_: mystery hull, generic warship
+Count-constrained post-unsat placeholder (`count` = unexplained positive warship units) on a no-exact-list inference row (**inference moderate residual**, **mine-score residual**, **no_exact_solution**), with per-unit military-score construction-envelope bounds, not the row residual. Same product role as the **generic freighter combo**; not a **ship build combo**, not a ranked solution, and not an inexact aggregate list.
+_Avoid_: mystery hull, generic warship, generic warship combo, treating it as a solution, assigning mine leftover to the ships
 
 **Inference search tier**:
 One staged step in **military score build inference** catalog construction and solving. The ladder has no fixed length; each tier declares how much of the action inventory is in play for that attempt. Later tiers are strict supersets of earlier ones on every dimension they control (permitted actions, per-action caps, ship-build component eligibility, constraint strictness). The solver walks the list until time runs out or a tier adds no new distinct exact explanation signatures to **inference merged top-K** (the ladder continues when K is full; see K-best retention there).
