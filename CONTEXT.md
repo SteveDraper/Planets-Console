@@ -329,7 +329,7 @@ The per-**turn analytic** function (`materialize_export_tree`) registered in Cor
 _Avoid_: duplicate domain logic in handler vs exports, silent partial data without status
 
 **Analytic export meta**:
-A documented branch of the export value tree (e.g. `$.meta`) carrying **materialization lifecycle** status independent of path **`none`** / **`value`**. Generic **`searchStatus`** values: **`not_started`**, **`in_progress`**, **`paused`**, **`stopped`**, **`complete`**. Consumers warn users when status is not **`complete`** (e.g. fleet analytic: prior-turn inference not ready). **`complete`** with path **`none`** is authoritative empty data, not bad data. Solver-specific outcomes (e.g. inference `no_exact_solution`, band residual) live under domain branches (e.g. `$.diagnostics`), not in **`searchStatus`**. Optional **`solutionsHeld`** counts held rows under **`complete`** / in-progress partial trees.
+A documented branch of the export value tree (e.g. `$.meta`) carrying **materialization lifecycle** status independent of path **`none`** / **`value`**. Generic **`searchStatus`** values: **`not_started`**, **`in_progress`**, **`paused`**, **`stopped`**, **`complete`**. Consumers warn users when status is not **`complete`** (e.g. fleet analytic: prior-turn inference not ready). **`complete`** with path **`none`** is authoritative empty data, not bad data. Scores product `status`, leftover, and `placeholders` live on the functional export tree as siblings of `$.solutions`; band residual and named compute failures stay under `$.diagnostics`. None of those belong in **`searchStatus`**. Optional **`solutionsHeld`** counts held rows under **`complete`** / in-progress partial trees.
 _Avoid_: inference-only statuses in generic meta, inferring quality from empty paths alone
 
 **Analytic export registry**:
@@ -753,20 +753,48 @@ Core **turn analytic** behavior (optional on the **Scores** analytic) that expla
 _Avoid_: build solver, score guesser, treating disconnect as cancel, scoreboard inference (use this term)
 
 **Score-decreasing effect**:
-A host-turn event that reduces military score or warship/freighter counts. A sibling workstream of hopeless search and high-slack padding, not a name for either. Exact-modeled families in the current quality bar are ship loss, gift, and trade; mine decay/sweep/mutual elimination are **mine-score residual**, not catalog families.
+A host-turn event that reduces military score or warship/freighter counts. A sibling workstream of hopeless search and high-slack padding, not a name for either. Exact-modeled families in the current quality bar are ship loss, gift, and trade; mine decay/sweep/mutual elimination are **mine-score residual**, not catalog families. Distinguishing those three families uses **public scoreboard pairing**; departing ships are **prior-fleet decrease candidate**s; the CP-SAT stays per scoreboard row.
 _Avoid_: noise (unqualified), negative slack (solver mechanism)
 
+**Public scoreboard pairing**:
+Matching another player's public `shipchange` / `freighterchange` / `militarychange` as an observation on this row's still-per-row solve, so an unmatched count drop is loss, a compatible counter-delta is ownership transfer (gift or capture; scoreboard-indistinguishable), and a count-flat military swap (or warship↔freighter column flip) is trade. The receiver of a matched incoming hull is not explained as a **ship build combo**. Not a joint multi-player CP-SAT, not RST ship-id identity, and not a **fleet analytic** feature.
+_Avoid_: cross-player solve, coupled CP-SAT, trade_or_capture_hint (corpus RST inventory), opponent-row join (implementation)
+
+**Prior-fleet decrease candidate**:
+An **active** **fleet ship record** on this player's prior-turn **fleet acquisition ledger** that may leave the roster this host turn (unmatched loss, outgoing transfer, or one side of trade). Hull-known or option-set-bounded records contribute that military; unknown-hull inferred records contribute only that record's envelope. Count of departing warships or freighters cannot exceed prior active rows of that class. The race build catalog is not a source of departing hulls. Missing or non-final prior ledger uses the same wait / **scores inference row invalidation** path as today's prior-turn fleet overlay.
+_Avoid_: fleet manifest, RST-only ships, any legal race hull, inverted ship-build combo
+
+**Idle-dock PP equality**:
+Pre-limit PQ/PPQ hard constraint `prioritypointchange == 2 × (starbases − ships built)` when planet and starbase counts did not drop and the observed delta lies on that even lattice. Each starbase either builds (forgoes +2 PP) or idles (+2 PP). **Gift**, **trade**, capture, and **ship loss** contribute 0 PP. Off-lattice deltas (recycle, combat, `pbN`) and planet/SB count drops skip enforcement. Not Classic PBP, not PLS, not after ship-limit. Post-limit spend is [Post-limit PP accounting for military score build inference](https://github.com/SteveDraper/Planets-Console/issues/364).
+_Avoid_: production-wide `enforce_priority_point_constraint`, inverting post-limit PP spend into a ship count, starbase-loot PP as this bar
+
+**Ship loss**:
+In **military score build inference**, unmatched departure of **prior-fleet decrease candidate**s -- no compatible **public scoreboard pairing**. Combat, recycle, glory, mines, and black hole are not split this bar. Zero PP. Exact on counts; military from the chosen candidate's known spec or envelope. Ranked `solutions[]` action, not a negative **unknown military ship**.
+_Avoid_: inverted ship-build catalog as loss actions, recycle-only, treating a warship-count drop as **mine-score residual**
+
+**Gift**:
+In **military score build inference**, an outgoing **public scoreboard pairing**: **prior-fleet decrease candidate**s left this roster and a compatible public counter-delta appeared on another row. Includes capture (tow, combat prize, Force Surrender). Zero PP. Ranked `solutions[]` action. Counterparty player id is on the explanation when pairing pins one row; several fit as distinct ranked signatures.
+_Avoid_: treating gift as GSx-only, excluding capture, labeling the receiver's +ship as a **ship build combo**
+
+**Trade**:
+In **military score build inference**, a count-flat **public scoreboard pairing** (military swap and/or warship↔freighter column flip). Host is two gifts; this is the fingerprint, not a separate host mechanic.
+_Avoid_: host trade action, requiring a joint multi-player CP-SAT
+
+**Acquired ship**:
+Incoming **public scoreboard pairing** on this scoreboard row: a matched hull that is not a **ship build combo**. Score-increasing counterpart of **gift** / **trade**.
+_Avoid_: stuffing incoming hulls into `shipBuilds`, **unknown military ship** for a paired incoming count
+
 **Mine-score residual**:
-Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status after **inference expensive-tier abort** for that regime (decrease-shaped remainder beyond the **inference moderate residual** floor, **mine-residual sticky prior**, or **large minefield observation**). Inference does not split observed vs unobserved minefields and does not exact-model this channel.
-_Avoid_: mine noise, mine slack, observed-mine decay
+Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status (`mine_score_residual`) after **inference expensive-tier abort** for that regime (decrease-shaped remainder beyond the **inference moderate residual** floor, **mine-residual sticky prior**, or **large minefield observation**). Inference does not split observed vs unobserved minefields and does not exact-model this channel.
+_Avoid_: mine noise, mine slack, observed-mine decay, intractable residual (that is `no_exact_solution`)
 
 **Inference moderate residual**:
-Unexplained military leftover of 1-11 points after the ship/freighter construction envelope (two 5.5-point posts / rounding cluster). Cheap-unsat takes **inference expensive-tier abort** but does not start **mine-residual sticky prior**. User-facing outcome is status and residual size plus count-constrained placeholders, not a band action list.
+Unexplained military leftover of 1-11 points after the ship/freighter construction envelope (two 5.5-point posts / rounding cluster). Cheap-unsat takes **inference expensive-tier abort** but does not start **mine-residual sticky prior**. User-facing outcome is wire status `moderate_residual`, residual size, and count-constrained placeholders -- not a band action list.
 _Avoid_: approximate solution (as a user-facing action list), inference score band (internal seed only)
 
 **Inference admission skip**:
-Not submitting **military score build inference** for a scoreboard row for identity or visibility reasons, before inspecting the delta. The set is the **viewpoint** owner (perspective slots `1..N`), Dead from the elimination turn inclusive, live inbound **Full Alliance**, **Stealth Mode** (every row), Horwasp, `no_prior_turn`, and `player_not_found`. See [Inference admission skip set](https://github.com/SteveDraper/Planets-Console/issues/356).
-_Avoid_: hopeless skip, pointless inference (ticket nickname), ally skip (use live inbound Full Alliance), Share Intel skip, 0-planet as Dead, one-way Full Alliance, Visibility either-direction partners
+Not submitting **military score build inference** for a scoreboard row for identity or visibility reasons, before inspecting the delta. Mixed-table wire statuses: `viewpoint_owner`, `dead`, `full_alliance` (live inbound **Full Alliance** only), `horwasp`, `no_prior_turn`, `player_not_found`. **Stealth Mode** is **build inference availability**, not a row status. See [Inference admission skip set](https://github.com/SteveDraper/Planets-Console/issues/356).
+_Avoid_: hopeless skip, pointless inference (ticket nickname), ally skip (use live inbound Full Alliance), Share Intel skip, 0-planet as Dead, one-way Full Alliance, Visibility either-direction partners, umbrella `admission_skip` status
 
 **Build inference availability**:
 Whether **military score build inference** may run for the loaded game. Inactive when **Stealth Mode** unpublished the Military column: grey **Include build inference** with a hint, no inference stream. The **Scores** analytic stays available (planet counts still publish). Distinct from per-row **inference admission skip** chrome on a mixed table.
@@ -781,8 +809,8 @@ Stopping after cheap exact **inference search tiers** (through the last modest-c
 _Avoid_: cancel, admission skip, no_exact_solution
 
 **Mine-residual sticky prior**:
-Per-player carry that this scoreboard row is in the mine-contaminated regime. Set or kept when the turn is **mine-score residual**; cleared when cheap tiers find a hard-equality exact. While set, a later cheap-unsat of either sign is enough for **inference expensive-tier abort**. Distinct from **recent minefield observation**.
-_Avoid_: muddy flag, hopeless latch, no_exact_solution sticky
+Per-player carry that this scoreboard row is in the mine-contaminated regime, derived from the prior host-turn persisted row (`status === mine_score_residual`). Cleared when cheap tiers find a hard-equality exact. While set, a later cheap-unsat of either sign is enough for **inference expensive-tier abort**. Distinct from **recent minefield observation**.
+_Avoid_: muddy flag, hopeless latch, no_exact_solution sticky, a parallel sticky boolean beside status
 
 **Recent minefield observation**:
 Viewpoint-RST evidence that this owner appeared in stored `minefields` inside a short host-turn window (default 3, overridable on the **inference tier policy asset**). Not "laid this turn" and not a decay estimate. A cheap exact drops carry-forward of that window; a later turn may open a new window from its own RST.
@@ -793,12 +821,12 @@ A **recent minefield observation** whose largest seen field for that owner is at
 _Avoid_: estimated decay, using RST units as a residual term
 
 **Generic freighter combo**:
-Solver-only ship-build combo (hull id 0) standing for some **true freighter** when freighter hulls are score-indistinguishable.
-_Avoid_: hull id 0 as a host hull, unknown freighter
+Hull-id-0 identity standing for some **true freighter** when hulls are score-indistinguishable. On exact rows it is the solver-only **ship build combo**; on no-exact-list rows it is an observation-derived post-unsat placeholder with the same sentinel.
+_Avoid_: hull id 0 as a host hull, unknown freighter, treating the residual emission as a ranked solution
 
 **Unknown military ship**:
-Count-constrained placeholder in an inference explanation for an unexplained warship, parallel to the **generic freighter combo**, with military-score upper and lower bounds when hull identity is unknown. Emitted when there is no exact action list (including **inference moderate residual**, **mine-score residual**, and **no_exact_solution**) so ship and priority-point constraints still surface.
-_Avoid_: mystery hull, generic warship
+Count-constrained post-unsat placeholder (`count` = unexplained positive warship units) on a no-exact-list inference row (**inference moderate residual**, **mine-score residual**, **no_exact_solution**), with per-unit military-score construction-envelope bounds, not the row residual. Lives on the functional `placeholders` collection (persist, stream `complete`, export), not `solutions[]`. Remainder is after **ship loss** / **gift** / **trade** / **acquired ship** families on that row. Same product role as the **generic freighter combo**; not a **ship build combo**, not a ranked solution, and not an inexact aggregate list. No emit when `count <= 0`.
+_Avoid_: mystery hull, generic warship, generic military ship, generic warship combo, treating it as a solution, assigning mine leftover to the ships, negative placeholder for departures
 
 **Inference search tier**:
 One staged step in **military score build inference** catalog construction and solving. The ladder has no fixed length; each tier declares how much of the action inventory is in play for that attempt. Later tiers are strict supersets of earlier ones on every dimension they control (permitted actions, per-action caps, ship-build component eligibility, constraint strictness). The solver walks the list until time runs out or a tier adds no new distinct exact explanation signatures to **inference merged top-K** (the ladder continues when K is full; see K-best retention there).
@@ -829,7 +857,7 @@ A band-feasible action multiset from tier *n* (exact pass at that tier was infea
 _Avoid_: warm start, hint
 
 **Inference score band**:
-Relaxed military-score constraint `explained_2x >= observed_2x - alpha` with `alpha` from the tier policy. Warship and freighter equalities stay exact. The final **inference search tier** always uses `alpha = 0`. Each tier tries exact constraints first; **inference score band** applies only on retry after an infeasible exact pass at that tier. Band-feasible results seed the next tier only; they are never user-facing explanations. **Exact** solutions from any tier merge into **inference merged top-K**. If the full ladder yields zero exact solutions, status is `no_exact_solution` with band residual in diagnostics.
+Relaxed military-score constraint `explained_2x >= observed_2x - alpha` with `alpha` from the tier policy. Warship and freighter equalities stay exact. The final **inference search tier** always uses `alpha = 0`. Each tier tries exact constraints first; **inference score band** applies only on retry after an infeasible exact pass at that tier. Band-feasible results seed the next tier only; they are never user-facing explanations. **Exact** solutions from any tier merge into **inference merged top-K**. If the full ladder yields zero exact solutions, status is `no_exact_solution` with band residual in diagnostics -- distinct from abort-before-expensive `moderate_residual` / `mine_score_residual`.
 _Avoid_: slack constraint, approximate solve
 
 **Inference explanation signature**:
@@ -1193,8 +1221,8 @@ Server-side cached output for a **turn analytic** that must not recompute on eve
 _Avoid_: analytic cache at game root, `{gameId}/homeworld-locator`, nesting computed cache inside **TurnInfo** documents, treating homeworld evidence as a single non-turn perspective blob
 
 **Scores inference row persistence**:
-Server-side terminal **military score build inference** result for one scoreboard row, keyed by game, shell **perspective**, **inference host turn**, and target **Player** (`playerId`). Stored at logical path `games/{gameId}/{perspective}/turns/{turn}/analytics/scores/inference_rows/{playerId}` inside document `games/{gameId}/{perspective}/turns/{turn}/analytics/scores.json`. Durable payload is the functional row only: status, summary, solutions, and **host turn functional targets** -- enough to render the **Scores** table row and **inference solution detail modal** without reopening the scheduler. Solver **diagnostics** (including full action catalogs / ship-build combo lists) are wire and in-memory only and are not written to storage. Written when a row completes with status **`exact`** or **`no_exact_solution`**, and for cheap **inference admission skip** terminals (fallback-complete, so fleet turn evidence can close). Not written for `fetch_error` or in-progress / `paused` rows. Product-status names for new residuals are [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). After orchestrator migration (**#200**), terminal `tier_solve` writes go through **`ScoresPersistencePolicy.persist`** (same pattern as fleet ledger persist); the inference stream adapter node-complete listener emits wire events only. Dropped or marked stale on **scores inference row invalidation**. Distinct from game-global hull catalog mask overrides at `games/{gameId}/analytics/scores/inference_hull_catalog_masks/{playerId}`.
-_Avoid_: SPA-only inference cache, duplicating turn in the in-document key when the breakpoint already scopes by turn, persisting cancellation or transient error outcomes, adapter-owned terminal persist callbacks (legacy pre-#200), persisting full action catalogs or other solver diagnostics on disk
+Server-side terminal **military score build inference** result for one scoreboard row, keyed by game, shell **perspective**, **inference host turn**, and target **Player** (`playerId`). Stored at logical path `games/{gameId}/{perspective}/turns/{turn}/analytics/scores/inference_rows/{playerId}` inside document `games/{gameId}/{perspective}/turns/{turn}/analytics/scores.json`. Durable payload is the functional row: status, summary, solutions, `placeholders`, `unexplainedMilitaryDelta2x`, and **host turn functional targets** -- enough to render the **Scores** table row and **inference solution detail modal** without reopening the scheduler. Solver **diagnostics** (including full action catalogs / ship-build combo lists and band residual) are wire and in-memory only and are not written to storage. Functional persist: **`exact`**, **`no_exact_solution`**, **`moderate_residual`**, **`mine_score_residual`**. Fallback-complete (closes fleet turn evidence): **inference admission skip** statuses plus `invalid_problem` / `solver_error`; also `stopped` / `time_limited`. Not written for `fetch_error` or in-progress / `paused` rows. See [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). After orchestrator migration (**#200**), terminal `tier_solve` writes go through **`ScoresPersistencePolicy.persist`** (same pattern as fleet ledger persist); the inference stream adapter node-complete listener emits wire events only. Dropped or marked stale on **scores inference row invalidation**. Distinct from game-global hull catalog mask overrides at `games/{gameId}/analytics/scores/inference_hull_catalog_masks/{playerId}`.
+_Avoid_: SPA-only inference cache, duplicating turn in the in-document key when the breakpoint already scopes by turn, persisting cancellation or transient error outcomes, adapter-owned terminal persist callbacks (legacy pre-#200), persisting full action catalogs or other solver diagnostics on disk, stuffing placeholders into `solutions[]`
 
 **Shallow store read**:
 A read that returns only the **immediate child segment names** at a logical store path (e.g. game ids under `games`), not nested values. Used to enumerate stored games without loading full documents.

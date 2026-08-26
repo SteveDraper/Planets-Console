@@ -357,6 +357,7 @@ When inference is enabled, add one extra column to the existing scoreboard table
 | **Inference solution count indicator** | Green outlined badge with **N** = rows currently held in **inference merged top-K**. While search is in flight and **N = 0**, show a **dashed-border badge with 0** (same count-badge chrome, not a separate hourglass icon). When **N > 0**, use a solid border; **N** rises toward K while search continues until `isComplete`. In-progress search adds an animation affordance on the badge. | summarize top solution when **N > 0**; show that inference is still running when **N = 0** | open modal with ranked held solutions when **N > 0** (grows while streaming until plateau at K); no modal until the first held exact arrives |
 | Paused | row frozen by **inference global pause** | paused summary; held count when **N > 0** | modal when **N > 0**; resume all via column header |
 | Red cross | natural completion with no exact explanation, invalid problem, or solver failure | summarize failure status and key diagnostics | no modal in #48; tooltip only (failure diagnostic modal is a later option) |
+| Residual / skip chrome (#360; decided, not shipped) | Distinct from the single red X: muted skip (no modal); `moderate_residual` vs `mine_score_residual` markers + leftover (existing detail opens); `no_exact_solution` keeps the red X. Design §3.8. | status + leftover in tooltip | skip: no modal; residual / complete-failure: existing detail, no new modal |
 | Global pause (column header) | freeze or resume all rows on this scope | pause/resume all build inference | `POST/DELETE .../inference/global-pause` |
 
 The row-level dashed-zero badge means the frontend should track inference status per player, not block the whole scoreboard table until all rows are solved. The table should remain useful while slower rows are still pending. With Phase 1H streaming (#71), the badge transitions from dashed **0** to a solid count when the first `solution` event arrives with a non-empty held top-K (`N` becomes 1), not when top-K enumeration or the full policy ladder finishes.
@@ -502,7 +503,7 @@ sum_agg(freighter_delta * count)
 sum(build_slot_usage) <= starbases_owned
 ```
 
-Ship combos use `build_slot_usage = 1` per ship. Priority-point deltas on ship builds remain **zero** until production-queue semantics are modeled; treat `prioritypointchange` as diagnostic-only until then.
+Ship combos use `build_slot_usage = 1` per ship. Priority-point deltas on ship builds remain **zero** in production except **idle-dock PP equality** (design §3.7 / [#359](https://github.com/SteveDraper/Planets-Console/issues/359): decided, not shipped). Post-limit spend is [#364](https://github.com/SteveDraper/Planets-Console/issues/364). Until that ships, treat `prioritypointchange` as diagnostic-only.
 
 **Solution shape:** emit structured rows `{ hull, engine, beam?, torp?, beam_count, launcher_count, count }` rather than opaque `build_*` preset IDs.
 
@@ -537,7 +538,7 @@ Support signed contribution vectors from the start:
 
 - fighter transfer from ship to starbase: negative score delta,
 - fighter transfer from starbase to ship: positive score delta,
-- future ship loss or transfer actions: negative or cross-player deltas.
+- **ship loss**, **gift**, and **trade** (decided, not shipped): design §3.7 and [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). Bounds are **prior-fleet decrease candidate**s, not unbounded cancellation and not inverted ship-build combos.
 
 Negative actions need explicit upper bounds. Without bounds, positive and negative actions can create cancellation loops and a huge number of equivalent solutions.
 
@@ -666,6 +667,9 @@ Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
 8. **Ship-only exact early-stop (#226):** after a step completes, if that step's `allowShipOnlyExactEarlyStop` is `true` **and** the best held solution is a ship-builds-only exact whose objective meets `solverThresholds.shipOnlyExactEarlyStopMinPlausibility`, stop climbing. Steps with the flag `false` never early-stop on this rule (even when a plausible Valiant-only exact is already held).
 9. **No-new-signatures early-stop (#236):** after a step completes with held exact(s), if the step added neither new ship-build combo ids nor new aggregate action ids **and** admitted no new exact signatures, stop climbing **only when** the best held solution's objective meets `solverThresholds.noNewExactSignaturesEarlyStopMinPlausibility`. Below that floor the ladder continues so later aggregate-widening tiers can still run (e.g. empty-belief `admit_ship_torpedoes` must not cut off planet/SB defense). Production YAML uses the same numeric floor as ship-only exact early-stop (`-300`).
 10. **Inference expensive-tier abort (decided, not shipped):** after cheap steps through `full_components`, if there is no hard-equality exact and the **hopeless classifier** fires, do not enter `admit_starbase_defense_posts` / `torp_escape_tier` / `full_catalog_exact`. Classifier, window, and size gate: design §3.5 and [Mine-score residual likelihood and expensive-tier abort](https://github.com/SteveDraper/Planets-Console/issues/357). Distinct from items 8-9 and from [#244](https://github.com/SteveDraper/Planets-Console/issues/244) per-step entry gates.
+11. **Unknown military ship placeholder (decided, not shipped):** after a no-exact-list outcome, emit post-unsat placeholders (not catalog combos, not `solutions[]`). Contract: design §3.6 and [Unknown military ship placeholder contract](https://github.com/SteveDraper/Planets-Console/issues/358).
+12. **Ship loss, gift, and trade (decided, not shipped):** admit decrease / pairing / **acquired ship** families and lattice-gated **idle-dock PP equality** from the first ship-bearing cheap step (superset thereafter). Contract: design §3.7 and [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). Prevents ship-only empty-exact on loss+replace. Post-limit PP is [#364](https://github.com/SteveDraper/Planets-Console/issues/364).
+13. **Product status persist and stream (decided, not shipped):** first-class residual / skip statuses, `placeholders` on functional persist and stream `complete`, distinct cell chrome. Contract: design §3.8 and [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360).
 
 Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved constraint snapshot, `alpha`, `comboCount`, seed count, band residual when used, and (for `collision_hull_widen`) twin overlay diagnostics.
 
@@ -675,7 +679,7 @@ Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved const
 |---------|-----|
 | At least one **exact** solution from any policy step | **Inference solution count indicator** with **N** = held top-K size; merged top-K across steps |
 | Full ladder, zero exact | Red cross / `no_exact_solution`; diagnostics include best band residual from internal retries |
-| **Inference moderate residual** / **mine-score residual** (decided, not shipped) | Expensive-tier abort after cheap unsat; persist/chrome in [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). Production today still collapses these into `no_exact_solution` / red X. |
+| **Inference moderate residual** / **mine-score residual** / `no_exact_solution` (decided, not shipped) | Distinct statuses (`moderate_residual` / `mine_score_residual` / `no_exact_solution`); `placeholders` + leftover on persist / `complete` / export; not an inexact action list. Design §3.6 / §3.8. Production today still collapses these into `no_exact_solution` / red X with empty `shipBuilds`. |
 | Stream cancelled (#71 implicit cancel) | `status: stopped` when applicable; count badge when **N > 0** on the terminal wire event (not preserved server-side across reconnect) |
 | Band near-solution | Never shown directly; seeds next step only |
 
@@ -1260,13 +1264,14 @@ Add action families and constraints only after Phase 1G ship-build combos are me
 
 Candidates:
 
-- mine laying and scooping,
-- ship trades and captures,
-- planet and starbase losses,
-- prior inventory and resource bounds,
+- mine laying and scooping (out of the #352 quality bar; **mine-score residual**),
+- planet and starbase losses (out of that bar),
+- prior inventory for minerals/cash/locations (departing ships: §3.7 / #359),
 - per-location defense post and fighter attribution,
-- production-queue priority-point effects on ship builds,
+- production-queue priority-point effects **after** ship-limit ([#364](https://github.com/SteveDraper/Planets-Console/issues/364); pre-limit idle-dock is §3.7),
 - fleet-informed inference overlay (#87 torp slice, #156 tech-gap prior; section 8.8).
+
+Ship trades, captures, and losses are **not** Phase 6 leftovers -- design §3.7 / [#359](https://github.com/SteveDraper/Planets-Console/issues/359). [Extended action families](https://github.com/SteveDraper/Planets-Console/issues/49) is restated by [Hygiene: remaining inference tickets vs this quality bar](https://github.com/SteveDraper/Planets-Console/issues/361).
 
 Each addition should include tests showing both new feasible explanations and cases where the new action removes a previous false unsat.
 
@@ -1363,7 +1368,7 @@ Script exit code `0` when no hard failures; stdout supports human summary and op
 | After #50 | Fewer false `no_exact_solution` from priority-point gaps; corpus Tier 1 more meaningful |
 | After #51, #52 | Revisit catalog coverage mapping for **ship build combos**; expand fixed corpus with combo-tier regressions |
 | After #53 | Optional manifest rows tied to combo diagnostics shapes |
-| With #49 (deferred effects) | Expand ground truth + coverage for trades/losses; adjunct fixtures |
+| With #359 / #364 (decrease families + post-limit PP) | Expand ground truth + coverage for trades/losses; adjunct fixtures. #49 no longer owns those families. |
 
 Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Solution detail modal UX: **#48** ([spec](design-military-score-inference-solution-modal.md)). Modal follow-ons: **#88** (relative plausibility pruning), **#89** (aggregate-action icons). Per-row solution streaming: **#71** (Phase 1H). Corpus harness: #62, #63, #64, #65, #66 (spec: [design-inference-corpus.md](design-inference-corpus.md)).
 
