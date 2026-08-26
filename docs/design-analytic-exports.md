@@ -365,7 +365,7 @@ Do **not** warn on **`complete`** even when all solution paths are **`none`**.
 
 Optional: **`solutionsHeld`**, **`hostTurn`**.
 
-Solver-specific outcomes (`no_exact_solution`, band residual) belong under **`$.diagnostics`** (scores row inference diagnostics), not in **`searchStatus`**. Accelerated segment detail may appear in **`$.diagnostics`** for debugging; functional per-host-turn solutions are exposed only via **`$.solutions`** at the correct scoreboard turn (export normalizes split-row **`hostTurnTargets`** from persistence into scope-local **`$.solutions`**).
+Solver-specific lifecycle must not enter **`searchStatus`**. Scores product `status`, leftover, and `placeholders` live on the functional export tree as siblings of `$.solutions` ([Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360) / design §3.8). Band residual and named compute failures stay under **`$.diagnostics`**. Accelerated segment detail may appear in **`$.diagnostics`** for debugging; functional per-host-turn solutions are exposed only via **`$.solutions`** at the correct scoreboard turn (export normalizes split-row **`hostTurnTargets`** from persistence into scope-local **`$.solutions`**).
 
 ---
 
