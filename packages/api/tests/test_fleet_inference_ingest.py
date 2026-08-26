@@ -43,6 +43,7 @@ from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 from tests.inference_corpus.fixtures import load_turn_fixture
 from tests.scores_exports_helpers import (
     inference_solution,
+    inference_target_player_id,
     perspective,
     schedule_row_with_ladder,
     ship_build_domain,
@@ -144,7 +145,7 @@ def test_placeholder_rows_remain_unknown_when_inference_in_progress_with_no_solu
 def test_streaming_refine_updates_option_sets(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = sample_turn.scores[0].ownerid
+    player_id = inference_target_player_id(sample_turn)
     turn = replace(
         sample_turn,
         ships=[],
@@ -241,7 +242,7 @@ def test_refine_preserves_scoreboard_ship_id_bounds(sample_turn):
     """
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = sample_turn.scores[0].ownerid
+    player_id = inference_target_player_id(sample_turn)
     turn = replace(
         sample_turn,
         ships=[],
@@ -693,7 +694,7 @@ def test_refine_drops_option_sets_for_hulls_other_than_observed(sample_turn):
 def test_streaming_refine_updates_freighter_option_sets(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = sample_turn.scores[0].ownerid
+    player_id = inference_target_player_id(sample_turn)
     turn = replace(
         sample_turn,
         ships=[],
@@ -994,7 +995,7 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
 def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = sample_turn.scores[0].ownerid
+    player_id = inference_target_player_id(sample_turn)
     turn = _turn_with_score_delta(
         turn_number=5,
         owner_id=player_id,

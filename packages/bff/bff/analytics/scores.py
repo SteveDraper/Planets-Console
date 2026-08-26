@@ -135,6 +135,8 @@ def table_from_core(core_data: dict, *, include_build_inference: bool = False) -
         "rows": rows,
         "rowPlayerIds": row_player_ids,
     }
+    if "buildInferenceAvailable" in core_data:
+        payload["buildInferenceAvailable"] = bool(core_data["buildInferenceAvailable"])
     if include_build_inference:
         payload["includeBuildInference"] = True
         payload["inferenceByRow"] = inference_by_row

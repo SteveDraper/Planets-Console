@@ -202,7 +202,7 @@ These families are ranked `solutions[]` actions (counts + pairing when it exists
 
 ### 3.8 Product status persist and stream
 
-Locked in [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). Product/solver contract; not shipped.
+Locked in [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). **Persist / first-class `status` shipped** ([Implement inference admission skip and product-status persist](https://github.com/SteveDraper/Planets-Console/issues/366)). Table-stream `complete` payload, BFF `displayStatus` chrome, and SPA cell chrome are the next phase.
 
 **Wire `status`** is first-class (same field as today). The player-facing contracts:
 

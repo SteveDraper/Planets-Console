@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING
 
 from api.analytics.catalog import catalog_entry
 from api.analytics.compute_context import AnalyticComputeContext, invoke_analytic_compute
+from api.analytics.military_score_inference.inference_admission import (
+    is_build_inference_available,
+)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores.compute_orchestration import (
@@ -81,7 +84,11 @@ def compute_scores_table(ctx: AnalyticComputeContext) -> dict:
         _score_row(score, players_by_id=players_by_id, races_by_id=races_by_id)
         for score in turn.scores
     ]
-    return {"analyticId": ANALYTIC_ID, "rows": rows}
+    return {
+        "analyticId": ANALYTIC_ID,
+        "rows": rows,
+        "buildInferenceAvailable": is_build_inference_available(turn),
+    }
 
 
 def get_scores_table(

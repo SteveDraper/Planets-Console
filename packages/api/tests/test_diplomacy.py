@@ -65,3 +65,31 @@ def test_share_intel_partner_ids_skips_self_row():
         _relation(playerid=10, playertoid=5, relationto=3, relationfrom=3),
     ]
     assert share_intel_partner_ids(relations, 10) == frozenset({5})
+
+
+def test_is_mutual_full_alliance_requires_both_directions():
+    from api.concepts.diplomacy import is_mutual_full_alliance
+
+    assert is_mutual_full_alliance(
+        _relation(playerid=8, playertoid=3, relationto=4, relationfrom=4)
+    )
+    assert not is_mutual_full_alliance(
+        _relation(playerid=8, playertoid=3, relationto=4, relationfrom=1)
+    )
+    assert not is_mutual_full_alliance(
+        _relation(playerid=8, playertoid=3, relationto=3, relationfrom=3)
+    )
+
+
+def test_is_live_inbound_full_alliance_mutual_only():
+    from api.concepts.diplomacy import is_live_inbound_full_alliance
+
+    relations = [
+        _relation(playerid=8, playertoid=3, relationto=4, relationfrom=4),
+        _relation(playerid=8, playertoid=4, relationto=4, relationfrom=1),
+        _relation(playerid=8, playertoid=2, relationto=3, relationfrom=3),
+    ]
+    assert is_live_inbound_full_alliance(relations, viewpoint_player_id=8, target_player_id=3)
+    assert not is_live_inbound_full_alliance(relations, viewpoint_player_id=8, target_player_id=4)
+    assert not is_live_inbound_full_alliance(relations, viewpoint_player_id=8, target_player_id=2)
+    assert not is_live_inbound_full_alliance(relations, viewpoint_player_id=0, target_player_id=3)

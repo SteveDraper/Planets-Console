@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.military_score_inference.accelerated_start import needs_accelerated_backfill
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -33,6 +32,21 @@ from api.models.game import TurnInfo
 STATUS_NO_PRIOR_TURN = "no_prior_turn"
 STATUS_PLAYER_NOT_FOUND = "player_not_found"
 STATUS_SOLVER_ERROR = "solver_error"
+STATUS_VIEWPOINT_OWNER = "viewpoint_owner"
+STATUS_DEAD = "dead"
+STATUS_FULL_ALLIANCE = "full_alliance"
+STATUS_HORWASP = "horwasp"
+
+INFERENCE_ADMISSION_SKIP_STATUSES = frozenset(
+    {
+        STATUS_VIEWPOINT_OWNER,
+        STATUS_DEAD,
+        STATUS_FULL_ALLIANCE,
+        STATUS_HORWASP,
+        STATUS_NO_PRIOR_TURN,
+        STATUS_PLAYER_NOT_FOUND,
+    }
+)
 
 
 def inference_result_to_api_payload(
@@ -75,33 +89,6 @@ def inference_result_to_api_payload(
         diagnostics=diagnostics,
         observation=observation,
         catalog=catalog,
-    )
-
-
-def no_prior_turn_reason(turn: TurnInfo) -> str:
-    if turn.settings.turn <= 1:
-        return "first_turn"
-    if needs_accelerated_backfill(turn.settings.turn, turn.settings):
-        return "accelerated_backfill_unavailable"
-    return "first_turn"
-
-
-def no_prior_turn_inference_api_payload(
-    turn: TurnInfo,
-    observation: InferenceObservation,
-) -> dict[str, object]:
-    from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
-
-    return inference_api_payload(
-        status=STATUS_NO_PRIOR_TURN,
-        summary="Prior turn score data unavailable",
-        solutions=(),
-        diagnostics=build_inference_solver_diagnostics(
-            turn=turn.settings.turn,
-            observation=observation,
-            turn_info=turn,
-            extra={"reason": no_prior_turn_reason(turn)},
-        ),
     )
 
 

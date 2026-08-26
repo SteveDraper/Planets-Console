@@ -364,7 +364,13 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
     """Fleet@(N-1) persist drops scores@N cache and reschedules the affected player's stream row."""
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_scheduler(monkeypatch)
-    player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
+    target_player_id = next(
+        row.ownerid for row in sample_turn.scores if row.ownerid != sample_turn.player.id
+    )
+    other_player_id = next(
+        row.ownerid for row in sample_turn.scores if row.ownerid != target_player_id
+    )
+    player_ids = (target_player_id, other_player_id)
     host_turn, ctx = _host_turn_context(
         sample_turn,
         persistence,

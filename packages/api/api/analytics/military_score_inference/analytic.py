@@ -28,12 +28,16 @@ from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHul
 from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_split_inference,
 )
+from api.analytics.military_score_inference.inference_admission import (
+    InferenceAdmissionSkip,
+    admission_skip_api_payload,
+)
 from api.analytics.military_score_inference.inference_api_payload import (
+    STATUS_NO_PRIOR_TURN,
     STATUS_SOLVER_ERROR,
     format_inference_summary,
     inference_api_payload,
     inference_result_to_api_payload,
-    no_prior_turn_inference_api_payload,
 )
 from api.analytics.military_score_inference.inference_path import (
     InferencePath,
@@ -217,8 +221,14 @@ def _no_prior_turn_inference_result(
     turn: TurnInfo,
     resolved_observation: InferenceObservation,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
+    del turn
     return (
-        no_prior_turn_inference_api_payload(turn, resolved_observation),
+        admission_skip_api_payload(
+            InferenceAdmissionSkip(
+                status=STATUS_NO_PRIOR_TURN,
+                summary="Prior turn score data unavailable",
+            )
+        ),
         resolved_observation,
         None,
     )

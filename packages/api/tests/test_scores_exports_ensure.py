@@ -23,7 +23,7 @@ from tests.export_chain_test_fixtures import export_chain_query_context, seed_fl
 from tests.scores_exports_helpers import (
     GAME_ID,
     ensure_missing_step,
-    first_player_id,
+    inference_target_player_id,
     perspective,
     prior_turn_ensure_context,
     put_persisted_row,
@@ -107,7 +107,7 @@ def test_probe_counts_current_turn_missing_without_computing(sample_turn, persis
     """Probe must count current-turn scheduler attachment without scheduling or materializing."""
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     ctx = export_chain_query_context(
         sample_turn,
@@ -131,7 +131,7 @@ def test_ensure_invalidates_materialized_tree_cache(sample_turn, persistence):
     """Materialized tree cached before ensure must not survive scheduler mutation."""
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = scores_query_context(sample_turn, persistence=persistence, scheduler=scheduler)
     scope = ExportScope(
         game_id=GAME_ID,
@@ -182,7 +182,7 @@ def test_probe_reports_current_turn_work_without_scheduling(sample_turn, persist
     """Probe must count missing current-turn work without attaching the scheduler."""
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     ctx = export_chain_query_context(
         sample_turn,
@@ -366,7 +366,7 @@ def test_ensure_no_prior_turn_records_ephemeral_without_schedule(sample_turn, pe
         settings=replace(sample_turn.settings, turn=2),
         game=replace(sample_turn.game, turn=2),
     )
-    player_id = first_player_id(turn_2)
+    player_id = inference_target_player_id(turn_2)
     # No turn 3 in storage → accelerated backfill unavailable → no_prior_turn.
     ctx = scores_query_context(
         turn_2,
@@ -416,7 +416,7 @@ def test_ensure_cheap_terminal_persist_does_not_notify_row_persisted(
         settings=replace(sample_turn.settings, turn=2),
         game=replace(sample_turn.game, turn=2),
     )
-    player_id = first_player_id(turn_2)
+    player_id = inference_target_player_id(turn_2)
     notified: list[tuple[int, int, int, int]] = []
     persistence.on_row_persisted = lambda game_id, perspective_id, host_turn, row_player_id: (
         notified.append((game_id, perspective_id, host_turn, row_player_id))
@@ -442,7 +442,7 @@ def test_ensure_cheap_terminal_persist_does_not_notify_row_persisted(
 def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     ctx = export_chain_query_context(
         sample_turn,
@@ -469,7 +469,7 @@ def test_ensure_current_turn_scheduler_passes_fleet_torp_input_status(
 ):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = export_chain_query_context(
         sample_turn,
         persistence=persistence,
@@ -501,7 +501,7 @@ def test_ensure_current_turn_scheduler_passes_fleet_torp_input_status(
 def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
     schedule_inference_row(
@@ -531,7 +531,7 @@ def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):
 def test_ensure_no_op_when_row_persisted_stopped(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     put_persisted_row(
         persistence,
@@ -559,7 +559,7 @@ def test_ensure_no_op_when_row_persisted_stopped(sample_turn, persistence):
 
 
 def test_probe_omits_stopped_persisted_row(sample_turn, persistence):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = export_chain_query_context(
         sample_turn,
         persistence=persistence,
@@ -587,7 +587,7 @@ def test_probe_omits_stopped_persisted_row(sample_turn, persistence):
 
 def test_probe_reports_scores_depends_on_fleet_prior_turn(sample_turn, persistence):
     """Probe must count fleet@N-1 before current-turn scores when the chain is incomplete."""
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     turn_number = sample_turn.settings.turn
     prior_turn = turn_number - 1
     ctx = export_chain_query_context(sample_turn, persistence=persistence)
@@ -630,7 +630,7 @@ def test_probe_reports_scores_depends_on_fleet_prior_turn(sample_turn, persisten
 def test_ensure_no_op_when_row_persisted(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     put_persisted_row(
         persistence,

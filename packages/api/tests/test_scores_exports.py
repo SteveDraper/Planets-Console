@@ -19,8 +19,8 @@ from api.analytics.scores.exports import EXPORT_CATALOG
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.scores_exports_helpers import (
-    first_player_id,
     first_turn_from,
+    inference_target_player_id,
     materialize_scores_tree,
     put_persisted_row,
     schedule_row_with_ladder,
@@ -42,7 +42,7 @@ def test_export_registry_includes_non_empty_scores_catalog():
 
 
 def test_complete_empty_solutions_returns_path_none(sample_turn, persistence):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     put_persisted_row(
         persistence,
         sample_turn,
@@ -118,7 +118,7 @@ def test_solutions_diagnostics_from_wire_complete_event():
 
 
 def test_top_solution_query_returns_full_build(sample_turn, persistence):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     put_persisted_row(
         persistence,
         sample_turn,
@@ -173,7 +173,7 @@ def test_top_solution_query_returns_full_build(sample_turn, persistence):
 
 
 def test_resolve_scores_services_fails_without_injection(sample_turn):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
@@ -188,7 +188,7 @@ def test_resolve_scores_services_fails_without_injection(sample_turn):
 
 
 def test_resolve_scores_services_fails_on_wrong_type(sample_turn):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
@@ -205,7 +205,7 @@ def test_resolve_scores_services_fails_on_wrong_type(sample_turn):
 
 def test_first_turn_materializes_complete_without_ensure(sample_turn):
     first_turn = first_turn_from(sample_turn)
-    player_id = first_player_id(first_turn)
+    player_id = inference_target_player_id(first_turn)
 
     ctx = scores_query_context(
         first_turn,
@@ -224,7 +224,7 @@ def test_first_turn_materializes_complete_without_ensure(sample_turn):
 def test_scheduler_branch_surfaces_ladder_diagnostics_via_query(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     schedule_row_with_ladder(
         scheduler,
         sample_turn,

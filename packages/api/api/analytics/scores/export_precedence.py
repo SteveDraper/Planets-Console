@@ -7,14 +7,15 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.military_score_inference.inference_api_payload import (
-    STATUS_NO_PRIOR_TURN,
-    STATUS_PLAYER_NOT_FOUND,
+    INFERENCE_ADMISSION_SKIP_STATUSES,
     STATUS_SOLVER_ERROR,
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
+    STATUS_MINE_SCORE_RESIDUAL,
+    STATUS_MODERATE_RESIDUAL,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
@@ -45,11 +46,16 @@ ScoresExportPrecedenceBranch = Literal[
     "empty",
 ]
 
-PERSISTABLE_INFERENCE_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
-_FALLBACK_COMPLETE_PERSISTED_STATUSES = frozenset(
+PERSISTABLE_INFERENCE_STATUSES = frozenset(
     {
-        STATUS_NO_PRIOR_TURN,
-        STATUS_PLAYER_NOT_FOUND,
+        STATUS_EXACT,
+        STATUS_NO_EXACT_SOLUTION,
+        STATUS_MODERATE_RESIDUAL,
+        STATUS_MINE_SCORE_RESIDUAL,
+    }
+)
+_FALLBACK_COMPLETE_PERSISTED_STATUSES = INFERENCE_ADMISSION_SKIP_STATUSES | frozenset(
+    {
         STATUS_INVALID_PROBLEM,
         STATUS_SOLVER_ERROR,
     }

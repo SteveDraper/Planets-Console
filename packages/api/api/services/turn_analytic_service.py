@@ -337,6 +337,7 @@ class TurnAnalyticService:
         return get_scores_row_inference(
             turn,
             player_id,
+            perspective=perspective,
             load_scoreboard_turn=load_scoreboard_turn,
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_resolution.overlay,
@@ -365,6 +366,12 @@ class TurnAnalyticService:
             turn_number,
             username=username,
         )
+        from api.analytics.military_score_inference.inference_admission import (
+            is_build_inference_available,
+        )
+
+        if not is_build_inference_available(turn):
+            return iter(())
 
         def resolve_mask_for_player(player_id: int):
             return self._hull_catalog_masks.resolve_mask_for_player_on_turn(

@@ -10,13 +10,12 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.inference_api_payload import (
-    STATUS_NO_PRIOR_TURN,
-    STATUS_PLAYER_NOT_FOUND,
-    no_prior_turn_inference_api_payload,
+from api.analytics.military_score_inference.inference_admission import (
+    admission_skip_complete_event,
+    is_build_inference_available,
+    resolve_inference_admission_skip,
 )
 from api.analytics.military_score_inference.inference_path import (
-    InferencePath,
     resolve_inference_path,
 )
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -45,9 +44,6 @@ from api.streaming.table_stream.multiplex import (
 )
 from api.streaming.table_stream.multiplex import (
     iter_multiplexed_stream_events,
-)
-from api.transport.inference_stream import (
-    inference_complete_event,
 )
 from api.transport.inference_stream_wire import domain_event_to_wire_events
 
@@ -104,24 +100,24 @@ def resolve_row_stream_admission(
     force_schedule: bool = False,
 ) -> RowStreamAdmission:
     """Decide whether a table-stream row is immediate, cached-complete, or tier-scheduled."""
-    if not force_schedule:
-        immediate = immediate_row_inference_events(
-            turn,
-            player_id,
-            load_scoreboard_turn=load_scoreboard_turn,
-        )
-        if immediate is not None:
-            return ImmediateRowAdmission(events=immediate)
+    immediate = immediate_row_inference_events(
+        turn,
+        player_id,
+        perspective=perspective,
+        load_scoreboard_turn=load_scoreboard_turn,
+    )
+    if immediate is not None:
+        return ImmediateRowAdmission(events=immediate)
 
-        if persistence is not None:
-            cached = persistence.wire_complete_for_row(
-                game_id,
-                perspective,
-                turn_number,
-                player_id,
-            )
-            if cached is not None:
-                return CachedCompleteRowAdmission(event=cached)
+    if not force_schedule and persistence is not None:
+        cached = persistence.wire_complete_for_row(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+        )
+        if cached is not None:
+            return CachedCompleteRowAdmission(event=cached)
 
     return ScheduleRowAdmission()
 
@@ -140,49 +136,19 @@ def immediate_row_inference_events(
     turn: TurnInfo,
     player_id: int,
     *,
+    perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
 ) -> tuple[dict[str, object], ...] | None:
     """Return terminal wire events when no scheduler work is needed, else None."""
-    score = next((row for row in turn.scores if row.ownerid == player_id), None)
-    if score is None:
-        return (
-            inference_complete_event(
-                status=STATUS_PLAYER_NOT_FOUND,
-                summary=f"No score row for player {player_id}",
-                solution_count=0,
-                is_complete=True,
-                diagnostics={"playerId": player_id, "turn": turn.settings.turn},
-                solutions=[],
-            ),
-        )
-
-    observation = build_inference_observation(
-        score,
+    skip = resolve_inference_admission_skip(
         turn,
+        player_id,
+        perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
     )
-    path, _segments = resolve_inference_path(
-        score,
-        turn,
-        load_scoreboard_turn=load_scoreboard_turn,
-    )
-    if path != InferencePath.NO_PRIOR_TURN:
+    if skip is None:
         return None
-
-    payload = no_prior_turn_inference_api_payload(turn, observation)
-    wire_solutions = payload.get("solutions")
-    return (
-        inference_complete_event(
-            status=str(payload.get("status", STATUS_NO_PRIOR_TURN)),
-            summary=str(payload.get("summary", "")),
-            solution_count=int(payload.get("solutionCount", 0)),
-            is_complete=bool(payload.get("isComplete", True)),
-            diagnostics=(
-                payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else None
-            ),
-            solutions=wire_solutions if isinstance(wire_solutions, list) else [],
-        ),
-    )
+    return (admission_skip_complete_event(skip),)
 
 
 def schedule_inference_row(
@@ -327,6 +293,9 @@ def iter_scores_table_inference_events(
     from api.analytics.military_score_inference.inference_table_stream_controller import (
         InferenceTableStreamController,
     )
+
+    if not is_build_inference_available(turn):
+        return
 
     turn_number = turn.settings.turn
     stream_scope = InferenceStreamScope(

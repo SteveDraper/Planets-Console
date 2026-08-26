@@ -19,9 +19,9 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 from tests.scores_exports_helpers import (
     GAME_ID,
-    first_player_id,
     first_turn_from,
     inference_solution,
+    inference_target_player_id,
     materialize_scores_tree,
     perspective,
     put_persisted_row,
@@ -34,7 +34,7 @@ from tests.scores_exports_helpers import (
 
 
 def test_turn_not_stored_query_unavailable(sample_turn):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
 
     def load_turn(_turn_number: int):
         return None
@@ -56,7 +56,7 @@ def test_turn_not_stored_query_unavailable(sample_turn):
 
 
 def test_turn_not_stored_materialize_asserts(sample_turn):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
 
     def load_turn(_turn_number: int):
         return None
@@ -74,7 +74,7 @@ def test_turn_not_stored_materialize_asserts(sample_turn):
 
 def test_not_started_when_no_persistence_or_scheduler(sample_turn):
     reset_inference_row_scheduler_for_tests()
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = scores_query_context(sample_turn, scheduler=InferenceRowScheduler(worker_count=0))
     tree, _scope = materialize_scores_tree(ctx, player_id)
     assert tree["meta"]["searchStatus"] == "not_started"
@@ -84,7 +84,7 @@ def test_not_started_when_no_persistence_or_scheduler(sample_turn):
 def test_in_progress_when_scheduler_holds_row(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     schedule_row_with_ladder(
         scheduler,
         sample_turn,
@@ -123,7 +123,7 @@ def test_in_progress_when_scheduler_holds_row(sample_turn):
 def test_persisted_row_replay_overrides_scheduler_state(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     put_persisted_row(
         persistence,
         sample_turn,
@@ -182,7 +182,7 @@ def test_persisted_row_replay_overrides_scheduler_state(sample_turn, persistence
 def test_paused_when_globally_paused_on_active_stream(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     scheduler.begin_scope(stream_scope)
     schedule_row_with_ladder(
@@ -201,7 +201,7 @@ def test_paused_when_globally_paused_on_active_stream(sample_turn):
 def test_in_progress_when_scheduler_pre_ladder(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
     scheduled = schedule_inference_row(
         scheduler,
@@ -224,7 +224,7 @@ def test_in_progress_when_scheduler_pre_ladder(sample_turn):
 def test_stopped_when_ladder_time_limited(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     schedule_row_with_ladder(
         scheduler,
         sample_turn,
@@ -256,7 +256,7 @@ def test_stopped_when_ladder_time_limited(sample_turn):
 def test_stopped_when_ladder_last_status_stopped(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     schedule_row_with_ladder(
         scheduler,
         sample_turn,
@@ -285,7 +285,7 @@ def test_stopped_when_ladder_last_status_stopped(sample_turn):
 
 
 def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     put_persisted_row(
         persistence,
         sample_turn,
@@ -321,7 +321,7 @@ def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
 
 
 def test_materialize_omits_hull_catalog_mask_when_resolver_returns_none(sample_turn):
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
 
     def resolve_none_mask(_turn, _player_id):
         return None
@@ -345,7 +345,7 @@ def test_materialize_omits_hull_catalog_mask_when_resolver_returns_none(sample_t
 
 def test_first_turn_immediate_complete_is_ensure_satisfied_not_persisted(sample_turn):
     first_turn = first_turn_from(sample_turn)
-    player_id = first_player_id(first_turn)
+    player_id = inference_target_player_id(first_turn)
 
     ctx = scores_query_context(
         first_turn,
