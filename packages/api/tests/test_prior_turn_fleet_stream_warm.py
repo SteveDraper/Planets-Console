@@ -50,6 +50,7 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
+from tests.scores_exports_helpers import inference_target_player_id
 
 
 @pytest.fixture(autouse=True)
@@ -535,7 +536,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     """
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_scheduler(monkeypatch, worker_count=1)
-    player_id = sample_turn.scores[0].ownerid
+    player_id = inference_target_player_id(sample_turn)
     player_ids = (player_id,)
     host_turn, ctx = _host_turn_context(
         sample_turn,
@@ -689,7 +690,7 @@ def test_inference_overlay_changes_diagnostics_vs_empty_overlay(
     """Scores row inference: fleet overlay changes torp admission diagnostics."""
     from api.analytics.scores.inference import get_scores_row_inference
 
-    player_id = sample_turn.scores[0].ownerid
+    player_id = inference_target_player_id(sample_turn)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
     host_turn, ctx = _host_turn_context(
         sample_turn,
@@ -765,7 +766,7 @@ def test_get_scores_row_inference_emits_applied_fleet_torp_input_status(
     """Row inference diagnostics report applied when prior fleet snapshot exists."""
     from api.analytics.scores.inference import get_scores_row_inference
 
-    player_id = sample_turn.scores[0].ownerid
+    player_id = inference_target_player_id(sample_turn)
     host_turn, ctx = _host_turn_context(
         sample_turn,
         persistence,
