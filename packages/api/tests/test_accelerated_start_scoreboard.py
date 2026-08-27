@@ -223,7 +223,8 @@ def test_unreliable_turn2_fails_when_turn3_not_stored():
         load_scoreboard_turn=lambda _turn_number: None,
     )
     assert payload["status"] == STATUS_NO_PRIOR_TURN
-    assert payload["diagnostics"]["reason"] == "accelerated_backfill_unavailable"
+    assert payload["summary"] == "Prior turn score data unavailable"
+    assert "diagnostics" not in payload
 
 
 def test_corpus_case_still_infers_exact_with_accelerated_adjustment():

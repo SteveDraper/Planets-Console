@@ -802,7 +802,7 @@ def test_recompute_force_schedules_immediate_path_players(
     monkeypatch,
     memory_backend,
 ):
-    """Explicit recompute must enqueue tier jobs even for immediate-path rows."""
+    """Skip-set rows stay immediate even on explicit recompute; never ``tier_solve``."""
     reset_inference_table_stream_registry_for_tests()
     scheduler = _install_workerless_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in first_turn.scores[:2])
@@ -834,7 +834,7 @@ def test_recompute_force_schedules_immediate_path_players(
     invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
     invalidation.recompute_host_turn(628580, 1, turn_number)
 
-    _wait_until(lambda: len(_run_ids_for_players(scheduler, player_ids)) == len(player_ids))
+    assert len(_run_ids_for_players(scheduler, player_ids)) == 0
 
     _end_open_table_stream(_stream_scope(first_turn), scheduler)
     thread.join(timeout=2.0)

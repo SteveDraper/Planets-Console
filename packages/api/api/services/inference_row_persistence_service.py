@@ -154,6 +154,25 @@ class InferenceRowPersistenceService:
             cleared.add(host_turn)
         return cleared
 
+    def has_mine_residual_sticky_prior(
+        self,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
+    ) -> bool:
+        """True when the prior host-turn persisted row is ``mine_score_residual``.
+
+        Skip, ``no_exact_solution``, and ``moderate_residual`` do not set sticky.
+        Readers (hopeless classifier) derive sticky from this persist, not a flag.
+        """
+        if host_turn <= 1:
+            return False
+        from api.analytics.military_score_inference.solver import STATUS_MINE_SCORE_RESIDUAL
+
+        prior = self.get_row(game_id, perspective, host_turn - 1, player_id)
+        return prior is not None and prior.status == STATUS_MINE_SCORE_RESIDUAL
+
     def persist_row_complete_for_scope(
         self,
         event: RowComplete,

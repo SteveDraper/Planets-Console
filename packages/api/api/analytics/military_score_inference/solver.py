@@ -48,6 +48,8 @@ from api.concepts.races import is_horwasp
 STATUS_EXACT = "exact"
 STATUS_INVALID_PROBLEM = "invalid_problem"
 STATUS_NO_EXACT_SOLUTION = "no_exact_solution"
+STATUS_MODERATE_RESIDUAL = "moderate_residual"
+STATUS_MINE_SCORE_RESIDUAL = "mine_score_residual"
 STATUS_STOPPED = "stopped"
 STATUS_TIME_LIMITED = "time_limited"
 

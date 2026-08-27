@@ -103,6 +103,7 @@ def test_scores_table_returns_scoreboard_columns_and_deltas():
     assert response.status_code == 200
     data = response.json()
     assert data["analyticId"] == "scores"
+    assert data["buildInferenceAvailable"] is True
     assert data["columns"] == [
         "Race (player)",
         "Planets",
@@ -133,6 +134,7 @@ def test_scores_table_with_build_inference_adds_column_and_player_stubs():
     assert data["columns"][-1] == "Build inference"
     assert len(data["rows"][0]) == len(data["columns"]) - 1
     assert data["inferenceByRow"][0] == {"playerId": INFERENCE_PLAYER_ID}
+    assert data["buildInferenceAvailable"] is True
 
 
 def test_scores_inference_returns_row_detail():

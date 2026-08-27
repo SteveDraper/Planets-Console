@@ -28,6 +28,7 @@ from tests.scores_exports_helpers import (
     GAME_ID,
     ensure_missing_step,
     first_player_id,
+    inference_target_player_id,
     perspective,
     put_persisted_row,
     schedule_row_with_ladder,
@@ -232,7 +233,7 @@ def test_materialized_tree_surfaces_complete_scores_status(sample_turn, persiste
 def test_materialized_tree_surfaces_in_progress_scores_status(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     turn_number = 8
     host_turn, stored_turns = host_turn_at(sample_turn, turn_number)
     schedule_row_with_ladder(
@@ -258,7 +259,7 @@ def test_materialized_tree_includes_placeholder_records_with_incomplete_search(
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
 
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     turn = turn_with_score_delta(
         sample_turn,
         turn_number=5,

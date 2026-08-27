@@ -50,6 +50,22 @@ def perspective(sample_turn) -> int:
 
 
 def first_player_id(sample_turn) -> int:
+    """RST scoreboard first row; often the viewpoint owner. Use
+    ``inference_target_player_id`` for scores ``tier_solve`` / ensure tests.
+    """
+    return sample_turn.scores[0].ownerid
+
+
+def inference_target_player_id(sample_turn) -> int:
+    """First scoreboard owner that is not the shell viewpoint.
+
+    Viewpoint-owner rows are inference admission skips and must not be used as
+    the default target for scores ``tier_solve`` / ensure tests.
+    """
+    viewpoint = sample_turn.player.id
+    for score in sample_turn.scores:
+        if score.ownerid != viewpoint:
+            return score.ownerid
     return sample_turn.scores[0].ownerid
 
 
@@ -181,7 +197,7 @@ def prior_turn_ensure_context(
     )
 
     stored_turns, _, _ = prior_turn_chain(sample_turn, prior_turn=prior_turn)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
 
     def load_turn(turn_number: int):
         return stored_turns.get(turn_number)

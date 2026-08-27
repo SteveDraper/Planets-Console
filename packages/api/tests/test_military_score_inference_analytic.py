@@ -61,7 +61,9 @@ def test_scores_table_never_includes_inference(sample_turn):
 
 
 def test_scores_row_inference_returns_solver_payload(sample_turn):
-    player_id = sample_turn.scores[0].ownerid
+    player_id = next(
+        score.ownerid for score in sample_turn.scores if score.ownerid != sample_turn.player.id
+    )
     inference = get_scores_row_inference(sample_turn, player_id)
     assert inference["playerId"] == player_id
     assert inference["status"] in {
@@ -76,19 +78,19 @@ def test_scores_row_inference_returns_solver_payload(sample_turn):
 
 
 def test_first_turn_produces_no_prior_turn_status(first_turn):
-    score = first_turn.scores[0]
+    score = next(row for row in first_turn.scores if row.ownerid != first_turn.player.id)
     inference = infer_military_score_build(score, first_turn)
     assert inference["status"] == STATUS_NO_PRIOR_TURN
     assert inference["summary"] == "Prior turn score data unavailable"
-    assert inference["diagnostics"]["reason"] == "first_turn"
+    assert "diagnostics" not in inference
 
 
 def test_first_turn_row_inference_produces_no_prior_turn_status(first_turn):
-    score = first_turn.scores[0]
+    score = next(row for row in first_turn.scores if row.ownerid != first_turn.player.id)
     inference = get_scores_row_inference(first_turn, score.ownerid)
     assert inference["status"] == STATUS_NO_PRIOR_TURN
     assert inference["summary"] == "Prior turn score data unavailable"
-    assert inference["diagnostics"]["reason"] == "first_turn"
+    assert "diagnostics" not in inference
 
 
 def test_build_inference_observation_maps_score_deltas(sample_turn):
@@ -119,8 +121,12 @@ def test_is_after_ship_limit_uses_game_total_for_standard_queue(sample_turn):
     assert is_after_ship_limit(over_limit_turn, score) is True
 
 
+def _non_viewpoint_owner_id(turn) -> int:
+    return next(score.ownerid for score in turn.scores if score.ownerid != turn.player.id)
+
+
 def test_solver_failure_is_isolated_per_player(sample_turn):
-    failing_player_id = sample_turn.scores[0].ownerid
+    failing_player_id = _non_viewpoint_owner_id(sample_turn)
 
     def _solve_side_effect(problem):
         if problem.observation.player_id == failing_player_id:
@@ -319,7 +325,7 @@ def test_constraints_payload_exposes_requested_pp_as_diagnostic_only():
 
 
 def test_row_inference_includes_structured_solver_diagnostics(sample_turn):
-    player_id = sample_turn.scores[0].ownerid
+    player_id = _non_viewpoint_owner_id(sample_turn)
     inference = get_scores_row_inference(sample_turn, player_id)
     diagnostics = inference["diagnostics"]
     assert diagnostics["turn"] == sample_turn.settings.turn
@@ -357,7 +363,7 @@ def test_build_inference_solver_diagnostics_passes_through_solver_owned_keys():
 
 
 def test_inference_diagnostics_include_policy_ladder_fields(sample_turn):
-    score = sample_turn.scores[0]
+    score = next(row for row in sample_turn.scores if row.ownerid != sample_turn.player.id)
     inference = infer_military_score_build(score, sample_turn)
     diagnostics = inference["diagnostics"]
     assert "policy_step_id" in diagnostics

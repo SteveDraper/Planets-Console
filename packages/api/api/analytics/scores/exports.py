@@ -10,6 +10,9 @@ from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefix
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.inference_admission import (
+    is_build_inference_available,
+)
 from api.analytics.military_score_inference.inference_stream_rows import (
     ImmediateRowAdmission,
     immediate_row_inference_events,
@@ -236,6 +239,8 @@ def is_scores_export_turn_evidence_closed(ctx: AnalyticQueryContext, scope: Expo
     turn = ctx.load_turn(scope.turn)
     if turn is None:
         return True
+    if not is_build_inference_available(turn):
+        return True
 
     from api.analytics.scores.export_snapshot import gather_scores_materialization_probe_snapshot
 
@@ -276,6 +281,8 @@ def admit_scores_export_work(
     services = resolve_scores_services(ctx)
     turn = ctx.load_turn(scope.turn)
     if turn is None:
+        return True
+    if not is_build_inference_available(turn):
         return True
 
     snapshot = gather_scores_ensure_probe_snapshot(ctx, services, scope, turn)
@@ -336,6 +343,7 @@ def _ensure_admit_inference_row(
     immediate = immediate_row_inference_events(
         turn,
         player_id,
+        perspective=scope.perspective,
         load_scoreboard_turn=ctx.load_turn,
     )
     if immediate is not None:
@@ -416,9 +424,9 @@ def _persist_immediate_row_admission(
 ) -> None:
     """Write ImmediateRowAdmission to inference-row storage when missing.
 
-    ``no_prior_turn`` / ``player_not_found`` are fallback-complete statuses: once
-    on disk, materialization probe and fleet ``turnEvidenceAtN`` see a closed
-    terminal without relying on ensure-ephemeral.
+    ImmediateRowAdmission cheap terminals (the inference admission skip set)
+    persist here so materialization probe and fleet ``turnEvidenceAtN`` see a
+    closed terminal without relying on ensure-ephemeral.
     """
     if services.persistence is None or scope.player_id is None:
         return

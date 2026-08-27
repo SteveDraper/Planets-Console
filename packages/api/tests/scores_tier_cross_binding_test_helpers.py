@@ -39,7 +39,8 @@ def reset_cross_binding_registries():
 
 
 def _session(sample_turn) -> InferenceRowStreamSession:
-    score = sample_turn.scores[0]
+    viewpoint = sample_turn.player.id
+    score = next(row for row in sample_turn.scores if row.ownerid != viewpoint)
     return InferenceRowStreamSession(
         player_id=score.ownerid,
         observation=build_inference_observation(score, sample_turn),

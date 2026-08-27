@@ -330,7 +330,7 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
 
     from tests.scores_exports_helpers import (
         GAME_ID,
-        first_player_id,
+        inference_target_player_id,
         perspective,
         scores_query_context,
     )
@@ -338,7 +338,7 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = scores_query_context(
         sample_turn,
         persistence=persistence,
@@ -407,7 +407,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
 
     from tests.scores_exports_helpers import (
         GAME_ID,
-        first_player_id,
+        inference_target_player_id,
         perspective,
         scores_query_context,
     )
@@ -415,7 +415,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = scores_query_context(
         sample_turn,
         persistence=persistence,
@@ -482,7 +482,7 @@ def test_build_scores_tier_solve_job_wire_raises_when_ensure_satisfied_without_a
 
     from tests.scores_exports_helpers import (
         GAME_ID,
-        first_player_id,
+        inference_target_player_id,
         perspective,
         scores_query_context,
     )
@@ -490,7 +490,7 @@ def test_build_scores_tier_solve_job_wire_raises_when_ensure_satisfied_without_a
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
-    player_id = first_player_id(sample_turn)
+    player_id = inference_target_player_id(sample_turn)
     ctx = scores_query_context(
         sample_turn,
         persistence=persistence,
@@ -549,7 +549,7 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
 
     from tests.scores_exports_helpers import (
         GAME_ID,
-        first_player_id,
+        inference_target_player_id,
         perspective,
         scores_query_context,
     )
@@ -564,7 +564,7 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
         settings=replace(sample_turn.settings, turn=2),
         game=replace(sample_turn.game, turn=2),
     )
-    player_id = first_player_id(turn_2)
+    player_id = inference_target_player_id(turn_2)
     ctx = scores_query_context(
         turn_2,
         persistence=persistence,

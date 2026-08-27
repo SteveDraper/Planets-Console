@@ -28,12 +28,16 @@ from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHul
 from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_split_inference,
 )
+from api.analytics.military_score_inference.inference_admission import (
+    admission_skip_api_payload,
+    admission_skip_for_status,
+)
 from api.analytics.military_score_inference.inference_api_payload import (
+    STATUS_NO_PRIOR_TURN,
     STATUS_SOLVER_ERROR,
     format_inference_summary,
     inference_api_payload,
     inference_result_to_api_payload,
-    no_prior_turn_inference_api_payload,
 )
 from api.analytics.military_score_inference.inference_path import (
     InferencePath,
@@ -214,11 +218,10 @@ def build_inference_solver_diagnostics(
 
 
 def _no_prior_turn_inference_result(
-    turn: TurnInfo,
     resolved_observation: InferenceObservation,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
     return (
-        no_prior_turn_inference_api_payload(turn, resolved_observation),
+        admission_skip_api_payload(admission_skip_for_status(STATUS_NO_PRIOR_TURN)),
         resolved_observation,
         None,
     )
@@ -245,7 +248,7 @@ def _run_accelerated_backfill_inference(
     )
     if backfill is not None:
         return backfill
-    return _no_prior_turn_inference_result(turn, resolved_observation)
+    return _no_prior_turn_inference_result(resolved_observation)
 
 
 def _run_accelerated_split_inference_path(
@@ -445,7 +448,7 @@ def run_inference_with_artifacts(
         load_scoreboard_turn=load_scoreboard_turn,
     )
     if path == InferencePath.NO_PRIOR_TURN:
-        return _no_prior_turn_inference_result(turn, resolved_observation)
+        return _no_prior_turn_inference_result(resolved_observation)
     if path == InferencePath.ACCELERATED_BACKFILL:
         return _run_accelerated_backfill_inference(
             score,

@@ -231,7 +231,7 @@ def test_hatch_read_scores_scheduler_held_row_is_in_progress(sample_turn):
     from api.analytics.scores.exports import EXPORT_CATALOG
     from api.compute.export_ensure import export_scope_is_ensure_final
 
-    from tests.scores_exports_helpers import first_player_id as scores_player_id
+    from tests.scores_exports_helpers import inference_target_player_id as scores_player_id
     from tests.scores_exports_helpers import schedule_row_with_ladder, scores_query_context
 
     reset_inference_row_scheduler_for_tests()

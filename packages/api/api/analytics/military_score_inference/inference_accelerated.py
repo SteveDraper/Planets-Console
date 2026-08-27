@@ -22,6 +22,10 @@ from api.analytics.military_score_inference.host_turn_targets import (
     host_turn_functional_target_to_wire_dict,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.inference_admission import (
+    admission_skip_api_payload,
+    admission_skip_for_status,
+)
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
     _serialize_solution_with_arithmetic,
@@ -41,7 +45,6 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.row_complete_factory import (
-    build_row_complete_wire_payload,
     row_complete_wire_payload_from_api_payload,
 )
 from api.analytics.military_score_inference.solver import (
@@ -413,16 +416,11 @@ def build_accelerated_backfill_stream_row_complete(
         None,
     )
     if target is None or target.catalog is None or target.problem is None:
-        result = InferenceResult(
-            status=STATUS_NO_PRIOR_TURN,
-            solutions=(),
-            diagnostics={"reason": "accelerated_backfill_unavailable"},
-        )
+        skip = admission_skip_for_status(STATUS_NO_PRIOR_TURN)
         return RowComplete(
-            result=result,
-            wire_payload=build_row_complete_wire_payload(
-                result,
-                summary_override="Prior turn score data unavailable",
+            result=InferenceResult(status=skip.status, solutions=(), diagnostics={}),
+            wire_payload=row_complete_wire_payload_from_api_payload(
+                admission_skip_api_payload(skip)
             ),
         )
 

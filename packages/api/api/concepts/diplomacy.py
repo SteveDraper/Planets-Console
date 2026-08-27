@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from enum import IntEnum
 
-from api.models.player import Relation
+from api.models.player import Player, Relation
 
 # Share Intel and above (Full Alliance) count as intel partners.
 _SHARE_INTEL_MIN = 3
@@ -39,6 +39,51 @@ def diplomacy_tier_from_relation_code(code: int) -> DiplomacyTier | None:
 def is_share_intel_or_above(code: int) -> bool:
     """True when the code is Share Intel (3) or Full Alliance (4)."""
     return code >= _SHARE_INTEL_MIN
+
+
+def is_full_alliance(code: int) -> bool:
+    """True when the code is Full Alliance (4)."""
+    return code == DiplomacyTier.FULL_ALLIANCE
+
+
+def is_mutual_full_alliance(relation: Relation) -> bool:
+    """True when both directions on this row are Full Alliance."""
+    return is_full_alliance(relation.relationto) and is_full_alliance(relation.relationfrom)
+
+
+def is_live_inbound_full_alliance(
+    relations: Iterable[Relation],
+    *,
+    viewpoint_player_id: int,
+    target_player_id: int,
+) -> bool:
+    """True when the viewpoint has functioning inbound Full Alliance with target.
+
+    Functioning FA is mutual ``relationto`` and ``relationfrom`` at Full Alliance
+    on the viewpoint's ``Relation`` row. One-way FA and Share Intel do not
+    qualify. Spectator ``0`` has no diplomacy skip.
+    """
+    if viewpoint_player_id < 1 or target_player_id == viewpoint_player_id:
+        return False
+    for relation in relations:
+        if relation.playerid != viewpoint_player_id:
+            continue
+        if relation.playertoid != target_player_id:
+            continue
+        return is_mutual_full_alliance(relation)
+    return False
+
+
+def is_team_locked_full_alliance(
+    viewpoint: Player | None,
+    target: Player | None,
+) -> bool:
+    """True when both players share a non-zero team id (locked Full Alliance)."""
+    if viewpoint is None or target is None:
+        return False
+    if viewpoint.id == target.id:
+        return False
+    return viewpoint.teamid > 0 and viewpoint.teamid == target.teamid
 
 
 def share_intel_partner_ids(

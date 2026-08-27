@@ -9,6 +9,15 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.inference_accelerated import (
+    build_accelerated_backfill_stream_row_complete,
+)
+from api.analytics.military_score_inference.inference_admission import (
+    admission_skip_for_status,
+)
+from api.analytics.military_score_inference.inference_api_payload import (
+    STATUS_NO_PRIOR_TURN,
+)
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
@@ -31,7 +40,10 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.transport.inference_stream_wire import domain_event_to_wire_events
+from api.transport.inference_stream_wire import (
+    domain_event_to_wire_events,
+    row_complete_to_complete_wire_event,
+)
 
 
 def _accel_window_segment() -> AcceleratedInferenceSegment:
@@ -384,3 +396,21 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
     run_inference_tier_job(run, callbacks)
 
     assert captured == [stream_tier_time_limit_seconds()]
+
+
+def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_turn) -> None:
+    score = next(row for row in sample_turn.scores if row.ownerid != sample_turn.player.id)
+    complete = build_accelerated_backfill_stream_row_complete(
+        score,
+        sample_turn,
+        target_host_turn=1,
+        source_turn_number=3,
+        source_turn=sample_turn,
+        segment_solves=(),
+    )
+    skip = admission_skip_for_status(STATUS_NO_PRIOR_TURN)
+    assert complete.wire_payload.status == skip.status
+    assert complete.wire_payload.summary == skip.summary
+    assert complete.wire_payload.diagnostics is None
+    event = row_complete_to_complete_wire_event(complete)
+    assert "diagnostics" not in event
