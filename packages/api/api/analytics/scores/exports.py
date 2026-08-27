@@ -424,9 +424,9 @@ def _persist_immediate_row_admission(
 ) -> None:
     """Write ImmediateRowAdmission to inference-row storage when missing.
 
-    ``no_prior_turn`` / ``player_not_found`` are fallback-complete statuses: once
-    on disk, materialization probe and fleet ``turnEvidenceAtN`` see a closed
-    terminal without relying on ensure-ephemeral.
+    ImmediateRowAdmission cheap terminals (the inference admission skip set)
+    persist here so materialization probe and fleet ``turnEvidenceAtN`` see a
+    closed terminal without relying on ensure-ephemeral.
     """
     if services.persistence is None or scope.player_id is None:
         return
