@@ -94,8 +94,6 @@ def inference_result_to_api_payload(
 
 def format_inference_summary(result: InferenceResult) -> str:
     """Return compact row-level summary text for the inference column."""
-    if result.status == STATUS_NO_PRIOR_TURN:
-        return "Prior turn score data unavailable"
     if result.status == STATUS_INVALID_PROBLEM:
         reason = result.diagnostics.get("reason")
         if isinstance(reason, str) and reason:

@@ -29,8 +29,8 @@ from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_split_inference,
 )
 from api.analytics.military_score_inference.inference_admission import (
-    InferenceAdmissionSkip,
     admission_skip_api_payload,
+    admission_skip_for_status,
 )
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
@@ -218,17 +218,10 @@ def build_inference_solver_diagnostics(
 
 
 def _no_prior_turn_inference_result(
-    turn: TurnInfo,
     resolved_observation: InferenceObservation,
 ) -> tuple[dict[str, object], InferenceObservation, ActionCatalog | None]:
-    del turn
     return (
-        admission_skip_api_payload(
-            InferenceAdmissionSkip(
-                status=STATUS_NO_PRIOR_TURN,
-                summary="Prior turn score data unavailable",
-            )
-        ),
+        admission_skip_api_payload(admission_skip_for_status(STATUS_NO_PRIOR_TURN)),
         resolved_observation,
         None,
     )
@@ -255,7 +248,7 @@ def _run_accelerated_backfill_inference(
     )
     if backfill is not None:
         return backfill
-    return _no_prior_turn_inference_result(turn, resolved_observation)
+    return _no_prior_turn_inference_result(resolved_observation)
 
 
 def _run_accelerated_split_inference_path(
@@ -455,7 +448,7 @@ def run_inference_with_artifacts(
         load_scoreboard_turn=load_scoreboard_turn,
     )
     if path == InferencePath.NO_PRIOR_TURN:
-        return _no_prior_turn_inference_result(turn, resolved_observation)
+        return _no_prior_turn_inference_result(resolved_observation)
     if path == InferencePath.ACCELERATED_BACKFILL:
         return _run_accelerated_backfill_inference(
             score,

@@ -69,12 +69,12 @@ def resolve_inference_admission_skip(
         )
 
     if _is_viewpoint_owner(player_id, perspective):
-        return _skip(STATUS_VIEWPOINT_OWNER)
+        return admission_skip_for_status(STATUS_VIEWPOINT_OWNER)
 
     roster = players_by_id(turn)
     target = roster.get(player_id)
     if target is not None and is_eliminated_at_turn(target, turn.settings.turn):
-        return _skip(STATUS_DEAD)
+        return admission_skip_for_status(STATUS_DEAD)
 
     if _is_full_alliance_skip(
         turn,
@@ -82,10 +82,10 @@ def resolve_inference_admission_skip(
         target_player_id=player_id,
         roster=roster,
     ):
-        return _skip(STATUS_FULL_ALLIANCE)
+        return admission_skip_for_status(STATUS_FULL_ALLIANCE)
 
     if target is not None and is_horwasp(target.raceid):
-        return _skip(STATUS_HORWASP)
+        return admission_skip_for_status(STATUS_HORWASP)
 
     path, _segments = resolve_inference_path(
         score,
@@ -93,8 +93,13 @@ def resolve_inference_admission_skip(
         load_scoreboard_turn=load_scoreboard_turn,
     )
     if path == InferencePath.NO_PRIOR_TURN:
-        return _skip(STATUS_NO_PRIOR_TURN)
+        return admission_skip_for_status(STATUS_NO_PRIOR_TURN)
     return None
+
+
+def admission_skip_for_status(status: str) -> InferenceAdmissionSkip:
+    """Skip terminal for a table-owned status: status and summary only."""
+    return InferenceAdmissionSkip(status=status, summary=_SKIP_SUMMARIES[status])
 
 
 def admission_skip_api_payload(skip: InferenceAdmissionSkip) -> dict[str, object]:
@@ -128,10 +133,6 @@ def build_inference_unavailable_api_payload(player_id: int) -> dict[str, object]
         "isComplete": True,
         "solutions": [],
     }
-
-
-def _skip(status: str) -> InferenceAdmissionSkip:
-    return InferenceAdmissionSkip(status=status, summary=_SKIP_SUMMARIES[status])
 
 
 def _scoreboard_row(turn: TurnInfo, player_id: int) -> Score | None:

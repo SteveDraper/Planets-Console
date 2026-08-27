@@ -8,6 +8,8 @@ from unittest.mock import patch
 import pytest
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_admission import (
+    admission_skip_api_payload,
+    admission_skip_for_status,
     is_build_inference_available,
     resolve_inference_admission_skip,
 )
@@ -231,6 +233,14 @@ def test_horwasp_skip(sample_turn) -> None:
     assert skip.status == STATUS_HORWASP
 
 
+def test_admission_skip_for_status_owns_table_summaries() -> None:
+    skip = admission_skip_for_status(STATUS_NO_PRIOR_TURN)
+    assert skip.status == STATUS_NO_PRIOR_TURN
+    assert skip.summary == "Prior turn score data unavailable"
+    payload = admission_skip_api_payload(skip)
+    assert "diagnostics" not in payload
+
+
 def test_no_prior_turn_skip(first_turn) -> None:
     target = _non_viewpoint_score(first_turn)
     skip = resolve_inference_admission_skip(
@@ -239,7 +249,7 @@ def test_no_prior_turn_skip(first_turn) -> None:
         perspective=first_turn.player.id,
     )
     assert skip is not None
-    assert skip.status == STATUS_NO_PRIOR_TURN
+    assert skip == admission_skip_for_status(STATUS_NO_PRIOR_TURN)
 
 
 def test_player_not_found_skip(sample_turn) -> None:
