@@ -371,6 +371,43 @@ def test_stealth_ensure_does_not_schedule(sample_turn, persistence) -> None:
     )
 
 
+def test_admit_scores_export_persists_skip_immediate_admission(sample_turn, persistence) -> None:
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    owner_id = sample_turn.player.id
+    ctx = scores_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=owner_id,
+        turn=sample_turn.settings.turn,
+        player_id=owner_id,
+    )
+    with patch(
+        "api.analytics.scores.exports.schedule_inference_row",
+        side_effect=AssertionError("skip ImmediateRowAdmission must not schedule tier_solve"),
+    ):
+        assert admit_scores_export_work(ctx, scope) is True
+    stream_scope = InferenceStreamScope(
+        game_id=GAME_ID,
+        perspective=owner_id,
+        turn_number=sample_turn.settings.turn,
+    )
+    assert scheduler.row_run_for_player(stream_scope, owner_id) is None
+    stored = persistence.get_row(
+        GAME_ID,
+        owner_id,
+        sample_turn.settings.turn,
+        owner_id,
+    )
+    assert stored is not None
+    assert stored.status == STATUS_VIEWPOINT_OWNER
+    assert stored.diagnostics is None
+
+
 @pytest.mark.parametrize(
     "status",
     [
