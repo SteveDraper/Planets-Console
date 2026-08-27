@@ -9,7 +9,6 @@ import pytest
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_admission import (
     is_build_inference_available,
-    is_team_locked_full_alliance,
     resolve_inference_admission_skip,
 )
 from api.analytics.military_score_inference.inference_api_payload import (
@@ -45,6 +44,7 @@ from api.analytics.scores.export_precedence import (
 )
 from api.analytics.scores.exports import admit_scores_export_work
 from api.analytics.turn_roster import player_by_id
+from api.concepts.diplomacy import is_team_locked_full_alliance
 from api.concepts.races import HORWASP_RACE_ID
 from api.models.enums import PlayerStatus
 from api.models.player import Relation

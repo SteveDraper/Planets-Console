@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from enum import IntEnum
 
-from api.models.player import Relation
+from api.models.player import Player, Relation
 
 # Share Intel and above (Full Alliance) count as intel partners.
 _SHARE_INTEL_MIN = 3
@@ -72,6 +72,18 @@ def is_live_inbound_full_alliance(
             continue
         return is_mutual_full_alliance(relation)
     return False
+
+
+def is_team_locked_full_alliance(
+    viewpoint: Player | None,
+    target: Player | None,
+) -> bool:
+    """True when both players share a non-zero team id (locked Full Alliance)."""
+    if viewpoint is None or target is None:
+        return False
+    if viewpoint.id == target.id:
+        return False
+    return viewpoint.teamid > 0 and viewpoint.teamid == target.teamid
 
 
 def share_intel_partner_ids(

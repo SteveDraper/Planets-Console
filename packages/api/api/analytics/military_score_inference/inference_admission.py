@@ -18,7 +18,7 @@ from api.analytics.military_score_inference.inference_path import (
 )
 from api.analytics.military_score_inference.inference_target import ScoreboardTurnLoader
 from api.analytics.turn_roster import players_by_id
-from api.concepts.diplomacy import is_live_inbound_full_alliance
+from api.concepts.diplomacy import is_live_inbound_full_alliance, is_team_locked_full_alliance
 from api.concepts.races import is_horwasp
 from api.models.game import TurnInfo
 from api.models.player import Player, Score
@@ -47,18 +47,6 @@ class InferenceAdmissionSkip:
 def is_build_inference_available(turn: TurnInfo) -> bool:
     """False when Stealth Mode unpublished the military column for every row."""
     return not turn.settings.stealthmode
-
-
-def is_team_locked_full_alliance(
-    viewpoint: Player | None,
-    target: Player | None,
-) -> bool:
-    """True when both players share a non-zero team id (locked Full Alliance)."""
-    if viewpoint is None or target is None:
-        return False
-    if viewpoint.id == target.id:
-        return False
-    return viewpoint.teamid > 0 and viewpoint.teamid == target.teamid
 
 
 def resolve_inference_admission_skip(
