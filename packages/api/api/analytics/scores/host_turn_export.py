@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.host_turn_targets import HostTurnFun
 from api.analytics.military_score_inference.inference_api_payload import (
     INFERENCE_ADMISSION_SKIP_STATUSES,
     STATUS_SOLVER_ERROR,
+    product_payload_fields,
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
@@ -24,10 +25,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
-from api.analytics.scores.export_wire import (
-    normalize_export_product_fields,
-    ranked_solutions_from_wire,
-)
+from api.analytics.scores.export_wire import ranked_solutions_from_wire
 from api.concepts.accelerated_scoreboard import first_reliable_accelerated_scoreboard_turn
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
@@ -105,16 +103,15 @@ def _search_status_from_target_status(status: object) -> SearchStatus:
 
 def _payload_from_functional_target(target: HostTurnFunctionalTarget) -> FunctionalHostTurnPayload:
     solutions = ranked_solutions_from_wire(target.solutions)
-    status, placeholders, leftover = normalize_export_product_fields(
+    placeholders, leftover = product_payload_fields(
         target.status,
-        None,
-        target.military_delta_2x,
+        leftover=target.military_delta_2x,
     )
     return FunctionalHostTurnPayload(
         solutions=solutions,
         solutions_held=target.solution_count,
         search_status=_search_status_from_target_status(target.status),
-        status=status,
+        status=target.status,
         placeholders=placeholders,
         unexplained_military_delta_2x=leftover,
     )
@@ -135,16 +132,16 @@ def _payload_for_host_turn_from_row(
 
     if scoreboard_host_turn(scoreboard_turn) != target_host_turn:
         return None
-    status, placeholders, leftover = normalize_export_product_fields(
+    placeholders, leftover = product_payload_fields(
         row.status,
-        row.placeholders,
-        row.unexplained_military_delta_2x,
+        placeholders=row.placeholders,
+        leftover=row.unexplained_military_delta_2x,
     )
     return FunctionalHostTurnPayload(
         solutions=ranked_solutions_from_wire(row.solutions),
         solutions_held=row.solution_count,
         search_status=_search_status_from_persisted_row(row),
-        status=status,
+        status=row.status,
         placeholders=placeholders,
         unexplained_military_delta_2x=leftover,
     )

@@ -7,8 +7,7 @@ from typing import Literal
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
 from api.analytics.military_score_inference.inference_api_payload import (
-    FUNCTIONAL_LEFTOVER_STATUSES,
-    INFERENCE_ADMISSION_SKIP_STATUSES,
+    product_payload_fields,
     serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
 )
@@ -118,48 +117,33 @@ def terminal_row_admission(
     return None
 
 
-def normalize_export_product_fields(
-    status: str | None,
-    placeholders: list[dict[str, object]] | None,
-    leftover: int | None,
-) -> tuple[str | None, list[dict[str, object]] | None, int | None]:
-    """Normalize product ``status``, leftover, and ``placeholders`` for the export tree.
-
-    Residual / ``no_exact_solution`` always expose leftover and ``placeholders``
-    (empty arrays are authoritative until placeholders are populated). Skip
-    rows expose empty ``placeholders`` and omit leftover. Other statuses omit
-    both branches unless the source already carried them.
-    """
-    if status is None:
-        return None, None, None
-    resolved_placeholders = placeholders
-    if (
-        status in FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES
-    ) and resolved_placeholders is None:
-        resolved_placeholders = []
-    resolved_leftover = leftover if status in FUNCTIONAL_LEFTOVER_STATUSES else None
-    return status, resolved_placeholders, resolved_leftover
-
-
 def product_fields_from_wire_complete(
     wire_event: dict[str, object],
 ) -> tuple[str | None, list[dict[str, object]] | None, int | None]:
     """Extract product status, placeholders, and leftover from a wire complete event."""
     raw_status = wire_event.get("status")
     status = raw_status if isinstance(raw_status, str) and raw_status else None
-    placeholders, leftover = inference_complete_functional_fields(wire_event)
-    return normalize_export_product_fields(status, placeholders, leftover)
+    source_placeholders, source_leftover = inference_complete_functional_fields(wire_event)
+    if status is None:
+        return None, None, None
+    placeholders, leftover = product_payload_fields(
+        status,
+        placeholders=source_placeholders,
+        leftover=source_leftover,
+    )
+    return status, placeholders, leftover
 
 
 def product_fields_from_persisted_row(
     persisted_row: PersistedInferenceRow,
 ) -> tuple[str | None, list[dict[str, object]] | None, int | None]:
     """Extract product status, placeholders, and leftover from a persisted inference row."""
-    return normalize_export_product_fields(
+    placeholders, leftover = product_payload_fields(
         persisted_row.status,
-        persisted_row.placeholders,
-        persisted_row.unexplained_military_delta_2x,
+        placeholders=persisted_row.placeholders,
+        leftover=persisted_row.unexplained_military_delta_2x,
     )
+    return persisted_row.status, placeholders, leftover
 
 
 def solutions_from_persisted_row(

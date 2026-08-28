@@ -58,6 +58,28 @@ FUNCTIONAL_LEFTOVER_STATUSES = frozenset(
 )
 
 
+def product_payload_fields(
+    status: str,
+    *,
+    placeholders: list[dict[str, object]] | None = None,
+    leftover: int | None = None,
+) -> tuple[list[dict[str, object]] | None, int | None]:
+    """Return product ``placeholders`` and leftover for persist, stream, and export.
+
+    Residual / ``no_exact_solution`` expose leftover and ``placeholders`` (empty
+    list if missing). Skip rows expose empty ``placeholders`` and omit leftover.
+    Other statuses omit leftover and omit placeholders unless the source already
+    carried them.
+    """
+    resolved_placeholders = placeholders
+    if (
+        status in FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES
+    ) and resolved_placeholders is None:
+        resolved_placeholders = []
+    resolved_leftover = leftover if status in FUNCTIONAL_LEFTOVER_STATUSES else None
+    return resolved_placeholders, resolved_leftover
+
+
 def inference_result_to_api_payload(
     result: InferenceResult,
     catalog: ActionCatalog,
@@ -199,6 +221,7 @@ def inference_api_payload(
     )
     leftover_2x = _functional_leftover_2x(status, observation)
     leftover_summary = _functional_leftover_status_summary(status, leftover_2x)
+    placeholders, leftover = product_payload_fields(status, leftover=leftover_2x)
     payload: dict[str, object] = {
         "status": status,
         "summary": leftover_summary if leftover_summary is not None else summary,
@@ -217,10 +240,10 @@ def inference_api_payload(
         ),
         "diagnostics": diagnostics,
     }
-    if status in FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES:
-        payload["placeholders"] = []
-    if leftover_2x is not None:
-        payload["unexplainedMilitaryDelta2x"] = leftover_2x
+    if placeholders is not None:
+        payload["placeholders"] = placeholders
+    if leftover is not None:
+        payload["unexplainedMilitaryDelta2x"] = leftover
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:
