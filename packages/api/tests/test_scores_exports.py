@@ -5,11 +5,19 @@ from __future__ import annotations
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import EnsureDependency
+from api.analytics.military_score_inference.inference_api_payload import (
+    INFERENCE_ADMISSION_SKIP_STATUSES,
+)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
-from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_MINE_SCORE_RESIDUAL,
+    STATUS_MODERATE_RESIDUAL,
+    STATUS_NO_EXACT_SOLUTION,
+)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_wire import (
     ranked_solutions_from_wire,
@@ -249,3 +257,135 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_via_query(sample_turn):
 
     tree, _scope = materialize_scores_tree(ctx, player_id)
     assert tree["diagnostics"]["solver"]["source"] == "scheduler_ladder"
+
+
+_PRODUCT_STATUS_QUERY_PATHS = [
+    "$.meta.searchStatus",
+    "$.status",
+    "$.solutions[0]",
+    "$.placeholders",
+    "$.unexplainedMilitaryDelta2x",
+    "$.solution.ships",
+    "$.solution.diagnostics",
+]
+
+
+def _query_product_status(ctx, player_id: int):
+    return ctx.query(
+        "scores",
+        _PRODUCT_STATUS_QUERY_PATHS,
+        {"player_id": player_id},
+        force_inline_ensure=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "leftover_2x"),
+    [
+        (STATUS_MODERATE_RESIDUAL, 22),
+        (STATUS_MINE_SCORE_RESIDUAL, 54),
+        (STATUS_NO_EXACT_SOLUTION, 8),
+    ],
+)
+def test_residual_export_exposes_product_status_leftover_and_empty_placeholders(
+    status: str,
+    leftover_2x: int,
+    sample_turn,
+    persistence,
+):
+    player_id = inference_target_player_id(sample_turn)
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=status,
+            summary=status,
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+            placeholders=[],
+            unexplained_military_delta_2x=leftover_2x,
+        ),
+    )
+    result = _query_product_status(
+        scores_query_context(sample_turn, persistence=persistence),
+        player_id,
+    )
+    assert result.status == "ok"
+    assert result.paths["$.meta.searchStatus"].value == "complete"
+    assert result.paths["$.status"].value == status
+    assert result.paths["$.solutions[0]"].kind == "none"
+    assert result.paths["$.placeholders"].value == []
+    assert result.paths["$.unexplainedMilitaryDelta2x"].value == leftover_2x
+    assert result.paths["$.solution.ships"].kind == "none"
+    assert result.paths["$.solution.diagnostics"].kind == "none"
+
+
+@pytest.mark.parametrize("status", sorted(INFERENCE_ADMISSION_SKIP_STATUSES))
+def test_skip_export_exposes_per_reason_status_without_leftover(
+    status: str,
+    sample_turn,
+    persistence,
+):
+    player_id = inference_target_player_id(sample_turn)
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=status,
+            summary=status,
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+            placeholders=[],
+        ),
+    )
+    result = _query_product_status(
+        scores_query_context(sample_turn, persistence=persistence),
+        player_id,
+    )
+    assert result.status == "ok"
+    assert result.paths["$.meta.searchStatus"].value == "complete"
+    assert result.paths["$.status"].value == status
+    assert result.paths["$.solutions[0]"].kind == "none"
+    assert result.paths["$.placeholders"].value == []
+    assert result.paths["$.unexplainedMilitaryDelta2x"].kind == "none"
+    assert result.paths["$.solution.ships"].kind == "none"
+    assert result.paths["$.solution.diagnostics"].kind == "none"
+
+
+def test_exact_export_exposes_product_status_without_leftover_or_placeholders(
+    sample_turn,
+    persistence,
+):
+    player_id = inference_target_player_id(sample_turn)
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="exact",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+    )
+    result = _query_product_status(
+        scores_query_context(sample_turn, persistence=persistence),
+        player_id,
+    )
+    assert result.status == "ok"
+    assert result.paths["$.meta.searchStatus"].value == "complete"
+    assert result.paths["$.status"].value == STATUS_EXACT
+    assert result.paths["$.placeholders"].kind == "none"
+    assert result.paths["$.unexplainedMilitaryDelta2x"].kind == "none"
+
+
+def test_product_status_paths_require_player_id(sample_turn):
+    ctx = scores_query_context(sample_turn)
+    result = ctx.query("scores", ["$.status", "$.placeholders", "$.unexplainedMilitaryDelta2x"])
+    assert result.status == "unavailable"
+    assert result.reason == "invalid_scope"

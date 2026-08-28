@@ -22,6 +22,8 @@ from api.analytics.military_score_inference.solver import (
 )
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.analytics.scores.export_wire import (
+    product_fields_from_persisted_row,
+    product_fields_from_wire_complete,
     search_status_from_wire_complete_event,
     solutions_from_persisted_row,
     solutions_from_scheduler_run,
@@ -130,11 +132,14 @@ class ScoresExportResolutionContext:
 
 @dataclass(frozen=True)
 class ScoresExportPayload:
-    """Resolved solution payload for a scores inference snapshot."""
+    """Resolved functional payload for a scores inference snapshot."""
 
     solutions: list[dict[str, object]]
     diagnostics: dict[str, object] | None
     solutions_held: int
+    status: str | None = None
+    placeholders: list[dict[str, object]] | None = None
+    unexplained_military_delta_2x: int | None = None
 
 
 @dataclass(frozen=True)
@@ -375,6 +380,32 @@ def _resolve_functional_payload(
     )
 
 
+def _payload_from_functional_host_turn(
+    functional_payload: FunctionalHostTurnPayload,
+) -> ScoresExportPayload:
+    return ScoresExportPayload(
+        functional_payload.solutions,
+        None,
+        functional_payload.solutions_held,
+        status=functional_payload.status,
+        placeholders=functional_payload.placeholders,
+        unexplained_military_delta_2x=functional_payload.unexplained_military_delta_2x,
+    )
+
+
+def _payload_from_persisted_row(persisted_row: PersistedInferenceRow) -> ScoresExportPayload:
+    solutions, diagnostics, solutions_held = solutions_from_persisted_row(persisted_row)
+    status, placeholders, leftover = product_fields_from_persisted_row(persisted_row)
+    return ScoresExportPayload(
+        solutions,
+        diagnostics,
+        solutions_held,
+        status=status,
+        placeholders=placeholders,
+        unexplained_military_delta_2x=leftover,
+    )
+
+
 def _materialize_scores_export_payload(
     snapshot: ScoresInferenceSnapshot,
     branch: ScoresExportPrecedenceBranch,
@@ -385,19 +416,24 @@ def _materialize_scores_export_payload(
     if branch == "priority_persisted":
         assert persisted_row is not None
         if functional_payload is not None:
-            return ScoresExportPayload(
-                functional_payload.solutions,
-                None,
-                functional_payload.solutions_held,
-            )
-        solutions, diagnostics, solutions_held = solutions_from_persisted_row(persisted_row)
-        return ScoresExportPayload(solutions, diagnostics, solutions_held)
+            return _payload_from_functional_host_turn(functional_payload)
+        return _payload_from_persisted_row(persisted_row)
 
     if branch == "terminal_admission":
         terminal = snapshot.resolved_terminal_admission()
         assert terminal is not None
         solutions, diagnostics, solutions_held = solutions_from_terminal_admission(terminal)
-        return ScoresExportPayload(solutions, diagnostics, solutions_held)
+        status, placeholders, leftover = product_fields_from_wire_complete(
+            wire_complete_event_from_terminal_admission(terminal)
+        )
+        return ScoresExportPayload(
+            solutions,
+            diagnostics,
+            solutions_held,
+            status=status,
+            placeholders=placeholders,
+            unexplained_military_delta_2x=leftover,
+        )
 
     if branch == "scheduler":
         scheduler_run = snapshot.scheduler_run
@@ -408,21 +444,12 @@ def _materialize_scores_export_payload(
     if branch == "fallback_persisted":
         assert persisted_row is not None
         if functional_payload is not None:
-            return ScoresExportPayload(
-                functional_payload.solutions,
-                None,
-                functional_payload.solutions_held,
-            )
-        solutions, diagnostics, solutions_held = solutions_from_persisted_row(persisted_row)
-        return ScoresExportPayload(solutions, diagnostics, solutions_held)
+            return _payload_from_functional_host_turn(functional_payload)
+        return _payload_from_persisted_row(persisted_row)
 
     if branch == "functional_backfill":
         assert functional_payload is not None
-        return ScoresExportPayload(
-            functional_payload.solutions,
-            None,
-            functional_payload.solutions_held,
-        )
+        return _payload_from_functional_host_turn(functional_payload)
 
     return ScoresExportPayload([], None, 0)
 

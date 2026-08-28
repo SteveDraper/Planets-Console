@@ -208,7 +208,9 @@ _META_SCHEMA: dict[str, Any] = {
                 "Inference search lifecycle for this row scope: not_started (no work "
                 "yet), in_progress (scheduler or stream active), paused (global "
                 "pause on active stream), stopped (user halt with held solutions), "
-                "complete (terminal persisted or immediate result)."
+                "complete (terminal persisted or immediate result). Product inference "
+                "outcomes (skip, residual, no_exact_solution) are not encoded here; "
+                "they live on $.status."
             ),
         },
         "solutionsHeld": {
@@ -336,15 +338,88 @@ _HULL_CATALOG_MASK_SCHEMA: dict[str, Any] = {
     },
 }
 
+_PLACEHOLDER_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "One post-unsat placeholder: unknown military ship (hull sentinel -1, typed id "
+        "unknown_military_ship) or observation-derived generic freighter (hull id 0). "
+        "Not a ranked solutions[] entry. Residual / no_exact_solution / skip rows "
+        "include the placeholders branch; arrays stay empty until placeholders are "
+        "populated."
+    ),
+    "additionalProperties": True,
+    "properties": {
+        "hullId": {
+            "type": "integer",
+            "description": (
+                "Hull sentinel: -1 for unknown military ship, 0 for generic freighter."
+            ),
+        },
+        "count": {
+            "type": "integer",
+            "description": "Unexplained positive remainder count for this placeholder.",
+        },
+        "militaryScoreDelta2xMin": {
+            "type": "integer",
+            "description": (
+                "Per-unit military score delta (times two) lower bound from the race "
+                "construction envelope. Present on unknown military ship placeholders."
+            ),
+        },
+        "militaryScoreDelta2xMax": {
+            "type": "integer",
+            "description": (
+                "Per-unit military score delta (times two) upper bound from the race "
+                "construction envelope. Present on unknown military ship placeholders."
+            ),
+        },
+        "buildSlotUsage": {
+            "type": "integer",
+            "description": "Starbase build-slot usage per unit (1 for both placeholder kinds).",
+        },
+    },
+}
+
+_PRODUCT_STATUS_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "enum": [
+        "exact",
+        "moderate_residual",
+        "mine_score_residual",
+        "no_exact_solution",
+        "viewpoint_owner",
+        "dead",
+        "full_alliance",
+        "horwasp",
+        "no_prior_turn",
+        "player_not_found",
+        "invalid_problem",
+        "solver_error",
+        "time_limited",
+        "stopped",
+        "paused",
+        "pending",
+        "fetch_error",
+    ],
+    "description": (
+        "Product inference outcome for this row. Distinct from $.meta.searchStatus "
+        "(lifecycle only). Includes exact, both residual statuses, no_exact_solution, "
+        "per-reason admission skips, and remaining solver/problem terminals. Stealth "
+        "Mode is build-inference availability, not a row status."
+    ),
+}
+
 EXPORT_VALUE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
         "Scores turn analytic export tree for one query scope. Mirrors held inference "
-        "row wire shape: lifecycle in meta, ranked solutions, optional diagnostics, "
-        "and optional hull catalog mask when player_id is set."
+        "row wire shape: lifecycle in meta, product status / leftover / placeholders "
+        "as siblings of ranked solutions, optional diagnostics, and optional hull "
+        "catalog mask when player_id is set."
     ),
     "properties": {
         "meta": _META_SCHEMA,
+        "status": _PRODUCT_STATUS_SCHEMA,
         "solutions": {
             "type": "array",
             "description": (
@@ -352,6 +427,25 @@ EXPORT_VALUE_SCHEMA: dict[str, Any] = {
                 "objectiveValue first. $.solutions[0] is the top explanation."
             ),
             "items": _SOLUTION_WIRE_SCHEMA,
+        },
+        "placeholders": {
+            "type": "array",
+            "description": (
+                "Post-unsat placeholder collection for residual / no_exact_solution / "
+                "skip rows. Sibling of $.solutions; empty arrays are authoritative "
+                "until placeholders are populated. Residual leftover stays on "
+                "unexplainedMilitaryDelta2x, not assigned onto these ships."
+            ),
+            "items": _PLACEHOLDER_ITEM_SCHEMA,
+        },
+        "unexplainedMilitaryDelta2x": {
+            "type": "integer",
+            "description": (
+                "Unexplained military score leftover in host times-two units for "
+                "moderate_residual, mine_score_residual, and no_exact_solution rows. "
+                "Omitted for exact and admission-skip terminals. Sibling of "
+                "$.solutions; not assigned onto placeholders."
+            ),
         },
         "diagnostics": _DIAGNOSTICS_SCHEMA,
         "tierEmissions": {

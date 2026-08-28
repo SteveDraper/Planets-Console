@@ -11,13 +11,23 @@ from api.analytics.military_score_inference.accelerated_start import (
     scoreboard_host_turn,
 )
 from api.analytics.military_score_inference.host_turn_targets import HostTurnFunctionalTarget
+from api.analytics.military_score_inference.inference_api_payload import (
+    INFERENCE_ADMISSION_SKIP_STATUSES,
+    STATUS_SOLVER_ERROR,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
+    STATUS_INVALID_PROBLEM,
+    STATUS_MINE_SCORE_RESIDUAL,
+    STATUS_MODERATE_RESIDUAL,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
-from api.analytics.scores.export_wire import ranked_solutions_from_wire
+from api.analytics.scores.export_wire import (
+    normalize_export_product_fields,
+    ranked_solutions_from_wire,
+)
 from api.concepts.accelerated_scoreboard import first_reliable_accelerated_scoreboard_turn
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
@@ -25,7 +35,19 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
 
-_COMPLETE_TARGET_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
+_COMPLETE_TARGET_STATUSES = (
+    frozenset(
+        {
+            STATUS_EXACT,
+            STATUS_NO_EXACT_SOLUTION,
+            STATUS_MODERATE_RESIDUAL,
+            STATUS_MINE_SCORE_RESIDUAL,
+            STATUS_INVALID_PROBLEM,
+            STATUS_SOLVER_ERROR,
+        }
+    )
+    | INFERENCE_ADMISSION_SKIP_STATUSES
+)
 
 
 def scores_scoreboard_turn_for_placeholder_refine(*, built_turn: int, shell_turn: int) -> int:
@@ -55,11 +77,14 @@ def functional_target_for_host_turn(
 
 @dataclass(frozen=True)
 class FunctionalHostTurnPayload:
-    """Held solutions and lifecycle status for one scoreboard host turn."""
+    """Held solutions, product status, and lifecycle status for one scoreboard host turn."""
 
     solutions: list[dict[str, object]]
     solutions_held: int
     search_status: SearchStatus
+    status: str | None = None
+    placeholders: list[dict[str, object]] | None = None
+    unexplained_military_delta_2x: int | None = None
 
 
 def _search_status_from_persisted_row(row: PersistedInferenceRow) -> SearchStatus:
@@ -80,10 +105,18 @@ def _search_status_from_target_status(status: object) -> SearchStatus:
 
 def _payload_from_functional_target(target: HostTurnFunctionalTarget) -> FunctionalHostTurnPayload:
     solutions = ranked_solutions_from_wire(target.solutions)
+    status, placeholders, leftover = normalize_export_product_fields(
+        target.status,
+        None,
+        target.military_delta_2x,
+    )
     return FunctionalHostTurnPayload(
         solutions=solutions,
         solutions_held=target.solution_count,
         search_status=_search_status_from_target_status(target.status),
+        status=status,
+        placeholders=placeholders,
+        unexplained_military_delta_2x=leftover,
     )
 
 
@@ -102,10 +135,18 @@ def _payload_for_host_turn_from_row(
 
     if scoreboard_host_turn(scoreboard_turn) != target_host_turn:
         return None
+    status, placeholders, leftover = normalize_export_product_fields(
+        row.status,
+        row.placeholders,
+        row.unexplained_military_delta_2x,
+    )
     return FunctionalHostTurnPayload(
         solutions=ranked_solutions_from_wire(row.solutions),
         solutions_held=row.solution_count,
         search_status=_search_status_from_persisted_row(row),
+        status=status,
+        placeholders=placeholders,
+        unexplained_military_delta_2x=leftover,
     )
 
 

@@ -49,7 +49,7 @@ INFERENCE_ADMISSION_SKIP_STATUSES = frozenset(
         STATUS_PLAYER_NOT_FOUND,
     }
 )
-_FUNCTIONAL_LEFTOVER_STATUSES = frozenset(
+FUNCTIONAL_LEFTOVER_STATUSES = frozenset(
     {
         STATUS_MODERATE_RESIDUAL,
         STATUS_MINE_SCORE_RESIDUAL,
@@ -109,7 +109,7 @@ def _functional_leftover_2x(
     status: str,
     observation: InferenceObservation | None,
 ) -> int | None:
-    if status not in _FUNCTIONAL_LEFTOVER_STATUSES:
+    if status not in FUNCTIONAL_LEFTOVER_STATUSES:
         return None
     if observation is None:
         return None
@@ -217,7 +217,7 @@ def inference_api_payload(
         ),
         "diagnostics": diagnostics,
     }
-    if status in _FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES:
+    if status in FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES:
         payload["placeholders"] = []
     if leftover_2x is not None:
         payload["unexplainedMilitaryDelta2x"] = leftover_2x
