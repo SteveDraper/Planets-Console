@@ -395,6 +395,7 @@ def _run_solver_inference_path(
                             **fleet_torp_input_status_diagnostics(fleet_torp_input_status),
                         },
                     ),
+                    observation=resolved_observation,
                 ),
                 resolved_observation,
                 None,

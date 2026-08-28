@@ -91,14 +91,46 @@ def inference_result_to_api_payload(
             **(extra_diagnostics or {}),
         },
     )
+    leftover_2x = _functional_leftover_2x(result.status, observation)
     return inference_api_payload(
         status=result.status,
-        summary=format_inference_summary(result),
+        summary=format_inference_summary(
+            result,
+            unexplained_military_delta_2x=leftover_2x,
+        ),
         solutions=result.solutions,
         diagnostics=diagnostics,
         observation=observation,
         catalog=catalog,
     )
+
+
+def _functional_leftover_2x(
+    status: str,
+    observation: InferenceObservation | None,
+) -> int | None:
+    if status not in _FUNCTIONAL_LEFTOVER_STATUSES:
+        return None
+    if observation is None:
+        return None
+    return observation.military_delta_2x
+
+
+def _functional_leftover_status_summary(
+    status: str,
+    leftover_2x: int | None,
+) -> str | None:
+    if status == STATUS_MODERATE_RESIDUAL:
+        if leftover_2x is None:
+            return "Moderate military leftover"
+        return f"Moderate military leftover ({leftover_2x // 2})"
+    if status == STATUS_MINE_SCORE_RESIDUAL:
+        if leftover_2x is None:
+            return "Mine-score leftover"
+        return f"Mine-score leftover ({leftover_2x // 2})"
+    if status == STATUS_NO_EXACT_SOLUTION:
+        return "No feasible build explanation found"
+    return None
 
 
 def format_inference_summary(
@@ -107,18 +139,17 @@ def format_inference_summary(
     unexplained_military_delta_2x: int | None = None,
 ) -> str:
     """Return compact row-level summary text for the inference column."""
-    leftover_1x = (unexplained_military_delta_2x or 0) // 2
-    if result.status == STATUS_MODERATE_RESIDUAL:
-        return f"Moderate military leftover ({leftover_1x})"
-    if result.status == STATUS_MINE_SCORE_RESIDUAL:
-        return f"Mine-score leftover ({leftover_1x})"
+    leftover_summary = _functional_leftover_status_summary(
+        result.status,
+        unexplained_military_delta_2x,
+    )
+    if leftover_summary is not None:
+        return leftover_summary
     if result.status == STATUS_INVALID_PROBLEM:
         reason = result.diagnostics.get("reason")
         if isinstance(reason, str) and reason:
             return f"Invalid inference problem: {reason}"
         return "Invalid inference problem"
-    if result.status == STATUS_NO_EXACT_SOLUTION:
-        return "No feasible build explanation found"
     if result.status == STATUS_SOLVER_ERROR:
         return "Build inference failed"
     if result.status == STATUS_STOPPED:
@@ -166,19 +197,11 @@ def inference_api_payload(
     fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
         fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
     )
-    unexplained_military_delta_2x: int | None = None
-    if status in _FUNCTIONAL_LEFTOVER_STATUSES:
-        unexplained_military_delta_2x = (
-            observation.military_delta_2x if observation is not None else 0
-        )
+    leftover_2x = _functional_leftover_2x(status, observation)
+    leftover_summary = _functional_leftover_status_summary(status, leftover_2x)
     payload: dict[str, object] = {
         "status": status,
-        "summary": format_inference_summary(
-            InferenceResult(status=status, solutions=solutions, diagnostics=diagnostics),
-            unexplained_military_delta_2x=unexplained_military_delta_2x,
-        )
-        if status in _FUNCTIONAL_LEFTOVER_STATUSES
-        else summary,
+        "summary": leftover_summary if leftover_summary is not None else summary,
         "solutionCount": len(solutions),
         # Zero-solution timeouts are terminal failures (visible error in the SPA).
         # Timeouts that already hold solutions stay incomplete so partial top-K can
@@ -196,8 +219,8 @@ def inference_api_payload(
     }
     if status in _FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES:
         payload["placeholders"] = []
-    if unexplained_military_delta_2x is not None:
-        payload["unexplainedMilitaryDelta2x"] = unexplained_military_delta_2x
+    if leftover_2x is not None:
+        payload["unexplainedMilitaryDelta2x"] = leftover_2x
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:

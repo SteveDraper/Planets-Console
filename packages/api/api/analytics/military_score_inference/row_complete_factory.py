@@ -84,6 +84,7 @@ def build_row_complete_wire_payload(
             summary=summary,
             solutions=result.solutions,
             diagnostics=result.diagnostics,
+            observation=observation,
         )
     return row_complete_wire_payload_from_api_payload(
         payload,
