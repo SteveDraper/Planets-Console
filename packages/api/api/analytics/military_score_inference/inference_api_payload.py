@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
 from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
     STATUS_MINE_SCORE_RESIDUAL,
     STATUS_MODERATE_RESIDUAL,
@@ -55,6 +56,25 @@ FUNCTIONAL_LEFTOVER_STATUSES = frozenset(
         STATUS_MINE_SCORE_RESIDUAL,
         STATUS_NO_EXACT_SOLUTION,
     }
+)
+PERSISTABLE_INFERENCE_STATUSES = frozenset(
+    {
+        STATUS_EXACT,
+        STATUS_NO_EXACT_SOLUTION,
+        STATUS_MODERATE_RESIDUAL,
+        STATUS_MINE_SCORE_RESIDUAL,
+    }
+)
+FALLBACK_COMPLETE_PERSISTED_STATUSES = INFERENCE_ADMISSION_SKIP_STATUSES | frozenset(
+    {
+        STATUS_INVALID_PROBLEM,
+        STATUS_SOLVER_ERROR,
+    }
+)
+# Row statuses that map to export searchStatus=complete. Derived from
+# persistable | fallback-complete; stopped / time_limited stay outside this set.
+COMPLETE_INFERENCE_SEARCH_STATUSES = (
+    PERSISTABLE_INFERENCE_STATUSES | FALLBACK_COMPLETE_PERSISTED_STATUSES
 )
 
 

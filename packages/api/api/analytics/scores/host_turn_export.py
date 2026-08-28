@@ -12,16 +12,10 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.host_turn_targets import HostTurnFunctionalTarget
 from api.analytics.military_score_inference.inference_api_payload import (
-    INFERENCE_ADMISSION_SKIP_STATUSES,
-    STATUS_SOLVER_ERROR,
+    COMPLETE_INFERENCE_SEARCH_STATUSES,
     product_payload_fields,
 )
 from api.analytics.military_score_inference.solver import (
-    STATUS_EXACT,
-    STATUS_INVALID_PROBLEM,
-    STATUS_MINE_SCORE_RESIDUAL,
-    STATUS_MODERATE_RESIDUAL,
-    STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
@@ -32,20 +26,6 @@ from api.models.player import Score
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
-
-_COMPLETE_TARGET_STATUSES = (
-    frozenset(
-        {
-            STATUS_EXACT,
-            STATUS_NO_EXACT_SOLUTION,
-            STATUS_MODERATE_RESIDUAL,
-            STATUS_MINE_SCORE_RESIDUAL,
-            STATUS_INVALID_PROBLEM,
-            STATUS_SOLVER_ERROR,
-        }
-    )
-    | INFERENCE_ADMISSION_SKIP_STATUSES
-)
 
 
 def scores_scoreboard_turn_for_placeholder_refine(*, built_turn: int, shell_turn: int) -> int:
@@ -88,7 +68,7 @@ class FunctionalHostTurnPayload:
 def _search_status_from_persisted_row(row: PersistedInferenceRow) -> SearchStatus:
     if row.status in (STATUS_STOPPED, STATUS_TIME_LIMITED):
         return "stopped"
-    if row.status in _COMPLETE_TARGET_STATUSES:
+    if row.status in COMPLETE_INFERENCE_SEARCH_STATUSES:
         return "complete"
     return "not_started"
 
@@ -96,7 +76,7 @@ def _search_status_from_persisted_row(row: PersistedInferenceRow) -> SearchStatu
 def _search_status_from_target_status(status: object) -> SearchStatus:
     if status in (STATUS_STOPPED, STATUS_TIME_LIMITED):
         return "stopped"
-    if isinstance(status, str) and status in _COMPLETE_TARGET_STATUSES:
+    if isinstance(status, str) and status in COMPLETE_INFERENCE_SEARCH_STATUSES:
         return "complete"
     return "not_started"
 

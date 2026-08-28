@@ -7,16 +7,12 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.military_score_inference.inference_api_payload import (
-    INFERENCE_ADMISSION_SKIP_STATUSES,
-    STATUS_SOLVER_ERROR,
+    COMPLETE_INFERENCE_SEARCH_STATUSES,
+    FALLBACK_COMPLETE_PERSISTED_STATUSES,
+    PERSISTABLE_INFERENCE_STATUSES,
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
-    STATUS_EXACT,
-    STATUS_INVALID_PROBLEM,
-    STATUS_MINE_SCORE_RESIDUAL,
-    STATUS_MODERATE_RESIDUAL,
-    STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
@@ -48,28 +44,12 @@ ScoresExportPrecedenceBranch = Literal[
     "empty",
 ]
 
-PERSISTABLE_INFERENCE_STATUSES = frozenset(
-    {
-        STATUS_EXACT,
-        STATUS_NO_EXACT_SOLUTION,
-        STATUS_MODERATE_RESIDUAL,
-        STATUS_MINE_SCORE_RESIDUAL,
-    }
-)
-_FALLBACK_COMPLETE_PERSISTED_STATUSES = INFERENCE_ADMISSION_SKIP_STATUSES | frozenset(
-    {
-        STATUS_INVALID_PROBLEM,
-        STATUS_SOLVER_ERROR,
-    }
-)
 # RowComplete statuses that, once on disk, close fleet turnEvidenceAtN
-# (priority complete/stopped or fallback-complete). Orchestrator tier_solve must
-# persist these rather than soft-completing the scores node with open evidence.
+# (complete search statuses or stopped). Orchestrator tier_solve must persist
+# these rather than soft-completing the scores node with open evidence.
 _PRIORITY_STOPPED_PERSISTED_STATUSES = frozenset({STATUS_STOPPED, STATUS_TIME_LIMITED})
 DURABLE_TURN_EVIDENCE_ROW_STATUSES = (
-    PERSISTABLE_INFERENCE_STATUSES
-    | _PRIORITY_STOPPED_PERSISTED_STATUSES
-    | _FALLBACK_COMPLETE_PERSISTED_STATUSES
+    COMPLETE_INFERENCE_SEARCH_STATUSES | _PRIORITY_STOPPED_PERSISTED_STATUSES
 )
 _AUTHORITATIVE_PERSISTED_BRANCHES = frozenset({"priority_persisted", "fallback_persisted"})
 
@@ -323,7 +303,7 @@ def _persisted_row_priority_search_status(status: str) -> SearchStatus | None:
 
 def _persisted_row_fallback_search_status(status: str) -> SearchStatus:
     """Persisted statuses used when admission and scheduler are absent."""
-    if status in _FALLBACK_COMPLETE_PERSISTED_STATUSES:
+    if status in FALLBACK_COMPLETE_PERSISTED_STATUSES:
         return "complete"
     return "not_started"
 

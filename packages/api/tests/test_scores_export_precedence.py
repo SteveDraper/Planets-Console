@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import pytest
 from api.analytics.military_score_inference.inference_api_payload import (
+    COMPLETE_INFERENCE_SEARCH_STATUSES,
+    FALLBACK_COMPLETE_PERSISTED_STATUSES,
+    INFERENCE_ADMISSION_SKIP_STATUSES,
+    PERSISTABLE_INFERENCE_STATUSES,
     STATUS_INVALID_PROBLEM,
     STATUS_PLAYER_NOT_FOUND,
     STATUS_SOLVER_ERROR,
@@ -18,6 +22,9 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
+    STATUS_MINE_SCORE_RESIDUAL,
+    STATUS_MODERATE_RESIDUAL,
+    STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
@@ -36,6 +43,24 @@ from tests.scores_exports_helpers import (
     ship_build_wire,
     stream_scope_for_turn,
 )
+
+
+def test_complete_search_statuses_are_persistable_union_fallback_complete():
+    assert COMPLETE_INFERENCE_SEARCH_STATUSES == (
+        PERSISTABLE_INFERENCE_STATUSES | FALLBACK_COMPLETE_PERSISTED_STATUSES
+    )
+    assert STATUS_STOPPED not in COMPLETE_INFERENCE_SEARCH_STATUSES
+    assert STATUS_TIME_LIMITED not in COMPLETE_INFERENCE_SEARCH_STATUSES
+    for status in (
+        STATUS_EXACT,
+        STATUS_NO_EXACT_SOLUTION,
+        STATUS_MODERATE_RESIDUAL,
+        STATUS_MINE_SCORE_RESIDUAL,
+        STATUS_INVALID_PROBLEM,
+        STATUS_SOLVER_ERROR,
+        *INFERENCE_ADMISSION_SKIP_STATUSES,
+    ):
+        assert status in COMPLETE_INFERENCE_SEARCH_STATUSES
 
 
 @pytest.mark.parametrize(
