@@ -128,7 +128,7 @@ def test_functional_target_time_limited_maps_to_stopped_search_status():
 
 def test_functional_target_residual_maps_to_complete_with_leftover():
     target = host_turn_functional_target_from_wire_dict(_sample_wire_target())
-    placeholders, leftover = product_payload_fields(
+    product = product_payload_fields(
         STATUS_MODERATE_RESIDUAL,
         leftover=22,
     )
@@ -140,18 +140,18 @@ def test_functional_target_residual_maps_to_complete_with_leftover():
         warship_delta=target.warship_delta,
         freighter_delta=target.freighter_delta,
         solutions=[],
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        placeholders=product.placeholders,
+        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
     )
     payload = _payload_from_functional_target(residual)
     assert payload.search_status == "complete"
-    assert payload.status == STATUS_MODERATE_RESIDUAL
-    assert payload.placeholders == []
-    assert payload.unexplained_military_delta_2x == 22
+    assert payload.product.status == STATUS_MODERATE_RESIDUAL
+    assert payload.product.placeholders == []
+    assert payload.product.unexplained_military_delta_2x == 22
 
 
 def test_payload_from_functional_target_reads_leftover_slot_not_observation_delta():
-    placeholders, leftover = product_payload_fields(
+    product = product_payload_fields(
         STATUS_MODERATE_RESIDUAL,
         leftover=22,
     )
@@ -163,12 +163,12 @@ def test_payload_from_functional_target_reads_leftover_slot_not_observation_delt
         warship_delta=0,
         freighter_delta=0,
         solutions=[],
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        placeholders=product.placeholders,
+        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
     )
     payload = _payload_from_functional_target(residual)
-    assert payload.unexplained_military_delta_2x == 22
-    assert payload.placeholders == []
+    assert payload.product.unexplained_military_delta_2x == 22
+    assert payload.product.placeholders == []
 
 
 def test_functional_host_turn_target_strips_segment_diagnostics():
@@ -247,7 +247,7 @@ def test_legacy_target_dict_without_product_slots_still_decodes():
 
 
 def test_host_turn_functional_target_product_slots_round_trip():
-    placeholders, leftover = product_payload_fields(
+    product = product_payload_fields(
         STATUS_MODERATE_RESIDUAL,
         leftover=22,
     )
@@ -259,8 +259,8 @@ def test_host_turn_functional_target_product_slots_round_trip():
         warship_delta=0,
         freighter_delta=0,
         solutions=[],
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        placeholders=product.placeholders,
+        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
     )
     wire = host_turn_functional_target_to_wire_dict(target)
     assert wire["placeholders"] == []
@@ -300,7 +300,7 @@ def test_segment_payload_populates_leftover_from_observation_delta():
 
 
 def test_persisted_inference_row_round_trips_target_product_slots():
-    placeholders, leftover = product_payload_fields(
+    product = product_payload_fields(
         STATUS_MODERATE_RESIDUAL,
         leftover=22,
     )
@@ -312,8 +312,8 @@ def test_persisted_inference_row_round_trips_target_product_slots():
         warship_delta=0,
         freighter_delta=0,
         solutions=[],
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        placeholders=product.placeholders,
+        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
     )
     row = PersistedInferenceRow(
         status=STATUS_MODERATE_RESIDUAL,

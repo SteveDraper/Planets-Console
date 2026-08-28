@@ -13,6 +13,7 @@ from api.analytics.military_score_inference.accelerated_start import (
 from api.analytics.military_score_inference.host_turn_targets import HostTurnFunctionalTarget
 from api.analytics.military_score_inference.inference_api_payload import (
     COMPLETE_INFERENCE_SEARCH_STATUSES,
+    InferenceProductPayload,
     product_payload_fields,
 )
 from api.analytics.military_score_inference.solver import (
@@ -55,14 +56,12 @@ def functional_target_for_host_turn(
 
 @dataclass(frozen=True)
 class FunctionalHostTurnPayload:
-    """Held solutions, product status, and lifecycle status for one scoreboard host turn."""
+    """Held solutions, product fields, and lifecycle status for one scoreboard host turn."""
 
     solutions: list[dict[str, object]]
     solutions_held: int
     search_status: SearchStatus
-    status: str | None = None
-    placeholders: list[dict[str, object]] | None = None
-    unexplained_military_delta_2x: int | None = None
+    product: InferenceProductPayload
 
 
 def _search_status_from_persisted_row(row: PersistedInferenceRow) -> SearchStatus:
@@ -83,18 +82,15 @@ def _search_status_from_target_status(status: object) -> SearchStatus:
 
 def _payload_from_functional_target(target: HostTurnFunctionalTarget) -> FunctionalHostTurnPayload:
     solutions = ranked_solutions_from_wire(target.solutions)
-    placeholders, leftover = product_payload_fields(
-        target.status,
-        placeholders=target.placeholders,
-        leftover=target.unexplained_military_delta_2x,
-    )
     return FunctionalHostTurnPayload(
         solutions=solutions,
         solutions_held=target.solution_count,
         search_status=_search_status_from_target_status(target.status),
-        status=target.status,
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        product=product_payload_fields(
+            target.status,
+            placeholders=target.placeholders,
+            leftover=target.unexplained_military_delta_2x,
+        ),
     )
 
 
@@ -113,18 +109,15 @@ def _payload_for_host_turn_from_row(
 
     if scoreboard_host_turn(scoreboard_turn) != target_host_turn:
         return None
-    placeholders, leftover = product_payload_fields(
-        row.status,
-        placeholders=row.placeholders,
-        leftover=row.unexplained_military_delta_2x,
-    )
     return FunctionalHostTurnPayload(
         solutions=ranked_solutions_from_wire(row.solutions),
         solutions_held=row.solution_count,
         search_status=_search_status_from_persisted_row(row),
-        status=row.status,
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        product=product_payload_fields(
+            row.status,
+            placeholders=row.placeholders,
+            leftover=row.unexplained_military_delta_2x,
+        ),
     )
 
 

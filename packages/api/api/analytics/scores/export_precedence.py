@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from api.analytics.military_score_inference.inference_api_payload import (
     COMPLETE_INFERENCE_SEARCH_STATUSES,
     FALLBACK_COMPLETE_PERSISTED_STATUSES,
     PERSISTABLE_INFERENCE_STATUSES,
+    InferenceProductPayload,
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
@@ -21,9 +22,9 @@ from api.analytics.scores.export_wire import (
     product_fields_from_persisted_row,
     product_fields_from_wire_complete,
     search_status_from_wire_complete_event,
+    solutions_diagnostics_from_wire_complete_event,
     solutions_from_persisted_row,
     solutions_from_scheduler_run,
-    solutions_from_terminal_admission,
     wire_complete_event_from_terminal_admission,
 )
 from api.analytics.scores.host_turn_export import (
@@ -117,9 +118,7 @@ class ScoresExportPayload:
     solutions: list[dict[str, object]]
     diagnostics: dict[str, object] | None
     solutions_held: int
-    status: str | None = None
-    placeholders: list[dict[str, object]] | None = None
-    unexplained_military_delta_2x: int | None = None
+    product: InferenceProductPayload = field(default_factory=InferenceProductPayload)
 
 
 @dataclass(frozen=True)
@@ -367,22 +366,17 @@ def _payload_from_functional_host_turn(
         functional_payload.solutions,
         None,
         functional_payload.solutions_held,
-        status=functional_payload.status,
-        placeholders=functional_payload.placeholders,
-        unexplained_military_delta_2x=functional_payload.unexplained_military_delta_2x,
+        product=functional_payload.product,
     )
 
 
 def _payload_from_persisted_row(persisted_row: PersistedInferenceRow) -> ScoresExportPayload:
     solutions, diagnostics, solutions_held = solutions_from_persisted_row(persisted_row)
-    status, placeholders, leftover = product_fields_from_persisted_row(persisted_row)
     return ScoresExportPayload(
         solutions,
         diagnostics,
         solutions_held,
-        status=status,
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        product=product_fields_from_persisted_row(persisted_row),
     )
 
 
@@ -402,17 +396,15 @@ def _materialize_scores_export_payload(
     if branch == "terminal_admission":
         terminal = snapshot.resolved_terminal_admission()
         assert terminal is not None
-        solutions, diagnostics, solutions_held = solutions_from_terminal_admission(terminal)
-        status, placeholders, leftover = product_fields_from_wire_complete(
-            wire_complete_event_from_terminal_admission(terminal)
+        wire_event = wire_complete_event_from_terminal_admission(terminal)
+        solutions, diagnostics, solutions_held = solutions_diagnostics_from_wire_complete_event(
+            wire_event
         )
         return ScoresExportPayload(
             solutions,
             diagnostics,
             solutions_held,
-            status=status,
-            placeholders=placeholders,
-            unexplained_military_delta_2x=leftover,
+            product=product_fields_from_wire_complete(wire_event),
         )
 
     if branch == "scheduler":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from api.analytics.military_score_inference.actions import ActionCatalog
@@ -78,13 +79,22 @@ COMPLETE_INFERENCE_SEARCH_STATUSES = (
 )
 
 
+@dataclass(frozen=True)
+class InferenceProductPayload:
+    """Product status, placeholders, and leftover for persist, stream, and export."""
+
+    status: str | None = None
+    placeholders: list[dict[str, object]] | None = None
+    unexplained_military_delta_2x: int | None = None
+
+
 def product_payload_fields(
     status: str,
     *,
     placeholders: list[dict[str, object]] | None = None,
     leftover: int | None = None,
-) -> tuple[list[dict[str, object]] | None, int | None]:
-    """Return product ``placeholders`` and leftover for persist, stream, and export.
+) -> InferenceProductPayload:
+    """Return product status, placeholders, and leftover for persist, stream, and export.
 
     Residual / ``no_exact_solution`` expose leftover and ``placeholders`` (empty
     list if missing). Skip rows expose empty ``placeholders`` and omit leftover.
@@ -97,7 +107,11 @@ def product_payload_fields(
     ) and resolved_placeholders is None:
         resolved_placeholders = []
     resolved_leftover = leftover if status in FUNCTIONAL_LEFTOVER_STATUSES else None
-    return resolved_placeholders, resolved_leftover
+    return InferenceProductPayload(
+        status=status,
+        placeholders=resolved_placeholders,
+        unexplained_military_delta_2x=resolved_leftover,
+    )
 
 
 def inference_result_to_api_payload(
@@ -241,9 +255,9 @@ def inference_api_payload(
     )
     leftover_2x = _functional_leftover_2x(status, observation)
     leftover_summary = _functional_leftover_status_summary(status, leftover_2x)
-    placeholders, leftover = product_payload_fields(status, leftover=leftover_2x)
+    product = product_payload_fields(status, leftover=leftover_2x)
     payload: dict[str, object] = {
-        "status": status,
+        "status": product.status,
         "summary": leftover_summary if leftover_summary is not None else summary,
         "solutionCount": len(solutions),
         # Zero-solution timeouts are terminal failures (visible error in the SPA).
@@ -260,10 +274,10 @@ def inference_api_payload(
         ),
         "diagnostics": diagnostics,
     }
-    if placeholders is not None:
-        payload["placeholders"] = placeholders
-    if leftover is not None:
-        payload["unexplainedMilitaryDelta2x"] = leftover
+    if product.placeholders is not None:
+        payload["placeholders"] = product.placeholders
+    if product.unexplained_military_delta_2x is not None:
+        payload["unexplainedMilitaryDelta2x"] = product.unexplained_military_delta_2x
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:

@@ -479,12 +479,13 @@ def build_scores_export_materialized_tree(
         ),
         "solutions": payload.solutions,
     }
-    if payload.status is not None:
-        tree["status"] = payload.status
-    if payload.placeholders is not None:
-        tree["placeholders"] = payload.placeholders
-    if payload.unexplained_military_delta_2x is not None:
-        tree["unexplainedMilitaryDelta2x"] = payload.unexplained_military_delta_2x
+    product = payload.product
+    if product.status is not None:
+        tree["status"] = product.status
+    if product.placeholders is not None:
+        tree["placeholders"] = product.placeholders
+    if product.unexplained_military_delta_2x is not None:
+        tree["unexplainedMilitaryDelta2x"] = product.unexplained_military_delta_2x
     if payload.diagnostics is not None:
         tree["diagnostics"] = payload.diagnostics
     tier_emissions = _tier_emissions_from_resolved(resolved)

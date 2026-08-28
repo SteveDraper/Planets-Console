@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.inference_api_payload import (
+    InferenceProductPayload,
     product_payload_fields,
 )
 
@@ -62,7 +63,7 @@ def _product_slots_from_dict(
     *,
     status: str,
     observation_delta: int,
-) -> tuple[list[dict[str, object]] | None, int | None]:
+) -> InferenceProductPayload:
     raw_placeholders = data.get("placeholders")
     placeholders = (
         [entry for entry in raw_placeholders if isinstance(entry, dict)]
@@ -100,7 +101,7 @@ def host_turn_functional_target_from_wire_dict(
 ) -> HostTurnFunctionalTarget:
     status = _required_str(data, "status")
     military_delta_2x = _required_int(data, "militaryDelta2x")
-    placeholders, leftover = _product_slots_from_dict(
+    product = _product_slots_from_dict(
         data,
         status=status,
         observation_delta=military_delta_2x,
@@ -113,8 +114,8 @@ def host_turn_functional_target_from_wire_dict(
         warship_delta=_required_int(data, "warshipDelta"),
         freighter_delta=_required_int(data, "freighterDelta"),
         solutions=_required_solutions(data),
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        placeholders=product.placeholders,
+        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
     )
 
 
@@ -123,7 +124,7 @@ def host_turn_functional_target_from_persistence_dict(
 ) -> HostTurnFunctionalTarget:
     status = _required_str(data, "status")
     military_delta_2x = _required_int(data, "military_delta_2x", "militaryDelta2x")
-    placeholders, leftover = _product_slots_from_dict(
+    product = _product_slots_from_dict(
         data,
         status=status,
         observation_delta=military_delta_2x,
@@ -136,8 +137,8 @@ def host_turn_functional_target_from_persistence_dict(
         warship_delta=_required_int(data, "warship_delta", "warshipDelta"),
         freighter_delta=_required_int(data, "freighter_delta", "freighterDelta"),
         solutions=_required_solutions(data),
-        placeholders=placeholders,
-        unexplained_military_delta_2x=leftover,
+        placeholders=product.placeholders,
+        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
     )
 
 
