@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from api.analytics.military_score_inference.host_turn_targets import (
+    HostTurnFunctionalTarget,
+)
 from api.analytics.military_score_inference.inference_api_payload import (
     COMPLETE_INFERENCE_SEARCH_STATUSES,
     FALLBACK_COMPLETE_PERSISTED_STATUSES,
@@ -11,6 +14,7 @@ from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_INVALID_PROBLEM,
     STATUS_PLAYER_NOT_FOUND,
     STATUS_SOLVER_ERROR,
+    product_payload_fields,
 )
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -494,21 +498,20 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn)
     assert payload.diagnostics["solver"]["source"] == "scheduler_ladder"
 
 
-def test_functional_backfill_resolves_host_turn_targets_without_diagnostics(sample_turn):
+def _held_scores_for_turn_two_from_turn_three_row(
+    persisted_row: PersistedInferenceRow,
+    *,
+    player_id: int,
+):
     from dataclasses import replace
 
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.export_types import ExportScope
-    from api.analytics.military_score_inference.analytic import infer_military_score_build
-    from api.analytics.military_score_inference.host_turn_targets import (
-        host_turn_targets_from_wire_event,
-    )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.exports import held_scores_for_scope
     from api.services.inference_row_persistence_service import InferenceRowPersistenceService
     from api.storage.memory_asset import MemoryAssetBackend
-    from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
     from tests.inference_corpus.fixtures import load_turn_fixture
 
@@ -518,30 +521,8 @@ def test_functional_backfill_resolves_host_turn_targets_without_diagnostics(samp
         turn_two,
         scores=[replace(score, turn=2) for score in turn_two.scores],
     )
-    player_id = 11
-    score = next(entry for entry in turn_three.scores if entry.ownerid == player_id)
-    inference_payload = infer_military_score_build(score, turn_three)
-    host_turn_targets = list(
-        host_turn_targets_from_wire_event(
-            inference_api_payload_to_wire_complete(inference_payload),
-        ),
-    )
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
-        628580,
-        1,
-        3,
-        player_id,
-        PersistedInferenceRow(
-            status=str(inference_payload["status"]),
-            summary=str(inference_payload["summary"]),
-            solution_count=int(inference_payload["solutionCount"]),
-            is_complete=True,
-            solutions=inference_payload["solutions"],
-            diagnostics=None,
-            host_turn_targets=host_turn_targets,
-        ),
-    )
+    persistence.put_row(628580, 1, 3, player_id, persisted_row)
 
     def load_turn(turn_number: int):
         if turn_number == 2:
@@ -558,15 +539,86 @@ def test_functional_backfill_resolves_host_turn_targets_without_diagnostics(samp
         game_id=turn_two.game.id,
         perspective=turn_two.player.id,
     )
-    resolved = held_scores_for_scope(
+    return held_scores_for_scope(
         ctx,
         ExportScope(game_id=628580, perspective=1, turn=2, player_id=player_id),
         turn=turn_two,
+    )
+
+
+def test_functional_backfill_resolves_host_turn_targets_without_diagnostics():
+    from api.analytics.military_score_inference.analytic import infer_military_score_build
+    from api.analytics.military_score_inference.host_turn_targets import (
+        host_turn_targets_from_wire_event,
+    )
+    from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
+
+    from tests.inference_corpus.fixtures import load_turn_fixture
+
+    player_id = 11
+    turn_three = load_turn_fixture("628580/1/turns/3.json")
+    score = next(entry for entry in turn_three.scores if entry.ownerid == player_id)
+    inference_payload = infer_military_score_build(score, turn_three)
+    host_turn_targets = list(
+        host_turn_targets_from_wire_event(
+            inference_api_payload_to_wire_complete(inference_payload),
+        ),
+    )
+    resolved = _held_scores_for_turn_two_from_turn_three_row(
+        PersistedInferenceRow(
+            status=str(inference_payload["status"]),
+            summary=str(inference_payload["summary"]),
+            solution_count=int(inference_payload["solutionCount"]),
+            is_complete=True,
+            solutions=inference_payload["solutions"],
+            diagnostics=None,
+            host_turn_targets=host_turn_targets,
+        ),
+        player_id=player_id,
     )
     assert resolved.decision.branch == "functional_backfill"
     assert resolved.payload.diagnostics is None
     assert resolved.payload.solutions
     assert resolved.payload.solutions_held > 0
+
+
+def test_functional_backfill_residual_target_exposes_leftover_slot_not_observation_delta():
+    observation_delta = 999
+    leftover_slot = 22
+    product = product_payload_fields(
+        STATUS_MODERATE_RESIDUAL,
+        leftover=leftover_slot,
+    )
+    residual_target = HostTurnFunctionalTarget(
+        host_turn=1,
+        status=STATUS_MODERATE_RESIDUAL,
+        solution_count=0,
+        military_delta_2x=observation_delta,
+        warship_delta=0,
+        freighter_delta=0,
+        solutions=[],
+        placeholders=product.placeholders,
+        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
+    )
+    resolved = _held_scores_for_turn_two_from_turn_three_row(
+        PersistedInferenceRow(
+            status=STATUS_MODERATE_RESIDUAL,
+            summary="Moderate military leftover (11)",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+            diagnostics=None,
+            host_turn_targets=[residual_target],
+        ),
+        player_id=11,
+    )
+    assert resolved.decision.branch == "functional_backfill"
+    assert resolved.decision.search_status == "complete"
+    assert resolved.payload.product.status == STATUS_MODERATE_RESIDUAL
+    assert resolved.payload.product.placeholders == []
+    assert resolved.payload.product.unexplained_military_delta_2x == leftover_slot
+    assert resolved.payload.product.unexplained_military_delta_2x != observation_delta
+    assert resolved.payload.diagnostics is None
 
 
 def test_resolve_scores_export_resolves_functional_payload_once(monkeypatch, sample_turn):
