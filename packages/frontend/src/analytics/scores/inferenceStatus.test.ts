@@ -73,6 +73,29 @@ describe('canOpenInferenceDetail', () => {
     expect(canOpenInferenceDetail(detail({ displayStatus: 'failure', isComplete: true }))).toBe(
       true
     )
+    expect(canOpenInferenceDetail(detail({ displayStatus: 'skipped', isComplete: true }))).toBe(
+      false
+    )
+    expect(
+      canOpenInferenceDetail(
+        detail({
+          displayStatus: 'moderate_residual',
+          status: 'moderate_residual',
+          isComplete: true,
+          unexplainedMilitaryDelta2x: 22,
+        })
+      )
+    ).toBe(true)
+    expect(
+      canOpenInferenceDetail(
+        detail({
+          displayStatus: 'mine_score_residual',
+          status: 'mine_score_residual',
+          isComplete: true,
+          unexplainedMilitaryDelta2x: 54,
+        })
+      )
+    ).toBe(true)
   })
 })
 

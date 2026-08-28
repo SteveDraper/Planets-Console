@@ -54,6 +54,21 @@ def inference_progress_event(
     return payload
 
 
+def inference_complete_functional_fields(
+    payload: dict[str, object],
+) -> tuple[list[dict[str, object]] | None, int | None]:
+    """Return ``placeholders`` and leftover 2x from a complete payload or wire event."""
+    raw_placeholders = payload.get("placeholders")
+    placeholders = (
+        [entry for entry in raw_placeholders if isinstance(entry, dict)]
+        if isinstance(raw_placeholders, list)
+        else None
+    )
+    leftover = payload.get("unexplainedMilitaryDelta2x")
+    unexplained = leftover if isinstance(leftover, int) and not isinstance(leftover, bool) else None
+    return placeholders, unexplained
+
+
 def inference_complete_event(
     *,
     status: str,
@@ -66,6 +81,8 @@ def inference_complete_event(
     fleet_torp_input_status: str | None = None,
     fleet_torp_overlay_belief_set_torp_ids: list[int] | None = None,
     tier_emissions: list[dict[str, object]] | None = None,
+    placeholders: list[dict[str, object]] | None = None,
+    unexplained_military_delta_2x: int | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "complete",
@@ -76,6 +93,10 @@ def inference_complete_event(
     }
     if solutions is not None:
         payload["solutions"] = solutions
+    if placeholders is not None:
+        payload["placeholders"] = placeholders
+    if unexplained_military_delta_2x is not None:
+        payload["unexplainedMilitaryDelta2x"] = unexplained_military_delta_2x
     if diagnostics is not None:
         payload["diagnostics"] = diagnostics
     if host_turn_targets is not None:

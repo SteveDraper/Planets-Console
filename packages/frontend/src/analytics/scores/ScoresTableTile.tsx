@@ -10,6 +10,7 @@ type ScoresTableTileProps = {
   onToggle: () => void
   scoresTableParams: ScoresTableParams
   onScoresTableParamsChange: (next: ScoresTableParams) => void
+  buildInferenceAvailable?: boolean
 }
 
 export function ScoresTableTile({
@@ -20,6 +21,7 @@ export function ScoresTableTile({
   onToggle,
   scoresTableParams,
   onScoresTableParamsChange,
+  buildInferenceAvailable = true,
 }: ScoresTableTileProps) {
   const showInferenceOption = supportsMode && enabled
 
@@ -47,19 +49,33 @@ export function ScoresTableTile({
       </label>
       {showInferenceOption ? (
         <label
-          className="flex cursor-pointer items-center gap-2 border-t border-[#52575d]/70 px-2 py-1.5 pl-8 text-xs text-slate-300"
+          className={cn(
+            'flex items-center gap-2 border-t border-[#52575d]/70 px-2 py-1.5 pl-8 text-xs text-slate-300',
+            buildInferenceAvailable ? 'cursor-pointer' : 'cursor-default text-slate-500'
+          )}
+          title={
+            buildInferenceAvailable
+              ? undefined
+              : 'Stealth Mode hides military scores; build inference is unavailable'
+          }
           onClick={(e) => e.stopPropagation()}
         >
           <input
             type="checkbox"
             checked={scoresTableParams.includeBuildInference}
+            disabled={!buildInferenceAvailable}
+            title={
+              buildInferenceAvailable
+                ? undefined
+                : 'Stealth Mode hides military scores; build inference is unavailable'
+            }
             onChange={(e) =>
               onScoresTableParamsChange({
                 ...scoresTableParams,
                 includeBuildInference: e.target.checked,
               })
             }
-            className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 accent-slate-400"
+            className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 accent-slate-400 disabled:opacity-50"
           />
           <span>Include build inference</span>
         </label>

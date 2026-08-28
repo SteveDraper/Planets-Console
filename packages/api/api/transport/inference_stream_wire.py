@@ -28,6 +28,7 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
 from api.models.game import TurnInfo
 from api.transport.inference_stream import (
     inference_complete_event,
+    inference_complete_functional_fields,
     inference_error_event,
     inference_global_pause_event,
     inference_progress_event,
@@ -76,6 +77,7 @@ def inference_api_payload_to_wire_complete(
             fleet_torp_overlay_belief_set_torp_ids=payload.get("fleetTorpOverlayBeliefSetTorpIds"),
         )
     )
+    placeholders, unexplained_military_delta_2x = inference_complete_functional_fields(payload)
     return inference_complete_event(
         status=str(payload.get("status", "")),
         summary=str(payload.get("summary", "")),
@@ -90,6 +92,8 @@ def inference_api_payload_to_wire_complete(
             payload=payload,
             diagnostics=diagnostics_dict,
         ),
+        placeholders=placeholders,
+        unexplained_military_delta_2x=unexplained_military_delta_2x,
     )
 
 
@@ -117,6 +121,8 @@ def row_complete_to_complete_wire_event(
         fleet_torp_input_status=fleet_torp_input_status,
         fleet_torp_overlay_belief_set_torp_ids=fleet_torp_overlay_belief_set_torp_ids,
         tier_emissions=_tier_emissions_for_complete_wire(diagnostics=payload.diagnostics),
+        placeholders=payload.placeholders,
+        unexplained_military_delta_2x=payload.unexplained_military_delta_2x,
     )
 
 

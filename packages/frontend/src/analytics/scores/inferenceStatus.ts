@@ -23,6 +23,15 @@ function baseInferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string 
   if (detail.displayStatus === 'stopped') {
     return detail.summary || 'Build inference halted'
   }
+  if (detail.displayStatus === 'skipped') {
+    return detail.summary || 'Build inference skipped'
+  }
+  if (
+    detail.displayStatus === 'moderate_residual' ||
+    detail.displayStatus === 'mine_score_residual'
+  ) {
+    return detail.summary || 'Build inference leftover'
+  }
   return detail.summary || 'No build inference result'
 }
 
@@ -42,6 +51,9 @@ export function inferenceAccessibleLabel(detail: ScoresInferenceRowDetail): stri
 }
 
 export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolean {
+  if (detail.displayStatus === 'skipped') {
+    return false
+  }
   if (
     (detail.displayStatus === 'success' || detail.displayStatus === 'paused') &&
     detail.solutionCount > 0
@@ -50,7 +62,10 @@ export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolea
   }
   return (
     detail.isComplete &&
-    (detail.displayStatus === 'failure' || detail.displayStatus === 'stopped')
+    (detail.displayStatus === 'failure' ||
+      detail.displayStatus === 'stopped' ||
+      detail.displayStatus === 'moderate_residual' ||
+      detail.displayStatus === 'mine_score_residual')
   )
 }
 

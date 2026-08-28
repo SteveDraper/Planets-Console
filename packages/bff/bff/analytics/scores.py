@@ -42,14 +42,31 @@ def _format_score_cell(cell: object) -> str:
     return f"{value} ({change})"
 
 
+_FAILURE_WIRE_STATUSES = frozenset(
+    {
+        "no_exact_solution",
+        "invalid_problem",
+        "solver_error",
+        "fetch_error",
+        "missing_inference",
+    }
+)
+
+
 def _inference_cell_display_status(inference: dict[str, object]) -> str:
     status = str(inference.get("status", ""))
     solution_count = inference.get("solutionCount", 0)
     is_complete = inference.get("isComplete", True)
     has_held_solutions = isinstance(solution_count, int) and solution_count > 0
 
+    if status == "paused":
+        return "paused"
     if status == "stopped":
         return "success" if has_held_solutions else "stopped"
+    if status == "moderate_residual":
+        return "moderate_residual"
+    if status == "mine_score_residual":
+        return "mine_score_residual"
     if status == "exact":
         return "success"
     if has_held_solutions and not is_complete:
@@ -60,6 +77,13 @@ def _inference_cell_display_status(inference: dict[str, object]) -> str:
         return "pending"
     if status == "pending" or (not is_complete and not has_held_solutions):
         return "pending"
+    if (
+        is_complete
+        and not has_held_solutions
+        and status not in _FAILURE_WIRE_STATUSES
+        and status != "time_limited"
+    ):
+        return "skipped"
     return "failure"
 
 
@@ -88,6 +112,12 @@ def _shape_inference_detail(
             "solutions": inference.get("solutions", []),
             "diagnostics": inference.get("diagnostics", {}),
         }
+        leftover = inference.get("unexplainedMilitaryDelta2x")
+        if isinstance(leftover, int) and not isinstance(leftover, bool):
+            shaped["unexplainedMilitaryDelta2x"] = leftover
+        placeholders = inference.get("placeholders")
+        if isinstance(placeholders, list):
+            shaped["placeholders"] = [entry for entry in placeholders if isinstance(entry, dict)]
         fleet_torp_input_status = inference.get("fleetTorpInputStatus")
         if isinstance(fleet_torp_input_status, str):
             shaped["fleetTorpInputStatus"] = fleet_torp_input_status
@@ -109,8 +139,10 @@ def _pending_inference_stub(player_id: object) -> dict[str, object]:
 
 
 def table_from_core(core_data: dict, *, include_build_inference: bool = False) -> dict:
+    available = bool(core_data.get("buildInferenceAvailable", True))
+    effective_include = include_build_inference and available
     columns = list(TABLE_COLUMNS)
-    if include_build_inference:
+    if effective_include:
         columns.append(INFERENCE_COLUMN)
 
     rows: list[list[str]] = []
@@ -124,7 +156,7 @@ def table_from_core(core_data: dict, *, include_build_inference: bool = False) -
             str(row.get("racePlayer", "")),
             *[_format_score_cell(row.get(field)) for field in TABLE_FIELDS],
         ]
-        if include_build_inference:
+        if effective_include:
             inference_by_row.append(_pending_inference_stub(player_id))
         rows.append(table_row)
         row_player_ids.append(player_id if isinstance(player_id, int) else None)
@@ -137,7 +169,7 @@ def table_from_core(core_data: dict, *, include_build_inference: bool = False) -
     }
     if "buildInferenceAvailable" in core_data:
         payload["buildInferenceAvailable"] = bool(core_data["buildInferenceAvailable"])
-    if include_build_inference:
+    if include_build_inference and available:
         payload["includeBuildInference"] = True
         payload["inferenceByRow"] = inference_by_row
     return payload

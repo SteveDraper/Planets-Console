@@ -30,6 +30,7 @@ describe('reduceRowStreamState', () => {
       summary: 'Inference timed out before finding a solution',
       isComplete: true,
       diagnostics: {},
+      placeholders: [],
     })
     expect(detail.displayStatus).toBe('failure')
     expect(detail.isComplete).toBe(true)
@@ -199,5 +200,38 @@ describe('reduceRowStreamState', () => {
     expect(next.status).toBe('fetch_error')
     expect(next.summary).toBe('stream ended early')
     expect(rowDetailFromStreamState(8, next).displayStatus).toBe('failure')
+  })
+
+  it('maps skip complete to skipped display status without opening solutions', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'dead',
+      summary: 'Player is dead',
+      solutionCount: 0,
+      isComplete: true,
+      solutions: [],
+      placeholders: [],
+    })
+    const detail = rowDetailFromStreamState(4, next)
+    expect(detail.displayStatus).toBe('skipped')
+    expect(detail.solutionCount).toBe(0)
+    expect(detail.placeholders).toEqual([])
+  })
+
+  it('maps residual complete to residual display status with leftover', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'moderate_residual',
+      summary: 'Moderate military leftover (11)',
+      solutionCount: 0,
+      isComplete: true,
+      solutions: [],
+      placeholders: [],
+      unexplainedMilitaryDelta2x: 22,
+    })
+    const detail = rowDetailFromStreamState(4, next)
+    expect(detail.displayStatus).toBe('moderate_residual')
+    expect(detail.unexplainedMilitaryDelta2x).toBe(22)
+    expect(detail.placeholders).toEqual([])
   })
 })

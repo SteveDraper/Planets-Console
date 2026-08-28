@@ -155,6 +155,90 @@ describe('ScoresTableView', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('No feasible build explanation found')
   })
 
+  it('mutes skip cells and does not open a modal', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'skipped',
+              status: 'dead',
+              summary: 'Player is dead',
+              solutionCount: 0,
+              isComplete: true,
+              solutions: [],
+              diagnostics: {},
+              placeholders: [],
+            },
+          ],
+        })}
+      />
+    )
+
+    const skipCell = screen.getByLabelText('Player is dead')
+    fireEvent.click(skipCell)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('renders distinct residual leftover markers and opens existing detail', () => {
+    const { rerender } = render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'moderate_residual',
+              status: 'moderate_residual',
+              summary: 'Moderate military leftover (11)',
+              solutionCount: 0,
+              isComplete: true,
+              solutions: [],
+              diagnostics: {},
+              placeholders: [],
+              unexplainedMilitaryDelta2x: 22,
+            },
+          ],
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText('Moderate military leftover (11)'))
+    expect(screen.getByRole('dialog')).toHaveTextContent('Moderate military leftover (11)')
+    expect(screen.getByText('11')).toBeInTheDocument()
+
+    rerender(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'mine_score_residual',
+              status: 'mine_score_residual',
+              summary: 'Mine-score leftover (27)',
+              solutionCount: 0,
+              isComplete: true,
+              solutions: [],
+              diagnostics: {},
+              placeholders: [],
+              unexplainedMilitaryDelta2x: 54,
+            },
+          ],
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText('Mine-score leftover (27)'))
+    expect(screen.getByRole('dialog')).toHaveTextContent('Mine-score leftover (27)')
+    expect(screen.getByText('27')).toBeInTheDocument()
+  })
+
   it('opens inference detail modal when success icon is clicked', () => {
     render(
       <ScoresTableView

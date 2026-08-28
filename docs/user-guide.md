@@ -155,6 +155,14 @@ With **Tabular** selected, the main area shows **one section per enabled analyti
 - If game scope is incomplete (no game, turn, or viewpoint), you see a short message instead of tables.
 - After scope is set, tables load from the server; pending and error states are shown inline per section.
 
+**Scores** includes an **Include build inference** checkbox under the analytic tile. When that option is on, the scoreboard gains a **Build inference** column:
+
+- A solid count is a ranked exact explanation; click it to open the existing detail surface.
+- A muted dash means the row was skipped (for example the viewpoint owner, a dead player, or inbound Full Alliance). Hover for the reason; there is no detail modal.
+- Amber leftover vs violet leftover markers distinguish moderate military leftover from mine-score leftover; leftover size is the unexplained military points. Click either to open the existing detail surface.
+- A red X means no exact explanation after a search that was meant to finish (`no_exact_solution`) or a solver/problem failure. Click it for the same detail surface (placeholders can appear there later).
+- In **Stealth Mode** the Scores table still shows planet counts, but **Include build inference** is greyed out because the military column is unpublished.
+
 ![Stacked analytic table tiles](images/user-guide/09-tabular-mode.png)
 
 *Screenshot placeholder: two or more table sections stacked.*

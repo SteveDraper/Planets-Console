@@ -204,6 +204,7 @@ export type TableDataResponse = {
   /** Parallel to `rows`; host player id for each scoreboard row when known. */
   rowPlayerIds?: Array<number | null>
   includeBuildInference?: boolean
+  buildInferenceAvailable?: boolean
   inferenceByRow?: Array<ScoresInferenceRowStub | ScoresInferenceRowDetail>
 }
 
@@ -254,13 +255,23 @@ export type ScoresInferenceSolution = {
 
 export type ScoresInferenceRowDetail = {
   playerId?: number
-  displayStatus: 'success' | 'pending' | 'paused' | 'failure' | 'stopped'
+  displayStatus:
+    | 'success'
+    | 'pending'
+    | 'paused'
+    | 'failure'
+    | 'stopped'
+    | 'skipped'
+    | 'moderate_residual'
+    | 'mine_score_residual'
   status: string
   summary: string
   solutionCount: number
   isComplete: boolean
   solutions: ScoresInferenceSolution[]
   diagnostics: Record<string, unknown>
+  placeholders?: Record<string, unknown>[]
+  unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
 }

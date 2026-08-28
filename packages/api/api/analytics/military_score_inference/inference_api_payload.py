@@ -20,6 +20,8 @@ from api.analytics.military_score_inference.score_arithmetic import (
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
+    STATUS_MINE_SCORE_RESIDUAL,
+    STATUS_MODERATE_RESIDUAL,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
@@ -45,6 +47,13 @@ INFERENCE_ADMISSION_SKIP_STATUSES = frozenset(
         STATUS_HORWASP,
         STATUS_NO_PRIOR_TURN,
         STATUS_PLAYER_NOT_FOUND,
+    }
+)
+_FUNCTIONAL_LEFTOVER_STATUSES = frozenset(
+    {
+        STATUS_MODERATE_RESIDUAL,
+        STATUS_MINE_SCORE_RESIDUAL,
+        STATUS_NO_EXACT_SOLUTION,
     }
 )
 
@@ -92,8 +101,17 @@ def inference_result_to_api_payload(
     )
 
 
-def format_inference_summary(result: InferenceResult) -> str:
+def format_inference_summary(
+    result: InferenceResult,
+    *,
+    unexplained_military_delta_2x: int | None = None,
+) -> str:
     """Return compact row-level summary text for the inference column."""
+    leftover_1x = (unexplained_military_delta_2x or 0) // 2
+    if result.status == STATUS_MODERATE_RESIDUAL:
+        return f"Moderate military leftover ({leftover_1x})"
+    if result.status == STATUS_MINE_SCORE_RESIDUAL:
+        return f"Mine-score leftover ({leftover_1x})"
     if result.status == STATUS_INVALID_PROBLEM:
         reason = result.diagnostics.get("reason")
         if isinstance(reason, str) and reason:
@@ -148,9 +166,19 @@ def inference_api_payload(
     fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
         fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
     )
+    unexplained_military_delta_2x: int | None = None
+    if status in _FUNCTIONAL_LEFTOVER_STATUSES:
+        unexplained_military_delta_2x = (
+            observation.military_delta_2x if observation is not None else 0
+        )
     payload: dict[str, object] = {
         "status": status,
-        "summary": summary,
+        "summary": format_inference_summary(
+            InferenceResult(status=status, solutions=solutions, diagnostics=diagnostics),
+            unexplained_military_delta_2x=unexplained_military_delta_2x,
+        )
+        if status in _FUNCTIONAL_LEFTOVER_STATUSES
+        else summary,
         "solutionCount": len(solutions),
         # Zero-solution timeouts are terminal failures (visible error in the SPA).
         # Timeouts that already hold solutions stay incomplete so partial top-K can
@@ -166,6 +194,10 @@ def inference_api_payload(
         ),
         "diagnostics": diagnostics,
     }
+    if status in _FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES:
+        payload["placeholders"] = []
+    if unexplained_military_delta_2x is not None:
+        payload["unexplainedMilitaryDelta2x"] = unexplained_military_delta_2x
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:

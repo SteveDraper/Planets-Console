@@ -277,6 +277,9 @@ def test_skip_complete_has_status_and_summary_only(sample_turn) -> None:
     assert event["status"] == STATUS_VIEWPOINT_OWNER
     assert event["summary"]
     assert event["solutionCount"] == 0
+    assert event["solutions"] == []
+    assert event["placeholders"] == []
+    assert "unexplainedMilitaryDelta2x" not in event
     assert "diagnostics" not in event
 
 

@@ -37,6 +37,8 @@ class RowCompleteWirePayload:
     solutions: list[dict[str, object]]
     diagnostics: dict[str, object] | None = None
     host_turn_targets: list[HostTurnFunctionalTarget] | None = None
+    placeholders: list[dict[str, object]] | None = None
+    unexplained_military_delta_2x: int | None = None
 
 
 @dataclass(frozen=True)

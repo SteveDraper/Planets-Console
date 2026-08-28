@@ -66,6 +66,8 @@ export const inferenceStreamCompleteEventSchema = inferenceStreamPlayerScopeSche
   solutionCount: z.number().int().min(0),
   isComplete: z.boolean(),
   solutions: z.array(inferenceStreamSolutionPayloadSchema).optional(),
+  placeholders: z.array(z.record(z.string(), z.unknown())).optional(),
+  unexplainedMilitaryDelta2x: z.number().int().optional(),
   diagnostics: z.record(z.string(), z.unknown()).optional(),
   fleetTorpInputStatus: fleetTorpInputStatusSchema.optional(),
   fleetTorpOverlayBeliefSetTorpIds: z.array(z.number().int()).optional(),

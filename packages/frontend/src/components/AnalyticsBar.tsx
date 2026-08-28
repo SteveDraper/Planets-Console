@@ -20,6 +20,7 @@ type AnalyticsBarProps = {
   onConnectionsMapParamsChange: (next: ConnectionsMapParams) => void
   scoresTableParams: ScoresTableParams
   onScoresTableParamsChange: (next: ScoresTableParams) => void
+  buildInferenceAvailable?: boolean
   stellarCartographyGates: StellarCartographySettingsGates
   ionStormCount: number | null
   /** When set, Homeworld locator catalog entry is greyed with a hint. */
@@ -46,6 +47,7 @@ export function AnalyticsBar({
   onConnectionsMapParamsChange,
   scoresTableParams,
   onScoresTableParamsChange,
+  buildInferenceAvailable = true,
   stellarCartographyGates,
   ionStormCount,
   homeworldInactiveReason,
@@ -80,6 +82,7 @@ export function AnalyticsBar({
                   onToggle={() => onToggle(a.id)}
                   scoresTableParams={scoresTableParams}
                   onScoresTableParamsChange={onScoresTableParamsChange}
+                  buildInferenceAvailable={buildInferenceAvailable}
                 />
               </li>
             )

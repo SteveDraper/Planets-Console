@@ -22,6 +22,7 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
     tier_emissions_from_wire_complete,
 )
 from api.serialization.codecs import DACITE_CONFIG, dataclass_to_json
+from api.transport.inference_stream import inference_complete_functional_fields
 
 INFERENCE_ROW_PERSISTENCE_VERSION = 2
 
@@ -31,9 +32,9 @@ class PersistedInferenceRow:
     """Terminal wire ``complete`` payload fields (without ``playerId``).
 
     Durable storage keeps functional row state: status, summary, solutions,
-    ``host_turn_targets``, and a compact ``tier_emissions`` ledger. Solver
-    ``diagnostics`` (including full action catalogs) are wire/live-only and must
-    not be written to storage.
+    ``placeholders``, ``unexplainedMilitaryDelta2x``, ``host_turn_targets``, and a
+    compact ``tier_emissions`` ledger. Solver ``diagnostics`` (including full action
+    catalogs) are wire/live-only and must not be written to storage.
     """
 
     status: str
@@ -45,6 +46,8 @@ class PersistedInferenceRow:
     host_turn_targets: list[HostTurnFunctionalTarget] | None = None
     fleet_torp_input_status: FleetTorpInputStatus | None = None
     tier_emissions: list[dict[str, object]] | None = None
+    placeholders: list[dict[str, object]] | None = None
+    unexplained_military_delta_2x: int | None = None
     persistence_version: int | None = None
 
 
@@ -59,6 +62,11 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
         "tierEmissions",
         payload.pop("tier_emissions", None),
     )
+    raw_placeholders = payload.pop("placeholders", None)
+    leftover = payload.pop(
+        "unexplainedMilitaryDelta2x",
+        payload.pop("unexplained_military_delta_2x", None),
+    )
     row = from_dict(
         data_class=PersistedInferenceRow,
         data=payload,
@@ -69,6 +77,11 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
     if isinstance(raw_tier_emissions, list):
         compact = compact_tier_emissions_from_step_diagnostics(raw_tier_emissions)
         row = replace(row, tier_emissions=compact or None)
+    if isinstance(raw_placeholders, list):
+        placeholders = [entry for entry in raw_placeholders if isinstance(entry, dict)]
+        row = replace(row, placeholders=placeholders)
+    if isinstance(leftover, int) and not isinstance(leftover, bool):
+        row = replace(row, unexplained_military_delta_2x=leftover)
     if not isinstance(raw_targets, list):
         return row
     targets = [
@@ -88,10 +101,15 @@ def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
     # Prefer camelCase wire keys for first-class ledger fields.
     payload.pop("fleet_torp_input_status", None)
     payload.pop("tier_emissions", None)
+    payload.pop("unexplained_military_delta_2x", None)
     if row.fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = row.fleet_torp_input_status
     if row.tier_emissions is not None:
         payload["tierEmissions"] = row.tier_emissions
+    if row.placeholders is not None:
+        payload["placeholders"] = row.placeholders
+    if row.unexplained_military_delta_2x is not None:
+        payload["unexplainedMilitaryDelta2x"] = row.unexplained_military_delta_2x
     if row.host_turn_targets is not None:
         payload["host_turn_targets"] = [
             host_turn_functional_target_to_persistence_dict(target)
@@ -147,6 +165,7 @@ def persisted_inference_row_from_wire_complete(
     """
     wire_solutions = wire_event.get("solutions")
     host_turn_targets = list(host_turn_targets_from_wire_event(wire_event))
+    placeholders, unexplained = inference_complete_functional_fields(wire_event)
     return PersistedInferenceRow(
         status=str(wire_event.get("status", "")),
         summary=str(wire_event.get("summary", "")),
@@ -157,6 +176,8 @@ def persisted_inference_row_from_wire_complete(
         host_turn_targets=host_turn_targets or None,
         fleet_torp_input_status=fleet_torp_input_status,
         tier_emissions=tier_emissions_from_wire_complete(wire_event),
+        placeholders=placeholders,
+        unexplained_military_delta_2x=unexplained,
         persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
 
@@ -180,4 +201,8 @@ def wire_complete_from_persisted_row(row: PersistedInferenceRow) -> dict[str, ob
         payload["fleetTorpInputStatus"] = row.fleet_torp_input_status
     if row.tier_emissions is not None:
         payload["tierEmissions"] = row.tier_emissions
+    if row.placeholders is not None:
+        payload["placeholders"] = row.placeholders
+    if row.unexplained_military_delta_2x is not None:
+        payload["unexplainedMilitaryDelta2x"] = row.unexplained_military_delta_2x
     return payload

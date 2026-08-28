@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ListFilter, Octagon, X } from 'lucide-react'
+import { ListFilter, Octagon, X, CircleDot, Hexagon } from 'lucide-react'
 import type {
   AnalyticShellScope,
   ScoresInferenceRowDetail,
@@ -113,6 +113,50 @@ function InferenceStatusCell({
           className="inline-flex items-center justify-center rounded p-1 text-slate-400 hover:bg-white/10 disabled:cursor-default disabled:opacity-60"
         >
           <Octagon className="h-4 w-4" aria-hidden />
+        </button>
+      </InferenceCellChrome>
+    )
+  }
+
+  if (detail.displayStatus === 'skipped') {
+    return (
+      <InferenceCellChrome {...chromeProps}>
+        <span
+          title={label}
+          aria-label={label}
+          className="inline-flex min-w-[1.25rem] items-center justify-center px-1 text-slate-500/70"
+        >
+          —
+        </span>
+      </InferenceCellChrome>
+    )
+  }
+
+  if (
+    detail.displayStatus === 'moderate_residual' ||
+    detail.displayStatus === 'mine_score_residual'
+  ) {
+    const leftover = Math.floor((detail.unexplainedMilitaryDelta2x ?? 0) / 2)
+    const isMine = detail.displayStatus === 'mine_score_residual'
+    return (
+      <InferenceCellChrome {...chromeProps}>
+        <button
+          type="button"
+          title={label}
+          aria-label={label}
+          onClick={onOpenDetail}
+          className={
+            isMine
+              ? 'inline-flex items-center gap-1 rounded p-1 text-violet-300 hover:bg-white/10'
+              : 'inline-flex items-center gap-1 rounded p-1 text-amber-300 hover:bg-white/10'
+          }
+        >
+          {isMine ? (
+            <Hexagon className="h-4 w-4" aria-hidden />
+          ) : (
+            <CircleDot className="h-4 w-4" aria-hidden />
+          )}
+          <span className="text-xs tabular-nums">{leftover}</span>
         </button>
       </InferenceCellChrome>
     )

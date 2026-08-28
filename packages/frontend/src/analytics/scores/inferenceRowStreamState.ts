@@ -42,6 +42,8 @@ export type RowStreamState = {
   summary: string
   isComplete: boolean
   diagnostics: Record<string, unknown>
+  placeholders: Record<string, unknown>[]
+  unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
 }
@@ -53,6 +55,7 @@ export function initialRowStreamState(): RowStreamState {
     summary: 'Build inference in progress',
     isComplete: false,
     diagnostics: {},
+    placeholders: [],
   }
 }
 
@@ -61,6 +64,14 @@ function pausedSummaryFromSolutions(solutions: ScoresInferenceSolution[]): strin
     ? `Paused with ${solutions.length} held solution(s)`
     : 'Build inference paused'
 }
+
+const FAILURE_WIRE_STATUSES = new Set([
+  'no_exact_solution',
+  'invalid_problem',
+  'solver_error',
+  'fetch_error',
+  'missing_inference',
+])
 
 export function displayStatusForRow(
   status: string,
@@ -72,6 +83,12 @@ export function displayStatusForRow(
   }
   if (status === 'stopped') {
     return solutionCount > 0 ? 'success' : 'stopped'
+  }
+  if (status === 'moderate_residual') {
+    return 'moderate_residual'
+  }
+  if (status === 'mine_score_residual') {
+    return 'mine_score_residual'
   }
   // Zero-solution timeouts are terminal errors; partial timeouts keep streaming.
   if (status === 'time_limited') {
@@ -88,6 +105,9 @@ export function displayStatusForRow(
   }
   if (!isComplete) {
     return 'pending'
+  }
+  if (!FAILURE_WIRE_STATUSES.has(status)) {
+    return 'skipped'
   }
   return 'failure'
 }
@@ -106,6 +126,10 @@ export function rowDetailFromStreamState(
     isComplete: state.isComplete,
     solutions: state.heldSolutions,
     diagnostics: state.diagnostics,
+    placeholders: state.placeholders,
+    ...(state.unexplainedMilitaryDelta2x != null
+      ? { unexplainedMilitaryDelta2x: state.unexplainedMilitaryDelta2x }
+      : {}),
     ...(state.fleetTorpInputStatus != null
       ? { fleetTorpInputStatus: state.fleetTorpInputStatus }
       : {}),
@@ -135,6 +159,7 @@ export function failureDetail(playerId: number, summary: string): ScoresInferenc
     isComplete: true,
     solutions: [],
     diagnostics: {},
+    placeholders: [],
   }
 }
 
@@ -217,6 +242,10 @@ export function reduceRowStreamState(
       summary: event.summary,
       isComplete: event.isComplete,
       diagnostics: event.diagnostics ?? {},
+      placeholders: event.placeholders ?? [],
+      ...(event.unexplainedMilitaryDelta2x != null
+        ? { unexplainedMilitaryDelta2x: event.unexplainedMilitaryDelta2x }
+        : {}),
       ...fleetTorpFieldsFromCompleteEvent(event),
       ...(event.solutions != null
         ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }

@@ -125,7 +125,6 @@ function TableTile({
   globalInferencePause: UseGlobalInferencePauseResult
 }) {
   const isScores = analyticId === 'scores'
-  const inferenceEnabled = isScores && scoresTableParams.includeBuildInference
   const setScoresDiagnostics = useAnalyticDiagnosticsStore((state) => state.setScoresDiagnostics)
   const { data, isPending, error } = useQuery({
     queryKey: [
@@ -143,6 +142,10 @@ function TableTile({
       ),
     enabled: fetchEnabled,
   })
+  const inferenceEnabled =
+    isScores &&
+    scoresTableParams.includeBuildInference &&
+    data?.buildInferenceAvailable !== false
   const { inferenceByRow } = useScoresInferenceByRow(
     data,
     analyticScope,

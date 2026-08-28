@@ -37,4 +37,26 @@ describe('ScoresTableTile', () => {
 
     expect(screen.queryByLabelText('Include build inference')).toBeNull()
   })
+
+  it('grey-disables include build inference when availability is off', () => {
+    render(
+      <ScoresTableTile
+        name="Scores"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        scoresTableParams={{ includeBuildInference: true }}
+        onScoresTableParamsChange={() => {}}
+        buildInferenceAvailable={false}
+      />
+    )
+
+    const inferenceCheckbox = screen.getByLabelText('Include build inference')
+    expect(inferenceCheckbox).toBeDisabled()
+    expect(inferenceCheckbox).toHaveAttribute(
+      'title',
+      expect.stringMatching(/stealth mode/i)
+    )
+  })
 })

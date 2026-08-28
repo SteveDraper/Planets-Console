@@ -2,13 +2,23 @@
 
 import json
 
+from api.analytics.military_score_inference.inference_admission import (
+    admission_skip_complete_event,
+    admission_skip_for_status,
+)
+from api.analytics.military_score_inference.inference_api_payload import STATUS_VIEWPOINT_OWNER
 from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
 )
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
-from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_MINE_SCORE_RESIDUAL,
+    STATUS_MODERATE_RESIDUAL,
+    STATUS_NO_EXACT_SOLUTION,
+)
 from api.transport.inference_stream import (
     inference_complete_event,
     inference_solution_event,
@@ -42,6 +52,71 @@ def test_stream_inference_ndjson_yields_ndjson_lines() -> None:
     assert last["status"] == "exact"
     assert last["solutionCount"] == 1
     assert last["solutions"] == [{"objectiveValue": 5, "actions": []}]
+
+
+def test_skip_complete_carries_empty_placeholders_and_no_leftover() -> None:
+    wire = admission_skip_complete_event(admission_skip_for_status(STATUS_VIEWPOINT_OWNER))
+    assert wire["type"] == "complete"
+    assert wire["status"] == STATUS_VIEWPOINT_OWNER
+    assert wire["solutionCount"] == 0
+    assert wire["solutions"] == []
+    assert wire["placeholders"] == []
+    assert "unexplainedMilitaryDelta2x" not in wire
+    assert "diagnostics" not in wire
+
+
+def test_residual_complete_carries_leftover_and_empty_placeholders() -> None:
+    moderate = inference_complete_event(
+        status=STATUS_MODERATE_RESIDUAL,
+        summary="Moderate military leftover (11)",
+        solution_count=0,
+        is_complete=True,
+        solutions=[],
+        placeholders=[],
+        unexplained_military_delta_2x=22,
+    )
+    mine = inference_complete_event(
+        status=STATUS_MINE_SCORE_RESIDUAL,
+        summary="Mine-score leftover (27)",
+        solution_count=0,
+        is_complete=True,
+        solutions=[],
+        placeholders=[],
+        unexplained_military_delta_2x=54,
+    )
+    unsat = inference_complete_event(
+        status=STATUS_NO_EXACT_SOLUTION,
+        summary="No feasible build explanation found",
+        solution_count=0,
+        is_complete=True,
+        solutions=[],
+        placeholders=[],
+        unexplained_military_delta_2x=40,
+    )
+    for wire in (moderate, mine, unsat):
+        assert wire["type"] == "complete"
+        assert wire["solutionCount"] == 0
+        assert wire["solutions"] == []
+        assert wire["placeholders"] == []
+        assert isinstance(wire["unexplainedMilitaryDelta2x"], int)
+
+
+def test_placeholder_complete_does_not_emit_solution_events() -> None:
+    items = [
+        inference_complete_event(
+            status=STATUS_MODERATE_RESIDUAL,
+            summary="Moderate military leftover (0)",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+            placeholders=[],
+            unexplained_military_delta_2x=0,
+        )
+    ]
+    events = [json.loads(line) for line in stream_inference_ndjson(lambda: iter(items))]
+    assert [event["type"] for event in events] == ["complete"]
+    assert events[0]["solutionCount"] == 0
+    assert events[0]["placeholders"] == []
 
 
 def test_row_complete_to_complete_wire_event_includes_solutions() -> None:

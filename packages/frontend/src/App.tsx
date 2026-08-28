@@ -30,6 +30,7 @@ import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
 import { useGlobalInferencePause } from './analytics/scores/useGlobalInferencePause'
+import { useBuildInferenceAvailable } from './analytics/scores/useBuildInferenceAvailable'
 import { usePersistStoreHydrated } from './lib/usePersistStoreHydrated'
 import { useComputeFreezeStatusSync } from './lib/useComputeFreezeStatusSync'
 import { useComputeDiagnosticsStore } from './stores/computeDiagnostics'
@@ -302,11 +303,16 @@ function ConsoleShell() {
       ),
     [analytics, enabledIds, homeworldInactiveReason]
   )
+  const buildInferenceAvailable = useBuildInferenceAvailable(
+    analyticScope,
+    viewMode === 'tabular' && enabledIds.has('scores') && turnDataReady
+  )
   const globalInferencePauseEnabled =
     viewMode === 'tabular' &&
     enabledIds.has('scores') &&
     scoresPreferencesHydrated &&
     scoresTableParams.includeBuildInference &&
+    buildInferenceAvailable &&
     turnDataReady &&
     analyticScope != null
   const globalInferencePause = useGlobalInferencePause(
@@ -367,6 +373,7 @@ function ConsoleShell() {
           onConnectionsMapParamsChange={setConnectionsMapParams}
           scoresTableParams={scoresTableParams}
           onScoresTableParamsChange={setScoresTableParams}
+          buildInferenceAvailable={buildInferenceAvailable}
           stellarCartographyGates={stellarCartographyGates}
           ionStormCount={ionStormCount}
           homeworldInactiveReason={homeworldInactiveReason}
