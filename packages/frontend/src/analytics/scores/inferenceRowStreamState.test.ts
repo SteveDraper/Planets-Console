@@ -24,13 +24,15 @@ describe('reduceRowStreamState', () => {
   })
 
   it('shows zero-solution time_limited complete as a visible failure', () => {
-    const detail = rowDetailFromStreamState(4, {
-      heldSolutions: [],
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
       status: 'time_limited',
+      displayStatus: 'failure',
       summary: 'Inference timed out before finding a solution',
+      solutionCount: 0,
       isComplete: true,
-      diagnostics: {},
     })
+    const detail = rowDetailFromStreamState(4, next)
     expect(detail.displayStatus).toBe('failure')
     expect(detail.isComplete).toBe(true)
     expect(detail.summary).toMatch(/timed out/i)
@@ -82,6 +84,7 @@ describe('reduceRowStreamState', () => {
     const complete = reduceRowStreamState(withSolution, {
       type: 'complete',
       status: 'exact',
+      displayStatus: 'success',
       summary: 'Best: built warship',
       solutionCount: 1,
       isComplete: true,
@@ -117,6 +120,7 @@ describe('reduceRowStreamState', () => {
     const complete = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'exact',
+      displayStatus: 'success',
       summary: 'Best: Freighter',
       solutionCount: 1,
       isComplete: true,
@@ -137,6 +141,7 @@ describe('reduceRowStreamState', () => {
     const firstComplete = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'exact',
+      displayStatus: 'success',
       summary: 'Provisional',
       solutionCount: 1,
       isComplete: true,
@@ -146,6 +151,7 @@ describe('reduceRowStreamState', () => {
     const secondComplete = reduceRowStreamState(firstComplete, {
       type: 'complete',
       status: 'exact',
+      displayStatus: 'success',
       summary: 'Authoritative',
       solutionCount: 1,
       isComplete: true,
@@ -179,6 +185,7 @@ describe('reduceRowStreamState', () => {
     const complete = reduceRowStreamState(withSolution, {
       type: 'complete',
       status: 'exact',
+      displayStatus: 'success',
       summary: 'Done',
       solutionCount: 1,
       isComplete: true,
@@ -199,5 +206,84 @@ describe('reduceRowStreamState', () => {
     expect(next.status).toBe('fetch_error')
     expect(next.summary).toBe('stream ended early')
     expect(rowDetailFromStreamState(8, next).displayStatus).toBe('failure')
+  })
+
+  it('maps skip complete to skipped display status without opening solutions', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'dead',
+      displayStatus: 'skipped',
+      summary: 'Player is dead',
+      solutionCount: 0,
+      isComplete: true,
+      solutions: [],
+      placeholders: [],
+    })
+    const detail = rowDetailFromStreamState(4, next)
+    expect(detail.displayStatus).toBe('skipped')
+    expect(detail.solutionCount).toBe(0)
+    expect(detail.placeholders).toEqual([])
+  })
+
+  it('does not reclassify Core skip statuses when BFF stamps failure', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'dead',
+      displayStatus: 'failure',
+      summary: 'Player is dead',
+      solutionCount: 0,
+      isComplete: true,
+      solutions: [],
+      placeholders: [],
+    })
+    expect(rowDetailFromStreamState(4, next).displayStatus).toBe('failure')
+  })
+
+  it('maps unknown complete without a skip stamp to failure', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'novel_terminal',
+      displayStatus: 'failure',
+      summary: 'unrecognized complete',
+      solutionCount: 0,
+      isComplete: true,
+    })
+    expect(rowDetailFromStreamState(4, next).displayStatus).toBe('failure')
+  })
+
+  it('maps residual complete to residual display status with leftover', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'moderate_residual',
+      displayStatus: 'moderate_residual',
+      summary: 'Moderate military leftover (11)',
+      solutionCount: 0,
+      isComplete: true,
+      solutions: [],
+      placeholders: [],
+      unexplainedMilitaryDelta2x: 22,
+    })
+    const detail = rowDetailFromStreamState(4, next)
+    expect(detail.displayStatus).toBe('moderate_residual')
+    expect(detail.unexplainedMilitaryDelta2x).toBe(22)
+    expect(detail.placeholders).toEqual([])
+  })
+
+  it('shows held time_limited complete using BFF success chrome', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'time_limited',
+      displayStatus: 'success',
+      summary: 'Timed out with held solutions',
+      solutionCount: 1,
+      isComplete: true,
+      solutions: [
+        {
+          objectiveValue: 10,
+          actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+        },
+      ],
+    })
+    expect(rowDetailFromStreamState(8, next).displayStatus).toBe('success')
   })
 })

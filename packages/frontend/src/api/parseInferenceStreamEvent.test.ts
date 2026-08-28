@@ -74,6 +74,7 @@ describe('parseInferenceStreamEvent', () => {
       JSON.stringify({
         type: 'complete',
         status: 'stopped',
+        displayStatus: 'stopped',
         summary: 'Build inference halted',
         solutionCount: 0,
         isComplete: true,
@@ -91,6 +92,7 @@ describe('parseInferenceStreamEvent', () => {
       JSON.stringify({
         type: 'complete',
         status: 'exact',
+        displayStatus: 'success',
         summary: 'Best: built warship',
         solutionCount: 1,
         isComplete: true,
@@ -105,6 +107,7 @@ describe('parseInferenceStreamEvent', () => {
     expect(event).toMatchObject({
       type: 'complete',
       status: 'exact',
+      displayStatus: 'success',
       isComplete: true,
     })
     if (event?.type === 'complete') {
@@ -113,11 +116,35 @@ describe('parseInferenceStreamEvent', () => {
     }
   })
 
+  it('parses complete events with leftover and empty placeholders', () => {
+    const event = parseInferenceStreamEvent(
+      JSON.stringify({
+        type: 'complete',
+        status: 'moderate_residual',
+        displayStatus: 'moderate_residual',
+        summary: 'Moderate military leftover (11)',
+        solutionCount: 0,
+        isComplete: true,
+        solutions: [],
+        placeholders: [],
+        unexplainedMilitaryDelta2x: 22,
+      })
+    )
+    expect(event).toMatchObject({
+      type: 'complete',
+      status: 'moderate_residual',
+      solutionCount: 0,
+      placeholders: [],
+      unexplainedMilitaryDelta2x: 22,
+    })
+  })
+
   it('parses complete events with first-class fleet torp fields', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({
         type: 'complete',
         status: 'exact',
+        displayStatus: 'success',
         summary: 'Best: built warship',
         solutionCount: 1,
         isComplete: true,
@@ -140,6 +167,20 @@ describe('parseInferenceStreamEvent', () => {
       })
     )
     expect(event).toMatchObject({ type: 'globalPause', paused: true })
+  })
+
+  it('rejects complete events without displayStatus', () => {
+    expect(() =>
+      parseInferenceStreamEvent(
+        JSON.stringify({
+          type: 'complete',
+          status: 'dead',
+          summary: 'Player is dead',
+          solutionCount: 0,
+          isComplete: true,
+        })
+      )
+    ).toThrow(/invalid shape/i)
   })
 
   it('rejects unknown event types', () => {

@@ -110,17 +110,19 @@ def admission_skip_api_payload(skip: InferenceAdmissionSkip) -> dict[str, object
         "solutionCount": 0,
         "isComplete": True,
         "solutions": [],
+        "placeholders": [],
     }
 
 
 def admission_skip_complete_event(skip: InferenceAdmissionSkip) -> dict[str, object]:
-    """Table-stream ``complete`` for a skip row: status and summary only."""
+    """Table-stream ``complete`` for a skip row: status, summary, empty placeholders."""
     return inference_complete_event(
         status=skip.status,
         summary=skip.summary,
         solution_count=0,
         is_complete=True,
         solutions=[],
+        placeholders=[],
     )
 
 

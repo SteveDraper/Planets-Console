@@ -1,5 +1,6 @@
 import type { ScoresInferenceRowDetail, ScoresInferenceSolution } from '../../api/bff'
 import type {
+  InferenceDisplayStatus,
   InferenceStreamEvent,
   InferenceStreamSolutionPayload,
   FleetTorpInputStatus,
@@ -42,6 +43,9 @@ export type RowStreamState = {
   summary: string
   isComplete: boolean
   diagnostics: Record<string, unknown>
+  placeholders: Record<string, unknown>[]
+  displayStatus?: InferenceDisplayStatus
+  unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
 }
@@ -53,6 +57,7 @@ export function initialRowStreamState(): RowStreamState {
     summary: 'Build inference in progress',
     isComplete: false,
     diagnostics: {},
+    placeholders: [],
   }
 }
 
@@ -62,31 +67,14 @@ function pausedSummaryFromSolutions(solutions: ScoresInferenceSolution[]): strin
     : 'Build inference paused'
 }
 
-export function displayStatusForRow(
-  status: string,
-  solutionCount: number,
-  isComplete: boolean
-): ScoresInferenceRowDetail['displayStatus'] {
-  if (status === 'paused') {
+function inFlightDisplayStatus(state: RowStreamState): InferenceDisplayStatus {
+  if (state.status === 'paused') {
     return 'paused'
   }
-  if (status === 'stopped') {
-    return solutionCount > 0 ? 'success' : 'stopped'
-  }
-  // Zero-solution timeouts are terminal errors; partial timeouts keep streaming.
-  if (status === 'time_limited') {
-    if (solutionCount > 0) {
-      return isComplete ? 'stopped' : 'success'
-    }
-    return isComplete ? 'failure' : 'pending'
-  }
-  if (solutionCount > 0 && !isComplete) {
+  if (state.heldSolutions.length > 0) {
     return 'success'
   }
-  if (status === 'exact' || (solutionCount > 0 && isComplete)) {
-    return 'success'
-  }
-  if (!isComplete) {
+  if (!state.isComplete) {
     return 'pending'
   }
   return 'failure'
@@ -99,13 +87,17 @@ export function rowDetailFromStreamState(
   const solutionCount = state.heldSolutions.length
   return {
     playerId,
-    displayStatus: displayStatusForRow(state.status, solutionCount, state.isComplete),
+    displayStatus: state.displayStatus ?? inFlightDisplayStatus(state),
     status: state.status,
     summary: state.summary,
     solutionCount,
     isComplete: state.isComplete,
     solutions: state.heldSolutions,
     diagnostics: state.diagnostics,
+    placeholders: state.placeholders,
+    ...(state.unexplainedMilitaryDelta2x != null
+      ? { unexplainedMilitaryDelta2x: state.unexplainedMilitaryDelta2x }
+      : {}),
     ...(state.fleetTorpInputStatus != null
       ? { fleetTorpInputStatus: state.fleetTorpInputStatus }
       : {}),
@@ -135,6 +127,7 @@ export function failureDetail(playerId: number, summary: string): ScoresInferenc
     isComplete: true,
     solutions: [],
     diagnostics: {},
+    placeholders: [],
   }
 }
 
@@ -214,9 +207,14 @@ export function reduceRowStreamState(
     return {
       ...state,
       status: event.status,
+      displayStatus: event.displayStatus,
       summary: event.summary,
       isComplete: event.isComplete,
       diagnostics: event.diagnostics ?? {},
+      placeholders: event.placeholders ?? [],
+      ...(event.unexplainedMilitaryDelta2x != null
+        ? { unexplainedMilitaryDelta2x: event.unexplainedMilitaryDelta2x }
+        : {}),
       ...fleetTorpFieldsFromCompleteEvent(event),
       ...(event.solutions != null
         ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }
@@ -228,6 +226,7 @@ export function reduceRowStreamState(
     return {
       ...state,
       status: 'fetch_error',
+      displayStatus: 'failure',
       summary: event.detail,
       isComplete: true,
     }

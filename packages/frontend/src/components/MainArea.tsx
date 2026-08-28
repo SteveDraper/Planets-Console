@@ -12,7 +12,7 @@ import type {
   ScoresTableWithInferenceData,
   TableDataResponse,
 } from '../api/bff'
-import { scoresTableQueryKey } from '../analytics/scores/api'
+import { scoresAnalyticTableQueryKey } from '../analytics/scores/api'
 import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
 import { ScoresTableView } from '../analytics/scores/ScoresTableView'
 import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
@@ -125,16 +125,11 @@ function TableTile({
   globalInferencePause: UseGlobalInferencePauseResult
 }) {
   const isScores = analyticId === 'scores'
-  const inferenceEnabled = isScores && scoresTableParams.includeBuildInference
   const setScoresDiagnostics = useAnalyticDiagnosticsStore((state) => state.setScoresDiagnostics)
   const { data, isPending, error } = useQuery({
-    queryKey: [
-      'analytic',
-      analyticId,
-      'table',
-      analyticScope,
-      ...(isScores ? scoresTableQueryKey(scoresTableParams) : []),
-    ] as const,
+    queryKey: isScores
+      ? scoresAnalyticTableQueryKey(analyticScope, scoresTableParams)
+      : (['analytic', analyticId, 'table', analyticScope] as const),
     queryFn: () =>
       fetchAnalyticTable(
         analyticId,
@@ -143,6 +138,10 @@ function TableTile({
       ),
     enabled: fetchEnabled,
   })
+  const inferenceEnabled =
+    isScores &&
+    scoresTableParams.includeBuildInference &&
+    data?.buildInferenceAvailable !== false
   const { inferenceByRow } = useScoresInferenceByRow(
     data,
     analyticScope,

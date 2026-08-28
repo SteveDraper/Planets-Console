@@ -24,6 +24,7 @@ from api.analytics.military_score_inference.policy_ladder import finalize_policy
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.models.game import TurnInfo
+from api.transport.inference_stream import inference_complete_functional_fields
 
 
 def row_complete_wire_payload_from_api_payload(
@@ -36,6 +37,7 @@ def row_complete_wire_payload_from_api_payload(
     diagnostics = payload.get("diagnostics")
     wire_solutions = payload.get("solutions")
     host_turn_targets = host_turn_functional_targets_from_wire_list(payload.get("hostTurnTargets"))
+    placeholders, unexplained = inference_complete_functional_fields(payload)
     return RowCompleteWirePayload(
         status=str(payload.get("status", "")),
         summary=str(payload.get("summary", "")),
@@ -44,6 +46,8 @@ def row_complete_wire_payload_from_api_payload(
         solutions=wire_solutions if isinstance(wire_solutions, list) else [],
         diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
         host_turn_targets=host_turn_targets,
+        placeholders=placeholders,
+        unexplained_military_delta_2x=unexplained,
     )
 
 
@@ -80,6 +84,7 @@ def build_row_complete_wire_payload(
             summary=summary,
             solutions=result.solutions,
             diagnostics=result.diagnostics,
+            observation=observation,
         )
     return row_complete_wire_payload_from_api_payload(
         payload,
@@ -141,6 +146,8 @@ def _stopped_wire_payload_from_base(
             **(base.wire_payload.diagnostics or {}),
             "stopped_reason": "cancelled",
         },
+        placeholders=base.wire_payload.placeholders,
+        unexplained_military_delta_2x=base.wire_payload.unexplained_military_delta_2x,
     )
 
 

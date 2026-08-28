@@ -202,7 +202,7 @@ These families are ranked `solutions[]` actions (counts + pairing when it exists
 
 ### 3.8 Product status persist and stream
 
-Locked in [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). **Persist / first-class `status` shipped** ([Implement inference admission skip and product-status persist](https://github.com/SteveDraper/Planets-Console/issues/366)). Table-stream `complete` payload, BFF `displayStatus` chrome, and SPA cell chrome are the next phase.
+Locked in [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). **Persist / first-class `status` shipped** ([Implement inference admission skip and product-status persist](https://github.com/SteveDraper/Planets-Console/issues/366)). **Table-stream `complete` payload, BFF `displayStatus`, and SPA cell chrome shipped** ([Implement inference status stream and SPA cell chrome](https://github.com/SteveDraper/Planets-Console/issues/367)). Export remaining status-lifecycle AC is [Scores analytic exports](https://github.com/SteveDraper/Planets-Console/issues/97). Non-empty `placeholders[]` is [Implement unknown military ship and residual freighter placeholders](https://github.com/SteveDraper/Planets-Console/issues/369).
 
 **Wire `status`** is first-class (same field as today). The player-facing contracts:
 

@@ -27,10 +27,22 @@ class InferenceStreamProgressEvent(BaseModel):
 class InferenceStreamCompleteEvent(BaseModel):
     type: Literal["complete"]
     status: str
+    displayStatus: Literal[
+        "success",
+        "pending",
+        "paused",
+        "failure",
+        "stopped",
+        "skipped",
+        "moderate_residual",
+        "mine_score_residual",
+    ]
     summary: str
     solutionCount: int
     isComplete: bool = True
     solutions: list[dict[str, Any]] | None = None
+    placeholders: list[dict[str, Any]] | None = None
+    unexplainedMilitaryDelta2x: int | None = None
     diagnostics: dict[str, Any] | None = None
     fleetTorpInputStatus: str | None = None
     fleetTorpOverlayBeliefSetTorpIds: list[int] | None = None

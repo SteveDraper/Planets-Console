@@ -11,6 +11,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from bff.analytics import TurnScope, get_inference_response
+from bff.analytics.scores import stamp_inference_stream_display_status
 from bff.compute_diagnostics_stream import filter_table_stream_player_ids
 from bff.core_client import get_core_client
 from bff.diagnostics_dep import (
@@ -108,12 +109,14 @@ def get_scores_inference_table_stream(
     core = get_core_client()
     return StreamingResponse(
         stream_inference_ndjson(
-            lambda: core.iter_scores_table_inference_stream(
-                game_id,
-                perspective,
-                turn,
-                filtered_player_ids,
-                username=username,
+            lambda: stamp_inference_stream_display_status(
+                core.iter_scores_table_inference_stream(
+                    game_id,
+                    perspective,
+                    turn,
+                    filtered_player_ids,
+                    username=username,
+                )
             )
         ),
         media_type="application/x-ndjson",

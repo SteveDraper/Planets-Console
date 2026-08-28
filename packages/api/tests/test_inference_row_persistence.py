@@ -162,6 +162,44 @@ def test_persisted_inference_row_round_trips_fleet_torp_input_status():
     assert wire["fleetTorpInputStatus"] == "applied"
 
 
+def test_persisted_inference_row_round_trips_placeholders_and_leftover():
+    from api.analytics.military_score_inference.solver import STATUS_MODERATE_RESIDUAL
+    from api.serialization.inference_row_persistence import (
+        persisted_inference_row_from_json,
+        persisted_inference_row_from_wire_complete,
+        persisted_inference_row_to_json,
+        wire_complete_from_persisted_row,
+    )
+
+    row = persisted_inference_row_from_wire_complete(
+        {
+            "type": "complete",
+            "status": STATUS_MODERATE_RESIDUAL,
+            "summary": "Moderate military leftover (11)",
+            "solutionCount": 0,
+            "isComplete": True,
+            "solutions": [],
+            "placeholders": [],
+            "unexplainedMilitaryDelta2x": 22,
+        }
+    )
+    assert row.placeholders == []
+    assert row.unexplained_military_delta_2x == 22
+    stored = persisted_inference_row_to_json(row)
+    assert stored["placeholders"] == []
+    assert stored["unexplainedMilitaryDelta2x"] == 22
+    assert "diagnostics" not in stored
+    loaded = persisted_inference_row_from_json(stored)
+    assert loaded.placeholders == []
+    assert loaded.unexplained_military_delta_2x == 22
+    wire = wire_complete_from_persisted_row(loaded)
+    assert wire["type"] == "complete"
+    assert wire["status"] == STATUS_MODERATE_RESIDUAL
+    assert wire["placeholders"] == []
+    assert wire["unexplainedMilitaryDelta2x"] == 22
+    assert wire["solutionCount"] == 0
+
+
 def test_persisted_inference_row_round_trips_tier_emissions():
     from api.serialization.inference_row_persistence import (
         persisted_inference_row_from_json,
