@@ -10,6 +10,7 @@ type ScoresTableTileProps = {
   onToggle: () => void
   scoresTableParams: ScoresTableParams
   onScoresTableParamsChange: (next: ScoresTableParams) => void
+  /** `undefined` until known; only `true` enables the control. */
   buildInferenceAvailable?: boolean
 }
 
@@ -21,9 +22,11 @@ export function ScoresTableTile({
   onToggle,
   scoresTableParams,
   onScoresTableParamsChange,
-  buildInferenceAvailable = true,
+  buildInferenceAvailable,
 }: ScoresTableTileProps) {
   const showInferenceOption = supportsMode && enabled
+  const inferenceControlEnabled = buildInferenceAvailable === true
+  const stealthUnavailable = buildInferenceAvailable === false
 
   return (
     <div
@@ -51,23 +54,23 @@ export function ScoresTableTile({
         <label
           className={cn(
             'flex items-center gap-2 border-t border-[#52575d]/70 px-2 py-1.5 pl-8 text-xs text-slate-300',
-            buildInferenceAvailable ? 'cursor-pointer' : 'cursor-default text-slate-500'
+            inferenceControlEnabled ? 'cursor-pointer' : 'cursor-default text-slate-500'
           )}
           title={
-            buildInferenceAvailable
-              ? undefined
-              : 'Stealth Mode hides military scores; build inference is unavailable'
+            stealthUnavailable
+              ? 'Stealth Mode hides military scores; build inference is unavailable'
+              : undefined
           }
           onClick={(e) => e.stopPropagation()}
         >
           <input
             type="checkbox"
             checked={scoresTableParams.includeBuildInference}
-            disabled={!buildInferenceAvailable}
+            disabled={!inferenceControlEnabled}
             title={
-              buildInferenceAvailable
-                ? undefined
-                : 'Stealth Mode hides military scores; build inference is unavailable'
+              stealthUnavailable
+                ? 'Stealth Mode hides military scores; build inference is unavailable'
+                : undefined
             }
             onChange={(e) =>
               onScoresTableParamsChange({

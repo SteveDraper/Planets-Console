@@ -23,6 +23,14 @@ export function scoresTableQueryKey(scoresParams: ScoresTableParams): readonly [
   return [scoresParams.includeBuildInference] as const
 }
 
+/** Full TanStack Query key for the Scores table GET (shared by TableTile and availability). */
+export function scoresAnalyticTableQueryKey(
+  analyticScope: AnalyticShellScope | null,
+  scoresParams: ScoresTableParams
+): readonly ['analytic', 'scores', 'table', AnalyticShellScope | null, boolean] {
+  return ['analytic', 'scores', 'table', analyticScope, ...scoresTableQueryKey(scoresParams)]
+}
+
 export function scoresRowInferenceQueryKey(
   scope: AnalyticShellScope,
   playerId: number

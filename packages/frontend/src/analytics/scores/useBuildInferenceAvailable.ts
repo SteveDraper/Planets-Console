@@ -1,23 +1,23 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, type AnalyticShellScope } from '../../api/bff'
-import { scoresTableQueryKey } from './api'
+import { scoresAnalyticTableQueryKey, type ScoresTableParams } from './api'
 
-const AVAILABILITY_TABLE_PARAMS = { includeBuildInference: false } as const
-
+/**
+ * Reads `buildInferenceAvailable` from the same Scores table query TableTile uses.
+ * `undefined` until that query succeeds so Stealth cannot flash as available.
+ */
 export function useBuildInferenceAvailable(
   analyticScope: AnalyticShellScope | null,
+  scoresTableParams: ScoresTableParams,
   enabled: boolean
-): boolean {
-  const { data } = useQuery({
-    queryKey: [
-      'analytic',
-      'scores',
-      'table',
-      analyticScope,
-      ...scoresTableQueryKey(AVAILABILITY_TABLE_PARAMS),
-    ] as const,
-    queryFn: () => fetchAnalyticTable('scores', analyticScope!, AVAILABILITY_TABLE_PARAMS),
+): boolean | undefined {
+  const { data, isSuccess } = useQuery({
+    queryKey: scoresAnalyticTableQueryKey(analyticScope, scoresTableParams),
+    queryFn: () => fetchAnalyticTable('scores', analyticScope!, scoresTableParams),
     enabled: enabled && analyticScope != null,
   })
-  return data?.buildInferenceAvailable !== false
+  if (!isSuccess) {
+    return undefined
+  }
+  return data.buildInferenceAvailable !== false
 }

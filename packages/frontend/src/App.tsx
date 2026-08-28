@@ -305,14 +305,18 @@ function ConsoleShell() {
   )
   const buildInferenceAvailable = useBuildInferenceAvailable(
     analyticScope,
-    viewMode === 'tabular' && enabledIds.has('scores') && turnDataReady
+    scoresTableParams,
+    viewMode === 'tabular' &&
+      enabledIds.has('scores') &&
+      turnDataReady &&
+      scoresPreferencesHydrated
   )
   const globalInferencePauseEnabled =
     viewMode === 'tabular' &&
     enabledIds.has('scores') &&
     scoresPreferencesHydrated &&
     scoresTableParams.includeBuildInference &&
-    buildInferenceAvailable &&
+    buildInferenceAvailable === true &&
     turnDataReady &&
     analyticScope != null
   const globalInferencePause = useGlobalInferencePause(

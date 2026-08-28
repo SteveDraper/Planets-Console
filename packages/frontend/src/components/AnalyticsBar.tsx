@@ -20,6 +20,7 @@ type AnalyticsBarProps = {
   onConnectionsMapParamsChange: (next: ConnectionsMapParams) => void
   scoresTableParams: ScoresTableParams
   onScoresTableParamsChange: (next: ScoresTableParams) => void
+  /** `undefined` until the Scores table query succeeds. */
   buildInferenceAvailable?: boolean
   stellarCartographyGates: StellarCartographySettingsGates
   ionStormCount: number | null
@@ -47,7 +48,7 @@ export function AnalyticsBar({
   onConnectionsMapParamsChange,
   scoresTableParams,
   onScoresTableParamsChange,
-  buildInferenceAvailable = true,
+  buildInferenceAvailable,
   stellarCartographyGates,
   ionStormCount,
   homeworldInactiveReason,
