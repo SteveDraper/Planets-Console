@@ -85,7 +85,8 @@ def _payload_from_functional_target(target: HostTurnFunctionalTarget) -> Functio
     solutions = ranked_solutions_from_wire(target.solutions)
     placeholders, leftover = product_payload_fields(
         target.status,
-        leftover=target.military_delta_2x,
+        placeholders=target.placeholders,
+        leftover=target.unexplained_military_delta_2x,
     )
     return FunctionalHostTurnPayload(
         solutions=solutions,
