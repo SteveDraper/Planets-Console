@@ -27,6 +27,16 @@ class InferenceStreamProgressEvent(BaseModel):
 class InferenceStreamCompleteEvent(BaseModel):
     type: Literal["complete"]
     status: str
+    displayStatus: Literal[
+        "success",
+        "pending",
+        "paused",
+        "failure",
+        "stopped",
+        "skipped",
+        "moderate_residual",
+        "mine_score_residual",
+    ]
     summary: str
     solutionCount: int
     isComplete: bool = True

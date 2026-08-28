@@ -13,6 +13,19 @@ export const FLEET_TORP_INPUT_STATUSES = [
 
 export const fleetTorpInputStatusSchema = z.enum(FLEET_TORP_INPUT_STATUSES)
 
+export const INFERENCE_DISPLAY_STATUSES = [
+  'success',
+  'pending',
+  'paused',
+  'failure',
+  'stopped',
+  'skipped',
+  'moderate_residual',
+  'mine_score_residual',
+] as const
+
+export const inferenceDisplayStatusSchema = z.enum(INFERENCE_DISPLAY_STATUSES)
+
 const inferenceSolutionActionSchema = z.object({
   actionId: z.string(),
   label: z.string(),
@@ -62,6 +75,7 @@ export const inferenceStreamProgressEventSchema = inferenceStreamPlayerScopeSche
 export const inferenceStreamCompleteEventSchema = inferenceStreamPlayerScopeSchema.extend({
   type: z.literal('complete'),
   status: z.string(),
+  displayStatus: inferenceDisplayStatusSchema,
   summary: z.string(),
   solutionCount: z.number().int().min(0),
   isComplete: z.boolean(),
@@ -92,6 +106,7 @@ export const inferenceStreamEventSchema = z.discriminatedUnion('type', [
 ])
 
 export type FleetTorpInputStatus = z.infer<typeof fleetTorpInputStatusSchema>
+export type InferenceDisplayStatus = z.infer<typeof inferenceDisplayStatusSchema>
 
 export type InferenceStreamSolutionPayload = z.infer<typeof inferenceStreamSolutionPayloadSchema>
 export type InferenceStreamEvent = z.infer<typeof inferenceStreamEventSchema>

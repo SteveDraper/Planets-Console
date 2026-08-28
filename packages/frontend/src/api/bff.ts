@@ -29,7 +29,10 @@ import {
   parseFleetTableStreamEvent,
   type FleetTableStreamEvent,
 } from './parseFleetTableStreamEvent'
-import type { FleetTorpInputStatus } from './inferenceStreamEventSchema'
+import type {
+  FleetTorpInputStatus,
+  InferenceDisplayStatus,
+} from './inferenceStreamEventSchema'
 import { fetchAnalyticTableNdjsonStream } from './fetchAnalyticTableNdjsonStream'
 import { readNdjsonStream } from './readNdjsonStream'
 import type { components } from './schema-games'
@@ -255,15 +258,7 @@ export type ScoresInferenceSolution = {
 
 export type ScoresInferenceRowDetail = {
   playerId?: number
-  displayStatus:
-    | 'success'
-    | 'pending'
-    | 'paused'
-    | 'failure'
-    | 'stopped'
-    | 'skipped'
-    | 'moderate_residual'
-    | 'mine_score_residual'
+  displayStatus: InferenceDisplayStatus
   status: string
   summary: string
   solutionCount: number

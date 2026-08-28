@@ -1,5 +1,7 @@
 """BFF Scores table analytic handler."""
 
+from collections.abc import Iterator
+
 from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics
 
@@ -42,13 +44,15 @@ def _format_score_cell(cell: object) -> str:
     return f"{value} ({change})"
 
 
-_FAILURE_WIRE_STATUSES = frozenset(
+# Display mapping only -- not Core skip predicates. Unknown terminals stay failure.
+INFERENCE_SKIP_DISPLAY_STATUSES = frozenset(
     {
-        "no_exact_solution",
-        "invalid_problem",
-        "solver_error",
-        "fetch_error",
-        "missing_inference",
+        "viewpoint_owner",
+        "dead",
+        "full_alliance",
+        "horwasp",
+        "no_prior_turn",
+        "player_not_found",
     }
 )
 
@@ -67,24 +71,31 @@ def _inference_cell_display_status(inference: dict[str, object]) -> str:
         return "moderate_residual"
     if status == "mine_score_residual":
         return "mine_score_residual"
+    if status in INFERENCE_SKIP_DISPLAY_STATUSES:
+        return "skipped"
     if status == "exact":
         return "success"
     if has_held_solutions and not is_complete:
         return "success"
+    # Held time_limited matches stopped-with-solutions: show the count, not stop chrome.
     if status == "time_limited" and has_held_solutions:
         return "success"
     if status == "time_limited" and is_complete is False:
         return "pending"
     if status == "pending" or (not is_complete and not has_held_solutions):
         return "pending"
-    if (
-        is_complete
-        and not has_held_solutions
-        and status not in _FAILURE_WIRE_STATUSES
-        and status != "time_limited"
-    ):
-        return "skipped"
     return "failure"
+
+
+def stamp_inference_stream_display_status(
+    events: Iterator[dict[str, object]],
+) -> Iterator[dict[str, object]]:
+    """Stamp BFF ``displayStatus`` on Core ``complete`` stream lines."""
+    for event in events:
+        if event.get("type") == "complete":
+            yield {**event, "displayStatus": _inference_cell_display_status(event)}
+        else:
+            yield event
 
 
 def _shape_inference_detail(
