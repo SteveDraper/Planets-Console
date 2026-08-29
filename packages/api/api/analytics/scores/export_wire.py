@@ -7,6 +7,8 @@ from typing import Literal
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
 from api.analytics.military_score_inference.inference_api_payload import (
+    InferenceProductPayload,
+    product_payload_fields,
     serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
 )
@@ -19,6 +21,7 @@ from api.analytics.military_score_inference.models import InferenceObservation, 
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_STOPPED
 from api.serialization.inference_row_persistence import PersistedInferenceRow
+from api.transport.inference_stream import inference_complete_functional_fields
 
 TerminalWireSearchStatus = Literal["complete", "stopped"]
 
@@ -115,6 +118,33 @@ def terminal_row_admission(
     return None
 
 
+def product_fields_from_wire_complete(
+    wire_event: dict[str, object],
+) -> InferenceProductPayload:
+    """Extract product status, placeholders, and leftover from a wire complete event."""
+    raw_status = wire_event.get("status")
+    status = raw_status if isinstance(raw_status, str) and raw_status else None
+    source_placeholders, source_leftover = inference_complete_functional_fields(wire_event)
+    if status is None:
+        return InferenceProductPayload()
+    return product_payload_fields(
+        status,
+        placeholders=source_placeholders,
+        leftover=source_leftover,
+    )
+
+
+def product_fields_from_persisted_row(
+    persisted_row: PersistedInferenceRow,
+) -> InferenceProductPayload:
+    """Extract product status, placeholders, and leftover from a persisted inference row."""
+    return product_payload_fields(
+        persisted_row.status,
+        placeholders=persisted_row.placeholders,
+        leftover=persisted_row.unexplained_military_delta_2x,
+    )
+
+
 def solutions_from_persisted_row(
     persisted_row: PersistedInferenceRow,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
@@ -160,17 +190,6 @@ def _diagnostics_from_scheduler_ladder(scheduler_run: RowRun) -> dict[str, objec
         solver=solver_diagnostics,
         extra=extra,
     )
-
-
-def solutions_from_terminal_admission(
-    admission: ImmediateRowAdmission | CachedCompleteRowAdmission,
-) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
-    """Serialize solutions from one terminal wire-complete row admission."""
-    if isinstance(admission, ImmediateRowAdmission):
-        return solutions_diagnostics_from_wire_complete_event(admission.events[-1])
-    if admission.event is None:
-        raise ValueError("CachedCompleteRowAdmission must carry a terminal wire-complete event")
-    return solutions_diagnostics_from_wire_complete_event(admission.event)
 
 
 def solutions_from_scheduler_run(

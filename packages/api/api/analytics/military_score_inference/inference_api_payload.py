@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from api.analytics.military_score_inference.actions import ActionCatalog
@@ -19,6 +20,7 @@ from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
 from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
     STATUS_MINE_SCORE_RESIDUAL,
     STATUS_MODERATE_RESIDUAL,
@@ -49,13 +51,67 @@ INFERENCE_ADMISSION_SKIP_STATUSES = frozenset(
         STATUS_PLAYER_NOT_FOUND,
     }
 )
-_FUNCTIONAL_LEFTOVER_STATUSES = frozenset(
+FUNCTIONAL_LEFTOVER_STATUSES = frozenset(
     {
         STATUS_MODERATE_RESIDUAL,
         STATUS_MINE_SCORE_RESIDUAL,
         STATUS_NO_EXACT_SOLUTION,
     }
 )
+PERSISTABLE_INFERENCE_STATUSES = frozenset(
+    {
+        STATUS_EXACT,
+        STATUS_NO_EXACT_SOLUTION,
+        STATUS_MODERATE_RESIDUAL,
+        STATUS_MINE_SCORE_RESIDUAL,
+    }
+)
+FALLBACK_COMPLETE_PERSISTED_STATUSES = INFERENCE_ADMISSION_SKIP_STATUSES | frozenset(
+    {
+        STATUS_INVALID_PROBLEM,
+        STATUS_SOLVER_ERROR,
+    }
+)
+# Row statuses that map to export searchStatus=complete. Derived from
+# persistable | fallback-complete; stopped / time_limited stay outside this set.
+COMPLETE_INFERENCE_SEARCH_STATUSES = (
+    PERSISTABLE_INFERENCE_STATUSES | FALLBACK_COMPLETE_PERSISTED_STATUSES
+)
+
+
+@dataclass(frozen=True)
+class InferenceProductPayload:
+    """Product status, placeholders, and leftover for persist, stream, and export."""
+
+    status: str | None = None
+    placeholders: list[dict[str, object]] | None = None
+    unexplained_military_delta_2x: int | None = None
+
+
+def product_payload_fields(
+    status: str,
+    *,
+    placeholders: list[dict[str, object]] | None = None,
+    leftover: int | None = None,
+) -> InferenceProductPayload:
+    """Return product status, placeholders, and leftover for persist, stream, and export.
+
+    Residual / ``no_exact_solution`` expose leftover and ``placeholders`` (empty
+    list if missing). Skip rows expose empty ``placeholders`` and omit leftover.
+    Other statuses omit leftover and omit placeholders unless the source already
+    carried them.
+    """
+    resolved_placeholders = placeholders
+    if (
+        status in FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES
+    ) and resolved_placeholders is None:
+        resolved_placeholders = []
+    resolved_leftover = leftover if status in FUNCTIONAL_LEFTOVER_STATUSES else None
+    return InferenceProductPayload(
+        status=status,
+        placeholders=resolved_placeholders,
+        unexplained_military_delta_2x=resolved_leftover,
+    )
 
 
 def inference_result_to_api_payload(
@@ -109,7 +165,7 @@ def _functional_leftover_2x(
     status: str,
     observation: InferenceObservation | None,
 ) -> int | None:
-    if status not in _FUNCTIONAL_LEFTOVER_STATUSES:
+    if status not in FUNCTIONAL_LEFTOVER_STATUSES:
         return None
     if observation is None:
         return None
@@ -199,8 +255,9 @@ def inference_api_payload(
     )
     leftover_2x = _functional_leftover_2x(status, observation)
     leftover_summary = _functional_leftover_status_summary(status, leftover_2x)
+    product = product_payload_fields(status, leftover=leftover_2x)
     payload: dict[str, object] = {
-        "status": status,
+        "status": product.status,
         "summary": leftover_summary if leftover_summary is not None else summary,
         "solutionCount": len(solutions),
         # Zero-solution timeouts are terminal failures (visible error in the SPA).
@@ -217,10 +274,10 @@ def inference_api_payload(
         ),
         "diagnostics": diagnostics,
     }
-    if status in _FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES:
-        payload["placeholders"] = []
-    if leftover_2x is not None:
-        payload["unexplainedMilitaryDelta2x"] = leftover_2x
+    if product.placeholders is not None:
+        payload["placeholders"] = product.placeholders
+    if product.unexplained_military_delta_2x is not None:
+        payload["unexplainedMilitaryDelta2x"] = product.unexplained_military_delta_2x
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:

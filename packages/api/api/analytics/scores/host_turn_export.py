@@ -11,9 +11,12 @@ from api.analytics.military_score_inference.accelerated_start import (
     scoreboard_host_turn,
 )
 from api.analytics.military_score_inference.host_turn_targets import HostTurnFunctionalTarget
+from api.analytics.military_score_inference.inference_api_payload import (
+    COMPLETE_INFERENCE_SEARCH_STATUSES,
+    InferenceProductPayload,
+    product_payload_fields,
+)
 from api.analytics.military_score_inference.solver import (
-    STATUS_EXACT,
-    STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
@@ -24,8 +27,6 @@ from api.models.player import Score
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
 SearchStatus = Literal["not_started", "in_progress", "paused", "stopped", "complete"]
-
-_COMPLETE_TARGET_STATUSES = frozenset({STATUS_EXACT, STATUS_NO_EXACT_SOLUTION})
 
 
 def scores_scoreboard_turn_for_placeholder_refine(*, built_turn: int, shell_turn: int) -> int:
@@ -55,17 +56,18 @@ def functional_target_for_host_turn(
 
 @dataclass(frozen=True)
 class FunctionalHostTurnPayload:
-    """Held solutions and lifecycle status for one scoreboard host turn."""
+    """Held solutions, product fields, and lifecycle status for one scoreboard host turn."""
 
     solutions: list[dict[str, object]]
     solutions_held: int
     search_status: SearchStatus
+    product: InferenceProductPayload
 
 
 def _search_status_from_persisted_row(row: PersistedInferenceRow) -> SearchStatus:
     if row.status in (STATUS_STOPPED, STATUS_TIME_LIMITED):
         return "stopped"
-    if row.status in _COMPLETE_TARGET_STATUSES:
+    if row.status in COMPLETE_INFERENCE_SEARCH_STATUSES:
         return "complete"
     return "not_started"
 
@@ -73,7 +75,7 @@ def _search_status_from_persisted_row(row: PersistedInferenceRow) -> SearchStatu
 def _search_status_from_target_status(status: object) -> SearchStatus:
     if status in (STATUS_STOPPED, STATUS_TIME_LIMITED):
         return "stopped"
-    if isinstance(status, str) and status in _COMPLETE_TARGET_STATUSES:
+    if isinstance(status, str) and status in COMPLETE_INFERENCE_SEARCH_STATUSES:
         return "complete"
     return "not_started"
 
@@ -84,6 +86,11 @@ def _payload_from_functional_target(target: HostTurnFunctionalTarget) -> Functio
         solutions=solutions,
         solutions_held=target.solution_count,
         search_status=_search_status_from_target_status(target.status),
+        product=product_payload_fields(
+            target.status,
+            placeholders=target.placeholders,
+            leftover=target.unexplained_military_delta_2x,
+        ),
     )
 
 
@@ -106,6 +113,11 @@ def _payload_for_host_turn_from_row(
         solutions=ranked_solutions_from_wire(row.solutions),
         solutions_held=row.solution_count,
         search_status=_search_status_from_persisted_row(row),
+        product=product_payload_fields(
+            row.status,
+            placeholders=row.placeholders,
+            leftover=row.unexplained_military_delta_2x,
+        ),
     )
 
 

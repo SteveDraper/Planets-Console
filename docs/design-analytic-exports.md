@@ -232,6 +232,7 @@ Example branches (scores):
     "solutionsHeld": 2,
     "hostTurn": 41
   },
+  "status": "exact",
   "solutions": [
     {
       "objectiveValue": 99,
@@ -246,6 +247,8 @@ Example branches (scores):
 ```
 
 `$.solutions` uses the same held top-K shape as scores row inference wire/persistence. For each scoreboard turn scope, **`$.solutions`** is the authoritative functional branch: it describes the **host turn implied by that row** (`hostTurn = scoreboardTurn - 1`), including accelerated backfill rows and split segments. Export materialization **normalizes per scope** -- when a persisted inference row carries multiple accelerated segments in **`hostTurnTargets`** (wire/persistence-only on inference rows, **not** an export tree branch), the materializer selects the matching segment and exposes only **`$.solutions`** for the requested scoreboard turn. Cross-analytic consumers query **`$.solutions`** at the correct scoreboard turn (e.g. fleet placeholders map `builtTurn` to `scores@(builtTurn + 1)` for backfill); they must not read **`$.diagnostics.accelerated_segments`** or **`hostTurnTargets`**. **`$.diagnostics`** is optional and for developer panels only; cross-analytic ingest must not depend on it. `$.solutions[0]` is the full top explanation (all `shipBuilds` and `actions` for that rank). `$.meta.searchStatus` carries lifecycle only.
+
+Product **`status`**, leftover (`unexplainedMilitaryDelta2x`), and **`placeholders`** are siblings of **`$.solutions`**. Residual / `no_exact_solution` rows expose leftover plus `placeholders` (empty until [Implement unknown military ship and residual freighter placeholders](https://github.com/SteveDraper/Planets-Console/issues/369) fills them). Admission-skip rows expose per-reason `status` and empty `placeholders` with leftover omitted. Do not collapse skip / residual / no-solution into the five generic `searchStatus` values. Stale `$.solution.ships` / `$.solution.diagnostics` paths are gone.
 
 **`objectiveValue` (Plausibility):** each solution's `objectiveValue` is the **inference solution rank weight** shown in the UI as *Plausibility*. Higher integer = more plausible. It is built from **scaled log-probability prior terms** (Laplace-smoothed histogram weights on magnitude bins and ship combos, composed additively in the solver objective) plus **non-likelihood ranking heuristics** (partial weapon-slot fill penalties, tier-overflow penalties). Consumers may treat it as **plausibility on a pseudo log-likelihood scale**: monotonic with prior support and useful for ordering held explanations, but **not** a calibrated probability, percentage, or exact joint log-likelihood (bucketed aggregates use one bin penalty per action, not per-unit iid terms). The wire field name `objectiveValue` is retained from the CP-SAT solver; do not rename without a coordinated contract change.
 
@@ -299,6 +302,9 @@ within one request and get distinct cached export trees.
 | Prefix | Rule |
 |--------|------|
 | `$.solutions.*` | requires `player_id` |
+| `$.status` | requires `player_id` (product inference outcome) |
+| `$.placeholders.*` | requires `player_id` |
+| `$.unexplainedMilitaryDelta2x` | requires `player_id` (residual leftover) |
 | `$.diagnostics.*` | requires `player_id` (scores row inference diagnostics) |
 | `$.evidence.*` | uses ambient **perspective** only; override forbidden |
 | `$.slots.*` | game-global; turn param ignored (baseline resolved inside materializer) |
@@ -365,7 +371,7 @@ Do **not** warn on **`complete`** even when all solution paths are **`none`**.
 
 Optional: **`solutionsHeld`**, **`hostTurn`**.
 
-Solver-specific lifecycle must not enter **`searchStatus`**. Scores product `status`, leftover, and `placeholders` live on the functional export tree as siblings of `$.solutions` ([Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360) / design §3.8). Band residual and named compute failures stay under **`$.diagnostics`**. Accelerated segment detail may appear in **`$.diagnostics`** for debugging; functional per-host-turn solutions are exposed only via **`$.solutions`** at the correct scoreboard turn (export normalizes split-row **`hostTurnTargets`** from persistence into scope-local **`$.solutions`**).
+Solver-specific lifecycle must not enter **`searchStatus`**. Scores product `status`, leftover (`unexplainedMilitaryDelta2x`), and `placeholders` live on the functional export tree as siblings of `$.solutions` ([Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360) / design §3.8; shipped by [Scores analytic exports](https://github.com/SteveDraper/Planets-Console/issues/97)). Band residual and named compute failures stay under **`$.diagnostics`**. Accelerated segment detail may appear in **`$.diagnostics`** for debugging; functional per-host-turn solutions are exposed only via **`$.solutions`** at the correct scoreboard turn (export normalizes split-row **`hostTurnTargets`** from persistence into scope-local **`$.solutions`**).
 
 ---
 
