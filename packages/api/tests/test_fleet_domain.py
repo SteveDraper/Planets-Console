@@ -8,6 +8,7 @@ from api.analytics.fleet.serialization import (
     append_fleet_evidence_event,
     fleet_acquisition_ledger_from_json,
     fleet_acquisition_ledger_to_json,
+    fleet_build_option_set_from_inference_ship_build,
     fleet_build_option_set_from_json,
     fleet_build_option_set_to_json,
     fleet_count_discrepancy_from_json,
@@ -44,6 +45,11 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
     PersistedFleetLedger,
+)
+from api.analytics.military_score_inference.models import InferenceSolutionShipBuild
+from api.concepts.hulls import (
+    GENERIC_FREIGHTER_SENTINEL_HULL_ID,
+    UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
 )
 from api.errors import ValidationError
 
@@ -116,6 +122,32 @@ def test_fleet_build_option_set_round_trip_unknown_military_sentinel_and_envelop
     restored = fleet_build_option_set_from_json(wire)
     assert restored == option_set
     assert fleet_build_option_set_to_json(restored) == wire
+
+
+@pytest.mark.parametrize(
+    ("hull_id", "expected_hull_id"),
+    [
+        (UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID, UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID),
+        (GENERIC_FREIGHTER_SENTINEL_HULL_ID, GENERIC_FREIGHTER_SENTINEL_HULL_ID),
+        (13, 13),
+        (-2, None),
+    ],
+)
+def test_fleet_build_option_set_from_inference_preserves_hull_sentinels(
+    hull_id: int,
+    expected_hull_id: int | None,
+) -> None:
+    option_set = fleet_build_option_set_from_inference_ship_build(
+        InferenceSolutionShipBuild(
+            combo_id="combo_mapped",
+            label="Mapped hull",
+            count=1,
+            hull_id=hull_id,
+            engine_id=1,
+        ),
+        solution_rank_weight=1,
+    )
+    assert option_set.hull_id == expected_hull_id
 
 
 def test_fleet_build_option_set_round_trip_unknown_counts():

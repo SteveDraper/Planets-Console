@@ -189,17 +189,26 @@ def _resolved_fleet_component_id(component_id: int) -> int | None:
 
 
 def _resolved_fleet_hull_id(hull_id: int) -> int | None:
-    """Preserve generic freighter sentinel; map other non-positive ids to unknown.
+    """Preserve documented hull sentinels; map other non-positive ids to unknown.
 
     ``GENERIC_FREIGHTER_SENTINEL_HULL_ID`` (0) is a documented fleet/solver
-    pseudo-id meaning "some freighter hull" -- not a host catalog id. It must
-    survive on fleet option sets so observation match can recognize generic
-    freighter inference without relying on the display ``label``.
+    pseudo-id meaning "some freighter hull" -- not a host catalog id.
+    ``UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID`` (-1) is a documented post-unsat
+    residual pseudo-id meaning "some military ship" -- not a host catalog id.
+    Both must survive on fleet option sets; other non-positive ids map to
+    unknown (``None``).
     """
-    from api.concepts.hulls import GENERIC_FREIGHTER_SENTINEL_HULL_ID
+    from api.concepts.hulls import (
+        GENERIC_FREIGHTER_SENTINEL_HULL_ID,
+        UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
+        is_generic_freighter_sentinel_hull_id,
+        is_unknown_military_ship_sentinel_hull_id,
+    )
 
-    if hull_id == GENERIC_FREIGHTER_SENTINEL_HULL_ID:
+    if is_generic_freighter_sentinel_hull_id(hull_id):
         return GENERIC_FREIGHTER_SENTINEL_HULL_ID
+    if is_unknown_military_ship_sentinel_hull_id(hull_id):
+        return UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
     return hull_id if hull_id > 0 else None
 
 
