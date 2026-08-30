@@ -204,12 +204,27 @@ def build_hopeless_row_facts(
     )
 
 
+class _PersistedRowStatus(Protocol):
+    status: str
+
+
 class _InferenceRowReader(Protocol):
-    def get_row(self, game_id: int, perspective: int, host_turn: int, player_id: int) -> object: ...
+    def get_row(
+        self, game_id: int, perspective: int, host_turn: int, player_id: int
+    ) -> _PersistedRowStatus | None: ...
 
     def has_mine_residual_sticky_prior(
         self, game_id: int, perspective: int, host_turn: int, player_id: int
     ) -> bool: ...
+
+
+class _HopelessFactsSession(Protocol):
+    observation: InferenceObservation
+    turn: TurnInfo
+    load_scoreboard_turn: Callable[[int], TurnInfo | None] | None
+    persistence: _InferenceRowReader | None
+    game_id: int
+    perspective: int
 
 
 def exact_host_turns_from_persistence(
@@ -228,8 +243,7 @@ def exact_host_turns_from_persistence(
     found: set[int] = set()
     for turn_number in range(start, host_turn):
         row = persistence.get_row(game_id, perspective, turn_number, player_id)
-        status = getattr(row, "status", None)
-        if status == STATUS_EXACT:
+        if row is not None and row.status == STATUS_EXACT:
             found.add(turn_number)
     return frozenset(found)
 
@@ -272,4 +286,16 @@ def hopeless_context_for_row(
         exact_host_turns=exact_turns,
         recent_window_turns=thresholds.recent_minefield_observation_turns,
         large_minefield_min_units=thresholds.large_minefield_observation_min_units,
+    )
+
+
+def hopeless_row_facts_from_session(session: _HopelessFactsSession) -> HopelessRowFacts:
+    """Assemble row facts from a stream session's observation, RST loader, and persist."""
+    return hopeless_context_for_row(
+        session.observation,
+        session.turn,
+        load_scoreboard_turn=session.load_scoreboard_turn,
+        persistence=session.persistence,
+        game_id=session.game_id,
+        perspective=session.perspective,
     )

@@ -470,6 +470,35 @@ def test_complete_of_full_components_still_aborts_when_classifier_fires(sample_t
     assert state.ladder_complete is True
 
 
+def test_finalize_honors_abort_status_when_merged_solutions_fail_hard_equalities(
+    sample_turn,
+) -> None:
+    """Abort last_status survives finalize even when a non-exact held buffer exists."""
+    from api.analytics.military_score_inference.actions import ActionCatalog
+    from api.analytics.military_score_inference.models import InferenceProblem
+    from api.analytics.military_score_inference.policy_ladder import (
+        finalize_policy_ladder_result,
+    )
+
+    observation = _observation(military_delta_2x=-40, warship_delta=0)
+    catalog = ActionCatalog((), (), {})
+    problem = InferenceProblem(observation=observation, aggregate_actions=())
+    held = InferenceSolution(objective_value=-10, actions=(), ship_builds=())
+    state = PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies()),
+        catalog=catalog,
+        problem=problem,
+        merged_solutions=[held],
+        last_status=STATUS_MINE_SCORE_RESIDUAL,
+        ladder_early_stop_reason="expensive_tier_abort",
+        ladder_complete=True,
+        hopeless_context=_facts(),
+    )
+    result, *_ = finalize_policy_ladder_result(state, observation, sample_turn)
+    assert result.status == STATUS_MINE_SCORE_RESIDUAL
+    assert result.diagnostics["stopped_reason"] == "expensive_tier_abort"
+
+
 def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
     ship_exact = InferenceResult(
         status=STATUS_EXACT,
@@ -647,7 +676,7 @@ def test_exact_persist_clears_n_window_in_hopeless_context(sample_turn) -> None:
     class _ExactPriorReader:
         def get_row(
             self, game_id: int, perspective: int, host_turn: int, player_id: int
-        ) -> object | None:
+        ) -> _ExactPriorRow | None:
             if host_turn == 110:
                 return _ExactPriorRow()
             return None
@@ -703,3 +732,28 @@ def test_exact_persist_clears_n_window_in_hopeless_context(sample_turn) -> None:
         ).abort
         is False
     )
+
+
+def test_initialize_tier_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> None:
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.inference_stream_session import (
+        InferenceRowStreamSession,
+    )
+    from api.analytics.military_score_inference.row_run import RowRun
+    from api.analytics.scores.tier_row_run_registry import initialize_tier_ladder_state
+
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    run = RowRun(session)
+    initialize_tier_ladder_state(run)
+    assert run.ladder_state is not None
+    assert run.ladder_state.hopeless_context is not None
+    assert run.ladder_state.hopeless_context.planet_delta == score.planetchange
+    assert run.ladder_state.hopeless_context.starbase_delta == score.starbasechange

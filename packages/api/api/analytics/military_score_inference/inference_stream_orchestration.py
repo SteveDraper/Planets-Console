@@ -10,7 +10,10 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
-from api.analytics.military_score_inference.hopeless_classifier import HopelessRowFacts
+from api.analytics.military_score_inference.hopeless_classifier import (
+    HopelessRowFacts,
+    hopeless_row_facts_from_session,
+)
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_accelerated import (
     AcceleratedSegmentResult,
@@ -20,6 +23,9 @@ from api.analytics.military_score_inference.inference_accelerated import (
 )
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
+)
 from api.analytics.military_score_inference.inference_target import (
     ScoreboardTurnLoader,
     load_accelerated_backfill_source_for_host_turn,
@@ -37,6 +43,33 @@ from api.analytics.military_score_inference.solver import STATUS_TIME_LIMITED
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.game import TurnInfo
 from api.models.player import Score
+
+
+def new_ladder_state(
+    session: InferenceRowStreamSession | None = None,
+    *,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+    hopeless_context: HopelessRowFacts | None = None,
+) -> PolicyLadderState:
+    """Build a fresh ladder snapshot. Session, when given, owns fact assembly."""
+    if session is not None:
+        if resolved_mask is None:
+            resolved_mask = session.resolved_mask
+        if fleet_torp_overlay is None:
+            fleet_torp_overlay = session.fleet_torp_overlay
+        if prior_fleet_max_tech_by_axis is None:
+            prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
+        if hopeless_context is None:
+            hopeless_context = hopeless_row_facts_from_session(session)
+    return PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies(None)),
+        resolved_mask=resolved_mask,
+        fleet_torp_overlay=fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+        hopeless_context=hopeless_context,
+    )
 
 
 @dataclass(frozen=True)
@@ -103,14 +136,15 @@ class InferenceStreamOrchestration:
 
     def new_ladder_state(
         self,
+        session: InferenceRowStreamSession | None = None,
         *,
         resolved_mask: ResolvedHullCatalogMask | None = None,
         fleet_torp_overlay: FleetTorpOverlay | None = None,
         prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
         hopeless_context: HopelessRowFacts | None = None,
     ) -> PolicyLadderState:
-        return PolicyLadderState(
-            policy_steps=tuple(resolve_tier_policies(None)),
+        return new_ladder_state(
+            session,
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
             prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,

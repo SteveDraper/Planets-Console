@@ -113,6 +113,8 @@ def finalize_policy_ladder_result(
             for solution in merged_solutions
         ):
             status = STATUS_EXACT
+        elif state.ladder_early_stop_reason == "expensive_tier_abort":
+            status = state.last_status
         elif state.time_limited:
             status = STATUS_TIME_LIMITED
         else:

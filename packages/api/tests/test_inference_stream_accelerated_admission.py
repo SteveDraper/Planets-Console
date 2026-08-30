@@ -88,6 +88,23 @@ def test_new_ladder_state_uses_full_k_per_segment(sample_turn) -> None:
     assert orchestration.new_ladder_state().resolved_max_solutions == 20
 
 
+def test_new_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> None:
+    orchestration = _accelerated_split_orchestration(sample_turn)
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    state = orchestration.new_ladder_state(session)
+    assert state.hopeless_context is not None
+    assert state.hopeless_context.planet_delta == score.planetchange
+    assert state.hopeless_context.starbase_delta == score.starbasechange
+
+
 def test_should_emit_streaming_solutions_false_for_accel_window_segment(sample_turn) -> None:
     orchestration = _accelerated_split_orchestration(sample_turn)
 
