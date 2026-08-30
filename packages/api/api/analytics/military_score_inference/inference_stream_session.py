@@ -6,6 +6,7 @@ import queue
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
@@ -20,6 +21,9 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     FleetTorpInputStatus,
 )
 from api.models.game import TurnInfo
+
+if TYPE_CHECKING:
+    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
 @dataclass
@@ -39,6 +43,7 @@ class InferenceRowStreamSession:
     fleet_torp_overlay: FleetTorpOverlay | None = None
     fleet_torp_input_status: FleetTorpInputStatus | None = None
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None
+    persistence: InferenceRowPersistenceService | None = None
     cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
     event_queue: queue.Queue[InferenceStreamDomainEvent] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))

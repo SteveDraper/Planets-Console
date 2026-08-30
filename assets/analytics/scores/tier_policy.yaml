@@ -108,6 +108,11 @@ solverThresholds:
   # [Z*-T, sliding max]. T=250 covers ~122 gap for lizard t9 truth vs early
   # ship-only Z* (~-378 vs -500). Steps may override with nearBestObjectiveThreshold.
   nearBestObjectiveThreshold: 250
+  # Host-turn window and size gate for large minefield observation (hopeless
+  # classifier). Cheap exact drops N-window carry-forward; T+1 may open a new
+  # window from its own RST. Classifier-only RST existence + size, not a decay model.
+  recentMinefieldObservationTurns: 3
+  largeMinefieldObservationMinUnits: 1000
 
 steps:
   - id: early_game_bands

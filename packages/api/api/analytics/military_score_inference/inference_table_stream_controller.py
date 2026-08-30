@@ -106,6 +106,7 @@ class InferenceTableStreamController(
             export_services=self.export_services,
             stream_token=self.stream_token,
             query_context=self.query_context,
+            persistence=self.persistence,
         )
 
     def cancel_player_row(self, player_id: int) -> None:

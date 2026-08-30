@@ -8,6 +8,12 @@ from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.constraints import (
     solution_satisfies_exact_hard_equalities,
 )
+from api.analytics.military_score_inference.hopeless_classifier import (
+    CHEAP_LADDER_LAST_STEP_ID,
+    classify_hopeless_abort,
+    leftover_2x_after_construction_envelope,
+    min_warship_score_delta_2x,
+)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceSolution,
@@ -24,6 +30,7 @@ from api.analytics.military_score_inference.tier_policy import (
 __all__ = (
     "make_incremental_admitter",
     "maybe_early_stop_after_step",
+    "maybe_expensive_tier_abort_after_step",
     "maybe_no_new_exact_signatures_early_stop",
 )
 
@@ -108,6 +115,46 @@ def maybe_no_new_exact_signatures_early_stop(
         return False
     state.ladder_complete = True
     state.ladder_early_stop_reason = "no_new_exact_signatures"
+    return True
+
+
+def maybe_expensive_tier_abort_after_step(
+    state: PolicyLadderState,
+    *,
+    policy_step: InferenceTierPolicyStep,
+    observation: InferenceObservation,
+    catalog: ActionCatalog | None,
+) -> bool:
+    """Stop before fighter / SB-post / raised-cap steps when the hopeless classifier fires."""
+    if policy_step.id != CHEAP_LADDER_LAST_STEP_ID:
+        return False
+    if state.cancelled or state.time_limited:
+        return False
+    if state.hopeless_context is None:
+        return False
+    facts = state.hopeless_context
+    if catalog is not None and any(
+        solution_satisfies_exact_hard_equalities(solution, observation, catalog)
+        for solution in state.merged_solutions
+    ):
+        return False
+    if catalog is None and state.merged_solutions:
+        return False
+    leftover_2x = leftover_2x_after_construction_envelope(
+        observation.military_delta_2x,
+        observation.warship_delta,
+        min_warship_score_delta_2x(catalog),
+    )
+    decision = classify_hopeless_abort(
+        facts,
+        leftover_2x=leftover_2x,
+        warship_delta=observation.warship_delta,
+    )
+    if not decision.abort or decision.status is None:
+        return False
+    state.ladder_complete = True
+    state.ladder_early_stop_reason = "expensive_tier_abort"
+    state.last_status = decision.status
     return True
 
 

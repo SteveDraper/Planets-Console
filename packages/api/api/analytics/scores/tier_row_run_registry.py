@@ -24,10 +24,9 @@ import threading
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
+    new_ladder_state,
 )
-from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.scores.persist_decision import (
     PersistDecision,
     persist_decision_from_admission,
@@ -108,22 +107,8 @@ def initialize_tier_ladder_state(
     orchestration: InferenceStreamOrchestration | None = None,
 ) -> None:
     """Initialize ladder state for one registered scores tier row run."""
-    session = run.session
     run.orchestration = orchestration
-    if orchestration is not None:
-        run.ladder_state = orchestration.new_ladder_state(
-            resolved_mask=session.resolved_mask,
-            fleet_torp_overlay=session.fleet_torp_overlay,
-            prior_fleet_max_tech_by_axis=session.prior_fleet_max_tech_by_axis,
-        )
-        return
-    policy_steps = tuple(resolve_tier_policies(None))
-    run.ladder_state = PolicyLadderState(
-        policy_steps=policy_steps,
-        resolved_mask=session.resolved_mask,
-        fleet_torp_overlay=session.fleet_torp_overlay,
-        prior_fleet_max_tech_by_axis=session.prior_fleet_max_tech_by_axis,
-    )
+    run.ladder_state = new_ladder_state(run.session)
 
 
 def register_row_run(

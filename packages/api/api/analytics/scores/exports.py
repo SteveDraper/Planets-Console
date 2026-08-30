@@ -392,6 +392,7 @@ def _ensure_admit_inference_row(
         export_services=ctx.export_services,
         stream_token=inputs.stream_token,
         query_context=ctx,
+        persistence=services.persistence,
     )
     return True
 
