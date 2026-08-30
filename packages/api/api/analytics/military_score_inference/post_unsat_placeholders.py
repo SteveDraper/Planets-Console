@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from api.analytics.military_score_inference.component_eligibility import (
     buildable_hull_ids_for_player,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.concepts.hulls import (
@@ -78,15 +79,26 @@ def post_unsat_placeholders(
 def post_unsat_placeholders_from_turn(
     observation: InferenceObservation,
     turn: TurnInfo,
+    *,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> list[dict[str, object]]:
-    """Build post-unsat placeholders from the turn catalog and race hull list."""
+    """Build post-unsat placeholders from the turn catalog and race hull list.
+
+    ``resolved_mask`` is the same hull eligibility the policy ladder solved under.
+    ``None`` keeps the default race list (``buildable_hull_ids_for_player`` without
+    an override).
+    """
     return post_unsat_placeholders(
         observation,
         hulls_by_id={hull.id: hull for hull in turn.hulls},
         engines_by_id={engine.id: engine for engine in turn.engines},
         beams_by_id={beam.id: beam for beam in turn.beams},
         torpedos_by_id={torpedo.id: torpedo for torpedo in turn.torpedos},
-        buildable_hull_ids=buildable_hull_ids_for_player(turn, observation.player_id),
+        buildable_hull_ids=buildable_hull_ids_for_player(
+            turn,
+            observation.player_id,
+            resolved_mask=resolved_mask,
+        ),
     )
 
 

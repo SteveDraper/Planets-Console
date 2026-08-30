@@ -7,12 +7,17 @@ from dataclasses import replace
 
 import pytest
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.component_eligibility import (
+    buildable_hull_ids_for_player,
+)
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import inference_api_payload
 from api.analytics.military_score_inference.models import InferenceProblem, InferenceResult
 from api.analytics.military_score_inference.post_unsat_placeholders import (
     UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
     explode_placeholder_to_unit_payloads,
     post_unsat_placeholders,
+    post_unsat_placeholders_from_turn,
 )
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.analytics.military_score_inference.solver import (
@@ -25,7 +30,7 @@ from api.concepts.hulls import (
     GENERIC_FREIGHTER_SENTINEL_HULL_ID,
     UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
 )
-from api.concepts.ship_build_military import warship_construction_envelope_2x
+from api.concepts.ship_build_military import is_military_hull, warship_construction_envelope_2x
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.transport.inference_stream import stream_inference_ndjson
 from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
@@ -274,6 +279,123 @@ def test_leftover_stays_on_row_not_assigned_onto_placeholder_ships():
     assert military["militaryScoreDelta2xMax"] == _CARRIER_MAX_2X
     assert leftover_2x != military["militaryScoreDelta2xMin"] * military["count"]
     assert leftover_2x != military["militaryScoreDelta2xMax"] * military["count"]
+
+
+def _hull_mask(*, effective_enabled_hull_ids: frozenset[int]) -> ResolvedHullCatalogMask:
+    return ResolvedHullCatalogMask(
+        race_id=0,
+        race_name="test",
+        master_hull_ids=effective_enabled_hull_ids,
+        default_enabled_hull_ids=effective_enabled_hull_ids,
+        effective_enabled_hull_ids=effective_enabled_hull_ids,
+        has_user_override=True,
+    )
+
+
+def _unknown_military(placeholders: list[dict[str, object]]) -> dict[str, object] | None:
+    return next(
+        (entry for entry in placeholders if entry["id"] == UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID),
+        None,
+    )
+
+
+def _sample_observation(sample_turn):
+    player_id = next(
+        score.ownerid for score in sample_turn.scores if score.ownerid != sample_turn.player.id
+    )
+    return replace(
+        _observation(warship_delta=2, freighter_delta=1, military_delta_2x=22),
+        player_id=player_id,
+    )
+
+
+def test_none_resolved_mask_keeps_default_hull_eligibility(sample_turn):
+    observation = _sample_observation(sample_turn)
+    default_ids = buildable_hull_ids_for_player(sample_turn, observation.player_id)
+    default_mask = ResolvedHullCatalogMask(
+        race_id=0,
+        race_name="test",
+        master_hull_ids=default_ids,
+        default_enabled_hull_ids=default_ids,
+        effective_enabled_hull_ids=default_ids,
+        has_user_override=False,
+    )
+    unmasked = post_unsat_placeholders_from_turn(observation, sample_turn)
+    via_none = post_unsat_placeholders_from_turn(observation, sample_turn, resolved_mask=None)
+    via_default_mask = post_unsat_placeholders_from_turn(
+        observation, sample_turn, resolved_mask=default_mask
+    )
+    assert unmasked == via_none == via_default_mask
+
+
+def test_resolved_mask_without_warships_omits_unknown_military(sample_turn):
+    observation = _sample_observation(sample_turn)
+    baseline = _unknown_military(post_unsat_placeholders_from_turn(observation, sample_turn))
+    assert baseline is not None
+    omitted = post_unsat_placeholders_from_turn(
+        observation,
+        sample_turn,
+        resolved_mask=_hull_mask(effective_enabled_hull_ids=frozenset()),
+    )
+    assert _unknown_military(omitted) is None
+    assert any(entry["id"] == GENERIC_FREIGHTER_COMBO_ID for entry in omitted)
+
+
+def test_resolved_mask_excluding_warship_changes_envelope(sample_turn):
+    observation = _sample_observation(sample_turn)
+    enabled = buildable_hull_ids_for_player(sample_turn, observation.player_id)
+    warship_ids = [
+        hull.id for hull in sample_turn.hulls if hull.id in enabled and is_military_hull(hull)
+    ]
+    assert len(warship_ids) > 1
+    baseline = _unknown_military(post_unsat_placeholders_from_turn(observation, sample_turn))
+    assert baseline is not None
+    narrowed = _unknown_military(
+        post_unsat_placeholders_from_turn(
+            observation,
+            sample_turn,
+            resolved_mask=_hull_mask(effective_enabled_hull_ids=frozenset({warship_ids[0]})),
+        )
+    )
+    assert narrowed is not None
+    assert (
+        narrowed["militaryScoreDelta2xMin"] != baseline["militaryScoreDelta2xMin"]
+        or narrowed["militaryScoreDelta2xMax"] != baseline["militaryScoreDelta2xMax"]
+    )
+
+
+def test_inference_payload_envelope_respects_resolved_mask(sample_turn):
+    from api.analytics.military_score_inference.inference_api_payload import (
+        inference_result_to_api_payload,
+    )
+
+    catalog = _empty_catalog()
+    observation = _sample_observation(sample_turn)
+    enabled = buildable_hull_ids_for_player(sample_turn, observation.player_id)
+    warship_ids = [
+        hull.id for hull in sample_turn.hulls if hull.id in enabled and is_military_hull(hull)
+    ]
+    assert len(warship_ids) > 1
+    problem = InferenceProblem(observation=observation, aggregate_actions=())
+    result = InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
+    unmasked = inference_result_to_api_payload(result, catalog, observation, sample_turn, problem)
+    masked = inference_result_to_api_payload(
+        result,
+        catalog,
+        observation,
+        sample_turn,
+        problem,
+        resolved_mask=_hull_mask(effective_enabled_hull_ids=frozenset({warship_ids[0]})),
+    )
+    unmasked_military = _unknown_military(unmasked["placeholders"])
+    masked_military = _unknown_military(masked["placeholders"])
+    assert unmasked_military is not None
+    assert masked_military is not None
+    assert (
+        masked_military["militaryScoreDelta2xMin"] != unmasked_military["militaryScoreDelta2xMin"]
+        or masked_military["militaryScoreDelta2xMax"]
+        != unmasked_military["militaryScoreDelta2xMax"]
+    )
 
 
 def test_explode_placeholder_copies_per_unit_envelope_to_n_unit_payloads():

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -128,6 +129,7 @@ def inference_result_to_api_payload(
     policy_steps_attempted: list[str] | None = None,
     step_diagnostics: list[dict[str, object]] | None = None,
     extra_diagnostics: dict[str, object] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> dict[str, object]:
     """Shape a solver result into the Core scores row inference object."""
     from api.analytics.military_score_inference.analytic import (
@@ -154,7 +156,11 @@ def inference_result_to_api_payload(
     leftover_2x = _functional_leftover_2x(result.status, observation)
     placeholders = None
     if result.status in FUNCTIONAL_LEFTOVER_STATUSES:
-        placeholders = post_unsat_placeholders_from_turn(observation, turn)
+        placeholders = post_unsat_placeholders_from_turn(
+            observation,
+            turn,
+            resolved_mask=resolved_mask,
+        )
     return inference_api_payload(
         status=result.status,
         summary=format_inference_summary(
