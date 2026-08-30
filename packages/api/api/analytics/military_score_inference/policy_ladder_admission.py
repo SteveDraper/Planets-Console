@@ -10,7 +10,6 @@ from api.analytics.military_score_inference.constraints import (
 )
 from api.analytics.military_score_inference.hopeless_classifier import (
     CHEAP_LADDER_LAST_STEP_ID,
-    HopelessClassifierInputs,
     classify_hopeless_abort,
     leftover_2x_after_construction_envelope,
     min_warship_score_delta_2x,
@@ -133,7 +132,7 @@ def maybe_expensive_tier_abort_after_step(
         return False
     if state.hopeless_context is None:
         return False
-    context = state.hopeless_context
+    facts = state.hopeless_context
     if catalog is not None and any(
         solution_satisfies_exact_hard_equalities(solution, observation, catalog)
         for solution in state.merged_solutions
@@ -141,21 +140,16 @@ def maybe_expensive_tier_abort_after_step(
         return False
     if catalog is None and state.merged_solutions:
         return False
-    leftover = leftover_2x_after_construction_envelope(
+    leftover_2x = leftover_2x_after_construction_envelope(
         observation.military_delta_2x,
         observation.warship_delta,
         min_warship_score_delta_2x(catalog),
     )
-    inputs = HopelessClassifierInputs(
-        leftover_2x=leftover,
+    decision = classify_hopeless_abort(
+        facts,
+        leftover_2x=leftover_2x,
         warship_delta=observation.warship_delta,
-        planet_delta=context.planet_delta,
-        starbase_delta=context.starbase_delta,
-        sticky_prior=context.sticky_prior,
-        max_owner_minefield_units=context.max_owner_minefield_units,
-        large_minefield_min_units=context.large_minefield_min_units,
     )
-    decision = classify_hopeless_abort(inputs)
     if not decision.abort or decision.status is None:
         return False
     state.ladder_complete = True

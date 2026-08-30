@@ -14,7 +14,7 @@ from api.analytics.military_score_inference.constraints import (
 )
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hopeless_classifier import (
-    HopelessClassifierInputs,
+    HopelessRowFacts,
     hopeless_context_for_row,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
@@ -159,7 +159,7 @@ def solve_with_policy_ladder(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
-    hopeless_context: HopelessClassifierInputs | None = None,
+    hopeless_context: HopelessRowFacts | None = None,
 ) -> tuple[
     InferenceResult,
     ActionCatalog | None,

@@ -22,7 +22,7 @@ from __future__ import annotations
 import threading
 
 from api.analytics.military_score_inference.hopeless_classifier import (
-    HopelessClassifierInputs,
+    HopelessRowFacts,
     hopeless_context_for_row,
 )
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
@@ -111,7 +111,7 @@ def _record_cancelled_locked(run_id: str, scope_key: tuple[int, int, int, int]) 
 
 def _hopeless_context_from_session(
     session: InferenceRowStreamSession,
-) -> HopelessClassifierInputs:
+) -> HopelessRowFacts:
     return hopeless_context_for_row(
         session.observation,
         session.turn,

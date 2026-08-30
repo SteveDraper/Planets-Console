@@ -44,9 +44,9 @@ EXPENSIVE_TIER_STEP_IDS = frozenset(
 
 
 @dataclass(frozen=True)
-class HopelessClassifierInputs:
-    leftover_2x: int
-    warship_delta: int
+class HopelessRowFacts:
+    """Scoreboard/RST facts for one row. Leftover is not stored here -- compute at abort."""
+
     planet_delta: int
     starbase_delta: int
     sticky_prior: bool
@@ -129,25 +129,32 @@ def max_owner_minefield_units_in_recent_window(
     return maximum
 
 
-def scoreboard_mine_shaped_path_blocked(inputs: HopelessClassifierInputs) -> bool:
+def scoreboard_mine_shaped_path_blocked(
+    facts: HopelessRowFacts,
+    warship_delta: int,
+) -> bool:
     """True when planet, starbase, or warship *count* drops veto the mine-shaped path.
 
     Race-specific gains (Empire free fighters, Robot lay-gains) are excluded by
     requiring a decrease-shaped leftover; they are not a hard race veto on a true
     decrease (captured tubes and miX exist).
     """
-    return inputs.planet_delta < 0 or inputs.starbase_delta < 0 or inputs.warship_delta < 0
+    return facts.planet_delta < 0 or facts.starbase_delta < 0 or warship_delta < 0
 
 
-def classify_hopeless_abort(inputs: HopelessClassifierInputs) -> HopelessAbortDecision:
+def classify_hopeless_abort(
+    facts: HopelessRowFacts,
+    leftover_2x: int,
+    warship_delta: int,
+) -> HopelessAbortDecision:
     """Return expensive-tier abort status for a cheap-unsat scoreboard row."""
-    points = leftover_points(inputs.leftover_2x)
-    large_observation = inputs.max_owner_minefield_units >= inputs.large_minefield_min_units
-    decrease_beyond_moderate = inputs.leftover_2x < 0 and points > MODERATE_RESIDUAL_MAX_POINTS
+    points = leftover_points(leftover_2x)
+    large_observation = facts.max_owner_minefield_units >= facts.large_minefield_min_units
+    decrease_beyond_moderate = leftover_2x < 0 and points > MODERATE_RESIDUAL_MAX_POINTS
     mine_shaped_decrease = decrease_beyond_moderate and not scoreboard_mine_shaped_path_blocked(
-        inputs
+        facts, warship_delta
     )
-    if inputs.sticky_prior or large_observation or mine_shaped_decrease:
+    if facts.sticky_prior or large_observation or mine_shaped_decrease:
         return HopelessAbortDecision(abort=True, status=STATUS_MINE_SCORE_RESIDUAL)
     if 1 <= points <= MODERATE_RESIDUAL_MAX_POINTS:
         return HopelessAbortDecision(abort=True, status=STATUS_MODERATE_RESIDUAL)
@@ -162,7 +169,7 @@ def scoreboard_count_deltas(turn: TurnInfo, player_id: int) -> tuple[int, int]:
     return score.planetchange, score.starbasechange
 
 
-def build_hopeless_classifier_inputs(
+def build_hopeless_row_facts(
     observation: InferenceObservation,
     turn: TurnInfo,
     *,
@@ -171,8 +178,8 @@ def build_hopeless_classifier_inputs(
     exact_host_turns: frozenset[int] = frozenset(),
     recent_window_turns: int,
     large_minefield_min_units: int,
-) -> HopelessClassifierInputs:
-    """Assemble classifier inputs from the scoreboard row, RST window, and sticky prior."""
+) -> HopelessRowFacts:
+    """Assemble row facts from the scoreboard, RST window, and sticky prior."""
     planet_delta, starbase_delta = scoreboard_count_deltas(turn, observation.player_id)
     host_turn = turn.settings.turn
     turns_by_number: dict[int, TurnInfo] = {host_turn: turn}
@@ -182,13 +189,7 @@ def build_hopeless_classifier_inputs(
             loaded = load_scoreboard_turn(turn_number)
             if loaded is not None:
                 turns_by_number[turn_number] = loaded
-    leftover = leftover_2x_after_construction_envelope(
-        observation.military_delta_2x,
-        observation.warship_delta,
-    )
-    return HopelessClassifierInputs(
-        leftover_2x=leftover,
-        warship_delta=observation.warship_delta,
+    return HopelessRowFacts(
         planet_delta=planet_delta,
         starbase_delta=starbase_delta,
         sticky_prior=sticky_prior,
@@ -243,8 +244,8 @@ def hopeless_context_for_row(
     game_id: int | None = None,
     perspective: int | None = None,
     policy_path: Path | None = None,
-) -> HopelessClassifierInputs:
-    """Build classifier inputs for one scoreboard row, including sticky and RST window."""
+) -> HopelessRowFacts:
+    """Build row facts for one scoreboard row, including sticky and RST window."""
     from api.analytics.military_score_inference.tier_policy import resolve_solver_thresholds
 
     thresholds = resolve_solver_thresholds(policy_path)
@@ -263,7 +264,7 @@ def hopeless_context_for_row(
             host_turn=host_turn,
             window_turns=thresholds.recent_minefield_observation_turns,
         )
-    return build_hopeless_classifier_inputs(
+    return build_hopeless_row_facts(
         observation,
         turn,
         sticky_prior=resolved_sticky,
