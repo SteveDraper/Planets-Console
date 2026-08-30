@@ -6,6 +6,7 @@ from ortools.sat.python import cp_model
 
 from api.analytics.military_score_inference.accelerated_start import scoreboard_host_turn
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.idle_dock_pp import IDLE_DOCK_PP_EQUALITY_LABEL
 from api.analytics.military_score_inference.inference_objective import add_count_active_indicator
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -134,6 +135,24 @@ class _SumEqualityConstraint:
         military_score_alpha: int = 0,
     ) -> None:
         rhs = getattr(observation, self.observation_attr)
+        if self.coefficient_attr == "score_delta_2x":
+            lhs = _military_lhs(
+                model,
+                aggregate_actions,
+                ship_build_combos,
+                action_count_vars,
+                combo_count_vars,
+            )
+            partition_slack = observation.military_partition_slack_2x
+            if partition_slack > 0:
+                model.add(lhs >= rhs - partition_slack)
+                model.add(lhs <= rhs + partition_slack)
+                return
+            if military_score_alpha > 0:
+                model.add(lhs >= rhs - military_score_alpha)
+                return
+            model.add(lhs == rhs)
+            return
         lhs = sum(
             getattr(action, self.coefficient_attr) * action_count_vars[action.id]
             for action in aggregate_actions
@@ -141,18 +160,51 @@ class _SumEqualityConstraint:
             getattr(combo, self.coefficient_attr) * combo_count_vars[combo.combo_id]
             for combo in ship_build_combos
         )
-        if self.coefficient_attr != "score_delta_2x":
-            model.add(lhs == rhs)
-            return
-        partition_slack = observation.military_partition_slack_2x
-        if partition_slack > 0:
-            model.add(lhs >= rhs - partition_slack)
-            model.add(lhs <= rhs + partition_slack)
-            return
-        if military_score_alpha > 0:
-            model.add(lhs >= rhs - military_score_alpha)
-            return
         model.add(lhs == rhs)
+
+
+def _action_has_military_interval(action: CandidateAction) -> bool:
+    return (
+        action.score_delta_2x_min is not None
+        and action.score_delta_2x_max is not None
+        and action.score_delta_2x_min != action.score_delta_2x_max
+    )
+
+
+def _military_lhs(
+    model: cp_model.CpModel,
+    aggregate_actions: tuple[CandidateAction, ...],
+    ship_build_combos: tuple[ShipBuildCombo, ...],
+    action_count_vars: dict[str, cp_model.IntVar],
+    combo_count_vars: dict[str, cp_model.IntVar],
+):
+    terms: list[object] = []
+    for action in aggregate_actions:
+        count_var = action_count_vars[action.id]
+        if _action_has_military_interval(action):
+            terms.append(_interval_military_contribution(model, action, count_var))
+        else:
+            terms.append(action.score_delta_2x * count_var)
+    for combo in ship_build_combos:
+        terms.append(combo.score_delta_2x * combo_count_vars[combo.combo_id])
+    return sum(terms)
+
+
+def _interval_military_contribution(
+    model: cp_model.CpModel,
+    action: CandidateAction,
+    count_var: cp_model.IntVar,
+):
+    min_2x = action.score_delta_2x_min
+    max_2x = action.score_delta_2x_max
+    if min_2x is None or max_2x is None:
+        return action.score_delta_2x * count_var
+    lo = min(0, min_2x * action.upper_bound, max_2x * action.upper_bound)
+    hi = max(0, min_2x * action.upper_bound, max_2x * action.upper_bound)
+    contrib = model.new_int_var(lo, hi, f"{action.id}_military_contrib")
+    model.add(contrib >= count_var * min_2x)
+    model.add(contrib <= count_var * max_2x)
+    return contrib
 
 
 _MILITARY_SCORE_EQUALITY = _SumEqualityConstraint(
@@ -176,12 +228,14 @@ class InferenceHardConstraints:
     """Which hard equalities and inequalities apply for one inference solve."""
 
     enforce_priority_point_constraint: bool = False
+    enforce_idle_dock_pp_equality: bool = False
     military_score_alpha: int = 0
 
     @classmethod
     def from_problem(cls, problem: InferenceProblem) -> InferenceHardConstraints:
         return cls(
             enforce_priority_point_constraint=problem.enforce_priority_point_constraint,
+            enforce_idle_dock_pp_equality=problem.enforce_idle_dock_pp_equality,
             military_score_alpha=problem.military_score_alpha,
         )
 
@@ -215,6 +269,8 @@ class InferenceHardConstraints:
             else:
                 strings.append(constraint.applied_equality_string(observation))
         strings.append(f"sum(buildSlotUsage * count) <= {observation.starbases_owned}")
+        if self.enforce_idle_dock_pp_equality:
+            strings.append(IDLE_DOCK_PP_EQUALITY_LABEL)
         if aggregate_action_ids is not None and _fighter_transfer_actions_both_present(
             aggregate_action_ids
         ):
@@ -250,6 +306,15 @@ class InferenceHardConstraints:
             )
             <= observation.starbases_owned
         )
+        if self.enforce_idle_dock_pp_equality:
+            ships_built = sum(
+                combo.build_slot_usage * combo_count_vars[combo.combo_id]
+                for combo in problem.ship_build_combos
+            )
+            model.add(
+                observation.priority_point_delta == 2 * (observation.starbases_owned - ships_built)
+            )
+        _add_prior_fleet_departure_caps(model, problem, action_count_vars)
         aggregate_action_ids = frozenset(action.id for action in problem.aggregate_actions)
         if _fighter_transfer_actions_both_present(aggregate_action_ids):
             _add_fighter_transfer_direction_exclusivity(model, action_count_vars)
@@ -261,6 +326,27 @@ class InferenceHardConstraints:
         )
 
 
+def _add_prior_fleet_departure_caps(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    warship_usage = [
+        action.prior_warship_usage * action_count_vars[action.id]
+        for action in problem.aggregate_actions
+        if action.prior_warship_usage
+    ]
+    if warship_usage:
+        model.add(sum(warship_usage) <= problem.prior_warship_departure_cap)
+    freighter_usage = [
+        action.prior_freighter_usage * action_count_vars[action.id]
+        for action in problem.aggregate_actions
+        if action.prior_freighter_usage
+    ]
+    if freighter_usage:
+        model.add(sum(freighter_usage) <= problem.prior_freighter_departure_cap)
+
+
 def solution_satisfies_exact_hard_equalities(
     solution: InferenceSolution,
     observation: InferenceObservation,
@@ -270,13 +356,26 @@ def solution_satisfies_exact_hard_equalities(
     actions_by_id = {action.id: action for action in catalog.aggregate_actions}
     combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
     military_sum = 0
+    military_min = 0
+    military_max = 0
     warship_sum = 0
     freighter_sum = 0
     for action in solution.actions:
         catalog_action = actions_by_id.get(action.action_id)
         if catalog_action is None:
             return False
-        military_sum += catalog_action.score_delta_2x * action.count
+        if _action_has_military_interval(catalog_action):
+            min_2x = catalog_action.score_delta_2x_min
+            max_2x = catalog_action.score_delta_2x_max
+            if min_2x is None or max_2x is None:
+                return False
+            lo, hi = (min_2x, max_2x) if min_2x <= max_2x else (max_2x, min_2x)
+            military_min += lo * action.count
+            military_max += hi * action.count
+        else:
+            military_sum += catalog_action.score_delta_2x * action.count
+            military_min += catalog_action.score_delta_2x * action.count
+            military_max += catalog_action.score_delta_2x * action.count
         warship_sum += catalog_action.warship_delta * action.count
         freighter_sum += catalog_action.freighter_delta * action.count
     for ship_build in solution.ship_builds:
@@ -284,10 +383,13 @@ def solution_satisfies_exact_hard_equalities(
         if combo is None:
             return False
         military_sum += combo.score_delta_2x * ship_build.count
+        military_min += combo.score_delta_2x * ship_build.count
+        military_max += combo.score_delta_2x * ship_build.count
         warship_sum += combo.warship_delta * ship_build.count
         freighter_sum += combo.freighter_delta * ship_build.count
+    slack = observation.military_partition_slack_2x
     return (
-        abs(military_sum - observation.military_delta_2x) <= observation.military_partition_slack_2x
+        military_min - slack <= observation.military_delta_2x <= military_max + slack
         and warship_sum == observation.warship_delta
         and freighter_sum == observation.freighter_delta
     )
@@ -313,6 +415,7 @@ def observation_to_constraints_payload(
         "freighterDelta": observation.freighter_delta,
         "requestedPriorityPointDelta": observation.priority_point_delta,
         "priorityPointConstraintEnforced": constraints.enforce_priority_point_constraint,
+        "idleDockPpEqualityEnforced": constraints.enforce_idle_dock_pp_equality,
         "starbasesOwned": observation.starbases_owned,
         "isAfterShipLimit": observation.is_after_ship_limit,
         "militaryScoreAlpha": constraints.military_score_alpha,

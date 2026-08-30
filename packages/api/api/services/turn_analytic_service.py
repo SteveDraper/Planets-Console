@@ -343,6 +343,7 @@ class TurnAnalyticService:
             fleet_torp_overlay=fleet_resolution.overlay,
             fleet_torp_input_status=fleet_resolution.input_status,
             prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
+            prior_fleet_records=fleet_resolution.records,
         )
 
     def iter_scores_table_inference_stream(

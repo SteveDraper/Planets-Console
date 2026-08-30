@@ -164,6 +164,7 @@ def schedule_inference_row(
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+    prior_fleet_records: tuple = (),
     export_services: Mapping[str, object] | None = None,
     stream_token: str | None = None,
     query_context: AnalyticQueryContext | None = None,
@@ -194,6 +195,7 @@ def schedule_inference_row(
         fleet_torp_overlay=fleet_torp_overlay,
         fleet_torp_input_status=fleet_torp_input_status,
         prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+        prior_fleet_records=prior_fleet_records,
         persistence=persistence,
     )
     orchestration = create_inference_stream_orchestration(

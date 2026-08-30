@@ -63,11 +63,15 @@ def new_ladder_state(
             prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
         if hopeless_context is None:
             hopeless_context = hopeless_row_facts_from_session(session)
+        prior_fleet_records = session.prior_fleet_records
+    else:
+        prior_fleet_records = ()
     return PolicyLadderState(
         policy_steps=tuple(resolve_tier_policies(None)),
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+        prior_fleet_records=prior_fleet_records,
         hopeless_context=hopeless_context,
     )
 

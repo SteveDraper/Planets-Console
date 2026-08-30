@@ -215,6 +215,7 @@ export type ScoresInferenceSolutionAction = {
   actionId: string
   label: string
   count: number
+  counterpartyPlayerId?: number
 }
 
 export type ScoresInferenceMilitaryScoreLineItem = {

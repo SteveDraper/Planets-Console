@@ -32,6 +32,7 @@ def get_scores_row_inference(
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+    prior_fleet_records: tuple = (),
 ) -> dict[str, object]:
     """Run military score build inference for one scoreboard row."""
     resolved_perspective = turn.player.id if perspective is None else perspective
@@ -59,5 +60,6 @@ def get_scores_row_inference(
             fleet_torp_overlay=fleet_torp_overlay,
             fleet_torp_input_status=fleet_torp_input_status,
             prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+            prior_fleet_records=prior_fleet_records,
         )
     return {"playerId": player_id, **inference}

@@ -503,7 +503,7 @@ sum_agg(freighter_delta * count)
 sum(build_slot_usage) <= starbases_owned
 ```
 
-Ship combos use `build_slot_usage = 1` per ship. Priority-point deltas on ship builds remain **zero** in production except **idle-dock PP equality** (design §3.7 / [#359](https://github.com/SteveDraper/Planets-Console/issues/359): decided, not shipped). Post-limit spend is [#364](https://github.com/SteveDraper/Planets-Console/issues/364). Until that ships, treat `prioritypointchange` as diagnostic-only.
+Ship combos use `build_slot_usage = 1` per ship. Priority-point deltas on ship builds remain **zero** in production except **idle-dock PP equality** (design §3.7 / [#359](https://github.com/SteveDraper/Planets-Console/issues/359): shipped, [#370](https://github.com/SteveDraper/Planets-Console/issues/370)). Post-limit spend is [#364](https://github.com/SteveDraper/Planets-Console/issues/364). Off-lattice or planet/SB drop: PP stays diagnostic-only.
 
 **Solution shape:** emit structured rows `{ hull, engine, beam?, torp?, beam_count, launcher_count, count }` rather than opaque `build_*` preset IDs.
 
@@ -538,7 +538,7 @@ Support signed contribution vectors from the start:
 
 - fighter transfer from ship to starbase: negative score delta,
 - fighter transfer from starbase to ship: positive score delta,
-- **ship loss**, **gift**, and **trade** (decided, not shipped): design §3.7 and [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). Bounds are **prior-fleet decrease candidate**s, not unbounded cancellation and not inverted ship-build combos.
+- **ship loss**, **gift**, and **trade** (shipped, [#370](https://github.com/SteveDraper/Planets-Console/issues/370)): design §3.7 and [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). Bounds are **prior-fleet decrease candidate**s, not unbounded cancellation and not inverted ship-build combos.
 
 Negative actions need explicit upper bounds. Without bounds, positive and negative actions can create cancellation loops and a huge number of equivalent solutions.
 
@@ -668,7 +668,7 @@ Replace `_solve_with_tier_retry` hardcoded 0--4 with policy-driven loop:
 9. **No-new-signatures early-stop (#236):** after a step completes with held exact(s), if the step added neither new ship-build combo ids nor new aggregate action ids **and** admitted no new exact signatures, stop climbing **only when** the best held solution's objective meets `solverThresholds.noNewExactSignaturesEarlyStopMinPlausibility`. Below that floor the ladder continues so later aggregate-widening tiers can still run (e.g. empty-belief `admit_ship_torpedoes` must not cut off planet/SB defense). Production YAML uses the same numeric floor as ship-only exact early-stop (`-300`).
 10. **Inference expensive-tier abort (shipped):** after cheap steps through `full_components`, if there is no hard-equality exact and the **hopeless classifier** fires, do not enter `admit_starbase_defense_posts` / `torp_escape_tier` / `full_catalog_exact`. Classifier, window, and size gate: design §3.5 and [Mine-score residual likelihood and expensive-tier abort](https://github.com/SteveDraper/Planets-Console/issues/357). Distinct from items 8-9 and from [#244](https://github.com/SteveDraper/Planets-Console/issues/244) per-step entry gates.
 11. **Unknown military ship placeholder (shipped, #369):** after a no-exact-list outcome, emit post-unsat placeholders (not catalog combos, not `solutions[]`). Contract: design §3.6 and [Unknown military ship placeholder contract](https://github.com/SteveDraper/Planets-Console/issues/358).
-12. **Ship loss, gift, and trade (decided, not shipped):** admit decrease / pairing / **acquired ship** families and lattice-gated **idle-dock PP equality** from the first ship-bearing cheap step (superset thereafter). Contract: design §3.7 and [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). Prevents ship-only empty-exact on loss+replace. Post-limit PP is [#364](https://github.com/SteveDraper/Planets-Console/issues/364).
+12. **Ship loss, gift, and trade (shipped, #370):** admit decrease / pairing / **acquired ship** families and lattice-gated **idle-dock PP equality** from the first ship-bearing cheap step (superset thereafter). Contract: design §3.7 and [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). Prevents ship-only empty-exact on loss+replace. Post-limit PP is [#364](https://github.com/SteveDraper/Planets-Console/issues/364).
 13. **Product status persist (shipped, #366) and stream/SPA chrome (shipped, #367):** first-class residual / skip statuses on the persist write gate; skip rows fallback-complete; sticky prior from T-1 `mine_score_residual`. Table-stream `complete` carries leftover + `placeholders[]`; BFF `displayStatus` adds `skipped` / residual buckets; SPA skip mute, residual markers, and Stealth Mode grey **Include build inference**. Non-empty `placeholders[]` shipped by #369. Contract: design §3.8 and [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360).
 
 Record in diagnostics: policy step `id`, index, `tiersAttempted`, resolved constraint snapshot, `alpha`, `comboCount`, seed count, band residual when used, and (for `collision_hull_widen`) twin overlay diagnostics.
@@ -844,7 +844,7 @@ Use these bounds before building the CP-SAT model:
 
 - **Residual score bound:** `abs(action.score_delta_2x) * count` cannot exceed a conservative residual cap unless the action is explicitly allowed to offset another signed action.
 - **Build slot bound:** total ship builds cannot exceed starbases owned in the initial no-loss model.
-- **Count-delta bound:** warship and freighter build actions are bounded by the observed count deltas when losses and trades are out of scope.
+- **Count-delta bound:** warship and freighter build actions are bounded by observed count deltas plus prior-fleet departure capacity, minus reserved incoming **acquired ship** counts (§3.7).
 - **Capacity bound:** ship fighters and torpedoes should be capped by plausible loadout capacity where known.
 - **Noisy-action cap:** defense posts, starbase fighters, and generic ammo adjustments should have conservative caps and lower probability weights.
 - **Policy step cap:** stop climbing the inference search tier ladder when a step adds no new exact signatures **and** the best held exact meets `noNewExactSignaturesEarlyStopMinPlausibility` (#236), the stream is cancelled (#71 SPA), or the **batch** per-case time budget is exhausted (section 8.5.4).

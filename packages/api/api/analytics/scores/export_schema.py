@@ -97,6 +97,13 @@ _ARITHMETIC_LINE_ITEM_SCHEMA: dict[str, Any] = {
             "type": "integer",
             "description": "Units of the action or combo included in this solution.",
         },
+        "counterpartyPlayerId": {
+            "type": "integer",
+            "description": (
+                "Other scoreboard-row owner when public pairing pins one counterparty "
+                "(gift, trade, or acquired ship)."
+            ),
+        },
         "scoreDelta2xPerUnit": {
             "type": "integer",
             "description": "Host military score delta (times two) contributed per unit.",

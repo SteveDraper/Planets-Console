@@ -70,7 +70,7 @@ The first version should not try to explain:
 - ship destruction or combat ammo use (as distinct families -- unmatched **ship loss** in §3.7 does not split combat vs recycle vs glory),
 - hard prior constraints from minerals, cash, or ship locations (departing **ships** are **prior-fleet decrease candidate**s in §3.7).
 
-Ship trades, captures, and losses for this quality bar are §3.7 (decided, not shipped) -- not deferred into [extended action families](https://github.com/SteveDraper/Planets-Console/issues/49).
+Ship trades, captures, and losses for this quality bar are §3.7 (shipped, #370) -- not deferred into [extended action families](https://github.com/SteveDraper/Planets-Console/issues/49).
 
 The design should still make remaining extensions natural. Deferred effects should be added as new action families and constraints, not as special-case patches to the solver.
 
@@ -177,7 +177,7 @@ Persist, stream `complete`, and export carry the collection as `placeholders` ([
 
 ### 3.7 Ship loss, gift, and trade
 
-Locked in [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). Product/solver contract; not shipped.
+Locked in [Ship loss, gift, and trade as exact families](https://github.com/SteveDraper/Planets-Console/issues/359). **Shipped** ([Implement ship loss, gift, trade, and acquired ship](https://github.com/SteveDraper/Planets-Console/issues/370)).
 
 **Distinguishability** uses **public scoreboard pairing** (other players' public `shipchange` / `freighterchange` / `militarychange` as observations). The CP-SAT stays per scoreboard row -- not a joint multi-player solve, not RST ship-id identity, not a new **fleet analytic** feature.
 
@@ -478,7 +478,7 @@ This keeps the first implementation independent of whether the backend is CP-SAT
 The design should grow by adding action families and constraints:
 
 - **Mine laying:** add minefield-score actions with negative torpedo inventory and positive minefield score (out of this quality bar; **mine-score residual**).
-- **Ship trades, captures, and losses:** §3.7 (decided, not shipped). Per-row **public scoreboard pairing** plus **prior-fleet decrease candidate**s; not a joint multi-player CP-SAT.
+- **Ship trades, captures, and losses:** §3.7 (shipped, #370). Per-row **public scoreboard pairing** plus **prior-fleet decrease candidate**s; not a joint multi-player CP-SAT.
 - **Planet losses:** add negative planet defense-post score and planet-count changes (out of this quality bar).
 - **Starbase losses:** add negative base fighter and defense score, plus starbase-count changes (out of this quality bar).
 - **Prior inventory:** minerals, cash, and locations remain deferred; departing ships are **prior-fleet decrease candidate**s (§3.7).
@@ -562,7 +562,7 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Inference admission skip (#356) | Never `tier_solve` for owner, Dead (inclusive), live inbound Full Alliance, Stealth (grey inference, keep Scores), Horwasp, `no_prior_turn`, `player_not_found`. Persist fallback-complete. Share Intel is not a skip. |
 | Hopeless classifier / expensive-tier abort (#357 / shipped #368) | Cheap always through `full_components`. Abort `admit_starbase_defense_posts`+ on cheap-unsat if decrease-shaped >11, sticky prior, or large RST minefield (N=3 / 1000 units, YAML-overridable). Moderate 1-11 aborts expensive without starting sticky. Not #244. |
 | Unknown military ship placeholder (#358 / shipped #369) | Post-unsat artifact, not a catalog combo or ranked solution. One row `count = N` unexplained +warships; per-unit race construction envelope in `score_delta_2x`; residual stays on the row. Dedicated collection, hull sentinel `-1`. Same-row post-unsat **generic freighter combo** for +freighters. Fleet explodes to N unit inferred rows. |
-| Ship loss, gift, and trade (#359) | Per-row **public scoreboard pairing**; departures from **prior-fleet decrease candidate**s (not inverted build catalog). **Gift** includes capture. Incoming matched hull is **acquired ship**, not a **ship build combo**. **Idle-dock PP equality** pre-limit PQ/PPQ lattice-gated. Families from first ship-bearing cheap step. **Unknown military ship** still `N > 0` only. Post-limit PP: #364. #49 no longer owns these families. |
+| Ship loss, gift, and trade (#359 / shipped #370) | Per-row **public scoreboard pairing**; departures from **prior-fleet decrease candidate**s (not inverted build catalog). **Gift** includes capture. Incoming matched hull is **acquired ship**, not a **ship build combo**. **Idle-dock PP equality** pre-limit PQ/PPQ lattice-gated. Families from first ship-bearing cheap step. **Unknown military ship** still `N > 0` only. Post-limit PP: #364. #49 no longer owns these families. |
 | Product status persist and stream (#360) | First-class `status` (`exact`, `moderate_residual`, `mine_score_residual`, `no_exact_solution`, per-reason skip). Residuals functional-persist with `placeholders` + leftover; skips fallback-complete. Sticky derived from T-1 `mine_score_residual`. Stream: one `complete`, no placeholder `solution` events. BFF `displayStatus` adds `skipped` / residual buckets. Distinct cell chrome; no new modal. Export: product `status` / leftover / `placeholders` siblings of `$.solutions`; `searchStatus` stays lifecycle-only. |
 
 ### Still open

@@ -23,6 +23,31 @@ describe('parseInferenceStreamEvent', () => {
     })
   })
 
+  it('parses counterpartyPlayerId on solution actions', () => {
+    const event = parseInferenceStreamEvent(
+      JSON.stringify({
+        type: 'solution',
+        solutions: [
+          {
+            objectiveValue: 0,
+            actions: [
+              {
+                actionId: 'gift:warship:to:3:point:40',
+                label: 'Gift warship to player 3',
+                count: 1,
+                counterpartyPlayerId: 3,
+              },
+            ],
+          },
+        ],
+      })
+    )
+    expect(event?.type).toBe('solution')
+    if (event?.type === 'solution') {
+      expect(event.solutions[0]?.actions[0]?.counterpartyPlayerId).toBe(3)
+    }
+  })
+
   it('parses solution events with full held top-K', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({

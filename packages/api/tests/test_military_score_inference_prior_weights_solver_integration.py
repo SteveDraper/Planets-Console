@@ -215,6 +215,7 @@ def test_full_path_catalog_build_top_k_prefers_higher_prior_combo(sample_turn):
         catalog,
         aggregate_actions=(),
         ship_build_combos=(higher_prior, lower_prior),
+        enforce_idle_dock_pp_equality=False,
     )
     result = solve_inference_problem(
         build_inference_problem(observation, narrowed_catalog, max_solutions=2)

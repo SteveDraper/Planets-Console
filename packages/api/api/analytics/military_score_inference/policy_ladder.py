@@ -161,6 +161,7 @@ def solve_with_policy_ladder(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+    prior_fleet_records: tuple = (),
     hopeless_context: HopelessRowFacts | None = None,
 ) -> tuple[
     InferenceResult,
@@ -187,6 +188,7 @@ def solve_with_policy_ladder(
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+        prior_fleet_records=prior_fleet_records,
         hopeless_context=resolved_hopeless,
     )
     while not state.ladder_complete and state.next_step_index < len(state.policy_steps):

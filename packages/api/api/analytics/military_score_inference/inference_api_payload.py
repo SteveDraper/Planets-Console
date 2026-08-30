@@ -313,6 +313,11 @@ def _serialize_solution_actions(
             "actionId": action.action_id,
             "label": action.label,
             "count": action.count,
+            **(
+                {"counterpartyPlayerId": action.counterparty_player_id}
+                if action.counterparty_player_id is not None
+                else {}
+            ),
         }
         for action in solution.actions
     ]

@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateCatalogCaps,
     resolved_aggregate_cap,
@@ -24,6 +25,7 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
     effective_fleet_torp_overlay,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.idle_dock_pp import should_enforce_idle_dock_pp
 from api.analytics.military_score_inference.models import (
     DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
     CandidateAction,
@@ -32,12 +34,20 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.prior_fleet_decrease_candidates import (
+    decrease_capacity_by_class,
+    prior_fleet_decrease_candidates,
+)
 from api.analytics.military_score_inference.prior_weights_catalog import (
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
 )
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
+)
+from api.analytics.military_score_inference.public_scoreboard_pairing import (
+    classify_public_scoreboard_pairing,
+    public_scoreboard_row_from_observation,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
@@ -48,6 +58,11 @@ from api.analytics.military_score_inference.scoring import starbase_fighter_scor
 from api.analytics.military_score_inference.ship_build_combos import (
     ShipBuildComboConfig,
     generate_ship_build_combos,
+)
+from api.analytics.military_score_inference.ship_transfer_families import (
+    build_ship_transfer_actions,
+    public_scoreboard_rows_from_scores,
+    ship_transfer_combo_capacity,
 )
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
@@ -86,6 +101,9 @@ class ActionCatalog:
     prior_weights_diagnostics: PriorWeightsDiagnostics | None = None
     fleet_torp_overlay_diagnostics: FleetTorpOverlayDiagnostics | None = None
     near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
+    enforce_idle_dock_pp_equality: bool = False
+    prior_warship_departure_cap: int = 0
+    prior_freighter_departure_cap: int = 0
 
     @property
     def catalog_size(self) -> int:
@@ -146,6 +164,9 @@ def build_inference_problem(
         admission_caps_by_action_id=catalog.admission_caps_by_action_id,
         tier_overflow_by_action_id=catalog.tier_overflow_by_action_id,
         near_best_objective_threshold=catalog.near_best_objective_threshold,
+        enforce_idle_dock_pp_equality=catalog.enforce_idle_dock_pp_equality,
+        prior_warship_departure_cap=catalog.prior_warship_departure_cap,
+        prior_freighter_departure_cap=catalog.prior_freighter_departure_cap,
     )
 
 
@@ -159,6 +180,7 @@ def build_action_catalog_from_turn(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     prior_weights_base_dir: Path | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
 ) -> ActionCatalog:
     resolved_policy_step = policy_step
     if resolved_policy_step is None:
@@ -203,6 +225,7 @@ def build_action_catalog_from_turn(
         policy_step_index=policy_step_index,
         policy_steps=resolve_tier_policies(),
         fleet_torp_overlay=fleet_torp_overlay,
+        prior_fleet_records=prior_fleet_records,
     )
 
 
@@ -240,6 +263,7 @@ def build_action_catalog(
     policy_step_index: int = 0,
     policy_steps: tuple[InferenceTierPolicyStep, ...] | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
@@ -280,6 +304,45 @@ def build_action_catalog(
                 player,
             )
         )
+    transfer_records = prior_fleet_records
+    peer_rows = (
+        public_scoreboard_rows_from_scores(turn.scores, this_player_id=observation.player_id)
+        if turn is not None
+        else ()
+    )
+    transfer_actions = build_ship_transfer_actions(
+        observation,
+        peer_rows=peer_rows,
+        prior_fleet_records=transfer_records,
+        hulls_by_id=hulls_by_id,
+        engines_by_id=engines_by_id,
+        beams_by_id=beams_by_id,
+        torpedos_by_id=torpedos_by_id,
+        buildable_hull_ids=buildable_hull_ids,
+    )
+    kept_actions.extend(transfer_actions)
+    extra_warship = extra_freighter = reserved_warship = reserved_freighter = 0
+    pairing = classify_public_scoreboard_pairing(
+        public_scoreboard_row_from_observation(observation),
+        peer_rows,
+    )
+    candidates = prior_fleet_decrease_candidates(
+        transfer_records,
+        hulls_by_id=hulls_by_id,
+        engines_by_id=engines_by_id,
+        beams_by_id=beams_by_id,
+        torpedos_by_id=torpedos_by_id,
+        buildable_hull_ids=buildable_hull_ids,
+    )
+    extra_warship, extra_freighter, reserved_warship, reserved_freighter = (
+        ship_transfer_combo_capacity(observation, pairing, candidates)
+    )
+    prior_warship_departure_cap, prior_freighter_departure_cap = decrease_capacity_by_class(
+        candidates
+    )
+    idle_dock = False
+    if turn is not None:
+        idle_dock = should_enforce_idle_dock_pp(observation, turn.settings)
 
     ranking_heuristics = InferenceRankingHeuristics()
     admission_caps_raw = compute_aggregate_admission_caps(policy_ladder, policy_step_index)
@@ -327,6 +390,10 @@ def build_action_catalog(
         prior_catalog=prior_catalog,
         beam_slot_counts=resolved_policy_step.beam_slot_counts,
         launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
+        extra_warship_capacity=extra_warship,
+        extra_freighter_capacity=extra_freighter,
+        reserved_incoming_warships=reserved_warship,
+        reserved_incoming_freighters=reserved_freighter,
     )
 
     return ActionCatalog(
@@ -341,6 +408,9 @@ def build_action_catalog(
         prior_weights_diagnostics=prior_diagnostics,
         fleet_torp_overlay_diagnostics=fleet_overlay_diagnostics,
         near_best_objective_threshold=resolved_policy_step.near_best_objective_threshold,
+        enforce_idle_dock_pp_equality=idle_dock,
+        prior_warship_departure_cap=prior_warship_departure_cap,
+        prior_freighter_departure_cap=prior_freighter_departure_cap,
     )
 
 

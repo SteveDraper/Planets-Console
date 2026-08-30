@@ -408,6 +408,7 @@ def _expand_score_equivalent_solutions(
                 action_id=action.id,
                 label=action.label,
                 count=count,
+                counterparty_player_id=action.counterparty_player_id,
             )
         )
     ship_build_variant_lists = [

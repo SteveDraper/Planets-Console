@@ -30,6 +30,7 @@ const inferenceSolutionActionSchema = z.object({
   actionId: z.string(),
   label: z.string(),
   count: z.number().int(),
+  counterpartyPlayerId: z.number().int().optional(),
 })
 
 const inferenceSolutionShipBuildSchema = z.object({
