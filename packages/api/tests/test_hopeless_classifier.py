@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from api.analytics.military_score_inference.hopeless_classifier import (
     EXPENSIVE_TIER_STEP_IDS,
     MODERATE_RESIDUAL_MAX_POINTS,
@@ -15,12 +17,18 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionShipBuild,
 )
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_tier_finish import (
+    TierStepFinishMode,
+    finish_tier_step,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_MINE_SCORE_RESIDUAL,
     STATUS_MODERATE_RESIDUAL,
     STATUS_NO_EXACT_SOLUTION,
 )
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
 from tests.fixtures.military_score_inference import _observation
 
@@ -121,9 +129,7 @@ def test_starbase_count_drop_blocks_mine_shaped_path() -> None:
 
 
 def test_count_drop_still_aborts_when_sticky_or_large_field() -> None:
-    sticky = classify_hopeless_abort(
-        _facts(sticky_prior=True), leftover_2x=-40, warship_delta=-1
-    )
+    sticky = classify_hopeless_abort(_facts(sticky_prior=True), leftover_2x=-40, warship_delta=-1)
     large = classify_hopeless_abort(
         _facts(planet_delta=-1, max_owner_minefield_units=_LARGE_FIELD_MIN_UNITS),
         leftover_2x=-40,
@@ -385,6 +391,83 @@ def test_abort_uses_catalog_envelope_leftover_not_raw_military(sample_turn, monk
     assert result.status == STATUS_MINE_SCORE_RESIDUAL
     assert "full_components" in attempted
     assert EXPENSIVE_TIER_STEP_IDS.isdisjoint(attempted)
+
+
+def _finish_full_components(
+    sample_turn,
+    *,
+    finish_mode: TierStepFinishMode,
+    skipped: bool = False,
+    new_exact_before_step: int | None = None,
+) -> tuple[PolicyLadderState, int]:
+    """Close ``full_components`` on a ladder that would abort if the classifier ran."""
+    steps = tuple(resolve_tier_policies())
+    full_index = next(i for i, step in enumerate(steps) if step.id == "full_components")
+    state = PolicyLadderState(
+        policy_steps=steps,
+        hopeless_context=_facts(),
+        last_status=STATUS_NO_EXACT_SOLUTION,
+        next_step_index=full_index,
+    )
+    finish_tier_step(
+        state,
+        policy_step=steps[full_index],
+        policy_step_index=full_index,
+        catalog=None,
+        turn=sample_turn,
+        observation=_observation(military_delta_2x=-40, warship_delta=0),
+        seed_count=0,
+        band_residual_2x=None,
+        step_started_at=time.monotonic(),
+        held_count_before=0,
+        newly_admitted=[],
+        skipped=skipped,
+        finish_mode=finish_mode,
+        new_exact_before_step=new_exact_before_step,
+    )
+    return state, full_index
+
+
+def test_skip_of_full_components_does_not_abort(sample_turn) -> None:
+    """Skipped last cheap step is not cheap-unsat; expensive tiers remain on the ladder."""
+    state, full_index = _finish_full_components(
+        sample_turn,
+        finish_mode=TierStepFinishMode.SKIP,
+        skipped=True,
+    )
+    remaining_ids = {step.id for step in state.policy_steps[state.next_step_index :]}
+    assert state.ladder_early_stop_reason != "expensive_tier_abort"
+    assert state.last_status == STATUS_NO_EXACT_SOLUTION
+    assert state.ladder_complete is False
+    assert state.next_step_index == full_index + 1
+    assert EXPENSIVE_TIER_STEP_IDS.issubset(remaining_ids)
+
+
+def test_budget_stop_of_full_components_does_not_abort(sample_turn) -> None:
+    """Zero-spendable BUDGET_STOP of the last cheap step is not cheap-unsat."""
+    state, full_index = _finish_full_components(
+        sample_turn,
+        finish_mode=TierStepFinishMode.BUDGET_STOP,
+        skipped=True,
+    )
+    remaining_ids = {step.id for step in state.policy_steps[state.next_step_index :]}
+    assert state.ladder_early_stop_reason != "expensive_tier_abort"
+    assert state.last_status == STATUS_NO_EXACT_SOLUTION
+    assert state.ladder_complete is False
+    assert state.next_step_index == full_index + 1
+    assert EXPENSIVE_TIER_STEP_IDS.issubset(remaining_ids)
+
+
+def test_complete_of_full_components_still_aborts_when_classifier_fires(sample_turn) -> None:
+    """Same setup as skip/budget-stop: COMPLETE of cheap-unsat still aborts."""
+    state, _full_index = _finish_full_components(
+        sample_turn,
+        finish_mode=TierStepFinishMode.COMPLETE,
+        new_exact_before_step=0,
+    )
+    assert state.ladder_early_stop_reason == "expensive_tier_abort"
+    assert state.last_status == STATUS_MINE_SCORE_RESIDUAL
+    assert state.ladder_complete is True
 
 
 def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
