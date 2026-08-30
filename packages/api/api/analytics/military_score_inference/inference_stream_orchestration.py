@@ -95,6 +95,7 @@ class InferenceStreamOrchestration:
     combined_time_limited: bool = False
     backfill_target_host_turn: int | None = None
     backfill_source_turn_number: int | None = None
+    resolved_mask: ResolvedHullCatalogMask | None = None
 
     @property
     def is_accelerated(self) -> bool:
@@ -203,12 +204,14 @@ class InferenceStreamOrchestration:
                 source_turn_number=self.backfill_source_turn_number,
                 source_turn=self.solve_turn,
                 segment_solves=segment_solves,
+                resolved_mask=self.resolved_mask,
             )
         return build_accelerated_split_stream_row_complete(
             self.row_score,
             self.row_turn,
             segment_solves=segment_solves,
             combined_time_limited=self.combined_time_limited,
+            resolved_mask=self.resolved_mask,
         )
 
     def record_ladder_segment_complete(
@@ -220,6 +223,7 @@ class InferenceStreamOrchestration:
         result, catalog, problem, policy_steps_attempted, step_diagnostics = (
             finalize_policy_ladder_result(ladder_state, observation, turn)
         )
+        self.resolved_mask = ladder_state.resolved_mask
         self.record_segment_ladder_complete(
             observation=observation,
             result=result,

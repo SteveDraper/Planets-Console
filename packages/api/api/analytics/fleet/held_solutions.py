@@ -7,6 +7,9 @@ from dataclasses import dataclass
 
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
+from api.analytics.military_score_inference.inference_api_payload import (
+    InferenceProductPayload,
+)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.export_services import ScoresExportContext
@@ -19,12 +22,21 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.models.game import TurnInfo
 
 
+def _placeholders_from_product(
+    product: InferenceProductPayload,
+) -> tuple[dict[str, object], ...]:
+    if product.placeholders is None:
+        return ()
+    return tuple(product.placeholders)
+
+
 @dataclass(frozen=True)
 class FleetHeldInference:
-    """Resolved scores held solutions for one player on one scoreboard turn."""
+    """Resolved scores held solutions and persist placeholders for one scoreboard turn."""
 
     search_status: SearchStatus
     solutions: tuple[dict[str, object], ...]
+    placeholders: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -75,6 +87,7 @@ class FleetInferenceSupport:
             return FleetHeldInference(
                 search_status=resolved.decision.search_status,
                 solutions=tuple(payload.solutions),
+                placeholders=_placeholders_from_product(payload.product),
             )
 
         persistence = self.scores_services.persistence
@@ -93,6 +106,7 @@ class FleetInferenceSupport:
         return FleetHeldInference(
             search_status=backfill.search_status,
             solutions=tuple(backfill.solutions),
+            placeholders=_placeholders_from_product(backfill.product),
         )
 
     def held_inference_for_placeholder(

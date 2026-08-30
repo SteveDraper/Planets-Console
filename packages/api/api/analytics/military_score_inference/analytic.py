@@ -410,6 +410,7 @@ def _run_solver_inference_path(
                 policy_steps_attempted=policy_steps_attempted,
                 step_diagnostics=step_diagnostics,
                 extra_diagnostics=fleet_torp_input_status_diagnostics(fleet_torp_input_status),
+                resolved_mask=resolved_mask,
             ),
             resolved_observation,
             solve_catalog,

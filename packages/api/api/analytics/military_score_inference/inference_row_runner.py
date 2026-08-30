@@ -129,6 +129,7 @@ def _outcome_after_ladder_complete(
             extra_diagnostics=fleet_torp_input_status_diagnostics(
                 run.session.fleet_torp_input_status,
             ),
+            resolved_mask=state.resolved_mask,
         ),
     )
 

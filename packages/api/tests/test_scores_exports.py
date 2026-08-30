@@ -322,6 +322,62 @@ def test_residual_export_exposes_product_status_leftover_and_empty_placeholders(
     assert result.paths["$.solution.diagnostics"].kind == "none"
 
 
+def test_residual_export_exposes_unknown_military_and_freighter_placeholders(
+    sample_turn,
+    persistence,
+):
+    from api.analytics.military_score_inference.post_unsat_placeholders import (
+        UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
+    )
+    from api.analytics.military_score_inference.ship_build_combos import (
+        GENERIC_FREIGHTER_COMBO_ID,
+    )
+    from api.concepts.hulls import (
+        GENERIC_FREIGHTER_SENTINEL_HULL_ID,
+        UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
+    )
+
+    player_id = inference_target_player_id(sample_turn)
+    placeholders = [
+        {
+            "id": UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
+            "hullId": UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
+            "count": 2,
+            "militaryScoreDelta2xMin": 232,
+            "militaryScoreDelta2xMax": 2180,
+            "buildSlotUsage": 1,
+        },
+        {
+            "id": GENERIC_FREIGHTER_COMBO_ID,
+            "hullId": GENERIC_FREIGHTER_SENTINEL_HULL_ID,
+            "count": 1,
+            "buildSlotUsage": 1,
+        },
+    ]
+    put_persisted_row(
+        persistence,
+        sample_turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_MODERATE_RESIDUAL,
+            summary="Moderate military leftover (11)",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+            placeholders=placeholders,
+            unexplained_military_delta_2x=22,
+        ),
+    )
+    result = _query_product_status(
+        scores_query_context(sample_turn, persistence=persistence),
+        player_id,
+    )
+    assert result.status == "ok"
+    assert result.paths["$.placeholders"].value == placeholders
+    assert result.paths["$.unexplainedMilitaryDelta2x"].value == 22
+    assert result.paths["$.solutions[0]"].kind == "none"
+
+
 @pytest.mark.parametrize("status", sorted(INFERENCE_ADMISSION_SKIP_STATUSES))
 def test_skip_export_exposes_per_reason_status_without_leftover(
     status: str,

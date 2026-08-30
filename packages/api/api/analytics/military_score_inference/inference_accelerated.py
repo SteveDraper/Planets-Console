@@ -322,6 +322,7 @@ def run_accelerated_split_inference(
                 policy_steps_attempted=reported_policy_steps,
                 step_diagnostics=reported_step_diagnostics,
                 extra_diagnostics={"accelerated_segments": segment_payloads},
+                resolved_mask=resolved_mask,
             ),
             segment_payloads,
         ),
@@ -337,6 +338,7 @@ def build_accelerated_split_stream_row_complete(
     *,
     segment_solves: tuple[AcceleratedSegmentResult, ...],
     combined_time_limited: bool,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> RowComplete:
     """Build terminal stream state for an accelerated split row."""
     segment_payloads = [
@@ -389,6 +391,7 @@ def build_accelerated_split_stream_row_complete(
             policy_steps_attempted=reported.policy_steps_attempted,
             step_diagnostics=reported.step_diagnostics,
             extra_diagnostics={"accelerated_segments": segment_payloads},
+            resolved_mask=resolved_mask,
         ),
         segment_payloads,
     )
@@ -406,6 +409,7 @@ def build_accelerated_backfill_stream_row_complete(
     source_turn_number: int,
     source_turn: TurnInfo,
     segment_solves: tuple[AcceleratedSegmentResult, ...],
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> RowComplete:
     """Build terminal stream state for an accelerated backfill row."""
     segment_payloads = [
@@ -450,6 +454,7 @@ def build_accelerated_backfill_stream_row_complete(
                 "accelerated_backfill_segment_id": target.segment.segment_id,
                 "accelerated_segments": segment_payloads,
             },
+            resolved_mask=resolved_mask,
         ),
         segment_payloads_for_targets,
     )

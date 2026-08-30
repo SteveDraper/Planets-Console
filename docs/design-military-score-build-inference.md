@@ -146,7 +146,7 @@ Abort is the anti-junk mechanism. Classifier misses that still get slack-padded 
 
 ### 3.6 Unknown military ship placeholder
 
-Locked in [Unknown military ship placeholder contract](https://github.com/SteveDraper/Planets-Console/issues/358).
+Locked in [Unknown military ship placeholder contract](https://github.com/SteveDraper/Planets-Console/issues/358). **Shipped** ([Implement unknown military ship and residual freighter placeholders](https://github.com/SteveDraper/Planets-Console/issues/369)).
 
 When the row has no exact action list (**inference moderate residual**, **mine-score residual**, `no_exact_solution`), inference emits count-constrained **post-unsat** placeholders so ship and priority-point constraints still surface. These are not CP-SAT catalog combos and not ranked `solutions[]` entries.
 
@@ -171,7 +171,7 @@ When the row has no exact action list (**inference moderate residual**, **mine-s
 
 **Fleet cardinality interface**
 
-When fleet later consumes this, explode `count = N` to N unit **fleet inferred acquisition** rows and copy the per-unit envelope onto each. Do not introduce multi-ship fleet rows. Option-set / envelope field mapping is not this contract.
+Fleet explodes `count = N` to N unit **fleet inferred acquisition** rows and copies the per-unit envelope onto each hull-sentinel build option set (`hullId` `-1` for unknown military, `0` for generic freighter; no engine/beam/torp fills). Do not introduce multi-ship fleet rows.
 
 Persist, stream `complete`, and export carry the collection as `placeholders` ([§3.8](#38-product-status-persist-and-stream)).
 
@@ -202,7 +202,7 @@ These families are ranked `solutions[]` actions (counts + pairing when it exists
 
 ### 3.8 Product status persist and stream
 
-Locked in [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). **Persist / first-class `status` shipped** ([Implement inference admission skip and product-status persist](https://github.com/SteveDraper/Planets-Console/issues/366)). **Table-stream `complete` payload, BFF `displayStatus`, and SPA cell chrome shipped** ([Implement inference status stream and SPA cell chrome](https://github.com/SteveDraper/Planets-Console/issues/367)). **Export product `status` / leftover / `placeholders` shipped** ([Scores analytic exports](https://github.com/SteveDraper/Planets-Console/issues/97)). Non-empty `placeholders[]` is [Implement unknown military ship and residual freighter placeholders](https://github.com/SteveDraper/Planets-Console/issues/369).
+Locked in [Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360). **Persist / first-class `status` shipped** ([Implement inference admission skip and product-status persist](https://github.com/SteveDraper/Planets-Console/issues/366)). **Table-stream `complete` payload, BFF `displayStatus`, and SPA cell chrome shipped** ([Implement inference status stream and SPA cell chrome](https://github.com/SteveDraper/Planets-Console/issues/367)). **Export product `status` / leftover / `placeholders` shipped** ([Scores analytic exports](https://github.com/SteveDraper/Planets-Console/issues/97)). **Non-empty `placeholders[]` shipped** ([Implement unknown military ship and residual freighter placeholders](https://github.com/SteveDraper/Planets-Console/issues/369)).
 
 **Wire `status`** is first-class (same field as today). The player-facing contracts:
 
@@ -561,7 +561,7 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Accelerated-start rows (#71) | Same stream and scheduler as normal rows; segments internal to row path |
 | Inference admission skip (#356) | Never `tier_solve` for owner, Dead (inclusive), live inbound Full Alliance, Stealth (grey inference, keep Scores), Horwasp, `no_prior_turn`, `player_not_found`. Persist fallback-complete. Share Intel is not a skip. |
 | Hopeless classifier / expensive-tier abort (#357 / shipped #368) | Cheap always through `full_components`. Abort `admit_starbase_defense_posts`+ on cheap-unsat if decrease-shaped >11, sticky prior, or large RST minefield (N=3 / 1000 units, YAML-overridable). Moderate 1-11 aborts expensive without starting sticky. Not #244. |
-| Unknown military ship placeholder (#358) | Post-unsat artifact, not a catalog combo or ranked solution. One row `count = N` unexplained +warships; per-unit race construction envelope in `score_delta_2x`; residual stays on the row. Dedicated collection, hull sentinel `-1`. Same-row post-unsat **generic freighter combo** for +freighters. Fleet explodes to N unit inferred rows. |
+| Unknown military ship placeholder (#358 / shipped #369) | Post-unsat artifact, not a catalog combo or ranked solution. One row `count = N` unexplained +warships; per-unit race construction envelope in `score_delta_2x`; residual stays on the row. Dedicated collection, hull sentinel `-1`. Same-row post-unsat **generic freighter combo** for +freighters. Fleet explodes to N unit inferred rows. |
 | Ship loss, gift, and trade (#359) | Per-row **public scoreboard pairing**; departures from **prior-fleet decrease candidate**s (not inverted build catalog). **Gift** includes capture. Incoming matched hull is **acquired ship**, not a **ship build combo**. **Idle-dock PP equality** pre-limit PQ/PPQ lattice-gated. Families from first ship-bearing cheap step. **Unknown military ship** still `N > 0` only. Post-limit PP: #364. #49 no longer owns these families. |
 | Product status persist and stream (#360) | First-class `status` (`exact`, `moderate_residual`, `mine_score_residual`, `no_exact_solution`, per-reason skip). Residuals functional-persist with `placeholders` + leftover; skips fallback-complete. Sticky derived from T-1 `mine_score_residual`. Stream: one `complete`, no placeholder `solution` events. BFF `displayStatus` adds `skipped` / residual buckets. Distinct cell chrome; no new modal. Export: product `status` / leftover / `placeholders` siblings of `$.solutions`; `searchStatus` stays lifecycle-only. |
 

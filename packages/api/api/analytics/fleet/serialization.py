@@ -176,6 +176,10 @@ def fleet_build_option_set_to_json(option_set: FleetBuildOptionSet) -> dict[str,
         payload["beamId"] = option_set.beam_id
     if option_set.torp_id is not None:
         payload["torpId"] = option_set.torp_id
+    if option_set.military_score_delta_2x_min is not None:
+        payload["militaryScoreDelta2xMin"] = option_set.military_score_delta_2x_min
+    if option_set.military_score_delta_2x_max is not None:
+        payload["militaryScoreDelta2xMax"] = option_set.military_score_delta_2x_max
     return payload
 
 
@@ -185,17 +189,26 @@ def _resolved_fleet_component_id(component_id: int) -> int | None:
 
 
 def _resolved_fleet_hull_id(hull_id: int) -> int | None:
-    """Preserve generic freighter sentinel; map other non-positive ids to unknown.
+    """Preserve documented hull sentinels; map other non-positive ids to unknown.
 
     ``GENERIC_FREIGHTER_SENTINEL_HULL_ID`` (0) is a documented fleet/solver
-    pseudo-id meaning "some freighter hull" -- not a host catalog id. It must
-    survive on fleet option sets so observation match can recognize generic
-    freighter inference without relying on the display ``label``.
+    pseudo-id meaning "some freighter hull" -- not a host catalog id.
+    ``UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID`` (-1) is a documented post-unsat
+    residual pseudo-id meaning "some military ship" -- not a host catalog id.
+    Both must survive on fleet option sets; other non-positive ids map to
+    unknown (``None``).
     """
-    from api.concepts.hulls import GENERIC_FREIGHTER_SENTINEL_HULL_ID
+    from api.concepts.hulls import (
+        GENERIC_FREIGHTER_SENTINEL_HULL_ID,
+        UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
+        is_generic_freighter_sentinel_hull_id,
+        is_unknown_military_ship_sentinel_hull_id,
+    )
 
-    if hull_id == GENERIC_FREIGHTER_SENTINEL_HULL_ID:
+    if is_generic_freighter_sentinel_hull_id(hull_id):
         return GENERIC_FREIGHTER_SENTINEL_HULL_ID
+    if is_unknown_military_ship_sentinel_hull_id(hull_id):
+        return UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
     return hull_id if hull_id > 0 else None
 
 
@@ -268,6 +281,24 @@ def fleet_build_option_set_from_json(data: dict[str, Any]) -> FleetBuildOptionSe
     if torp_id is not None and (not isinstance(torp_id, int) or isinstance(torp_id, bool)):
         raise ValidationError("fleet build option set torpId must be an int")
 
+    military_score_delta_2x_min = data.get("militaryScoreDelta2xMin")
+    if military_score_delta_2x_min is not None and (
+        not isinstance(military_score_delta_2x_min, int)
+        or isinstance(military_score_delta_2x_min, bool)
+    ):
+        raise ValidationError(
+            "fleet build option set militaryScoreDelta2xMin must be an int or null"
+        )
+
+    military_score_delta_2x_max = data.get("militaryScoreDelta2xMax")
+    if military_score_delta_2x_max is not None and (
+        not isinstance(military_score_delta_2x_max, int)
+        or isinstance(military_score_delta_2x_max, bool)
+    ):
+        raise ValidationError(
+            "fleet build option set militaryScoreDelta2xMax must be an int or null"
+        )
+
     return FleetBuildOptionSet(
         combo_id=combo_id,
         label=label,
@@ -278,6 +309,8 @@ def fleet_build_option_set_from_json(data: dict[str, Any]) -> FleetBuildOptionSe
         torp_id=torp_id,
         beam_count=beam_count,
         launcher_count=launcher_count,
+        military_score_delta_2x_min=military_score_delta_2x_min,
+        military_score_delta_2x_max=military_score_delta_2x_max,
     )
 
 

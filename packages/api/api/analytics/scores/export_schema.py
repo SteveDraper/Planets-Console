@@ -342,13 +342,16 @@ _PLACEHOLDER_ITEM_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
         "One post-unsat placeholder: unknown military ship (hull sentinel -1, typed id "
-        "unknown_military_ship) or observation-derived generic freighter (hull id 0). "
-        "Not a ranked solutions[] entry. Residual / no_exact_solution / skip rows "
-        "include the placeholders branch; arrays stay empty until placeholders are "
-        "populated."
+        "unknown_military_ship) or observation-derived generic freighter (hull id 0, "
+        "typed id combo_freighter). Not a ranked solutions[] entry. Residual / "
+        "no_exact_solution rows include the collection; skip rows keep an empty array."
     ),
     "additionalProperties": True,
     "properties": {
+        "id": {
+            "type": "string",
+            "description": "Typed placeholder id: unknown_military_ship or combo_freighter.",
+        },
         "hullId": {
             "type": "integer",
             "description": (
@@ -432,9 +435,9 @@ EXPORT_VALUE_SCHEMA: dict[str, Any] = {
             "type": "array",
             "description": (
                 "Post-unsat placeholder collection for residual / no_exact_solution / "
-                "skip rows. Sibling of $.solutions; empty arrays are authoritative "
-                "until placeholders are populated. Residual leftover stays on "
-                "unexplainedMilitaryDelta2x, not assigned onto these ships."
+                "skip rows. Sibling of $.solutions. Residual leftover stays on "
+                "unexplainedMilitaryDelta2x, not assigned onto these ships. Skip rows "
+                "keep an empty array."
             ),
             "items": _PLACEHOLDER_ITEM_SCHEMA,
         },

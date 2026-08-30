@@ -6,6 +6,7 @@ from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.host_turn_targets import (
     host_turn_functional_targets_from_wire_list,
 )
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_api_payload import (
     format_inference_summary,
     inference_api_payload,
@@ -61,6 +62,7 @@ def build_row_complete_wire_payload(
     policy_steps_attempted: list[str] | None = None,
     step_diagnostics: list[dict[str, object]] | None = None,
     extra_diagnostics: dict[str, object] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
     summary_override: str | None = None,
     force_is_complete: bool | None = None,
 ) -> RowCompleteWirePayload:
@@ -76,6 +78,7 @@ def build_row_complete_wire_payload(
             policy_steps_attempted=policy_steps_attempted,
             step_diagnostics=step_diagnostics,
             extra_diagnostics=extra_diagnostics,
+            resolved_mask=resolved_mask,
         )
     else:
         summary = summary_override or format_inference_summary(result)
@@ -116,6 +119,7 @@ def row_complete_from_ladder_finalize(
     observation: InferenceObservation,
     turn: TurnInfo,
     extra_diagnostics: dict[str, object] | None = None,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
 ) -> RowComplete:
     return RowComplete(
         result=result,
@@ -128,6 +132,7 @@ def row_complete_from_ladder_finalize(
             policy_steps_attempted=policy_steps_attempted,
             step_diagnostics=step_diagnostics,
             extra_diagnostics=extra_diagnostics,
+            resolved_mask=resolved_mask,
         ),
     )
 
@@ -187,6 +192,7 @@ def row_complete_stopped(
                 step_diagnostics,
                 observation=observation,
                 turn=turn,
+                resolved_mask=ladder_state.resolved_mask,
             )
         )
     stopped_result = InferenceResult(
