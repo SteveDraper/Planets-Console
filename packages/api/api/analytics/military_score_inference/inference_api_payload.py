@@ -13,6 +13,9 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
     InferenceSolutionShipBuild,
 )
+from api.analytics.military_score_inference.post_unsat_placeholders import (
+    post_unsat_placeholders_from_turn,
+)
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     fleet_torp_complete_wire_fields_from_diagnostics,
 )
@@ -97,7 +100,8 @@ def product_payload_fields(
     """Return product status, placeholders, and leftover for persist, stream, and export.
 
     Residual / ``no_exact_solution`` expose leftover and ``placeholders`` (empty
-    list if missing). Skip rows expose empty ``placeholders`` and omit leftover.
+    list if missing; callers pass the §3.6 collection when built). Skip rows
+    expose empty ``placeholders`` and omit leftover.
     Other statuses omit leftover and omit placeholders unless the source already
     carried them.
     """
@@ -148,6 +152,9 @@ def inference_result_to_api_payload(
         },
     )
     leftover_2x = _functional_leftover_2x(result.status, observation)
+    placeholders = None
+    if result.status in FUNCTIONAL_LEFTOVER_STATUSES:
+        placeholders = post_unsat_placeholders_from_turn(observation, turn)
     return inference_api_payload(
         status=result.status,
         summary=format_inference_summary(
@@ -158,6 +165,7 @@ def inference_result_to_api_payload(
         diagnostics=diagnostics,
         observation=observation,
         catalog=catalog,
+        placeholders=placeholders,
     )
 
 
@@ -249,13 +257,14 @@ def inference_api_payload(
     diagnostics: dict[str, object],
     observation: InferenceObservation | None = None,
     catalog: ActionCatalog | None = None,
+    placeholders: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
         fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
     )
     leftover_2x = _functional_leftover_2x(status, observation)
     leftover_summary = _functional_leftover_status_summary(status, leftover_2x)
-    product = product_payload_fields(status, leftover=leftover_2x)
+    product = product_payload_fields(status, leftover=leftover_2x, placeholders=placeholders)
     payload: dict[str, object] = {
         "status": product.status,
         "summary": leftover_summary if leftover_summary is not None else summary,

@@ -144,5 +144,149 @@ def ship_build_military_score_delta_2x(
     )
 
 
+def warship_construction_envelope_2x(
+    *,
+    hulls_by_id: dict[int, Hull],
+    engines_by_id: dict[int, Engine],
+    beams_by_id: dict[int, Beam],
+    torpedos_by_id: dict[int, Torpedo],
+    buildable_hull_ids: frozenset[int],
+) -> tuple[int, int] | None:
+    """Per-unit military 2x range over legal warship fills for buildable hulls.
+
+    Min is the cheapest fill that still counts as a warship (one cheapest beam or
+    launcher, or zero weapons on a fighter-bay hull). Max is the most expensive
+    fill (costliest engines in every slot, weapons at hull max). Engines always
+    fill every slot. Returns None when no legal warship fill exists.
+    """
+    scores: list[int] = []
+    for hull_id in buildable_hull_ids:
+        hull = hulls_by_id.get(hull_id)
+        if hull is None or not is_military_hull(hull):
+            continue
+        hull_scores = _legal_warship_fill_scores_2x(
+            hull,
+            engines_by_id=engines_by_id,
+            beams_by_id=beams_by_id,
+            torpedos_by_id=torpedos_by_id,
+        )
+        scores.extend(hull_scores)
+    if not scores:
+        return None
+    return min(scores), max(scores)
+
+
+def _legal_warship_fill_scores_2x(
+    hull: Hull,
+    *,
+    engines_by_id: dict[int, Engine],
+    beams_by_id: dict[int, Beam],
+    torpedos_by_id: dict[int, Torpedo],
+) -> list[int]:
+    if hull.engines > 0 and not engines_by_id:
+        return []
+    engine_min, engine_max = _minmax_engines(engines_by_id)
+    if engine_min is None or engine_max is None:
+        return []
+
+    min_weapon_fills = _min_warship_weapon_fills(
+        hull, beams_by_id=beams_by_id, torpedos_by_id=torpedos_by_id
+    )
+    max_weapon_fill = _max_warship_weapon_fill(
+        hull, beams_by_id=beams_by_id, torpedos_by_id=torpedos_by_id
+    )
+    scores: list[int] = []
+    for beam, torpedo, beam_count, launcher_count in min_weapon_fills:
+        scores.append(
+            ship_build_military_score_delta_2x(
+                hull,
+                engine_min,
+                beam,
+                torpedo,
+                beam_count=beam_count,
+                launcher_count=launcher_count,
+            )
+        )
+    if max_weapon_fill is not None:
+        beam, torpedo, beam_count, launcher_count = max_weapon_fill
+        scores.append(
+            ship_build_military_score_delta_2x(
+                hull,
+                engine_max,
+                beam,
+                torpedo,
+                beam_count=beam_count,
+                launcher_count=launcher_count,
+            )
+        )
+    return scores
+
+
+def _minmax_engines(
+    engines_by_id: dict[int, Engine],
+) -> tuple[Engine | None, Engine | None]:
+    if not engines_by_id:
+        return None, None
+    engines = list(engines_by_id.values())
+    cheapest = min(engines, key=_engine_construction_key)
+    costliest = max(engines, key=_engine_construction_key)
+    return cheapest, costliest
+
+
+def _engine_construction_key(engine: Engine) -> tuple[int, int]:
+    return (construction_value(engine.cost, _component_minerals(engine)), engine.id)
+
+
+def _beam_construction_key(beam: Beam) -> tuple[int, int]:
+    return (construction_value(beam.cost, _component_minerals(beam)), beam.id)
+
+
+def _torpedo_launcher_construction_key(torpedo: Torpedo) -> tuple[int, int]:
+    return (
+        construction_value(torpedo.launchercost, _component_minerals(torpedo)),
+        torpedo.id,
+    )
+
+
+def _min_warship_weapon_fills(
+    hull: Hull,
+    *,
+    beams_by_id: dict[int, Beam],
+    torpedos_by_id: dict[int, Torpedo],
+) -> list[tuple[Beam | None, Torpedo | None, int, int]]:
+    """Legal minimum weapon fills that still count as a warship."""
+    if hull.fighterbays > 0:
+        return [(None, None, 0, 0)]
+    fills: list[tuple[Beam | None, Torpedo | None, int, int]] = []
+    if hull.beams > 0 and beams_by_id:
+        cheapest_beam = min(beams_by_id.values(), key=_beam_construction_key)
+        fills.append((cheapest_beam, None, 1, 0))
+    if hull.launchers > 0 and torpedos_by_id:
+        cheapest_torp = min(torpedos_by_id.values(), key=_torpedo_launcher_construction_key)
+        fills.append((None, cheapest_torp, 0, 1))
+    return fills
+
+
+def _max_warship_weapon_fill(
+    hull: Hull,
+    *,
+    beams_by_id: dict[int, Beam],
+    torpedos_by_id: dict[int, Torpedo],
+) -> tuple[Beam | None, Torpedo | None, int, int] | None:
+    beam: Beam | None = None
+    torpedo: Torpedo | None = None
+    beam_count = 0
+    launcher_count = 0
+    if hull.beams > 0 and beams_by_id:
+        beam = max(beams_by_id.values(), key=_beam_construction_key)
+        beam_count = hull.beams
+    if hull.launchers > 0 and torpedos_by_id:
+        torpedo = max(torpedos_by_id.values(), key=_torpedo_launcher_construction_key)
+        launcher_count = hull.launchers
+    if not ship_build_counts_as_warship(hull, beam_count=beam_count, launcher_count=launcher_count):
+        return None
+    return beam, torpedo, beam_count, launcher_count
+
+
 def _component_minerals(component: Hull | Engine | Beam | Torpedo) -> int:
     return component.tritanium + component.duranium + component.molybdenum

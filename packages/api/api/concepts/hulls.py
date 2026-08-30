@@ -12,9 +12,17 @@ from api.models.components import Hull
 # (no weapon slots). Preserved on fleet build option sets as hullId 0.
 GENERIC_FREIGHTER_SENTINEL_HULL_ID = 0
 
+# Post-unsat residual sentinel: not a host hull id. Means "some military ship"
+# with per-unit race construction-envelope bounds, not a catalog combo.
+UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID = -1
+
 
 def is_generic_freighter_sentinel_hull_id(hull_id: int | None) -> bool:
     return hull_id == GENERIC_FREIGHTER_SENTINEL_HULL_ID
+
+
+def is_unknown_military_ship_sentinel_hull_id(hull_id: int | None) -> bool:
+    return hull_id == UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
 
 
 def hull_has_weapon_slots(hull: Hull) -> bool:
