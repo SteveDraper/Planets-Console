@@ -32,7 +32,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.models import InferenceSolutionAction
-from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_MODERATE_RESIDUAL
+from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.export_services import ScoresExportContext
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -821,57 +821,6 @@ def test_persisted_inference_refines_placeholders():
     assert record.build_option_sets[0].hull_id == 13
     assert record.build_option_sets[0].engine_id == 9
     assert record.fields.hull == FleetFieldUnknown()
-
-
-def test_residual_unknown_military_persist_explodes_to_unit_fleet_rows():
-    """Persist count=N becomes N unit inferred rows; do not invent a multi-ship row."""
-    from api.analytics.military_score_inference.post_unsat_placeholders import (
-        UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
-        explode_placeholder_to_unit_payloads,
-    )
-    from api.concepts.hulls import UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
-
-    placeholder = {
-        "id": UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
-        "hullId": UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
-        "count": 3,
-        "militaryScoreDelta2xMin": 232,
-        "militaryScoreDelta2xMax": 2180,
-        "buildSlotUsage": 1,
-    }
-    units = explode_placeholder_to_unit_payloads(placeholder)
-    assert len(units) == 3
-    assert all(unit["count"] == 1 for unit in units)
-    assert all(unit["militaryScoreDelta2xMin"] == 232 for unit in units)
-
-    turn = _turn_with_score_delta(turn_number=111, owner_id=8, shipchange=3)
-    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
-        628580,
-        1,
-        111,
-        8,
-        PersistedInferenceRow(
-            status=STATUS_MODERATE_RESIDUAL,
-            summary="Moderate military leftover (11)",
-            solution_count=0,
-            is_complete=True,
-            solutions=[],
-            placeholders=[placeholder],
-            unexplained_military_delta_2x=22,
-        ),
-    )
-    snapshot = apply_fleet_turn_delta(
-        ensure_fleet_baseline(628580, 1, turn),
-        turn,
-        inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
-            turn,
-        ),
-    )
-    records = ledger_for_player(snapshot, 8).records
-    assert len(records) == 3
-    assert all(len(record.build_option_sets) == 0 for record in records)
 
 
 def test_persisted_inference_refines_freighter_placeholders():

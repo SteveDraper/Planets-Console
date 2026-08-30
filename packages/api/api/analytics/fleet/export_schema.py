@@ -41,7 +41,23 @@ _BUILD_OPTION_SET_SCHEMA: dict[str, Any] = {
         },
         "hullId": {
             "type": "integer",
-            "description": "Host hull id for this option set.",
+            "description": (
+                "Host hull id, generic-freighter sentinel 0, or unknown-military sentinel -1."
+            ),
+        },
+        "militaryScoreDelta2xMin": {
+            "type": "integer",
+            "description": (
+                "Per-unit construction-envelope lower bound (score delta times two) on "
+                "unknown-military hull-sentinel option sets."
+            ),
+        },
+        "militaryScoreDelta2xMax": {
+            "type": "integer",
+            "description": (
+                "Per-unit construction-envelope upper bound (score delta times two) on "
+                "unknown-military hull-sentinel option sets."
+            ),
         },
         "engineId": {
             "type": "integer",

@@ -101,6 +101,23 @@ def test_fleet_build_option_set_round_trip():
     assert fleet_build_option_set_to_json(restored) == wire
 
 
+def test_fleet_build_option_set_round_trip_unknown_military_sentinel_and_envelope():
+    option_set = FleetBuildOptionSet(
+        combo_id="unknown_military_ship",
+        label="Unknown military ship",
+        hull_id=-1,
+        military_score_delta_2x_min=232,
+        military_score_delta_2x_max=2180,
+    )
+    wire = fleet_build_option_set_to_json(option_set)
+    assert wire["hullId"] == -1
+    assert wire["militaryScoreDelta2xMin"] == 232
+    assert wire["militaryScoreDelta2xMax"] == 2180
+    restored = fleet_build_option_set_from_json(wire)
+    assert restored == option_set
+    assert fleet_build_option_set_to_json(restored) == wire
+
+
 def test_fleet_build_option_set_round_trip_unknown_counts():
     option_set = FleetBuildOptionSet(
         hull_id=13,

@@ -101,6 +101,9 @@ class FleetBuildOptionSet:
     # None = unknown slot fill (e.g. fog-of-war); 0 = confirmed empty; >0 = fitted count.
     beam_count: int | None = None
     launcher_count: int | None = None
+    # Per-unit construction envelope on unknown-military hull-sentinel option sets.
+    military_score_delta_2x_min: int | None = None
+    military_score_delta_2x_max: int | None = None
 
 
 @dataclass(frozen=True)

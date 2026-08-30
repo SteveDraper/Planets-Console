@@ -1,8 +1,9 @@
-"""Refine inferred fleet acquisition placeholders from held inference solutions."""
+"""Refine inferred fleet acquisition rows from held solutions and persist placeholders."""
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 
 from api.analytics.fleet.display_default_option_set import (
     display_default_option_set_index,
@@ -43,11 +44,24 @@ from api.analytics.military_score_inference.inference_api_payload import (
     inference_wire_solution_objective_value,
 )
 from api.analytics.military_score_inference.models import InferenceSolutionShipBuild
+from api.analytics.military_score_inference.post_unsat_placeholders import (
+    UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
+    explode_placeholder_to_unit_payloads,
+)
 from api.analytics.military_score_inference.ship_build_combos import (
+    GENERIC_ZERO_MILITARY_SCORE_LABEL,
     is_generic_zero_military_score_combo_id,
 )
 from api.analytics.scores.export_wire import ranked_solutions_from_wire
+from api.concepts.hulls import (
+    GENERIC_FREIGHTER_SENTINEL_HULL_ID,
+    UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
+    is_generic_freighter_sentinel_hull_id,
+    is_unknown_military_ship_sentinel_hull_id,
+)
 from api.models.game import TurnInfo
+
+UNKNOWN_MILITARY_SHIP_LABEL = "Unknown military ship"
 
 INFERENCE_SOURCE = "scores.inference"
 
@@ -58,7 +72,7 @@ def refine_inferred_acquisitions_from_scores(
     *,
     inference_materialization: FleetInferenceMaterialization,
 ) -> FleetTurnSnapshot:
-    """Attach fleet build option sets from top-K held solutions to placeholder rows."""
+    """Attach fleet build option sets from held solutions or persist placeholders."""
     for ledger in snapshot.players:
         refine_player_inferred_acquisitions_from_scores(
             ledger,
@@ -78,7 +92,7 @@ def refine_player_inferred_acquisitions_from_scores(
     perspective: int,
     inference_materialization: FleetInferenceMaterialization,
 ) -> None:
-    """Attach fleet build option sets from top-K held solutions for one player ledger."""
+    """Attach fleet build option sets from held solutions or persist placeholders."""
     turn_number = turn.settings.turn
     if not _ledger_has_placeholders_for_turn(ledger, turn_number):
         return
@@ -94,13 +108,14 @@ def refine_player_inferred_acquisitions_from_scores(
             turn=turn,
             load_turn=load_turn,
         )
-        if not held.solutions:
+        if not held.solutions and not held.placeholders:
             continue
         _refine_player_placeholders_for_built_turn(
             ledger,
             shell_turn=turn_number,
             built_turn=built_turn,
             solutions=list(held.solutions),
+            persist_placeholders=list(held.placeholders),
             search_status=held.search_status,
         )
 
@@ -124,9 +139,9 @@ def _refine_player_placeholders_for_built_turn(
     shell_turn: int,
     built_turn: int,
     solutions: list[dict[str, object]],
+    persist_placeholders: list[dict[str, object]],
     search_status: str,
 ) -> None:
-    ranked = ranked_solutions_from_wire(solutions)
     warship_placeholders = _placeholder_rows_for_built_turn(
         ledger,
         shell_turn=shell_turn,
@@ -139,19 +154,120 @@ def _refine_player_placeholders_for_built_turn(
         built_turn=built_turn,
         ship_class="freighter",
     )
-    _assign_option_sets_to_placeholders(
+    if solutions:
+        ranked = ranked_solutions_from_wire(solutions)
+        _assign_option_sets_to_placeholders(
+            warship_placeholders,
+            _expanded_builds_by_solution(ranked, ship_class="warship"),
+            shell_turn=shell_turn,
+            search_status=search_status,
+            built_turn=built_turn,
+        )
+        _assign_option_sets_to_placeholders(
+            freighter_placeholders,
+            _expanded_builds_by_solution(ranked, ship_class="freighter"),
+            shell_turn=shell_turn,
+            search_status=search_status,
+            built_turn=built_turn,
+        )
+        return
+    _assign_persist_placeholders_to_unit_rows(
         warship_placeholders,
-        _expanded_builds_by_solution(ranked, ship_class="warship"),
+        persist_placeholders,
+        ship_class="warship",
         shell_turn=shell_turn,
         search_status=search_status,
         built_turn=built_turn,
     )
-    _assign_option_sets_to_placeholders(
+    _assign_persist_placeholders_to_unit_rows(
         freighter_placeholders,
-        _expanded_builds_by_solution(ranked, ship_class="freighter"),
+        persist_placeholders,
+        ship_class="freighter",
         shell_turn=shell_turn,
         search_status=search_status,
         built_turn=built_turn,
+    )
+
+
+def _assign_persist_placeholders_to_unit_rows(
+    rows: list[FleetShipRecord],
+    persist_placeholders: list[dict[str, object]],
+    *,
+    ship_class: FleetShipClass,
+    shell_turn: int,
+    search_status: str,
+    built_turn: int,
+) -> None:
+    """Explode persist placeholders 1:1 onto scoreboard-seeded unit rows of one class.
+
+    Assigns only when exploded unit count equals the seeded row count. Does not
+    pad, truncate, or merge when those cardinalities disagree.
+    """
+    units: list[dict[str, object]] = []
+    for placeholder in persist_placeholders:
+        if _placeholder_ship_class(placeholder) != ship_class:
+            continue
+        units.extend(explode_placeholder_to_unit_payloads(placeholder))
+    if not units or len(units) != len(rows):
+        return
+    option_sets = [_option_set_from_placeholder_unit(unit) for unit in units]
+    _assign_option_sets_to_placeholders(
+        rows,
+        [option_sets],
+        shell_turn=shell_turn,
+        search_status=search_status,
+        built_turn=built_turn,
+    )
+
+
+def _placeholder_ship_class(placeholder: Mapping[str, object]) -> FleetShipClass | None:
+    hull_id = placeholder.get("hullId")
+    if isinstance(hull_id, int) and not isinstance(hull_id, bool):
+        if is_unknown_military_ship_sentinel_hull_id(hull_id):
+            return "warship"
+        if is_generic_freighter_sentinel_hull_id(hull_id):
+            return "freighter"
+    combo_id = placeholder.get("id")
+    if isinstance(combo_id, str):
+        if combo_id == UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID:
+            return "warship"
+        if is_generic_zero_military_score_combo_id(combo_id):
+            return "freighter"
+    return None
+
+
+def _wire_int(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
+
+
+def _option_set_from_placeholder_unit(unit: Mapping[str, object]) -> FleetBuildOptionSet:
+    """Map one exploded persist unit onto a hull-sentinel option set.
+
+    Copies hull sentinel and per-unit envelope. Does not invent engine, beam,
+    or torp fills.
+    """
+    combo_id = unit.get("id")
+    if not isinstance(combo_id, str) or not combo_id:
+        combo_id = None
+    hull_id = _wire_int(unit.get("hullId"))
+    if hull_id is None:
+        if combo_id == UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID:
+            hull_id = UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
+        elif combo_id is not None and is_generic_zero_military_score_combo_id(combo_id):
+            hull_id = GENERIC_FREIGHTER_SENTINEL_HULL_ID
+    label = ""
+    if combo_id == UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID:
+        label = UNKNOWN_MILITARY_SHIP_LABEL
+    elif combo_id is not None and is_generic_zero_military_score_combo_id(combo_id):
+        label = GENERIC_ZERO_MILITARY_SCORE_LABEL
+    return FleetBuildOptionSet(
+        combo_id=combo_id,
+        label=label,
+        hull_id=hull_id,
+        military_score_delta_2x_min=_wire_int(unit.get("militaryScoreDelta2xMin")),
+        military_score_delta_2x_max=_wire_int(unit.get("militaryScoreDelta2xMax")),
     )
 
 

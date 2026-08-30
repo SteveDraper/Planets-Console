@@ -171,7 +171,7 @@ When the row has no exact action list (**inference moderate residual**, **mine-s
 
 **Fleet cardinality interface**
 
-When fleet later consumes this, explode `count = N` to N unit **fleet inferred acquisition** rows and copy the per-unit envelope onto each. Do not introduce multi-ship fleet rows. Option-set / envelope field mapping is not this contract.
+Fleet explodes `count = N` to N unit **fleet inferred acquisition** rows and copies the per-unit envelope onto each hull-sentinel build option set (`hullId` `-1` for unknown military, `0` for generic freighter; no engine/beam/torp fills). Do not introduce multi-ship fleet rows.
 
 Persist, stream `complete`, and export carry the collection as `placeholders` ([§3.8](#38-product-status-persist-and-stream)).
 
