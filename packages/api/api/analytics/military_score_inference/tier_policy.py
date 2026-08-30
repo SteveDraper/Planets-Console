@@ -135,11 +135,17 @@ class InferenceTierPolicyStep:
         return snapshot
 
 
+DEFAULT_RECENT_MINEFIELD_OBSERVATION_TURNS = 3
+DEFAULT_LARGE_MINEFIELD_OBSERVATION_MIN_UNITS = 1000
+
+
 @dataclass(frozen=True)
 class SolverThresholds:
     ship_only_exact_early_stop_min_plausibility: int
     no_new_exact_signatures_early_stop_min_plausibility: int
     near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
+    recent_minefield_observation_turns: int = DEFAULT_RECENT_MINEFIELD_OBSERVATION_TURNS
+    large_minefield_observation_min_units: int = DEFAULT_LARGE_MINEFIELD_OBSERVATION_MIN_UNITS
 
 
 @dataclass(frozen=True)
@@ -313,6 +319,32 @@ def _parse_run_degrade_aggregate_probe(raw: object, *, step_id: str) -> bool:
 def _parse_required_near_best_objective_threshold(raw: object, *, location: str) -> int:
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
         raise ValueError(f"{location}: nearBestObjectiveThreshold must be a non-negative integer")
+    return raw
+
+
+def _parse_optional_positive_int(
+    raw: object,
+    *,
+    field_name: str,
+    default: int,
+) -> int:
+    if raw is None:
+        return default
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise ValueError(f"tier policy solverThresholds.{field_name} must be a positive int")
+    return raw
+
+
+def _parse_optional_non_negative_int(
+    raw: object,
+    *,
+    field_name: str,
+    default: int,
+) -> int:
+    if raw is None:
+        return default
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise ValueError(f"tier policy solverThresholds.{field_name} must be a non-negative int")
     return raw
 
 
@@ -620,6 +652,16 @@ def parse_solver_thresholds(document: dict[str, Any]) -> SolverThresholds:
         ship_only_exact_early_stop_min_plausibility=ship_only_threshold,
         no_new_exact_signatures_early_stop_min_plausibility=no_new_signatures_threshold,
         near_best_objective_threshold=near_best_threshold,
+        recent_minefield_observation_turns=_parse_optional_positive_int(
+            raw_thresholds.get("recentMinefieldObservationTurns"),
+            field_name="recentMinefieldObservationTurns",
+            default=DEFAULT_RECENT_MINEFIELD_OBSERVATION_TURNS,
+        ),
+        large_minefield_observation_min_units=_parse_optional_non_negative_int(
+            raw_thresholds.get("largeMinefieldObservationMinUnits"),
+            field_name="largeMinefieldObservationMinUnits",
+            default=DEFAULT_LARGE_MINEFIELD_OBSERVATION_MIN_UNITS,
+        ),
     )
 
 

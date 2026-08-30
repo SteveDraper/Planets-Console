@@ -10,6 +10,7 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
+from api.analytics.military_score_inference.hopeless_classifier import HopelessClassifierInputs
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_accelerated import (
     AcceleratedSegmentResult,
@@ -106,12 +107,14 @@ class InferenceStreamOrchestration:
         resolved_mask: ResolvedHullCatalogMask | None = None,
         fleet_torp_overlay: FleetTorpOverlay | None = None,
         prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+        hopeless_context: HopelessClassifierInputs | None = None,
     ) -> PolicyLadderState:
         return PolicyLadderState(
             policy_steps=tuple(resolve_tier_policies(None)),
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
             prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+            hopeless_context=hopeless_context,
         )
 
     def record_segment_ladder_complete(

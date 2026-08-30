@@ -21,9 +21,16 @@ from __future__ import annotations
 
 import threading
 
+from api.analytics.military_score_inference.hopeless_classifier import (
+    HopelessClassifierInputs,
+    hopeless_context_for_row,
+)
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
+)
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
@@ -102,6 +109,19 @@ def _record_cancelled_locked(run_id: str, scope_key: tuple[int, int, int, int]) 
     _cancelled_run_by_scope[scope_key] = run_id
 
 
+def _hopeless_context_from_session(
+    session: InferenceRowStreamSession,
+) -> HopelessClassifierInputs:
+    return hopeless_context_for_row(
+        session.observation,
+        session.turn,
+        load_scoreboard_turn=session.load_scoreboard_turn,
+        persistence=session.persistence,
+        game_id=session.game_id,
+        perspective=session.perspective,
+    )
+
+
 def initialize_tier_ladder_state(
     run: RowRun,
     *,
@@ -110,11 +130,13 @@ def initialize_tier_ladder_state(
     """Initialize ladder state for one registered scores tier row run."""
     session = run.session
     run.orchestration = orchestration
+    hopeless_context = _hopeless_context_from_session(session)
     if orchestration is not None:
         run.ladder_state = orchestration.new_ladder_state(
             resolved_mask=session.resolved_mask,
             fleet_torp_overlay=session.fleet_torp_overlay,
             prior_fleet_max_tech_by_axis=session.prior_fleet_max_tech_by_axis,
+            hopeless_context=hopeless_context,
         )
         return
     policy_steps = tuple(resolve_tier_policies(None))
@@ -123,6 +145,7 @@ def initialize_tier_ladder_state(
         resolved_mask=session.resolved_mask,
         fleet_torp_overlay=session.fleet_torp_overlay,
         prior_fleet_max_tech_by_axis=session.prior_fleet_max_tech_by_axis,
+        hopeless_context=hopeless_context,
     )
 
 

@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder_admission import (
     maybe_early_stop_after_step,
+    maybe_expensive_tier_abort_after_step,
     maybe_no_new_exact_signatures_early_stop,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -173,7 +174,15 @@ def finish_tier_step(
         ):
             _annotate_last_step_early_stop(state)
             return
-    # BUDGET_STOP: advance only -- no early-stop.
+    if maybe_expensive_tier_abort_after_step(
+        state,
+        policy_step=policy_step,
+        observation=observation,
+        catalog=catalog,
+    ):
+        _annotate_last_step_early_stop(state)
+        return
+    # BUDGET_STOP: advance only -- no ship-only / no-new-signature early-stop.
 
     if state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True

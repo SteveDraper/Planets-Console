@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
+from api.analytics.military_score_inference.hopeless_classifier import HopelessClassifierInputs
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.hull_collision_twins_asset import (
     HullCollisionTwinsAsset,
@@ -51,3 +52,4 @@ class PolicyLadderState:
     hull_collision_twins_path: str | None = None
     hull_collision_twins_fell_back: bool = False
     hull_collision_twins_loaded: bool = False
+    hopeless_context: HopelessClassifierInputs | None = None

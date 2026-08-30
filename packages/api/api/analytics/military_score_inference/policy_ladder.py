@@ -13,6 +13,10 @@ from api.analytics.military_score_inference.constraints import (
     solution_satisfies_exact_hard_equalities,
 )
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
+from api.analytics.military_score_inference.hopeless_classifier import (
+    HopelessClassifierInputs,
+    hopeless_context_for_row,
+)
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.models import (
@@ -155,6 +159,7 @@ def solve_with_policy_ladder(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+    hopeless_context: HopelessClassifierInputs | None = None,
 ) -> tuple[
     InferenceResult,
     ActionCatalog | None,
@@ -171,12 +176,16 @@ def solve_with_policy_ladder(
     ``min_seconds == 0`` and zero spendable skip inside the tier step.
     """
     resolved_max_solutions = max_solutions if max_solutions is not None else 20
+    resolved_hopeless = hopeless_context
+    if resolved_hopeless is None:
+        resolved_hopeless = hopeless_context_for_row(observation, turn, policy_path=policy_path)
     state = PolicyLadderState(
         policy_steps=tuple(resolve_tier_policies(policy_path)),
         resolved_max_solutions=resolved_max_solutions,
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+        hopeless_context=resolved_hopeless,
     )
     while not state.ladder_complete and state.next_step_index < len(state.policy_steps):
         if cancel_token is not None and cancel_token.is_cancelled():

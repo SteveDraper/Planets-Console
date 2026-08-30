@@ -167,6 +167,7 @@ def schedule_inference_row(
     export_services: Mapping[str, object] | None = None,
     stream_token: str | None = None,
     query_context: AnalyticQueryContext | None = None,
+    persistence: InferenceRowPersistenceService | None = None,
 ) -> ScheduledInferenceRow | None:
     observation = build_inference_observation(
         score,
@@ -193,6 +194,7 @@ def schedule_inference_row(
         fleet_torp_overlay=fleet_torp_overlay,
         fleet_torp_input_status=fleet_torp_input_status,
         prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+        persistence=persistence,
     )
     orchestration = create_inference_stream_orchestration(
         path,
