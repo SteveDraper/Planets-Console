@@ -97,6 +97,45 @@ def test_matched_incoming_hull_is_acquired_ship():
     assert pairing.unmatched_warship_drop == 0
 
 
+def test_military_swap_trade_tolerates_rounding_offset():
+    pairing = classify_public_scoreboard_pairing(
+        _row(8, military_2x=-40),
+        (_row(3, military_2x=39),),
+    )
+    assert len(pairing.matches) == 1
+    assert pairing.matches[0].family == "trade"
+    assert pairing.matches[0].counterparty_player_id == 3
+
+
+def test_gift_tolerates_counterparty_military_rounding():
+    pairing = classify_public_scoreboard_pairing(
+        _row(8, warship=-1, military_2x=-40),
+        (_row(3, warship=1, military_2x=39),),
+    )
+    assert len(pairing.matches) == 1
+    assert pairing.matches[0].family == "gift"
+    assert pairing.matches[0].warship_delta == -1
+    assert pairing.unmatched_warship_drop == 0
+
+
+def test_zero_noise_rows_do_not_match_as_trade():
+    pairing = classify_public_scoreboard_pairing(
+        _row(8),
+        (_row(3),),
+    )
+    assert pairing.matches == ()
+    assert pairing.unmatched_warship_drop == 0
+    assert pairing.unmatched_freighter_drop == 0
+
+
+def test_beyond_tolerance_military_mismatch_is_not_a_trade():
+    pairing = classify_public_scoreboard_pairing(
+        _row(8, military_2x=-40),
+        (_row(3, military_2x=30),),
+    )
+    assert pairing.matches == ()
+
+
 def test_partial_gift_leaves_unmatched_loss():
     pairing = classify_public_scoreboard_pairing(
         _row(8, warship=-2, military_2x=-80),

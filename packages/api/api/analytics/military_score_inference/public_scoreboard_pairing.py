@@ -9,9 +9,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from api.analytics.military_score_inference.accelerated_start import (
+    SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
+)
 from api.analytics.military_score_inference.models import InferenceObservation
 
 TransferFamily = Literal["gift", "trade", "acquired"]
+
+# Each row's public military score is floored independently, so a single row's
+# ``militarychange`` can be off by one 2x unit; a two-row comparison accumulates
+# the fuzz from both rows.
+_PER_ROW_MILITARY_SLACK_2X = SCOREBOARD_MILITARY_PARTITION_SLACK_2X
+_TWO_ROW_MILITARY_SLACK_2X = 2 * SCOREBOARD_MILITARY_PARTITION_SLACK_2X
 
 
 @dataclass(frozen=True)
@@ -108,11 +117,13 @@ def _trade_match(this_row: PublicScoreboardRow, other: PublicScoreboardRow) -> P
         and other.warship_delta == -this_row.warship_delta
         and other.freighter_delta == -this_row.freighter_delta
     )
+    # Requiring movement beyond the two-row slack keeps zero-noise rows (both
+    # within rounding fuzz of 0) from spuriously matching each other as trades.
     military_swap = (
         this_row.warship_delta == 0
         and this_row.freighter_delta == 0
-        and this_row.military_delta_2x != 0
-        and other.military_delta_2x == -this_row.military_delta_2x
+        and abs(this_row.military_delta_2x) > _TWO_ROW_MILITARY_SLACK_2X
+        and abs(this_row.military_delta_2x + other.military_delta_2x) <= _TWO_ROW_MILITARY_SLACK_2X
         and other.warship_delta == 0
         and other.freighter_delta == 0
     )
@@ -183,13 +194,18 @@ def _military_compatible_transfer(
 ) -> bool:
     """Public militarychange signs match an ownership transfer, not two independent builds.
 
-    Freighter-only transfers may have zero military on both rows. Warship transfers
-    require opposite-sign military (or zero on the freighter side of a mixed drop).
+    Sign tests tolerate per-row floor rounding: a row within the per-row slack of 0
+    counts as flat. Freighter-only transfers may be flat on both rows. Warship
+    transfers require opposite-sign military beyond the slack (or a flat counterparty
+    only when this row is also flat, e.g. the freighter side of a mixed drop).
     """
     this_m = this_row.military_delta_2x
     other_m = other.military_delta_2x
-    if this_m == 0 and other_m == 0:
-        return True
+    slack = _PER_ROW_MILITARY_SLACK_2X
     if outgoing:
-        return this_m <= 0 and other_m >= 0 and not (this_m < 0 and other_m == 0)
-    return this_m >= 0 and other_m <= 0 and not (this_m > 0 and other_m == 0)
+        return (
+            this_m <= slack
+            and other_m >= -slack
+            and not (this_m < -slack and abs(other_m) <= slack)
+        )
+    return this_m >= -slack and other_m <= slack and not (this_m > slack and abs(other_m) <= slack)
