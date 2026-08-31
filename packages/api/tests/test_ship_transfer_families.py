@@ -505,6 +505,88 @@ def test_catalog_solver_class_flip_trade_when_matching_hull_is_not_first_group(
     assert chosen.counterparty_player_id == 3
 
 
+def _same_class_swap_catalog(
+    synthetic_catalog_context,
+    *,
+    swap_military_2x: int = 40,
+) -> tuple[InferenceObservation, ShipTransferCatalogFragment]:
+    first, first_military = _known_warship_record(
+        synthetic_catalog_context,
+        beam_count=1,
+        record_id="serpent-first",
+    )
+    second, second_military = _known_warship_record(
+        synthetic_catalog_context,
+        beam_count=2,
+        record_id="serpent-second",
+    )
+    assert first_military != second_military
+    observation = _observation(
+        military_delta_2x=swap_military_2x,
+        warship_delta=0,
+        freighter_delta=0,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(_peer_row(3, warship=0, military_2x=-swap_military_2x),),
+        prior_fleet_records=(first, second),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    return observation, fragment
+
+
+def test_same_class_swap_emits_one_action_across_prior_fleet_groups(
+    synthetic_catalog_context,
+):
+    observation, fragment = _same_class_swap_catalog(synthetic_catalog_context)
+    trades = [action for action in fragment.actions if action.id.startswith(TRADE_ACTION_PREFIX)]
+    assert len(trades) == 1
+    swap = trades[0]
+    assert swap.id == f"{TRADE_ACTION_PREFIX}warship:with:3:swap:{observation.military_delta_2x}"
+    assert swap.score_delta_2x == observation.military_delta_2x
+    assert swap.warship_delta == 0
+    assert swap.freighter_delta == 0
+    assert swap.prior_group_key is None
+    assert swap.prior_warship_usage == 1
+    assert swap.upper_bound == 1
+
+
+def test_same_class_swap_requires_a_prior_fleet_warship(synthetic_catalog_context):
+    observation = _observation(
+        military_delta_2x=40,
+        warship_delta=0,
+        freighter_delta=0,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(_peer_row(3, warship=0, military_2x=-40),),
+        prior_fleet_records=(_class_only_freighter_record(),),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert not any(action.id.startswith(TRADE_ACTION_PREFIX) for action in fragment.actions)
+
+
+def test_catalog_solver_same_class_swap_is_exact(synthetic_catalog_context):
+    observation, fragment = _same_class_swap_catalog(synthetic_catalog_context)
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            prior_warship_departure_cap=fragment.prior_warship_departure_cap,
+            prior_departure_group_caps=fragment.prior_departure_group_caps,
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    chosen = result.solutions[0].actions[0]
+    assert (
+        chosen.action_id
+        == f"{TRADE_ACTION_PREFIX}warship:with:3:swap:{observation.military_delta_2x}"
+    )
+    assert chosen.counterparty_player_id == 3
+
+
 def test_solver_exact_ship_loss_uses_prior_fleet_military():
     loss = CandidateAction(
         id=f"{SHIP_LOSS_ACTION_PREFIX}warship:point:40",

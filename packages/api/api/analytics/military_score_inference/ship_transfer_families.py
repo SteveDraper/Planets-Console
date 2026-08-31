@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.prior_fleet_decrease_candidates impo
     prior_fleet_decrease_candidates,
 )
 from api.analytics.military_score_inference.public_scoreboard_pairing import (
+    PairingMatch,
     PublicScoreboardPairing,
     PublicScoreboardRow,
     classify_public_scoreboard_pairing,
@@ -198,7 +199,6 @@ def _departure_action(
     counterparty_player_id: int | None = None,
     warship_delta: int | None = None,
     freighter_delta: int | None = None,
-    score_point: int | None = None,
     departure_count: int = 1,
 ) -> CandidateAction:
     """One catalog action departing ``departure_count`` records from one group.
@@ -207,17 +207,11 @@ def _departure_action(
     scale with the departure count so a multi-ship action prices and consumes
     all of its departing records.
     """
-    if score_point is not None:
-        point = score_point
-        score_min = score_point
-        score_max = score_point
-        envelope = False
-    else:
-        point, score_min, score_max = _departure_score_bounds(kind, min_2x, max_2x)
-        point *= departure_count
-        score_min *= departure_count
-        score_max *= departure_count
-        envelope = kind == "envelope"
+    point, score_min, score_max = _departure_score_bounds(kind, min_2x, max_2x)
+    point *= departure_count
+    score_min *= departure_count
+    score_max *= departure_count
+    envelope = kind == "envelope"
     if warship_delta is None:
         warship_delta = -1 if ship_class == "warship" else 0
     if freighter_delta is None:
@@ -316,23 +310,22 @@ def _trade_actions(
     for match in pairing.matches:
         if match.family != "trade":
             continue
-        same_class_swap = match.warship_delta == 0 and match.freighter_delta == 0
+        if match.warship_delta == 0 and match.freighter_delta == 0:
+            swap = _same_class_swap_action(match, candidates, observation)
+            if swap is not None:
+                actions.append(swap)
+            continue
         # A class-flip trade departs all k flipped ships in one action, so its
-        # military envelope and prior-fleet usage scale by k. A same-class swap
-        # has zero count deltas, so k is unobservable and stays 1.
+        # military envelope and prior-fleet usage scale by k.
         if match.warship_delta < 0:
             outgoing_class: FleetShipClass = "warship"
             departing_count = -match.warship_delta
         elif match.freighter_delta < 0:
             outgoing_class = "freighter"
             departing_count = -match.freighter_delta
-        elif same_class_swap:
-            outgoing_class = "warship"
-            departing_count = 1
         else:
             continue
         grouped = _group_candidates(candidates, outgoing_class)
-        score_point = observation.military_delta_2x if same_class_swap else None
         for (kind, min_2x, max_2x), group in grouped.items():
             if len(group) < departing_count:
                 continue
@@ -350,11 +343,39 @@ def _trade_actions(
                     counterparty_player_id=match.counterparty_player_id,
                     warship_delta=match.warship_delta,
                     freighter_delta=match.freighter_delta,
-                    score_point=score_point,
                     departure_count=departing_count,
                 )
             )
     return actions
+
+
+def _same_class_swap_action(
+    match: PairingMatch,
+    candidates: tuple[PriorFleetDecreaseCandidate, ...],
+    observation: InferenceObservation,
+) -> CandidateAction | None:
+    """One trade action per counterparty for a count-flat military swap.
+
+    The swap's net military IS the observed delta -- what was given cannot be
+    separated from what was received -- so prior-fleet groups are
+    indistinguishable and would only multiply score-equivalent solutions. The
+    swapped-out ship's group is unobservable, so the action carries no
+    ``prior_group_key``; the class-level departure cap still applies through
+    ``prior_warship_usage``.
+    """
+    if not any(candidate.ship_class == "warship" for candidate in candidates):
+        return None
+    return CandidateAction(
+        id=(
+            f"{TRADE_ACTION_PREFIX}warship:with:{match.counterparty_player_id}:"
+            f"swap:{observation.military_delta_2x}"
+        ),
+        label=_trade_label("warship", match.counterparty_player_id),
+        score_delta_2x=observation.military_delta_2x,
+        counterparty_player_id=match.counterparty_player_id,
+        prior_warship_usage=1,
+        upper_bound=1,
+    )
 
 
 def _incoming_military_bounds(incoming_military_2x: int) -> tuple[int, int | None, int | None]:
