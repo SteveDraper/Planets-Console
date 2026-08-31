@@ -1008,9 +1008,7 @@ def test_catalog_solver_two_ship_class_flip_trade_is_exact(synthetic_catalog_con
         (first, second),
         military_delta_2x=-2 * military_2x,
     )
-    trade = next(
-        action for action in fragment.actions if action.id.startswith(TRADE_ACTION_PREFIX)
-    )
+    trade = next(action for action in fragment.actions if action.id.startswith(TRADE_ACTION_PREFIX))
     assert trade.score_delta_2x == -2 * military_2x
     assert trade.prior_warship_usage == 2
     assert trade.upper_bound == 1
