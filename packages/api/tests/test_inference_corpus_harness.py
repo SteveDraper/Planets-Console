@@ -19,7 +19,7 @@ from tests.inference_corpus.run import HORWASP_SKIP_REASON, run_discovered_case,
 
 def test_load_fixed_manifest_has_seed_cases():
     _, cases = load_manifest()
-    assert len(cases) == 3
+    assert len(cases) == 6
     host2 = next(case for case in cases if case.id == "628580-p1-host2")
     assert host2.host_turn == 2
     assert host2.complexity == "minimal"
@@ -28,6 +28,19 @@ def test_load_fixed_manifest_has_seed_cases():
     assert host2.require_top_k is True
     host51 = next(case for case in cases if case.id == "628580-p1-host51")
     assert host51.expect_coverage is True
+    adjunct = next(case for case in cases if case.id == "628580-p6-host20")
+    assert adjunct.complexity == "adjunct"
+    assert adjunct.required_perspectives == (8,)
+    assert adjunct.expect_coverage is False
+    swap = next(case for case in cases if case.id == "900001-p1-host10")
+    assert swap.complexity == "adjunct"
+    assert swap.player_id == 1
+    assert swap.expect_coverage is False
+    flip = next(case for case in cases if case.id == "900001-p3-host10")
+    assert flip.complexity == "adjunct"
+    assert flip.player_id == 3
+    assert flip.prior_turn_path == swap.prior_turn_path
+    assert flip.score_turn_path == swap.score_turn_path
 
 
 def test_resolve_player_id_from_game_info():
@@ -40,6 +53,22 @@ def test_adjunct_case_skipped_by_default():
     case = cases[0]
     adjunct_case = case.__class__(
         **{**case.__dict__, "id": "adjunct-stub", "complexity": "adjunct"}
+    )
+    result = run_manifest_case(adjunct_case)
+    assert result.outcome == CaseOutcome.SKIPPED_COMPLEXITY
+    assert result.skip_reason == "adjunct_disabled"
+
+
+def test_adjunct_expect_coverage_still_skipped_without_include_adjunct():
+    _, cases = load_manifest()
+    case = cases[0]
+    adjunct_case = case.__class__(
+        **{
+            **case.__dict__,
+            "id": "adjunct-expect-coverage-stub",
+            "complexity": "adjunct",
+            "expect_coverage": True,
+        }
     )
     result = run_manifest_case(adjunct_case)
     assert result.outcome == CaseOutcome.SKIPPED_COMPLEXITY
@@ -154,3 +183,15 @@ def test_manifest_rejects_non_integer_required_perspectives(tmp_path):
     )
     with pytest.raises(ValueError, match=r"requiredPerspectives\[1\] must be an integer"):
         load_manifest(manifest_path)
+
+
+def test_missing_required_perspectives_fails_fast():
+    _, cases = load_manifest()
+    adjunct = next(case for case in cases if case.id == "628580-p6-host20")
+    missing = adjunct.__class__(
+        **{**adjunct.__dict__, "id": "missing-slot", "required_perspectives": (99,)}
+    )
+    result = run_manifest_case(missing)
+    assert result.outcome == CaseOutcome.FAILED
+    assert result.failure_message is not None
+    assert "99/turns/20.json" in result.failure_message

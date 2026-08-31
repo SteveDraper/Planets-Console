@@ -12,12 +12,20 @@ def test_fixed_inference_corpus_tier1_passes():
     report = run_fixed_corpus()
     assert report.failed_count == 0, "\n".join(report.summary_lines())
     assert report.hard_ranking_misses == []
-    assert report.passed_count == len(report.results)
-    assert len(report.results) == 3
-    for result in report.results:
-        assert result.outcome == CaseOutcome.PASSED, (
-            f"{result.case_id}: {result.outcome} ({result.failure_message or result.skip_reason})"
-        )
+    passed = [result for result in report.results if result.outcome == CaseOutcome.PASSED]
+    skipped = [
+        result for result in report.results if result.outcome == CaseOutcome.SKIPPED_COMPLEXITY
+    ]
+    assert len(passed) == 3
+    assert len(skipped) == 3
+    assert {result.case_id for result in skipped} == {
+        "628580-p6-host20",
+        "900001-p1-host10",
+        "900001-p3-host10",
+    }
+    assert all(result.skip_reason == "adjunct_disabled" for result in skipped)
+    assert all(result.complexity == "adjunct" for result in skipped)
+    assert len(report.results) == 6
 
 
 def test_fixed_corpus_host2_hard_ranking_lock_passes():
@@ -80,6 +88,41 @@ def test_fixed_corpus_coverage_case_has_ground_truth_available():
 
 
 def test_fixed_inference_corpus_report_distinguishes_skip_buckets():
-    """Harness exposes skip outcome enums even when the fixed corpus does not use them yet."""
+    """Harness exposes skip outcome enums; default CI uses skipped_complexity for adjunct."""
     assert CaseOutcome.SKIPPED_COMPLEXITY.value == "skipped_complexity"
     assert CaseOutcome.OUT_OF_SEARCH_SPACE.value == "out_of_search_space"
+
+
+def test_fixed_adjunct_row_skipped_by_default():
+    _, cases = load_manifest()
+    adjunct = next(case for case in cases if case.id == "628580-p6-host20")
+    skipped = run_manifest_case(adjunct)
+    assert skipped.outcome == CaseOutcome.SKIPPED_COMPLEXITY
+    assert skipped.skip_reason == "adjunct_disabled"
+    assert skipped.complexity == "adjunct"
+
+
+def test_included_adjunct_row_classifies_trade_hint_from_merged_perspective():
+    _, cases = load_manifest()
+    adjunct = next(case for case in cases if case.id == "628580-p6-host20")
+    stub_payload = {
+        "status": "exact",
+        "solutionCount": 1,
+        "solutions": [{"actions": [], "shipBuilds": []}],
+    }
+    with (
+        patch(
+            "tests.inference_corpus.pipeline_tier1.run_inference_with_artifacts",
+            return_value=(stub_payload, None, None),
+        ),
+        patch(
+            "tests.inference_corpus.pipeline_tier1.verify_top_solution_hard_equalities",
+            return_value=None,
+        ),
+    ):
+        result = run_manifest_case(adjunct, include_adjunct=True)
+    assert result.complexity == "adjunct"
+    assert "trade_or_capture_hint" in result.complexity_reasons
+    assert result.coverage_reason != "deferred_trade"
+    assert result.outcome != CaseOutcome.OUT_OF_SEARCH_SPACE
+    assert result.ground_truth_available is False

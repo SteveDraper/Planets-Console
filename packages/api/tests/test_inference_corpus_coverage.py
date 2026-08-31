@@ -18,7 +18,9 @@ from tests.inference_corpus.catalog_coverage import (
     COVERAGE_REASON_ACTION_NOT_IN_CATALOG,
     COVERAGE_REASON_COMBO_NOT_IN_CATALOG,
     COVERAGE_REASON_COUNT_ABOVE_UPPER_BOUND,
+    COVERAGE_REASON_DEFERRED_STARBASE_LOSS,
     COVERAGE_REASON_GROUND_TRUTH_UNAVAILABLE,
+    coverage_reason_from_complexity,
     evaluate_catalog_coverage,
     evaluate_ground_truth_catalog_coverage,
     resolve_coverage_for_case,
@@ -43,6 +45,32 @@ def test_evaluate_catalog_coverage_accepts_empty_ground_truth():
         probability_buckets_by_action_id={},
     )
     result = evaluate_catalog_coverage((), catalog)
+    assert result.in_search_space is True
+    assert result.coverage_reason is None
+
+
+def test_modeled_transfer_signals_are_not_deferred_coverage():
+    """Gift/trade/loss families shipped in #370; do not emit deferred_trade / deferred_ship_loss."""
+    assert coverage_reason_from_complexity(("trade_or_capture_hint",)) is None
+    assert coverage_reason_from_complexity(("net_ship_count_decrease",)) is None
+    assert (
+        coverage_reason_from_complexity(("planet_or_starbase_count_decrease",))
+        == COVERAGE_REASON_DEFERRED_STARBASE_LOSS
+    )
+
+    empty_catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
+    extraction = GroundTruthExtraction(available=True, ground_truth=())
+    result = resolve_coverage_for_case(
+        extraction=extraction,
+        ground_truth=(),
+        catalog=empty_catalog,
+        complexity_reasons=("trade_or_capture_hint",),
+    )
+    assert result is not None
     assert result.in_search_space is True
     assert result.coverage_reason is None
 

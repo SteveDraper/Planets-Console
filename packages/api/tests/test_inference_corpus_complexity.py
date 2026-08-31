@@ -12,6 +12,7 @@ from tests.inference_corpus.complexity import (
     merge_turn_inventories,
     parse_max_complexity,
 )
+from tests.inference_corpus.fixtures import load_turn_fixture
 from tests.inference_corpus.manifest import FIXTURES_ROOT
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -130,3 +131,45 @@ def test_classify_marks_heavy_for_many_new_ships(sample_turn):
 
     assert complexity == "heavy"
     assert any(reason.startswith("new_ships=") for reason in reasons)
+
+
+def test_classify_marks_adjunct_for_merged_trade_capture_hint():
+    """SSD 153 is foreign-owned at N only in perspective 8; p6 prior omits it."""
+    prior_turn = load_turn_fixture("628580/6/turns/20.json")
+    score_turn = load_turn_fixture("628580/6/turns/21.json")
+    other_prior = load_turn_fixture("628580/8/turns/20.json")
+    other_score = load_turn_fixture("628580/8/turns/21.json")
+    player_id = 6
+    score = next(row for row in score_turn.scores if row.ownerid == player_id)
+
+    alone = merge_turn_inventories(
+        case_perspective_prior=prior_turn,
+        case_perspective_score=score_turn,
+        other_prior_turns=(),
+        other_score_turns=(),
+    )
+    alone_complexity, alone_reasons = classify_complexity(
+        prior_turn=prior_turn,
+        score_turn=score_turn,
+        player_id=player_id,
+        score=score,
+        merged=alone,
+    )
+    assert alone_complexity == "heavy"
+    assert "trade_or_capture_hint" not in alone_reasons
+
+    merged = merge_turn_inventories(
+        case_perspective_prior=prior_turn,
+        case_perspective_score=score_turn,
+        other_prior_turns=(other_prior,),
+        other_score_turns=(other_score,),
+    )
+    complexity, reasons = classify_complexity(
+        prior_turn=prior_turn,
+        score_turn=score_turn,
+        player_id=player_id,
+        score=score,
+        merged=merged,
+    )
+    assert complexity == "adjunct"
+    assert "trade_or_capture_hint" in reasons

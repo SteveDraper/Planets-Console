@@ -21,6 +21,7 @@ from tests.inference_corpus.discovery import list_perspectives_with_turn_pair
 from tests.inference_corpus.fixtures import (
     assert_required_perspectives_present,
     load_manifest_ground_truth_turn_snapshots,
+    load_other_manifest_perspective_turns,
     load_turn_fixture,
 )
 from tests.inference_corpus.manifest import FIXTURES_ROOT, resolve_player_id
@@ -97,6 +98,20 @@ def run_manifest_case(
     case_time_limit_seconds: float | None = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
 ) -> CorpusCaseResult:
     """Execute Tier 1 pipeline for one manifest case."""
+    multi_view_reason = assert_required_perspectives_present(
+        case.game_id,
+        case.host_turn,
+        case.host_turn + 1,
+        case.required_perspectives,
+        fixtures_root=fixtures_root,
+    )
+    if multi_view_reason is not None:
+        return CorpusCaseResult(
+            case_id=case.id,
+            outcome=CaseOutcome.FAILED,
+            failure_message=multi_view_reason,
+        )
+
     skip_reason = _complexity_skip_reason(
         case.complexity,
         max_complexity=max_complexity,
@@ -108,21 +123,6 @@ def run_manifest_case(
             outcome=CaseOutcome.SKIPPED_COMPLEXITY,
             complexity=case.complexity,
             skip_reason=skip_reason,
-        )
-
-    multi_view_reason = assert_required_perspectives_present(
-        case.id,
-        case.game_id,
-        case.host_turn,
-        case.host_turn + 1,
-        case.required_perspectives,
-        fixtures_root=fixtures_root,
-    )
-    if multi_view_reason is not None:
-        return CorpusCaseResult(
-            case_id=case.id,
-            outcome=CaseOutcome.SKIPPED_INCOMPLETE_MULTI_VIEW,
-            skip_reason=multi_view_reason,
         )
 
     try:
@@ -145,11 +145,15 @@ def run_manifest_case(
     if unsupported_race is not None:
         return unsupported_race
 
+    other_prior_turns, other_score_turns = load_other_manifest_perspective_turns(
+        case,
+        fixtures_root=fixtures_root,
+    )
     merged = merge_turn_inventories(
         case_perspective_prior=prior_turn,
         case_perspective_score=score_turn,
-        other_prior_turns=(),
-        other_score_turns=(),
+        other_prior_turns=other_prior_turns,
+        other_score_turns=other_score_turns,
     )
     try:
         score = score_for_player(score_turn.scores, player_id, case.id)
@@ -464,7 +468,9 @@ def _complexity_skip_reason(
 ) -> str | None:
     if complexity is None:
         return None
-    if complexity == "adjunct" and not include_adjunct:
+    if complexity == "adjunct":
+        if include_adjunct:
+            return None
         return "adjunct_disabled"
     case_level = COMPLEXITY_ORDINAL[complexity]
     cap_level = COMPLEXITY_ORDINAL[max_complexity]

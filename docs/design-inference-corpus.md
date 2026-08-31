@@ -127,26 +127,31 @@ Example host-turn pair for discovery smoke tests: **perspective `1`, hostTurn `2
 
 ### 4.2 Refresh procedure (from local store)
 
-1. Load-all or ensure turns exist under `.data/games/{gameId}/{perspective}/turns/{N}.json`.
-2. Copy rst JSON to `packages/api/tests/fixtures/inference_corpus/{gameId}/{perspective}/turns/`.
-3. Trim large arrays (section 4.3) so each turn file stays under ~200 KB if possible.
-4. Copy or subset `games/{gameId}/info.json` to `fixtures/inference_corpus/{gameId}/info.json`.
-5. Run `infer_military_score_build` locally on the trimmed `scoreTurn`; adjust manifest `expectedStatus` / pick another turn if not `exact`.
-6. Add or update `manifest.json` row; run `make test_api`.
+Single-perspective (existing seed) or **multi-perspective adjunct** (section 8) follow the same copy-then-trim loop.
 
-Optional helper (implement in #62 or ad hoc):
+1. Load-all or ensure turns exist under `.data/games/{gameId}/{perspective}/turns/{N}.json` for **every** slot the case needs (the case perspective plus each `requiredPerspectives` entry).
+2. Copy rst JSON to `packages/api/tests/fixtures/inference_corpus/{gameId}/{perspective}/turns/` for each of those slots, same host-turn pair `(N, N+1)`.
+3. Trim large arrays (section 4.3) so each turn file stays under ~200 KB if possible.
+4. Copy or subset `games/{gameId}/info.json` to `fixtures/inference_corpus/{gameId}/info.json` (one file per game; already present for `628580`).
+5. For a trade/gift hint: confirm `classify_complexity` is `adjunct` with `trade_or_capture_hint` **after** merging the other slot, and is **not** that signal on the case slot alone. If the case prior still contains the foreign-owned hull, omit that ship id from the case prior (keep it on the counterparty prior).
+6. Add or update `manifest.json` rows (`requiredPerspectives`, `complexity: adjunct`). Default CI skips adjunct unless `--include-adjunct`.
+7. Run `make test_api`.
+
+Example: copy host turns 20 and 21 for perspectives 6 and 8 of game `628580` (the committed #66 pair):
 
 ```bash
 cd packages/api
 PYTHONPATH=. uv run python -c "
 from pathlib import Path
-import json, shutil
-src = Path('../../.data/games/628580/1/turns')
-dst = Path('tests/fixtures/inference_corpus/628580/1/turns')
-dst.mkdir(parents=True, exist_ok=True)
-for n in (2, 3):
-    shutil.copy2(src / f'{n}.json', dst / f'{n}.json')
-print('copied; trim before commit')
+import shutil
+root = Path('../../.data/games/628580')
+dst_root = Path('tests/fixtures/inference_corpus/628580')
+for perspective in (6, 8):
+    dst = dst_root / str(perspective) / 'turns'
+    dst.mkdir(parents=True, exist_ok=True)
+    for n in (20, 21):
+        shutil.copy2(root / str(perspective) / 'turns' / f'{n}.json', dst / f'{n}.json')
+print('copied; trim before commit (section 4.3)')
 "
 ```
 
@@ -157,6 +162,8 @@ Full turn dumps (~800 KB+) are too large for git. Trim **in place** keeping dese
 **Always keep:** `settings`, `game`, `player`, `players`, `races`, `scores`, `hulls`, `engines`, `beams`, `torpedos`, `ships` (see below), `planets` (only ids/owner/defense/fighters needed for defense deltas), `starbases` if present in payload.
 
 **Ships:** For Tier 1-only fixtures, keeping **all** `ships` is acceptable if under size budget. For smaller files, keep ships where `ownerid == case playerId` plus any hull that appears on a **new** ship id in `scoreTurn` vs `priorTurn` (for ground truth in #64).
+
+**Adjunct multi-view (#66):** Keep the transferred ship on the **counterparty** prior (foreign `ownerid` at N) and on the **case** score turn (new owner at N+1). Omit that ship id from the **case prior** when the case RST already scanned it -- otherwise the trade hint fires without a merge and `requiredPerspectives` is not doing work. Keep the planet at the transfer XY if it is needed to explain location. Empty `messages`, `notes`, `vcrs`, `ionstorms`, and other unused arrays as for single-slot trims.
 
 **May drop:** `messages`, `events`, large history arrays, `mines`, `fights`, `chartags`, and other fields not read by `turn_info_from_json` for inference (verify with `turn_info_from_json` after trim).
 
@@ -254,7 +261,7 @@ Most probe budget stops are **`out_of_search_space`** (catalog coverage gaps). T
 | 0 | `minimal` | yes |
 | 1 | `routine` | yes |
 | 2 | `heavy` | yes |
-| 3 | `adjunct` | only with `--include-adjunct` (future) |
+| 3 | `adjunct` | only with `--include-adjunct` |
 
 CLI `--max-complexity` accepts names `minimal`, `routine`, `heavy`, `adjunct` or integers `0`–`3`. Skip when `case.level > cap`.
 
@@ -287,7 +294,7 @@ Document computed `complexity` and `complexityReasons: string[]` on each case re
 
 ### 6.3 Default skips
 
-- `complexity == adjunct` and not `--include-adjunct` -> `skipped_complexity` (reason `adjunct_disabled`)
+- `complexity == adjunct` and not `--include-adjunct` -> `skipped_complexity` (reason `adjunct_disabled`). `--include-adjunct` runs the adjunct row even when `--max-complexity` is `heavy`. `expectCoverage` is a CI assertion for rows that run (section 9.2); it does not opt adjunct into the default skip.
 - Above `--max-complexity` -> `skipped_complexity`
 
 ---
@@ -323,9 +330,13 @@ When classifying **adjunct** or running **Tier 2**, merge snapshots for host tur
 - Start with perspective `P` ships (and planets/starbases for defense).
 - For each other perspective `Q` with both turns stored, append ships/planets visible at N and N+1.
 
-If a trade hypothesis needs slot `Q` and `Q` is missing, set `incomplete_multi_view: true` and **do not** promote to `adjunct` on trade alone.
+If a trade hypothesis needs slot `Q` and `Q` is missing, **do not** promote to `adjunct` on trade alone (the merge simply lacks the foreign hull).
 
-`requiredPerspectives` in manifest: CI fails fast if listed paths are absent in fixed fixtures.
+`requiredPerspectives` in manifest: CI **fails fast** (`failed`) if listed paths are absent in fixed fixtures. The fixed-corpus runner also merges every **sibling fixture slot** that has both turns, so classification sees the same multi-view as local discovery.
+
+**Committed pattern (#66):** game `628580`, host turn **20**, perspectives **6** (case) and **8** (`requiredPerspectives`). Super Star Destroyer id `153` is owned by slot 8 at N and by slot 6 at N+1 at the same XY (Antonia). The case-perspective prior **omits** that foreign-owned hull so `trade_or_capture_hint` requires the merge; without perspective 8 the same pair classifies `heavy`. Default CI skips the adjunct row (`adjunct_disabled`). Gift/trade/loss are catalog families (#370), so `trade_or_capture_hint` and `net_ship_count_decrease` are **not** mapped to `deferred_trade` / `deferred_ship_loss`.
+
+**Synthetic trade pairing fixture:** game `900001`, host turn **10**, one shared perspective-1 turn pair. Two disjoint public-scoreboard trades on the same files: players 1↔2 warship military swap (unequal construction military) and players 3↔4 freighter↔warship class flip. Scoreboard `*change` on turn 11 is those two swaps only (idle player 5 is flat). Settings keep `acceleratedturns: 3` but the pair is post-accel (`scoreTurn` 11), so scoreboard backfill does not run. Manifest rows `900001-p1-host10` / `900001-p3-host10` override `playerId` and `gameInfoPath`; default CI skips both (`adjunct_disabled`). Pairing tests call `classify_public_scoreboard_pairing` / `build_action_catalog_from_turn` (not stubbed coverage). This is not 628580 history -- catalogs are cloned from a 628580 fixture; military deltas use `ship_build_military_score_delta_2x`.
 
 ---
 
@@ -400,8 +411,8 @@ Manifest `expectCoverage` is a **CI assertion** only: when `true`, the case must
 
 | Reason | Meaning |
 |--------|---------|
-| `deferred_trade` | Trade/capture implied, not in catalog |
-| `deferred_ship_loss` | Ship loss/combat not modeled |
+| `deferred_trade` | Retained enum; not auto-assigned from `trade_or_capture_hint` after #370 |
+| `deferred_ship_loss` | Retained enum; not auto-assigned from `net_ship_count_decrease` after #370 |
 | `deferred_starbase_loss` | Base loss not modeled |
 | `deferred_planet_loss` | Planet loss not modeled |
 | `deferred_minefield` | Mine/scoop not modeled |
@@ -438,7 +449,7 @@ When `--tier 2` or manifest `tier: 2`, after catalog coverage and before the sol
 - Skip when `groundTruthAvailable: false`.
 - Tier 2 does **not** compare ground truth to the solver top solution.
 
-No `tier: 2` manifest rows are required in #65; CLI `--tier 2` exercises the path until #66 multi-view fixtures land.
+No `tier: 2` manifest rows are required; CLI `--tier 2` exercises the path. Multi-view inventory for classification uses the #66 fixture pair (section 8).
 
 ---
 
@@ -446,7 +457,7 @@ No `tier: 2` manifest rows are required in #65; CLI `--tier 2` exercises the pat
 
 ### 12.1 Per-case outcomes
 
-`passed` | `failed` | `skipped_complexity` | `skipped_incomplete_multi_view` | `out_of_search_space` | `ranking_miss`
+`passed` | `failed` | `skipped_complexity` | `out_of_search_space` | `ranking_miss`
 
 `ranking_miss` does not set exit code 1 unless hard mode (section 10): manifest `requireTopK: true` or `--fail-on-ranking-miss`.
 
@@ -471,7 +482,7 @@ Print summary counts and optional `--json` array of per-case records (`caseId`, 
 | #77 | Tier policy refactor; refresh fixtures when diagnostics or tier metadata change |
 | #78 | Cancelled (unused global overlay); corpus unaffected |
 
-**Solver epic ordering:** #62 parallel #50; refresh fixtures after #51; **#77** supersedes #52/#72 (YAML tier policy, slack deferral, band seeding -- see implementation doc section 8.5); re-run corpus after #77 before hardening #65 top-K checks. #66 with #49 when trades modeled.
+**Solver epic ordering:** #62 parallel #50; refresh fixtures after #51; **#77** supersedes #52/#72 (YAML tier policy, slack deferral, band seeding -- see implementation doc section 8.5); re-run corpus after #77 before hardening #65 top-K checks. #66 adjunct fixtures land after #370 (ship loss / gift / trade / acquired).
 
 ### #71 (SPA streaming) and corpus boundaries
 
@@ -498,6 +509,6 @@ Glossary: `CONTEXT.md` **Inference corpus runner**, **Inference solve interrupt 
 ## 14. Open evolution
 
 - Hybrid CP-SAT coverage probe when mapping says covered but solver returns `no_exact_solution` (section 11.2 parent doc).
-- `--include-adjunct` to run adjunct cases instead of skipping.
 - Combo-aware ground truth after #51 lands.
 - Corpus timeout diagnosis options listed in section 13 (#71 follow-on).
+- Adjunct ground-truth extraction for gift/trade/loss action ids (section 9.2 still skips complexity `adjunct`).

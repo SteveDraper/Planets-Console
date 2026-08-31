@@ -1326,16 +1326,16 @@ Sparse storage is valid: only perspectives and turn pairs that exist are discove
 
 Before running the solver, classify each case into `minimal`, `routine`, `heavy`, or `adjunct` from **ground-truth inventory change** between turns `N` and `N+1` for the case player. Signals include ship build count, defense/fighter load-ups, and adjunct effects (losses, trades, captures).
 
-- **Multi-perspective ground truth:** adjunct detection (e.g. trades) may merge ship visibility from every perspective that has both turns stored. If a required other perspective is missing, do not infer a trade; mark `incomplete_multi_view` when relevant.
+- **Multi-perspective ground truth:** adjunct detection (e.g. trades) may merge ship visibility from every perspective that has both turns stored. If a required other perspective is missing from the fixture tree, the fixed corpus **fails fast**. Do not infer a trade from the case slot alone when the foreign hull is only on another slot.
 - **`--max-complexity`:** skip cases above the cap (recorded reason, not a failure).
-- **Level 3 (`adjunct`):** skipped by default unless a future `--include-adjunct` flag is added.
+- **Level 3 (`adjunct`):** skipped by default unless `--include-adjunct`.
 
 #### Per-case pipeline
 
 1. Skip if complexity > `--max-complexity`.
 2. Classify complexity (optional multi-perspective merge for adjunct signals).
 3. Extract **ground truth explanation** when the extractor supports this case; if unavailable, run **Tier 1 only** (observation closure).
-4. **Catalog coverage** (v1: action-level mapping of ground truth to the catalog built from turn `N+1` `TurnInfo`; later: optional CP-SAT feasibility probe when mapping says covered but solver is INFEASIBLE). If not covered, emit **out of search space** with `coverageReason` (e.g. `deferred_trade`, `combo_not_in_catalog`) and **do not** run the solver.
+4. **Catalog coverage** (v1: action-level mapping of ground truth to the catalog built from turn `N+1` `TurnInfo`; later: optional CP-SAT feasibility probe when mapping says covered but solver is INFEASIBLE). If not covered, emit **out of search space** with `coverageReason` (e.g. `deferred_starbase_loss`, `combo_not_in_catalog`) and **do not** run the solver. `trade_or_capture_hint` / `net_ship_count_decrease` are **not** deferred after #370.
 5. **Tier 1:** `infer_military_score_build` for the case player on turn `N+1`. For `minimal` / `routine`: require `exact`, at least one solution, and programmatic verification of hard equalities on the top solution. For `heavy`: same, or allow `time_limited` with at least one feasible solution. CI fixed rows are `minimal` / `routine` with implicit `exact` expectation; manifest may add `expectedStatus` for known regressions.
 6. **Tier 2** (when enabled, e.g. `--tier 2`): assert ground truth is **compatible** with inventory (hard fail on mismatch).
 7. **Top-K ranking check** (default `K=3`, `--top-k`): when ground truth is available and catalog coverage passed, require the ground-truth action multiset to appear among the top `K` ranked solutions. A miss is an **investigation signal** (soft by default; manifest may set `requireTopK: true` for hard fail on selected CI rows). Levels 0-1: soft everywhere until priors stabilize.
@@ -1347,7 +1347,6 @@ Before running the solver, classify each case into `minimal`, `routine`, `heavy`
 | `passed` | Tier 1 (and Tier 2 if enabled) satisfied |
 | `failed` | Hard Tier 1/2 failure |
 | `skipped_complexity` | Above `--max-complexity` |
-| `skipped_incomplete_multi_view` | Adjunct hypothesis needs missing perspectives |
 | `out_of_search_space` | Ground truth not expressible in current catalog (distinct from solver `no_exact_solution`) |
 | `ranking_miss` | `exact` but ground truth not in top-K (investigation, optionally hard) |
 
@@ -1358,7 +1357,8 @@ Script exit code `0` when no hard failures; stdout supports human summary and op
 - Small trimmed finished-game slice under `tests/fixtures/inference_corpus/`.
 - Manifest lists explicit cases with `hostTurn`, `perspective`, `complexity`, optional `requiredPerspectives`, optional `requireTopK`.
 - Most rows: `minimal` / `routine`, Tier 1 `exact` only.
-- Optional second snippet with multiple perspectives for future adjunct / coverage regressions.
+- **Adjunct multi-perspective snippet (#66):** game `628580`, host turn 20, case perspective 6 plus required perspective 8. Super Star Destroyer 153 is a same-XY owner change 8→6. The case prior omits the foreign-owned hull so classification is `heavy` alone and `adjunct` (`trade_or_capture_hint`) after the merge. Default CI skips the row (`adjunct_disabled`). Refresh from a local load-all copy of those two slots, then trim per [design-inference-corpus.md](design-inference-corpus.md) section 4.
+- **Synthetic #370 pairing fixture:** game `900001`, host turn 10, shared `900001/1/turns/{10,11}.json`. Two disjoint trades (warship military swap 1↔2; freighter↔warship class flip 3↔4). Post-accel so `scoreTurn` change fields are reliable. Default CI skips the adjunct rows; pairing tests exercise `trade:` catalog/pairing directly.
 
 #### Ordering relative to solver work (GitHub epic #39)
 
@@ -1368,7 +1368,7 @@ Script exit code `0` when no hard failures; stdout supports human summary and op
 | After #50 | Fewer false `no_exact_solution` from priority-point gaps; corpus Tier 1 more meaningful |
 | After #51, #52 | Revisit catalog coverage mapping for **ship build combos**; expand fixed corpus with combo-tier regressions |
 | After #53 | Optional manifest rows tied to combo diagnostics shapes |
-| With #359 / #364 (decrease families + post-limit PP) | Expand ground truth + coverage for trades/losses; adjunct fixtures. #49 no longer owns those families. |
+| With #370 (decrease families; #66 fixtures) | Expand adjunct multi-view classification; gift/trade/loss are catalog families, not `deferred_trade`. #49 no longer owns those families. |
 
 Epic #39 Phase 1G tracker: #50, #51, #52, #53, #54, #55. Solution detail modal UX: **#48** ([spec](design-military-score-inference-solution-modal.md)). Modal follow-ons: **#88** (relative plausibility pruning), **#89** (aggregate-action icons). Per-row solution streaming: **#71** (Phase 1H). Corpus harness: #62, #63, #64, #65, #66 (spec: [design-inference-corpus.md](design-inference-corpus.md)).
 
