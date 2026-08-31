@@ -141,6 +141,53 @@ def _departure_score_bounds(kind: str, min_2x: int, max_2x: int) -> tuple[int, i
     return 0, -max_2x, -min_2x
 
 
+def _military_id_suffix(kind: str, min_2x: int, max_2x: int) -> str:
+    if kind == "point":
+        return f"point:{min_2x}"
+    return f"envelope:{min_2x}:{max_2x}"
+
+
+def _departure_action(
+    *,
+    action_id: str,
+    label: str,
+    kind: str,
+    min_2x: int,
+    max_2x: int,
+    ship_class: FleetShipClass,
+    upper_bound: int,
+    counterparty_player_id: int | None = None,
+    warship_delta: int | None = None,
+    freighter_delta: int | None = None,
+    score_point: int | None = None,
+) -> CandidateAction:
+    if score_point is not None:
+        point = score_point
+        score_min = score_point
+        score_max = score_point
+        envelope = False
+    else:
+        point, score_min, score_max = _departure_score_bounds(kind, min_2x, max_2x)
+        envelope = kind == "envelope"
+    if warship_delta is None:
+        warship_delta = -1 if ship_class == "warship" else 0
+    if freighter_delta is None:
+        freighter_delta = -1 if ship_class == "freighter" else 0
+    return CandidateAction(
+        id=action_id,
+        label=label,
+        score_delta_2x=point,
+        warship_delta=warship_delta,
+        freighter_delta=freighter_delta,
+        score_delta_2x_min=score_min if envelope else None,
+        score_delta_2x_max=score_max if envelope else None,
+        counterparty_player_id=counterparty_player_id,
+        prior_warship_usage=1 if ship_class == "warship" else 0,
+        prior_freighter_usage=1 if ship_class == "freighter" else 0,
+        upper_bound=upper_bound,
+    )
+
+
 def _loss_actions(
     observation: InferenceObservation,
     pairing: PublicScoreboardPairing,
@@ -159,22 +206,17 @@ def _loss_actions(
             continue
         grouped = _group_candidates(candidates, ship_class)
         for (kind, min_2x, max_2x), group in grouped.items():
-            point, score_min, score_max = _departure_score_bounds(kind, min_2x, max_2x)
             upper = len(group) if class_upper is None else min(class_upper, len(group))
             if upper <= 0:
                 continue
-            action_id = _loss_action_id(ship_class, kind, min_2x, max_2x)
             actions.append(
-                CandidateAction(
-                    id=action_id,
+                _departure_action(
+                    action_id=_loss_action_id(ship_class, kind, min_2x, max_2x),
                     label=_loss_label(ship_class, kind, min_2x, max_2x),
-                    score_delta_2x=point,
-                    warship_delta=-1 if ship_class == "warship" else 0,
-                    freighter_delta=-1 if ship_class == "freighter" else 0,
-                    score_delta_2x_min=score_min if kind == "envelope" else None,
-                    score_delta_2x_max=score_max if kind == "envelope" else None,
-                    prior_warship_usage=1 if ship_class == "warship" else 0,
-                    prior_freighter_usage=1 if ship_class == "freighter" else 0,
+                    kind=kind,
+                    min_2x=min_2x,
+                    max_2x=max_2x,
+                    ship_class=ship_class,
                     upper_bound=upper,
                 )
             )
@@ -198,23 +240,18 @@ def _gift_actions(
             needed = -count_delta
             grouped = _group_candidates(candidates, ship_class)
             for (kind, min_2x, max_2x), group in grouped.items():
-                point, score_min, score_max = _departure_score_bounds(kind, min_2x, max_2x)
-                upper = min(needed, len(group))
                 actions.append(
-                    CandidateAction(
-                        id=_gift_action_id(
+                    _departure_action(
+                        action_id=_gift_action_id(
                             ship_class, match.counterparty_player_id, kind, min_2x, max_2x
                         ),
                         label=_gift_label(ship_class, match.counterparty_player_id),
-                        score_delta_2x=point,
-                        warship_delta=-1 if ship_class == "warship" else 0,
-                        freighter_delta=-1 if ship_class == "freighter" else 0,
-                        score_delta_2x_min=score_min if kind == "envelope" else None,
-                        score_delta_2x_max=score_max if kind == "envelope" else None,
+                        kind=kind,
+                        min_2x=min_2x,
+                        max_2x=max_2x,
+                        ship_class=ship_class,
+                        upper_bound=min(needed, len(group)),
                         counterparty_player_id=match.counterparty_player_id,
-                        prior_warship_usage=1 if ship_class == "warship" else 0,
-                        prior_freighter_usage=1 if ship_class == "freighter" else 0,
-                        upper_bound=upper,
                     )
                 )
     return actions
@@ -229,45 +266,35 @@ def _trade_actions(
     for match in pairing.matches:
         if match.family != "trade":
             continue
-        outgoing_class: FleetShipClass | None = None
+        same_class_swap = match.warship_delta == 0 and match.freighter_delta == 0
         if match.warship_delta < 0:
-            outgoing_class = "warship"
+            outgoing_class: FleetShipClass = "warship"
         elif match.freighter_delta < 0:
             outgoing_class = "freighter"
-        elif match.warship_delta == 0 and match.freighter_delta == 0:
+        elif same_class_swap:
             outgoing_class = "warship"
-        if outgoing_class is None:
+        else:
             continue
         grouped = _group_candidates(candidates, outgoing_class)
-        if not grouped:
-            continue
-        for (kind, min_2x, max_2x), group in grouped.items():
-            if match.warship_delta == 0 and match.freighter_delta == 0:
-                point = observation.military_delta_2x
-                score_min = point
-                score_max = point
-                envelope = False
-            else:
-                point, score_min, score_max = _departure_score_bounds(kind, min_2x, max_2x)
-                envelope = kind == "envelope"
-            if not group:
-                continue
+        score_point = observation.military_delta_2x if same_class_swap else None
+        for kind, min_2x, max_2x in grouped:
             actions.append(
-                CandidateAction(
-                    id=f"{TRADE_ACTION_PREFIX}with:{match.counterparty_player_id}",
-                    label=f"Trade with player {match.counterparty_player_id}",
-                    score_delta_2x=point,
+                _departure_action(
+                    action_id=_trade_action_id(
+                        outgoing_class, match.counterparty_player_id, kind, min_2x, max_2x
+                    ),
+                    label=_trade_label(outgoing_class, match.counterparty_player_id),
+                    kind=kind,
+                    min_2x=min_2x,
+                    max_2x=max_2x,
+                    ship_class=outgoing_class,
+                    upper_bound=1,
+                    counterparty_player_id=match.counterparty_player_id,
                     warship_delta=match.warship_delta,
                     freighter_delta=match.freighter_delta,
-                    score_delta_2x_min=score_min if envelope else None,
-                    score_delta_2x_max=score_max if envelope else None,
-                    counterparty_player_id=match.counterparty_player_id,
-                    prior_warship_usage=1 if outgoing_class == "warship" else 0,
-                    prior_freighter_usage=1 if outgoing_class == "freighter" else 0,
-                    upper_bound=1,
+                    score_point=score_point,
                 )
             )
-            break
     return actions
 
 
@@ -304,9 +331,7 @@ def _acquired_actions(pairing: PublicScoreboardPairing) -> list[CandidateAction]
 
 
 def _loss_action_id(ship_class: FleetShipClass, kind: str, min_2x: int, max_2x: int) -> str:
-    if kind == "point":
-        return f"{SHIP_LOSS_ACTION_PREFIX}{ship_class}:point:{min_2x}"
-    return f"{SHIP_LOSS_ACTION_PREFIX}{ship_class}:envelope:{min_2x}:{max_2x}"
+    return f"{SHIP_LOSS_ACTION_PREFIX}{ship_class}:{_military_id_suffix(kind, min_2x, max_2x)}"
 
 
 def _gift_action_id(
@@ -316,9 +341,23 @@ def _gift_action_id(
     min_2x: int,
     max_2x: int,
 ) -> str:
-    if kind == "point":
-        return f"{GIFT_ACTION_PREFIX}{ship_class}:to:{player_id}:point:{min_2x}"
-    return f"{GIFT_ACTION_PREFIX}{ship_class}:to:{player_id}:envelope:{min_2x}:{max_2x}"
+    return (
+        f"{GIFT_ACTION_PREFIX}{ship_class}:to:{player_id}:"
+        f"{_military_id_suffix(kind, min_2x, max_2x)}"
+    )
+
+
+def _trade_action_id(
+    ship_class: FleetShipClass,
+    player_id: int,
+    kind: str,
+    min_2x: int,
+    max_2x: int,
+) -> str:
+    return (
+        f"{TRADE_ACTION_PREFIX}{ship_class}:with:{player_id}:"
+        f"{_military_id_suffix(kind, min_2x, max_2x)}"
+    )
 
 
 def _loss_label(ship_class: FleetShipClass, kind: str, min_2x: int, max_2x: int) -> str:
@@ -329,3 +368,7 @@ def _loss_label(ship_class: FleetShipClass, kind: str, min_2x: int, max_2x: int)
 
 def _gift_label(ship_class: FleetShipClass, player_id: int) -> str:
     return f"Gift {ship_class} to player {player_id}"
+
+
+def _trade_label(ship_class: FleetShipClass, player_id: int) -> str:
+    return f"Trade {ship_class} with player {player_id}"

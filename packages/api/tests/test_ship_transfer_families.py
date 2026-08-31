@@ -50,7 +50,12 @@ def _scoreboard_class_event(ship_class: str) -> FleetEvidenceEvent:
     )
 
 
-def _known_warship_record(synthetic_catalog_context) -> tuple[FleetShipRecord, int]:
+def _known_warship_record(
+    synthetic_catalog_context,
+    *,
+    beam_count: int = 2,
+    record_id: str = "known-serpent",
+) -> tuple[FleetShipRecord, int]:
     hull = synthetic_catalog_context["hulls_by_id"][24]
     engine = synthetic_catalog_context["engines_by_id"][1]
     beam = synthetic_catalog_context["beams_by_id"][1]
@@ -59,11 +64,11 @@ def _known_warship_record(synthetic_catalog_context) -> tuple[FleetShipRecord, i
         engine,
         beam,
         None,
-        beam_count=2,
+        beam_count=beam_count,
         launcher_count=0,
     )
     record = FleetShipRecord(
-        record_id="known-serpent",
+        record_id=record_id,
         fields=FleetShipRecordFields(
             hull=FleetFieldKnown(24),
             engine=FleetFieldKnown(1),
@@ -75,7 +80,7 @@ def _known_warship_record(synthetic_catalog_context) -> tuple[FleetShipRecord, i
                 hull_id=24,
                 engine_id=1,
                 beam_id=1,
-                beam_count=2,
+                beam_count=beam_count,
                 launcher_count=0,
             )
         ],
@@ -214,13 +219,29 @@ def test_acquired_incoming_is_reserved_out_of_build_bound():
     )
 
 
-def _peer_row(player_id: int, *, warship: int, military_2x: int) -> PublicScoreboardRow:
+def _peer_row(
+    player_id: int,
+    *,
+    warship: int,
+    military_2x: int,
+    freighter: int = 0,
+) -> PublicScoreboardRow:
     return PublicScoreboardRow(
         player_id=player_id,
         warship_delta=warship,
-        freighter_delta=0,
+        freighter_delta=freighter,
         military_delta_2x=military_2x,
     )
+
+
+def _transfer_catalog_kwargs(synthetic_catalog_context) -> dict:
+    return {
+        "hulls_by_id": synthetic_catalog_context["hulls_by_id"],
+        "engines_by_id": synthetic_catalog_context["engines_by_id"],
+        "beams_by_id": synthetic_catalog_context["beams_by_id"],
+        "torpedos_by_id": synthetic_catalog_context["torpedos_by_id"],
+        "buildable_hull_ids": synthetic_catalog_context["buildable_hull_ids"],
+    }
 
 
 def test_gift_actions_carry_counterparty_and_are_not_loss(synthetic_catalog_context):
@@ -274,6 +295,75 @@ def test_several_gift_counterparties_are_distinct_action_ids(synthetic_catalog_c
     }
     assert len(gift_ids) == 2
     assert counterparties == {3, 4}
+
+
+def _class_flip_trade_catalog(
+    synthetic_catalog_context,
+    *,
+    first_beam_count: int = 1,
+    matching_beam_count: int = 2,
+) -> tuple[InferenceObservation, tuple[CandidateAction, ...], int, int]:
+    first, first_military = _known_warship_record(
+        synthetic_catalog_context,
+        beam_count=first_beam_count,
+        record_id="serpent-first",
+    )
+    matching, matching_military = _known_warship_record(
+        synthetic_catalog_context,
+        beam_count=matching_beam_count,
+        record_id="serpent-matching",
+    )
+    assert first_military != matching_military
+    observation = replace(
+        _observation(
+            military_delta_2x=-matching_military,
+            warship_delta=-1,
+            freighter_delta=1,
+        ),
+        priority_point_delta=1,
+    )
+    actions = build_ship_transfer_actions(
+        observation,
+        peer_rows=(_peer_row(3, warship=1, freighter=-1, military_2x=matching_military),),
+        prior_fleet_records=(first, matching),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    return observation, actions, first_military, matching_military
+
+
+def test_trade_emits_distinct_ids_for_each_prior_fleet_military_group(
+    synthetic_catalog_context,
+):
+    _, actions, first_military, matching_military = _class_flip_trade_catalog(
+        synthetic_catalog_context
+    )
+    trade_ids = {action.id for action in actions if action.id.startswith(TRADE_ACTION_PREFIX)}
+    expected = {
+        f"{TRADE_ACTION_PREFIX}warship:with:3:point:{first_military}",
+        f"{TRADE_ACTION_PREFIX}warship:with:3:point:{matching_military}",
+    }
+    assert trade_ids == expected
+
+
+def test_catalog_solver_class_flip_trade_when_matching_hull_is_not_first_group(
+    synthetic_catalog_context,
+):
+    observation, actions, _first_military, matching_military = _class_flip_trade_catalog(
+        synthetic_catalog_context
+    )
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=actions,
+            prior_warship_departure_cap=2,
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    chosen = result.solutions[0].actions[0]
+    assert chosen.action_id == f"{TRADE_ACTION_PREFIX}warship:with:3:point:{matching_military}"
+    assert chosen.counterparty_player_id == 3
 
 
 def test_solver_exact_ship_loss_uses_prior_fleet_military():
