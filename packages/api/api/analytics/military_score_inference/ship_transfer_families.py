@@ -67,7 +67,8 @@ class ShipTransferCatalogFragment:
 def ship_transfer_combo_capacity(
     observation: InferenceObservation,
     pairing: PublicScoreboardPairing,
-    candidates: tuple[PriorFleetDecreaseCandidate, ...],
+    warship_decrease_capacity: int,
+    freighter_decrease_capacity: int,
 ) -> tuple[int, int, int, int]:
     """Warship/freighter extra combo capacity and reserved incoming acquired counts.
 
@@ -75,7 +76,8 @@ def ship_transfer_combo_capacity(
     loss+replace (net 0) can still build. Incoming acquired counts are reserved
     out of the build bound so they are not explained as ship-build combos.
     """
-    extra_warship, extra_freighter = decrease_capacity_by_class(candidates)
+    extra_warship = warship_decrease_capacity
+    extra_freighter = freighter_decrease_capacity
     if observation.warship_delta > 0:
         extra_warship = 0
     if observation.freighter_delta > 0:
@@ -116,11 +118,16 @@ def build_ship_transfer_catalog_fragment(
     actions.extend(_gift_actions(pairing, candidates))
     actions.extend(_trade_actions(pairing, candidates, observation))
     actions.extend(_acquired_actions(pairing))
-    extra_warship, extra_freighter, reserved_warship, reserved_freighter = (
-        ship_transfer_combo_capacity(observation, pairing, candidates)
-    )
     prior_warship_departure_cap, prior_freighter_departure_cap = decrease_capacity_by_class(
         candidates
+    )
+    extra_warship, extra_freighter, reserved_warship, reserved_freighter = (
+        ship_transfer_combo_capacity(
+            observation,
+            pairing,
+            prior_warship_departure_cap,
+            prior_freighter_departure_cap,
+        )
     )
     return ShipTransferCatalogFragment(
         actions=tuple(action for action in actions if action.upper_bound > 0),

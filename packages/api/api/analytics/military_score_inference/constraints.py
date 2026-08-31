@@ -381,7 +381,6 @@ def solution_satisfies_exact_hard_equalities(
     """Return whether a solution matches enforced hard equality targets."""
     actions_by_id = {action.id: action for action in catalog.aggregate_actions}
     combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
-    military_sum = 0
     military_min = 0
     military_max = 0
     warship_sum = 0
@@ -399,7 +398,6 @@ def solution_satisfies_exact_hard_equalities(
             military_min += lo * action.count
             military_max += hi * action.count
         else:
-            military_sum += catalog_action.score_delta_2x * action.count
             military_min += catalog_action.score_delta_2x * action.count
             military_max += catalog_action.score_delta_2x * action.count
         warship_sum += catalog_action.warship_delta * action.count
@@ -408,7 +406,6 @@ def solution_satisfies_exact_hard_equalities(
         combo = combos_by_id.get(ship_build.combo_id)
         if combo is None:
             return False
-        military_sum += combo.score_delta_2x * ship_build.count
         military_min += combo.score_delta_2x * ship_build.count
         military_max += combo.score_delta_2x * ship_build.count
         warship_sum += combo.warship_delta * ship_build.count
