@@ -9,6 +9,7 @@ tier aggregate allowlist).
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 from api.analytics.fleet.types import FleetShipClass, FleetShipRecord
 from api.analytics.military_score_inference.models import CandidateAction, InferenceObservation
@@ -60,6 +61,19 @@ def public_scoreboard_rows_from_scores(
     )
 
 
+@dataclass(frozen=True)
+class ShipTransferCatalogFragment:
+    """Transfer actions plus combo/departure caps from one pairing."""
+
+    actions: tuple[CandidateAction, ...]
+    extra_warship_capacity: int
+    extra_freighter_capacity: int
+    reserved_incoming_warships: int
+    reserved_incoming_freighters: int
+    prior_warship_departure_cap: int
+    prior_freighter_departure_cap: int
+
+
 def ship_transfer_combo_capacity(
     observation: InferenceObservation,
     pairing: PublicScoreboardPairing,
@@ -85,7 +99,7 @@ def ship_transfer_combo_capacity(
     return extra_warship, extra_freighter, reserved_warship, reserved_freighter
 
 
-def build_ship_transfer_actions(
+def build_ship_transfer_catalog_fragment(
     observation: InferenceObservation,
     *,
     peer_rows: tuple[PublicScoreboardRow, ...],
@@ -95,8 +109,8 @@ def build_ship_transfer_actions(
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
     buildable_hull_ids: frozenset[int],
-) -> tuple[CandidateAction, ...]:
-    """Admit loss / gift / trade / acquired actions for this scoreboard row."""
+) -> ShipTransferCatalogFragment:
+    """Admit transfer actions and combo/departure caps from one pairing."""
     pairing = classify_public_scoreboard_pairing(
         public_scoreboard_row_from_observation(observation),
         peer_rows,
@@ -114,7 +128,21 @@ def build_ship_transfer_actions(
     actions.extend(_gift_actions(pairing, candidates))
     actions.extend(_trade_actions(pairing, candidates, observation))
     actions.extend(_acquired_actions(pairing))
-    return tuple(action for action in actions if action.upper_bound > 0)
+    extra_warship, extra_freighter, reserved_warship, reserved_freighter = (
+        ship_transfer_combo_capacity(observation, pairing, candidates)
+    )
+    prior_warship_departure_cap, prior_freighter_departure_cap = decrease_capacity_by_class(
+        candidates
+    )
+    return ShipTransferCatalogFragment(
+        actions=tuple(action for action in actions if action.upper_bound > 0),
+        extra_warship_capacity=extra_warship,
+        extra_freighter_capacity=extra_freighter,
+        reserved_incoming_warships=reserved_warship,
+        reserved_incoming_freighters=reserved_freighter,
+        prior_warship_departure_cap=prior_warship_departure_cap,
+        prior_freighter_departure_cap=prior_freighter_departure_cap,
+    )
 
 
 def _group_candidates(

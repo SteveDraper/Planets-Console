@@ -34,20 +34,12 @@ from api.analytics.military_score_inference.models import (
     ProbabilityBucket,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.prior_fleet_decrease_candidates import (
-    decrease_capacity_by_class,
-    prior_fleet_decrease_candidates,
-)
 from api.analytics.military_score_inference.prior_weights_catalog import (
     PriorWeightsCatalog,
     PriorWeightsDiagnostics,
 )
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
-)
-from api.analytics.military_score_inference.public_scoreboard_pairing import (
-    classify_public_scoreboard_pairing,
-    public_scoreboard_row_from_observation,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
@@ -60,9 +52,8 @@ from api.analytics.military_score_inference.ship_build_combos import (
     generate_ship_build_combos,
 )
 from api.analytics.military_score_inference.ship_transfer_families import (
-    build_ship_transfer_actions,
+    build_ship_transfer_catalog_fragment,
     public_scoreboard_rows_from_scores,
-    ship_transfer_combo_capacity,
 )
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
@@ -304,42 +295,22 @@ def build_action_catalog(
                 player,
             )
         )
-    transfer_records = prior_fleet_records
     peer_rows = (
         public_scoreboard_rows_from_scores(turn.scores, this_player_id=observation.player_id)
         if turn is not None
         else ()
     )
-    transfer_actions = build_ship_transfer_actions(
+    transfer_fragment = build_ship_transfer_catalog_fragment(
         observation,
         peer_rows=peer_rows,
-        prior_fleet_records=transfer_records,
+        prior_fleet_records=prior_fleet_records,
         hulls_by_id=hulls_by_id,
         engines_by_id=engines_by_id,
         beams_by_id=beams_by_id,
         torpedos_by_id=torpedos_by_id,
         buildable_hull_ids=buildable_hull_ids,
     )
-    kept_actions.extend(transfer_actions)
-    extra_warship = extra_freighter = reserved_warship = reserved_freighter = 0
-    pairing = classify_public_scoreboard_pairing(
-        public_scoreboard_row_from_observation(observation),
-        peer_rows,
-    )
-    candidates = prior_fleet_decrease_candidates(
-        transfer_records,
-        hulls_by_id=hulls_by_id,
-        engines_by_id=engines_by_id,
-        beams_by_id=beams_by_id,
-        torpedos_by_id=torpedos_by_id,
-        buildable_hull_ids=buildable_hull_ids,
-    )
-    extra_warship, extra_freighter, reserved_warship, reserved_freighter = (
-        ship_transfer_combo_capacity(observation, pairing, candidates)
-    )
-    prior_warship_departure_cap, prior_freighter_departure_cap = decrease_capacity_by_class(
-        candidates
-    )
+    kept_actions.extend(transfer_fragment.actions)
     idle_dock = False
     if turn is not None:
         idle_dock = should_enforce_idle_dock_pp(observation, turn.settings)
@@ -390,10 +361,10 @@ def build_action_catalog(
         prior_catalog=prior_catalog,
         beam_slot_counts=resolved_policy_step.beam_slot_counts,
         launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
-        extra_warship_capacity=extra_warship,
-        extra_freighter_capacity=extra_freighter,
-        reserved_incoming_warships=reserved_warship,
-        reserved_incoming_freighters=reserved_freighter,
+        extra_warship_capacity=transfer_fragment.extra_warship_capacity,
+        extra_freighter_capacity=transfer_fragment.extra_freighter_capacity,
+        reserved_incoming_warships=transfer_fragment.reserved_incoming_warships,
+        reserved_incoming_freighters=transfer_fragment.reserved_incoming_freighters,
     )
 
     return ActionCatalog(
@@ -409,8 +380,8 @@ def build_action_catalog(
         fleet_torp_overlay_diagnostics=fleet_overlay_diagnostics,
         near_best_objective_threshold=resolved_policy_step.near_best_objective_threshold,
         enforce_idle_dock_pp_equality=idle_dock,
-        prior_warship_departure_cap=prior_warship_departure_cap,
-        prior_freighter_departure_cap=prior_freighter_departure_cap,
+        prior_warship_departure_cap=transfer_fragment.prior_warship_departure_cap,
+        prior_freighter_departure_cap=transfer_fragment.prior_freighter_departure_cap,
     )
 
 

@@ -31,7 +31,7 @@ from api.analytics.military_score_inference.ship_transfer_families import (
     GIFT_ACTION_PREFIX,
     SHIP_LOSS_ACTION_PREFIX,
     TRADE_ACTION_PREFIX,
-    build_ship_transfer_actions,
+    build_ship_transfer_catalog_fragment,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
@@ -250,7 +250,7 @@ def test_gift_actions_carry_counterparty_and_are_not_loss(synthetic_catalog_cont
         _observation(military_delta_2x=-military_2x, warship_delta=-1),
         priority_point_delta=1,
     )
-    actions = build_ship_transfer_actions(
+    actions = build_ship_transfer_catalog_fragment(
         observation,
         peer_rows=(_peer_row(3, warship=1, military_2x=military_2x),),
         prior_fleet_records=(record,),
@@ -259,7 +259,7 @@ def test_gift_actions_carry_counterparty_and_are_not_loss(synthetic_catalog_cont
         beams_by_id=synthetic_catalog_context["beams_by_id"],
         torpedos_by_id=synthetic_catalog_context["torpedos_by_id"],
         buildable_hull_ids=synthetic_catalog_context["buildable_hull_ids"],
-    )
+    ).actions
     assert any(action.id.startswith(GIFT_ACTION_PREFIX) for action in actions)
     assert all(not action.id.startswith(SHIP_LOSS_ACTION_PREFIX) for action in actions)
     gift = next(action for action in actions if action.id.startswith(GIFT_ACTION_PREFIX))
@@ -274,7 +274,7 @@ def test_several_gift_counterparties_are_distinct_action_ids(synthetic_catalog_c
         _observation(military_delta_2x=-military_2x, warship_delta=-1),
         priority_point_delta=1,
     )
-    actions = build_ship_transfer_actions(
+    actions = build_ship_transfer_catalog_fragment(
         observation,
         peer_rows=(
             _peer_row(3, warship=1, military_2x=military_2x),
@@ -286,7 +286,7 @@ def test_several_gift_counterparties_are_distinct_action_ids(synthetic_catalog_c
         beams_by_id=synthetic_catalog_context["beams_by_id"],
         torpedos_by_id=synthetic_catalog_context["torpedos_by_id"],
         buildable_hull_ids=synthetic_catalog_context["buildable_hull_ids"],
-    )
+    ).actions
     gift_ids = {action.id for action in actions if action.id.startswith(GIFT_ACTION_PREFIX)}
     counterparties = {
         action.counterparty_player_id
@@ -322,12 +322,12 @@ def _class_flip_trade_catalog(
         ),
         priority_point_delta=1,
     )
-    actions = build_ship_transfer_actions(
+    actions = build_ship_transfer_catalog_fragment(
         observation,
         peer_rows=(_peer_row(3, warship=1, freighter=-1, military_2x=matching_military),),
         prior_fleet_records=(first, matching),
         **_transfer_catalog_kwargs(synthetic_catalog_context),
-    )
+    ).actions
     return observation, actions, first_military, matching_military
 
 
@@ -631,6 +631,48 @@ def test_catalog_idle_dock_flag_follows_lattice(sample_turn, synthetic_catalog_b
         turn=sample_turn,
     )
     assert off_catalog.enforce_idle_dock_pp_equality is False
+
+
+def test_transfer_catalog_fragment_carries_actions_and_capacity_fields(
+    synthetic_catalog_context,
+):
+    record, military_2x = _known_warship_record(synthetic_catalog_context)
+    observation = replace(
+        _observation(military_delta_2x=-military_2x, warship_delta=-1),
+        priority_point_delta=1,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(),
+        prior_fleet_records=(record,),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert any(action.id.startswith(SHIP_LOSS_ACTION_PREFIX) for action in fragment.actions)
+    assert all(action.upper_bound > 0 for action in fragment.actions)
+    assert fragment.prior_warship_departure_cap == 1
+    assert fragment.prior_freighter_departure_cap == 0
+    assert fragment.extra_warship_capacity == 1
+    assert fragment.extra_freighter_capacity == 0
+    assert fragment.reserved_incoming_warships == 0
+    assert fragment.reserved_incoming_freighters == 0
+
+
+def test_transfer_catalog_fragment_reserves_acquired_incoming(synthetic_catalog_context):
+    observation = replace(
+        _observation(military_delta_2x=40, warship_delta=1),
+        priority_point_delta=1,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(_peer_row(3, warship=-1, military_2x=-40),),
+        prior_fleet_records=(),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert any(action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) for action in fragment.actions)
+    assert fragment.reserved_incoming_warships == 1
+    assert fragment.reserved_incoming_freighters == 0
+    assert fragment.extra_warship_capacity == 0
+    assert fragment.prior_warship_departure_cap == 0
 
 
 def test_gift_and_loss_share_prior_fleet_departure_cap():
