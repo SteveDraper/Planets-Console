@@ -31,6 +31,7 @@ from api.analytics.military_score_inference.ship_transfer_families import (
     GIFT_ACTION_PREFIX,
     SHIP_LOSS_ACTION_PREFIX,
     TRADE_ACTION_PREFIX,
+    ShipTransferCatalogFragment,
     build_ship_transfer_catalog_fragment,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
@@ -341,7 +342,7 @@ def _class_flip_trade_catalog(
     *,
     first_beam_count: int = 1,
     matching_beam_count: int = 2,
-) -> tuple[InferenceObservation, tuple[CandidateAction, ...], int, int]:
+) -> tuple[InferenceObservation, ShipTransferCatalogFragment, int, int]:
     first, first_military = _known_warship_record(
         synthetic_catalog_context,
         beam_count=first_beam_count,
@@ -361,22 +362,24 @@ def _class_flip_trade_catalog(
         ),
         priority_point_delta=1,
     )
-    actions = build_ship_transfer_catalog_fragment(
+    fragment = build_ship_transfer_catalog_fragment(
         observation,
         peer_rows=(_peer_row(3, warship=1, freighter=-1, military_2x=matching_military),),
         prior_fleet_records=(first, matching),
         **_transfer_catalog_kwargs(synthetic_catalog_context),
-    ).actions
-    return observation, actions, first_military, matching_military
+    )
+    return observation, fragment, first_military, matching_military
 
 
 def test_trade_emits_distinct_ids_for_each_prior_fleet_military_group(
     synthetic_catalog_context,
 ):
-    _, actions, first_military, matching_military = _class_flip_trade_catalog(
+    _, fragment, first_military, matching_military = _class_flip_trade_catalog(
         synthetic_catalog_context
     )
-    trade_ids = {action.id for action in actions if action.id.startswith(TRADE_ACTION_PREFIX)}
+    trade_ids = {
+        action.id for action in fragment.actions if action.id.startswith(TRADE_ACTION_PREFIX)
+    }
     expected = {
         f"{TRADE_ACTION_PREFIX}warship:with:3:point:{first_military}",
         f"{TRADE_ACTION_PREFIX}warship:with:3:point:{matching_military}",
@@ -387,14 +390,15 @@ def test_trade_emits_distinct_ids_for_each_prior_fleet_military_group(
 def test_catalog_solver_class_flip_trade_when_matching_hull_is_not_first_group(
     synthetic_catalog_context,
 ):
-    observation, actions, _first_military, matching_military = _class_flip_trade_catalog(
+    observation, fragment, _first_military, matching_military = _class_flip_trade_catalog(
         synthetic_catalog_context
     )
     result = solve_inference_problem(
         InferenceProblem(
             observation=observation,
-            aggregate_actions=actions,
+            aggregate_actions=fragment.actions,
             prior_warship_departure_cap=2,
+            prior_departure_group_caps=fragment.prior_departure_group_caps,
             max_solutions=5,
             time_limit_seconds=2.0,
         )
@@ -690,6 +694,11 @@ def test_transfer_catalog_fragment_carries_actions_and_capacity_fields(
     assert all(action.upper_bound > 0 for action in fragment.actions)
     assert fragment.prior_warship_departure_cap == 1
     assert fragment.prior_freighter_departure_cap == 0
+    assert fragment.prior_departure_group_caps == {f"warship:point:{military_2x}": 1}
+    loss = next(
+        action for action in fragment.actions if action.id.startswith(SHIP_LOSS_ACTION_PREFIX)
+    )
+    assert loss.prior_group_key == f"warship:point:{military_2x}"
     assert fragment.extra_warship_capacity == 1
     assert fragment.extra_freighter_capacity == 0
     assert fragment.reserved_incoming_warships == 0
@@ -708,6 +717,7 @@ def test_transfer_catalog_fragment_reserves_acquired_incoming(synthetic_catalog_
         **_transfer_catalog_kwargs(synthetic_catalog_context),
     )
     assert any(action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) for action in fragment.actions)
+    assert all(action.prior_group_key is None for action in fragment.actions)
     assert fragment.reserved_incoming_warships == 1
     assert fragment.reserved_incoming_freighters == 0
     assert fragment.extra_warship_capacity == 0
@@ -755,3 +765,85 @@ def test_gift_and_loss_share_prior_fleet_departure_cap():
     for solution in result.solutions:
         used = sum(action.count for action in solution.actions)
         assert used == 1
+
+
+def _partial_gift_two_departure_fragment(
+    synthetic_catalog_context,
+    *,
+    second_record_beam_count: int,
+) -> tuple[InferenceObservation, ShipTransferCatalogFragment, int, int]:
+    """Fragment where a partial gift admits loss and gift actions over shared groups.
+
+    The observation drops two warships while claiming twice the first record's
+    military; the peer row absorbs only one warship, so the other drop stays
+    unmatched and the loss family is admitted alongside the gift family.
+    """
+    first, first_military = _known_warship_record(
+        synthetic_catalog_context,
+        beam_count=2,
+        record_id="departure-first",
+    )
+    second, second_military = _known_warship_record(
+        synthetic_catalog_context,
+        beam_count=second_record_beam_count,
+        record_id="departure-second",
+    )
+    observation = replace(
+        _observation(military_delta_2x=-2 * first_military, warship_delta=-2),
+        priority_point_delta=1,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(_peer_row(3, warship=1, military_2x=first_military),),
+        prior_fleet_records=(first, second),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    return observation, fragment, first_military, second_military
+
+
+def _solve_partial_gift_two_departure(
+    observation: InferenceObservation,
+    fragment: ShipTransferCatalogFragment,
+):
+    return solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            prior_warship_departure_cap=fragment.prior_warship_departure_cap,
+            prior_departure_group_caps=fragment.prior_departure_group_caps,
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+
+
+def test_group_departure_capacity_forbids_single_record_double_claim(
+    synthetic_catalog_context,
+):
+    observation, fragment, first_military, second_military = _partial_gift_two_departure_fragment(
+        synthetic_catalog_context,
+        second_record_beam_count=1,
+    )
+    assert second_military != first_military
+    result = _solve_partial_gift_two_departure(observation, fragment)
+    assert result.status != STATUS_EXACT
+    assert result.solutions == ()
+
+
+def test_group_departure_capacity_allows_two_records_in_same_group(
+    synthetic_catalog_context,
+):
+    observation, fragment, first_military, second_military = _partial_gift_two_departure_fragment(
+        synthetic_catalog_context,
+        second_record_beam_count=2,
+    )
+    assert second_military == first_military
+    result = _solve_partial_gift_two_departure(observation, fragment)
+    assert result.status == STATUS_EXACT
+    for solution in result.solutions:
+        action_ids = {action.action_id for action in solution.actions}
+        assert action_ids == {
+            f"{SHIP_LOSS_ACTION_PREFIX}warship:point:{first_military}",
+            f"{GIFT_ACTION_PREFIX}warship:to:3:point:{first_military}",
+        }
+        assert sum(action.count for action in solution.actions) == 2

@@ -61,6 +61,7 @@ class ShipTransferCatalogFragment:
     reserved_incoming_freighters: int
     prior_warship_departure_cap: int
     prior_freighter_departure_cap: int
+    prior_departure_group_caps: dict[str, int]
 
 
 def ship_transfer_combo_capacity(
@@ -129,7 +130,19 @@ def build_ship_transfer_catalog_fragment(
         reserved_incoming_freighters=reserved_freighter,
         prior_warship_departure_cap=prior_warship_departure_cap,
         prior_freighter_departure_cap=prior_freighter_departure_cap,
+        prior_departure_group_caps=_prior_departure_group_caps(candidates),
     )
+
+
+def _prior_departure_group_caps(
+    candidates: tuple[PriorFleetDecreaseCandidate, ...],
+) -> dict[str, int]:
+    """Record count per departure group, shared across loss/gift/trade families."""
+    return {
+        _prior_group_key(ship_class, kind, min_2x, max_2x): len(group)
+        for ship_class in ("warship", "freighter")
+        for (kind, min_2x, max_2x), group in _group_candidates(candidates, ship_class).items()
+    }
 
 
 def _group_candidates(
@@ -160,6 +173,10 @@ def _military_id_suffix(kind: str, min_2x: int, max_2x: int) -> str:
     if kind == "point":
         return f"point:{min_2x}"
     return f"envelope:{min_2x}:{max_2x}"
+
+
+def _prior_group_key(ship_class: FleetShipClass, kind: str, min_2x: int, max_2x: int) -> str:
+    return f"{ship_class}:{_military_id_suffix(kind, min_2x, max_2x)}"
 
 
 def _departure_action(
@@ -199,6 +216,7 @@ def _departure_action(
         counterparty_player_id=counterparty_player_id,
         prior_warship_usage=1 if ship_class == "warship" else 0,
         prior_freighter_usage=1 if ship_class == "freighter" else 0,
+        prior_group_key=_prior_group_key(ship_class, kind, min_2x, max_2x),
         upper_bound=upper_bound,
     )
 

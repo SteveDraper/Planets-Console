@@ -318,6 +318,7 @@ class InferenceHardConstraints:
             if implied_ships_built is not None:
                 model.add(ships_built == implied_ships_built)
         _add_prior_fleet_departure_caps(model, problem, action_count_vars)
+        _add_prior_fleet_group_departure_caps(model, problem, action_count_vars)
         aggregate_action_ids = frozenset(action.id for action in problem.aggregate_actions)
         if _fighter_transfer_actions_both_present(aggregate_action_ids):
             _add_fighter_transfer_direction_exclusivity(model, action_count_vars)
@@ -348,6 +349,28 @@ def _add_prior_fleet_departure_caps(
     ]
     if freighter_usage:
         model.add(sum(freighter_usage) <= problem.prior_freighter_departure_cap)
+
+
+def _add_prior_fleet_group_departure_caps(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    """Share each departure group's record count across loss/gift/trade families.
+
+    A group with no declared capacity caps at zero, so actions claiming a
+    prior-fleet group can never exceed what the catalog carried for it.
+    """
+    usage_by_group: dict[str, list[object]] = {}
+    for action in problem.aggregate_actions:
+        if action.prior_group_key is None:
+            continue
+        usage = action.prior_warship_usage + action.prior_freighter_usage
+        usage_by_group.setdefault(action.prior_group_key, []).append(
+            usage * action_count_vars[action.id]
+        )
+    for group_key, usage_terms in usage_by_group.items():
+        model.add(sum(usage_terms) <= problem.prior_departure_group_caps.get(group_key, 0))
 
 
 def solution_satisfies_exact_hard_equalities(

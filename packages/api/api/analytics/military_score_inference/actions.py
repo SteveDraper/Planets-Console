@@ -95,6 +95,7 @@ class ActionCatalog:
     enforce_idle_dock_pp_equality: bool = False
     prior_warship_departure_cap: int = 0
     prior_freighter_departure_cap: int = 0
+    prior_departure_group_caps: dict[str, int] = field(default_factory=dict)
 
     @property
     def catalog_size(self) -> int:
@@ -158,6 +159,7 @@ def build_inference_problem(
         enforce_idle_dock_pp_equality=catalog.enforce_idle_dock_pp_equality,
         prior_warship_departure_cap=catalog.prior_warship_departure_cap,
         prior_freighter_departure_cap=catalog.prior_freighter_departure_cap,
+        prior_departure_group_caps=catalog.prior_departure_group_caps,
     )
 
 
@@ -381,6 +383,7 @@ def build_action_catalog(
         enforce_idle_dock_pp_equality=idle_dock,
         prior_warship_departure_cap=transfer_fragment.prior_warship_departure_cap,
         prior_freighter_departure_cap=transfer_fragment.prior_freighter_departure_cap,
+        prior_departure_group_caps=transfer_fragment.prior_departure_group_caps,
     )
 
 

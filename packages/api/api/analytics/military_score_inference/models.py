@@ -55,6 +55,9 @@ class CandidateAction:
     counterparty_player_id: int | None = None
     prior_warship_usage: int = 0
     prior_freighter_usage: int = 0
+    # Prior-fleet departure group identity shared across loss/gift/trade families;
+    # None for actions that do not consume a prior-fleet record.
+    prior_group_key: str | None = None
 
 
 class MagnitudeCountBounds(Protocol):
@@ -148,6 +151,7 @@ class InferenceProblem:
     enforce_idle_dock_pp_equality: bool = False
     prior_warship_departure_cap: int = 0
     prior_freighter_departure_cap: int = 0
+    prior_departure_group_caps: dict[str, int] = field(default_factory=dict)
     military_score_alpha: int = 0
     ranking_heuristics: InferenceRankingHeuristics = field(
         default_factory=_default_ranking_heuristics
