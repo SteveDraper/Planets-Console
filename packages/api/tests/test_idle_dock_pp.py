@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 from api.analytics.military_score_inference.idle_dock_pp import (
+    idle_dock_implied_ships_built,
     is_idle_dock_queue,
     should_enforce_idle_dock_pp,
 )
@@ -96,3 +97,15 @@ def test_skip_starbase_count_drop(sample_turn):
         )
         is False
     )
+
+
+def test_implied_ships_built_on_lattice():
+    assert idle_dock_implied_ships_built(_observation()) == 1
+    assert idle_dock_implied_ships_built(_observation(priority_point_delta=0)) == 2
+    assert idle_dock_implied_ships_built(_observation(priority_point_delta=4)) == 0
+
+
+def test_implied_ships_built_off_lattice_is_none():
+    assert idle_dock_implied_ships_built(_observation(priority_point_delta=1)) is None
+    assert idle_dock_implied_ships_built(_observation(priority_point_delta=6)) is None
+    assert idle_dock_implied_ships_built(_observation(starbases_owned=-1)) is None

@@ -6,7 +6,10 @@ from ortools.sat.python import cp_model
 
 from api.analytics.military_score_inference.accelerated_start import scoreboard_host_turn
 from api.analytics.military_score_inference.actions import ActionCatalog
-from api.analytics.military_score_inference.idle_dock_pp import IDLE_DOCK_PP_EQUALITY_LABEL
+from api.analytics.military_score_inference.idle_dock_pp import (
+    IDLE_DOCK_PP_EQUALITY_LABEL,
+    idle_dock_implied_ships_built,
+)
 from api.analytics.military_score_inference.inference_objective import add_count_active_indicator
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -311,9 +314,9 @@ class InferenceHardConstraints:
                 combo.build_slot_usage * combo_count_vars[combo.combo_id]
                 for combo in problem.ship_build_combos
             )
-            model.add(
-                observation.priority_point_delta == 2 * (observation.starbases_owned - ships_built)
-            )
+            implied_ships_built = idle_dock_implied_ships_built(observation)
+            if implied_ships_built is not None:
+                model.add(ships_built == implied_ships_built)
         _add_prior_fleet_departure_caps(model, problem, action_count_vars)
         aggregate_action_ids = frozenset(action.id for action in problem.aggregate_actions)
         if _fighter_transfer_actions_both_present(aggregate_action_ids):

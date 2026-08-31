@@ -33,17 +33,6 @@ TRADE_ACTION_PREFIX = "trade:"
 ACQUIRED_SHIP_ACTION_PREFIX = "acquired:"
 
 
-def is_ship_transfer_action_id(action_id: str) -> bool:
-    return action_id.startswith(
-        (
-            SHIP_LOSS_ACTION_PREFIX,
-            GIFT_ACTION_PREFIX,
-            TRADE_ACTION_PREFIX,
-            ACQUIRED_SHIP_ACTION_PREFIX,
-        )
-    )
-
-
 def public_scoreboard_rows_from_scores(
     scores: tuple[Score, ...] | list[Score],
     *,
