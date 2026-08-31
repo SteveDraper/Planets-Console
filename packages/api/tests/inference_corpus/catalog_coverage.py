@@ -26,8 +26,9 @@ COVERAGE_REASON_COMBO_NOT_IN_CATALOG = "combo_not_in_catalog"
 COVERAGE_REASON_ACTION_NOT_IN_CATALOG = "action_not_in_catalog"
 COVERAGE_REASON_COUNT_ABOVE_UPPER_BOUND = "count_above_upper_bound"
 
-# Stable coverageReason strings retained after #370. Gift/trade/loss are catalog
-# families, so trade_or_capture_hint and net_ship_count_decrease are not mapped.
+# Complexity reasons that defer catalog coverage. Gift, trade, and loss are
+# catalog families, so trade_or_capture_hint and net_ship_count_decrease are
+# not mapped.
 _COMPLEXITY_TO_COVERAGE: dict[str, str] = {
     "planet_or_starbase_count_decrease": COVERAGE_REASON_DEFERRED_STARBASE_LOSS,
     "unexplained_military_change": COVERAGE_REASON_DEFERRED_MINEFIELD,
