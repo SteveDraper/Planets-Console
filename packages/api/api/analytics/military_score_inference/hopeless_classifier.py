@@ -161,14 +161,6 @@ def classify_hopeless_abort(
     return HopelessAbortDecision(abort=False)
 
 
-def scoreboard_count_deltas(turn: TurnInfo, player_id: int) -> tuple[int, int]:
-    """Planet and starbase ``*change`` fields for the scoreboard row, else ``(0, 0)``."""
-    score = next((row for row in turn.scores if row.ownerid == player_id), None)
-    if score is None:
-        return 0, 0
-    return score.planetchange, score.starbasechange
-
-
 def build_hopeless_row_facts(
     observation: InferenceObservation,
     turn: TurnInfo,
@@ -179,8 +171,7 @@ def build_hopeless_row_facts(
     recent_window_turns: int,
     large_minefield_min_units: int,
 ) -> HopelessRowFacts:
-    """Assemble row facts from the scoreboard, RST window, and sticky prior."""
-    planet_delta, starbase_delta = scoreboard_count_deltas(turn, observation.player_id)
+    """Assemble row facts from the observation, RST window, and sticky prior."""
     host_turn = turn.settings.turn
     turns_by_number: dict[int, TurnInfo] = {host_turn: turn}
     if load_scoreboard_turn is not None:
@@ -190,8 +181,8 @@ def build_hopeless_row_facts(
             if loaded is not None:
                 turns_by_number[turn_number] = loaded
     return HopelessRowFacts(
-        planet_delta=planet_delta,
-        starbase_delta=starbase_delta,
+        planet_delta=observation.planet_delta,
+        starbase_delta=observation.starbase_delta,
         sticky_prior=sticky_prior,
         max_owner_minefield_units=max_owner_minefield_units_in_recent_window(
             owner_id=observation.player_id,
