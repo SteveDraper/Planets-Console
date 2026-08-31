@@ -12,6 +12,7 @@ from tests.inference_corpus.complexity import (
     merge_turn_inventories,
     parse_max_complexity,
 )
+from tests.inference_corpus.fixtures import load_turn_fixture
 from tests.inference_corpus.manifest import FIXTURES_ROOT
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -134,16 +135,10 @@ def test_classify_marks_heavy_for_many_new_ships(sample_turn):
 
 def test_classify_marks_adjunct_for_merged_trade_capture_hint():
     """SSD 153 is foreign-owned at N only in perspective 8; p6 prior omits it."""
-    settings_defaults = json.loads((FIXTURES_ROOT / "628580/info.json").read_text())["settings"]
-
-    def load_relative(relative: str):
-        with open(FIXTURES_ROOT / relative) as handle:
-            return turn_info_from_json(json.load(handle), settings_defaults=settings_defaults)
-
-    prior_turn = load_relative("628580/6/turns/20.json")
-    score_turn = load_relative("628580/6/turns/21.json")
-    other_prior = load_relative("628580/8/turns/20.json")
-    other_score = load_relative("628580/8/turns/21.json")
+    prior_turn = load_turn_fixture("628580/6/turns/20.json")
+    score_turn = load_turn_fixture("628580/6/turns/21.json")
+    other_prior = load_turn_fixture("628580/8/turns/20.json")
+    other_score = load_turn_fixture("628580/8/turns/21.json")
     player_id = 6
     score = next(row for row in score_turn.scores if row.ownerid == player_id)
 
