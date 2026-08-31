@@ -99,7 +99,6 @@ def run_manifest_case(
 ) -> CorpusCaseResult:
     """Execute Tier 1 pipeline for one manifest case."""
     multi_view_reason = assert_required_perspectives_present(
-        case.id,
         case.game_id,
         case.host_turn,
         case.host_turn + 1,

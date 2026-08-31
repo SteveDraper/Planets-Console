@@ -138,7 +138,6 @@ def load_other_manifest_perspective_turns(
 
 
 def assert_required_perspectives_present(
-    _case_id: str,
     game_id: int,
     host_turn: int,
     score_turn: int,
