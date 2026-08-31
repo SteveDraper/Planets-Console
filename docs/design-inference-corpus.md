@@ -457,7 +457,7 @@ No `tier: 2` manifest rows are required; CLI `--tier 2` exercises the path. Mult
 
 ### 12.1 Per-case outcomes
 
-`passed` | `failed` | `skipped_complexity` | `skipped_incomplete_multi_view` | `out_of_search_space` | `ranking_miss`
+`passed` | `failed` | `skipped_complexity` | `out_of_search_space` | `ranking_miss`
 
 `ranking_miss` does not set exit code 1 unless hard mode (section 10): manifest `requireTopK: true` or `--fail-on-ranking-miss`.
 

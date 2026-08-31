@@ -1347,7 +1347,6 @@ Before running the solver, classify each case into `minimal`, `routine`, `heavy`
 | `passed` | Tier 1 (and Tier 2 if enabled) satisfied |
 | `failed` | Hard Tier 1/2 failure |
 | `skipped_complexity` | Above `--max-complexity` |
-| `skipped_incomplete_multi_view` | Adjunct hypothesis needs missing perspectives |
 | `out_of_search_space` | Ground truth not expressible in current catalog (distinct from solver `no_exact_solution`) |
 | `ranking_miss` | `exact` but ground truth not in top-K (investigation, optionally hard) |
 
