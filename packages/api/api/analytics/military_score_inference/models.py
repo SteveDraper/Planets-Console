@@ -35,6 +35,8 @@ class InferenceObservation:
     is_after_ship_limit: bool
     military_partition_slack_2x: int = 0
     scoreboard_delta_source: str = "reported_change_fields"
+    planet_delta: int = 0
+    starbase_delta: int = 0
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,14 @@ class CandidateAction:
     build_slot_usage: int = 0
     lower_bound: int = 0
     upper_bound: int = 0
+    score_delta_2x_min: int | None = None
+    score_delta_2x_max: int | None = None
+    counterparty_player_id: int | None = None
+    prior_warship_usage: int = 0
+    prior_freighter_usage: int = 0
+    # Prior-fleet departure group identity shared across loss/gift/trade families;
+    # None for actions that do not consume a prior-fleet record.
+    prior_group_key: str | None = None
 
 
 class MagnitudeCountBounds(Protocol):
@@ -138,6 +148,10 @@ class InferenceProblem:
     max_solutions: int = 20
     time_limit_seconds: float = 20.0
     enforce_priority_point_constraint: bool = False
+    enforce_idle_dock_pp_equality: bool = False
+    prior_warship_departure_cap: int = 0
+    prior_freighter_departure_cap: int = 0
+    prior_departure_group_caps: dict[str, int] = field(default_factory=dict)
     military_score_alpha: int = 0
     ranking_heuristics: InferenceRankingHeuristics = field(
         default_factory=_default_ranking_heuristics
@@ -153,6 +167,7 @@ class InferenceSolutionAction:
     action_id: str
     label: str
     count: int
+    counterparty_player_id: int | None = None
 
 
 @dataclass(frozen=True)

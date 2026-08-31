@@ -95,6 +95,8 @@ def observation_from_deltas(
         is_after_ship_limit=is_after_ship_limit(turn, score),
         military_partition_slack_2x=military_partition_slack_2x,
         scoreboard_delta_source=scoreboard_delta_source,
+        planet_delta=score.planetchange,
+        starbase_delta=score.starbasechange,
     )
 
 

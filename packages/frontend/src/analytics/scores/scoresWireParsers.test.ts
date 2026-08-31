@@ -34,4 +34,24 @@ describe('readInferenceSolution', () => {
       ],
     })
   })
+
+  it('parses counterpartyPlayerId on gift/trade/acquired actions', () => {
+    const parsed = readInferenceSolution({
+      objectiveValue: 0,
+      actions: [
+        {
+          actionId: 'gift:warship:to:3:point:40',
+          label: 'Gift warship to player 3',
+          count: 1,
+          counterpartyPlayerId: 3,
+        },
+      ],
+    })
+    expect(parsed?.actions[0]).toEqual({
+      actionId: 'gift:warship:to:3:point:40',
+      label: 'Gift warship to player 3',
+      count: 1,
+      counterpartyPlayerId: 3,
+    })
+  })
 })

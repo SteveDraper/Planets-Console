@@ -66,10 +66,12 @@ def _apply_fleet_resolution_to_row_run(
     session.fleet_torp_overlay = resolution.overlay
     session.fleet_torp_input_status = resolution.input_status
     session.prior_fleet_max_tech_by_axis = resolution.prior_fleet_max_tech_for_admission()
+    session.prior_fleet_records = resolution.records
     ladder_state = run.ladder_state
     if ladder_state is not None:
         ladder_state.fleet_torp_overlay = resolution.overlay
         ladder_state.prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
+        ladder_state.prior_fleet_records = resolution.records
 
 
 def build_scores_materialize_job_wire(

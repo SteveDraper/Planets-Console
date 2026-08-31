@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.accelerated_start import AcceleratedInferenceSegment
 from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
@@ -102,6 +103,7 @@ def run_accelerated_segment_policy_ladder(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
 ) -> AcceleratedSegmentResult:
     """Run the policy ladder for one accelerated segment."""
     observation = observation_from_accelerated_segment(score, turn, segment)
@@ -120,6 +122,7 @@ def run_accelerated_segment_policy_ladder(
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+        prior_fleet_records=prior_fleet_records,
     )
     return AcceleratedSegmentResult(
         segment=segment,
@@ -232,6 +235,7 @@ def run_accelerated_split_inference(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
 ) -> tuple[
     dict[str, object],
     InferenceObservation,
@@ -262,6 +266,7 @@ def run_accelerated_split_inference(
             resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_torp_overlay,
             prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
+            prior_fleet_records=prior_fleet_records,
         )
         if segment.is_streaming_target:
             reported_observation = ladder_result.observation

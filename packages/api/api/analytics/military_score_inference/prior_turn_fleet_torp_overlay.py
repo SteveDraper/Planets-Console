@@ -37,6 +37,7 @@ class PriorTurnFleetTorpResolution:
     overlay: FleetTorpOverlay | None
     input_status: FleetTorpInputStatus
     max_tech_by_axis: dict[str, int] = field(default_factory=dict)
+    records: tuple[FleetShipRecord, ...] = ()
 
     def prior_fleet_max_tech_for_admission(self) -> dict[str, int] | None:
         """Prior-fleet max tech for early inference gates, or ``None`` when not applied.
@@ -82,6 +83,7 @@ def resolution_from_fleet_records(
             prior_turn,
             option_set_mass_threshold=threshold,
         ),
+        records=tuple(records),
     )
 
 

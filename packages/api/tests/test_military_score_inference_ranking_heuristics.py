@@ -357,6 +357,7 @@ def test_ranking_heuristics_diagnostics_payload_shape():
 
     assert payload["partialWeaponSlotPenaltyPerLine"] == -25
     assert payload["tierOverflowMarginalWeight"] == 50
+    assert payload["transferFamilyActivePenalty"] == 25
     assert payload["admissionCaps"] == {"planet_defense_posts_added_total": 16}
     assert len(payload["diversityCaps"]) == 2
 

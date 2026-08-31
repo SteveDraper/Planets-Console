@@ -48,6 +48,9 @@ function readSolutionAction(entry: unknown): ScoresInferenceSolution['actions'][
     actionId: entry.actionId,
     label: entry.label,
     count: entry.count,
+    ...(typeof entry.counterpartyPlayerId === 'number'
+      ? { counterpartyPlayerId: entry.counterpartyPlayerId }
+      : {}),
   }
 }
 

@@ -12,6 +12,11 @@ from api.analytics.fleet.field_constraints import (
 )
 from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
 from api.analytics.fleet.serialization import append_fleet_evidence_event
+from api.analytics.fleet.ship_class import (
+    record_ship_class,
+    record_ship_class_from_known_hull,
+    record_ship_class_from_scoreboard_delta,
+)
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetEvidenceEvent,
@@ -21,7 +26,6 @@ from api.analytics.fleet.types import (
     FleetShipClass,
     FleetShipRecord,
 )
-from api.concepts.hulls import hull_is_freighter
 from api.models.components import Hull
 from api.models.game import TurnInfo
 from api.models.player import Score
@@ -113,45 +117,10 @@ def _active_records_for_class(
     for record in ledger.records:
         if record.disposition != "active":
             continue
-        record_class = _record_ship_class(record, hulls_by_id)
+        record_class = record_ship_class(record, hulls_by_id)
         if record_class == ship_class:
             records.append(record)
     return records
-
-
-def _record_ship_class(
-    record: FleetShipRecord,
-    hulls_by_id: dict[int, Hull],
-) -> FleetShipClass | None:
-    survivor_class = _record_ship_class_survivor(record, hulls_by_id)
-    if survivor_class is not None:
-        return survivor_class
-    return _record_ship_class_absorbable(record)
-
-
-def _record_ship_class_absorbable(record: FleetShipRecord) -> FleetShipClass | None:
-    for event in record.events:
-        if event.kind != "scoreboard_delta":
-            continue
-        ship_class = event.payload.get("shipClass")
-        if ship_class in ("warship", "freighter"):
-            return ship_class  # type: ignore[return-value]
-    return None
-
-
-def _record_ship_class_survivor(
-    record: FleetShipRecord,
-    hulls_by_id: dict[int, Hull],
-) -> FleetShipClass | None:
-    hull_constraint = record.fields.hull
-    if not isinstance(hull_constraint, FleetFieldKnown):
-        return None
-    if not isinstance(hull_constraint.value, int):
-        return None
-    hull = hulls_by_id.get(hull_constraint.value)
-    if hull is None:
-        return None
-    return "freighter" if hull_is_freighter(hull) else "warship"
 
 
 def _absorbable_ship_id(record: FleetShipRecord) -> AbsorbableShipId | None:
@@ -162,7 +131,7 @@ def _absorbable_ship_id(record: FleetShipRecord) -> AbsorbableShipId | None:
     ship_id = record.fields.ship_id
     if not isinstance(ship_id, (FleetFieldUnknown, FleetFieldBounded)):
         return None
-    if _record_ship_class_absorbable(record) is None:
+    if record_ship_class_from_scoreboard_delta(record) is None:
         return None
     return ship_id
 
@@ -172,7 +141,7 @@ def _is_survivor(record: FleetShipRecord, hulls_by_id: dict[int, Hull]) -> bool:
         return False
     if _known_ship_id(record) is None:
         return False
-    return _record_ship_class_survivor(record, hulls_by_id) is not None
+    return record_ship_class_from_known_hull(record, hulls_by_id) is not None
 
 
 def _known_ship_id(record: FleetShipRecord) -> int | None:

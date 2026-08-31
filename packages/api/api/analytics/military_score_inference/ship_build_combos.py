@@ -88,11 +88,20 @@ def ship_build_upper_bound(
     *,
     is_warship: bool,
     is_freighter: bool,
+    extra_warship_capacity: int = 0,
+    extra_freighter_capacity: int = 0,
+    reserved_incoming_warships: int = 0,
+    reserved_incoming_freighters: int = 0,
 ) -> int:
     if is_warship:
-        count_delta = max(0, observation.warship_delta)
+        count_delta = (
+            max(0, observation.warship_delta - reserved_incoming_warships) + extra_warship_capacity
+        )
     elif is_freighter:
-        count_delta = max(0, observation.freighter_delta)
+        count_delta = (
+            max(0, observation.freighter_delta - reserved_incoming_freighters)
+            + extra_freighter_capacity
+        )
     else:
         return 0
     return min(count_delta, observation.starbases_owned)
@@ -134,6 +143,10 @@ def generate_ship_build_combos(
     config: ShipBuildComboConfig | None = None,
     beam_slot_counts: SlotCountMode = "none",
     launcher_slot_counts: SlotCountMode = "none",
+    extra_warship_capacity: int = 0,
+    extra_freighter_capacity: int = 0,
+    reserved_incoming_warships: int = 0,
+    reserved_incoming_freighters: int = 0,
 ) -> tuple[ShipBuildCombo, ...]:
     combo_config = config or ShipBuildComboConfig()
     combos: list[ShipBuildCombo] = []
@@ -190,6 +203,10 @@ def generate_ship_build_combos(
                                 observation,
                                 is_warship=counts_as_warship,
                                 is_freighter=counts_as_freighter,
+                                extra_warship_capacity=extra_warship_capacity,
+                                extra_freighter_capacity=extra_freighter_capacity,
+                                reserved_incoming_warships=reserved_incoming_warships,
+                                reserved_incoming_freighters=reserved_incoming_freighters,
                             )
                             if build_upper_bound <= 0:
                                 continue

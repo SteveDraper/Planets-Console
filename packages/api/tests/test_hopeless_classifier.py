@@ -579,14 +579,15 @@ def test_sample_turn_count_drops_block_auto_built_mine_shaped_abort(
 ) -> None:
     from dataclasses import replace
 
-    from api.analytics.military_score_inference.hopeless_classifier import (
-        scoreboard_count_deltas,
-    )
-
-    planet_delta, starbase_delta = scoreboard_count_deltas(sample_turn, 8)
-    assert planet_delta < 0 or starbase_delta < 0
+    score = next(row for row in sample_turn.scores if row.ownerid == 8)
+    assert score.planetchange < 0 or score.starbasechange < 0
     _unsat_every_tier(monkeypatch)
-    observation = _observation(military_delta_2x=-40, warship_delta=0)
+    observation = _observation(
+        military_delta_2x=-40,
+        warship_delta=0,
+        planet_delta=score.planetchange,
+        starbase_delta=score.starbasechange,
+    )
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
         replace(sample_turn, minefields=[]),
