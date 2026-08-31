@@ -30,6 +30,10 @@ def _default_tier_overflow_marginal_weight() -> int:
     return INFERENCE_PROBABILITY_WEIGHT_SCALE // 2
 
 
+def _default_transfer_family_active_penalty() -> int:
+    return INFERENCE_PROBABILITY_WEIGHT_SCALE // 4
+
+
 @dataclass(frozen=True)
 class InferenceRankingHeuristics:
     partial_weapon_slot_penalty_per_line: int = field(
@@ -37,6 +41,9 @@ class InferenceRankingHeuristics:
     )
     tier_overflow_marginal_weight: int = field(
         default_factory=_default_tier_overflow_marginal_weight
+    )
+    transfer_family_active_penalty: int = field(
+        default_factory=_default_transfer_family_active_penalty
     )
     torpedo_load_diversity_cap: int = 2
     fighter_channel_diversity_cap: int = 2
@@ -95,6 +102,33 @@ def compute_bin_penalty_objective_contribution(
         )
         contribution -= penalty
     return contribution
+
+
+def transfer_family_probability_buckets(
+    upper_bound: int,
+    heuristics: InferenceRankingHeuristics,
+) -> tuple[ProbabilityBucket, ...]:
+    """Flat-penalty two-bin bucket set for one transfer-family action.
+
+    The none bin carries max weight, so any active loss/gift/trade/acquired
+    action pays a flat ranking penalty and ranks strictly below an otherwise
+    equal solution with no transfer (e.g. phantom loss+replace vs empty).
+    """
+    return (
+        ProbabilityBucket(
+            label="none",
+            lower_count=0,
+            upper_count=0,
+            marginal_weight=INFERENCE_PROBABILITY_WEIGHT_SCALE,
+        ),
+        ProbabilityBucket(
+            label="active",
+            lower_count=1,
+            upper_count=upper_bound,
+            marginal_weight=INFERENCE_PROBABILITY_WEIGHT_SCALE
+            - heuristics.transfer_family_active_penalty,
+        ),
+    )
 
 
 def build_tier_aware_probability_buckets(
@@ -191,6 +225,7 @@ def ranking_heuristics_diagnostics_payload(
     return {
         "partialWeaponSlotPenaltyPerLine": heuristics.partial_weapon_slot_penalty_per_line,
         "tierOverflowMarginalWeight": heuristics.tier_overflow_marginal_weight,
+        "transferFamilyActivePenalty": heuristics.transfer_family_active_penalty,
         "diversityCaps": [
             {"superclass": TORPEDO_LOADS_SUPERCLASS, "cap": heuristics.torpedo_load_diversity_cap},
             {

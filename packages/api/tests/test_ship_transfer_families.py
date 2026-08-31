@@ -17,6 +17,7 @@ from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
     InferenceProblem,
+    ProbabilityBucket,
     ShipBuildCombo,
 )
 from api.analytics.military_score_inference.prior_fleet_decrease_candidates import (
@@ -37,6 +38,7 @@ from api.analytics.military_score_inference.ship_transfer_families import (
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.concepts.hulls import UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
+from api.concepts.inference_probability_scale import INFERENCE_PROBABILITY_WEIGHT_SCALE
 from api.concepts.ship_build_military import ship_build_military_score_delta_2x
 
 from tests.fixtures.military_score_inference import _observation
@@ -232,6 +234,100 @@ def test_decrease_families_enter_at_early_game_bands(synthetic_catalog_build_con
     assert any(
         action.id.startswith(SHIP_LOSS_ACTION_PREFIX) for action in catalog.aggregate_actions
     )
+
+
+TRANSFER_ACTION_PREFIXES = (
+    SHIP_LOSS_ACTION_PREFIX,
+    GIFT_ACTION_PREFIX,
+    TRADE_ACTION_PREFIX,
+    ACQUIRED_SHIP_ACTION_PREFIX,
+)
+
+
+def _is_transfer_action_id(action_id: str) -> bool:
+    return action_id.startswith(TRANSFER_ACTION_PREFIXES)
+
+
+def test_flat_observation_empty_solution_ranks_strictly_above_phantom_loss_replace(
+    synthetic_catalog_build_context,
+):
+    record, _military_2x = _known_warship_record(synthetic_catalog_build_context)
+    observation = _observation(military_delta_2x=0, warship_delta=0)
+    catalog = build_action_catalog(
+        observation,
+        **synthetic_catalog_build_context,
+        prior_fleet_records=(record,),
+    )
+    assert any(
+        action.id.startswith(SHIP_LOSS_ACTION_PREFIX) for action in catalog.aggregate_actions
+    )
+    result = solve_inference_problem(
+        build_inference_problem(observation, catalog, time_limit_seconds=5.0)
+    )
+    assert result.status == STATUS_EXACT
+    best = result.solutions[0]
+    assert best.actions == ()
+    assert best.ship_builds == ()
+    for solution in result.solutions[1:]:
+        assert solution.objective_value < best.objective_value
+
+
+def test_transfer_actions_carry_flat_penalty_buckets(synthetic_catalog_build_context):
+    record, military_2x = _known_warship_record(synthetic_catalog_build_context)
+    observation = replace(
+        _observation(military_delta_2x=-military_2x, warship_delta=-1),
+        priority_point_delta=1,
+    )
+    catalog = build_action_catalog(
+        observation,
+        **synthetic_catalog_build_context,
+        prior_fleet_records=(record,),
+    )
+    transfer_actions = [
+        action for action in catalog.aggregate_actions if _is_transfer_action_id(action.id)
+    ]
+    assert transfer_actions
+    active_weight = (
+        INFERENCE_PROBABILITY_WEIGHT_SCALE
+        - catalog.ranking_heuristics.transfer_family_active_penalty
+    )
+    for action in transfer_actions:
+        buckets = catalog.probability_buckets_by_action_id[action.id]
+        assert buckets == (
+            ProbabilityBucket(
+                label="none",
+                lower_count=0,
+                upper_count=0,
+                marginal_weight=INFERENCE_PROBABILITY_WEIGHT_SCALE,
+            ),
+            ProbabilityBucket(
+                label="active",
+                lower_count=1,
+                upper_count=action.upper_bound,
+                marginal_weight=active_weight,
+            ),
+        )
+
+
+def test_catalog_solver_genuine_loss_stays_exact_with_transfer_penalty(
+    synthetic_catalog_build_context,
+):
+    record, military_2x = _known_warship_record(synthetic_catalog_build_context)
+    observation = replace(
+        _observation(military_delta_2x=-military_2x, warship_delta=-1),
+        priority_point_delta=1,
+    )
+    catalog = build_action_catalog(
+        observation,
+        **synthetic_catalog_build_context,
+        prior_fleet_records=(record,),
+    )
+    result = solve_inference_problem(
+        build_inference_problem(observation, catalog, time_limit_seconds=5.0)
+    )
+    assert result.status == STATUS_EXACT
+    best_action_ids = {action.action_id for action in result.solutions[0].actions}
+    assert f"{SHIP_LOSS_ACTION_PREFIX}warship:point:{military_2x}" in best_action_ids
 
 
 def test_loss_plus_replace_combo_bound_uses_prior_fleet_capacity():

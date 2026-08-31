@@ -45,6 +45,7 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
     TierOverflowBand,
     build_tier_aware_probability_buckets,
+    transfer_family_probability_buckets,
 )
 from api.analytics.military_score_inference.scoring import starbase_fighter_score_delta_2x
 from api.analytics.military_score_inference.ship_build_combos import (
@@ -317,6 +318,11 @@ def build_action_catalog(
         idle_dock = should_enforce_idle_dock_pp(observation, turn.settings)
 
     ranking_heuristics = InferenceRankingHeuristics()
+    for action in transfer_fragment.actions:
+        probability_buckets[action.id] = transfer_family_probability_buckets(
+            action.upper_bound,
+            ranking_heuristics,
+        )
     admission_caps_raw = compute_aggregate_admission_caps(policy_ladder, policy_step_index)
     admission_caps_by_action_id: dict[str, int] = {}
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = {}
