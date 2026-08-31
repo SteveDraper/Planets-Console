@@ -192,7 +192,14 @@ def _departure_action(
     warship_delta: int | None = None,
     freighter_delta: int | None = None,
     score_point: int | None = None,
+    departure_count: int = 1,
 ) -> CandidateAction:
+    """One catalog action departing ``departure_count`` records from one group.
+
+    The group key stays per-unit; the military envelope and prior-fleet usage
+    scale with the departure count so a multi-ship action prices and consumes
+    all of its departing records.
+    """
     if score_point is not None:
         point = score_point
         score_min = score_point
@@ -200,6 +207,9 @@ def _departure_action(
         envelope = False
     else:
         point, score_min, score_max = _departure_score_bounds(kind, min_2x, max_2x)
+        point *= departure_count
+        score_min *= departure_count
+        score_max *= departure_count
         envelope = kind == "envelope"
     if warship_delta is None:
         warship_delta = -1 if ship_class == "warship" else 0
@@ -214,8 +224,8 @@ def _departure_action(
         score_delta_2x_min=score_min if envelope else None,
         score_delta_2x_max=score_max if envelope else None,
         counterparty_player_id=counterparty_player_id,
-        prior_warship_usage=1 if ship_class == "warship" else 0,
-        prior_freighter_usage=1 if ship_class == "freighter" else 0,
+        prior_warship_usage=departure_count if ship_class == "warship" else 0,
+        prior_freighter_usage=departure_count if ship_class == "freighter" else 0,
         prior_group_key=_prior_group_key(ship_class, kind, min_2x, max_2x),
         upper_bound=upper_bound,
     )
@@ -300,17 +310,25 @@ def _trade_actions(
         if match.family != "trade":
             continue
         same_class_swap = match.warship_delta == 0 and match.freighter_delta == 0
+        # A class-flip trade departs all k flipped ships in one action, so its
+        # military envelope and prior-fleet usage scale by k. A same-class swap
+        # has zero count deltas, so k is unobservable and stays 1.
         if match.warship_delta < 0:
             outgoing_class: FleetShipClass = "warship"
+            departing_count = -match.warship_delta
         elif match.freighter_delta < 0:
             outgoing_class = "freighter"
+            departing_count = -match.freighter_delta
         elif same_class_swap:
             outgoing_class = "warship"
+            departing_count = 1
         else:
             continue
         grouped = _group_candidates(candidates, outgoing_class)
         score_point = observation.military_delta_2x if same_class_swap else None
-        for kind, min_2x, max_2x in grouped:
+        for (kind, min_2x, max_2x), group in grouped.items():
+            if len(group) < departing_count:
+                continue
             actions.append(
                 _departure_action(
                     action_id=_trade_action_id(
@@ -326,9 +344,22 @@ def _trade_actions(
                     warship_delta=match.warship_delta,
                     freighter_delta=match.freighter_delta,
                     score_point=score_point,
+                    departure_count=departing_count,
                 )
             )
     return actions
+
+
+def _incoming_military_bounds(incoming_military_2x: int) -> tuple[int, int | None, int | None]:
+    """Per-unit military for one acquired ship. Returns point, min, max.
+
+    The counterparty's drop is a total over all transferred ships, so each unit
+    carries any share of it: an envelope [0, total] admits the true total for
+    any incoming count >= 1. A non-positive total stays a point.
+    """
+    if incoming_military_2x <= 0:
+        return incoming_military_2x, None, None
+    return 0, 0, incoming_military_2x
 
 
 def _acquired_actions(pairing: PublicScoreboardPairing) -> list[CandidateAction]:
@@ -338,24 +369,30 @@ def _acquired_actions(pairing: PublicScoreboardPairing) -> list[CandidateAction]
             continue
         incoming_military = -match.counterparty_military_delta_2x
         if match.warship_delta > 0:
+            point, min_2x, max_2x = _incoming_military_bounds(incoming_military)
             actions.append(
                 CandidateAction(
                     id=f"{ACQUIRED_SHIP_ACTION_PREFIX}warship:from:{match.counterparty_player_id}",
                     label=f"Acquired warship from player {match.counterparty_player_id}",
-                    score_delta_2x=incoming_military,
+                    score_delta_2x=point,
                     warship_delta=1,
+                    score_delta_2x_min=min_2x,
+                    score_delta_2x_max=max_2x,
                     counterparty_player_id=match.counterparty_player_id,
                     upper_bound=match.warship_delta,
                 )
             )
         if match.freighter_delta > 0:
             freighter_military = 0 if match.warship_delta > 0 else incoming_military
+            point, min_2x, max_2x = _incoming_military_bounds(freighter_military)
             actions.append(
                 CandidateAction(
                     id=f"{ACQUIRED_SHIP_ACTION_PREFIX}freighter:from:{match.counterparty_player_id}",
                     label=f"Acquired freighter from player {match.counterparty_player_id}",
-                    score_delta_2x=freighter_military,
+                    score_delta_2x=point,
                     freighter_delta=1,
+                    score_delta_2x_min=min_2x,
+                    score_delta_2x_max=max_2x,
                     counterparty_player_id=match.counterparty_player_id,
                     upper_bound=match.freighter_delta,
                 )

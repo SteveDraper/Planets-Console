@@ -943,3 +943,134 @@ def test_group_departure_capacity_allows_two_records_in_same_group(
             f"{GIFT_ACTION_PREFIX}warship:to:3:point:{first_military}",
         }
         assert sum(action.count for action in solution.actions) == 2
+
+
+def test_catalog_solver_two_ship_acquired_is_exact(synthetic_catalog_context):
+    observation = replace(
+        _observation(military_delta_2x=40, warship_delta=2),
+        priority_point_delta=1,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(_peer_row(3, warship=-2, military_2x=-40),),
+        prior_fleet_records=(),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    acquired = next(
+        action for action in fragment.actions if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+    )
+    assert acquired.upper_bound == 2
+    assert acquired.score_delta_2x_min == 0
+    assert acquired.score_delta_2x_max == 40
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            prior_departure_group_caps=fragment.prior_departure_group_caps,
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    chosen = result.solutions[0].actions[0]
+    assert chosen.action_id == f"{ACQUIRED_SHIP_ACTION_PREFIX}warship:from:3"
+    assert chosen.count == 2
+
+
+def _two_ship_class_flip_trade_fragment(
+    synthetic_catalog_context,
+    prior_fleet_records: tuple[FleetShipRecord, ...],
+    *,
+    military_delta_2x: int,
+) -> tuple[InferenceObservation, ShipTransferCatalogFragment]:
+    observation = replace(
+        _observation(
+            military_delta_2x=military_delta_2x,
+            warship_delta=-2,
+            freighter_delta=2,
+        ),
+        priority_point_delta=1,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(_peer_row(3, warship=2, freighter=-2, military_2x=-military_delta_2x),),
+        prior_fleet_records=prior_fleet_records,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    return observation, fragment
+
+
+def test_catalog_solver_two_ship_class_flip_trade_is_exact(synthetic_catalog_context):
+    first, military_2x = _known_warship_record(synthetic_catalog_context, record_id="serpent-a")
+    second, _ = _known_warship_record(synthetic_catalog_context, record_id="serpent-b")
+    observation, fragment = _two_ship_class_flip_trade_fragment(
+        synthetic_catalog_context,
+        (first, second),
+        military_delta_2x=-2 * military_2x,
+    )
+    trade = next(
+        action for action in fragment.actions if action.id.startswith(TRADE_ACTION_PREFIX)
+    )
+    assert trade.score_delta_2x == -2 * military_2x
+    assert trade.prior_warship_usage == 2
+    assert trade.upper_bound == 1
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            prior_warship_departure_cap=fragment.prior_warship_departure_cap,
+            prior_departure_group_caps=fragment.prior_departure_group_caps,
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    chosen = result.solutions[0].actions[0]
+    assert chosen.action_id == f"{TRADE_ACTION_PREFIX}warship:with:3:point:{military_2x}"
+    assert chosen.count == 1
+
+
+def test_two_ship_class_flip_trade_requires_two_records_in_group(synthetic_catalog_context):
+    record, military_2x = _known_warship_record(synthetic_catalog_context)
+    _, fragment = _two_ship_class_flip_trade_fragment(
+        synthetic_catalog_context,
+        (record,),
+        military_delta_2x=-2 * military_2x,
+    )
+    assert not any(action.id.startswith(TRADE_ACTION_PREFIX) for action in fragment.actions)
+
+
+def test_group_departure_cap_forbids_two_ship_trade_over_single_record_group():
+    trade = CandidateAction(
+        id=f"{TRADE_ACTION_PREFIX}warship:with:3:point:40",
+        label="Trade warship with player 3",
+        score_delta_2x=-80,
+        warship_delta=-2,
+        freighter_delta=2,
+        counterparty_player_id=3,
+        prior_warship_usage=2,
+        prior_group_key="warship:point:40",
+        upper_bound=1,
+    )
+    observation = InferenceObservation(
+        player_id=8,
+        turn=111,
+        military_delta_2x=-80,
+        warship_delta=-2,
+        freighter_delta=2,
+        priority_point_delta=1,
+        starbases_owned=2,
+        is_after_ship_limit=False,
+    )
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=(trade,),
+            prior_warship_departure_cap=2,
+            prior_departure_group_caps={"warship:point:40": 1},
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+    assert result.status != STATUS_EXACT
+    assert result.solutions == ()
