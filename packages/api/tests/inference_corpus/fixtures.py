@@ -80,8 +80,65 @@ def _manifest_ground_truth_perspective(
     return case.perspective
 
 
+def list_fixture_perspectives_with_turn_pair(
+    game_id: int,
+    host_turn: int,
+    score_turn: int,
+    *,
+    fixtures_root: Path = FIXTURES_ROOT,
+) -> tuple[int, ...]:
+    """Return sorted fixture slots that have both host and score turn files."""
+    game_root = fixtures_root / str(game_id)
+    if not game_root.is_dir():
+        return ()
+    perspectives: list[int] = []
+    for child in game_root.iterdir():
+        if not child.is_dir() or not child.name.isdigit():
+            continue
+        perspective = int(child.name)
+        if perspective < 1:
+            continue
+        prior_path = child / "turns" / f"{host_turn}.json"
+        score_path = child / "turns" / f"{score_turn}.json"
+        if prior_path.is_file() and score_path.is_file():
+            perspectives.append(perspective)
+    return tuple(sorted(perspectives))
+
+
+def load_other_manifest_perspective_turns(
+    case: ManifestCase,
+    *,
+    fixtures_root: Path = FIXTURES_ROOT,
+) -> tuple[tuple[TurnInfo, ...], tuple[TurnInfo, ...]]:
+    """Load sibling fixture perspectives for multi-view adjunct classification."""
+    other_prior: list[TurnInfo] = []
+    other_score: list[TurnInfo] = []
+    score_turn_number = case.host_turn + 1
+    for perspective in list_fixture_perspectives_with_turn_pair(
+        case.game_id,
+        case.host_turn,
+        score_turn_number,
+        fixtures_root=fixtures_root,
+    ):
+        if perspective == case.perspective:
+            continue
+        other_prior.append(
+            load_turn_fixture(
+                f"{case.game_id}/{perspective}/turns/{case.host_turn}.json",
+                fixtures_root=fixtures_root,
+            )
+        )
+        other_score.append(
+            load_turn_fixture(
+                f"{case.game_id}/{perspective}/turns/{score_turn_number}.json",
+                fixtures_root=fixtures_root,
+            )
+        )
+    return tuple(other_prior), tuple(other_score)
+
+
 def assert_required_perspectives_present(
-    case_id: str,
+    _case_id: str,
     game_id: int,
     host_turn: int,
     score_turn: int,
@@ -89,7 +146,7 @@ def assert_required_perspectives_present(
     *,
     fixtures_root: Path = FIXTURES_ROOT,
 ) -> str | None:
-    """Return a skip reason when a required perspective turn pair is missing."""
+    """Return a failure message when a required perspective turn pair is missing."""
     for perspective in required_perspectives:
         for turn_number in (host_turn, score_turn):
             path = fixtures_root / str(game_id) / str(perspective) / "turns" / f"{turn_number}.json"
