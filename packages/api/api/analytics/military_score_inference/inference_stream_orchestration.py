@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.accelerated_start import (
     AcceleratedInferenceSegment,
     scoreboard_host_turn,
@@ -63,7 +64,7 @@ def new_ladder_state(
             prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
         if hopeless_context is None:
             hopeless_context = hopeless_row_facts_from_session(session)
-        prior_fleet_records = session.prior_fleet_records
+        prior_fleet_records: tuple[FleetShipRecord, ...] = session.prior_fleet_records
     else:
         prior_fleet_records = ()
     return PolicyLadderState(

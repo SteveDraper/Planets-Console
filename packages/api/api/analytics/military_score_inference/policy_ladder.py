@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
@@ -161,7 +162,7 @@ def solve_with_policy_ladder(
     resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
-    prior_fleet_records: tuple = (),
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
     hopeless_context: HopelessRowFacts | None = None,
 ) -> tuple[
     InferenceResult,

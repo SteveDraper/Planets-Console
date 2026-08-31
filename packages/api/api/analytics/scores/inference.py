@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.analytic import (
     infer_military_score_build,
     run_inference_with_artifacts,
@@ -32,7 +33,7 @@ def get_scores_row_inference(
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
-    prior_fleet_records: tuple = (),
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
 ) -> dict[str, object]:
     """Run military score build inference for one scoreboard row."""
     resolved_perspective = turn.player.id if perspective is None else perspective

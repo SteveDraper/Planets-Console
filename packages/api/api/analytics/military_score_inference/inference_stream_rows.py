@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
@@ -164,7 +165,7 @@ def schedule_inference_row(
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
-    prior_fleet_records: tuple = (),
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
     export_services: Mapping[str, object] | None = None,
     stream_token: str | None = None,
     query_context: AnalyticQueryContext | None = None,
