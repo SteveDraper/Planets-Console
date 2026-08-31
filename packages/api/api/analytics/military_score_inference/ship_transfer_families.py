@@ -108,7 +108,6 @@ def build_ship_transfer_catalog_fragment(
     engines_by_id: dict[int, Engine],
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
-    buildable_hull_ids: frozenset[int],
 ) -> ShipTransferCatalogFragment:
     """Admit transfer actions and combo/departure caps from one pairing."""
     pairing = classify_public_scoreboard_pairing(
@@ -121,7 +120,6 @@ def build_ship_transfer_catalog_fragment(
         engines_by_id=engines_by_id,
         beams_by_id=beams_by_id,
         torpedos_by_id=torpedos_by_id,
-        buildable_hull_ids=buildable_hull_ids,
     )
     actions: list[CandidateAction] = []
     actions.extend(_loss_actions(observation, pairing, candidates))

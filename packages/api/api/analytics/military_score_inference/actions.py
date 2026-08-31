@@ -308,7 +308,6 @@ def build_action_catalog(
         engines_by_id=engines_by_id,
         beams_by_id=beams_by_id,
         torpedos_by_id=torpedos_by_id,
-        buildable_hull_ids=buildable_hull_ids,
     )
     kept_actions.extend(transfer_fragment.actions)
     idle_dock = False

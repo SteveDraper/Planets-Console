@@ -35,6 +35,7 @@ from api.analytics.military_score_inference.ship_transfer_families import (
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.concepts.hulls import UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
 from api.concepts.ship_build_military import ship_build_military_score_delta_2x
 
 from tests.fixtures.military_score_inference import _observation
@@ -101,15 +102,39 @@ def _envelope_warship_record() -> FleetShipRecord:
     )
 
 
+def _class_only_warship_record() -> FleetShipRecord:
+    return FleetShipRecord(
+        record_id="class-only-warship",
+        events=[_scoreboard_class_event("warship")],
+    )
+
+
+def _unknown_hull_envelope_warship_record() -> FleetShipRecord:
+    return FleetShipRecord(
+        record_id="unknown-hull-envelope",
+        events=[_scoreboard_class_event("warship")],
+        build_option_sets=[
+            FleetBuildOptionSet(
+                hull_id=UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
+                military_score_delta_2x_min=20,
+                military_score_delta_2x_max=80,
+            )
+        ],
+    )
+
+
+def _class_only_freighter_record() -> FleetShipRecord:
+    return FleetShipRecord(
+        record_id="class-only-freighter",
+        events=[_scoreboard_class_event("freighter")],
+    )
+
+
 def test_known_hull_candidate_is_point_military(synthetic_catalog_context):
     record, military_2x = _known_warship_record(synthetic_catalog_context)
     candidates = prior_fleet_decrease_candidates(
         (record,),
-        hulls_by_id=synthetic_catalog_context["hulls_by_id"],
-        engines_by_id=synthetic_catalog_context["engines_by_id"],
-        beams_by_id=synthetic_catalog_context["beams_by_id"],
-        torpedos_by_id=synthetic_catalog_context["torpedos_by_id"],
-        buildable_hull_ids=synthetic_catalog_context["buildable_hull_ids"],
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
     )
     assert len(candidates) == 1
     assert candidates[0].is_point_military is True
@@ -121,11 +146,7 @@ def test_known_hull_candidate_is_point_military(synthetic_catalog_context):
 def test_option_set_envelope_candidate_is_interval(synthetic_catalog_context):
     candidates = prior_fleet_decrease_candidates(
         (_envelope_warship_record(),),
-        hulls_by_id=synthetic_catalog_context["hulls_by_id"],
-        engines_by_id=synthetic_catalog_context["engines_by_id"],
-        beams_by_id=synthetic_catalog_context["beams_by_id"],
-        torpedos_by_id=synthetic_catalog_context["torpedos_by_id"],
-        buildable_hull_ids=synthetic_catalog_context["buildable_hull_ids"],
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
     )
     assert len(candidates) == 1
     assert candidates[0].is_point_military is False
@@ -133,16 +154,43 @@ def test_option_set_envelope_candidate_is_interval(synthetic_catalog_context):
     assert candidates[0].score_delta_2x_max == 80
 
 
+def test_class_only_warship_without_envelope_is_not_a_candidate(synthetic_catalog_context):
+    candidates = prior_fleet_decrease_candidates(
+        (_class_only_warship_record(),),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert candidates == ()
+
+
+def test_unknown_hull_warship_with_record_envelope_is_candidate(synthetic_catalog_context):
+    candidates = prior_fleet_decrease_candidates(
+        (_unknown_hull_envelope_warship_record(),),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert len(candidates) == 1
+    assert candidates[0].is_point_military is False
+    assert candidates[0].score_delta_2x_min == 20
+    assert candidates[0].score_delta_2x_max == 80
+    assert candidates[0].ship_class == "warship"
+
+
+def test_class_only_freighter_is_zero_military(synthetic_catalog_context):
+    candidates = prior_fleet_decrease_candidates(
+        (_class_only_freighter_record(),),
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert len(candidates) == 1
+    assert candidates[0].ship_class == "freighter"
+    assert candidates[0].score_delta_2x_min == 0
+    assert candidates[0].score_delta_2x_max == 0
+
+
 def test_inactive_records_are_not_decrease_candidates(synthetic_catalog_context):
     record, _ = _known_warship_record(synthetic_catalog_context)
     record.disposition = "lost"
     candidates = prior_fleet_decrease_candidates(
         (record,),
-        hulls_by_id=synthetic_catalog_context["hulls_by_id"],
-        engines_by_id=synthetic_catalog_context["engines_by_id"],
-        beams_by_id=synthetic_catalog_context["beams_by_id"],
-        torpedos_by_id=synthetic_catalog_context["torpedos_by_id"],
-        buildable_hull_ids=synthetic_catalog_context["buildable_hull_ids"],
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
     )
     assert candidates == ()
 
@@ -240,7 +288,6 @@ def _transfer_catalog_kwargs(synthetic_catalog_context) -> dict:
         "engines_by_id": synthetic_catalog_context["engines_by_id"],
         "beams_by_id": synthetic_catalog_context["beams_by_id"],
         "torpedos_by_id": synthetic_catalog_context["torpedos_by_id"],
-        "buildable_hull_ids": synthetic_catalog_context["buildable_hull_ids"],
     }
 
 
@@ -254,11 +301,7 @@ def test_gift_actions_carry_counterparty_and_are_not_loss(synthetic_catalog_cont
         observation,
         peer_rows=(_peer_row(3, warship=1, military_2x=military_2x),),
         prior_fleet_records=(record,),
-        hulls_by_id=synthetic_catalog_context["hulls_by_id"],
-        engines_by_id=synthetic_catalog_context["engines_by_id"],
-        beams_by_id=synthetic_catalog_context["beams_by_id"],
-        torpedos_by_id=synthetic_catalog_context["torpedos_by_id"],
-        buildable_hull_ids=synthetic_catalog_context["buildable_hull_ids"],
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
     ).actions
     assert any(action.id.startswith(GIFT_ACTION_PREFIX) for action in actions)
     assert all(not action.id.startswith(SHIP_LOSS_ACTION_PREFIX) for action in actions)
@@ -281,11 +324,7 @@ def test_several_gift_counterparties_are_distinct_action_ids(synthetic_catalog_c
             _peer_row(4, warship=1, military_2x=military_2x),
         ),
         prior_fleet_records=(record,),
-        hulls_by_id=synthetic_catalog_context["hulls_by_id"],
-        engines_by_id=synthetic_catalog_context["engines_by_id"],
-        beams_by_id=synthetic_catalog_context["beams_by_id"],
-        torpedos_by_id=synthetic_catalog_context["torpedos_by_id"],
-        buildable_hull_ids=synthetic_catalog_context["buildable_hull_ids"],
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
     ).actions
     gift_ids = {action.id for action in actions if action.id.startswith(GIFT_ACTION_PREFIX)}
     counterparties = {

@@ -21,10 +21,7 @@ from api.concepts.hulls import (
     is_generic_freighter_sentinel_hull_id,
     is_unknown_military_ship_sentinel_hull_id,
 )
-from api.concepts.ship_build_military import (
-    ship_build_military_score_delta_2x,
-    warship_construction_envelope_2x,
-)
+from api.concepts.ship_build_military import ship_build_military_score_delta_2x
 from api.models.components import Beam, Engine, Hull, Torpedo
 
 
@@ -47,16 +44,8 @@ def prior_fleet_decrease_candidates(
     engines_by_id: dict[int, Engine],
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
-    buildable_hull_ids: frozenset[int],
 ) -> tuple[PriorFleetDecreaseCandidate, ...]:
     """Active prior-turn records that may leave the roster this host turn."""
-    race_envelope = warship_construction_envelope_2x(
-        hulls_by_id=hulls_by_id,
-        engines_by_id=engines_by_id,
-        beams_by_id=beams_by_id,
-        torpedos_by_id=torpedos_by_id,
-        buildable_hull_ids=buildable_hull_ids,
-    )
     candidates: list[PriorFleetDecreaseCandidate] = []
     for record in records:
         if record.disposition != "active":
@@ -71,7 +60,6 @@ def prior_fleet_decrease_candidates(
             engines_by_id=engines_by_id,
             beams_by_id=beams_by_id,
             torpedos_by_id=torpedos_by_id,
-            race_envelope=race_envelope,
         )
         if military is None:
             continue
@@ -104,7 +92,6 @@ def _departure_military_2x(
     engines_by_id: dict[int, Engine],
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
-    race_envelope: tuple[int, int] | None,
 ) -> tuple[int, int] | None:
     option_envelope = _option_set_envelope_2x(record.build_option_sets)
     point = _known_fill_military_2x(
@@ -120,9 +107,7 @@ def _departure_military_2x(
         return option_envelope
     if ship_class == "freighter":
         return 0, 0
-    if race_envelope is None:
-        return None
-    return race_envelope
+    return None
 
 
 def _option_set_envelope_2x(
