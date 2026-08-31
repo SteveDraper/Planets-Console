@@ -1359,6 +1359,7 @@ Script exit code `0` when no hard failures; stdout supports human summary and op
 - Manifest lists explicit cases with `hostTurn`, `perspective`, `complexity`, optional `requiredPerspectives`, optional `requireTopK`.
 - Most rows: `minimal` / `routine`, Tier 1 `exact` only.
 - **Adjunct multi-perspective snippet (#66):** game `628580`, host turn 20, case perspective 6 plus required perspective 8. Super Star Destroyer 153 is a same-XY owner change 8→6. The case prior omits the foreign-owned hull so classification is `heavy` alone and `adjunct` (`trade_or_capture_hint`) after the merge. Default CI skips the row (`adjunct_disabled`). Refresh from a local load-all copy of those two slots, then trim per [design-inference-corpus.md](design-inference-corpus.md) section 4.
+- **Synthetic #370 pairing fixture:** game `900001`, host turn 10, shared `900001/1/turns/{10,11}.json`. Two disjoint trades (warship military swap 1↔2; freighter↔warship class flip 3↔4). Post-accel so `scoreTurn` change fields are reliable. Default CI skips the adjunct rows; pairing tests exercise `trade:` catalog/pairing directly.
 
 #### Ordering relative to solver work (GitHub epic #39)
 

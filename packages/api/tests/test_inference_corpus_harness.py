@@ -19,7 +19,7 @@ from tests.inference_corpus.run import HORWASP_SKIP_REASON, run_discovered_case,
 
 def test_load_fixed_manifest_has_seed_cases():
     _, cases = load_manifest()
-    assert len(cases) == 4
+    assert len(cases) == 6
     host2 = next(case for case in cases if case.id == "628580-p1-host2")
     assert host2.host_turn == 2
     assert host2.complexity == "minimal"
@@ -32,6 +32,15 @@ def test_load_fixed_manifest_has_seed_cases():
     assert adjunct.complexity == "adjunct"
     assert adjunct.required_perspectives == (8,)
     assert adjunct.expect_coverage is False
+    swap = next(case for case in cases if case.id == "900001-p1-host10")
+    assert swap.complexity == "adjunct"
+    assert swap.player_id == 1
+    assert swap.expect_coverage is False
+    flip = next(case for case in cases if case.id == "900001-p3-host10")
+    assert flip.complexity == "adjunct"
+    assert flip.player_id == 3
+    assert flip.prior_turn_path == swap.prior_turn_path
+    assert flip.score_turn_path == swap.score_turn_path
 
 
 def test_resolve_player_id_from_game_info():

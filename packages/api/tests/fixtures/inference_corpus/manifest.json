@@ -65,6 +65,40 @@
       "expectCoverage": false,
       "requiredPerspectives": [8],
       "notes": "Multi-perspective adjunct (#66): Super Star Destroyer 153 gifted 8->6 at Antonia (1737,2366). Case prior omits the foreign-owned hull so trade_or_capture_hint requires merged perspective 8. Default CI skips adjunct."
+    },
+    {
+      "id": "900001-p1-host10",
+      "gameId": 900001,
+      "perspective": 1,
+      "hostTurn": 10,
+      "playerId": 1,
+      "gameInfoPath": "900001/info.json",
+      "priorTurnPath": "900001/1/turns/10.json",
+      "scoreTurnPath": "900001/1/turns/11.json",
+      "complexity": "adjunct",
+      "tier": 1,
+      "expectedStatus": "exact",
+      "requireTopK": false,
+      "expectCoverage": false,
+      "requiredPerspectives": [],
+      "notes": "Synthetic post-accel warship military swap (players 1<->2). Shared turn files with 900001-p3-host10. Default CI skips adjunct."
+    },
+    {
+      "id": "900001-p3-host10",
+      "gameId": 900001,
+      "perspective": 1,
+      "hostTurn": 10,
+      "playerId": 3,
+      "gameInfoPath": "900001/info.json",
+      "priorTurnPath": "900001/1/turns/10.json",
+      "scoreTurnPath": "900001/1/turns/11.json",
+      "complexity": "adjunct",
+      "tier": 1,
+      "expectedStatus": "exact",
+      "requireTopK": false,
+      "expectCoverage": false,
+      "requiredPerspectives": [],
+      "notes": "Synthetic post-accel freighter/warship class-flip (players 3<->4). Shared turn files with 900001-p1-host10. Default CI skips adjunct."
     }
   ]
 }

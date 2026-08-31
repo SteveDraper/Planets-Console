@@ -336,6 +336,8 @@ If a trade hypothesis needs slot `Q` and `Q` is missing, **do not** promote to `
 
 **Committed pattern (#66):** game `628580`, host turn **20**, perspectives **6** (case) and **8** (`requiredPerspectives`). Super Star Destroyer id `153` is owned by slot 8 at N and by slot 6 at N+1 at the same XY (Antonia). The case-perspective prior **omits** that foreign-owned hull so `trade_or_capture_hint` requires the merge; without perspective 8 the same pair classifies `heavy`. Default CI skips the adjunct row (`adjunct_disabled`). Gift/trade/loss are catalog families (#370), so `trade_or_capture_hint` and `net_ship_count_decrease` are **not** mapped to `deferred_trade` / `deferred_ship_loss`.
 
+**Synthetic trade pairing fixture:** game `900001`, host turn **10**, one shared perspective-1 turn pair. Two disjoint public-scoreboard trades on the same files: players 1↔2 warship military swap (unequal construction military) and players 3↔4 freighter↔warship class flip. Scoreboard `*change` on turn 11 is those two swaps only (idle player 5 is flat). Settings keep `acceleratedturns: 3` but the pair is post-accel (`scoreTurn` 11), so scoreboard backfill does not run. Manifest rows `900001-p1-host10` / `900001-p3-host10` override `playerId` and `gameInfoPath`; default CI skips both (`adjunct_disabled`). Pairing tests call `classify_public_scoreboard_pairing` / `build_action_catalog_from_turn` (not stubbed coverage). This is not 628580 history -- catalogs are cloned from a 628580 fixture; military deltas use `ship_build_military_score_delta_2x`.
+
 ---
 
 ## 9. Ground truth explanation v1 (#64)

@@ -17,11 +17,15 @@ def test_fixed_inference_corpus_tier1_passes():
         result for result in report.results if result.outcome == CaseOutcome.SKIPPED_COMPLEXITY
     ]
     assert len(passed) == 3
-    assert len(skipped) == 1
-    assert skipped[0].case_id == "628580-p6-host20"
-    assert skipped[0].skip_reason == "adjunct_disabled"
-    assert skipped[0].complexity == "adjunct"
-    assert len(report.results) == 4
+    assert len(skipped) == 3
+    assert {result.case_id for result in skipped} == {
+        "628580-p6-host20",
+        "900001-p1-host10",
+        "900001-p3-host10",
+    }
+    assert all(result.skip_reason == "adjunct_disabled" for result in skipped)
+    assert all(result.complexity == "adjunct" for result in skipped)
+    assert len(report.results) == 6
 
 
 def test_fixed_corpus_host2_hard_ranking_lock_passes():
