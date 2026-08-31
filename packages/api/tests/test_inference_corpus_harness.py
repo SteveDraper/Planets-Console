@@ -59,6 +59,22 @@ def test_adjunct_case_skipped_by_default():
     assert result.skip_reason == "adjunct_disabled"
 
 
+def test_adjunct_expect_coverage_still_skipped_without_include_adjunct():
+    _, cases = load_manifest()
+    case = cases[0]
+    adjunct_case = case.__class__(
+        **{
+            **case.__dict__,
+            "id": "adjunct-expect-coverage-stub",
+            "complexity": "adjunct",
+            "expect_coverage": True,
+        }
+    )
+    result = run_manifest_case(adjunct_case)
+    assert result.outcome == CaseOutcome.SKIPPED_COMPLEXITY
+    assert result.skip_reason == "adjunct_disabled"
+
+
 def test_horwasp_manifest_case_skipped_without_inference_failure():
     _, cases = load_manifest()
     case = cases[0]

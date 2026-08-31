@@ -117,7 +117,6 @@ def run_manifest_case(
         case.complexity,
         max_complexity=max_complexity,
         include_adjunct=include_adjunct,
-        expect_coverage=case.expect_coverage,
     )
     if skip_reason is not None:
         return CorpusCaseResult(
@@ -177,7 +176,6 @@ def run_manifest_case(
         complexity,
         max_complexity=max_complexity,
         include_adjunct=include_adjunct,
-        expect_coverage=case.expect_coverage,
     )
     if skip_reason is not None:
         return CorpusCaseResult(
@@ -279,7 +277,6 @@ def run_discovered_case(
         complexity,
         max_complexity=max_complexity,
         include_adjunct=include_adjunct,
-        expect_coverage=expect_coverage,
     )
     if skip_reason is not None:
         return CorpusCaseResult(
@@ -469,12 +466,11 @@ def _complexity_skip_reason(
     *,
     max_complexity: ComplexityLevel,
     include_adjunct: bool,
-    expect_coverage: bool = False,
 ) -> str | None:
     if complexity is None:
         return None
     if complexity == "adjunct":
-        if include_adjunct or expect_coverage:
+        if include_adjunct:
             return None
         return "adjunct_disabled"
     case_level = COMPLEXITY_ORDINAL[complexity]

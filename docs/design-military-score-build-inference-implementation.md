@@ -1328,7 +1328,7 @@ Before running the solver, classify each case into `minimal`, `routine`, `heavy`
 
 - **Multi-perspective ground truth:** adjunct detection (e.g. trades) may merge ship visibility from every perspective that has both turns stored. If a required other perspective is missing from the fixture tree, the fixed corpus **fails fast**. Do not infer a trade from the case slot alone when the foreign hull is only on another slot.
 - **`--max-complexity`:** skip cases above the cap (recorded reason, not a failure).
-- **Level 3 (`adjunct`):** skipped by default unless `--include-adjunct` or the manifest row sets `expectCoverage: true`.
+- **Level 3 (`adjunct`):** skipped by default unless `--include-adjunct`.
 
 #### Per-case pipeline
 

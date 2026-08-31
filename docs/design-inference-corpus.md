@@ -134,7 +134,7 @@ Single-perspective (existing seed) or **multi-perspective adjunct** (section 8) 
 3. Trim large arrays (section 4.3) so each turn file stays under ~200 KB if possible.
 4. Copy or subset `games/{gameId}/info.json` to `fixtures/inference_corpus/{gameId}/info.json` (one file per game; already present for `628580`).
 5. For a trade/gift hint: confirm `classify_complexity` is `adjunct` with `trade_or_capture_hint` **after** merging the other slot, and is **not** that signal on the case slot alone. If the case prior still contains the foreign-owned hull, omit that ship id from the case prior (keep it on the counterparty prior).
-6. Add or update `manifest.json` rows (`requiredPerspectives`, `complexity: adjunct`). Default CI skips adjunct unless `--include-adjunct` or `expectCoverage: true`.
+6. Add or update `manifest.json` rows (`requiredPerspectives`, `complexity: adjunct`). Default CI skips adjunct unless `--include-adjunct`.
 7. Run `make test_api`.
 
 Example: copy host turns 20 and 21 for perspectives 6 and 8 of game `628580` (the committed #66 pair):
@@ -261,7 +261,7 @@ Most probe budget stops are **`out_of_search_space`** (catalog coverage gaps). T
 | 0 | `minimal` | yes |
 | 1 | `routine` | yes |
 | 2 | `heavy` | yes |
-| 3 | `adjunct` | only with `--include-adjunct`, or when the manifest row sets `expectCoverage: true` |
+| 3 | `adjunct` | only with `--include-adjunct` |
 
 CLI `--max-complexity` accepts names `minimal`, `routine`, `heavy`, `adjunct` or integers `0`–`3`. Skip when `case.level > cap`.
 
@@ -294,7 +294,7 @@ Document computed `complexity` and `complexityReasons: string[]` on each case re
 
 ### 6.3 Default skips
 
-- `complexity == adjunct` and not `--include-adjunct` and not manifest `expectCoverage` -> `skipped_complexity` (reason `adjunct_disabled`). `--include-adjunct` (or `expectCoverage`) runs the adjunct row even when `--max-complexity` is `heavy`.
+- `complexity == adjunct` and not `--include-adjunct` -> `skipped_complexity` (reason `adjunct_disabled`). `--include-adjunct` runs the adjunct row even when `--max-complexity` is `heavy`. `expectCoverage` is a CI assertion for rows that run (section 9.2); it does not opt adjunct into the default skip.
 - Above `--max-complexity` -> `skipped_complexity`
 
 ---
