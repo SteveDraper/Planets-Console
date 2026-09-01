@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { ReactNode } from 'react'
 import {
   defaultConnectionsParams,
@@ -10,6 +10,7 @@ import {
 import { useMapAnalyticQueries, type UseMapAnalyticQueriesInput } from './useMapAnalyticQueries'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import type { AnalyticItem } from '../api/bff'
+import { useConnectionsMapParamsStore } from '../analytics/connections/connectionsMapParamsStore'
 
 vi.mock('../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/bff')>()
@@ -56,12 +57,16 @@ function defaultHookInput(
     analytics: sampleAnalytics,
     analyticScope: sampleScope,
     analyticFetchEnabled: true,
-    connectionsMapParams: defaultConnectionsParams,
     ...overrides,
   }
 }
 
 describe('useMapAnalyticQueries', () => {
+  beforeEach(() => {
+    useConnectionsMapParamsStore.setState({
+      connectionsMapParams: defaultConnectionsParams,
+    })
+  })
   it('combines map query results when data arrives', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     vi.mocked(fetchAnalyticMap).mockClear()
@@ -109,11 +114,10 @@ describe('useMapAnalyticQueries', () => {
     })
     vi.mocked(combineMapData).mockClear()
 
-    const { result, rerender } = renderHook(
-      (input: UseMapAnalyticQueriesInput) => useMapAnalyticQueries(input),
+    const { result } = renderHook(
+      () => useMapAnalyticQueries(defaultHookInput()),
       {
         wrapper: createWrapper(client),
-        initialProps: defaultHookInput(),
       }
     )
 
@@ -122,14 +126,12 @@ describe('useMapAnalyticQueries', () => {
     })
     const edgesOffFlare = result.current.combined.edges
 
-    rerender(
-      defaultHookInput({
-        connectionsMapParams: {
-          ...defaultConnectionsParams,
-          flareMode: 'only',
-        },
-      })
-    )
+    useConnectionsMapParamsStore.setState({
+      connectionsMapParams: {
+        ...defaultConnectionsParams,
+        flareMode: 'only',
+      },
+    })
 
     await waitFor(() => {
       expect(result.current.combined.edges).not.toEqual(edgesOffFlare)

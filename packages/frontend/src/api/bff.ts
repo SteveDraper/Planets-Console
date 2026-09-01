@@ -1,10 +1,10 @@
 import { turnUsernamesByPlayerIdFromPayload } from '../lib/turnPlayerUsernames'
 import { turnRelationsFromPayload, type TurnRelationEdge } from '../lib/turnRelations'
 
-import { appendConnectionsMapQueryParams } from '../analytics/connections/api'
-import type { ConnectionsMapParams } from '../analytics/connections/api'
-import { appendScoresTableQueryParams } from '../analytics/scores/api'
-import type { ScoresTableParams } from '../analytics/scores/api'
+import {
+  appendRegisteredMapQueryParams,
+  appendRegisteredTableQueryParams,
+} from '../analytics/shellAnalyticQueryParams'
 import {
   parseFleetComponentCatalog,
   type FleetComponentCatalog,
@@ -615,27 +615,23 @@ function analyticScopeParams(scope: AnalyticShellScope): URLSearchParams {
   return params
 }
 
-function analyticMapQueryString(
-  scope: AnalyticShellScope,
-  analyticId: string,
-  connectionsParams: ConnectionsMapParams | undefined
-): string {
+function analyticMapQueryString(scope: AnalyticShellScope, analyticId: string): string {
   const params = analyticScopeParams(scope)
-  if (analyticId === 'connections' && connectionsParams != null) {
-    appendConnectionsMapQueryParams(params, connectionsParams)
-  }
+  appendRegisteredMapQueryParams(analyticId, params)
   return `?${params.toString()}`
 }
 
 export async function fetchAnalyticTable(
   analyticId: string,
   scope: AnalyticShellScope,
-  scoresTableParams?: ScoresTableParams
+  extraAppend?: (params: URLSearchParams) => void
 ): Promise<TableDataResponse> {
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/table`
   const params = analyticScopeParams(scope)
-  if (analyticId === 'scores' && scoresTableParams != null) {
-    appendScoresTableQueryParams(params, scoresTableParams)
+  if (extraAppend != null) {
+    extraAppend(params)
+  } else {
+    appendRegisteredTableQueryParams(analyticId, params)
   }
   const qs = `?${params.toString()}`
   const endpointLabel = `GET ${path}`
@@ -873,11 +869,10 @@ export async function fetchFleetComponentCatalog(
 
 export async function fetchAnalyticMap(
   analyticId: string,
-  scope: AnalyticShellScope,
-  connectionsParams?: ConnectionsMapParams
+  scope: AnalyticShellScope
 ): Promise<MapDataResponse> {
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/map`
-  const qs = analyticMapQueryString(scope, analyticId, connectionsParams)
+  const qs = analyticMapQueryString(scope, analyticId)
   const endpointLabel = `GET ${path}`
   const r = await bffRequest(`${path}${qs}`, { cache: 'no-store' }, endpointLabel)
   if (!r.ok) {

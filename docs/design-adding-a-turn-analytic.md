@@ -266,68 +266,60 @@ Registry tests assert each layer follows `TURN_ANALYTIC_CATALOG` order; catalog/
 
 ## 4. Frontend (optional)
 
-Skip this section when generic shells suffice (Scores is the reference).
+Skip this section when **generic shells** suffice: sidebar checkbox, generic MainArea table body, no extra GET query params, no GameInfo inactivity, no table stream.
 
-Add `src/analytics/<id>/` when you need any of:
+Custom Shell chrome is a sparse **shell analytic registration** ([ADR 0026](adr/0026-shell-analytic-registration.md)), keyed by **turn analytic catalog** id. Add `src/analytics/<id>/shell.tsx` exporting a `ShellAnalyticRegistration` and one entry in `shellAnalyticRegistry.ts`. **Do not** add analytic-id branches in `App.tsx`, `AnalyticsBar.tsx`, `MainArea.tsx`, or generic `fetchAnalyticTable` / `fetchAnalyticMap` in `bff.ts`.
 
-| Need | Where |
-|------|-------|
-| Sidebar controls beyond enable/disable | `AnalyticsBar` delegates to `<Id>MapTile` or similar |
-| Map GET query params not covered by generic fetch | Query builder in `src/analytics/<id>/api.ts`; wire names match BFF |
-| Custom React Query keys | `MainArea.tsx` map fetch loop (see below) |
-| Map layer merge rules | `src/analytics/mapLayers.ts` |
+An unregistered selectable id is not an error: generic checkbox + generic table.
+
+| Need | Slot |
+|------|------|
+| Sidebar controls beyond enable/disable | `renderSidebar(ctx)` -- return `null` in a **view mode** that should use the generic checkbox |
+| Custom MainArea table body | `TableView` |
+| Extra GET query params on generic table/map fetch | `queryParams.appendTable` / `appendMap` (same function references live in `shellAnalyticQueryParams.ts` so `bff.ts` does not import React chrome) |
+| GameInfo inactivity (grey/disable without dropping persisted enablement) | `availability(gameInfo) => string \| null` |
+| Table stream | `stream`: `{ lifetime: 'shell', hook, Provider }` or `{ lifetime: 'tile' }` |
+
+`renderSidebar` receives `ShellAnalyticSidebarContext`: `viewMode`, `catalogItem`, `enabled`, `onToggle`, plus shell-owned `turnDataReady` and `analyticScope` so tiles do not re-derive ensure/scope.
 
 Generic paths (no frontend module required):
 
-- **Table:** `MainArea` calls `fetchAnalyticTable(analyticId, analyticScope)`.
-- **Map (no extra params):** `fetchAnalyticMap(analyticId, analyticScope)`.
+- **Table:** `MainArea` uses `TableView` when registered, otherwise `GenericTableTile` calling `fetchAnalyticTable(analyticId, analyticScope)`.
+- **Map (no extra params):** `fetchAnalyticMap(analyticId, analyticScope)` via the map fetch/merge registry.
+
+A caller that must **not** pick up store-backed table params (e.g. race/player labels with `includeBuildInference: false`) passes `extraAppend` to `fetchAnalyticTable` and skips the registered appender.
 
 After BFF response shape changes, regenerate OpenAPI types (`make generate` or `cd packages/frontend && npm run generate:api`). Produces per-router `schema-<slice>.ts` files; see [ADR 0003](adr/0003-frontend-bff-contract-codegen.md).
 
 (Requires a running server with BFF OpenAPI endpoint.)
 
-### 4.1 Map fetch orchestration (current vs future)
+### 4.1 Map fetch vs Shell chrome
 
-**Current design:** `MainArea` uses one generic map-fetch path for all map analytics except **Connections**, which has a dedicated branch for:
+These are sibling registries, not one mega plugin table:
 
-- React Query keys that include sidebar params (warp speed, flare mode, etc.)
-- Re-fetch when those params change
-- Wiring `fetchAnalyticMap('connections', scope, params)` via `src/analytics/connections/api.ts`
+| Concern | Owner |
+|---------|--------|
+| Sidebar, table view, query-string adapters, GameInfo availability, stream lifetime | **Shell analytic registration** (`shellAnalyticRegistry.ts`) |
+| Map GET query keys, fetch, merge into combined map data | **Map fetch/merge registry** (`mapAnalyticRegistry.ts` + `useMapAnalyticQueries`) |
+| Map paint (React Flow node/edge components) | Not a registry slot yet ([#383](https://github.com/SteveDraper/Planets-Console/issues/383)) |
 
-For a **new map analytic with no query params**, no `MainArea` edit is required -- the generic path is enough (same as base-map-style overlays).
+Parametric map knobs (Connections warp/flare) live in an **ephemeral** Zustand store under `src/analytics/connections/` -- not in `App.tsx`, **not persisted**. `buildQuerySpec` and the query-param adapter read `getState()`; `useMapAnalyticQueries` subscribes so query keys update when knobs change. Generic `fetchAnalyticMap` appends `queryParams.appendMap`.
 
-For a **new map analytic with query params or custom cache behaviour**, the current process is:
+Do not add `if (analyticId === ...)` in `MainArea` for map fetch. A new parametric map analytic registers `queryParams.appendMap` and, when the query key must include those knobs, a map-registry `buildQuerySpec`.
 
-1. Add query helpers under `src/analytics/<id>/`.
-2. Add a **new `if (analyticId === '<id>')` branch** in `MainArea.tsx` (mirror Connections).
+**Re-examination triggers** -- map **paint** (#383) or a deeper map-registry slot, not a new MainArea fetch branch:
 
-**Stop and reconsider architecture** if you are about to add a second branch of this kind, or if Connections and the new analytic share substantial fetch/key logic. Repeated `MainArea` special cases mean the shell owns analytic-specific orchestration that should move out.
-
-**Possible future direction (not implemented):** extract a map-fetch plugin surface, e.g.:
-
-| Piece | Responsibility |
-|-------|----------------|
-| `src/analytics/<id>/mapFetch.ts` | `mapQueryKey(scope, params)`, `fetchMap(scope, params)` |
-| `src/analytics/mapFetchRegistry.ts` | `Record<analyticId, MapFetchPlugin \| undefined>` -- absent entry means generic fetch |
-| `MainArea.tsx` | Looks up plugin by id; no per-analytic `if/elif` |
-
-That would align frontend orchestration with the BFF **Analytic descriptor** model: one module per analytic, one registration line, generic dispatch in the shell. Until that refactor, treat each Connections-like analytic as a documented exception and track how many exist.
-
-**Re-examination triggers** -- schedule or do the generalization work when any of these become true:
-
-- Two or more map analytics with configurable query params
-- A third distinct pattern in `MainArea` map fetch (beyond generic + Connections)
-- Shared query-key or param-forwarding logic copied between analytic modules
-- Sidebar tile + map fetch + merge rules for one analytic span four or more files with duplicated wiring
-
-When triggered, prefer a small registry refactor over accumulating `MainArea` branches. Update this section and [design-analytics-structure.md](design-analytics-structure.md) when the plugin model is adopted.
+- A second map analytic whose paint cannot live in `MapGraph` without an id switch
+- Query-key or param-forwarding logic copied between analytic modules instead of `queryParams` / `buildQuerySpec`
+- Sidebar tile + map fetch + merge + paint for one analytic spanning duplicated wiring
 
 ### 4.2 Frontend checklist (when this section applies)
 
 - [ ] Query wire names match BFF and `api/transport/` (if params cross layers)
-- [ ] Map fetch uses generic path unless query params or custom keys are required
-- [ ] If adding a `MainArea` branch: note it in the PR and confirm re-examination triggers above are not met
-- [ ] If re-examination triggers **are** met: discuss map-fetch plugin refactor before adding another branch
+- [ ] Custom chrome is a `ShellAnalyticRegistration` plus one registry line; `App` / `AnalyticsBar` / `MainArea` / generic fetch stay id-switch free
+- [ ] Unregistered selectable ids fall back to generic checkbox + generic table (not an error)
+- [ ] Map fetch/merge stays on `mapAnalyticRegistry`; map paint remains [#383](https://github.com/SteveDraper/Planets-Console/issues/383)
+- [ ] Connections-style knobs: analytic-owned ephemeral store, not `App` `useState` and not persisted unless the product asks for it
 
 ---
 
@@ -341,8 +333,8 @@ Use this before opening a PR:
 - [ ] **Core:** router query params and `TurnAnalyticsOptions` (if applicable)
 - [ ] **BFF:** module with `from_catalog_entry` descriptor + `_BFF_DESCRIPTORS_BY_ID` entry
 - [ ] **BFF:** unit/integration tests for dispatch and HTTP shape
-- [ ] **Frontend:** only if generic shells insufficient; query wire names aligned with BFF
-- [ ] **Frontend:** if adding a `MainArea` map-fetch branch, confirm [§4.1 re-examination triggers](#41-map-fetch-orchestration-current-vs-future) are not met
+- [ ] **Frontend:** only if generic shells insufficient; register Shell chrome ([§4](#4-frontend-optional)); query wire names aligned with BFF
+- [ ] **Frontend:** do not add analytic-id branches in `App` / `AnalyticsBar` / `MainArea` / generic table/map fetch; confirm [§4.1](#41-map-fetch-vs-shell-chrome) if map paint or a second parametric map contract is involved
 - [ ] **Docs:** row in `design-analytics-structure.md` quick-reference table
 - [ ] **`make test`** passes (lint + all package tests)
 - [ ] Manual smoke: enable analytic in shell, confirm tabular and/or map output after turn ensure
@@ -359,7 +351,7 @@ Use this before opening a PR:
 | BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Append `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` |
 | `supportsMap: true` but no `get_map` | Registry validation test fails | Set handler on descriptor |
 | Frontend query param names drift from BFF | Silent wrong results or ignored params | Share wire names via `api/transport/` |
-| Second Connections-style `MainArea` branch | Shell accumulates analytic-specific fetch logic | See [§4.1 re-examination triggers](#41-map-fetch-orchestration-current-vs-future); generalize map fetch instead |
+| Analytic-id branch in `App` / `AnalyticsBar` / `MainArea` / generic fetch | Shell accumulates chrome that belongs on the registration | Register `renderSidebar` / `TableView` / `queryParams` / `availability` / `stream` instead |
 | New map analytic needs non-Connections query params | Shared map route would accept misleading or clashing params | See [map route query params](design-analytics-structure.md#map-route-query-params-intentional-gap); descriptor-driven parsing or split routes |
 | Fetch before turn ensure | Empty/error flicker | Gate on `turnDataReady` in shell (see design-frontend-and-backend-state.md) |
 | Map overlay without base-map | No planet nodes to attach to | Map mode always fetches `base-map` first |
@@ -370,6 +362,6 @@ Use this before opening a PR:
 
 | Analytic | Kind | Read |
 |----------|------|------|
-| Scores | Table-only, generic frontend | `api/analytics/scores.py`, `bff/analytics/scores.py` |
+| Scores | Table-only, custom sidebar + tile-lived inference | `api/analytics/scores.py`, `bff/analytics/scores.py`, `src/analytics/scores/shell.tsx` |
 | base-map | Always-on map layer | `api/analytics/base_map.py`, `bff/analytics/base_map.py` |
 | Connections | Map overlay + query params + frontend controls | [design-connections-analytic.md](design-connections-analytic.md) |

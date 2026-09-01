@@ -40,6 +40,19 @@ function renderTile(ui: ReactNode) {
   })
 }
 
+function seedInactiveHomeworld() {
+  useShellStore.setState({
+    gameInfoContext: {
+      turn: 10,
+      isGameFinished: true,
+      perspectives: [],
+      sectorDisplayName: null,
+      stellarCartographyGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+      homeworldInactiveReason: 'nohomeworld',
+    },
+  })
+}
+
 function seedShellForAnalyticScope() {
   useSessionStore.setState({ name: 'alice', password: '', credentialsRevision: 0 })
   useShellStore.setState({
@@ -97,6 +110,7 @@ describe('HomeworldLocatorTile', () => {
   })
 
   it('disables the toggle and shows an inactive hint when unavailable', () => {
+    seedInactiveHomeworld()
     renderTile(
       <HomeworldLocatorTile
         name="Homeworld locator"
@@ -104,7 +118,6 @@ describe('HomeworldLocatorTile', () => {
         supportsMode
         depressed={false}
         onToggle={() => undefined}
-        inactiveReason="nohomeworld"
         turnDataReady
       />
     )
@@ -115,6 +128,7 @@ describe('HomeworldLocatorTile', () => {
   })
 
   it('shows unchecked when persisted enabled but inactive', () => {
+    seedInactiveHomeworld()
     renderTile(
       <HomeworldLocatorTile
         name="Homeworld locator"
@@ -122,7 +136,6 @@ describe('HomeworldLocatorTile', () => {
         supportsMode
         depressed
         onToggle={() => undefined}
-        inactiveReason="nohomeworld"
         turnDataReady
       />
     )
@@ -139,7 +152,6 @@ describe('HomeworldLocatorTile', () => {
         supportsMode
         depressed={false}
         onToggle={() => undefined}
-        inactiveReason={null}
         turnDataReady
       />
     )
@@ -155,7 +167,6 @@ describe('HomeworldLocatorTile', () => {
         supportsMode
         depressed
         onToggle={() => undefined}
-        inactiveReason={null}
         turnDataReady
       />
     )
@@ -213,7 +224,6 @@ describe('HomeworldLocatorTile', () => {
         supportsMode
         depressed
         onToggle={() => undefined}
-        inactiveReason={null}
         turnDataReady
       />
     )
@@ -239,7 +249,6 @@ describe('HomeworldLocatorTile', () => {
         supportsMode
         depressed
         onToggle={() => undefined}
-        inactiveReason={null}
         turnDataReady={false}
       />
     )

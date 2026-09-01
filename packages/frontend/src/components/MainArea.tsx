@@ -1,27 +1,10 @@
-import { memo, useEffect, useState, type ReactNode } from 'react'
+import { memo, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
-import { fetchAnalyticTable } from '../api/bff'
-import type {
-  AnalyticItem,
-  AnalyticShellScope,
-  ConnectionsMapParams,
-  ScoresInferenceRowDetail,
-  ScoresTableParams,
-  ScoresTableWithInferenceData,
-  TableDataResponse,
-} from '../api/bff'
-import { scoresAnalyticTableQueryKey } from '../analytics/scores/api'
-import { scoresDiagnosticsFromTable } from '../analytics/scores/diagnosticsFromTable'
-import { ScoresTableView } from '../analytics/scores/ScoresTableView'
-import { FleetAnalyticTableTile } from '../analytics/fleet/FleetAnalyticTableTile'
-import { FleetStreamPlayersProvider } from '../analytics/fleet/FleetStreamPlayersContext'
-import { useFleetTableStream } from '../analytics/fleet/useFleetTableStream'
-import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
-import { useScoresInferenceByRow } from '../analytics/scores/useScoresInferenceByRow'
-import type { UseGlobalInferencePauseResult } from '../analytics/scores/useGlobalInferencePause'
-import { useAnalyticDiagnosticsStore } from '../stores/analyticDiagnostics'
+import type { AnalyticItem, AnalyticShellScope } from '../api/bff'
+import { GenericTableTile } from '../analytics/GenericTableTile'
+import { ShellLivedStreamTree } from '../analytics/ShellLivedStreamTree'
+import { shellAnalyticRegistrationFor } from '../analytics/shellAnalyticRegistry'
 import { isStellarCartographyMapEnabled } from '../analytics/mapShellCartography'
 import {
   DEFAULT_PLANET_LABEL_OPTIONS,
@@ -30,7 +13,6 @@ import {
 import { ShellCenterPane, ShellErrorPane } from './shell/ShellPlaceholders'
 import { MapShellContent, type MapShellContentProps } from './shell/MapShellContent'
 import { deriveTurnEnsureLoadingView } from '../lib/mapDisplayRetention'
-import { errorDetailFromUnknown } from '../lib/queryRetry'
 import { enabledTableAnalyticIds } from '../lib/enabledModeAnalyticIds'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
 import { useRetainedMapDisplay } from '../lib/useRetainedMapDisplay'
@@ -71,19 +53,6 @@ function AnalyticTableSection({ title, children }: { title: string; children: Re
   )
 }
 
-function buildScoresTableWithInference(
-  data: TableDataResponse,
-  inferenceByRow: ScoresInferenceRowDetail[]
-): ScoresTableWithInferenceData {
-  return {
-    analyticId: data.analyticId,
-    columns: data.columns,
-    rows: data.rows,
-    includeBuildInference: true,
-    inferenceByRow,
-  }
-}
-
 type MainAreaProps = {
   viewMode: ViewMode
   enabledAnalyticIds: string[]
@@ -98,133 +67,10 @@ type MainAreaProps = {
   turnEnsureError: unknown
   /** Scope is set but login name is missing, so turn cannot be ensured. */
   turnBlockedNoLogin: boolean
-  /** Parameters for the Connections map analytic (refetch when these change). */
-  connectionsMapParams: ConnectionsMapParams
-  /** Parameters for the Scores table analytic (refetch when these change). */
-  scoresTableParams: ScoresTableParams
-  /** When false, scores table and inference queries wait for persisted preferences. */
-  scoresPreferencesHydrated: boolean
-  globalInferencePause: UseGlobalInferencePauseResult
   /** Turns beyond latest stored game turn for ion storm prediction. */
   futureTurnOffset: number
   onMapZoomChange: (zoom: number) => void
   onSetZoomReady: (setZoom: (zoom: number) => void) => void
-}
-
-function TableTile({
-  analyticId,
-  analyticScope,
-  fetchEnabled,
-  scoresTableParams,
-  globalInferencePause,
-}: {
-  analyticId: string
-  analyticScope: AnalyticShellScope | null
-  fetchEnabled: boolean
-  scoresTableParams: ScoresTableParams
-  globalInferencePause: UseGlobalInferencePauseResult
-}) {
-  const isScores = analyticId === 'scores'
-  const setScoresDiagnostics = useAnalyticDiagnosticsStore((state) => state.setScoresDiagnostics)
-  const { data, isPending, error } = useQuery({
-    queryKey: isScores
-      ? scoresAnalyticTableQueryKey(analyticScope, scoresTableParams)
-      : (['analytic', analyticId, 'table', analyticScope] as const),
-    queryFn: () =>
-      fetchAnalyticTable(
-        analyticId,
-        analyticScope!,
-        isScores ? scoresTableParams : undefined
-      ),
-    enabled: fetchEnabled,
-  })
-  const inferenceEnabled =
-    isScores &&
-    scoresTableParams.includeBuildInference &&
-    data?.buildInferenceAvailable !== false
-  const { inferenceByRow } = useScoresInferenceByRow(
-    data,
-    analyticScope,
-    inferenceEnabled && fetchEnabled,
-    { onGlobalPauseChange: globalInferencePause.syncPausedFromStream }
-  )
-  const scoresTableWithInference =
-    data != null && inferenceByRow != null
-      ? buildScoresTableWithInference(data, inferenceByRow)
-      : null
-
-  useEffect(() => {
-    if (!isScores || analyticScope == null) {
-      return
-    }
-    if (scoresTableWithInference != null) {
-      setScoresDiagnostics(scoresDiagnosticsFromTable(scoresTableWithInference, analyticScope))
-      return
-    }
-    setScoresDiagnostics(null)
-  }, [isScores, analyticScope, scoresTableWithInference, setScoresDiagnostics])
-
-  if (analyticScope == null) {
-    return (
-      <div className="p-4 text-sm text-gray-400">
-        Load game info and choose a turn and viewpoint to load this analytic.
-      </div>
-    )
-  }
-  if (isPending) return <div className="p-4 text-sm text-gray-400">Loading…</div>
-  if (error) {
-    return (
-      <div className="max-w-prose p-4 text-sm text-red-400 break-words">
-        Error loading data. {errorDetailFromUnknown(error)}
-      </div>
-    )
-  }
-  if (!data) return null
-  if (isScores && scoresTableWithInference != null) {
-    return (
-      <ScoresTableView
-        data={scoresTableWithInference}
-        analyticScope={analyticScope}
-        isGloballyPaused={globalInferencePause.isGloballyPaused}
-        globalInferencePause={globalInferencePause}
-      />
-    )
-  }
-  // Generic column/row grid only. Analytics with custom table payloads (or map-only
-  // analytics still enabled under a stale catalog) must not reach this path.
-  if (!Array.isArray(data.columns) || !Array.isArray(data.rows)) {
-    return (
-      <div className="p-4 text-sm text-gray-400">
-        This analytic has no tabular grid view.
-      </div>
-    )
-  }
-  return (
-    <div className="overflow-auto">
-      <table className="min-w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-[#52575d]">
-            {data.columns.map((c) => (
-              <th key={c} className="px-3 py-2 text-left font-medium text-slate-200">
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.rows.map((row, i) => (
-            <tr key={i} className="border-b border-[#52575d]/60">
-              {row.map((cell, j) => (
-                <td key={j} className="px-3 py-2 text-gray-400">
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
 }
 
 type MapMainAreaProps = {
@@ -233,7 +79,6 @@ type MapMainAreaProps = {
   analyticScope: AnalyticShellScope | null
   turnDataReady: boolean
   turnEnsurePending: boolean
-  connectionsMapParams: ConnectionsMapParams
   futureTurnOffset: number
   planetLabelOptions: PlanetLabelOptions
   onPlanetLabelOptionsChange: (value: PlanetLabelOptions) => void
@@ -256,7 +101,6 @@ const MapMainArea = memo(function MapMainArea({
   analyticScope,
   turnDataReady,
   turnEnsurePending,
-  connectionsMapParams,
   futureTurnOffset,
   planetLabelOptions,
   onPlanetLabelOptionsChange,
@@ -271,7 +115,6 @@ const MapMainArea = memo(function MapMainArea({
     analytics,
     analyticScope,
     analyticFetchEnabled,
-    connectionsMapParams,
   })
 
   const {
@@ -338,10 +181,6 @@ export function MainArea({
   turnEnsureIsError,
   turnEnsureError,
   turnBlockedNoLogin,
-  connectionsMapParams,
-  scoresTableParams,
-  scoresPreferencesHydrated,
-  globalInferencePause,
   futureTurnOffset,
   onMapZoomChange,
   onSetZoomReady,
@@ -352,15 +191,7 @@ export function MainArea({
   )
   const tableAnalyticIds =
     viewMode === 'tabular' ? enabledTableAnalyticIds(enabledAnalyticIds, analytics) : []
-
-  // Own the fleet stream above table/map so view-mode toggles do not tear down the session.
-  const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
-  const fleetStreamEnabled =
-    fleetEnabled && analyticFetchEnabled && !turnBlockedNoLogin
-  const { streamPlayersById: fleetStreamPlayersById } = useFleetTableStream(
-    analyticScope,
-    fleetStreamEnabled
-  )
+  const streamEnabled = analyticFetchEnabled && !turnBlockedNoLogin
 
   if (viewMode === 'tabular' && tableAnalyticIds.length === 0) {
     return <ShellCenterPane message="Enable at least one analytic in the left bar." />
@@ -394,53 +225,51 @@ export function MainArea({
     }
 
     return (
-      <FleetStreamPlayersProvider streamPlayersById={fleetStreamPlayersById}>
+      <ShellLivedStreamTree
+        analyticScope={analyticScope}
+        enabledAnalyticIds={enabledAnalyticIds}
+        streamEnabled={streamEnabled}
+      >
         <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-black p-4">
           {tableAnalyticIds.map((id) => {
-            const fetchEnabled =
-              analyticFetchEnabled && (id !== 'scores' || scoresPreferencesHydrated)
+            const TableView =
+              shellAnalyticRegistrationFor(id)?.TableView ?? GenericTableTile
             return (
               <AnalyticTableSection
                 key={id}
                 title={analytics.find((a) => a.id === id)?.name ?? id}
               >
-                {id === FLEET_ANALYTIC_ID ? (
-                  <FleetAnalyticTableTile
-                    analyticScope={analyticScope}
-                    fetchEnabled={fetchEnabled}
-                  />
-                ) : (
-                  <TableTile
-                    analyticId={id}
-                    analyticScope={analyticScope}
-                    fetchEnabled={fetchEnabled}
-                    scoresTableParams={scoresTableParams}
-                    globalInferencePause={globalInferencePause}
-                  />
-                )}
+                <TableView
+                  analyticId={id}
+                  analyticScope={analyticScope}
+                  fetchEnabled={analyticFetchEnabled}
+                />
               </AnalyticTableSection>
             )
           })}
         </main>
-      </FleetStreamPlayersProvider>
+      </ShellLivedStreamTree>
     )
   }
 
   return (
-    <FleetStreamPlayersProvider streamPlayersById={fleetStreamPlayersById}>
+    <ShellLivedStreamTree
+      analyticScope={analyticScope}
+      enabledAnalyticIds={enabledAnalyticIds}
+      streamEnabled={streamEnabled}
+    >
       <MapMainArea
         enabledAnalyticIds={enabledAnalyticIds}
         analytics={analytics}
         analyticScope={analyticScope}
         turnDataReady={turnDataReady}
         turnEnsurePending={turnEnsurePending}
-        connectionsMapParams={connectionsMapParams}
         futureTurnOffset={futureTurnOffset}
         planetLabelOptions={planetLabelOptions}
         onPlanetLabelOptionsChange={setPlanetLabelOptions}
         onMapZoomChange={onMapZoomChange}
         onSetZoomReady={onSetZoomReady}
       />
-    </FleetStreamPlayersProvider>
+    </ShellLivedStreamTree>
   )
 }

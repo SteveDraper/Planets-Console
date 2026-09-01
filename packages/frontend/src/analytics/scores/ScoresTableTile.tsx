@@ -1,6 +1,9 @@
 import { cn } from '../../lib/utils'
 import { tileClassName } from '../tileChrome'
-import type { ScoresTableParams } from './api'
+import type { AnalyticShellScope } from '../../api/bff'
+import { usePersistStoreHydrated } from '../../lib/usePersistStoreHydrated'
+import { useScoresTablePreferencesStore } from '../../stores/scoresTablePreferences'
+import { useBuildInferenceAvailable } from './useBuildInferenceAvailable'
 
 type ScoresTableTileProps = {
   name: string
@@ -8,10 +11,8 @@ type ScoresTableTileProps = {
   supportsMode: boolean
   depressed: boolean
   onToggle: () => void
-  scoresTableParams: ScoresTableParams
-  onScoresTableParamsChange: (next: ScoresTableParams) => void
-  /** `undefined` until known; only `true` enables the control. */
-  buildInferenceAvailable?: boolean
+  turnDataReady: boolean
+  analyticScope: AnalyticShellScope | null
 }
 
 export function ScoresTableTile({
@@ -20,10 +21,17 @@ export function ScoresTableTile({
   supportsMode,
   depressed,
   onToggle,
-  scoresTableParams,
-  onScoresTableParamsChange,
-  buildInferenceAvailable,
+  turnDataReady,
+  analyticScope,
 }: ScoresTableTileProps) {
+  const scoresTableParams = useScoresTablePreferencesStore((s) => s.scoresTableParams)
+  const setScoresTableParams = useScoresTablePreferencesStore((s) => s.setScoresTableParams)
+  const scoresPreferencesHydrated = usePersistStoreHydrated(useScoresTablePreferencesStore)
+  const buildInferenceAvailable = useBuildInferenceAvailable(
+    analyticScope,
+    scoresTableParams,
+    supportsMode && enabled && turnDataReady && scoresPreferencesHydrated
+  )
   const showInferenceOption = supportsMode && enabled
   const inferenceControlEnabled = buildInferenceAvailable === true
   const stealthUnavailable = buildInferenceAvailable === false
@@ -73,7 +81,7 @@ export function ScoresTableTile({
                 : undefined
             }
             onChange={(e) =>
-              onScoresTableParamsChange({
+              setScoresTableParams({
                 ...scoresTableParams,
                 includeBuildInference: e.target.checked,
               })

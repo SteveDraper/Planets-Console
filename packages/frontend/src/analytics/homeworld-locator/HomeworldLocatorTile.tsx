@@ -29,8 +29,6 @@ type HomeworldLocatorTileProps = {
   supportsMode: boolean
   depressed: boolean
   onToggle: () => void
-  /** When set, catalog is greyed and toggle is disabled (no traditional homeworlds). */
-  inactiveReason: string | null
   /**
    * True when the shell turn blob is in storage (ensure succeeded).
    * Sidebar table/map GETs must wait for this -- same gate as MainArea.
@@ -68,9 +66,10 @@ export function HomeworldLocatorTile({
   supportsMode,
   depressed,
   onToggle,
-  inactiveReason,
   turnDataReady,
 }: HomeworldLocatorTileProps) {
+  const inactiveReason =
+    useShellStore((s) => s.gameInfoContext?.homeworldInactiveReason) ?? null
   const available = inactiveReason == null
   const canToggle = supportsMode && available
   const showAsUnsupported = !canToggle

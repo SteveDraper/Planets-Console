@@ -2,11 +2,8 @@ import { useEffect, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { tileClassName } from '../tileChrome'
-import type {
-  ConnectionsFlareDepth,
-  ConnectionsFlareMode,
-  ConnectionsMapParams,
-} from './api'
+import type { ConnectionsFlareDepth, ConnectionsFlareMode } from './api'
+import { useConnectionsMapParamsStore } from './connectionsMapParamsStore'
 
 const WARP_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const
 
@@ -24,8 +21,6 @@ type ConnectionsMapTileProps = {
   supportsMode: boolean
   depressed: boolean
   onToggle: () => void
-  connectionsMapParams: ConnectionsMapParams
-  onConnectionsMapParamsChange: (next: ConnectionsMapParams) => void
 }
 
 export function ConnectionsMapTile({
@@ -34,9 +29,9 @@ export function ConnectionsMapTile({
   supportsMode,
   depressed,
   onToggle,
-  connectionsMapParams,
-  onConnectionsMapParamsChange,
 }: ConnectionsMapTileProps) {
+  const connectionsMapParams = useConnectionsMapParamsStore((s) => s.connectionsMapParams)
+  const setConnectionsMapParams = useConnectionsMapParamsStore((s) => s.setConnectionsMapParams)
   const [expanded, setExpanded] = useState(false)
   const canExpand = supportsMode && enabled
 
@@ -107,7 +102,7 @@ export function ConnectionsMapTile({
             <select
               value={connectionsMapParams.flareMode}
               onChange={(e) =>
-                onConnectionsMapParamsChange({
+                setConnectionsMapParams({
                   ...connectionsMapParams,
                   flareMode: e.target.value as ConnectionsFlareMode,
                 })
@@ -126,7 +121,7 @@ export function ConnectionsMapTile({
             <select
               value={connectionsMapParams.flareDepth}
               onChange={(e) =>
-                onConnectionsMapParamsChange({
+                setConnectionsMapParams({
                   ...connectionsMapParams,
                   flareDepth: Number(e.target.value) as ConnectionsFlareDepth,
                 })
@@ -151,7 +146,7 @@ export function ConnectionsMapTile({
             <select
               value={connectionsMapParams.warpSpeed}
               onChange={(e) =>
-                onConnectionsMapParamsChange({
+                setConnectionsMapParams({
                   ...connectionsMapParams,
                   warpSpeed: Number(e.target.value),
                 })
@@ -171,7 +166,7 @@ export function ConnectionsMapTile({
               type="checkbox"
               checked={connectionsMapParams.gravitonicMovement}
               onChange={(e) =>
-                onConnectionsMapParamsChange({
+                setConnectionsMapParams({
                   ...connectionsMapParams,
                   gravitonicMovement: e.target.checked,
                 })

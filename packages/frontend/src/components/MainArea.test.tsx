@@ -3,8 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { ReactNode } from 'react'
-import type { AnalyticItem, AnalyticShellScope, ConnectionsMapParams } from '../api/bff'
-import type { ScoresTableParams } from '../analytics/scores/api'
+import type { AnalyticItem, AnalyticShellScope } from '../api/bff'
 import { MainArea } from './MainArea'
 import { fetchAnalyticTable } from '../api/bff'
 import { useMapAnalyticQueries } from '../lib/useMapAnalyticQueries'
@@ -53,12 +52,11 @@ vi.mock('../analytics/fleet/useFleetTableStream', () => ({
   useFleetTableStream: vi.fn(() => ({ streamPlayersById: stableFleetStreamPlayersById })),
 }))
 
-const defaultConnectionsParams: ConnectionsMapParams = {
-  warpSpeed: 9,
-  gravitonicMovement: false,
-  flareMode: 'off',
-  flareDepth: 2,
-}
+vi.mock('../lib/usePersistStoreHydrated', () => ({
+  usePersistStoreHydrated: vi.fn(() => true),
+}))
+
+import { usePersistStoreHydrated } from '../lib/usePersistStoreHydrated'
 
 const sampleAnalytics: AnalyticItem[] = [
   { id: 'base-map', name: 'Base', supportsTable: false, supportsMap: true, type: 'base' },
@@ -121,19 +119,6 @@ function createWrapper() {
   }
 }
 
-const defaultScoresTableParams: ScoresTableParams = {
-  includeBuildInference: false,
-}
-
-const idleGlobalInferencePause = {
-  isGloballyPaused: false,
-  isPending: false,
-  error: null,
-  pauseGlobally: vi.fn(),
-  resumeGlobally: vi.fn(),
-  syncPausedFromStream: vi.fn(),
-}
-
 function defaultMainAreaProps(viewMode: 'tabular' | 'map') {
   return {
     viewMode,
@@ -145,10 +130,6 @@ function defaultMainAreaProps(viewMode: 'tabular' | 'map') {
     turnEnsureIsError: false,
     turnEnsureError: null,
     turnBlockedNoLogin: false,
-    connectionsMapParams: defaultConnectionsParams,
-    scoresTableParams: defaultScoresTableParams,
-    scoresPreferencesHydrated: true,
-    globalInferencePause: idleGlobalInferencePause,
     futureTurnOffset: 0,
     onMapZoomChange: vi.fn(),
     onSetZoomReady: vi.fn(),
@@ -241,6 +222,7 @@ describe('MainArea map hook mounting', () => {
 describe('MainArea tabular analytic sections', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(usePersistStoreHydrated).mockReturnValue(true)
     vi.mocked(fetchAnalyticTable).mockResolvedValue({
       analyticId: 'scores',
       columns: ['Player'],
@@ -274,11 +256,11 @@ describe('MainArea tabular analytic sections', () => {
   })
 
   it('does not fetch scores table until preferences are hydrated', async () => {
+    vi.mocked(usePersistStoreHydrated).mockReturnValue(false)
     render(
       <MainArea
         {...defaultMainAreaProps('tabular')}
         enabledAnalyticIds={['scores']}
-        scoresPreferencesHydrated={false}
       />,
       { wrapper: createWrapper() }
     )
@@ -306,11 +288,7 @@ describe('MainArea tabular analytic sections', () => {
     expect(screen.queryByRole('button', { name: /Stellar Cartography/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Homeworld locator/i })).not.toBeInTheDocument()
     expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
-    expect(fetchAnalyticTable).toHaveBeenCalledWith(
-      'scores',
-      sampleScope,
-      expect.anything()
-    )
+    expect(fetchAnalyticTable).toHaveBeenCalledWith('scores', sampleScope)
   })
 
   it('shows empty-state guidance when only map-only analytics are enabled', () => {

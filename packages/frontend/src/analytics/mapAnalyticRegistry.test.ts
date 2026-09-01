@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 import { connectionsMapAnalytic, connectionsMapQueryKey } from './connections/mapAnalytic'
+import { useConnectionsMapParamsStore } from './connections/connectionsMapParamsStore'
 import { fleetMapAnalytic } from './fleet/mapAnalytic'
 import { stellarCartographyMapAnalytic } from './stellar-cartography/mapAnalytic'
 import {
@@ -29,10 +30,14 @@ import {
 const queryContext = {
   analyticScope: sampleScope,
   analyticFetchEnabled: true,
-  connectionsMapParams: defaultConnectionsParams,
 }
 
 describe('map analytic registry', () => {
+  beforeEach(() => {
+    useConnectionsMapParamsStore.setState({
+      connectionsMapParams: defaultConnectionsParams,
+    })
+  })
   it('registers every canonical map analytic id explicitly', () => {
     expect(REGISTERED_MAP_ANALYTIC_IDS).toEqual([
       BASE_MAP_ANALYTIC_ID,

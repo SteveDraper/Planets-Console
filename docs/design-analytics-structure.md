@@ -125,29 +125,28 @@ Adding a **turn analytic** touches:
 
 `TURN_ANALYTICS` is derived from registrations at import and aligned to the catalog; a missing or extra registration raises `RuntimeError` on startup.
 
-Frontend registration is **optional** and only needed when generic shells are insufficient (custom sidebar controls, non-default query keys, bespoke map merge logic). See [design-adding-a-turn-analytic.md](design-adding-a-turn-analytic.md).
+Frontend **Shell chrome** is **optional** and sparse: a **shell analytic registration** (`shellAnalyticRegistry.ts`) when generic checkbox + generic table are not enough. Map fetch/merge is a sibling registry (`mapAnalyticRegistry.ts`). See [design-adding-a-turn-analytic.md §4](design-adding-a-turn-analytic.md#4-frontend-optional) and [ADR 0026](adr/0026-shell-analytic-registration.md).
 
-### Frontend map fetch (intentional gap)
+### Frontend map fetch vs Shell chrome
 
-The SPA does **not** mirror BFF descriptor dispatch for map GETs. Today:
+The SPA does **not** put map GET orchestration on the shell registration, and it does **not** branch on analytic id in `MainArea`:
 
-- **Generic path:** `MainArea` calls `fetchAnalyticMap(analyticId, analyticScope)` for map analytics with no extra query params (base-map overlays other than Connections).
-- **Connections exception:** `MainArea` branches on `analyticId === 'connections'` for React Query keys, scope + param forwarding, and refetch when sidebar controls change.
+- **Shell analytic registration:** sidebar factory, MainArea table view, generic-route query-param adapters, GameInfo availability, table-stream lifetime.
+- **Map fetch/merge registry:** query keys, fetch, merge into combined map data (`useMapAnalyticQueries`). Parametric knobs (Connections) live in an analytic-owned ephemeral store; `buildQuerySpec` reads them; generic `fetchAnalyticMap` appends `queryParams.appendMap`.
+- **Map paint** (React Flow components) is not a registry slot yet ([#383](https://github.com/SteveDraper/Planets-Console/issues/383)).
 
-This is deliberate for now (one special case, known location). **Re-examine when adding a second map analytic that needs configurable query params or custom cache keys** -- copying the Connections branch in `MainArea` is a signal to generalize instead.
-
-**Possible future direction (not implemented):** a small frontend map-fetch plugin registry under `src/analytics/` where parametric analytics export `mapQueryKey(...)` and `fetchMap(...)`; `MainArea` dispatches by id without growing `if/elif` chains. See [design-adding-a-turn-analytic.md §4](design-adding-a-turn-analytic.md#4-frontend-optional) for the decision checklist when that trigger fires.
+Unregistered selectable ids keep generic checkbox + generic table -- not an error. **Re-examine when adding map paint that cannot live in `MapGraph` without an id switch** (#383), not by adding another `MainArea` fetch branch.
 
 ## Quick reference: existing analytics
 
 | id | Core module | BFF module | Table | Map | Frontend extras |
 |----|-------------|------------|-------|-----|-----------------|
-| `base-map` | `base_map.py` | `base_map.py` | no | yes (base layer) | none |
-| `scores` | `scores.py` | `scores.py` | yes | no | none |
-| `connections` | `connections.py` | `connections.py` | no | yes (overlay) | `src/analytics/connections/` |
-| `stellar-cartography` | `stellar_cartography.py` | `stellar_cartography.py` | no | yes (overlay + edges) | `src/analytics/stellar-cartography/` |
-| `fleet` | `fleet.py` | `fleet.py` | yes | yes (per-player overlay) | scaffold only (F0.2) |
-| `visibility` | `visibility.py` | `visibility.py` | no | yes (region overlays) | `src/analytics/visibility/` |
-| `homeworld-locator` | `homeworld_locator/` | `homeworld_locator.py` | yes | yes (markers) | `src/analytics/homeworld-locator/` |
+| `base-map` | `base_map.py` | `base_map.py` | no | yes (base layer) | map fetch/merge only (no sidebar) |
+| `scores` | `scores.py` | `scores.py` | yes | no | shell chrome (`src/analytics/scores/`) |
+| `connections` | `connections.py` | `connections.py` | no | yes (overlay) | shell chrome + map registry (`src/analytics/connections/`) |
+| `stellar-cartography` | `stellar_cartography.py` | `stellar_cartography.py` | no | yes (overlay + edges) | shell chrome + map registry (`src/analytics/stellar-cartography/`) |
+| `fleet` | `fleet.py` | `fleet.py` | yes | yes (per-player overlay) | shell chrome + shell-lived stream (`src/analytics/fleet/`) |
+| `visibility` | `visibility.py` | `visibility.py` | no | yes (region overlays) | shell chrome + map registry (`src/analytics/visibility/`) |
+| `homeworld-locator` | `homeworld_locator/` | `homeworld_locator.py` | yes | yes (markers) | shell chrome + `availability` (`src/analytics/homeworld-locator/`) |
 
 `fleet` is the first **selectable** analytic that supports both table and map.

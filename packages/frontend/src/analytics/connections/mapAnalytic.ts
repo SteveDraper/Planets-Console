@@ -7,6 +7,7 @@ import type {
 import type { ConnectionsMapParams, ConnectionsFlareMode } from './api'
 import { CONNECTIONS_ANALYTIC_ID } from '../mapAnalyticIds'
 import { appendConnectionsMapLayer } from './mapLayer'
+import { useConnectionsMapParamsStore } from './connectionsMapParamsStore'
 
 export type ConnectionsMapQueryKey = readonly [
   'analytic',
@@ -42,10 +43,10 @@ export function connectionsMapQueryKey(
 
 export const connectionsMapAnalytic: MapAnalyticRegistration = {
   buildQuerySpec(context: MapAnalyticQueryContext) {
+    const connectionsMapParams = useConnectionsMapParamsStore.getState().connectionsMapParams
     return {
-      queryKey: connectionsMapQueryKey(context.analyticScope, context.connectionsMapParams),
-      queryFn: () =>
-        fetchAnalyticMap(CONNECTIONS_ANALYTIC_ID, context.analyticScope!, context.connectionsMapParams),
+      queryKey: connectionsMapQueryKey(context.analyticScope, connectionsMapParams),
+      queryFn: () => fetchAnalyticMap(CONNECTIONS_ANALYTIC_ID, context.analyticScope!),
       enabled: context.analyticFetchEnabled && context.analyticScope != null,
     }
   },

@@ -4,10 +4,12 @@ import { cn } from '../../lib/utils'
 import { tileClassName } from '../tileChrome'
 import {
   CARTOGRAPHY_LAYER_DEFINITIONS,
+  EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
   isCartographyLayerGateEnabled,
   type CartographyLayerId,
-  type StellarCartographySettingsGates,
 } from './layers'
+import { useStellarCartographyTurnSummary } from './useStellarCartographyTurnSummary'
+import type { AnalyticShellScope } from '../../api/bff'
 import { DisplayModeControl } from '../DisplayModeControl'
 import {
   CLUSTER_OUTLINE_DISPLAY_MODE_LABELS,
@@ -30,9 +32,8 @@ type StellarCartographyMapTileProps = {
   supportsMode: boolean
   depressed: boolean
   onToggle: () => void
-  settingsGates: StellarCartographySettingsGates
-  /** When null, turn ion storm count is not known yet. */
-  ionStormCount: number | null
+  turnDataReady: boolean
+  analyticScope: AnalyticShellScope | null
 }
 
 function WormholeDisplayModeControl({
@@ -81,10 +82,22 @@ export function StellarCartographyMapTile({
   supportsMode,
   depressed,
   onToggle,
-  settingsGates,
-  ionStormCount,
+  turnDataReady,
+  analyticScope,
 }: StellarCartographyMapTileProps) {
   const cartographySettingsKnown = useShellStore((s) => s.gameInfoContext != null)
+  const settingsGates =
+    useShellStore((s) => s.gameInfoContext?.stellarCartographyGates) ??
+    EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
+  const { data: stellarCartographyTurnSummary } = useStellarCartographyTurnSummary({
+    analyticScope,
+    turnDataReady,
+    ionStormsGate: settingsGates.ionStorms,
+  })
+  const ionStormCount =
+    settingsGates.ionStorms && turnDataReady && analyticScope != null
+      ? (stellarCartographyTurnSummary?.ionStormCount ?? null)
+      : null
   const [expanded, setExpanded] = useState(false)
   const canExpand = supportsMode && enabled
   const layers = useStellarCartographyLayersStore((s) => s.layers)
