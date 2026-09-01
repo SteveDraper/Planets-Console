@@ -7,10 +7,10 @@ import type {
   ScoresTableWithInferenceData,
   TableDataResponse,
 } from '../../api/bff'
-import { errorDetailFromUnknown } from '../../lib/queryRetry'
 import { usePersistStoreHydrated } from '../../lib/usePersistStoreHydrated'
 import { useAnalyticDiagnosticsStore } from '../../stores/analyticDiagnostics'
 import { useScoresTablePreferencesStore } from '../../stores/scoresTablePreferences'
+import { AnalyticTableGrid } from '../AnalyticTableGrid'
 import type { ShellAnalyticTableViewProps } from '../shellAnalyticRegistry'
 import { scoresAnalyticTableQueryKey } from './api'
 import { scoresDiagnosticsFromTable } from './diagnosticsFromTable'
@@ -32,9 +32,11 @@ function buildScoresTableWithInference(
 }
 
 function ScoresAnalyticTableBody({
+  analyticId,
   analyticScope,
   fetchEnabled,
 }: {
+  analyticId: string
   analyticScope: AnalyticShellScope
   fetchEnabled: boolean
 }) {
@@ -42,7 +44,7 @@ function ScoresAnalyticTableBody({
   const setScoresDiagnostics = useAnalyticDiagnosticsStore((state) => state.setScoresDiagnostics)
   const { data, isPending, error } = useQuery({
     queryKey: scoresAnalyticTableQueryKey(analyticScope, scoresTableParams),
-    queryFn: () => fetchAnalyticTable('scores', analyticScope),
+    queryFn: () => fetchAnalyticTable(analyticId, analyticScope),
     enabled: fetchEnabled,
   })
   const inferenceEnabled =
@@ -75,15 +77,6 @@ function ScoresAnalyticTableBody({
     setScoresDiagnostics(null)
   }, [analyticScope, scoresTableWithInference, setScoresDiagnostics])
 
-  if (isPending) return <div className="p-4 text-sm text-gray-400">Loading…</div>
-  if (error) {
-    return (
-      <div className="max-w-prose p-4 text-sm text-red-400 break-words">
-        Error loading data. {errorDetailFromUnknown(error)}
-      </div>
-    )
-  }
-  if (!data) return null
   if (scoresTableWithInference != null) {
     return (
       <ScoresTableView
@@ -94,41 +87,12 @@ function ScoresAnalyticTableBody({
       />
     )
   }
-  if (!Array.isArray(data.columns) || !Array.isArray(data.rows)) {
-    return (
-      <div className="p-4 text-sm text-gray-400">This analytic has no tabular grid view.</div>
-    )
-  }
-  return (
-    <div className="overflow-auto">
-      <table className="min-w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-[#52575d]">
-            {data.columns.map((c) => (
-              <th key={c} className="px-3 py-2 text-left font-medium text-slate-200">
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.rows.map((row, i) => (
-            <tr key={i} className="border-b border-[#52575d]/60">
-              {row.map((cell, j) => (
-                <td key={j} className="px-3 py-2 text-gray-400">
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+  return <AnalyticTableGrid isPending={isPending} error={error} data={data} />
 }
 
 /** Scores table body: REST grid plus tile-lived inference stream. */
 export function ScoresAnalyticTableTile({
+  analyticId,
   analyticScope,
   fetchEnabled,
 }: ShellAnalyticTableViewProps) {
@@ -145,6 +109,7 @@ export function ScoresAnalyticTableTile({
 
   return (
     <ScoresAnalyticTableBody
+      analyticId={analyticId}
       analyticScope={analyticScope}
       fetchEnabled={scoresFetchEnabled}
     />
