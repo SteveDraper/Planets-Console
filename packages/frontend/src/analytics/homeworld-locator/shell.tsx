@@ -13,6 +13,7 @@ export const homeworldLocatorShellAnalytic: ShellAnalyticChrome = {
         depressed={ctx.enabled && supportsMode}
         onToggle={ctx.onToggle}
         turnDataReady={ctx.turnDataReady}
+        analyticScope={ctx.analyticScope}
       />
     )
   },

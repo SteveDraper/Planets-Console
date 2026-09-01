@@ -6,7 +6,6 @@ import type { ReactNode } from 'react'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
 import { defaultHomeworldRegionSelectionPreset } from '../../lib/homeworldRegionSelection'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
-import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
 import {
   HOMEWORLD_REGION_SELECTION_STORAGE_KEY,
@@ -23,13 +22,12 @@ vi.mock('./api', () => ({
   postHomeworldLocatorRefresh: vi.fn(),
 }))
 
-vi.mock('../../api/bff', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../api/bff')>()
-  return {
-    ...actual,
-    fetchViewpointEligibility: vi.fn().mockResolvedValue({ perspectives: [1, 2] }),
-  }
-})
+const sampleScope = {
+  gameId: '628580',
+  turn: 5,
+  perspective: 1,
+  username: 'alice',
+}
 
 function renderTile(ui: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -53,14 +51,8 @@ function seedInactiveHomeworld() {
   })
 }
 
-function seedShellForAnalyticScope() {
-  useSessionStore.setState({ name: 'alice', password: '', credentialsRevision: 0 })
+function seedRoster() {
   useShellStore.setState({
-    selectedGameId: '628580',
-    selectedTurn: 5,
-    perspectiveOverrideOrdinal: null,
-    storageOnlyLoad: false,
-    storageAvailablePerspectives: null,
     gameInfoContext: {
       turn: 10,
       isGameFinished: true,
@@ -83,7 +75,6 @@ describe('HomeworldLocatorTile', () => {
       selectedSectorIndexes: [],
       showEnvelopeOverlays: true,
     })
-    useSessionStore.setState({ name: '', password: '', credentialsRevision: 0 })
     useShellStore.setState({
       selectedGameId: null,
       selectedTurn: null,
@@ -119,6 +110,7 @@ describe('HomeworldLocatorTile', () => {
         depressed={false}
         onToggle={() => undefined}
         turnDataReady
+        analyticScope={null}
       />
     )
     const checkbox = screen.getByRole('checkbox')
@@ -137,6 +129,7 @@ describe('HomeworldLocatorTile', () => {
         depressed
         onToggle={() => undefined}
         turnDataReady
+        analyticScope={null}
       />
     )
     const checkbox = screen.getByRole('checkbox')
@@ -153,6 +146,7 @@ describe('HomeworldLocatorTile', () => {
         depressed={false}
         onToggle={() => undefined}
         turnDataReady
+        analyticScope={null}
       />
     )
     expect(screen.getByRole('checkbox')).not.toBeDisabled()
@@ -168,6 +162,7 @@ describe('HomeworldLocatorTile', () => {
         depressed
         onToggle={() => undefined}
         turnDataReady
+        analyticScope={null}
       />
     )
 
@@ -187,7 +182,7 @@ describe('HomeworldLocatorTile', () => {
 
   it('shows region selection when sector overlays are present', async () => {
     const user = userEvent.setup()
-    seedShellForAnalyticScope()
+    seedRoster()
     vi.mocked(fetchHomeworldLocatorMap).mockResolvedValue({
       analyticId: 'homeworld-locator',
       available: true,
@@ -225,6 +220,7 @@ describe('HomeworldLocatorTile', () => {
         depressed
         onToggle={() => undefined}
         turnDataReady
+        analyticScope={sampleScope}
       />
     )
 
@@ -241,7 +237,7 @@ describe('HomeworldLocatorTile', () => {
 
   it('does not fetch homeworld analytics until turn data is in storage', async () => {
     const user = userEvent.setup()
-    seedShellForAnalyticScope()
+    seedRoster()
     renderTile(
       <HomeworldLocatorTile
         name="Homeworld locator"
@@ -250,6 +246,7 @@ describe('HomeworldLocatorTile', () => {
         depressed
         onToggle={() => undefined}
         turnDataReady={false}
+        analyticScope={sampleScope}
       />
     )
 
