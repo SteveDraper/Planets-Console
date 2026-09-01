@@ -17,8 +17,17 @@ import {
   queryParamsAdaptersFor,
   type ShellAnalyticQueryParamAdapters,
 } from './shellAnalyticQueryParams'
+import type { ShellAnalyticStreamSlot, ShellLivedStreamMountSlot } from './shellLivedStream'
 import { stellarCartographyShellAnalytic } from './stellar-cartography/shell'
 import { visibilityShellAnalytic } from './visibility/shell'
+
+export type {
+  ShellAnalyticStreamSlot,
+  ShellLivedStreamMountProps,
+  ShellLivedStreamMountSlot,
+  ShellLivedStreamSlot,
+  TileLivedStreamSlot,
+} from './shellLivedStream'
 
 export type ShellViewMode = 'tabular' | 'map'
 
@@ -40,18 +49,6 @@ export type ShellAnalyticTableViewProps = {
   analyticScope: AnalyticShellScope | null
   fetchEnabled: boolean
 }
-
-export type ShellLivedStreamSlot = {
-  lifetime: 'shell'
-  hook: (analyticScope: AnalyticShellScope | null, enabled: boolean) => object
-  Provider: ComponentType<object & { children: ReactNode }>
-}
-
-export type TileLivedStreamSlot = {
-  lifetime: 'tile'
-}
-
-export type ShellAnalyticStreamSlot = ShellLivedStreamSlot | TileLivedStreamSlot
 
 /**
  * Sparse SPA plugin for one turn analytic's Shell chrome.
@@ -164,7 +161,7 @@ export function foldAvailableEnabledAnalyticIds(
 
 export function shellLivedStreamRegistrations(): Array<{
   analyticId: string
-  stream: ShellLivedStreamSlot
+  stream: ShellLivedStreamMountSlot
 }> {
   return Object.entries(shellAnalyticRegistry).flatMap(([analyticId, registration]) => {
     const stream = registration.stream

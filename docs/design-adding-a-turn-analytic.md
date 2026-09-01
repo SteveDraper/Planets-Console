@@ -278,7 +278,7 @@ An unregistered selectable id is not an error: generic checkbox + generic table.
 | Custom MainArea table body | `TableView` |
 | Extra GET query params on generic table/map fetch | Appender in `shellAnalyticQueryParams.ts` (`SHELL_TABLE_QUERY_APPENDERS` / `SHELL_MAP_QUERY_APPENDERS`). The shell registry composes `queryParams` onto the registration. `bff.ts` imports that module so it does not pull React chrome. Do not set `queryParams` on `shell.tsx`. |
 | GameInfo inactivity (grey/disable without dropping persisted enablement) | `availability(gameInfo) => string \| null` |
-| Table stream | `stream`: `{ lifetime: 'shell', hook, Provider }` or `{ lifetime: 'tile' }` |
+| Table stream | `stream`: `shellLivedStream({ hook, Provider })` (shell-lived) or `{ lifetime: 'tile' }` |
 
 `renderSidebar` receives `ShellAnalyticSidebarContext`: `viewMode`, `catalogItem`, `enabled`, `onToggle`, plus shell-owned `turnDataReady` and `analyticScope` so tiles do not re-derive ensure/scope.
 

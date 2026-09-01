@@ -2,17 +2,8 @@ import { FleetAnalyticTile } from './FleetAnalyticTile'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
 import { FleetStreamPlayersProvider } from './FleetStreamPlayersContext'
 import { useFleetTableStream } from './useFleetTableStream'
-import {
-  sidebarTileChrome,
-  type ShellAnalyticChrome,
-  type ShellLivedStreamSlot,
-} from '../shellAnalyticRegistry'
-
-const fleetShellLivedStream: ShellLivedStreamSlot = {
-  lifetime: 'shell',
-  hook: useFleetTableStream,
-  Provider: FleetStreamPlayersProvider as ShellLivedStreamSlot['Provider'],
-}
+import { shellLivedStream } from '../shellLivedStream'
+import { sidebarTileChrome, type ShellAnalyticChrome } from '../shellAnalyticRegistry'
 
 export const fleetShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
@@ -23,5 +14,8 @@ export const fleetShellAnalytic: ShellAnalyticChrome = {
       <FleetAnalyticTableTile analyticScope={analyticScope} fetchEnabled={fetchEnabled} />
     )
   },
-  stream: fleetShellLivedStream,
+  stream: shellLivedStream({
+    hook: useFleetTableStream,
+    Provider: FleetStreamPlayersProvider,
+  }),
 }

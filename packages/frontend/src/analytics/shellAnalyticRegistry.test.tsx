@@ -47,6 +47,8 @@ function renderWithQuery(ui: ReactNode) {
 }
 
 describe('shell analytic registry', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+
   it('lists every selectable catalog id that currently has custom chrome', () => {
     expect([...CUSTOM_SHELL_CHROME_ANALYTIC_IDS]).toEqual([...SELECTABLE_TURN_ANALYTIC_IDS])
     for (const analyticId of CUSTOM_SHELL_CHROME_ANALYTIC_IDS) {
@@ -107,9 +109,22 @@ describe('shell analytic registry', () => {
   })
 
   it('records fleet as shell-lived and scores as tile-lived', () => {
-    const shellLived = shellLivedStreamRegistrations().map((row) => row.analyticId)
-    expect(shellLived).toEqual(['fleet'])
+    const shellLived = shellLivedStreamRegistrations()
+    expect(shellLived.map((row) => row.analyticId)).toEqual(['fleet'])
+    expect(shellLived[0]?.stream.Mount).toEqual(expect.any(Function))
     expect(shellAnalyticRegistrationFor(SCORES_ANALYTIC_ID)?.stream?.lifetime).toBe('tile')
+  })
+
+  it('authors the fleet shell-lived stream as a typed hook/Provider pair', () => {
+    const fleetShell = readFileSync(join(here, 'fleet', 'shell.tsx'), 'utf8')
+    expect(fleetShell).toMatch(/from '\.\.\/shellLivedStream'/)
+    expect(fleetShell).toMatch(/shellLivedStream\(/)
+    expect(fleetShell).toMatch(/\bhook:\s*useFleetTableStream/)
+    expect(fleetShell).toMatch(/\bProvider:\s*FleetStreamPlayersProvider/)
+    expect(fleetShell).not.toMatch(/as ShellLivedStreamSlot/)
+    const slotModule = readFileSync(join(here, 'shellLivedStream.tsx'), 'utf8')
+    expect(slotModule).not.toMatch(/=> object/)
+    expect(slotModule).not.toMatch(/ComponentType<object/)
   })
 
   it('folds GameInfo unavailability without an id-specific App branch', () => {
