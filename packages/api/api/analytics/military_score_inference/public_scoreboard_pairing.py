@@ -165,13 +165,13 @@ def classify_public_scoreboard_pairing(
             continue
         gift = _gift_match(this_row, other)
         if gift is None:
-            gift = _pp_gap_gift_match(this_row, other, this_budget, other_budget)
+            gift = _pp_gap_family_match("gift", this_row, other, this_budget, other_budget)
         if gift is not None:
             matches.append(gift)
             continue
         acquired = _acquired_match(this_row, other)
         if acquired is None:
-            acquired = _pp_gap_acquired_match(this_row, other, this_budget, other_budget)
+            acquired = _pp_gap_family_match("acquired", this_row, other, this_budget, other_budget)
         if acquired is not None:
             matches.append(acquired)
 
@@ -307,7 +307,7 @@ def _military_compatible_transfer(
     return this_m >= -slack and other_m <= slack and not (this_m > slack and abs(other_m) <= slack)
 
 
-def _unique_incoming_class(row: PublicScoreboardRow) -> PinnedHullClass | None:
+def unique_incoming_class(row: PublicScoreboardRow) -> PinnedHullClass | None:
     """Pin incoming hull class from the receiver residual when it is unique."""
     if row.freighter_delta == 0 and row.warship_delta != 0:
         return "warship"
@@ -329,10 +329,10 @@ def _pp_gap_pairing_match(
     Unknown class still pairs; class columns stay 0 and ``transfer_count`` carries the cap.
     """
     if family == "acquired":
-        pinned = _unique_incoming_class(this_row)
+        pinned = unique_incoming_class(this_row)
         sign = 1
     else:
-        pinned = _unique_incoming_class(other)
+        pinned = unique_incoming_class(other)
         sign = -1
     if pinned == "warship":
         warship_delta, freighter_delta = sign * cap, 0
@@ -352,27 +352,23 @@ def _pp_gap_pairing_match(
     )
 
 
-def _pp_gap_gift_match(
+def _pp_gap_family_match(
+    family: Literal["gift", "acquired"],
     this_row: PublicScoreboardRow,
     other: PublicScoreboardRow,
     this_budget: TransferBudget,
     other_budget: TransferBudget,
 ) -> PairingMatch | None:
-    """Outgoing PP-gap / dock-cap budget with a peer arrival budget."""
-    if this_budget.excess_out <= 0 or other_budget.excess_in <= 0:
+    """PP-gap / dock-cap budget pair: one transfer, gift or acquired."""
+    if family == "gift":
+        this_excess, peer_excess = this_budget.excess_out, other_budget.excess_in
+    else:
+        this_excess, peer_excess = this_budget.excess_in, other_budget.excess_out
+    if this_excess <= 0 or peer_excess <= 0:
         return None
-    cap = min(this_budget.excess_out, other_budget.excess_in)
-    return _pp_gap_pairing_match(family="gift", this_row=this_row, other=other, cap=cap)
-
-
-def _pp_gap_acquired_match(
-    this_row: PublicScoreboardRow,
-    other: PublicScoreboardRow,
-    this_budget: TransferBudget,
-    other_budget: TransferBudget,
-) -> PairingMatch | None:
-    """Incoming PP-gap / dock-cap budget with a peer departure budget."""
-    if this_budget.excess_in <= 0 or other_budget.excess_out <= 0:
-        return None
-    cap = min(this_budget.excess_in, other_budget.excess_out)
-    return _pp_gap_pairing_match(family="acquired", this_row=this_row, other=other, cap=cap)
+    return _pp_gap_pairing_match(
+        family=family,
+        this_row=this_row,
+        other=other,
+        cap=min(this_excess, peer_excess),
+    )

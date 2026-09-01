@@ -22,8 +22,11 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
     PairingMatch,
     PublicScoreboardPairing,
     PublicScoreboardRow,
+    TransferBudget,
     classify_public_scoreboard_pairing,
     public_scoreboard_row_from_observation,
+    transfer_budget_for_row,
+    unique_incoming_class,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import GameSettings
@@ -76,15 +79,17 @@ def ship_transfer_combo_capacity(
     pairing: PublicScoreboardPairing,
     warship_decrease_capacity: int,
     freighter_decrease_capacity: int,
+    *,
+    this_budget: TransferBudget,
 ) -> tuple[int, int, int, int, int]:
     """Warship/freighter extra combo capacity and reserved incoming acquired counts.
 
     Extra combo slots are prior-fleet departures when the class did not grow, so
     loss+replace (net 0) can still build. Incoming acquired counts are reserved
     out of the build bound so they are not explained as ship-build combos.
-    PP-gap counterparties are alternatives for the same arrival budget (max, not
-    sum), so a solution pairs with one donor. Unknown class is one transfer
-    count, not two additive class columns.
+    When ``this_budget.excess_in > 0``, reserved incoming is that budget
+    (alternative signatures, not the sum of peer ``transfer_count``s). Otherwise
+    reserved incoming is the sum of raw-drop acquired class deltas.
     """
     extra_warship = warship_decrease_capacity
     extra_freighter = freighter_decrease_capacity
@@ -92,45 +97,41 @@ def ship_transfer_combo_capacity(
         extra_warship = 0
     if observation.freighter_delta > 0:
         extra_freighter = 0
-    reserved_warship_raw = sum(
-        match.warship_delta
-        for match in pairing.matches
-        if match.family == "acquired" and match.source == "raw_drop"
+    reserved_warship, reserved_freighter, reserved_ships = _reserved_incoming_acquired(
+        public_scoreboard_row_from_observation(observation),
+        this_budget,
+        pairing,
     )
-    reserved_freighter_raw = sum(
-        match.freighter_delta
-        for match in pairing.matches
-        if match.family == "acquired" and match.source == "raw_drop"
-    )
-    reserved_warship_pp = max(
-        (
-            match.warship_delta
-            for match in pairing.matches
-            if match.family == "acquired" and match.source == "pp_gap"
-        ),
-        default=0,
-    )
-    reserved_freighter_pp = max(
-        (
-            match.freighter_delta
-            for match in pairing.matches
-            if match.family == "acquired" and match.source == "pp_gap"
-        ),
-        default=0,
-    )
-    reserved_ships_raw = reserved_warship_raw + reserved_freighter_raw
-    reserved_ships_pp = max(
-        (
-            match.transfer_count
-            for match in pairing.matches
-            if match.family == "acquired" and match.source == "pp_gap"
-        ),
-        default=0,
-    )
-    reserved_warship = max(reserved_warship_raw, reserved_warship_pp)
-    reserved_freighter = max(reserved_freighter_raw, reserved_freighter_pp)
-    reserved_ships = max(reserved_ships_raw, reserved_ships_pp)
     return extra_warship, extra_freighter, reserved_warship, reserved_freighter, reserved_ships
+
+
+def _reserved_incoming_acquired(
+    this_row: PublicScoreboardRow,
+    this_budget: TransferBudget,
+    pairing: PublicScoreboardPairing,
+) -> tuple[int, int, int]:
+    """Reserved (warships, freighters, ships) for acquired incoming.
+
+    Idle-dock / dock-cap ``excess_in`` is one arrival budget. Class columns
+    follow the receiver residual when unique; unknown class reserves the total
+    only. Raw-drop rows with no ``excess_in`` still sum complementary-drop
+    matches.
+    """
+    if this_budget.excess_in > 0:
+        ships = this_budget.excess_in
+        pinned = unique_incoming_class(this_row)
+        if pinned == "warship":
+            return ships, 0, ships
+        if pinned == "freighter":
+            return 0, ships, ships
+        return 0, 0, ships
+    reserved_warship = sum(
+        match.warship_delta for match in pairing.matches if match.family == "acquired"
+    )
+    reserved_freighter = sum(
+        match.freighter_delta for match in pairing.matches if match.family == "acquired"
+    )
+    return reserved_warship, reserved_freighter, reserved_warship + reserved_freighter
 
 
 def build_ship_transfer_catalog_fragment(
@@ -146,13 +147,20 @@ def build_ship_transfer_catalog_fragment(
     is_after_ship_limit: bool | None = None,
 ) -> ShipTransferCatalogFragment:
     """Admit transfer actions and combo/departure caps from one pairing."""
+    this_row = public_scoreboard_row_from_observation(observation)
+    after_ship_limit = (
+        observation.is_after_ship_limit if is_after_ship_limit is None else is_after_ship_limit
+    )
+    this_budget = transfer_budget_for_row(
+        this_row,
+        settings=settings,
+        is_after_ship_limit=after_ship_limit,
+    )
     pairing = classify_public_scoreboard_pairing(
-        public_scoreboard_row_from_observation(observation),
+        this_row,
         peer_rows,
         settings=settings,
-        is_after_ship_limit=(
-            observation.is_after_ship_limit if is_after_ship_limit is None else is_after_ship_limit
-        ),
+        is_after_ship_limit=after_ship_limit,
     )
     candidates = prior_fleet_decrease_candidates(
         prior_fleet_records,
@@ -175,6 +183,7 @@ def build_ship_transfer_catalog_fragment(
             pairing,
             prior_warship_departure_cap,
             prior_freighter_departure_cap,
+            this_budget=this_budget,
         )
     )
     return ShipTransferCatalogFragment(
@@ -426,6 +435,17 @@ def _same_class_swap_action(
     )
 
 
+def _incoming_military_envelope(match: PairingMatch, this_military_delta_2x: int) -> int:
+    """Catalog incoming military keyed on pairing source.
+
+    Raw-drop uses the counterparty's public drop. PP-gap uses this row's
+    military (both rows may go up, so the donor drop is not a bound).
+    """
+    if match.source == "pp_gap":
+        return max(0, this_military_delta_2x)
+    return -match.counterparty_military_delta_2x
+
+
 def _incoming_military_bounds(incoming_military_2x: int) -> tuple[int, int | None, int | None]:
     """Per-unit military for one acquired ship. Returns point, min, max.
 
@@ -484,11 +504,8 @@ def _acquired_actions(
     for match in pairing.matches:
         if match.family != "acquired":
             continue
-        if match.source == "pp_gap":
-            point, min_2x, max_2x = _incoming_military_bounds(max(0, this_military_delta_2x))
-        else:
-            incoming_military = -match.counterparty_military_delta_2x
-            point, min_2x, max_2x = _incoming_military_bounds(incoming_military)
+        incoming_military = _incoming_military_envelope(match, this_military_delta_2x)
+        point, min_2x, max_2x = _incoming_military_bounds(incoming_military)
         if match.is_unpinned_class_choice():
             group = f"acquired:{match.counterparty_player_id}"
             unpinned_classes: tuple[FleetShipClass, ...] = ("warship", "freighter")
@@ -518,13 +535,10 @@ def _acquired_actions(
                 )
             )
         if match.freighter_delta > 0:
-            if match.source == "pp_gap":
-                freighter_point, freighter_min, freighter_max = point, min_2x, max_2x
-            else:
-                freighter_military = 0 if match.warship_delta > 0 else incoming_military
-                freighter_point, freighter_min, freighter_max = _incoming_military_bounds(
-                    freighter_military
-                )
+            freighter_military = 0 if match.warship_delta > 0 else incoming_military
+            freighter_point, freighter_min, freighter_max = _incoming_military_bounds(
+                freighter_military
+            )
             actions.append(
                 _acquired_class_action(
                     match,

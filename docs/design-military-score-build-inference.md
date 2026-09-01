@@ -191,6 +191,8 @@ Locked in [Ship loss, gift, and trade as exact families](https://github.com/Stev
 
 Catalog military envelopes on interval actions (PP-gap acquired `[0, this row's military]`, unknown-hull loss, etc.) stay wide for search. Each ranked `solutions[]` row's `militaryScoreArithmetic` intersects those envelopes with leftover after the other elements of **that** solution so line-item military is self-consistent and maximally tight. Floor slack stays as a residual band on the line item when it still has width.
 
+**Reserved incoming.** When this row's idle-dock or dock-cap `excess_in` is positive, the build bound reserves that count (class split only when the receiver residual pins warship or freighter; unknown class reserves the total only). Several PP-gap counterparties are alternative signatures for that same budget -- not `max(raw, pp)` and not the sum of peer `transfer_count`s. When `excess_in` is 0, reserved incoming is the sum of raw-drop acquired class deltas.
+
 Several compatible counterparties are distinct ranked **inference explanation signature**s. Counterparty player id is on the explanation when pairing pins one row.
 
 **Catalog.** Departures are **prior-fleet decrease candidate**s: **active** **fleet ship record**s on that player's prior-turn **fleet acquisition ledger**. Hull-known or option-set-bounded records contribute that military; unknown-hull inferred records contribute only that record's envelope. Cannot lose more warships or freighters than prior active rows of that class. Do **not** invert the ship-build combo catalog as `warship_delta = -1` fills (junk-exact). Missing or non-final prior ledger uses the same wait / **scores inference row invalidation** path as today's prior-turn fleet overlay.
