@@ -4,7 +4,6 @@ import type {
   AnalyticItem,
   AnalyticShellScope,
   CombinedMapData,
-  ConnectionsMapParams,
   MapDataResponse,
 } from '../api/bff'
 import {
@@ -12,6 +11,7 @@ import {
   type MapAnalyticQueryContext,
 } from '../analytics/mapAnalyticRegistry'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
+import { useConnectionsMapParamsStore } from '../analytics/connections/connectionsMapParamsStore'
 import {
   combineMapDataFromAnalyticQueries,
   enabledMapAnalyticIds,
@@ -27,7 +27,6 @@ export type UseMapAnalyticQueriesInput = {
   analytics: AnalyticItem[]
   analyticScope: AnalyticShellScope | null
   analyticFetchEnabled: boolean
-  connectionsMapParams: ConnectionsMapParams
 }
 
 export type UseMapAnalyticQueriesResult = {
@@ -58,8 +57,8 @@ export function useMapAnalyticQueries({
   analytics,
   analyticScope,
   analyticFetchEnabled,
-  connectionsMapParams,
 }: UseMapAnalyticQueriesInput): UseMapAnalyticQueriesResult {
+  const connectionsMapParams = useConnectionsMapParamsStore((s) => s.connectionsMapParams)
   const enabledMapIds = useMemo(
     () => enabledMapAnalyticIds(enabledAnalyticIds, analytics),
     [enabledAnalyticIds, analytics]
@@ -73,7 +72,6 @@ export function useMapAnalyticQueries({
     (): MapAnalyticQueryContext => ({
       analyticScope,
       analyticFetchEnabled,
-      connectionsMapParams,
     }),
     [analyticScope, analyticFetchEnabled, connectionsMapParams]
   )

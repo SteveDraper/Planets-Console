@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAnalyticTable, type AnalyticShellScope, type TableDataResponse } from '../api/bff'
-import { scoresTableQueryKey } from '../analytics/scores/api'
+import { appendScoresTableQueryParams, scoresTableQueryKey } from '../analytics/scores/api'
 
 const SCORES_TABLE_LABELS_PARAMS = { includeBuildInference: false } as const
 
@@ -42,7 +42,10 @@ export function useTurnRacePlayerLabels(
       scope,
       ...scoresTableQueryKey(SCORES_TABLE_LABELS_PARAMS),
     ] as const,
-    queryFn: () => fetchAnalyticTable('scores', scope!, SCORES_TABLE_LABELS_PARAMS),
+    queryFn: () =>
+      fetchAnalyticTable('scores', scope!, (params) => {
+        appendScoresTableQueryParams(params, SCORES_TABLE_LABELS_PARAMS)
+      }),
     enabled: enabled && scope != null,
   })
   return useMemo(() => turnRacePlayerLabelsFromTable(data), [data])

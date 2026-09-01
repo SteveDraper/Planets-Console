@@ -1,76 +1,134 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ScoresTableTile } from './ScoresTableTile'
+import { useScoresTablePreferencesStore } from '../../stores/scoresTablePreferences'
+
+vi.mock('../../api/bff', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/bff')>()
+  return {
+    ...actual,
+    fetchAnalyticTable: vi.fn().mockResolvedValue({
+      analyticId: 'scores',
+      columns: ['Race / Player'],
+      rows: [['The Birds (1)']],
+      buildInferenceAvailable: true,
+    }),
+  }
+})
+
+vi.mock('../../lib/usePersistStoreHydrated', () => ({
+  usePersistStoreHydrated: vi.fn(() => true),
+}))
+
+const sampleScope = { gameId: '628580', turn: 111, perspective: 1 }
+
+function renderTile(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  })
+}
 
 describe('ScoresTableTile', () => {
-  it('shows include build inference checkbox when scores is enabled in tabular mode', () => {
-    const onScoresTableParamsChange = vi.fn()
-    render(
+  beforeEach(async () => {
+    const { fetchAnalyticTable } = await import('../../api/bff')
+    vi.mocked(fetchAnalyticTable).mockResolvedValue({
+      analyticId: 'scores',
+      columns: ['Race / Player'],
+      rows: [['The Birds (1)']],
+      buildInferenceAvailable: true,
+    })
+    useScoresTablePreferencesStore.setState({
+      scoresTableParams: { includeBuildInference: false },
+    })
+  })
+
+  it('shows include build inference checkbox when scores is enabled in tabular mode', async () => {
+    renderTile(
       <ScoresTableTile
         name="Scores"
         enabled
         supportsMode
         depressed
         onToggle={() => {}}
-        scoresTableParams={{ includeBuildInference: false }}
-        onScoresTableParamsChange={onScoresTableParamsChange}
-        buildInferenceAvailable
+        turnDataReady
+        analyticScope={sampleScope}
       />
     )
 
-    const inferenceCheckbox = screen.getByLabelText('Include build inference')
+    const inferenceCheckbox = await screen.findByLabelText('Include build inference')
+    await waitFor(() => {
+      expect(inferenceCheckbox).not.toBeDisabled()
+    })
     fireEvent.click(inferenceCheckbox)
-    expect(onScoresTableParamsChange).toHaveBeenCalledWith({ includeBuildInference: true })
+    expect(useScoresTablePreferencesStore.getState().scoresTableParams).toEqual({
+      includeBuildInference: true,
+    })
   })
 
   it('hides include build inference checkbox when scores is disabled', () => {
-    render(
+    renderTile(
       <ScoresTableTile
         name="Scores"
         enabled={false}
         supportsMode
         depressed={false}
         onToggle={() => {}}
-        scoresTableParams={{ includeBuildInference: false }}
-        onScoresTableParamsChange={() => {}}
+        turnDataReady
+        analyticScope={sampleScope}
       />
     )
 
     expect(screen.queryByLabelText('Include build inference')).toBeNull()
   })
 
-  it('grey-disables include build inference when availability is off', () => {
-    render(
+  it('grey-disables include build inference when availability is off', async () => {
+    const { fetchAnalyticTable } = await import('../../api/bff')
+    vi.mocked(fetchAnalyticTable).mockResolvedValue({
+      analyticId: 'scores',
+      columns: ['Race / Player'],
+      rows: [['The Birds (1)']],
+      buildInferenceAvailable: false,
+    })
+    useScoresTablePreferencesStore.setState({
+      scoresTableParams: { includeBuildInference: true },
+    })
+    renderTile(
       <ScoresTableTile
         name="Scores"
         enabled
         supportsMode
         depressed
         onToggle={() => {}}
-        scoresTableParams={{ includeBuildInference: true }}
-        onScoresTableParamsChange={() => {}}
-        buildInferenceAvailable={false}
+        turnDataReady
+        analyticScope={sampleScope}
       />
     )
 
-    const inferenceCheckbox = screen.getByLabelText('Include build inference')
-    expect(inferenceCheckbox).toBeDisabled()
-    expect(inferenceCheckbox).toHaveAttribute(
-      'title',
-      expect.stringMatching(/stealth mode/i)
-    )
+    const inferenceCheckbox = await screen.findByLabelText('Include build inference')
+    await waitFor(() => {
+      expect(inferenceCheckbox).toBeDisabled()
+      expect(inferenceCheckbox).toHaveAttribute(
+        'title',
+        expect.stringMatching(/stealth mode/i)
+      )
+    })
   })
 
   it('keeps include build inference disabled until availability is known', () => {
-    render(
+    renderTile(
       <ScoresTableTile
         name="Scores"
         enabled
         supportsMode
         depressed
         onToggle={() => {}}
-        scoresTableParams={{ includeBuildInference: false }}
-        onScoresTableParamsChange={() => {}}
+        turnDataReady={false}
+        analyticScope={sampleScope}
       />
     )
 

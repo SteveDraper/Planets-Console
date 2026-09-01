@@ -1,5 +1,7 @@
 import type { AnalyticShellScope } from '../../api/bff'
 
+export const SCORES_ANALYTIC_ID = 'scores'
+
 /** Wire query names for Scores table GETs. */
 export const SCORES_QUERY_WIRE = {
   includeBuildInference: 'includeBuildInference',

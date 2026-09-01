@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps } from 'react'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import { StellarCartographyMapTile } from './StellarCartographyMapTile'
 import { defaultCartographyLayerVisibility } from './layers'
 import {
@@ -11,6 +13,17 @@ import {
 import { defaultWormholeDisplayMode } from './wormholeDisplayMode'
 import { useShellStore } from '../../stores/shell'
 import { useStellarCartographyLayersStore } from '../../stores/stellarCartographyLayers'
+
+vi.mock('../../api/bff', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/bff')>()
+  return {
+    ...actual,
+    fetchStellarCartographyTurnSummary: vi.fn().mockResolvedValue({
+      ionStormCount: 3,
+      nuIonStorms: false,
+    }),
+  }
+})
 
 const allGatesEnabled = {
   debrisDiskBorders: true,
@@ -22,9 +35,12 @@ const allGatesEnabled = {
   blackHoles: true,
 }
 
+const sampleScope = { gameId: '1', turn: 1, perspective: 1 }
+
 function renderTile(
   overrides: Partial<ComponentProps<typeof StellarCartographyMapTile>> = {}
 ) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <StellarCartographyMapTile
       name="Stellar Cartography"
@@ -32,10 +48,15 @@ function renderTile(
       supportsMode
       depressed
       onToggle={() => {}}
-      settingsGates={allGatesEnabled}
-      ionStormCount={3}
+      turnDataReady
+      analyticScope={sampleScope}
       {...overrides}
-    />
+    />,
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    }
   )
 }
 
@@ -67,17 +88,7 @@ describe('StellarCartographyMapTile', () => {
   it('shows all layer controls when game settings are not loaded yet', async () => {
     const user = userEvent.setup()
     useShellStore.setState({ gameInfoContext: null })
-    renderTile({
-      settingsGates: {
-        debrisDiskBorders: false,
-        starClusters: false,
-        neutronClusters: false,
-        nebulae: false,
-        ionStorms: false,
-        wormholes: false,
-        blackHoles: false,
-      },
-    })
+    renderTile()
     await user.click(
       screen.getByRole('button', { name: /expand stellar cartography layers/i })
     )
@@ -92,17 +103,25 @@ describe('StellarCartographyMapTile', () => {
 
   it('shows only settings-gated layers when expanded', async () => {
     const user = userEvent.setup()
-    renderTile({
-      settingsGates: {
-        debrisDiskBorders: false,
-        starClusters: true,
-        neutronClusters: false,
-        nebulae: false,
-        ionStorms: true,
-        wormholes: false,
-        blackHoles: true,
+    useShellStore.setState({
+      gameInfoContext: {
+        turn: 1,
+        perspectives: [],
+        isGameFinished: true,
+        sectorDisplayName: null,
+        stellarCartographyGates: {
+          debrisDiskBorders: false,
+          starClusters: true,
+          neutronClusters: false,
+          nebulae: false,
+          ionStorms: true,
+          wormholes: false,
+          blackHoles: true,
+        },
+        homeworldInactiveReason: null,
       },
     })
+    renderTile()
     await user.click(
       screen.getByRole('button', { name: /expand stellar cartography layers/i })
     )
@@ -141,11 +160,16 @@ describe('StellarCartographyMapTile', () => {
 
   it('disables ion storms layer when turn has no storms', async () => {
     const user = userEvent.setup()
-    renderTile({ ionStormCount: 0 })
+    const { fetchStellarCartographyTurnSummary } = await import('../../api/bff')
+    vi.mocked(fetchStellarCartographyTurnSummary).mockResolvedValue({
+      ionStormCount: 0,
+      nuIonStorms: false,
+    })
+    renderTile()
     await user.click(
       screen.getByRole('button', { name: /expand stellar cartography layers/i })
     )
-    const ionStorms = screen.getByText('Ion storms').closest('label')
+    const ionStorms = (await screen.findByText('Ion storms')).closest('label')
     expect(ionStorms).toHaveAttribute('title', 'No ion storms on this turn')
     expect(screen.getByRole('checkbox', { name: /ion storms/i })).toBeDisabled()
   })

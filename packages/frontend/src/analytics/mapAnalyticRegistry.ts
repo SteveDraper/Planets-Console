@@ -5,7 +5,6 @@ import type {
   MapDataResponse,
   MapEdge,
 } from '../api/bff'
-import type { ConnectionsMapParams } from './connections/api'
 import { connectionsMapAnalytic } from './connections/mapAnalytic'
 import {
   BASE_MAP_ANALYTIC_ID,
@@ -24,7 +23,6 @@ import type { CombineMapDataOptionsBase } from './mapLayers'
 export type MapAnalyticQueryContext = {
   analyticScope: AnalyticShellScope | null
   analyticFetchEnabled: boolean
-  connectionsMapParams: ConnectionsMapParams
 }
 
 export type MapAnalyticQuerySpec = {
@@ -161,7 +159,7 @@ export function defaultMapAnalyticQuerySpec(
       if (analyticScope == null) {
         throw new Error('Map analytic query requires analytic scope')
       }
-      return fetchAnalyticMap(analyticId, analyticScope, undefined)
+      return fetchAnalyticMap(analyticId, analyticScope)
     },
     enabled: analyticFetchEnabled && analyticScope != null,
   }

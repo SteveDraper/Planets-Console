@@ -62,7 +62,7 @@ describe('useBuildInferenceAvailable', () => {
     const { result } = renderAvailabilityHook(client)
 
     expect(result.current).toBeUndefined()
-    expect(fetchAnalyticTable).toHaveBeenCalledWith('scores', scope, scoresTableParams)
+    expect(fetchAnalyticTable).toHaveBeenCalledWith('scores', scope)
   })
 
   it('returns false when the payload says build inference is unavailable', async () => {

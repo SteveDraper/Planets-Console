@@ -1,12 +1,10 @@
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import type { AnalyticShellScope } from '../../api/bff'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { tileClassName } from '../tileChrome'
 import { DisplayModeControl } from '../DisplayModeControl'
-import { deriveAnalyticScope } from '../../shell/shellContext'
-import { useEligiblePerspectives } from '../../shell/useEligiblePerspectives'
-import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
 import { homeworldInactiveHint } from './constants'
 import { selectHomeworldCandidateForMapAttention } from './homeworldCandidateAttention'
@@ -29,13 +27,12 @@ type HomeworldLocatorTileProps = {
   supportsMode: boolean
   depressed: boolean
   onToggle: () => void
-  /** When set, catalog is greyed and toggle is disabled (no traditional homeworlds). */
-  inactiveReason: string | null
   /**
    * True when the shell turn blob is in storage (ensure succeeded).
    * Sidebar table/map GETs must wait for this -- same gate as MainArea.
    */
   turnDataReady: boolean
+  analyticScope: AnalyticShellScope | null
 }
 
 function HomeworldRegionSelectionControl({
@@ -68,9 +65,11 @@ export function HomeworldLocatorTile({
   supportsMode,
   depressed,
   onToggle,
-  inactiveReason,
   turnDataReady,
+  analyticScope,
 }: HomeworldLocatorTileProps) {
+  const inactiveReason =
+    useShellStore((s) => s.gameInfoContext?.homeworldInactiveReason) ?? null
   const available = inactiveReason == null
   const canToggle = supportsMode && available
   const showAsUnsupported = !canToggle
@@ -80,29 +79,8 @@ export function HomeworldLocatorTile({
   const canExpand = canToggle && enabled
   const fetchEnabled = canExpand && turnDataReady
 
-  const selectedGameId = useShellStore((s) => s.selectedGameId)
-  const gameInfoContext = useShellStore((s) => s.gameInfoContext)
-  const selectedTurn = useShellStore((s) => s.selectedTurn)
-  const perspectiveOverrideOrdinal = useShellStore((s) => s.perspectiveOverrideOrdinal)
-  const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
-  const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
-  const loginName = useSessionStore((s) => s.name)
-  const eligiblePerspectives = useEligiblePerspectives()
-  const perspectives = gameInfoContext?.perspectives
+  const perspectives = useShellStore((s) => s.gameInfoContext?.perspectives)
   const roster = perspectives ?? EMPTY_ROSTER
-
-  const analyticScope = deriveAnalyticScope({
-    selectedGameId,
-    gameInfoContext,
-    selectedTurn,
-    perspectiveOverrideOrdinal,
-    loginName,
-    storageOnlyLoad,
-    storageAvailablePerspectives,
-    eligiblePerspectives,
-    viewedDataTurn: selectedTurn,
-    turnUsernamesByPlayerId: null,
-  })
 
   const { overlays, homeworldMapOverlaysQuerySucceeded, overlaysError } =
     useHomeworldLocatorMapOverlays({

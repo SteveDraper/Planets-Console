@@ -1,13 +1,5 @@
-import { cn } from '../lib/utils'
-import { ConnectionsMapTile } from '../analytics/connections/ConnectionsMapTile'
-import { FleetAnalyticTile } from '../analytics/fleet/FleetAnalyticTile'
-import { ScoresTableTile } from '../analytics/scores/ScoresTableTile'
-import { StellarCartographyMapTile } from '../analytics/stellar-cartography/StellarCartographyMapTile'
-import { VisibilityMapTile } from '../analytics/visibility/VisibilityMapTile'
-import { HomeworldLocatorTile } from '../analytics/homeworld-locator/HomeworldLocatorTile'
-import { tileClassName } from '../analytics/tileChrome'
-import type { StellarCartographySettingsGates } from '../analytics/stellar-cartography/layers'
-import type { AnalyticItem, ConnectionsMapParams, ScoresTableParams } from '../api/bff'
+import { renderShellAnalyticSidebar } from '../analytics/renderShellAnalyticSidebar'
+import type { AnalyticItem, AnalyticShellScope } from '../api/bff'
 
 type ViewMode = 'tabular' | 'map'
 
@@ -16,22 +8,8 @@ type AnalyticsBarProps = {
   enabledIds: Set<string>
   onToggle: (id: string) => void
   viewMode: ViewMode
-  connectionsMapParams: ConnectionsMapParams
-  onConnectionsMapParamsChange: (next: ConnectionsMapParams) => void
-  scoresTableParams: ScoresTableParams
-  onScoresTableParamsChange: (next: ScoresTableParams) => void
-  /** `undefined` until the Scores table query succeeds. */
-  buildInferenceAvailable?: boolean
-  stellarCartographyGates: StellarCartographySettingsGates
-  ionStormCount: number | null
-  /** When set, Homeworld locator catalog entry is greyed with a hint. */
-  homeworldInactiveReason: string | null
-  /** Shell turn blob is in storage; homeworld sidebar must not GET analytics before this. */
   turnDataReady: boolean
-}
-
-function supportsCurrentMode(a: AnalyticItem, viewMode: ViewMode): boolean {
-  return viewMode === 'tabular' ? a.supportsTable : a.supportsMap
+  analyticScope: AnalyticShellScope | null
 }
 
 /** Only analytics the user can toggle; base map is excluded from the pane. */
@@ -44,15 +22,8 @@ export function AnalyticsBar({
   enabledIds,
   onToggle,
   viewMode,
-  connectionsMapParams,
-  onConnectionsMapParamsChange,
-  scoresTableParams,
-  onScoresTableParamsChange,
-  buildInferenceAvailable,
-  stellarCartographyGates,
-  ionStormCount,
-  homeworldInactiveReason,
   turnDataReady,
+  analyticScope,
 }: AnalyticsBarProps) {
   const list = selectableAnalytics(analytics)
   return (
@@ -63,125 +34,16 @@ export function AnalyticsBar({
       <ul className="flex flex-col gap-1.5">
         {list.map((a) => {
           const enabled = enabledIds.has(a.id)
-          const supportsMode = supportsCurrentMode(a, viewMode)
-          const depressed = enabled && supportsMode
-          const isConnectionsMap = a.id === 'connections' && viewMode === 'map'
-          const isScoresTable = a.id === 'scores' && viewMode === 'tabular'
-          const isStellarCartographyMap = a.id === 'stellar-cartography' && viewMode === 'map'
-          const isVisibilityMap = a.id === 'visibility' && viewMode === 'map'
-          const isFleet = a.id === 'fleet'
-          const isHomeworldLocator = a.id === 'homeworld-locator'
-
-          if (isScoresTable) {
-            return (
-              <li key={a.id} className="min-w-0">
-                <ScoresTableTile
-                  name={a.name}
-                  enabled={enabled}
-                  supportsMode={supportsMode}
-                  depressed={depressed}
-                  onToggle={() => onToggle(a.id)}
-                  scoresTableParams={scoresTableParams}
-                  onScoresTableParamsChange={onScoresTableParamsChange}
-                  buildInferenceAvailable={buildInferenceAvailable}
-                />
-              </li>
-            )
-          }
-
-          if (isConnectionsMap) {
-            return (
-              <li key={a.id} className="min-w-0">
-                <ConnectionsMapTile
-                  name={a.name}
-                  enabled={enabled}
-                  supportsMode={supportsMode}
-                  depressed={depressed}
-                  onToggle={() => onToggle(a.id)}
-                  connectionsMapParams={connectionsMapParams}
-                  onConnectionsMapParamsChange={onConnectionsMapParamsChange}
-                />
-              </li>
-            )
-          }
-
-          if (isFleet) {
-            return (
-              <li key={a.id} className="min-w-0">
-                <FleetAnalyticTile
-                  name={a.name}
-                  enabled={enabled}
-                  supportsMode={supportsMode}
-                  depressed={depressed}
-                  onToggle={() => onToggle(a.id)}
-                />
-              </li>
-            )
-          }
-
-          if (isStellarCartographyMap) {
-            return (
-              <li key={a.id} className="min-w-0">
-                <StellarCartographyMapTile
-                  name={a.name}
-                  enabled={enabled}
-                  supportsMode={supportsMode}
-                  depressed={depressed}
-                  onToggle={() => onToggle(a.id)}
-                  settingsGates={stellarCartographyGates}
-                  ionStormCount={ionStormCount}
-                />
-              </li>
-            )
-          }
-
-          if (isVisibilityMap) {
-            return (
-              <li key={a.id} className="min-w-0">
-                <VisibilityMapTile
-                  name={a.name}
-                  enabled={enabled}
-                  supportsMode={supportsMode}
-                  depressed={depressed}
-                  onToggle={() => onToggle(a.id)}
-                />
-              </li>
-            )
-          }
-
-          if (isHomeworldLocator) {
-            return (
-              <li key={a.id} className="min-w-0">
-                <HomeworldLocatorTile
-                  name={a.name}
-                  enabled={enabled}
-                  supportsMode={supportsMode}
-                  depressed={depressed}
-                  onToggle={() => onToggle(a.id)}
-                  inactiveReason={homeworldInactiveReason}
-                  turnDataReady={turnDataReady}
-                />
-              </li>
-            )
-          }
-
           return (
-            <li key={a.id}>
-              <label
-                className={cn(
-                  'flex cursor-pointer items-center gap-2 px-2 py-1.5',
-                  tileClassName({ supportsMode, depressed })
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={() => supportsMode && onToggle(a.id)}
-                  disabled={!supportsMode}
-                  className="h-4 w-4 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
-                />
-                <span className="min-w-0 truncate">{a.name}</span>
-              </label>
+            <li key={a.id} className="min-w-0">
+              {renderShellAnalyticSidebar({
+                viewMode,
+                catalogItem: a,
+                enabled,
+                onToggle: () => onToggle(a.id),
+                turnDataReady,
+                analyticScope,
+              })}
             </li>
           )
         })}

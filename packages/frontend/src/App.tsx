@@ -5,20 +5,13 @@ import { ShellErrorBar, type ShellErrorItem } from './components/ShellErrorBar'
 import { ShellLoadAllProgressBar } from './components/ShellLoadAllProgressBar'
 import { AnalyticsBar } from './components/AnalyticsBar'
 import { MainArea } from './components/MainArea'
-import {
-  fetchAnalytics,
-  fetchShellBootstrap,
-  type ConnectionsMapParams,
-} from './api/bff'
+import { fetchAnalytics, fetchShellBootstrap, type AnalyticItem } from './api/bff'
 import { useEnabledAnalyticsStore } from './stores/enabledAnalytics'
 // Side-effect: install persisted player-color resolution port for map/table paint (#289).
 import './stores/playerColors'
-import { useScoresTablePreferencesStore } from './stores/scoresTablePreferences'
 import { useSessionStore } from './stores/session'
 import { useShellStore } from './stores/shell'
-import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './analytics/stellar-cartography/layers'
-import { useStellarCartographyTurnSummary } from './analytics/stellar-cartography/useStellarCartographyTurnSummary'
-import { withoutInactiveHomeworldLocator } from './analytics/homeworld-locator/homeworldAvailability'
+import { foldAvailableEnabledAnalyticIds } from './analytics/shellAnalyticRegistry'
 import { useClearHomeworldLocatorAttentionOnShellChange } from './analytics/homeworld-locator/useClearHomeworldLocatorAttentionOnShellChange'
 import {
   applyShellGameBootstrapResult,
@@ -29,11 +22,11 @@ import { useIdentityLifecycle } from './shell/useIdentityLifecycle'
 import { TurnKeyboardShortcuts } from './components/shell/TurnKeyboardShortcuts'
 import { shouldRetryTanStackQuery } from './lib/queryRetry'
 import { clampMapZoom } from './lib/mapZoom'
-import { useGlobalInferencePause } from './analytics/scores/useGlobalInferencePause'
-import { useBuildInferenceAvailable } from './analytics/scores/useBuildInferenceAvailable'
 import { usePersistStoreHydrated } from './lib/usePersistStoreHydrated'
 import { useComputeFreezeStatusSync } from './lib/useComputeFreezeStatusSync'
 import { useComputeDiagnosticsStore } from './stores/computeDiagnostics'
+
+const EMPTY_ANALYTICS: AnalyticItem[] = []
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,15 +46,6 @@ function ConsoleShell() {
   const enabledIdsList = useEnabledAnalyticsStore((s) => s.enabledIds)
   const toggleAnalytic = useEnabledAnalyticsStore((s) => s.toggleEnabled)
   const enabledIds = useMemo(() => new Set(enabledIdsList), [enabledIdsList])
-  const [connectionsMapParams, setConnectionsMapParams] = useState<ConnectionsMapParams>({
-    warpSpeed: 9,
-    gravitonicMovement: false,
-    flareMode: 'include',
-    /** 2+ includes full static table (1- and 3-pair host rows); 1 is 1-pair rows only. */
-    flareDepth: 2,
-  })
-  const scoresTableParams = useScoresTablePreferencesStore((s) => s.scoresTableParams)
-  const setScoresTableParams = useScoresTablePreferencesStore((s) => s.setScoresTableParams)
   const [shellErrors, setShellErrors] = useState<ShellErrorItem[]>([])
 
   const addShellError = useCallback((message: string) => {
@@ -171,8 +155,6 @@ function ConsoleShell() {
 
   useComputeFreezeStatusSync(analyticScope)
 
-  const scoresPreferencesHydrated = usePersistStoreHydrated(useScoresTablePreferencesStore)
-
   const trimmedLoginName = loginName?.trim() ?? ''
 
   const { data: initialGameBootstrap, isError: initialGameInfoIsError, error: initialGameInfoError } =
@@ -277,51 +259,14 @@ function ConsoleShell() {
     }
   }, [analyticsIsError, analyticsError, addShellError])
 
-  const stellarCartographyGates =
-    gameInfoContext?.stellarCartographyGates ??
-    EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES
-
-  const { data: stellarCartographyTurnSummary } = useStellarCartographyTurnSummary({
-    analyticScope,
-    turnDataReady,
-    ionStormsGate: stellarCartographyGates.ionStorms,
-  })
-
-  const ionStormCount =
-    stellarCartographyGates.ionStorms && turnDataReady && analyticScope != null
-      ? (stellarCartographyTurnSummary?.ionStormCount ?? null)
-      : null
-
-  const homeworldInactiveReason = gameInfoContext?.homeworldInactiveReason ?? null
-
-  const analytics = analyticsData?.analytics ?? []
+  const analytics = analyticsData?.analytics ?? EMPTY_ANALYTICS
   const enabledAnalyticIds = useMemo(
     () =>
-      withoutInactiveHomeworldLocator(
+      foldAvailableEnabledAnalyticIds(
         analytics.filter((a) => enabledIds.has(a.id)).map((a) => a.id),
-        homeworldInactiveReason
+        gameInfoContext
       ),
-    [analytics, enabledIds, homeworldInactiveReason]
-  )
-  const buildInferenceAvailable = useBuildInferenceAvailable(
-    analyticScope,
-    scoresTableParams,
-    viewMode === 'tabular' &&
-      enabledIds.has('scores') &&
-      turnDataReady &&
-      scoresPreferencesHydrated
-  )
-  const globalInferencePauseEnabled =
-    viewMode === 'tabular' &&
-    enabledIds.has('scores') &&
-    scoresPreferencesHydrated &&
-    scoresTableParams.includeBuildInference &&
-    buildInferenceAvailable === true &&
-    turnDataReady &&
-    analyticScope != null
-  const globalInferencePause = useGlobalInferencePause(
-    analyticScope,
-    globalInferencePauseEnabled
+    [analytics, enabledIds, gameInfoContext]
   )
   const handleMapZoomChange = useCallback((z: number) => {
     setMapZoom(clampMapZoom(z))
@@ -373,15 +318,8 @@ function ConsoleShell() {
           enabledIds={enabledIds}
           onToggle={toggleAnalytic}
           viewMode={viewMode}
-          connectionsMapParams={connectionsMapParams}
-          onConnectionsMapParamsChange={setConnectionsMapParams}
-          scoresTableParams={scoresTableParams}
-          onScoresTableParamsChange={setScoresTableParams}
-          buildInferenceAvailable={buildInferenceAvailable}
-          stellarCartographyGates={stellarCartographyGates}
-          ionStormCount={ionStormCount}
-          homeworldInactiveReason={homeworldInactiveReason}
           turnDataReady={turnDataReady}
+          analyticScope={analyticScope}
         />
         {isPending ? (
           <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
@@ -398,10 +336,6 @@ function ConsoleShell() {
             turnEnsureIsError={turnEnsureIsError}
             turnEnsureError={turnEnsureError}
             turnBlockedNoLogin={turnBlockedNoLogin}
-            connectionsMapParams={connectionsMapParams}
-            scoresTableParams={scoresTableParams}
-            scoresPreferencesHydrated={scoresPreferencesHydrated}
-            globalInferencePause={globalInferencePause}
             futureTurnOffset={futureTurnOffset}
             onMapZoomChange={handleMapZoomChange}
             onSetZoomReady={handleSetZoomReady}

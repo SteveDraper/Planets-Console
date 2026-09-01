@@ -13,7 +13,7 @@ export function useBuildInferenceAvailable(
 ): boolean | undefined {
   const { data, isSuccess } = useQuery({
     queryKey: scoresAnalyticTableQueryKey(analyticScope, scoresTableParams),
-    queryFn: () => fetchAnalyticTable('scores', analyticScope!, scoresTableParams),
+    queryFn: () => fetchAnalyticTable('scores', analyticScope!),
     enabled: enabled && analyticScope != null,
   })
   if (!isSuccess) {

@@ -60,7 +60,7 @@ describe('useBaseMapPlanetPositions', () => {
       expect(result.current.positionsReady).toBe(true)
     })
 
-    expect(fetchAnalyticMap).toHaveBeenCalledWith('base-map', sampleScope, undefined)
+    expect(fetchAnalyticMap).toHaveBeenCalledWith('base-map', sampleScope)
     expect(result.current.planetPositions.get(12)).toEqual({ x: 50, y: 60 })
     expect(result.current.positionsError).toBeNull()
     const keys = client

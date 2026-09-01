@@ -13,7 +13,7 @@ This document describes the **Connections** analytic: **one-turn ship reachabili
 | Core analytics adapter | `packages/api/api/analytics/connections.py` |
 | BFF map route + handler | `packages/bff/bff/routers/analytics.py`, `packages/bff/bff/analytics/connections.py` |
 | SPA: fetch, merge with base map, styling | `packages/frontend/src/api/bff.ts`, `packages/frontend/src/analytics/mapLayers.ts`, `MapGraph.tsx` |
-| SPA: enable + parameters | `packages/frontend/src/App.tsx` (`connectionsMapParams`), `packages/frontend/src/analytics/connections/ConnectionsMapTile.tsx` |
+| SPA: enable + parameters | `packages/frontend/src/analytics/connections/connectionsMapParamsStore.ts` (ephemeral Zustand), `packages/frontend/src/analytics/connections/ConnectionsMapTile.tsx`, `packages/frontend/src/analytics/connections/shell.tsx` |
 | Tests | `packages/api/tests/test_planet_connections.py`, `packages/bff/tests/test_analytics.py` |
 
 Related: [Warp wells on the map](design-warp-wells-map.md) (well drawing and concept HTTP), [vga-planets-domain-context.md](vga-planets-domain-context.md) (domain), [Frontend and backend state](design-frontend-and-backend-state.md) (query keys and gating).
@@ -101,7 +101,7 @@ The BFF does not recompute logic; it forwards to Core **`get_turn_analytics`** w
 ### 6.1 Enabling and parameters
 
 - **Connections** appears in the **Analytics** sidebar as a **checkbox** (map mode). It must be **enabled** for the map request to run (together with the always-included **base map** layer when map mode is active).
-- **`connectionsMapParams`** in `App.tsx` holds:
+- **`connectionsMapParams`** in the ephemeral Zustand store `connectionsMapParamsStore.ts` (not persisted; not `App.tsx` state) holds:
   - **`warpSpeed`** (1--9),
   - **`gravitonicMovement`**,
   - **`flareMode`** (`off` \| `include` \| `only`),
@@ -113,7 +113,7 @@ Controls live in **`ConnectionsMapTile`**: **Flares** and **Depth** are shown wh
 
 ### 6.2 Fetch and cache key
 
-`MainArea` uses **`useQueries`**. For **connections**, the TanStack **query key** includes (in order): `'analytic'`, `'connections'`, `'map'`, `gameId`, `turn`, `perspective`, **`warpSpeed`**, **`gravitonicMovement`**, **`flareMode`**, **`flareDepth`**. Changing any of these refetches the connections overlay.
+`useMapAnalyticQueries` (via the Connections `buildQuerySpec`) includes sidebar params in the TanStack **query key** (in order): `'analytic'`, `'connections'`, `'map'`, `gameId`, `turn`, `perspective`, **`warpSpeed`**, **`gravitonicMovement`**, **`flareMode`**, **`flareDepth`**. Changing any of these refetches the connections overlay.
 
 `fetchAnalyticMap` passes the connection parameters as query string fields on the GET (see `appendConnectionsMapQueryParams` in `src/analytics/connections/api.ts`).
 

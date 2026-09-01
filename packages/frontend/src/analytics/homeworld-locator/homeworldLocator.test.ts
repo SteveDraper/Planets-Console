@@ -9,7 +9,6 @@ import {
 } from './constants'
 import {
   homeworldLocatorInactiveReasonFromGameInfo,
-  withoutInactiveHomeworldLocator,
 } from './homeworldAvailability'
 import { parseHomeworldLocatorPayload } from './wireSchema'
 import {
@@ -17,6 +16,8 @@ import {
   resolveHomeworldMarkerDisplays,
 } from './mapAnalytic'
 import * as homeworldApi from './api'
+import { foldAvailableEnabledAnalyticIds } from '../shellAnalyticRegistry'
+import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
 
 
 describe('homeworldLocatorInactiveReasonFromGameInfo', () => {
@@ -92,21 +93,35 @@ describe('homeworldInactiveHint', () => {
   })
 })
 
-describe('withoutInactiveHomeworldLocator', () => {
+describe('foldAvailableEnabledAnalyticIds (homeworld availability)', () => {
   it('keeps homeworld-locator when available', () => {
     expect(
-      withoutInactiveHomeworldLocator(
+      foldAvailableEnabledAnalyticIds(
         ['scores', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'fleet'],
-        null
+        {
+          turn: 1,
+          perspectives: [],
+          isGameFinished: true,
+          sectorDisplayName: null,
+          stellarCartographyGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+          homeworldInactiveReason: null,
+        }
       )
     ).toEqual(['scores', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'fleet'])
   })
 
   it('drops homeworld-locator from effective enabled ids when inactive', () => {
     expect(
-      withoutInactiveHomeworldLocator(
+      foldAvailableEnabledAnalyticIds(
         ['scores', HOMEWORLD_LOCATOR_ANALYTIC_ID, 'fleet'],
-        INACTIVE_REASON_NO_HOMEWORLD
+        {
+          turn: 1,
+          perspectives: [],
+          isGameFinished: true,
+          sectorDisplayName: null,
+          stellarCartographyGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+          homeworldInactiveReason: INACTIVE_REASON_NO_HOMEWORLD,
+        }
       )
     ).toEqual(['scores', 'fleet'])
   })
