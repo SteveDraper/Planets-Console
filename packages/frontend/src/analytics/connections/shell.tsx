@@ -1,8 +1,7 @@
 import { ConnectionsMapTile } from './ConnectionsMapTile'
-import { appendConnectionsMapQueryParamsFromStore } from './queryParams'
-import type { ShellAnalyticRegistration } from '../shellAnalyticRegistry'
+import type { ShellAnalyticChrome } from '../shellAnalyticRegistry'
 
-export const connectionsShellAnalytic: ShellAnalyticRegistration = {
+export const connectionsShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
     if (ctx.viewMode !== 'map') {
       return null
@@ -18,5 +17,4 @@ export const connectionsShellAnalytic: ShellAnalyticRegistration = {
       />
     )
   },
-  queryParams: { appendMap: appendConnectionsMapQueryParamsFromStore },
 }

@@ -1,7 +1,7 @@
 import { StellarCartographyMapTile } from './StellarCartographyMapTile'
-import type { ShellAnalyticRegistration } from '../shellAnalyticRegistry'
+import type { ShellAnalyticChrome } from '../shellAnalyticRegistry'
 
-export const stellarCartographyShellAnalytic: ShellAnalyticRegistration = {
+export const stellarCartographyShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
     if (ctx.viewMode !== 'map') {
       return null

@@ -1,9 +1,8 @@
 import { ScoresTableTile } from './ScoresTableTile'
 import { ScoresAnalyticTableTile } from './ScoresAnalyticTableTile'
-import { appendScoresTableQueryParamsFromStore } from './queryParams'
-import type { ShellAnalyticRegistration } from '../shellAnalyticRegistry'
+import type { ShellAnalyticChrome } from '../shellAnalyticRegistry'
 
-export const scoresShellAnalytic: ShellAnalyticRegistration = {
+export const scoresShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
     if (ctx.viewMode !== 'tabular') {
       return null
@@ -22,6 +21,5 @@ export const scoresShellAnalytic: ShellAnalyticRegistration = {
     )
   },
   TableView: ScoresAnalyticTableTile,
-  queryParams: { appendTable: appendScoresTableQueryParamsFromStore },
   stream: { lifetime: 'tile' },
 }

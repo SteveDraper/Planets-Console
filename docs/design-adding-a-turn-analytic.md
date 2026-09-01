@@ -276,7 +276,7 @@ An unregistered selectable id is not an error: generic checkbox + generic table.
 |------|------|
 | Sidebar controls beyond enable/disable | `renderSidebar(ctx)` -- return `null` in a **view mode** that should use the generic checkbox |
 | Custom MainArea table body | `TableView` |
-| Extra GET query params on generic table/map fetch | `queryParams.appendTable` / `appendMap` (same function references live in `shellAnalyticQueryParams.ts` so `bff.ts` does not import React chrome) |
+| Extra GET query params on generic table/map fetch | Appender in `shellAnalyticQueryParams.ts` (`SHELL_TABLE_QUERY_APPENDERS` / `SHELL_MAP_QUERY_APPENDERS`). The shell registry composes `queryParams` onto the registration. `bff.ts` imports that module so it does not pull React chrome. Do not set `queryParams` on `shell.tsx`. |
 | GameInfo inactivity (grey/disable without dropping persisted enablement) | `availability(gameInfo) => string \| null` |
 | Table stream | `stream`: `{ lifetime: 'shell', hook, Provider }` or `{ lifetime: 'tile' }` |
 
@@ -299,13 +299,14 @@ These are sibling registries, not one mega plugin table:
 
 | Concern | Owner |
 |---------|--------|
-| Sidebar, table view, query-string adapters, GameInfo availability, stream lifetime | **Shell analytic registration** (`shellAnalyticRegistry.ts`) |
+| Sidebar, table view, GameInfo availability, stream lifetime | **Shell analytic registration** (`shellAnalyticRegistry.ts`); `queryParams` is composed onto it |
+| Extra GET query-string adapters | **`shellAnalyticQueryParams.ts`** (only write site; `bff.ts` imports this module) |
 | Map GET query keys, fetch, merge into combined map data | **Map fetch/merge registry** (`mapAnalyticRegistry.ts` + `useMapAnalyticQueries`) |
 | Map paint (React Flow node/edge components) | Not a registry slot yet ([#383](https://github.com/SteveDraper/Planets-Console/issues/383)) |
 
-Parametric map knobs (Connections warp/flare) live in an **ephemeral** Zustand store under `src/analytics/connections/` -- not in `App.tsx`, **not persisted**. `buildQuerySpec` and the query-param adapter read `getState()`; `useMapAnalyticQueries` subscribes so query keys update when knobs change. Generic `fetchAnalyticMap` appends `queryParams.appendMap`.
+Parametric map knobs (Connections warp/flare) live in an **ephemeral** Zustand store under `src/analytics/connections/` -- not in `App.tsx`, **not persisted**. `buildQuerySpec` and the query-param adapter read `getState()`; `useMapAnalyticQueries` subscribes so query keys update when knobs change. Generic `fetchAnalyticMap` appends the map appender from `shellAnalyticQueryParams.ts`.
 
-Do not add `if (analyticId === ...)` in `MainArea` for map fetch. A new parametric map analytic registers `queryParams.appendMap` and, when the query key must include those knobs, a map-registry `buildQuerySpec`.
+Do not add `if (analyticId === ...)` in `MainArea` for map fetch. A new parametric map analytic registers an appender in `shellAnalyticQueryParams.ts` and, when the query key must include those knobs, a map-registry `buildQuerySpec`.
 
 **Re-examination triggers** -- map **paint** (#383) or a deeper map-registry slot, not a new MainArea fetch branch:
 
@@ -316,7 +317,7 @@ Do not add `if (analyticId === ...)` in `MainArea` for map fetch. A new parametr
 ### 4.2 Frontend checklist (when this section applies)
 
 - [ ] Query wire names match BFF and `api/transport/` (if params cross layers)
-- [ ] Custom chrome is a `ShellAnalyticRegistration` plus one registry line; `App` / `AnalyticsBar` / `MainArea` / generic fetch stay id-switch free
+- [ ] Custom chrome is a `ShellAnalyticChrome` plus one registry line; extra GET params go in `shellAnalyticQueryParams.ts`; `App` / `AnalyticsBar` / `MainArea` / generic fetch stay id-switch free
 - [ ] Unregistered selectable ids fall back to generic checkbox + generic table (not an error)
 - [ ] Map fetch/merge stays on `mapAnalyticRegistry`; map paint remains [#383](https://github.com/SteveDraper/Planets-Console/issues/383)
 - [ ] Connections-style knobs: analytic-owned ephemeral store, not `App` `useState` and not persisted unless the product asks for it
@@ -351,7 +352,7 @@ Use this before opening a PR:
 | BFF lists analytic, Core handler missing | 422 from Core when BFF forwards | Append `REGISTRATION` to `TURN_ANALYTIC_REGISTRATIONS` in `registry.py` |
 | `supportsMap: true` but no `get_map` | Registry validation test fails | Set handler on descriptor |
 | Frontend query param names drift from BFF | Silent wrong results or ignored params | Share wire names via `api/transport/` |
-| Analytic-id branch in `App` / `AnalyticsBar` / `MainArea` / generic fetch | Shell accumulates chrome that belongs on the registration | Register `renderSidebar` / `TableView` / `queryParams` / `availability` / `stream` instead |
+| Analytic-id branch in `App` / `AnalyticsBar` / `MainArea` / generic fetch | Shell accumulates chrome that belongs on the registration | Register `renderSidebar` / `TableView` / an appender in `shellAnalyticQueryParams.ts` / `availability` / `stream` instead |
 | New map analytic needs non-Connections query params | Shared map route would accept misleading or clashing params | See [map route query params](design-analytics-structure.md#map-route-query-params-intentional-gap); descriptor-driven parsing or split routes |
 | Fetch before turn ensure | Empty/error flicker | Gate on `turnDataReady` in shell (see design-frontend-and-backend-state.md) |
 | Map overlay without base-map | No planet nodes to attach to | Map mode always fetches `base-map` first |

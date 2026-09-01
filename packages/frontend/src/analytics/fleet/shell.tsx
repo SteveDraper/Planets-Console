@@ -2,7 +2,7 @@ import { FleetAnalyticTile } from './FleetAnalyticTile'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
 import { FleetStreamPlayersProvider } from './FleetStreamPlayersContext'
 import { useFleetTableStream } from './useFleetTableStream'
-import type { ShellAnalyticRegistration, ShellLivedStreamSlot } from '../shellAnalyticRegistry'
+import type { ShellAnalyticChrome, ShellLivedStreamSlot } from '../shellAnalyticRegistry'
 
 const fleetShellLivedStream: ShellLivedStreamSlot = {
   lifetime: 'shell',
@@ -10,7 +10,7 @@ const fleetShellLivedStream: ShellLivedStreamSlot = {
   Provider: FleetStreamPlayersProvider as ShellLivedStreamSlot['Provider'],
 }
 
-export const fleetShellAnalytic: ShellAnalyticRegistration = {
+export const fleetShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
     const supportsMode =
       ctx.viewMode === 'tabular' ? ctx.catalogItem.supportsTable : ctx.catalogItem.supportsMap

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   appendRegisteredMapQueryParams,
   appendRegisteredTableQueryParams,
+  queryParamsAdaptersFor,
 } from './shellAnalyticQueryParams'
 import { useScoresTablePreferencesStore } from '../stores/scoresTablePreferences'
 import {
@@ -29,6 +30,14 @@ describe('registered analytic query param appenders', () => {
     const params = new URLSearchParams()
     appendRegisteredTableQueryParams('mystery', params)
     expect([...params.keys()]).toEqual([])
+  })
+
+  it('returns adapters only for ids that have a table or map appender', () => {
+    expect(queryParamsAdaptersFor('mystery')).toBeUndefined()
+    expect(queryParamsAdaptersFor('scores')?.appendTable).toBeTypeOf('function')
+    expect(queryParamsAdaptersFor('scores')?.appendMap).toBeUndefined()
+    expect(queryParamsAdaptersFor('connections')?.appendMap).toBeTypeOf('function')
+    expect(queryParamsAdaptersFor('connections')?.appendTable).toBeUndefined()
   })
 
   it('appends connections map params from the store', () => {

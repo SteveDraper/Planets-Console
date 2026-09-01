@@ -132,7 +132,7 @@ Frontend **Shell chrome** is **optional** and sparse: a **shell analytic registr
 The SPA does **not** put map GET orchestration on the shell registration, and it does **not** branch on analytic id in `MainArea`:
 
 - **Shell analytic registration:** sidebar factory, MainArea table view, generic-route query-param adapters, GameInfo availability, table-stream lifetime.
-- **Map fetch/merge registry:** query keys, fetch, merge into combined map data (`useMapAnalyticQueries`). Parametric knobs (Connections) live in an analytic-owned ephemeral store; `buildQuerySpec` reads them; generic `fetchAnalyticMap` appends `queryParams.appendMap`.
+- **Map fetch/merge registry:** query keys, fetch, merge into combined map data (`useMapAnalyticQueries`). Parametric knobs (Connections) live in an analytic-owned ephemeral store; `buildQuerySpec` reads them; generic `fetchAnalyticMap` appends the map appender from `shellAnalyticQueryParams.ts`.
 - **Map paint** (React Flow components) is not a registry slot yet ([#383](https://github.com/SteveDraper/Planets-Console/issues/383)).
 
 Unregistered selectable ids keep generic checkbox + generic table -- not an error. **Re-examine when adding map paint that cannot live in `MapGraph` without an id switch** (#383), not by adding another `MainArea` fetch branch.

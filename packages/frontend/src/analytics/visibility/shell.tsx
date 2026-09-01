@@ -1,7 +1,7 @@
 import { VisibilityMapTile } from './VisibilityMapTile'
-import type { ShellAnalyticRegistration } from '../shellAnalyticRegistry'
+import type { ShellAnalyticChrome } from '../shellAnalyticRegistry'
 
-export const visibilityShellAnalytic: ShellAnalyticRegistration = {
+export const visibilityShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
     if (ctx.viewMode !== 'map') {
       return null

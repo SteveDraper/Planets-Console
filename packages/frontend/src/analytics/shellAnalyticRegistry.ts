@@ -13,6 +13,10 @@ import {
 } from './mapAnalyticIds'
 import { SCORES_ANALYTIC_ID } from './scores/api'
 import { scoresShellAnalytic } from './scores/shell'
+import {
+  queryParamsAdaptersFor,
+  type ShellAnalyticQueryParamAdapters,
+} from './shellAnalyticQueryParams'
 import { stellarCartographyShellAnalytic } from './stellar-cartography/shell'
 import { visibilityShellAnalytic } from './visibility/shell'
 
@@ -37,11 +41,6 @@ export type ShellAnalyticTableViewProps = {
   fetchEnabled: boolean
 }
 
-export type ShellAnalyticQueryParamAdapters = {
-  appendTable?: (params: URLSearchParams) => void
-  appendMap?: (params: URLSearchParams) => void
-}
-
 export type ShellLivedStreamSlot = {
   lifetime: 'shell'
   hook: (analyticScope: AnalyticShellScope | null, enabled: boolean) => object
@@ -57,6 +56,7 @@ export type ShellAnalyticStreamSlot = ShellLivedStreamSlot | TileLivedStreamSlot
 /**
  * Sparse SPA plugin for one turn analytic's Shell chrome.
  * Omit a slot (or the whole registration) to keep generic checkbox / generic table.
+ * `queryParams` is composed from `shellAnalyticQueryParams.ts`, not authored in `shell.tsx`.
  */
 export type ShellAnalyticRegistration = {
   renderSidebar?: (ctx: ShellAnalyticSidebarContext) => ReactNode | null
@@ -66,13 +66,36 @@ export type ShellAnalyticRegistration = {
   stream?: ShellAnalyticStreamSlot
 }
 
+/** Authored in `shell.tsx`. Query-param adapters are composed from `shellAnalyticQueryParams.ts`. */
+export type ShellAnalyticChrome = Omit<ShellAnalyticRegistration, 'queryParams'>
+
+function withComposedQueryParams(
+  analyticId: string,
+  chrome: ShellAnalyticChrome
+): ShellAnalyticRegistration {
+  const queryParams = queryParamsAdaptersFor(analyticId)
+  if (queryParams == null) {
+    return chrome
+  }
+  return { ...chrome, queryParams }
+}
+
 const shellAnalyticRegistry: Record<string, ShellAnalyticRegistration> = {
-  [SCORES_ANALYTIC_ID]: scoresShellAnalytic,
-  [CONNECTIONS_ANALYTIC_ID]: connectionsShellAnalytic,
-  [STELLAR_CARTOGRAPHY_ANALYTIC_ID]: stellarCartographyShellAnalytic,
-  [FLEET_ANALYTIC_ID]: fleetShellAnalytic,
-  [VISIBILITY_ANALYTIC_ID]: visibilityShellAnalytic,
-  [HOMEWORLD_LOCATOR_ANALYTIC_ID]: homeworldLocatorShellAnalytic,
+  [SCORES_ANALYTIC_ID]: withComposedQueryParams(SCORES_ANALYTIC_ID, scoresShellAnalytic),
+  [CONNECTIONS_ANALYTIC_ID]: withComposedQueryParams(
+    CONNECTIONS_ANALYTIC_ID,
+    connectionsShellAnalytic
+  ),
+  [STELLAR_CARTOGRAPHY_ANALYTIC_ID]: withComposedQueryParams(
+    STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+    stellarCartographyShellAnalytic
+  ),
+  [FLEET_ANALYTIC_ID]: withComposedQueryParams(FLEET_ANALYTIC_ID, fleetShellAnalytic),
+  [VISIBILITY_ANALYTIC_ID]: withComposedQueryParams(VISIBILITY_ANALYTIC_ID, visibilityShellAnalytic),
+  [HOMEWORLD_LOCATOR_ANALYTIC_ID]: withComposedQueryParams(
+    HOMEWORLD_LOCATOR_ANALYTIC_ID,
+    homeworldLocatorShellAnalytic
+  ),
 }
 
 /** Selectable catalog ids that currently ship custom Shell chrome. */

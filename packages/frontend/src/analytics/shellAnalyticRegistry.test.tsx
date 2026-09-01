@@ -17,7 +17,6 @@ import {
 } from './shellAnalyticRegistry'
 import { SHELL_MAP_QUERY_APPENDERS, SHELL_TABLE_QUERY_APPENDERS } from './shellAnalyticQueryParams'
 import { SCORES_ANALYTIC_ID } from './scores/api'
-import { CONNECTIONS_ANALYTIC_ID } from './mapAnalyticIds'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from './stellar-cartography/layers'
 
 const SELECTABLE_TURN_ANALYTIC_IDS = [
@@ -88,13 +87,22 @@ describe('shell analytic registry', () => {
     ).toBeInTheDocument()
   })
 
-  it('shares query-param appenders with the React-free lookup used by generic fetch', () => {
-    expect(shellAnalyticRegistrationFor(SCORES_ANALYTIC_ID)?.queryParams?.appendTable).toBe(
-      SHELL_TABLE_QUERY_APPENDERS[SCORES_ANALYTIC_ID]
-    )
-    expect(shellAnalyticRegistrationFor(CONNECTIONS_ANALYTIC_ID)?.queryParams?.appendMap).toBe(
-      SHELL_MAP_QUERY_APPENDERS[CONNECTIONS_ANALYTIC_ID]
-    )
+  it('composes every queryParams slot from the React-free fetch maps, and vice versa', () => {
+    for (const analyticId of CUSTOM_SHELL_CHROME_ANALYTIC_IDS) {
+      const queryParams = shellAnalyticRegistrationFor(analyticId)?.queryParams
+      expect(queryParams?.appendTable).toBe(SHELL_TABLE_QUERY_APPENDERS[analyticId])
+      expect(queryParams?.appendMap).toBe(SHELL_MAP_QUERY_APPENDERS[analyticId])
+    }
+    for (const analyticId of Object.keys(SHELL_TABLE_QUERY_APPENDERS)) {
+      expect(shellAnalyticRegistrationFor(analyticId)?.queryParams?.appendTable).toBe(
+        SHELL_TABLE_QUERY_APPENDERS[analyticId]
+      )
+    }
+    for (const analyticId of Object.keys(SHELL_MAP_QUERY_APPENDERS)) {
+      expect(shellAnalyticRegistrationFor(analyticId)?.queryParams?.appendMap).toBe(
+        SHELL_MAP_QUERY_APPENDERS[analyticId]
+      )
+    }
   })
 
   it('records fleet as shell-lived and scores as tile-lived', () => {
@@ -136,5 +144,12 @@ describe('shell dispatch has no analytic id branches', () => {
     const mapBody = mapFn.slice(0, mapFn.indexOf('export async function fetchStellarCartographySample'))
     expect(tableBody).not.toMatch(idBranch)
     expect(mapBody).not.toMatch(idBranch)
+  })
+
+  it('does not author queryParams on shell.tsx modules', () => {
+    for (const analyticId of CUSTOM_SHELL_CHROME_ANALYTIC_IDS) {
+      const source = readFileSync(join(here, analyticId, 'shell.tsx'), 'utf8')
+      expect(source).not.toMatch(/\bqueryParams\s*:/)
+    }
   })
 })

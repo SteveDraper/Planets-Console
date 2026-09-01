@@ -1,7 +1,7 @@
 import { HomeworldLocatorTile } from './HomeworldLocatorTile'
-import type { ShellAnalyticRegistration } from '../shellAnalyticRegistry'
+import type { ShellAnalyticChrome } from '../shellAnalyticRegistry'
 
-export const homeworldLocatorShellAnalytic: ShellAnalyticRegistration = {
+export const homeworldLocatorShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
     const supportsMode =
       ctx.viewMode === 'tabular' ? ctx.catalogItem.supportsTable : ctx.catalogItem.supportsMap
