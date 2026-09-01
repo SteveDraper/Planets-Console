@@ -40,14 +40,24 @@ def test_pq_ppq_shared_limit_is_idle_dock_queue(sample_turn):
 
 
 def test_enforce_on_even_lattice_without_planet_or_starbase_drop(sample_turn):
-    assert should_enforce_idle_dock_pp(_observation(), sample_turn.settings) is True
+    observation = _observation()
+    assert (
+        should_enforce_idle_dock_pp(
+            observation,
+            sample_turn.settings,
+            is_after_ship_limit=observation.is_after_ship_limit,
+        )
+        is True
+    )
 
 
 def test_skip_odd_priority_points(sample_turn):
+    observation = _observation(priority_point_delta=1)
     assert (
         should_enforce_idle_dock_pp(
-            _observation(priority_point_delta=1),
+            observation,
             sample_turn.settings,
+            is_after_ship_limit=observation.is_after_ship_limit,
         )
         is False
     )
@@ -59,41 +69,63 @@ def test_skip_classic_pbp(sample_turn):
         productionqueue=False,
         planetaryproductionqueue=False,
     )
+    observation = _observation()
     assert is_idle_dock_queue(settings) is False
-    assert should_enforce_idle_dock_pp(_observation(), settings) is False
+    assert (
+        should_enforce_idle_dock_pp(
+            observation,
+            settings,
+            is_after_ship_limit=observation.is_after_ship_limit,
+        )
+        is False
+    )
 
 
 def test_skip_pls(sample_turn):
     settings = replace(sample_turn.settings, shiplimittype=1)
+    observation = _observation()
     assert is_idle_dock_queue(settings) is False
-    assert should_enforce_idle_dock_pp(_observation(), settings) is False
+    assert (
+        should_enforce_idle_dock_pp(
+            observation,
+            settings,
+            is_after_ship_limit=observation.is_after_ship_limit,
+        )
+        is False
+    )
 
 
 def test_skip_after_ship_limit(sample_turn):
+    observation = _observation(is_after_ship_limit=True)
     assert (
         should_enforce_idle_dock_pp(
-            _observation(is_after_ship_limit=True),
+            observation,
             sample_turn.settings,
+            is_after_ship_limit=True,
         )
         is False
     )
 
 
 def test_skip_planet_count_drop(sample_turn):
+    observation = _observation(planet_delta=-1)
     assert (
         should_enforce_idle_dock_pp(
-            _observation(planet_delta=-1),
+            observation,
             sample_turn.settings,
+            is_after_ship_limit=observation.is_after_ship_limit,
         )
         is False
     )
 
 
 def test_skip_starbase_count_drop(sample_turn):
+    observation = _observation(starbase_delta=-1)
     assert (
         should_enforce_idle_dock_pp(
-            _observation(starbase_delta=-1),
+            observation,
             sample_turn.settings,
+            is_after_ship_limit=observation.is_after_ship_limit,
         )
         is False
     )
