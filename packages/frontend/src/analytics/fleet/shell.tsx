@@ -7,7 +7,12 @@ import { sidebarTileChrome, type ShellAnalyticChrome } from '../shellAnalyticReg
 
 export const fleetShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
-    return <FleetAnalyticTile {...sidebarTileChrome(ctx)} />
+    return (
+      <FleetAnalyticTile
+        {...sidebarTileChrome(ctx)}
+        analyticScope={ctx.analyticScope}
+      />
+    )
   },
   TableView({ analyticScope, fetchEnabled }) {
     return (

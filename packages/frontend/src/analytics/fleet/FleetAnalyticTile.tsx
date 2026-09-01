@@ -1,15 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import {
-  deriveAnalyticScope,
-  deriveShellTurnMax,
-  deriveTurnView,
-} from '../../shell/shellContext'
-import { useEligiblePerspectives } from '../../shell/useEligiblePerspectives'
+import type { AnalyticShellScope } from '../../api/bff'
+import { deriveShellTurnMax, deriveTurnView } from '../../shell/shellContext'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useTurnRacePlayerLabels } from '../../lib/turnRacePlayerLabels'
 import { cn } from '../../lib/utils'
-import { useSessionStore } from '../../stores/session'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import {
   FLEET_HEADING_TRAIL_MAX_EXTEND_TURNS,
@@ -32,6 +27,7 @@ type FleetAnalyticTileProps = {
   supportsMode: boolean
   depressed: boolean
   onToggle: () => void
+  analyticScope: AnalyticShellScope | null
 }
 
 type FleetPlayerVisibilityRowProps = {
@@ -81,16 +77,11 @@ export function FleetAnalyticTile({
   supportsMode,
   depressed,
   onToggle,
+  analyticScope,
 }: FleetAnalyticTileProps) {
   const [expanded, setExpanded] = useState(false)
-  const selectedGameId = useShellStore((s) => s.selectedGameId)
   const gameInfoContext = useShellStore((s) => s.gameInfoContext)
   const selectedTurn = useShellStore((s) => s.selectedTurn)
-  const perspectiveOverrideOrdinal = useShellStore((s) => s.perspectiveOverrideOrdinal)
-  const storageOnlyLoad = useShellStore((s) => s.storageOnlyLoad)
-  const storageAvailablePerspectives = useShellStore((s) => s.storageAvailablePerspectives)
-  const loginName = useSessionStore((s) => s.name)
-  const eligiblePerspectives = useEligiblePerspectives()
   const { players: orderedPlayers, isPlayerVisible } = useOrderedFleetPlayers()
   const setFleetPlayerVisible = useFleetPlayerVisibilityStore((state) => state.setFleetPlayerVisible)
   const trailExtendTurns = useFleetHeadingTrailExtendStore((state) => state.extendTurns)
@@ -102,31 +93,6 @@ export function FleetAnalyticTile({
   const { isFuture } = useMemo(
     () => deriveTurnView(selectedTurn, shellTurnMax),
     [selectedTurn, shellTurnMax]
-  )
-  const analyticScope = useMemo(
-    () =>
-      deriveAnalyticScope({
-        selectedGameId,
-        gameInfoContext,
-        selectedTurn,
-        perspectiveOverrideOrdinal,
-        loginName,
-        storageOnlyLoad,
-        storageAvailablePerspectives,
-        eligiblePerspectives,
-        viewedDataTurn: selectedTurn,
-        turnUsernamesByPlayerId: null,
-      }),
-    [
-      selectedGameId,
-      gameInfoContext,
-      selectedTurn,
-      perspectiveOverrideOrdinal,
-      loginName,
-      storageOnlyLoad,
-      storageAvailablePerspectives,
-      eligiblePerspectives,
-    ]
   )
   const racePlayerLabels = useTurnRacePlayerLabels(analyticScope, supportsMode && enabled)
   const canExpand = supportsMode && enabled && orderedPlayers.length > 0

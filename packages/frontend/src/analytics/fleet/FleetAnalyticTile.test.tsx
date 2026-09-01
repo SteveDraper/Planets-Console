@@ -25,6 +25,13 @@ vi.mock('../../api/bff', async (importOriginal) => {
 
 import { fetchAnalyticTable } from '../../api/bff'
 
+const sampleScope = {
+  gameId: '628580',
+  turn: 5,
+  perspective: 1,
+  username: 'alice',
+}
+
 function createWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -40,6 +47,7 @@ function renderTile(overrides: Partial<ComponentProps<typeof FleetAnalyticTile>>
       supportsMode
       depressed
       onToggle={() => {}}
+      analyticScope={sampleScope}
       {...overrides}
     />,
     { wrapper: createWrapper(client) }
