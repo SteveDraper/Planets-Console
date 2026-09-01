@@ -144,23 +144,19 @@ def build_ship_transfer_catalog_fragment(
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
     settings: GameSettings | None = None,
-    is_after_ship_limit: bool | None = None,
 ) -> ShipTransferCatalogFragment:
     """Admit transfer actions and combo/departure caps from one pairing."""
     this_row = public_scoreboard_row_from_observation(observation)
-    after_ship_limit = (
-        observation.is_after_ship_limit if is_after_ship_limit is None else is_after_ship_limit
-    )
     this_budget = transfer_budget_for_row(
         this_row,
         settings=settings,
-        is_after_ship_limit=after_ship_limit,
+        is_after_ship_limit=observation.is_after_ship_limit,
     )
     pairing = classify_public_scoreboard_pairing(
         this_row,
         peer_rows,
         settings=settings,
-        is_after_ship_limit=after_ship_limit,
+        is_after_ship_limit=observation.is_after_ship_limit,
     )
     candidates = prior_fleet_decrease_candidates(
         prior_fleet_records,

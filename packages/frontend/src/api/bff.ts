@@ -10,6 +10,10 @@ import {
   type FleetComponentCatalog,
 } from '../analytics/fleet/fleetComponentCatalog'
 import type {
+  MilitaryScoreArithmetic,
+  MilitaryScoreLineItem,
+} from '../analytics/scores/inferenceConstraints'
+import type {
   MapDataResponse,
   StellarCartographySampleResponse,
   StellarCartographyTurnSummaryResponse,
@@ -218,29 +222,9 @@ export type ScoresInferenceSolutionAction = {
   counterpartyPlayerId?: number
 }
 
-export type ScoresInferenceMilitaryScoreLineItem = {
-  actionId?: string
-  comboId?: string
-  label: string
-  count: number
-  scoreDelta2xPerUnit: number
-  militaryChangePerUnit: number
-  scoreDelta2xSubtotal: number
-  militaryChangeSubtotal: number
-  scoreDelta2xSubtotalMin?: number
-  scoreDelta2xSubtotalMax?: number
-  militaryChangeSubtotalMin?: number
-  militaryChangeSubtotalMax?: number
-}
+export type ScoresInferenceMilitaryScoreLineItem = MilitaryScoreLineItem
 
-export type ScoresInferenceMilitaryScoreArithmetic = {
-  observedMilitaryChange: number
-  observedMilitaryDelta2x: number
-  explainedMilitaryChange: number
-  explainedMilitaryDelta2x: number
-  matchesObserved: boolean
-  lineItems: ScoresInferenceMilitaryScoreLineItem[]
-}
+export type ScoresInferenceMilitaryScoreArithmetic = MilitaryScoreArithmetic
 
 export type ScoresInferenceSolutionShipBuild = {
   comboId: string

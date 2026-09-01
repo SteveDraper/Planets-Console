@@ -318,12 +318,15 @@ def build_action_catalog(
         beams_by_id=beams_by_id,
         torpedos_by_id=torpedos_by_id,
         settings=turn.settings if turn is not None else None,
-        is_after_ship_limit=observation.is_after_ship_limit,
     )
     kept_actions.extend(transfer_fragment.actions)
     idle_dock = False
     if turn is not None:
-        idle_dock = should_enforce_idle_dock_pp(observation, turn.settings)
+        idle_dock = should_enforce_idle_dock_pp(
+            observation,
+            turn.settings,
+            is_after_ship_limit=observation.is_after_ship_limit,
+        )
 
     ranking_heuristics = InferenceRankingHeuristics()
     for action in transfer_fragment.actions:

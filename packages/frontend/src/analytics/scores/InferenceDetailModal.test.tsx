@@ -195,7 +195,7 @@ describe('InferenceDetailModal', () => {
                 matchesObserved: true,
                 lineItems: [
                   {
-                    comboId: 'combo_13_9_3_6_8_6',
+                    actionId: 'combo_13_9_3_6_8_6',
                     label: 'Missouri',
                     count: 1,
                     scoreDelta2xPerUnit: 220,

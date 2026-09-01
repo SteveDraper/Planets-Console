@@ -15,8 +15,8 @@ from api.analytics.military_score_inference.accelerated_start import (
     SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
 )
 from api.analytics.military_score_inference.idle_dock_pp import (
-    idle_dock_implied_ships_built_values,
-    should_enforce_idle_dock_pp_values,
+    idle_dock_implied_ships_built,
+    should_enforce_idle_dock_pp,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.models.game import GameSettings
@@ -42,6 +42,11 @@ class PublicScoreboardRow:
     priority_point_delta: int = 0
     planet_delta: int = 0
     starbase_delta: int = 0
+
+    @property
+    def starbases_owned(self) -> int:
+        """Same count as ``InferenceObservation.starbases_owned`` for idle-dock PP."""
+        return self.starbases
 
 
 @dataclass(frozen=True)
@@ -97,18 +102,12 @@ def transfer_budget_for_row(
     """Compute transfer budgets from public scores + settings only."""
     net = row.warship_delta + row.freighter_delta
     implied_k: int | None = None
-    if settings is not None and should_enforce_idle_dock_pp_values(
-        priority_point_delta=row.priority_point_delta,
-        starbases_owned=row.starbases,
-        planet_delta=row.planet_delta,
-        starbase_delta=row.starbase_delta,
+    if settings is not None and should_enforce_idle_dock_pp(
+        row,
+        settings,
         is_after_ship_limit=is_after_ship_limit,
-        settings=settings,
     ):
-        implied_k = idle_dock_implied_ships_built_values(
-            row.priority_point_delta,
-            row.starbases,
-        )
+        implied_k = idle_dock_implied_ships_built(row)
     excess_in = max(0, net - row.starbases)
     excess_out = 0
     if implied_k is not None:
