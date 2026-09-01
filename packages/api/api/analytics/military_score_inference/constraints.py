@@ -380,22 +380,59 @@ def _add_acquired_incoming_caps(
 
     Several counterparties are alternative signatures for the same arrival.
     A solution pairs with one matching donor; it does not consume every
-    ``excess_out`` peer.
+    ``excess_out`` peer. Unknown class is exclusive alternatives, not two
+    additive class columns.
     """
+    _add_acquired_total_cap(model, problem, action_count_vars)
     _add_acquired_class_cap(
         model,
         problem,
         action_count_vars,
         cap=problem.acquired_warship_cap,
-        count_attr="warship_delta",
+        warship=True,
     )
     _add_acquired_class_cap(
         model,
         problem,
         action_count_vars,
         cap=problem.acquired_freighter_cap,
-        count_attr="freighter_delta",
+        warship=False,
     )
+    _add_exclusive_class_groups(model, problem, action_count_vars)
+
+
+def _acquired_action_count_terms(
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+    *,
+    warship: bool | None,
+) -> list[object]:
+    terms: list[object] = []
+    for action in problem.aggregate_actions:
+        if not action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX):
+            continue
+        if warship is None:
+            units = action.warship_delta + action.freighter_delta
+        elif warship:
+            units = action.warship_delta
+        else:
+            units = action.freighter_delta
+        if units:
+            terms.append(units * action_count_vars[action.id])
+    return terms
+
+
+def _add_acquired_total_cap(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    cap = problem.acquired_ship_cap
+    if not cap:
+        return
+    usage = _acquired_action_count_terms(problem, action_count_vars, warship=None)
+    if usage:
+        model.add(sum(usage) <= cap)
 
 
 def _add_acquired_class_cap(
@@ -404,17 +441,38 @@ def _add_acquired_class_cap(
     action_count_vars: dict[str, cp_model.IntVar],
     *,
     cap: int | None,
-    count_attr: str,
+    warship: bool,
 ) -> None:
-    if cap is None:
+    if not cap:
         return
-    usage = [
-        getattr(action, count_attr) * action_count_vars[action.id]
-        for action in problem.aggregate_actions
-        if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) and getattr(action, count_attr)
-    ]
+    usage = _acquired_action_count_terms(problem, action_count_vars, warship=warship)
     if usage:
         model.add(sum(usage) <= cap)
+
+
+def _add_exclusive_class_groups(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    """Unknown-class transfers pick one hull class, not both."""
+    members_by_group: dict[str, list[str]] = {}
+    for action in problem.aggregate_actions:
+        if action.exclusive_class_group is None:
+            continue
+        members_by_group.setdefault(action.exclusive_class_group, []).append(action.id)
+    for group_key, action_ids in members_by_group.items():
+        if len(action_ids) < 2:
+            continue
+        active_indicators = [
+            add_count_active_indicator(
+                model,
+                action_count_vars[action_id],
+                name=f"exclusive_class_{group_key}_{action_id}_active",
+            )
+            for action_id in action_ids
+        ]
+        model.add(sum(active_indicators) <= 1)
 
 
 def solution_satisfies_exact_hard_equalities(

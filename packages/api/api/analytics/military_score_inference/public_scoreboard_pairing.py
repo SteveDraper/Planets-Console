@@ -23,6 +23,7 @@ from api.models.game import GameSettings
 
 TransferFamily = Literal["gift", "trade", "acquired"]
 PairingSource = Literal["raw_drop", "pp_gap"]
+PinnedHullClass = Literal["warship", "freighter"]
 
 # Each row's public military score is floored independently, so a single row's
 # ``militarychange`` can be off by one 2x unit; a two-row comparison accumulates
@@ -51,6 +52,18 @@ class PairingMatch:
     freighter_delta: int
     counterparty_military_delta_2x: int
     source: PairingSource = "raw_drop"
+    transfer_count: int = 0
+    pinned_class: PinnedHullClass | None = None
+
+    def is_unpinned_class_choice(self) -> bool:
+        """True when hull class is unknown: one transfer, exclusive class alternatives."""
+        return (
+            self.family in ("gift", "acquired")
+            and self.pinned_class is None
+            and self.transfer_count > 0
+            and self.warship_delta == 0
+            and self.freighter_delta == 0
+        )
 
 
 @dataclass(frozen=True)
@@ -294,8 +307,8 @@ def _military_compatible_transfer(
     return this_m >= -slack and other_m <= slack and not (this_m > slack and abs(other_m) <= slack)
 
 
-def _unique_incoming_class(row: PublicScoreboardRow) -> Literal["warship", "freighter"] | None:
-    """Pin incoming hull class from this row's residual when it is unique."""
+def _unique_incoming_class(row: PublicScoreboardRow) -> PinnedHullClass | None:
+    """Pin incoming hull class from the receiver residual when it is unique."""
     if row.freighter_delta == 0 and row.warship_delta != 0:
         return "warship"
     if row.warship_delta == 0 and row.freighter_delta != 0:
@@ -303,17 +316,17 @@ def _unique_incoming_class(row: PublicScoreboardRow) -> Literal["warship", "frei
     return None
 
 
-def _pp_gap_class_deltas(
+def _pp_gap_pairing_match(
     *,
     family: Literal["gift", "acquired"],
-    cap: int,
     this_row: PublicScoreboardRow,
     other: PublicScoreboardRow,
-) -> tuple[int, int]:
-    """Signed warship/freighter deltas for a PP-gap match.
+    cap: int,
+) -> PairingMatch:
+    """One PP-gap transfer: count plus optional pinned class, never two additive columns.
 
-    Pin class from this row when unique; otherwise from the peer. Ambiguous
-    residuals still pair, with both class columns set to the count cap.
+    Pin class from the receiver residual when unique (acquired: this row; gift: the peer).
+    Unknown class still pairs; class columns stay 0 and ``transfer_count`` carries the cap.
     """
     if family == "acquired":
         pinned = _unique_incoming_class(this_row)
@@ -322,10 +335,21 @@ def _pp_gap_class_deltas(
         pinned = _unique_incoming_class(other)
         sign = -1
     if pinned == "warship":
-        return sign * cap, 0
-    if pinned == "freighter":
-        return 0, sign * cap
-    return sign * cap, sign * cap
+        warship_delta, freighter_delta = sign * cap, 0
+    elif pinned == "freighter":
+        warship_delta, freighter_delta = 0, sign * cap
+    else:
+        warship_delta, freighter_delta = 0, 0
+    return PairingMatch(
+        family=family,
+        counterparty_player_id=other.player_id,
+        warship_delta=warship_delta,
+        freighter_delta=freighter_delta,
+        counterparty_military_delta_2x=other.military_delta_2x,
+        source="pp_gap",
+        transfer_count=cap,
+        pinned_class=pinned,
+    )
 
 
 def _pp_gap_gift_match(
@@ -338,20 +362,7 @@ def _pp_gap_gift_match(
     if this_budget.excess_out <= 0 or other_budget.excess_in <= 0:
         return None
     cap = min(this_budget.excess_out, other_budget.excess_in)
-    warship_delta, freighter_delta = _pp_gap_class_deltas(
-        family="gift",
-        cap=cap,
-        this_row=this_row,
-        other=other,
-    )
-    return PairingMatch(
-        family="gift",
-        counterparty_player_id=other.player_id,
-        warship_delta=warship_delta,
-        freighter_delta=freighter_delta,
-        counterparty_military_delta_2x=other.military_delta_2x,
-        source="pp_gap",
-    )
+    return _pp_gap_pairing_match(family="gift", this_row=this_row, other=other, cap=cap)
 
 
 def _pp_gap_acquired_match(
@@ -364,17 +375,4 @@ def _pp_gap_acquired_match(
     if this_budget.excess_in <= 0 or other_budget.excess_out <= 0:
         return None
     cap = min(this_budget.excess_in, other_budget.excess_out)
-    warship_delta, freighter_delta = _pp_gap_class_deltas(
-        family="acquired",
-        cap=cap,
-        this_row=this_row,
-        other=other,
-    )
-    return PairingMatch(
-        family="acquired",
-        counterparty_player_id=other.player_id,
-        warship_delta=warship_delta,
-        freighter_delta=freighter_delta,
-        counterparty_military_delta_2x=other.military_delta_2x,
-        source="pp_gap",
-    )
+    return _pp_gap_pairing_match(family="acquired", this_row=this_row, other=other, cap=cap)

@@ -27,6 +27,8 @@ from tests.fixtures.military_score_inference import _observation
 from tests.fixtures.pp_gap_transfer import (
     BIRDS_PLAYER_ID,
     FEDERATION_PLAYER_ID,
+    federation_row,
+    mixed_residual_receiver_observation,
     privateer_observation,
     privateer_peer_rows,
 )
@@ -363,6 +365,7 @@ def test_pp_gap_catalog_reserves_one_acquired_warship_not_sum_of_peers(
     assert all(action.upper_bound == 1 for action in acquired)
     assert fragment.reserved_incoming_warships == 1
     assert fragment.reserved_incoming_freighters == 0
+    assert fragment.reserved_incoming_ships == 1
     assert idle_dock_implied_ships_built(observation) == 2
     assert (
         ship_build_upper_bound(
@@ -395,3 +398,27 @@ def test_pp_gap_catalog_emits_no_acquired_when_no_peer_excess_out(
         **_transfer_catalog_kwargs(synthetic_catalog_context),
     )
     assert not any(action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) for action in fragment.actions)
+
+
+def test_pp_gap_unknown_class_catalog_is_exclusive_not_two_reserved_columns(
+    sample_turn, synthetic_catalog_context
+):
+    observation = mixed_residual_receiver_observation()
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(federation_row(),),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    acquired = [
+        action for action in fragment.actions if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+    ]
+    assert {action.warship_delta for action in acquired} == {0, 1}
+    assert {action.freighter_delta for action in acquired} == {0, 1}
+    assert all(action.upper_bound == 1 for action in acquired)
+    assert len({action.exclusive_class_group for action in acquired}) == 1
+    assert all(action.exclusive_class_group is not None for action in acquired)
+    assert fragment.reserved_incoming_warships == 0
+    assert fragment.reserved_incoming_freighters == 0
+    assert fragment.reserved_incoming_ships == 1

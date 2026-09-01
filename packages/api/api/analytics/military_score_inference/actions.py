@@ -99,6 +99,7 @@ class ActionCatalog:
     prior_departure_group_caps: dict[str, int] = field(default_factory=dict)
     acquired_warship_cap: int | None = None
     acquired_freighter_cap: int | None = None
+    acquired_ship_cap: int | None = None
 
     @property
     def catalog_size(self) -> int:
@@ -165,6 +166,7 @@ def build_inference_problem(
         prior_departure_group_caps=catalog.prior_departure_group_caps,
         acquired_warship_cap=catalog.acquired_warship_cap,
         acquired_freighter_cap=catalog.acquired_freighter_cap,
+        acquired_ship_cap=catalog.acquired_ship_cap,
     )
 
 
@@ -398,6 +400,7 @@ def build_action_catalog(
         prior_departure_group_caps=transfer_fragment.prior_departure_group_caps,
         acquired_warship_cap=transfer_fragment.reserved_incoming_warships,
         acquired_freighter_cap=transfer_fragment.reserved_incoming_freighters,
+        acquired_ship_cap=transfer_fragment.reserved_incoming_ships,
     )
 
 

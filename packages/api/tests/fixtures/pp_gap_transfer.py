@@ -99,6 +99,34 @@ def birds_row() -> PublicScoreboardRow:
     )
 
 
+def mixed_residual_receiver_row() -> PublicScoreboardRow:
+    """Both class columns nonzero, idle-dock ``excess_in=1`` -- hull class is unknown."""
+    return _row(
+        8,
+        warship=1,
+        freighter=1,
+        military_change_1x=40,
+        starbases=1,
+        priority_point_delta=0,
+    )
+
+
+def mixed_residual_receiver_observation() -> InferenceObservation:
+    row = mixed_residual_receiver_row()
+    return InferenceObservation(
+        player_id=row.player_id,
+        turn=15,
+        military_delta_2x=row.military_delta_2x,
+        warship_delta=row.warship_delta,
+        freighter_delta=row.freighter_delta,
+        priority_point_delta=row.priority_point_delta,
+        starbases_owned=row.starbases,
+        is_after_ship_limit=False,
+        planet_delta=row.planet_delta,
+        starbase_delta=row.starbase_delta,
+    )
+
+
 def privateer_peer_rows() -> tuple[PublicScoreboardRow, ...]:
     return (federation_row(), birds_row())
 

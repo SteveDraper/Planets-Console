@@ -15,6 +15,7 @@ from tests.fixtures.pp_gap_transfer import (
     PRIVATEER_PLAYER_ID,
     birds_row,
     federation_row,
+    mixed_residual_receiver_row,
     privateer_peer_rows,
     privateer_peer_scores,
     privateer_row,
@@ -221,6 +222,8 @@ def test_pp_gap_pairs_privateer_with_fed_or_birds_as_alternative_donors(sample_t
     assert all(match.source == "pp_gap" for match in pairing.matches)
     assert all(match.warship_delta == 1 for match in pairing.matches)
     assert all(match.freighter_delta == 0 for match in pairing.matches)
+    assert all(match.transfer_count == 1 for match in pairing.matches)
+    assert all(match.pinned_class == "warship" for match in pairing.matches)
 
 
 def test_pp_gap_acquired_does_not_require_opposite_class_or_military_signs(sample_turn):
@@ -253,6 +256,28 @@ def test_pp_gap_gift_is_symmetric_to_acquired(sample_turn):
     assert privateer_match.source == "pp_gap"
     assert privateer_match.warship_delta == -1
     assert privateer_match.freighter_delta == 0
+    assert privateer_match.transfer_count == 1
+    assert privateer_match.pinned_class == "warship"
+
+
+def test_pp_gap_unknown_class_is_one_transfer_not_two_columns(sample_turn):
+    receiver = mixed_residual_receiver_row()
+    pairing = classify_public_scoreboard_pairing(
+        receiver,
+        (federation_row(),),
+        settings=sample_turn.settings,
+        is_after_ship_limit=False,
+    )
+    assert receiver.warship_delta != 0 and receiver.freighter_delta != 0
+    assert len(pairing.matches) == 1
+    match = pairing.matches[0]
+    assert match.family == "acquired"
+    assert match.source == "pp_gap"
+    assert match.transfer_count == 1
+    assert match.pinned_class is None
+    assert match.warship_delta == 0
+    assert match.freighter_delta == 0
+    assert match.is_unpinned_class_choice()
 
 
 def test_pp_gap_does_not_admit_unpaired_acquired(sample_turn):

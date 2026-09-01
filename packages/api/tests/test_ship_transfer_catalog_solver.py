@@ -32,6 +32,7 @@ from tests.fixtures.military_score_inference import _observation
 from tests.fixtures.pp_gap_transfer import (
     BIRDS_PLAYER_ID,
     FEDERATION_PLAYER_ID,
+    mixed_residual_receiver_observation,
     privateer_observation,
     privateer_peer_rows,
 )
@@ -311,6 +312,7 @@ def test_pp_gap_solver_privateer_pairs_one_donor_fed_or_birds(
             ship_build_combos=(combo,),
             enforce_idle_dock_pp_equality=True,
             acquired_warship_cap=fragment.reserved_incoming_warships,
+            acquired_ship_cap=fragment.reserved_incoming_ships,
             max_solutions=5,
             time_limit_seconds=5.0,
         )
@@ -380,6 +382,7 @@ def test_pp_gap_solver_does_not_consume_every_excess_out_donor(
             aggregate_actions=fragment.actions,
             ship_build_combos=(wide_combo,),
             acquired_warship_cap=fragment.reserved_incoming_warships,
+            acquired_ship_cap=fragment.reserved_incoming_ships,
             max_solutions=5,
             time_limit_seconds=5.0,
         )
@@ -418,3 +421,68 @@ def test_pp_gap_solver_unpaired_acquired_stays_no_exact_solution(
     )
     assert result.status == STATUS_NO_EXACT_SOLUTION
     assert result.solutions == ()
+
+
+def _mixed_residual_build_combos() -> tuple[ShipBuildCombo, ShipBuildCombo]:
+    return (
+        ShipBuildCombo(
+            combo_id="combo_warship",
+            hull_id=24,
+            engine_id=1,
+            beam_id=1,
+            torp_id=None,
+            beam_count=2,
+            launcher_count=0,
+            labels=("Meteor",),
+            score_delta_2x=80,
+            warship_delta=1,
+            build_slot_usage=1,
+            upper_bound=1,
+        ),
+        ShipBuildCombo(
+            combo_id="combo_freighter",
+            hull_id=16,
+            engine_id=1,
+            beam_id=None,
+            torp_id=None,
+            beam_count=0,
+            launcher_count=0,
+            labels=("Large Deep Space Freighter",),
+            score_delta_2x=0,
+            freighter_delta=1,
+            build_slot_usage=1,
+            upper_bound=1,
+        ),
+    )
+
+
+def test_pp_gap_unknown_class_cannot_take_two_acquired_ships(
+    sample_turn, synthetic_catalog_context
+):
+    observation = mixed_residual_receiver_observation()
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=privateer_peer_rows(),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            ship_build_combos=_mixed_residual_build_combos(),
+            acquired_ship_cap=fragment.reserved_incoming_ships,
+            max_solutions=20,
+            time_limit_seconds=5.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    assert fragment.reserved_incoming_ships == 1
+    for solution in result.solutions:
+        acquired = [
+            action
+            for action in solution.actions
+            if action.action_id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+        ]
+        assert sum(action.count for action in acquired) <= 1
