@@ -14,6 +14,7 @@ import {
   isRegisteredShellAnalytic,
   shellAnalyticRegistrationFor,
   shellLivedStreamRegistrations,
+  sidebarTileChrome,
 } from './shellAnalyticRegistry'
 import { SHELL_MAP_QUERY_APPENDERS, SHELL_TABLE_QUERY_APPENDERS } from './shellAnalyticQueryParams'
 import { SCORES_ANALYTIC_ID } from './scores/api'
@@ -151,5 +152,76 @@ describe('shell dispatch has no analytic id branches', () => {
       const source = readFileSync(join(here, analyticId, 'shell.tsx'), 'utf8')
       expect(source).not.toMatch(/\bqueryParams\s*:/)
     }
+  })
+})
+
+describe('sidebarTileChrome', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const catalogItem: AnalyticItem = {
+    id: 'example',
+    name: 'Example',
+    supportsTable: true,
+    supportsMap: false,
+    type: 'selectable',
+  }
+  const onToggle = () => {}
+
+  it('uses analyticSupportsViewMode for greying and depression', () => {
+    expect(
+      sidebarTileChrome({
+        viewMode: 'tabular',
+        catalogItem,
+        enabled: true,
+        onToggle,
+        turnDataReady: true,
+        analyticScope: null,
+      })
+    ).toEqual({
+      name: 'Example',
+      enabled: true,
+      supportsMode: true,
+      depressed: true,
+      onToggle,
+    })
+    expect(
+      sidebarTileChrome({
+        viewMode: 'map',
+        catalogItem,
+        enabled: true,
+        onToggle,
+        turnDataReady: true,
+        analyticScope: null,
+      })
+    ).toEqual({
+      name: 'Example',
+      enabled: true,
+      supportsMode: false,
+      depressed: false,
+      onToggle,
+    })
+  })
+
+  it('does not depress when the analytic is disabled', () => {
+    expect(
+      sidebarTileChrome({
+        viewMode: 'tabular',
+        catalogItem,
+        enabled: false,
+        onToggle,
+        turnDataReady: true,
+        analyticScope: null,
+      }).depressed
+    ).toBe(false)
+  })
+
+  it('is the chrome mapping used by every shell factory and the generic fallback', () => {
+    for (const analyticId of CUSTOM_SHELL_CHROME_ANALYTIC_IDS) {
+      const source = readFileSync(join(here, analyticId, 'shell.tsx'), 'utf8')
+      expect(source).toMatch(/\{\.\.\.sidebarTileChrome\(ctx\)\}/)
+      expect(source).not.toMatch(/\bsupportsMode\s*=/)
+    }
+    const fallback = readFileSync(join(here, 'renderShellAnalyticSidebar.tsx'), 'utf8')
+    expect(fallback).toMatch(/sidebarTileChrome\(ctx\)/)
+    expect(fallback).not.toMatch(/\bsupportsMode\s*=/)
   })
 })

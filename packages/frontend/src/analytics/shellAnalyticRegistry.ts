@@ -128,6 +128,26 @@ export function analyticSupportsViewMode(
   return viewMode === 'tabular' ? catalogItem.supportsTable : catalogItem.supportsMap
 }
 
+/** Shared sidebar enable-checkbox chrome; tiles add extras on top of this. */
+export type SidebarTileChrome = {
+  name: string
+  enabled: boolean
+  supportsMode: boolean
+  depressed: boolean
+  onToggle: () => void
+}
+
+export function sidebarTileChrome(ctx: ShellAnalyticSidebarContext): SidebarTileChrome {
+  const supportsMode = analyticSupportsViewMode(ctx.catalogItem, ctx.viewMode)
+  return {
+    name: ctx.catalogItem.name,
+    enabled: ctx.enabled,
+    supportsMode,
+    depressed: ctx.enabled && supportsMode,
+    onToggle: ctx.onToggle,
+  }
+}
+
 /**
  * Drop enabled ids whose registration reports a GameInfo inactivity reason.
  * Persisted enablement is left intact.

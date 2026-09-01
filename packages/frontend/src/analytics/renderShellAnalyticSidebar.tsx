@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 import { GenericAnalyticCheckbox } from './GenericAnalyticCheckbox'
 import {
-  analyticSupportsViewMode,
   shellAnalyticRegistrationFor,
+  sidebarTileChrome,
   type ShellAnalyticSidebarContext,
 } from './shellAnalyticRegistry'
 
@@ -12,14 +12,5 @@ export function renderShellAnalyticSidebar(ctx: ShellAnalyticSidebarContext): Re
   if (custom != null) {
     return custom
   }
-  const supportsMode = analyticSupportsViewMode(ctx.catalogItem, ctx.viewMode)
-  return (
-    <GenericAnalyticCheckbox
-      name={ctx.catalogItem.name}
-      enabled={ctx.enabled}
-      supportsMode={supportsMode}
-      depressed={ctx.enabled && supportsMode}
-      onToggle={ctx.onToggle}
-    />
-  )
+  return <GenericAnalyticCheckbox {...sidebarTileChrome(ctx)} />
 }
