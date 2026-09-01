@@ -12,7 +12,11 @@ from api.analytics.military_score_inference.ship_transfer_families import (
     SHIP_LOSS_ACTION_PREFIX,
     TRADE_ACTION_PREFIX,
 )
-from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_NO_EXACT_SOLUTION,
+    solve_inference_problem,
+)
 
 
 def test_solver_exact_ship_loss_uses_prior_fleet_military():
@@ -328,3 +332,84 @@ def test_group_departure_cap_forbids_two_ship_trade_over_single_record_group():
     )
     assert result.status != STATUS_EXACT
     assert result.solutions == ()
+
+
+def test_unpinned_gift_class_xor_allows_two_warship_groups_not_a_class_mix():
+    exclusive_group = "gift:9"
+    warship_a = CandidateAction(
+        id=f"{GIFT_ACTION_PREFIX}warship:to:9:point:40",
+        label="Gift warship to player 9",
+        score_delta_2x=-40,
+        warship_delta=-1,
+        counterparty_player_id=9,
+        prior_warship_usage=1,
+        exclusive_class_group=exclusive_group,
+        upper_bound=1,
+    )
+    warship_b = CandidateAction(
+        id=f"{GIFT_ACTION_PREFIX}warship:to:9:point:50",
+        label="Gift warship to player 9",
+        score_delta_2x=-50,
+        warship_delta=-1,
+        counterparty_player_id=9,
+        prior_warship_usage=1,
+        exclusive_class_group=exclusive_group,
+        upper_bound=1,
+    )
+    freighter = CandidateAction(
+        id=f"{GIFT_ACTION_PREFIX}freighter:to:9:point:0",
+        label="Gift freighter to player 9",
+        score_delta_2x=0,
+        freighter_delta=-1,
+        counterparty_player_id=9,
+        prior_freighter_usage=1,
+        exclusive_class_group=exclusive_group,
+        upper_bound=1,
+    )
+    both_warships = InferenceObservation(
+        player_id=8,
+        turn=111,
+        military_delta_2x=-90,
+        warship_delta=-2,
+        freighter_delta=0,
+        priority_point_delta=1,
+        starbases_owned=2,
+        is_after_ship_limit=False,
+    )
+    mixed_classes = InferenceObservation(
+        player_id=8,
+        turn=111,
+        military_delta_2x=-40,
+        warship_delta=-1,
+        freighter_delta=-1,
+        priority_point_delta=1,
+        starbases_owned=2,
+        is_after_ship_limit=False,
+    )
+    actions = (warship_a, warship_b, freighter)
+    same_class = solve_inference_problem(
+        InferenceProblem(
+            observation=both_warships,
+            aggregate_actions=actions,
+            prior_warship_departure_cap=2,
+            prior_freighter_departure_cap=1,
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+    assert same_class.status == STATUS_EXACT
+    chosen = {action.action_id for action in same_class.solutions[0].actions}
+    assert chosen == {warship_a.id, warship_b.id}
+
+    mixed = solve_inference_problem(
+        InferenceProblem(
+            observation=mixed_classes,
+            aggregate_actions=actions,
+            prior_warship_departure_cap=2,
+            prior_freighter_departure_cap=1,
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+    assert mixed.status == STATUS_NO_EXACT_SOLUTION
+    assert mixed.solutions == ()

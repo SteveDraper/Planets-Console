@@ -450,29 +450,71 @@ def _add_acquired_class_cap(
         model.add(sum(usage) <= cap)
 
 
+def _exclusive_group_hull_class(action: CandidateAction) -> str | None:
+    """Warship or freighter when the action moves exactly one hull class."""
+    has_warship = action.warship_delta != 0
+    has_freighter = action.freighter_delta != 0
+    if has_warship and not has_freighter:
+        return "warship"
+    if has_freighter and not has_warship:
+        return "freighter"
+    return None
+
+
+def _add_class_active_indicator(
+    model: cp_model.CpModel,
+    action_count_vars: dict[str, cp_model.IntVar],
+    action_ids: list[str],
+    *,
+    name: str,
+) -> cp_model.IntVar:
+    """True when any action in ``action_ids`` has count >= 1."""
+    if len(action_ids) == 1:
+        return add_count_active_indicator(
+            model,
+            action_count_vars[action_ids[0]],
+            name=name,
+        )
+    active = model.new_bool_var(name)
+    total = sum(action_count_vars[action_id] for action_id in action_ids)
+    model.add(total >= 1).only_enforce_if(active)
+    model.add(total == 0).only_enforce_if(active.negated())
+    return active
+
+
 def _add_exclusive_class_groups(
     model: cp_model.CpModel,
     problem: InferenceProblem,
     action_count_vars: dict[str, cp_model.IntVar],
 ) -> None:
-    """Unknown-class transfers pick one hull class, not both."""
-    members_by_group: dict[str, list[str]] = {}
+    """Unknown-class transfers pick one hull class, not both.
+
+    Several prior-fleet groups of the same class may all contribute. Exclusivity
+    is class XOR within the group, not one-action-only.
+    """
+    ids_by_group_class: dict[str, dict[str, list[str]]] = {}
     for action in problem.aggregate_actions:
         if action.exclusive_class_group is None:
             continue
-        members_by_group.setdefault(action.exclusive_class_group, []).append(action.id)
-    for group_key, action_ids in members_by_group.items():
-        if len(action_ids) < 2:
+        hull_class = _exclusive_group_hull_class(action)
+        if hull_class is None:
             continue
-        active_indicators = [
-            add_count_active_indicator(
+        ids_by_group_class.setdefault(action.exclusive_class_group, {}).setdefault(
+            hull_class, []
+        ).append(action.id)
+    for group_key, ids_by_class in ids_by_group_class.items():
+        if len(ids_by_class) < 2:
+            continue
+        class_active = [
+            _add_class_active_indicator(
                 model,
-                action_count_vars[action_id],
-                name=f"exclusive_class_{group_key}_{action_id}_active",
+                action_count_vars,
+                action_ids,
+                name=f"exclusive_class_{group_key}_{hull_class}_active",
             )
-            for action_id in action_ids
+            for hull_class, action_ids in ids_by_class.items()
         ]
-        model.add(sum(active_indicators) <= 1)
+        model.add(sum(class_active) <= 1)
 
 
 def solution_satisfies_exact_hard_equalities(

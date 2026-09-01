@@ -37,12 +37,14 @@ from tests.fixtures.pp_gap_transfer import (
     privateer_peer_rows,
 )
 from tests.fixtures.ship_transfer_families import (
+    UNPINNED_GIFT_COUNTERPARTY_ID,
     _class_flip_trade_catalog,
     _known_warship_record,
     _peer_row,
     _same_class_swap_catalog,
     _transfer_catalog_kwargs,
     _two_ship_class_flip_trade_fragment,
+    _unpinned_pp_gap_two_ship_gift_fragment,
 )
 
 
@@ -454,6 +456,62 @@ def _mixed_residual_build_combos() -> tuple[ShipBuildCombo, ShipBuildCombo]:
             upper_bound=1,
         ),
     )
+
+
+def test_pp_gap_unpinned_gift_solver_uses_both_warship_groups(
+    sample_turn, synthetic_catalog_context
+):
+    warship_build_2x = 40
+    observation, fragment, first_military, second_military = (
+        _unpinned_pp_gap_two_ship_gift_fragment(
+            synthetic_catalog_context,
+            sample_turn.settings,
+        )
+    )
+    observation = replace(
+        observation,
+        military_delta_2x=3 * warship_build_2x - first_military - second_military,
+    )
+    assert first_military != second_military
+    warship_combo = ShipBuildCombo(
+        combo_id="combo_warship",
+        hull_id=24,
+        engine_id=1,
+        beam_id=1,
+        torp_id=None,
+        beam_count=2,
+        launcher_count=0,
+        labels=("Serpent",),
+        score_delta_2x=warship_build_2x,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=3,
+    )
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            ship_build_combos=(warship_combo,),
+            enforce_idle_dock_pp_equality=True,
+            prior_warship_departure_cap=fragment.prior_warship_departure_cap,
+            prior_departure_group_caps=fragment.prior_departure_group_caps,
+            max_solutions=10,
+            time_limit_seconds=5.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    expected_gifts = {
+        f"{GIFT_ACTION_PREFIX}warship:to:{UNPINNED_GIFT_COUNTERPARTY_ID}:point:{first_military}",
+        f"{GIFT_ACTION_PREFIX}warship:to:{UNPINNED_GIFT_COUNTERPARTY_ID}:point:{second_military}",
+    }
+    for solution in result.solutions:
+        gift_ids = {
+            action.action_id
+            for action in solution.actions
+            if action.action_id.startswith(GIFT_ACTION_PREFIX)
+        }
+        assert gift_ids == expected_gifts
+        assert sum(action.count for action in solution.actions if action.action_id in gift_ids) == 2
 
 
 def test_pp_gap_unknown_class_cannot_take_two_acquired_ships(

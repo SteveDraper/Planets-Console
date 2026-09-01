@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.ship_transfer_families import (
 )
 from api.concepts.hulls import UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
 from api.concepts.ship_build_military import ship_build_military_score_delta_2x
+from api.models.game import GameSettings
 from tests.fixtures.military_score_inference import _observation
 
 
@@ -220,3 +221,59 @@ def _two_ship_class_flip_trade_fragment(
         **_transfer_catalog_kwargs(synthetic_catalog_context),
     )
     return observation, fragment
+
+
+UNPINNED_GIFT_COUNTERPARTY_ID = 9
+
+
+def _unpinned_pp_gap_two_ship_gift_fragment(
+    synthetic_catalog_context,
+    settings: GameSettings,
+    *,
+    include_freighter: bool = False,
+    military_delta_2x: int = 0,
+) -> tuple[InferenceObservation, ShipTransferCatalogFragment, int, int]:
+    """PP-gap gift of 2 unknown-class ships with two distinct warship groups.
+
+    Giver: idle-dock k=3, net +1 warship → excess_out=2. Receiver both class
+    columns nonzero with excess_in=2, so the gift stays unpinned (transfer_count=2).
+    """
+    first, first_military = _known_warship_record(
+        synthetic_catalog_context,
+        beam_count=1,
+        record_id="unpinned-gift-warship-a",
+    )
+    second, second_military = _known_warship_record(
+        synthetic_catalog_context,
+        beam_count=2,
+        record_id="unpinned-gift-warship-b",
+    )
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (first, second)
+    if include_freighter:
+        prior_fleet_records = (*prior_fleet_records, _class_only_freighter_record())
+    observation = InferenceObservation(
+        player_id=8,
+        turn=15,
+        military_delta_2x=military_delta_2x,
+        warship_delta=1,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=3,
+        is_after_ship_limit=False,
+    )
+    receiver = PublicScoreboardRow(
+        player_id=UNPINNED_GIFT_COUNTERPARTY_ID,
+        warship_delta=2,
+        freighter_delta=2,
+        military_delta_2x=80,
+        starbases=2,
+        priority_point_delta=0,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(receiver,),
+        prior_fleet_records=prior_fleet_records,
+        settings=settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    return observation, fragment, first_military, second_military

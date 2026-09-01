@@ -42,6 +42,7 @@ from tests.fixtures.pp_gap_transfer import (
     privateer_peer_rows,
 )
 from tests.fixtures.ship_transfer_families import (
+    UNPINNED_GIFT_COUNTERPARTY_ID,
     _class_flip_trade_catalog,
     _class_only_freighter_record,
     _known_warship_record,
@@ -49,6 +50,7 @@ from tests.fixtures.ship_transfer_families import (
     _same_class_swap_catalog,
     _transfer_catalog_kwargs,
     _two_ship_class_flip_trade_fragment,
+    _unpinned_pp_gap_two_ship_gift_fragment,
 )
 
 
@@ -462,6 +464,26 @@ def test_pp_gap_unknown_class_catalog_is_exclusive_not_two_reserved_columns(
     assert fragment.reserved_incoming_warships == 0
     assert fragment.reserved_incoming_freighters == 0
     assert fragment.reserved_incoming_ships == this_budget.excess_in
+
+
+def test_pp_gap_unpinned_gift_catalog_keeps_two_warship_groups(
+    sample_turn, synthetic_catalog_context
+):
+    _, fragment, first_military, second_military = _unpinned_pp_gap_two_ship_gift_fragment(
+        synthetic_catalog_context,
+        sample_turn.settings,
+        include_freighter=True,
+    )
+    assert first_military != second_military
+    gifts = [action for action in fragment.actions if action.id.startswith(GIFT_ACTION_PREFIX)]
+    warship_gifts = [action for action in gifts if action.warship_delta < 0]
+    freighter_gifts = [action for action in gifts if action.freighter_delta < 0]
+    assert len(warship_gifts) == 2
+    assert freighter_gifts
+    assert {action.exclusive_class_group for action in gifts} == {
+        f"gift:{UNPINNED_GIFT_COUNTERPARTY_ID}"
+    }
+    assert all(action.upper_bound == 1 for action in warship_gifts)
 
 
 def _acquired_pairing_match(
