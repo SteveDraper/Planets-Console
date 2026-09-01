@@ -4,6 +4,7 @@ import { useModalKeydownFocusTrap } from '../../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../../lib/restoreFocus'
 import { cn } from '../../lib/utils'
 import {
+  formatMilitaryChangeSubtotal,
   formatSignedDelta,
   militaryChangeFromDelta2x,
   readInferenceConstraints,
@@ -56,7 +57,7 @@ function SolutionActionTable({
               </td>
               <td className="py-1 pr-2">{formatSolutionLineItemLabel(line)}</td>
               <td className="py-1 tabular-nums">
-                {formatSignedDelta(line.militaryChangeSubtotal)}
+                {formatMilitaryChangeSubtotal(line)}
               </td>
             </tr>
           ))}

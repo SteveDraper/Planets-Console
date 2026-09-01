@@ -9,6 +9,10 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
+    ShipBuildCombo,
+)
+from api.analytics.military_score_inference.score_arithmetic import (
+    solution_military_score_arithmetic_payload,
 )
 from api.analytics.military_score_inference.ship_transfer_families import (
     ACQUIRED_SHIP_ACTION_PREFIX,
@@ -18,9 +22,19 @@ from api.analytics.military_score_inference.ship_transfer_families import (
     ShipTransferCatalogFragment,
     build_ship_transfer_catalog_fragment,
 )
-from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_NO_EXACT_SOLUTION,
+    solve_inference_problem,
+)
 
 from tests.fixtures.military_score_inference import _observation
+from tests.fixtures.pp_gap_transfer import (
+    BIRDS_PLAYER_ID,
+    FEDERATION_PLAYER_ID,
+    privateer_observation,
+    privateer_peer_rows,
+)
 from tests.fixtures.ship_transfer_families import (
     _class_flip_trade_catalog,
     _known_warship_record,
@@ -259,3 +273,148 @@ def test_catalog_solver_two_ship_class_flip_trade_is_exact(synthetic_catalog_con
     chosen = result.solutions[0].actions[0]
     assert chosen.action_id == f"{TRADE_ACTION_PREFIX}warship:with:3:point:{military_2x}"
     assert chosen.count == 1
+
+
+def _privateer_build_combo() -> ShipBuildCombo:
+    return ShipBuildCombo(
+        combo_id="combo_meteor",
+        hull_id=24,
+        engine_id=1,
+        beam_id=1,
+        torp_id=None,
+        beam_count=2,
+        launcher_count=0,
+        labels=("Meteor",),
+        score_delta_2x=40,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=2,
+    )
+
+
+def test_pp_gap_solver_privateer_pairs_one_donor_fed_or_birds(
+    sample_turn, synthetic_catalog_context
+):
+    observation = privateer_observation()
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=privateer_peer_rows(),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    combo = _privateer_build_combo()
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            ship_build_combos=(combo,),
+            enforce_idle_dock_pp_equality=True,
+            acquired_warship_cap=fragment.reserved_incoming_warships,
+            max_solutions=5,
+            time_limit_seconds=5.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    leftover_2x = observation.military_delta_2x - 2 * combo.score_delta_2x
+    actions_by_id = {action.id: action for action in fragment.actions}
+    counterparties_by_solution = []
+    for solution in result.solutions:
+        acquired = [
+            action
+            for action in solution.actions
+            if action.action_id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+        ]
+        assert len(acquired) == 1
+        assert acquired[0].count == 1
+        counterparties_by_solution.append(acquired[0].counterparty_player_id)
+        assert solution.ship_builds[0].count == 2
+        arithmetic = solution_military_score_arithmetic_payload(
+            solution,
+            observation,
+            actions_by_id,
+            {combo.combo_id: combo},
+        )
+        acquired_line = next(
+            item
+            for item in arithmetic["lineItems"]
+            if str(item.get("actionId", "")).startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+        )
+        catalog_acquired = actions_by_id[acquired[0].action_id]
+        assert catalog_acquired.score_delta_2x_max == observation.military_delta_2x
+        assert acquired_line["scoreDelta2xSubtotal"] == leftover_2x
+        assert leftover_2x < observation.military_delta_2x
+        assert arithmetic["matchesObserved"] is True
+    assert set(counterparties_by_solution) == {FEDERATION_PLAYER_ID, BIRDS_PLAYER_ID}
+
+
+def test_pp_gap_solver_does_not_consume_every_excess_out_donor(
+    sample_turn, synthetic_catalog_context
+):
+    """Without idle-dock, 1 build + 2 acquired would hit +3 warships -- that is forbidden."""
+    observation = privateer_observation()
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=privateer_peer_rows(),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    wide_combo = ShipBuildCombo(
+        combo_id="combo_meteor",
+        hull_id=24,
+        engine_id=1,
+        beam_id=1,
+        torp_id=None,
+        beam_count=2,
+        launcher_count=0,
+        labels=("Meteor",),
+        score_delta_2x=40,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=3,
+    )
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            ship_build_combos=(wide_combo,),
+            acquired_warship_cap=fragment.reserved_incoming_warships,
+            max_solutions=5,
+            time_limit_seconds=5.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    for solution in result.solutions:
+        acquired = [
+            action
+            for action in solution.actions
+            if action.action_id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+        ]
+        assert sum(action.count for action in acquired) == 1
+
+
+def test_pp_gap_solver_unpaired_acquired_stays_no_exact_solution(
+    sample_turn, synthetic_catalog_context
+):
+    observation = privateer_observation()
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert not any(action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) for action in fragment.actions)
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            ship_build_combos=(_privateer_build_combo(),),
+            enforce_idle_dock_pp_equality=True,
+            max_solutions=5,
+            time_limit_seconds=5.0,
+        )
+    )
+    assert result.status == STATUS_NO_EXACT_SOLUTION
+    assert result.solutions == ()

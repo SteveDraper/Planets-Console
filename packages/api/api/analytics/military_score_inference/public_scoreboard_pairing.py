@@ -1,7 +1,9 @@
 """Public scoreboard pairing fingerprints for ship transfer families.
 
 Other players' public ``shipchange`` / ``freighterchange`` / ``militarychange``
-are observations on this row's still-per-row solve. Not a joint CP-SAT.
+are observations on this row's still-per-row solve. Idle-dock PP vs net and
+dock-cap ``net > starbases`` supply transfer budgets when mixed build+transfer
+cancels in the raw count columns. Not a joint CP-SAT, not RST pairing.
 """
 
 from __future__ import annotations
@@ -12,9 +14,15 @@ from typing import Literal
 from api.analytics.military_score_inference.accelerated_start import (
     SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
 )
+from api.analytics.military_score_inference.idle_dock_pp import (
+    idle_dock_implied_ships_built_values,
+    should_enforce_idle_dock_pp_values,
+)
 from api.analytics.military_score_inference.models import InferenceObservation
+from api.models.game import GameSettings
 
 TransferFamily = Literal["gift", "trade", "acquired"]
+PairingSource = Literal["raw_drop", "pp_gap"]
 
 # Each row's public military score is floored independently, so a single row's
 # ``militarychange`` can be off by one 2x unit; a two-row comparison accumulates
@@ -29,6 +37,10 @@ class PublicScoreboardRow:
     warship_delta: int
     freighter_delta: int
     military_delta_2x: int
+    starbases: int = 0
+    priority_point_delta: int = 0
+    planet_delta: int = 0
+    starbase_delta: int = 0
 
 
 @dataclass(frozen=True)
@@ -38,6 +50,7 @@ class PairingMatch:
     warship_delta: int
     freighter_delta: int
     counterparty_military_delta_2x: int
+    source: PairingSource = "raw_drop"
 
 
 @dataclass(frozen=True)
@@ -45,6 +58,55 @@ class PublicScoreboardPairing:
     matches: tuple[PairingMatch, ...]
     unmatched_warship_drop: int
     unmatched_freighter_drop: int
+
+
+@dataclass(frozen=True)
+class TransferBudget:
+    """Idle-dock / dock-cap transfer remainder on one public scoreboard row.
+
+    ``excess_out`` with no raw count drop is PP-only (dock cap cannot see a
+    hidden departure). ``excess_in`` always includes the dock-cap floor
+    ``max(0, net - starbases)``.
+    """
+
+    implied_ships_built: int | None
+    net: int
+    excess_in: int
+    excess_out: int
+
+
+def transfer_budget_for_row(
+    row: PublicScoreboardRow,
+    *,
+    settings: GameSettings | None,
+    is_after_ship_limit: bool,
+) -> TransferBudget:
+    """Compute transfer budgets from public scores + settings only."""
+    net = row.warship_delta + row.freighter_delta
+    implied_k: int | None = None
+    if settings is not None and should_enforce_idle_dock_pp_values(
+        priority_point_delta=row.priority_point_delta,
+        starbases_owned=row.starbases,
+        planet_delta=row.planet_delta,
+        starbase_delta=row.starbase_delta,
+        is_after_ship_limit=is_after_ship_limit,
+        settings=settings,
+    ):
+        implied_k = idle_dock_implied_ships_built_values(
+            row.priority_point_delta,
+            row.starbases,
+        )
+    excess_in = max(0, net - row.starbases)
+    excess_out = 0
+    if implied_k is not None:
+        excess_out = max(0, implied_k - net)
+        excess_in = max(excess_in, max(0, net - implied_k))
+    return TransferBudget(
+        implied_ships_built=implied_k,
+        net=net,
+        excess_in=excess_in,
+        excess_out=excess_out,
+    )
 
 
 def public_scoreboard_row_from_observation(
@@ -55,27 +117,48 @@ def public_scoreboard_row_from_observation(
         warship_delta=observation.warship_delta,
         freighter_delta=observation.freighter_delta,
         military_delta_2x=observation.military_delta_2x,
+        starbases=observation.starbases_owned,
+        priority_point_delta=observation.priority_point_delta,
+        planet_delta=observation.planet_delta,
+        starbase_delta=observation.starbase_delta,
     )
 
 
 def classify_public_scoreboard_pairing(
     this_row: PublicScoreboardRow,
     other_rows: tuple[PublicScoreboardRow, ...],
+    *,
+    settings: GameSettings | None = None,
+    is_after_ship_limit: bool = False,
 ) -> PublicScoreboardPairing:
     """Classify gift / trade / acquired matches and unmatched count drops."""
+    this_budget = transfer_budget_for_row(
+        this_row,
+        settings=settings,
+        is_after_ship_limit=is_after_ship_limit,
+    )
     matches: list[PairingMatch] = []
     for other in other_rows:
         if other.player_id == this_row.player_id:
             continue
+        other_budget = transfer_budget_for_row(
+            other,
+            settings=settings,
+            is_after_ship_limit=is_after_ship_limit,
+        )
         trade = _trade_match(this_row, other)
         if trade is not None:
             matches.append(trade)
             continue
         gift = _gift_match(this_row, other)
+        if gift is None:
+            gift = _pp_gap_gift_match(this_row, other, this_budget, other_budget)
         if gift is not None:
             matches.append(gift)
             continue
         acquired = _acquired_match(this_row, other)
+        if acquired is None:
+            acquired = _pp_gap_acquired_match(this_row, other, this_budget, other_budget)
         if acquired is not None:
             matches.append(acquired)
 
@@ -209,3 +292,89 @@ def _military_compatible_transfer(
             and not (this_m < -slack and abs(other_m) <= slack)
         )
     return this_m >= -slack and other_m <= slack and not (this_m > slack and abs(other_m) <= slack)
+
+
+def _unique_incoming_class(row: PublicScoreboardRow) -> Literal["warship", "freighter"] | None:
+    """Pin incoming hull class from this row's residual when it is unique."""
+    if row.freighter_delta == 0 and row.warship_delta != 0:
+        return "warship"
+    if row.warship_delta == 0 and row.freighter_delta != 0:
+        return "freighter"
+    return None
+
+
+def _pp_gap_class_deltas(
+    *,
+    family: Literal["gift", "acquired"],
+    cap: int,
+    this_row: PublicScoreboardRow,
+    other: PublicScoreboardRow,
+) -> tuple[int, int]:
+    """Signed warship/freighter deltas for a PP-gap match.
+
+    Pin class from this row when unique; otherwise from the peer. Ambiguous
+    residuals still pair, with both class columns set to the count cap.
+    """
+    if family == "acquired":
+        pinned = _unique_incoming_class(this_row)
+        sign = 1
+    else:
+        pinned = _unique_incoming_class(other)
+        sign = -1
+    if pinned == "warship":
+        return sign * cap, 0
+    if pinned == "freighter":
+        return 0, sign * cap
+    return sign * cap, sign * cap
+
+
+def _pp_gap_gift_match(
+    this_row: PublicScoreboardRow,
+    other: PublicScoreboardRow,
+    this_budget: TransferBudget,
+    other_budget: TransferBudget,
+) -> PairingMatch | None:
+    """Outgoing PP-gap / dock-cap budget with a peer arrival budget."""
+    if this_budget.excess_out <= 0 or other_budget.excess_in <= 0:
+        return None
+    cap = min(this_budget.excess_out, other_budget.excess_in)
+    warship_delta, freighter_delta = _pp_gap_class_deltas(
+        family="gift",
+        cap=cap,
+        this_row=this_row,
+        other=other,
+    )
+    return PairingMatch(
+        family="gift",
+        counterparty_player_id=other.player_id,
+        warship_delta=warship_delta,
+        freighter_delta=freighter_delta,
+        counterparty_military_delta_2x=other.military_delta_2x,
+        source="pp_gap",
+    )
+
+
+def _pp_gap_acquired_match(
+    this_row: PublicScoreboardRow,
+    other: PublicScoreboardRow,
+    this_budget: TransferBudget,
+    other_budget: TransferBudget,
+) -> PairingMatch | None:
+    """Incoming PP-gap / dock-cap budget with a peer departure budget."""
+    if this_budget.excess_in <= 0 or other_budget.excess_out <= 0:
+        return None
+    cap = min(this_budget.excess_in, other_budget.excess_out)
+    warship_delta, freighter_delta = _pp_gap_class_deltas(
+        family="acquired",
+        cap=cap,
+        this_row=this_row,
+        other=other,
+    )
+    return PairingMatch(
+        family="acquired",
+        counterparty_player_id=other.player_id,
+        warship_delta=warship_delta,
+        freighter_delta=freighter_delta,
+        counterparty_military_delta_2x=other.military_delta_2x,
+        source="pp_gap",
+    )

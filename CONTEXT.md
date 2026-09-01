@@ -769,8 +769,8 @@ A host-turn event that reduces military score or warship/freighter counts. A sib
 _Avoid_: noise (unqualified), negative slack (solver mechanism)
 
 **Public scoreboard pairing**:
-Matching another player's public `shipchange` / `freighterchange` / `militarychange` as an observation on this row's still-per-row solve, so an unmatched count drop is loss, a compatible counter-delta is ownership transfer (gift or capture; scoreboard-indistinguishable), and a count-flat military swap (or warship↔freighter column flip) is trade. The receiver of a matched incoming hull is not explained as a **ship build combo**. Not a joint multi-player CP-SAT, not RST ship-id identity, and not a **fleet analytic** feature.
-_Avoid_: cross-player solve, coupled CP-SAT, trade_or_capture_hint (corpus RST inventory), opponent-row join (implementation)
+Matching another player's public `shipchange` / `freighterchange` / `militarychange` as an observation on this row's still-per-row solve, so an unmatched count drop is loss, a compatible counter-delta is ownership transfer (gift or capture; scoreboard-indistinguishable), and a count-flat military swap (or warship↔freighter column flip) is trade. Net columns are not sufficient when idle-dock PP implies a hidden departure or arrival: pair `excess_in` / `excess_out` budgets from scores + settings (`k = starbases − PP/2` on lattice, plus dock-cap `net > starbases`). Several peers with a matching budget are alternative ranked signatures for the same transfer count -- a solution names one donor, not a joint matching that consumes every `excess_out`. The receiver of a matched incoming hull is not explained as a **ship build combo**. Not a joint multi-player CP-SAT, not RST ship-id identity, and not a **fleet analytic** feature.
+_Avoid_: cross-player solve, coupled CP-SAT, RST pairing, trade_or_capture_hint (corpus RST inventory), opponent-row join (implementation)
 
 **Prior-fleet decrease candidate**:
 An **active** **fleet ship record** on this player's prior-turn **fleet acquisition ledger** that may leave the roster this host turn (unmatched loss, outgoing transfer, or one side of trade). Hull-known or option-set-bounded records contribute that military; unknown-hull inferred records contribute only that record's envelope. Count of departing warships or freighters cannot exceed prior active rows of that class. The race build catalog is not a source of departing hulls. Missing or non-final prior ledger uses the same wait / **scores inference row invalidation** path as today's prior-turn fleet overlay.
@@ -793,7 +793,7 @@ In **military score build inference**, a count-flat **public scoreboard pairing*
 _Avoid_: host trade action, requiring a joint multi-player CP-SAT
 
 **Acquired ship**:
-Incoming **public scoreboard pairing** on this scoreboard row: a matched hull that is not a **ship build combo**. Score-increasing counterpart of **gift** / **trade**.
+Incoming **public scoreboard pairing** on this scoreboard row: a matched hull that is not a **ship build combo**. Score-increasing counterpart of **gift** / **trade**. Catalog envelopes may be wide (PP-gap uses this row's full military rise); each emitted solution's `militaryScoreArithmetic` tightens that envelope to leftover after the other elements of that solution.
 _Avoid_: stuffing incoming hulls into `shipBuilds`, **unknown military ship** for a paired incoming count
 
 **Mine-score residual**:

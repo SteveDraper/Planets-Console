@@ -17,12 +17,17 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceSolution,
     ShipBuildCombo,
+    candidate_action_has_military_interval,
+    candidate_military_subtotal_bounds_2x,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
     diversity_caps_applied_payload,
     fighter_channel_action_ids,
     torpedo_load_action_ids,
+)
+from api.analytics.military_score_inference.ship_transfer_families import (
+    ACQUIRED_SHIP_ACTION_PREFIX,
 )
 
 PRIORITY_POINT_DIAGNOSTIC_NOTE = (
@@ -166,14 +171,6 @@ class _SumEqualityConstraint:
         model.add(lhs == rhs)
 
 
-def _action_has_military_interval(action: CandidateAction) -> bool:
-    return (
-        action.score_delta_2x_min is not None
-        and action.score_delta_2x_max is not None
-        and action.score_delta_2x_min != action.score_delta_2x_max
-    )
-
-
 def _military_lhs(
     model: cp_model.CpModel,
     aggregate_actions: tuple[CandidateAction, ...],
@@ -184,7 +181,7 @@ def _military_lhs(
     terms: list[object] = []
     for action in aggregate_actions:
         count_var = action_count_vars[action.id]
-        if _action_has_military_interval(action):
+        if candidate_action_has_military_interval(action):
             terms.append(_interval_military_contribution(model, action, count_var))
         else:
             terms.append(action.score_delta_2x * count_var)
@@ -319,6 +316,7 @@ class InferenceHardConstraints:
                 model.add(ships_built == implied_ships_built)
         _add_prior_fleet_departure_caps(model, problem, action_count_vars)
         _add_prior_fleet_group_departure_caps(model, problem, action_count_vars)
+        _add_acquired_incoming_caps(model, problem, action_count_vars)
         aggregate_action_ids = frozenset(action.id for action in problem.aggregate_actions)
         if _fighter_transfer_actions_both_present(aggregate_action_ids):
             _add_fighter_transfer_direction_exclusivity(model, action_count_vars)
@@ -373,6 +371,52 @@ def _add_prior_fleet_group_departure_caps(
         model.add(sum(usage_terms) <= problem.prior_departure_group_caps.get(group_key, 0))
 
 
+def _add_acquired_incoming_caps(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    """Cap total acquired ships at the paired incoming budget.
+
+    Several counterparties are alternative signatures for the same arrival.
+    A solution pairs with one matching donor; it does not consume every
+    ``excess_out`` peer.
+    """
+    _add_acquired_class_cap(
+        model,
+        problem,
+        action_count_vars,
+        cap=problem.acquired_warship_cap,
+        count_attr="warship_delta",
+    )
+    _add_acquired_class_cap(
+        model,
+        problem,
+        action_count_vars,
+        cap=problem.acquired_freighter_cap,
+        count_attr="freighter_delta",
+    )
+
+
+def _add_acquired_class_cap(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+    *,
+    cap: int | None,
+    count_attr: str,
+) -> None:
+    if cap is None:
+        return
+    usage = [
+        getattr(action, count_attr) * action_count_vars[action.id]
+        for action in problem.aggregate_actions
+        if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) and getattr(action, count_attr)
+    ]
+    if usage:
+        model.add(sum(usage) <= cap)
+
+
 def solution_satisfies_exact_hard_equalities(
     solution: InferenceSolution,
     observation: InferenceObservation,
@@ -389,17 +433,9 @@ def solution_satisfies_exact_hard_equalities(
         catalog_action = actions_by_id.get(action.action_id)
         if catalog_action is None:
             return False
-        if _action_has_military_interval(catalog_action):
-            min_2x = catalog_action.score_delta_2x_min
-            max_2x = catalog_action.score_delta_2x_max
-            if min_2x is None or max_2x is None:
-                return False
-            lo, hi = (min_2x, max_2x) if min_2x <= max_2x else (max_2x, min_2x)
-            military_min += lo * action.count
-            military_max += hi * action.count
-        else:
-            military_min += catalog_action.score_delta_2x * action.count
-            military_max += catalog_action.score_delta_2x * action.count
+        lo, hi = candidate_military_subtotal_bounds_2x(catalog_action, action.count)
+        military_min += lo
+        military_max += hi
         warship_sum += catalog_action.warship_delta * action.count
         freighter_sum += catalog_action.freighter_delta * action.count
     for ship_build in solution.ship_builds:

@@ -21,6 +21,10 @@ export type MilitaryScoreLineItem = {
   militaryChangePerUnit: number
   scoreDelta2xSubtotal: number
   militaryChangeSubtotal: number
+  scoreDelta2xSubtotalMin?: number
+  scoreDelta2xSubtotalMax?: number
+  militaryChangeSubtotalMin?: number
+  militaryChangeSubtotalMax?: number
 }
 
 export type MilitaryScoreArithmetic = {
@@ -100,7 +104,7 @@ export function readMilitaryScoreArithmetic(value: unknown): MilitaryScoreArithm
     ) {
       continue
     }
-    lineItems.push({
+    const lineItem: MilitaryScoreLineItem = {
       actionId: lineId,
       label: item.label,
       count: item.count,
@@ -108,7 +112,20 @@ export function readMilitaryScoreArithmetic(value: unknown): MilitaryScoreArithm
       militaryChangePerUnit: item.militaryChangePerUnit,
       scoreDelta2xSubtotal: item.scoreDelta2xSubtotal,
       militaryChangeSubtotal: item.militaryChangeSubtotal,
-    })
+    }
+    if (typeof item.scoreDelta2xSubtotalMin === 'number') {
+      lineItem.scoreDelta2xSubtotalMin = item.scoreDelta2xSubtotalMin
+    }
+    if (typeof item.scoreDelta2xSubtotalMax === 'number') {
+      lineItem.scoreDelta2xSubtotalMax = item.scoreDelta2xSubtotalMax
+    }
+    if (typeof item.militaryChangeSubtotalMin === 'number') {
+      lineItem.militaryChangeSubtotalMin = item.militaryChangeSubtotalMin
+    }
+    if (typeof item.militaryChangeSubtotalMax === 'number') {
+      lineItem.militaryChangeSubtotalMax = item.militaryChangeSubtotalMax
+    }
+    lineItems.push(lineItem)
   }
   if (
     typeof value.observedMilitaryChange !== 'number' ||
@@ -139,4 +156,17 @@ export function formatSignedDelta(value: number): string {
     return `+${value}`
   }
   return String(value)
+}
+
+export function formatMilitaryChangeSubtotal(line: MilitaryScoreLineItem): string {
+  const min = line.militaryChangeSubtotalMin
+  const max = line.militaryChangeSubtotalMax
+  if (
+    typeof min === 'number' &&
+    typeof max === 'number' &&
+    min !== max
+  ) {
+    return `${formatSignedDelta(min)} to ${formatSignedDelta(max)}`
+  }
+  return formatSignedDelta(line.militaryChangeSubtotal)
 }

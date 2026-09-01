@@ -227,6 +227,10 @@ export type ScoresInferenceMilitaryScoreLineItem = {
   militaryChangePerUnit: number
   scoreDelta2xSubtotal: number
   militaryChangeSubtotal: number
+  scoreDelta2xSubtotalMin?: number
+  scoreDelta2xSubtotalMax?: number
+  militaryChangeSubtotalMin?: number
+  militaryChangeSubtotalMax?: number
 }
 
 export type ScoresInferenceMilitaryScoreArithmetic = {

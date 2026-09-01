@@ -6,10 +6,12 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.idle_dock_pp import idle_dock_implied_ships_built
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     ProbabilityBucket,
 )
+from api.analytics.military_score_inference.public_scoreboard_pairing import PublicScoreboardRow
 from api.analytics.military_score_inference.ship_build_combos import ship_build_upper_bound
 from api.analytics.military_score_inference.ship_transfer_families import (
     ACQUIRED_SHIP_ACTION_PREFIX,
@@ -22,6 +24,12 @@ from api.analytics.military_score_inference.tier_policy import resolve_tier_poli
 from api.concepts.inference_probability_scale import INFERENCE_PROBABILITY_WEIGHT_SCALE
 
 from tests.fixtures.military_score_inference import _observation
+from tests.fixtures.pp_gap_transfer import (
+    BIRDS_PLAYER_ID,
+    FEDERATION_PLAYER_ID,
+    privateer_observation,
+    privateer_peer_rows,
+)
 from tests.fixtures.ship_transfer_families import (
     _class_flip_trade_catalog,
     _class_only_freighter_record,
@@ -333,3 +341,57 @@ def test_two_ship_class_flip_trade_requires_two_records_in_group(synthetic_catal
         military_delta_2x=-2 * military_2x,
     )
     assert not any(action.id.startswith(TRADE_ACTION_PREFIX) for action in fragment.actions)
+
+
+def test_pp_gap_catalog_reserves_one_acquired_warship_not_sum_of_peers(
+    sample_turn, synthetic_catalog_context
+):
+    observation = privateer_observation()
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=privateer_peer_rows(),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    acquired = [
+        action for action in fragment.actions if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+    ]
+    counterparties = {action.counterparty_player_id for action in acquired}
+    assert counterparties == {FEDERATION_PLAYER_ID, BIRDS_PLAYER_ID}
+    assert all(action.warship_delta == 1 for action in acquired)
+    assert all(action.upper_bound == 1 for action in acquired)
+    assert fragment.reserved_incoming_warships == 1
+    assert fragment.reserved_incoming_freighters == 0
+    assert idle_dock_implied_ships_built(observation) == 2
+    assert (
+        ship_build_upper_bound(
+            observation,
+            is_warship=True,
+            is_freighter=False,
+            reserved_incoming_warships=fragment.reserved_incoming_warships,
+        )
+        == 2
+    )
+
+
+def test_pp_gap_catalog_emits_no_acquired_when_no_peer_excess_out(
+    sample_turn, synthetic_catalog_context
+):
+    observation = privateer_observation()
+    closed_birds = PublicScoreboardRow(
+        player_id=BIRDS_PLAYER_ID,
+        warship_delta=0,
+        freighter_delta=0,
+        military_delta_2x=0,
+        starbases=0,
+        priority_point_delta=0,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(closed_birds,),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert not any(action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) for action in fragment.actions)

@@ -26,6 +26,7 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
     public_scoreboard_row_from_observation,
 )
 from api.models.components import Beam, Engine, Hull, Torpedo
+from api.models.game import GameSettings
 from api.models.player import Score
 
 SHIP_LOSS_ACTION_PREFIX = "ship_loss:"
@@ -45,6 +46,10 @@ def public_scoreboard_rows_from_scores(
             warship_delta=score.shipchange,
             freighter_delta=score.freighterchange,
             military_delta_2x=2 * score.militarychange,
+            starbases=score.starbases,
+            priority_point_delta=score.prioritypointchange,
+            planet_delta=score.planetchange,
+            starbase_delta=score.starbasechange,
         )
         for score in scores
         if score.ownerid != this_player_id
@@ -76,6 +81,8 @@ def ship_transfer_combo_capacity(
     Extra combo slots are prior-fleet departures when the class did not grow, so
     loss+replace (net 0) can still build. Incoming acquired counts are reserved
     out of the build bound so they are not explained as ship-build combos.
+    PP-gap counterparties are alternatives for the same arrival budget (max, not
+    sum), so a solution pairs with one donor.
     """
     extra_warship = warship_decrease_capacity
     extra_freighter = freighter_decrease_capacity
@@ -83,12 +90,34 @@ def ship_transfer_combo_capacity(
         extra_warship = 0
     if observation.freighter_delta > 0:
         extra_freighter = 0
-    reserved_warship = sum(
-        match.warship_delta for match in pairing.matches if match.family == "acquired"
+    reserved_warship_raw = sum(
+        match.warship_delta
+        for match in pairing.matches
+        if match.family == "acquired" and match.source == "raw_drop"
     )
-    reserved_freighter = sum(
-        match.freighter_delta for match in pairing.matches if match.family == "acquired"
+    reserved_freighter_raw = sum(
+        match.freighter_delta
+        for match in pairing.matches
+        if match.family == "acquired" and match.source == "raw_drop"
     )
+    reserved_warship_pp = max(
+        (
+            match.warship_delta
+            for match in pairing.matches
+            if match.family == "acquired" and match.source == "pp_gap"
+        ),
+        default=0,
+    )
+    reserved_freighter_pp = max(
+        (
+            match.freighter_delta
+            for match in pairing.matches
+            if match.family == "acquired" and match.source == "pp_gap"
+        ),
+        default=0,
+    )
+    reserved_warship = max(reserved_warship_raw, reserved_warship_pp)
+    reserved_freighter = max(reserved_freighter_raw, reserved_freighter_pp)
     return extra_warship, extra_freighter, reserved_warship, reserved_freighter
 
 
@@ -101,11 +130,17 @@ def build_ship_transfer_catalog_fragment(
     engines_by_id: dict[int, Engine],
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
+    settings: GameSettings | None = None,
+    is_after_ship_limit: bool | None = None,
 ) -> ShipTransferCatalogFragment:
     """Admit transfer actions and combo/departure caps from one pairing."""
     pairing = classify_public_scoreboard_pairing(
         public_scoreboard_row_from_observation(observation),
         peer_rows,
+        settings=settings,
+        is_after_ship_limit=(
+            observation.is_after_ship_limit if is_after_ship_limit is None else is_after_ship_limit
+        ),
     )
     candidates = prior_fleet_decrease_candidates(
         prior_fleet_records,
@@ -118,7 +153,7 @@ def build_ship_transfer_catalog_fragment(
     actions.extend(_loss_actions(observation, pairing, candidates))
     actions.extend(_gift_actions(pairing, candidates))
     actions.extend(_trade_actions(pairing, candidates, observation))
-    actions.extend(_acquired_actions(pairing))
+    actions.extend(_acquired_actions(pairing, observation.military_delta_2x))
     prior_warship_departure_cap, prior_freighter_departure_cap = decrease_capacity_by_class(
         candidates
     )
@@ -383,21 +418,29 @@ def _incoming_military_bounds(incoming_military_2x: int) -> tuple[int, int | Non
 
     The counterparty's drop is a total over all transferred ships, so each unit
     carries any share of it: an envelope [0, total] admits the true total for
-    any incoming count >= 1. A non-positive total stays a point.
+    any incoming count >= 1. A non-positive total stays a point. This is the
+    catalog search domain; emitted solution arithmetic tightens it against the
+    other elements of that solution.
     """
     if incoming_military_2x <= 0:
         return incoming_military_2x, None, None
     return 0, 0, incoming_military_2x
 
 
-def _acquired_actions(pairing: PublicScoreboardPairing) -> list[CandidateAction]:
+def _acquired_actions(
+    pairing: PublicScoreboardPairing,
+    this_military_delta_2x: int,
+) -> list[CandidateAction]:
     actions: list[CandidateAction] = []
     for match in pairing.matches:
         if match.family != "acquired":
             continue
-        incoming_military = -match.counterparty_military_delta_2x
-        if match.warship_delta > 0:
+        if match.source == "pp_gap":
+            point, min_2x, max_2x = _incoming_military_bounds(max(0, this_military_delta_2x))
+        else:
+            incoming_military = -match.counterparty_military_delta_2x
             point, min_2x, max_2x = _incoming_military_bounds(incoming_military)
+        if match.warship_delta > 0:
             actions.append(
                 CandidateAction(
                     id=f"{ACQUIRED_SHIP_ACTION_PREFIX}warship:from:{match.counterparty_player_id}",
@@ -411,16 +454,21 @@ def _acquired_actions(pairing: PublicScoreboardPairing) -> list[CandidateAction]
                 )
             )
         if match.freighter_delta > 0:
-            freighter_military = 0 if match.warship_delta > 0 else incoming_military
-            point, min_2x, max_2x = _incoming_military_bounds(freighter_military)
+            if match.source == "pp_gap":
+                freighter_point, freighter_min, freighter_max = point, min_2x, max_2x
+            else:
+                freighter_military = 0 if match.warship_delta > 0 else incoming_military
+                freighter_point, freighter_min, freighter_max = _incoming_military_bounds(
+                    freighter_military
+                )
             actions.append(
                 CandidateAction(
                     id=f"{ACQUIRED_SHIP_ACTION_PREFIX}freighter:from:{match.counterparty_player_id}",
                     label=f"Acquired freighter from player {match.counterparty_player_id}",
-                    score_delta_2x=point,
+                    score_delta_2x=freighter_point,
                     freighter_delta=1,
-                    score_delta_2x_min=min_2x,
-                    score_delta_2x_max=max_2x,
+                    score_delta_2x_min=freighter_min,
+                    score_delta_2x_max=freighter_max,
                     counterparty_player_id=match.counterparty_player_id,
                     upper_bound=match.freighter_delta,
                 )
