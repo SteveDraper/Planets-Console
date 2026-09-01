@@ -120,6 +120,30 @@ _ARITHMETIC_LINE_ITEM_SCHEMA: dict[str, Any] = {
             "type": "integer",
             "description": "Total military score change for this line item (subtotal // 2).",
         },
+        "scoreDelta2xSubtotalMin": {
+            "type": "integer",
+            "description": (
+                "Inclusive lower bound on scoreDelta2xSubtotal after tightening this "
+                "interval action against the other elements of this solution. Omitted "
+                "when the contribution is a point."
+            ),
+        },
+        "scoreDelta2xSubtotalMax": {
+            "type": "integer",
+            "description": (
+                "Inclusive upper bound on scoreDelta2xSubtotal after tightening this "
+                "interval action against the other elements of this solution. Omitted "
+                "when the contribution is a point."
+            ),
+        },
+        "militaryChangeSubtotalMin": {
+            "type": "integer",
+            "description": "Displayed lower bound (scoreDelta2xSubtotalMin // 2).",
+        },
+        "militaryChangeSubtotalMax": {
+            "type": "integer",
+            "description": "Displayed upper bound (scoreDelta2xSubtotalMax // 2).",
+        },
     },
 }
 

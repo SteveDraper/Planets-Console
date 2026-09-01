@@ -97,6 +97,9 @@ class ActionCatalog:
     prior_warship_departure_cap: int = 0
     prior_freighter_departure_cap: int = 0
     prior_departure_group_caps: dict[str, int] = field(default_factory=dict)
+    acquired_warship_cap: int | None = None
+    acquired_freighter_cap: int | None = None
+    acquired_ship_cap: int | None = None
 
     @property
     def catalog_size(self) -> int:
@@ -161,6 +164,9 @@ def build_inference_problem(
         prior_warship_departure_cap=catalog.prior_warship_departure_cap,
         prior_freighter_departure_cap=catalog.prior_freighter_departure_cap,
         prior_departure_group_caps=catalog.prior_departure_group_caps,
+        acquired_warship_cap=catalog.acquired_warship_cap,
+        acquired_freighter_cap=catalog.acquired_freighter_cap,
+        acquired_ship_cap=catalog.acquired_ship_cap,
     )
 
 
@@ -311,11 +317,16 @@ def build_action_catalog(
         engines_by_id=engines_by_id,
         beams_by_id=beams_by_id,
         torpedos_by_id=torpedos_by_id,
+        settings=turn.settings if turn is not None else None,
     )
     kept_actions.extend(transfer_fragment.actions)
     idle_dock = False
     if turn is not None:
-        idle_dock = should_enforce_idle_dock_pp(observation, turn.settings)
+        idle_dock = should_enforce_idle_dock_pp(
+            observation,
+            turn.settings,
+            is_after_ship_limit=observation.is_after_ship_limit,
+        )
 
     ranking_heuristics = InferenceRankingHeuristics()
     for action in transfer_fragment.actions:
@@ -390,6 +401,9 @@ def build_action_catalog(
         prior_warship_departure_cap=transfer_fragment.prior_warship_departure_cap,
         prior_freighter_departure_cap=transfer_fragment.prior_freighter_departure_cap,
         prior_departure_group_caps=transfer_fragment.prior_departure_group_caps,
+        acquired_warship_cap=transfer_fragment.reserved_incoming_warships,
+        acquired_freighter_cap=transfer_fragment.reserved_incoming_freighters,
+        acquired_ship_cap=transfer_fragment.reserved_incoming_ships,
     )
 
 

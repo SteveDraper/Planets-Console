@@ -17,12 +17,17 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceSolution,
     ShipBuildCombo,
+    candidate_action_has_military_interval,
+    candidate_military_subtotal_bounds_2x,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
     diversity_caps_applied_payload,
     fighter_channel_action_ids,
     torpedo_load_action_ids,
+)
+from api.analytics.military_score_inference.ship_transfer_families import (
+    ACQUIRED_SHIP_ACTION_PREFIX,
 )
 
 PRIORITY_POINT_DIAGNOSTIC_NOTE = (
@@ -166,14 +171,6 @@ class _SumEqualityConstraint:
         model.add(lhs == rhs)
 
 
-def _action_has_military_interval(action: CandidateAction) -> bool:
-    return (
-        action.score_delta_2x_min is not None
-        and action.score_delta_2x_max is not None
-        and action.score_delta_2x_min != action.score_delta_2x_max
-    )
-
-
 def _military_lhs(
     model: cp_model.CpModel,
     aggregate_actions: tuple[CandidateAction, ...],
@@ -184,7 +181,7 @@ def _military_lhs(
     terms: list[object] = []
     for action in aggregate_actions:
         count_var = action_count_vars[action.id]
-        if _action_has_military_interval(action):
+        if candidate_action_has_military_interval(action):
             terms.append(_interval_military_contribution(model, action, count_var))
         else:
             terms.append(action.score_delta_2x * count_var)
@@ -319,6 +316,7 @@ class InferenceHardConstraints:
                 model.add(ships_built == implied_ships_built)
         _add_prior_fleet_departure_caps(model, problem, action_count_vars)
         _add_prior_fleet_group_departure_caps(model, problem, action_count_vars)
+        _add_acquired_incoming_caps(model, problem, action_count_vars)
         aggregate_action_ids = frozenset(action.id for action in problem.aggregate_actions)
         if _fighter_transfer_actions_both_present(aggregate_action_ids):
             _add_fighter_transfer_direction_exclusivity(model, action_count_vars)
@@ -373,6 +371,152 @@ def _add_prior_fleet_group_departure_caps(
         model.add(sum(usage_terms) <= problem.prior_departure_group_caps.get(group_key, 0))
 
 
+def _add_acquired_incoming_caps(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    """Cap total acquired ships at the paired incoming budget.
+
+    Several counterparties are alternative signatures for the same arrival.
+    A solution pairs with one matching donor; it does not consume every
+    ``excess_out`` peer. Unknown class is exclusive alternatives, not two
+    additive class columns.
+    """
+    _add_acquired_total_cap(model, problem, action_count_vars)
+    _add_acquired_class_cap(
+        model,
+        problem,
+        action_count_vars,
+        cap=problem.acquired_warship_cap,
+        warship=True,
+    )
+    _add_acquired_class_cap(
+        model,
+        problem,
+        action_count_vars,
+        cap=problem.acquired_freighter_cap,
+        warship=False,
+    )
+    _add_exclusive_class_groups(model, problem, action_count_vars)
+
+
+def _acquired_action_count_terms(
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+    *,
+    warship: bool | None,
+) -> list[object]:
+    terms: list[object] = []
+    for action in problem.aggregate_actions:
+        if not action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX):
+            continue
+        if warship is None:
+            units = action.warship_delta + action.freighter_delta
+        elif warship:
+            units = action.warship_delta
+        else:
+            units = action.freighter_delta
+        if units:
+            terms.append(units * action_count_vars[action.id])
+    return terms
+
+
+def _add_acquired_total_cap(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    cap = problem.acquired_ship_cap
+    if not cap:
+        return
+    usage = _acquired_action_count_terms(problem, action_count_vars, warship=None)
+    if usage:
+        model.add(sum(usage) <= cap)
+
+
+def _add_acquired_class_cap(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+    *,
+    cap: int | None,
+    warship: bool,
+) -> None:
+    if not cap:
+        return
+    usage = _acquired_action_count_terms(problem, action_count_vars, warship=warship)
+    if usage:
+        model.add(sum(usage) <= cap)
+
+
+def _exclusive_group_hull_class(action: CandidateAction) -> str | None:
+    """Warship or freighter when the action moves exactly one hull class."""
+    has_warship = action.warship_delta != 0
+    has_freighter = action.freighter_delta != 0
+    if has_warship and not has_freighter:
+        return "warship"
+    if has_freighter and not has_warship:
+        return "freighter"
+    return None
+
+
+def _add_class_active_indicator(
+    model: cp_model.CpModel,
+    action_count_vars: dict[str, cp_model.IntVar],
+    action_ids: list[str],
+    *,
+    name: str,
+) -> cp_model.IntVar:
+    """True when any action in ``action_ids`` has count >= 1."""
+    if len(action_ids) == 1:
+        return add_count_active_indicator(
+            model,
+            action_count_vars[action_ids[0]],
+            name=name,
+        )
+    active = model.new_bool_var(name)
+    total = sum(action_count_vars[action_id] for action_id in action_ids)
+    model.add(total >= 1).only_enforce_if(active)
+    model.add(total == 0).only_enforce_if(active.negated())
+    return active
+
+
+def _add_exclusive_class_groups(
+    model: cp_model.CpModel,
+    problem: InferenceProblem,
+    action_count_vars: dict[str, cp_model.IntVar],
+) -> None:
+    """Unknown-class transfers pick one hull class, not both.
+
+    Several prior-fleet groups of the same class may all contribute. Exclusivity
+    is class XOR within the group, not one-action-only.
+    """
+    ids_by_group_class: dict[str, dict[str, list[str]]] = {}
+    for action in problem.aggregate_actions:
+        if action.exclusive_class_group is None:
+            continue
+        hull_class = _exclusive_group_hull_class(action)
+        if hull_class is None:
+            continue
+        ids_by_group_class.setdefault(action.exclusive_class_group, {}).setdefault(
+            hull_class, []
+        ).append(action.id)
+    for group_key, ids_by_class in ids_by_group_class.items():
+        if len(ids_by_class) < 2:
+            continue
+        class_active = [
+            _add_class_active_indicator(
+                model,
+                action_count_vars,
+                action_ids,
+                name=f"exclusive_class_{group_key}_{hull_class}_active",
+            )
+            for hull_class, action_ids in ids_by_class.items()
+        ]
+        model.add(sum(class_active) <= 1)
+
+
 def solution_satisfies_exact_hard_equalities(
     solution: InferenceSolution,
     observation: InferenceObservation,
@@ -389,17 +533,9 @@ def solution_satisfies_exact_hard_equalities(
         catalog_action = actions_by_id.get(action.action_id)
         if catalog_action is None:
             return False
-        if _action_has_military_interval(catalog_action):
-            min_2x = catalog_action.score_delta_2x_min
-            max_2x = catalog_action.score_delta_2x_max
-            if min_2x is None or max_2x is None:
-                return False
-            lo, hi = (min_2x, max_2x) if min_2x <= max_2x else (max_2x, min_2x)
-            military_min += lo * action.count
-            military_max += hi * action.count
-        else:
-            military_min += catalog_action.score_delta_2x * action.count
-            military_max += catalog_action.score_delta_2x * action.count
+        lo, hi = candidate_military_subtotal_bounds_2x(catalog_action, action.count)
+        military_min += lo
+        military_max += hi
         warship_sum += catalog_action.warship_delta * action.count
         freighter_sum += catalog_action.freighter_delta * action.count
     for ship_build in solution.ship_builds:

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatMilitaryChangeSubtotal,
   formatSignedDelta,
   militaryChangeFromDelta2x,
   readInferenceConstraints,
@@ -51,6 +52,33 @@ describe('readMilitaryScoreArithmetic', () => {
     expect(arithmetic?.lineItems[0]?.militaryChangeSubtotal).toBe(22)
   })
 
+  it('parses tightened interval bounds on a line item', () => {
+    const arithmetic = readMilitaryScoreArithmetic({
+      observedMilitaryChange: 6674,
+      observedMilitaryDelta2x: 13348,
+      explainedMilitaryChange: 6674,
+      explainedMilitaryDelta2x: 13348,
+      matchesObserved: true,
+      lineItems: [
+        {
+          actionId: 'acquired:warship:from:1',
+          label: 'Acquired warship from player 1',
+          count: 1,
+          scoreDelta2xPerUnit: 4996,
+          militaryChangePerUnit: 2498,
+          scoreDelta2xSubtotal: 4996,
+          militaryChangeSubtotal: 2498,
+          scoreDelta2xSubtotalMin: 4995,
+          scoreDelta2xSubtotalMax: 4997,
+          militaryChangeSubtotalMin: 2497,
+          militaryChangeSubtotalMax: 2498,
+        },
+      ],
+    })
+    expect(arithmetic?.lineItems[0]?.militaryChangeSubtotalMin).toBe(2497)
+    expect(arithmetic?.lineItems[0]?.militaryChangeSubtotalMax).toBe(2498)
+  })
+
   it('parses ship-build line items that use comboId', () => {
     const arithmetic = readMilitaryScoreArithmetic({
       observedMilitaryChange: 110,
@@ -88,5 +116,37 @@ describe('formatSignedDelta', () => {
   it('prefixes positive values', () => {
     expect(formatSignedDelta(5)).toBe('+5')
     expect(formatSignedDelta(-3)).toBe('-3')
+  })
+})
+
+describe('formatMilitaryChangeSubtotal', () => {
+  it('formats a point contribution', () => {
+    expect(
+      formatMilitaryChangeSubtotal({
+        actionId: 'defense',
+        label: 'Defense post',
+        count: 2,
+        scoreDelta2xPerUnit: 22,
+        militaryChangePerUnit: 11,
+        scoreDelta2xSubtotal: 44,
+        militaryChangeSubtotal: 22,
+      })
+    ).toBe('+22')
+  })
+
+  it('formats a residual band when min and max differ', () => {
+    expect(
+      formatMilitaryChangeSubtotal({
+        actionId: 'acquired:warship:from:1',
+        label: 'Acquired warship from player 1',
+        count: 1,
+        scoreDelta2xPerUnit: 4996,
+        militaryChangePerUnit: 2498,
+        scoreDelta2xSubtotal: 4996,
+        militaryChangeSubtotal: 2498,
+        militaryChangeSubtotalMin: 2497,
+        militaryChangeSubtotalMax: 2498,
+      })
+    ).toBe('+2497 to +2498')
   })
 })

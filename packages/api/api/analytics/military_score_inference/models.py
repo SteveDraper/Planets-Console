@@ -58,6 +58,32 @@ class CandidateAction:
     # Prior-fleet departure group identity shared across loss/gift/trade families;
     # None for actions that do not consume a prior-fleet record.
     prior_group_key: str | None = None
+    # Set when warship and freighter are exclusive alternatives for one transfer.
+    exclusive_class_group: str | None = None
+
+
+def candidate_action_has_military_interval(action: CandidateAction) -> bool:
+    """True when the catalog gives this action a proper military envelope."""
+    return (
+        action.score_delta_2x_min is not None
+        and action.score_delta_2x_max is not None
+        and action.score_delta_2x_min != action.score_delta_2x_max
+    )
+
+
+def candidate_military_subtotal_bounds_2x(action: CandidateAction, count: int) -> tuple[int, int]:
+    """Inclusive catalog military 2x for ``count`` units of ``action``."""
+    if candidate_action_has_military_interval(action):
+        lo = action.score_delta_2x_min
+        hi = action.score_delta_2x_max
+        if lo is None or hi is None:
+            point = action.score_delta_2x * count
+            return point, point
+        if lo > hi:
+            lo, hi = hi, lo
+        return lo * count, hi * count
+    point = action.score_delta_2x * count
+    return point, point
 
 
 class MagnitudeCountBounds(Protocol):
@@ -152,6 +178,9 @@ class InferenceProblem:
     prior_warship_departure_cap: int = 0
     prior_freighter_departure_cap: int = 0
     prior_departure_group_caps: dict[str, int] = field(default_factory=dict)
+    acquired_warship_cap: int | None = None
+    acquired_freighter_cap: int | None = None
+    acquired_ship_cap: int | None = None
     military_score_alpha: int = 0
     ranking_heuristics: InferenceRankingHeuristics = field(
         default_factory=_default_ranking_heuristics

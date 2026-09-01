@@ -6,9 +6,19 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.idle_dock_pp import idle_dock_implied_ships_built
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     ProbabilityBucket,
+)
+from api.analytics.military_score_inference.public_scoreboard_pairing import (
+    PairingMatch,
+    PairingSource,
+    PublicScoreboardPairing,
+    PublicScoreboardRow,
+    TransferBudget,
+    public_scoreboard_row_from_observation,
+    transfer_budget_for_row,
 )
 from api.analytics.military_score_inference.ship_build_combos import ship_build_upper_bound
 from api.analytics.military_score_inference.ship_transfer_families import (
@@ -17,12 +27,22 @@ from api.analytics.military_score_inference.ship_transfer_families import (
     SHIP_LOSS_ACTION_PREFIX,
     TRADE_ACTION_PREFIX,
     build_ship_transfer_catalog_fragment,
+    ship_transfer_combo_capacity,
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.concepts.inference_probability_scale import INFERENCE_PROBABILITY_WEIGHT_SCALE
 
 from tests.fixtures.military_score_inference import _observation
+from tests.fixtures.pp_gap_transfer import (
+    BIRDS_PLAYER_ID,
+    FEDERATION_PLAYER_ID,
+    federation_row,
+    mixed_residual_receiver_observation,
+    privateer_observation,
+    privateer_peer_rows,
+)
 from tests.fixtures.ship_transfer_families import (
+    UNPINNED_GIFT_COUNTERPARTY_ID,
     _class_flip_trade_catalog,
     _class_only_freighter_record,
     _known_warship_record,
@@ -30,6 +50,7 @@ from tests.fixtures.ship_transfer_families import (
     _same_class_swap_catalog,
     _transfer_catalog_kwargs,
     _two_ship_class_flip_trade_fragment,
+    _unpinned_pp_gap_two_ship_gift_fragment,
 )
 
 
@@ -317,12 +338,22 @@ def test_transfer_catalog_fragment_reserves_acquired_incoming(synthetic_catalog_
         prior_fleet_records=(),
         **_transfer_catalog_kwargs(synthetic_catalog_context),
     )
-    assert any(action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) for action in fragment.actions)
+    acquired = next(
+        action for action in fragment.actions if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+    )
+    assert acquired.score_delta_2x_max == 40
     assert all(action.prior_group_key is None for action in fragment.actions)
     assert fragment.reserved_incoming_warships == 1
     assert fragment.reserved_incoming_freighters == 0
+    assert fragment.reserved_incoming_ships == 1
     assert fragment.extra_warship_capacity == 0
     assert fragment.prior_warship_departure_cap == 0
+    this_budget = transfer_budget_for_row(
+        public_scoreboard_row_from_observation(observation),
+        settings=None,
+        is_after_ship_limit=False,
+    )
+    assert this_budget.excess_in == 0
 
 
 def test_two_ship_class_flip_trade_requires_two_records_in_group(synthetic_catalog_context):
@@ -333,3 +364,187 @@ def test_two_ship_class_flip_trade_requires_two_records_in_group(synthetic_catal
         military_delta_2x=-2 * military_2x,
     )
     assert not any(action.id.startswith(TRADE_ACTION_PREFIX) for action in fragment.actions)
+
+
+def test_pp_gap_catalog_reserves_one_acquired_warship_not_sum_of_peers(
+    sample_turn, synthetic_catalog_context
+):
+    observation = privateer_observation()
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=privateer_peer_rows(),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    acquired = [
+        action for action in fragment.actions if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+    ]
+    counterparties = {action.counterparty_player_id for action in acquired}
+    assert counterparties == {FEDERATION_PLAYER_ID, BIRDS_PLAYER_ID}
+    assert all(action.warship_delta == 1 for action in acquired)
+    assert all(action.upper_bound == 1 for action in acquired)
+    assert all(action.score_delta_2x_max == observation.military_delta_2x for action in acquired)
+    this_budget = transfer_budget_for_row(
+        public_scoreboard_row_from_observation(observation),
+        settings=sample_turn.settings,
+        is_after_ship_limit=False,
+    )
+    assert this_budget.excess_in == 1
+    assert sum(action.upper_bound for action in acquired) == 2
+    assert fragment.reserved_incoming_warships == this_budget.excess_in
+    assert fragment.reserved_incoming_freighters == 0
+    assert fragment.reserved_incoming_ships == this_budget.excess_in
+    assert idle_dock_implied_ships_built(observation) == 2
+    assert (
+        ship_build_upper_bound(
+            observation,
+            is_warship=True,
+            is_freighter=False,
+            reserved_incoming_warships=fragment.reserved_incoming_warships,
+        )
+        == 2
+    )
+
+
+def test_pp_gap_catalog_emits_no_acquired_when_no_peer_excess_out(
+    sample_turn, synthetic_catalog_context
+):
+    observation = privateer_observation()
+    closed_birds = PublicScoreboardRow(
+        player_id=BIRDS_PLAYER_ID,
+        warship_delta=0,
+        freighter_delta=0,
+        military_delta_2x=0,
+        starbases=0,
+        priority_point_delta=0,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(closed_birds,),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    assert not any(action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX) for action in fragment.actions)
+    this_budget = transfer_budget_for_row(
+        public_scoreboard_row_from_observation(observation),
+        settings=sample_turn.settings,
+        is_after_ship_limit=False,
+    )
+    assert this_budget.excess_in == 1
+    assert fragment.reserved_incoming_ships == this_budget.excess_in
+
+
+def test_pp_gap_unknown_class_catalog_is_exclusive_not_two_reserved_columns(
+    sample_turn, synthetic_catalog_context
+):
+    observation = mixed_residual_receiver_observation()
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(federation_row(),),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    acquired = [
+        action for action in fragment.actions if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+    ]
+    assert {action.warship_delta for action in acquired} == {0, 1}
+    assert {action.freighter_delta for action in acquired} == {0, 1}
+    assert all(action.upper_bound == 1 for action in acquired)
+    assert len({action.exclusive_class_group for action in acquired}) == 1
+    assert all(action.exclusive_class_group is not None for action in acquired)
+    this_budget = transfer_budget_for_row(
+        public_scoreboard_row_from_observation(observation),
+        settings=sample_turn.settings,
+        is_after_ship_limit=False,
+    )
+    assert this_budget.excess_in == 1
+    assert fragment.reserved_incoming_warships == 0
+    assert fragment.reserved_incoming_freighters == 0
+    assert fragment.reserved_incoming_ships == this_budget.excess_in
+
+
+def test_pp_gap_unpinned_gift_catalog_keeps_two_warship_groups(
+    sample_turn, synthetic_catalog_context
+):
+    _, fragment, first_military, second_military = _unpinned_pp_gap_two_ship_gift_fragment(
+        synthetic_catalog_context,
+        sample_turn.settings,
+        include_freighter=True,
+    )
+    assert first_military != second_military
+    gifts = [action for action in fragment.actions if action.id.startswith(GIFT_ACTION_PREFIX)]
+    warship_gifts = [action for action in gifts if action.warship_delta < 0]
+    freighter_gifts = [action for action in gifts if action.freighter_delta < 0]
+    assert len(warship_gifts) == 2
+    assert freighter_gifts
+    assert {action.exclusive_class_group for action in gifts} == {
+        f"gift:{UNPINNED_GIFT_COUNTERPARTY_ID}"
+    }
+    assert all(action.upper_bound == 1 for action in warship_gifts)
+
+
+def _acquired_pairing_match(
+    *,
+    player_id: int,
+    source: PairingSource,
+    warship: int = 0,
+    freighter: int = 0,
+    transfer_count: int = 0,
+) -> PairingMatch:
+    return PairingMatch(
+        family="acquired",
+        counterparty_player_id=player_id,
+        warship_delta=warship,
+        freighter_delta=freighter,
+        counterparty_military_delta_2x=-40,
+        source=source,
+        transfer_count=transfer_count,
+        pinned_class="warship" if warship and not freighter else None,
+    )
+
+
+def test_combo_capacity_reserves_excess_in_not_max_of_peer_caps():
+    observation = _observation(warship_delta=4, starbases_owned=2)
+    this_budget = TransferBudget(implied_ships_built=2, net=4, excess_in=2, excess_out=0)
+    pairing = PublicScoreboardPairing(
+        matches=(
+            _acquired_pairing_match(player_id=1, source="pp_gap", warship=1, transfer_count=1),
+            _acquired_pairing_match(player_id=3, source="pp_gap", warship=1, transfer_count=1),
+        ),
+        unmatched_warship_drop=0,
+        unmatched_freighter_drop=0,
+    )
+    _, _, reserved_warship, reserved_freighter, reserved_ships = ship_transfer_combo_capacity(
+        observation,
+        pairing,
+        0,
+        0,
+        this_budget=this_budget,
+    )
+    assert sum(match.transfer_count for match in pairing.matches) == 2
+    assert max(match.transfer_count for match in pairing.matches) == 1
+    assert (reserved_warship, reserved_freighter, reserved_ships) == (2, 0, 2)
+
+
+def test_combo_capacity_raw_drop_reserves_sum_when_excess_in_is_zero():
+    observation = _observation(warship_delta=2, starbases_owned=3)
+    this_budget = TransferBudget(implied_ships_built=None, net=2, excess_in=0, excess_out=0)
+    pairing = PublicScoreboardPairing(
+        matches=(
+            _acquired_pairing_match(player_id=1, source="raw_drop", warship=1),
+            _acquired_pairing_match(player_id=3, source="raw_drop", warship=1),
+        ),
+        unmatched_warship_drop=0,
+        unmatched_freighter_drop=0,
+    )
+    _, _, reserved_warship, reserved_freighter, reserved_ships = ship_transfer_combo_capacity(
+        observation,
+        pairing,
+        0,
+        0,
+        this_budget=this_budget,
+    )
+    assert (reserved_warship, reserved_freighter, reserved_ships) == (2, 0, 2)

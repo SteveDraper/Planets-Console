@@ -8,8 +8,18 @@ spend is not this module.
 
 from __future__ import annotations
 
-from api.analytics.military_score_inference.models import InferenceObservation
+from typing import Protocol
+
 from api.models.game import GameSettings
+
+
+class IdleDockPpRow(Protocol):
+    """Public scoreboard fields for idle-dock PP lattice and enforcement."""
+
+    priority_point_delta: int
+    starbases_owned: int
+    planet_delta: int
+    starbase_delta: int
 
 
 def is_idle_dock_queue(settings: GameSettings) -> bool:
@@ -19,10 +29,10 @@ def is_idle_dock_queue(settings: GameSettings) -> bool:
     return bool(settings.productionqueue or settings.planetaryproductionqueue)
 
 
-def idle_dock_pp_on_lattice(observation: InferenceObservation) -> bool:
+def idle_dock_pp_on_lattice(row: IdleDockPpRow) -> bool:
     """True when observed PP is ``2 * (starbases - k)`` for integer k in ``[0, starbases]``."""
-    priority_points = observation.priority_point_delta
-    starbases = observation.starbases_owned
+    starbases = row.starbases_owned
+    priority_points = row.priority_point_delta
     if starbases < 0 or priority_points < 0 or priority_points % 2 != 0:
         return False
     idle_docks = priority_points // 2
@@ -30,24 +40,26 @@ def idle_dock_pp_on_lattice(observation: InferenceObservation) -> bool:
 
 
 def should_enforce_idle_dock_pp(
-    observation: InferenceObservation,
+    row: IdleDockPpRow,
     settings: GameSettings,
+    *,
+    is_after_ship_limit: bool,
 ) -> bool:
-    """Lattice-gated idle-dock PP equality for this row."""
-    if observation.is_after_ship_limit:
+    """Lattice-gated idle-dock PP equality for public scoreboard fields."""
+    if is_after_ship_limit:
         return False
     if not is_idle_dock_queue(settings):
         return False
-    if observation.planet_delta < 0 or observation.starbase_delta < 0:
+    if row.planet_delta < 0 or row.starbase_delta < 0:
         return False
-    return idle_dock_pp_on_lattice(observation)
+    return idle_dock_pp_on_lattice(row)
 
 
-def idle_dock_implied_ships_built(observation: InferenceObservation) -> int | None:
+def idle_dock_implied_ships_built(row: IdleDockPpRow) -> int | None:
     """Ships built implied by idle-dock PP, or None when not on lattice."""
-    if not idle_dock_pp_on_lattice(observation):
+    if not idle_dock_pp_on_lattice(row):
         return None
-    return observation.starbases_owned - observation.priority_point_delta // 2
+    return row.starbases_owned - row.priority_point_delta // 2
 
 
 IDLE_DOCK_PP_EQUALITY_LABEL = (
