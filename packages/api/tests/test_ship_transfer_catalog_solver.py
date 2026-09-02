@@ -633,6 +633,27 @@ def test_idle_dock_balanced_complementary_drop_solver_is_exact_build(
         )
     )
     assert result.status == STATUS_EXACT
-    best = result.solutions[0]
-    assert best.ship_builds
-    assert sum(build.count for build in best.ship_builds) == 1
+    assert result.solutions
+    actions_by_id = {action.id: action for action in fragment.actions}
+    combos_by_id = {combo.combo_id: combo for combo in combos}
+    for solution in result.solutions:
+        acquired = [
+            action
+            for action in solution.actions
+            if action.action_id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+        ]
+        assert sum(action.count for action in acquired) == 0
+        assert sum(build.count for build in solution.ship_builds) == 1
+        arithmetic = solution_military_score_arithmetic_payload(
+            solution,
+            observation,
+            actions_by_id,
+            combos_by_id,
+        )
+        explained_2x = arithmetic["explainedMilitaryDelta2x"]
+        assert isinstance(explained_2x, int)
+        assert arithmetic["matchesObserved"] is True
+        assert (
+            abs(explained_2x - observation.military_delta_2x)
+            <= observation.military_partition_slack_2x
+        )
