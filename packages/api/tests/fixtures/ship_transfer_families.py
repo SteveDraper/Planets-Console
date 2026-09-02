@@ -127,6 +127,18 @@ def _peer_row(
     )
 
 
+def idle_dock_balanced_warship_build_observation(
+    *,
+    military_delta_2x: int,
+) -> InferenceObservation:
+    """1 SB, PP 0, +1 warship: idle-dock k equals net, so excess_in is 0."""
+    return _observation(
+        military_delta_2x=military_delta_2x,
+        warship_delta=1,
+        starbases_owned=1,
+    )
+
+
 def _transfer_catalog_kwargs(synthetic_catalog_context) -> dict:
     return {
         "hulls_by_id": synthetic_catalog_context["hulls_by_id"],

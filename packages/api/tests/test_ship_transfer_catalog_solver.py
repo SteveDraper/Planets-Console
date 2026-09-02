@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
+from api.analytics.military_score_inference.ship_build_combos import generate_ship_build_combos
 from api.analytics.military_score_inference.ship_transfer_families import (
     ACQUIRED_SHIP_ACTION_PREFIX,
     GIFT_ACTION_PREFIX,
@@ -45,6 +46,7 @@ from tests.fixtures.ship_transfer_families import (
     _transfer_catalog_kwargs,
     _two_ship_class_flip_trade_fragment,
     _unpinned_pp_gap_two_ship_gift_fragment,
+    idle_dock_balanced_warship_build_observation,
 )
 
 
@@ -544,3 +546,40 @@ def test_pp_gap_unknown_class_cannot_take_two_acquired_ships(
             if action.action_id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
         ]
         assert sum(action.count for action in acquired) <= 1
+
+
+def test_idle_dock_balanced_complementary_drop_solver_is_exact_build(
+    sample_turn, synthetic_catalog_context
+):
+    _, military_2x = _known_warship_record(synthetic_catalog_context)
+    observation = idle_dock_balanced_warship_build_observation(military_delta_2x=military_2x)
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(_peer_row(3, warship=-1, military_2x=-military_2x),),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    combos = generate_ship_build_combos(
+        observation,
+        **synthetic_catalog_context,
+        reserved_incoming_warships=fragment.reserved_incoming_warships,
+        reserved_incoming_freighters=fragment.reserved_incoming_freighters,
+    )
+    assert combos
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            ship_build_combos=combos,
+            enforce_idle_dock_pp_equality=True,
+            acquired_warship_cap=fragment.reserved_incoming_warships,
+            acquired_ship_cap=fragment.reserved_incoming_ships,
+            max_solutions=5,
+            time_limit_seconds=5.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    best = result.solutions[0]
+    assert best.ship_builds
+    assert sum(build.count for build in best.ship_builds) == 1
