@@ -121,12 +121,13 @@ class InferenceRowScheduler(
         """Return whether scores@N should wipe+reschedule after one fleet ledger persist.
 
         Own-DAG elision (#204): when scores is already a non-terminal dependent of
-        this fleet scope on the same orchestrator DAG, skip **both** durable wipe
-        and in-place reschedule -- first-pass dataflow is DependencyOutputs.
-        Elision peeks the stream binding's orchestrator when a scores stream is
-        open, otherwise the process compute orchestrator (cold export-ensure DAG
-        with no stream). Ambient / external consumers still wipe then reschedule
-        (reschedule is a no-op without a stream controller).
+        this fleet scope on the same orchestrator DAG (``waiting_deps``, ``ready``,
+        ``running``, or ``parked``), skip **both** durable wipe and in-place
+        reschedule -- first-pass dataflow is DependencyOutputs. Elision peeks the
+        stream binding's orchestrator when a scores stream is open, otherwise the
+        process compute orchestrator (cold export-ensure DAG with no stream).
+        Ambient / external consumers still wipe then reschedule (reschedule is a
+        no-op without a stream controller).
 
         Orchestrator peeks run outside the scheduler lock so adapters never read
         the live ``nodes`` map under that lock.
@@ -171,12 +172,13 @@ class InferenceRowScheduler(
 
         Own-DAG fleet persist notifications fire only after the fleet node is
         ``complete`` (deferred until after ``_complete_node``). Skip when scores is
-        ``waiting_deps`` on that fleet scope and the completed fleet node's
-        materialization version matches the notification. A persist while fleet is
-        still non-terminal is treated as external and must wipe+reschedule.
+        a non-terminal dependent of that fleet scope and the completed fleet
+        node's materialization version matches the notification. A persist while
+        fleet is still non-terminal, or scores that does not depend on this fleet
+        node, is treated as external and must wipe+reschedule.
         """
         scores_view = orchestrator.peek_scope_view(scores_scope)
-        if scores_view is None or scores_view.state != "waiting_deps":
+        if scores_view is None or scores_view.state in {"complete", "failed"}:
             return False
         if fleet_scope not in scores_view.dependency_scopes:
             return False
