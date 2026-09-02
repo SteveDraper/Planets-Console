@@ -15,7 +15,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
-    CachedCompleteRowAdmission,
     ScheduledInferenceRow,
     iter_scores_table_inference_events,
     schedule_inference_row,
@@ -1146,6 +1145,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
 def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
     sample_turn,
     monkeypatch,
+    memory_backend,
     request,
 ):
     """Canceller that still needs the row must force_fresh_replace after abort.
@@ -1153,8 +1153,14 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
     Cached-complete admission must not skip orchestrator replace: aborting an
     in-flight scores row and then treating durable cache as done leaves the
     multiplex without the player and persist-deferred fleet waiting_deps on a
-    failed node (Cyborg t16 hang).
+    failed node (Cyborg t16 hang). Production admission sees the durable row;
+    ``force_schedule`` after cancel is what skips cache (Immediate/skip still
+    wins).
     """
+    from api.analytics.military_score_inference.inference_stream_rows import (
+        CachedCompleteRowAdmission,
+        ScheduleRowAdmission,
+    )
     from api.compute.dag import PlannedComputeNode
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
@@ -1175,6 +1181,12 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
     request.addfinalizer(cleanup)
 
     player_id = sample_turn.scores[0].ownerid
+    persistence = InferenceRowPersistenceService(memory_backend)
+    _seed_cached_rows(
+        persistence,
+        turn_number=sample_turn.settings.turn,
+        player_ids=(player_id,),
+    )
     scope_key = _stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope_key)
     controller = InferenceTableStreamController(
@@ -1185,9 +1197,15 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
         scheduler=scheduler,
         game_id=628580,
         perspective=1,
+        persistence=persistence,
         query_context=minimal_stream_query_context(sample_turn),
     )
     controller.attach()
+    assert isinstance(controller.resolve_row_admission(player_id), CachedCompleteRowAdmission)
+    assert isinstance(
+        controller.resolve_row_admission(player_id, force_schedule=True),
+        ScheduleRowAdmission,
+    )
 
     def scores_only_dag(_ctx, analytic_id, export_scope, **_kwargs):
         return (
@@ -1220,10 +1238,6 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
     scope = scheduler._root_scope_for_session(scheduled.session)
     orchestrator = get_compute_orchestrator()
     assert orchestrator.nodes[scope].state == "running"
-
-    controller.resolve_row_admission = lambda _player_id: CachedCompleteRowAdmission(
-        event={"type": "complete", "playerId": player_id, "summary": "cached"}
-    )
 
     assert controller.reschedule_row(player_id) is True
     after = controller.scheduled_rows.get(player_id)
