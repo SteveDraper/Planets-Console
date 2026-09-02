@@ -24,6 +24,8 @@ NodeState = Literal[
     "failed",
 ]
 
+TERMINAL_NODE_STATES: frozenset[NodeState] = frozenset({"complete", "failed"})
+
 
 @dataclass(frozen=True)
 class ComputeRequest:
@@ -144,7 +146,7 @@ class ComputeNodeRun:
         ``parked`` is a soft pause, not terminal -- dependents stay blocked
         until an explicit ``force_fresh`` wake.
         """
-        return self.state in {"complete", "failed"}
+        return self.state in TERMINAL_NODE_STATES
 
     @property
     def blocks_readiness_refresh(self) -> bool:

@@ -175,11 +175,22 @@ class InferenceTableStreamController(
 
         Cancel runs outside ``stream_lock``: cancel aborts orchestrator scopes and drains
         node-complete listeners that call ``deliver_domain_event`` (needs this lock).
+
+        After a cancel, re-admit with ``force_schedule`` so cached-complete
+        does not skip ``force_fresh`` replace of the aborted orchestrator node.
+        Immediate / skip admission still comes from ``resolve_row_admission``.
         """
+        cancelled = False
+
+        def cancel_run_id(run_id: str) -> None:
+            nonlocal cancelled
+            cancelled = True
+            self.scheduler.cancel_row_run(run_id)
+
         return self.reschedule_one(
             player_id,
-            cancel_run_id=self.scheduler.cancel_row_run,
-            resolve_admission=self.resolve_row_admission,
+            cancel_run_id=cancel_run_id,
+            resolve_admission=lambda pid: self.resolve_row_admission(pid, force_schedule=cancelled),
             active_run_id_for_player=self._active_run_id_for_player,
             before_collect_cancels=self._refresh_host_turn,
         )

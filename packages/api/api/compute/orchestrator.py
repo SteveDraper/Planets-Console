@@ -14,6 +14,7 @@ from api.compute.orchestrator_ensure import OrchestratorEnsureMixin
 from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
 from api.compute.orchestrator_observers import OrchestratorObservers
 from api.compute.orchestrator_state import (
+    TERMINAL_NODE_STATES,
     ComputeHandle,
     ComputeNodeRun,
     ComputeRequest,
@@ -72,6 +73,14 @@ class ScopeNodeView:
     step_index: int
     dependency_scopes: frozenset[ComputeScope]
     result_wire: object | None
+
+    @property
+    def is_terminal(self) -> bool:
+        """Whether this snapshot is a final outcome (``complete`` or ``failed``).
+
+        ``parked`` is a soft pause, not terminal.
+        """
+        return self.state in TERMINAL_NODE_STATES
 
 
 @dataclass(frozen=True)

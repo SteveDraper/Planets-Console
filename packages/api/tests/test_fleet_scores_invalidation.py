@@ -57,6 +57,80 @@ def _fake_orchestrator_with_nodes(nodes: dict) -> object:
     return FakeOrchestrator()
 
 
+def _bind_own_dag_fleet_persist(
+    scheduler,
+    *,
+    scores_state: str,
+    depends_on_fleet: bool,
+    ledger_materialization_version: int | None = None,
+):
+    """Install stream binding + peek orchestrator for own-DAG fleet persist cases."""
+    from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
+    from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
+    from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.compute.orchestrator import ComputeNodeRun
+
+    if ledger_materialization_version is None:
+        ledger_materialization_version = FLEET_MATERIALIZATION_VERSION
+    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=112)
+    stream_token = scheduler.begin_scope(scope)
+    scores_scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=112,
+        player_id=8,
+    )
+    fleet_scope = ComputeScope(
+        analytic_id="fleet",
+        game_id=628580,
+        perspective=1,
+        turn=111,
+        player_id=8,
+    )
+    persisted = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=8),
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+        materialization_version=ledger_materialization_version,
+    )
+    scheduler._stream_bindings[stream_token] = type(
+        "FakeBinding",
+        (),
+        {
+            "orchestrator": _fake_orchestrator_with_nodes(
+                {
+                    scores_scope: ComputeNodeRun(
+                        scope=scores_scope,
+                        dependency_scopes=(fleet_scope,) if depends_on_fleet else (),
+                        state=scores_state,
+                    ),
+                    fleet_scope: ComputeNodeRun(
+                        scope=fleet_scope,
+                        dependency_scopes=(),
+                        state="complete",
+                        result_wire={
+                            "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
+                        },
+                    ),
+                }
+            ),
+            "query_context": object(),
+        },
+    )()
+    event = FleetLedgerPersistedEvent(
+        game_id=628580,
+        perspective=1,
+        fleet_turn=111,
+        player_id=8,
+        materialization_version=FLEET_MATERIALIZATION_VERSION,
+    )
+    return scope, event
+
+
 @pytest.fixture
 def memory_backend():
     backend = MemoryAssetBackend(initial={})
@@ -310,89 +384,17 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
     monkeypatch,
 ):
     """Own-DAG elision: skip wipe and reschedule when scores waits on matching fleet."""
-    from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
-    from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
-    from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
-    from api.analytics.fleet.types import FleetAcquisitionLedger, FleetMaterializationProvenance
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
-    from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.compute.orchestrator import ComputeNodeRun
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
 
     inference_persistence = InferenceRowPersistenceService(memory_backend)
     scheduler = InferenceRowScheduler(worker_count=0)
-    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=112)
-    stream_token = scheduler.begin_scope(scope)
-    query_context = object()
-    scores_scope = ComputeScope(
-        analytic_id=SCORES_ANALYTIC_ID,
-        game_id=628580,
-        perspective=1,
-        turn=112,
-        player_id=8,
+    _scope, event = _bind_own_dag_fleet_persist(
+        scheduler,
+        scores_state="waiting_deps",
+        depends_on_fleet=True,
     )
-    fleet_scope = ComputeScope(
-        analytic_id="fleet",
-        game_id=628580,
-        perspective=1,
-        turn=111,
-        player_id=8,
-    )
-    persisted = PersistedFleetLedger(
-        ledger=FleetAcquisitionLedger(player_id=8),
-        provenance=FleetMaterializationProvenance(
-            turn_evidence_at_n=True,
-            prior_ledger_at_n_minus_1=True,
-        ),
-        materialization_version=FLEET_MATERIALIZATION_VERSION,
-    )
-    scheduler._stream_bindings[stream_token] = type(
-        "FakeBinding",
-        (),
-        {
-            "orchestrator": _fake_orchestrator_with_nodes(
-                {
-                    scores_scope: ComputeNodeRun(
-                        scope=scores_scope,
-                        dependency_scopes=(fleet_scope,),
-                        state="waiting_deps",
-                    ),
-                    fleet_scope: ComputeNodeRun(
-                        scope=fleet_scope,
-                        dependency_scopes=(),
-                        state="complete",
-                        result_wire={
-                            "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
-                        },
-                    ),
-                }
-            ),
-            "query_context": query_context,
-        },
-    )()
-
-    event = FleetLedgerPersistedEvent(
-        game_id=628580,
-        perspective=1,
-        fleet_turn=111,
-        player_id=8,
-        materialization_version=FLEET_MATERIALIZATION_VERSION,
-    )
-    wipe_calls = 0
-
-    def _count_wipe() -> None:
-        nonlocal wipe_calls
-        wipe_calls += 1
-
-    assert (
-        scheduler.should_reschedule_scores_row_after_fleet_persist(
-            scope,
-            event,
-            invalidate_row=_count_wipe,
-        )
-        is False
-    )
-    assert wipe_calls == 0
 
     rescheduled_players: list[int] = []
     monkeypatch.setattr(
@@ -401,9 +403,6 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
     )
 
     # Seed a durable scores row so on_fleet_ledger_persisted would wipe it if not elided.
-    from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.serialization.inference_row_persistence import PersistedInferenceRow
-
     inference_persistence.put_row(
         628580,
         1,
@@ -583,75 +582,62 @@ def test_fleet_ledger_persist_reschedules_for_external_persist_while_waiting_on_
     assert wipe_calls == 1
 
 
-def test_fleet_ledger_persist_reschedules_when_stream_fleet_version_differs(
-    memory_backend,
+@pytest.mark.parametrize(
+    ("scores_state", "depends_on_fleet", "expect_reschedule"),
+    (
+        ("waiting_deps", True, False),
+        ("ready", True, False),
+        ("running", True, False),
+        ("parked", True, False),
+        ("running", False, True),
+    ),
+)
+def test_fleet_ledger_persist_own_dag_elision(
+    scores_state,
+    depends_on_fleet,
+    expect_reschedule,
 ):
-    from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
-    from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
-    from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
-    from api.analytics.fleet.types import FleetAcquisitionLedger, FleetMaterializationProvenance
+    """Own-DAG elision skips wipe when non-terminal scores depend on this fleet persist.
+
+    Matching completed fleet@(N-1) must not cancel in-flight scores@N that already
+    depends on that fleet node. In-flight scores with no edge to this fleet persist
+    is still external and must wipe+reschedule.
+    """
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
-    from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.compute.orchestrator import ComputeNodeRun
 
     scheduler = InferenceRowScheduler(worker_count=0)
-    scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=112)
-    stream_token = scheduler.begin_scope(scope)
-    query_context = object()
-    scores_scope = ComputeScope(
-        analytic_id=SCORES_ANALYTIC_ID,
-        game_id=628580,
-        perspective=1,
-        turn=112,
-        player_id=8,
+    scope, event = _bind_own_dag_fleet_persist(
+        scheduler,
+        scores_state=scores_state,
+        depends_on_fleet=depends_on_fleet,
     )
-    fleet_scope = ComputeScope(
-        analytic_id="fleet",
-        game_id=628580,
-        perspective=1,
-        turn=111,
-        player_id=8,
-    )
-    stale_persisted = PersistedFleetLedger(
-        ledger=FleetAcquisitionLedger(player_id=8),
-        provenance=FleetMaterializationProvenance(
-            turn_evidence_at_n=True,
-            prior_ledger_at_n_minus_1=True,
-        ),
-        materialization_version=FLEET_MATERIALIZATION_VERSION - 1,
-    )
-    scheduler._stream_bindings[stream_token] = type(
-        "FakeBinding",
-        (),
-        {
-            "orchestrator": _fake_orchestrator_with_nodes(
-                {
-                    scores_scope: ComputeNodeRun(
-                        scope=scores_scope,
-                        dependency_scopes=(fleet_scope,),
-                        state="waiting_deps",
-                    ),
-                    fleet_scope: ComputeNodeRun(
-                        scope=fleet_scope,
-                        dependency_scopes=(),
-                        state="complete",
-                        result_wire={
-                            "persistedLedgerWire": persisted_fleet_ledger_to_json(stale_persisted),
-                        },
-                    ),
-                }
-            ),
-            "query_context": query_context,
-        },
-    )()
+    wipe_calls = 0
 
-    event = FleetLedgerPersistedEvent(
-        game_id=628580,
-        perspective=1,
-        fleet_turn=111,
-        player_id=8,
-        materialization_version=FLEET_MATERIALIZATION_VERSION,
+    def _count_wipe() -> None:
+        nonlocal wipe_calls
+        wipe_calls += 1
+
+    assert (
+        scheduler.should_reschedule_scores_row_after_fleet_persist(
+            scope,
+            event,
+            invalidate_row=_count_wipe,
+        )
+        is expect_reschedule
+    )
+    assert wipe_calls == (1 if expect_reschedule else 0)
+
+
+def test_fleet_ledger_persist_reschedules_when_stream_fleet_version_differs():
+    from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
+    from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+
+    scheduler = InferenceRowScheduler(worker_count=0)
+    scope, event = _bind_own_dag_fleet_persist(
+        scheduler,
+        scores_state="waiting_deps",
+        depends_on_fleet=True,
+        ledger_materialization_version=FLEET_MATERIALIZATION_VERSION - 1,
     )
     assert (
         scheduler.should_reschedule_scores_row_after_fleet_persist(
