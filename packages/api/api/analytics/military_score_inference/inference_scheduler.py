@@ -178,7 +178,7 @@ class InferenceRowScheduler(
         node, is treated as external and must wipe+reschedule.
         """
         scores_view = orchestrator.peek_scope_view(scores_scope)
-        if scores_view is None or scores_view.state in {"complete", "failed"}:
+        if scores_view is None or scores_view.is_terminal:
             return False
         if fleet_scope not in scores_view.dependency_scopes:
             return False
