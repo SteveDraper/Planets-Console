@@ -562,7 +562,6 @@ def test_combo_capacity_reserves_excess_in_not_max_of_peer_caps():
     )
     _, _, reserved_warship, reserved_freighter, reserved_ships = ship_transfer_combo_capacity(
         observation,
-        pairing,
         0,
         0,
         this_budget=this_budget,
@@ -585,7 +584,6 @@ def test_combo_capacity_raw_drop_does_not_reserve_when_excess_in_is_zero():
     )
     _, _, reserved_warship, reserved_freighter, reserved_ships = ship_transfer_combo_capacity(
         observation,
-        pairing,
         0,
         0,
         this_budget=this_budget,

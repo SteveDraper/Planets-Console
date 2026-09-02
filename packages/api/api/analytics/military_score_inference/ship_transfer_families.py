@@ -76,7 +76,6 @@ class ShipTransferCatalogFragment:
 
 def ship_transfer_combo_capacity(
     observation: InferenceObservation,
-    pairing: PublicScoreboardPairing,
     warship_decrease_capacity: int,
     freighter_decrease_capacity: int,
     *,
@@ -87,9 +86,9 @@ def ship_transfer_combo_capacity(
     Extra combo slots are prior-fleet departures when the class did not grow, so
     loss+replace (net 0) can still build. Incoming acquired counts are reserved
     out of the build bound so they are not explained as ship-build combos.
-    When ``this_budget.excess_in > 0``, reserved incoming is that budget
-    (alternative signatures, not the sum of peer ``transfer_count``s). Otherwise
-    reserved incoming is the sum of raw-drop acquired class deltas.
+    Reserved incoming is ``this_budget.excess_in`` (class-split when the
+    receiver residual pins warship or freighter; unknown class reserves the
+    total only). Pairing names counterparties; it does not size the reserve.
     """
     extra_warship = warship_decrease_capacity
     extra_freighter = freighter_decrease_capacity
@@ -100,7 +99,6 @@ def ship_transfer_combo_capacity(
     reserved_warship, reserved_freighter, reserved_ships = _reserved_incoming_acquired(
         public_scoreboard_row_from_observation(observation),
         this_budget,
-        pairing,
     )
     return extra_warship, extra_freighter, reserved_warship, reserved_freighter, reserved_ships
 
@@ -108,30 +106,20 @@ def ship_transfer_combo_capacity(
 def _reserved_incoming_acquired(
     this_row: PublicScoreboardRow,
     this_budget: TransferBudget,
-    pairing: PublicScoreboardPairing,
 ) -> tuple[int, int, int]:
     """Reserved (warships, freighters, ships) for acquired incoming.
 
-    Idle-dock / dock-cap ``excess_in`` is one arrival budget. Class columns
+    Idle-dock / dock-cap ``excess_in`` is the arrival budget. Class columns
     follow the receiver residual when unique; unknown class reserves the total
-    only. Raw-drop rows with no ``excess_in`` still sum complementary-drop
-    matches.
+    only.
     """
-    if this_budget.excess_in > 0:
-        ships = this_budget.excess_in
-        pinned = unique_incoming_class(this_row)
-        if pinned == "warship":
-            return ships, 0, ships
-        if pinned == "freighter":
-            return 0, ships, ships
-        return 0, 0, ships
-    reserved_warship = sum(
-        match.warship_delta for match in pairing.matches if match.family == "acquired"
-    )
-    reserved_freighter = sum(
-        match.freighter_delta for match in pairing.matches if match.family == "acquired"
-    )
-    return reserved_warship, reserved_freighter, reserved_warship + reserved_freighter
+    ships = this_budget.excess_in
+    pinned = unique_incoming_class(this_row)
+    if pinned == "warship":
+        return ships, 0, ships
+    if pinned == "freighter":
+        return 0, ships, ships
+    return 0, 0, ships
 
 
 def build_ship_transfer_catalog_fragment(
@@ -176,7 +164,6 @@ def build_ship_transfer_catalog_fragment(
     extra_warship, extra_freighter, reserved_warship, reserved_freighter, reserved_ships = (
         ship_transfer_combo_capacity(
             observation,
-            pairing,
             prior_warship_departure_cap,
             prior_freighter_departure_cap,
             this_budget=this_budget,
