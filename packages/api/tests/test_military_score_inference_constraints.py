@@ -76,6 +76,24 @@ def _build_warship_action(*, priority_point_delta: int = 0) -> CandidateAction:
     )
 
 
+def _acquired_class_actions() -> tuple[CandidateAction, CandidateAction]:
+    warship = CandidateAction(
+        id="acquired:warship:from:3",
+        label="Acquired warship from player 3",
+        score_delta_2x=40,
+        warship_delta=1,
+        upper_bound=1,
+    )
+    freighter = CandidateAction(
+        id="acquired:freighter:from:3",
+        label="Acquired freighter from player 3",
+        score_delta_2x=0,
+        freighter_delta=1,
+        upper_bound=1,
+    )
+    return warship, freighter
+
+
 def test_applied_equalities_default_omit_priority_point():
     observation = _observation(priority_point_delta=54)
     constraints = InferenceHardConstraints()
@@ -286,3 +304,67 @@ def test_single_direction_fighter_transfer_still_satisfies_observation():
             else "fighters_starbase_to_ship"
         )
         assert _action_count(solution, other_id) == 0
+
+
+def test_acquired_class_cap_none_is_unconstrained_zero_hard_disallows():
+    observation = _observation(military_delta_2x=40, warship_delta=1, freighter_delta=1)
+    warship, freighter = _acquired_class_actions()
+    blocked = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(warship, freighter),
+        acquired_warship_cap=1,
+        acquired_freighter_cap=0,
+        acquired_ship_cap=2,
+    )
+    open_classes = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(warship, freighter),
+        acquired_warship_cap=None,
+        acquired_freighter_cap=None,
+        acquired_ship_cap=2,
+    )
+    assert solve_inference_problem(blocked).status == STATUS_NO_EXACT_SOLUTION
+    result = solve_inference_problem(open_classes)
+    assert result.status == STATUS_EXACT
+    assert _action_count(result.solutions[0], warship.id) == 1
+    assert _action_count(result.solutions[0], freighter.id) == 1
+
+
+def test_acquired_all_caps_zero_forbids_acquired():
+    observation = _observation(military_delta_2x=40, warship_delta=1)
+    warship, _ = _acquired_class_actions()
+    problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(warship,),
+        acquired_warship_cap=0,
+        acquired_freighter_cap=0,
+        acquired_ship_cap=0,
+    )
+    assert solve_inference_problem(problem).status == STATUS_NO_EXACT_SOLUTION
+
+
+def test_acquired_cap_n_limits_acquired_count():
+    observation = _observation(military_delta_2x=80, warship_delta=2)
+    warship = CandidateAction(
+        id="acquired:warship:from:3",
+        label="Acquired warship from player 3",
+        score_delta_2x=40,
+        warship_delta=1,
+        upper_bound=2,
+    )
+    capped = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(warship,),
+        acquired_warship_cap=1,
+        acquired_ship_cap=2,
+    )
+    within_cap = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(warship,),
+        acquired_warship_cap=2,
+        acquired_ship_cap=2,
+    )
+    assert solve_inference_problem(capped).status == STATUS_NO_EXACT_SOLUTION
+    result = solve_inference_problem(within_cap)
+    assert result.status == STATUS_EXACT
+    assert _action_count(result.solutions[0], warship.id) == 2

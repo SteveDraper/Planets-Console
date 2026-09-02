@@ -60,8 +60,30 @@ def public_scoreboard_rows_from_scores(
 
 
 @dataclass(frozen=True)
+class IncomingAcquiredBudget:
+    """Build-reserve ints and CP-SAT acquired caps from pin + ``excess_in``.
+
+    Reserve ints subtract from the class build bound (``0`` = do not reserve
+    that class). Solver caps are optional: ``None`` = no CP-SAT cap, ``0`` =
+    hard disallow, ``N`` = cap at N.
+    """
+
+    reserved_warships: int
+    reserved_freighters: int
+    reserved_ships: int
+    acquired_warship_cap: int | None
+    acquired_freighter_cap: int | None
+    acquired_ship_cap: int | None
+
+
+@dataclass(frozen=True)
 class ShipTransferCatalogFragment:
-    """Transfer actions plus combo/departure caps from one pairing."""
+    """Transfer actions plus combo/departure caps from one pairing.
+
+    ``reserved_incoming_*`` subtract from class build bounds (``0`` = do not
+    reserve that class). ``acquired_*_cap`` are CP-SAT caps: ``None`` = no
+    constraint, ``0`` = hard disallow.
+    """
 
     actions: tuple[CandidateAction, ...]
     extra_warship_capacity: int
@@ -69,6 +91,9 @@ class ShipTransferCatalogFragment:
     reserved_incoming_warships: int
     reserved_incoming_freighters: int
     reserved_incoming_ships: int
+    acquired_warship_cap: int | None
+    acquired_freighter_cap: int | None
+    acquired_ship_cap: int | None
     prior_warship_departure_cap: int
     prior_freighter_departure_cap: int
     prior_departure_group_caps: dict[str, int]
@@ -96,30 +121,67 @@ def ship_transfer_combo_capacity(
         extra_warship = 0
     if observation.freighter_delta > 0:
         extra_freighter = 0
-    reserved_warship, reserved_freighter, reserved_ships = _reserved_incoming_acquired(
+    reserved = incoming_acquired_budget(
         public_scoreboard_row_from_observation(observation),
         this_budget,
     )
-    return extra_warship, extra_freighter, reserved_warship, reserved_freighter, reserved_ships
+    return (
+        extra_warship,
+        extra_freighter,
+        reserved.reserved_warships,
+        reserved.reserved_freighters,
+        reserved.reserved_ships,
+    )
 
 
-def _reserved_incoming_acquired(
+def incoming_acquired_budget(
     this_row: PublicScoreboardRow,
     this_budget: TransferBudget,
-) -> tuple[int, int, int]:
-    """Reserved (warships, freighters, ships) for acquired incoming.
+) -> IncomingAcquiredBudget:
+    """One pin + ``excess_in`` decision for build reserves and solver caps.
 
     Idle-dock / dock-cap ``excess_in`` is the arrival budget. Class columns
-    follow the receiver residual when unique; unknown class reserves the total
-    only.
+    follow the receiver residual when unique. Unknown class reserves neither
+    class column (ints stay 0) and leaves class solver caps unconstrained.
+    ``excess_in == 0`` forbids all acquired.
     """
     ships = this_budget.excess_in
+    if ships == 0:
+        return IncomingAcquiredBudget(
+            reserved_warships=0,
+            reserved_freighters=0,
+            reserved_ships=0,
+            acquired_warship_cap=0,
+            acquired_freighter_cap=0,
+            acquired_ship_cap=0,
+        )
     pinned = unique_incoming_class(this_row)
     if pinned == "warship":
-        return ships, 0, ships
+        return IncomingAcquiredBudget(
+            reserved_warships=ships,
+            reserved_freighters=0,
+            reserved_ships=ships,
+            acquired_warship_cap=ships,
+            acquired_freighter_cap=0,
+            acquired_ship_cap=ships,
+        )
     if pinned == "freighter":
-        return 0, ships, ships
-    return 0, 0, ships
+        return IncomingAcquiredBudget(
+            reserved_warships=0,
+            reserved_freighters=ships,
+            reserved_ships=ships,
+            acquired_warship_cap=0,
+            acquired_freighter_cap=ships,
+            acquired_ship_cap=ships,
+        )
+    return IncomingAcquiredBudget(
+        reserved_warships=0,
+        reserved_freighters=0,
+        reserved_ships=ships,
+        acquired_warship_cap=None,
+        acquired_freighter_cap=None,
+        acquired_ship_cap=ships,
+    )
 
 
 def build_ship_transfer_catalog_fragment(
@@ -161,21 +223,23 @@ def build_ship_transfer_catalog_fragment(
     prior_warship_departure_cap, prior_freighter_departure_cap = decrease_capacity_by_class(
         candidates
     )
-    extra_warship, extra_freighter, reserved_warship, reserved_freighter, reserved_ships = (
-        ship_transfer_combo_capacity(
-            observation,
-            prior_warship_departure_cap,
-            prior_freighter_departure_cap,
-            this_budget=this_budget,
-        )
+    extra_warship, extra_freighter, *_ = ship_transfer_combo_capacity(
+        observation,
+        prior_warship_departure_cap,
+        prior_freighter_departure_cap,
+        this_budget=this_budget,
     )
+    acquired = incoming_acquired_budget(this_row, this_budget)
     return ShipTransferCatalogFragment(
         actions=tuple(action for action in actions if action.upper_bound > 0),
         extra_warship_capacity=extra_warship,
         extra_freighter_capacity=extra_freighter,
-        reserved_incoming_warships=reserved_warship,
-        reserved_incoming_freighters=reserved_freighter,
-        reserved_incoming_ships=reserved_ships,
+        reserved_incoming_warships=acquired.reserved_warships,
+        reserved_incoming_freighters=acquired.reserved_freighters,
+        reserved_incoming_ships=acquired.reserved_ships,
+        acquired_warship_cap=acquired.acquired_warship_cap,
+        acquired_freighter_cap=acquired.acquired_freighter_cap,
+        acquired_ship_cap=acquired.acquired_ship_cap,
         prior_warship_departure_cap=prior_warship_departure_cap,
         prior_freighter_departure_cap=prior_freighter_departure_cap,
         prior_departure_group_caps=_prior_departure_group_caps(candidates),

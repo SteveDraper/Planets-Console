@@ -30,6 +30,7 @@ from api.analytics.military_score_inference.ship_transfer_families import (
     SHIP_LOSS_ACTION_PREFIX,
     TRADE_ACTION_PREFIX,
     build_ship_transfer_catalog_fragment,
+    incoming_acquired_budget,
     ship_transfer_combo_capacity,
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
@@ -507,6 +508,9 @@ def test_pp_gap_unknown_class_catalog_is_exclusive_not_two_reserved_columns(
     assert fragment.reserved_incoming_warships == 0
     assert fragment.reserved_incoming_freighters == 0
     assert fragment.reserved_incoming_ships == this_budget.excess_in
+    assert fragment.acquired_warship_cap is None
+    assert fragment.acquired_freighter_cap is None
+    assert fragment.acquired_ship_cap == this_budget.excess_in
 
 
 def test_pp_gap_unpinned_gift_catalog_keeps_two_warship_groups(
@@ -590,3 +594,37 @@ def test_combo_capacity_raw_drop_does_not_reserve_when_excess_in_is_zero():
     )
     assert sum(match.warship_delta for match in pairing.matches if match.family == "acquired") == 2
     assert (reserved_warship, reserved_freighter, reserved_ships) == (0, 0, 0)
+
+
+def test_incoming_acquired_budget_encoding_table():
+    cases = (
+        ("pinned_warship", 1, 0, 1, (1, 0, 1), (1, 0, 1)),
+        ("pinned_freighter", 0, 1, 1, (0, 1, 1), (0, 1, 1)),
+        ("unknown", 1, 1, 1, (0, 0, 1), (None, None, 1)),
+        ("excess_in_zero_unknown", 1, 1, 0, (0, 0, 0), (0, 0, 0)),
+        ("excess_in_zero_warship", 1, 0, 0, (0, 0, 0), (0, 0, 0)),
+    )
+    for name, warship_delta, freighter_delta, excess_in, reserved, caps in cases:
+        row = PublicScoreboardRow(
+            player_id=1,
+            warship_delta=warship_delta,
+            freighter_delta=freighter_delta,
+            military_delta_2x=40,
+        )
+        this_budget = TransferBudget(
+            implied_ships_built=None,
+            net=warship_delta + freighter_delta,
+            excess_in=excess_in,
+            excess_out=0,
+        )
+        decided = incoming_acquired_budget(row, this_budget)
+        assert (
+            decided.reserved_warships,
+            decided.reserved_freighters,
+            decided.reserved_ships,
+        ) == reserved, name
+        assert (
+            decided.acquired_warship_cap,
+            decided.acquired_freighter_cap,
+            decided.acquired_ship_cap,
+        ) == caps, name

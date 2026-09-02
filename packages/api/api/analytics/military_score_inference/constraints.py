@@ -381,7 +381,8 @@ def _add_acquired_incoming_caps(
     Several counterparties are alternative signatures for the same arrival.
     A solution pairs with one matching donor; it does not consume every
     ``excess_out`` peer. Unknown class is exclusive alternatives, not two
-    additive class columns.
+    additive class columns. ``None`` skips a cap; ``0`` hard-disallows that
+    bucket; ``N`` caps the acquired count at N.
     """
     _add_acquired_total_cap(model, problem, action_count_vars)
     _add_acquired_class_cap(
@@ -428,7 +429,7 @@ def _add_acquired_total_cap(
     action_count_vars: dict[str, cp_model.IntVar],
 ) -> None:
     cap = problem.acquired_ship_cap
-    if not cap:
+    if cap is None:
         return
     usage = _acquired_action_count_terms(problem, action_count_vars, warship=None)
     if usage:
@@ -443,7 +444,7 @@ def _add_acquired_class_cap(
     cap: int | None,
     warship: bool,
 ) -> None:
-    if not cap:
+    if cap is None:
         return
     usage = _acquired_action_count_terms(problem, action_count_vars, warship=warship)
     if usage:

@@ -178,7 +178,7 @@ class InferenceProblem:
     prior_warship_departure_cap: int = 0
     prior_freighter_departure_cap: int = 0
     prior_departure_group_caps: dict[str, int] = field(default_factory=dict)
-    acquired_warship_cap: int | None = None
+    acquired_warship_cap: int | None = None  # None = no cap; 0 = hard disallow
     acquired_freighter_cap: int | None = None
     acquired_ship_cap: int | None = None
     military_score_alpha: int = 0

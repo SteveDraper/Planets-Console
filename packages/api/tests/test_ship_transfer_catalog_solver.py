@@ -11,6 +11,10 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     ShipBuildCombo,
 )
+from api.analytics.military_score_inference.public_scoreboard_pairing import (
+    public_scoreboard_row_from_observation,
+    transfer_budget_for_row,
+)
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
@@ -315,8 +319,9 @@ def test_pp_gap_solver_privateer_pairs_one_donor_fed_or_birds(
             aggregate_actions=fragment.actions,
             ship_build_combos=(combo,),
             enforce_idle_dock_pp_equality=True,
-            acquired_warship_cap=fragment.reserved_incoming_warships,
-            acquired_ship_cap=fragment.reserved_incoming_ships,
+            acquired_warship_cap=fragment.acquired_warship_cap,
+            acquired_freighter_cap=fragment.acquired_freighter_cap,
+            acquired_ship_cap=fragment.acquired_ship_cap,
             max_solutions=5,
             time_limit_seconds=5.0,
         )
@@ -385,8 +390,9 @@ def test_pp_gap_solver_does_not_consume_every_excess_out_donor(
             observation=observation,
             aggregate_actions=fragment.actions,
             ship_build_combos=(wide_combo,),
-            acquired_warship_cap=fragment.reserved_incoming_warships,
-            acquired_ship_cap=fragment.reserved_incoming_ships,
+            acquired_warship_cap=fragment.acquired_warship_cap,
+            acquired_freighter_cap=fragment.acquired_freighter_cap,
+            acquired_ship_cap=fragment.acquired_ship_cap,
             max_solutions=5,
             time_limit_seconds=5.0,
         )
@@ -548,6 +554,52 @@ def test_pp_gap_unknown_class_cannot_take_two_acquired_ships(
         assert sum(action.count for action in acquired) <= 1
 
 
+def test_pp_gap_unknown_class_production_caps_are_none_and_solve_exact(
+    sample_turn, synthetic_catalog_context, synthetic_catalog_build_context
+):
+    """Unknown class must not copy reserved ints (0, 0, excess_in) onto solver caps."""
+    observation = mixed_residual_receiver_observation()
+    this_budget = transfer_budget_for_row(
+        public_scoreboard_row_from_observation(observation),
+        settings=sample_turn.settings,
+        is_after_ship_limit=False,
+    )
+    assert this_budget.excess_in == 1
+    catalog = build_action_catalog(observation, **synthetic_catalog_build_context)
+    assert (
+        catalog.acquired_warship_cap,
+        catalog.acquired_freighter_cap,
+        catalog.acquired_ship_cap,
+    ) == (None, None, this_budget.excess_in)
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=privateer_peer_rows(),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=fragment.actions,
+            ship_build_combos=_mixed_residual_build_combos(),
+            acquired_warship_cap=catalog.acquired_warship_cap,
+            acquired_freighter_cap=catalog.acquired_freighter_cap,
+            acquired_ship_cap=catalog.acquired_ship_cap,
+            max_solutions=20,
+            time_limit_seconds=5.0,
+        )
+    )
+    assert result.status == STATUS_EXACT
+    for solution in result.solutions:
+        acquired = [
+            action
+            for action in solution.actions
+            if action.action_id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+        ]
+        assert sum(action.count for action in acquired) <= 1
+
+
 def test_idle_dock_balanced_complementary_drop_solver_is_exact_build(
     sample_turn, synthetic_catalog_context
 ):
@@ -573,8 +625,9 @@ def test_idle_dock_balanced_complementary_drop_solver_is_exact_build(
             aggregate_actions=fragment.actions,
             ship_build_combos=combos,
             enforce_idle_dock_pp_equality=True,
-            acquired_warship_cap=fragment.reserved_incoming_warships,
-            acquired_ship_cap=fragment.reserved_incoming_ships,
+            acquired_warship_cap=fragment.acquired_warship_cap,
+            acquired_freighter_cap=fragment.acquired_freighter_cap,
+            acquired_ship_cap=fragment.acquired_ship_cap,
             max_solutions=5,
             time_limit_seconds=5.0,
         )
