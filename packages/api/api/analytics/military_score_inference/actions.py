@@ -97,7 +97,7 @@ class ActionCatalog:
     prior_warship_departure_cap: int = 0
     prior_freighter_departure_cap: int = 0
     prior_departure_group_caps: dict[str, int] = field(default_factory=dict)
-    acquired_warship_cap: int | None = None
+    acquired_warship_cap: int | None = None  # None = no cap; 0 = hard disallow
     acquired_freighter_cap: int | None = None
     acquired_ship_cap: int | None = None
 
@@ -401,9 +401,9 @@ def build_action_catalog(
         prior_warship_departure_cap=transfer_fragment.prior_warship_departure_cap,
         prior_freighter_departure_cap=transfer_fragment.prior_freighter_departure_cap,
         prior_departure_group_caps=transfer_fragment.prior_departure_group_caps,
-        acquired_warship_cap=transfer_fragment.reserved_incoming_warships,
-        acquired_freighter_cap=transfer_fragment.reserved_incoming_freighters,
-        acquired_ship_cap=transfer_fragment.reserved_incoming_ships,
+        acquired_warship_cap=transfer_fragment.acquired_warship_cap,
+        acquired_freighter_cap=transfer_fragment.acquired_freighter_cap,
+        acquired_ship_cap=transfer_fragment.acquired_ship_cap,
     )
 
 

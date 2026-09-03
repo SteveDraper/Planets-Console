@@ -6,7 +6,10 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog,
     build_inference_problem,
 )
-from api.analytics.military_score_inference.idle_dock_pp import idle_dock_implied_ships_built
+from api.analytics.military_score_inference.idle_dock_pp import (
+    idle_dock_implied_ships_built,
+    should_enforce_idle_dock_pp,
+)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     ProbabilityBucket,
@@ -27,6 +30,7 @@ from api.analytics.military_score_inference.ship_transfer_families import (
     SHIP_LOSS_ACTION_PREFIX,
     TRADE_ACTION_PREFIX,
     build_ship_transfer_catalog_fragment,
+    incoming_acquired_budget,
     ship_transfer_combo_capacity,
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
@@ -51,6 +55,7 @@ from tests.fixtures.ship_transfer_families import (
     _transfer_catalog_kwargs,
     _two_ship_class_flip_trade_fragment,
     _unpinned_pp_gap_two_ship_gift_fragment,
+    idle_dock_balanced_warship_build_observation,
 )
 
 
@@ -327,7 +332,9 @@ def test_transfer_catalog_fragment_carries_actions_and_capacity_fields(
     assert fragment.reserved_incoming_freighters == 0
 
 
-def test_transfer_catalog_fragment_reserves_acquired_incoming(synthetic_catalog_context):
+def test_transfer_catalog_fragment_does_not_reserve_raw_drop_when_excess_in_is_zero(
+    synthetic_catalog_context,
+):
     observation = replace(
         _observation(military_delta_2x=40, warship_delta=1),
         priority_point_delta=1,
@@ -343,17 +350,54 @@ def test_transfer_catalog_fragment_reserves_acquired_incoming(synthetic_catalog_
     )
     assert acquired.score_delta_2x_max == 40
     assert all(action.prior_group_key is None for action in fragment.actions)
-    assert fragment.reserved_incoming_warships == 1
-    assert fragment.reserved_incoming_freighters == 0
-    assert fragment.reserved_incoming_ships == 1
-    assert fragment.extra_warship_capacity == 0
-    assert fragment.prior_warship_departure_cap == 0
     this_budget = transfer_budget_for_row(
         public_scoreboard_row_from_observation(observation),
         settings=None,
         is_after_ship_limit=False,
     )
     assert this_budget.excess_in == 0
+    assert fragment.reserved_incoming_warships == this_budget.excess_in
+    assert fragment.reserved_incoming_freighters == 0
+    assert fragment.reserved_incoming_ships == this_budget.excess_in
+    assert fragment.extra_warship_capacity == 0
+    assert fragment.prior_warship_departure_cap == 0
+
+
+def test_idle_dock_balanced_complementary_drop_does_not_reserve_incoming(
+    sample_turn, synthetic_catalog_context
+):
+    observation = idle_dock_balanced_warship_build_observation(military_delta_2x=40)
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(_peer_row(3, warship=-1, military_2x=-40),),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    this_budget = transfer_budget_for_row(
+        public_scoreboard_row_from_observation(observation),
+        settings=sample_turn.settings,
+        is_after_ship_limit=False,
+    )
+    assert should_enforce_idle_dock_pp(
+        observation,
+        sample_turn.settings,
+        is_after_ship_limit=False,
+    )
+    assert idle_dock_implied_ships_built(observation) == 1
+    assert this_budget.excess_in == 0
+    assert fragment.reserved_incoming_warships == 0
+    assert fragment.reserved_incoming_freighters == 0
+    assert fragment.reserved_incoming_ships == 0
+    assert (
+        ship_build_upper_bound(
+            observation,
+            is_warship=True,
+            is_freighter=False,
+            reserved_incoming_warships=fragment.reserved_incoming_warships,
+        )
+        == 1
+    )
 
 
 def test_two_ship_class_flip_trade_requires_two_records_in_group(synthetic_catalog_context):
@@ -464,6 +508,9 @@ def test_pp_gap_unknown_class_catalog_is_exclusive_not_two_reserved_columns(
     assert fragment.reserved_incoming_warships == 0
     assert fragment.reserved_incoming_freighters == 0
     assert fragment.reserved_incoming_ships == this_budget.excess_in
+    assert fragment.acquired_warship_cap is None
+    assert fragment.acquired_freighter_cap is None
+    assert fragment.acquired_ship_cap == this_budget.excess_in
 
 
 def test_pp_gap_unpinned_gift_catalog_keeps_two_warship_groups(
@@ -519,7 +566,6 @@ def test_combo_capacity_reserves_excess_in_not_max_of_peer_caps():
     )
     _, _, reserved_warship, reserved_freighter, reserved_ships = ship_transfer_combo_capacity(
         observation,
-        pairing,
         0,
         0,
         this_budget=this_budget,
@@ -529,7 +575,7 @@ def test_combo_capacity_reserves_excess_in_not_max_of_peer_caps():
     assert (reserved_warship, reserved_freighter, reserved_ships) == (2, 0, 2)
 
 
-def test_combo_capacity_raw_drop_reserves_sum_when_excess_in_is_zero():
+def test_combo_capacity_raw_drop_does_not_reserve_when_excess_in_is_zero():
     observation = _observation(warship_delta=2, starbases_owned=3)
     this_budget = TransferBudget(implied_ships_built=None, net=2, excess_in=0, excess_out=0)
     pairing = PublicScoreboardPairing(
@@ -542,9 +588,43 @@ def test_combo_capacity_raw_drop_reserves_sum_when_excess_in_is_zero():
     )
     _, _, reserved_warship, reserved_freighter, reserved_ships = ship_transfer_combo_capacity(
         observation,
-        pairing,
         0,
         0,
         this_budget=this_budget,
     )
-    assert (reserved_warship, reserved_freighter, reserved_ships) == (2, 0, 2)
+    assert sum(match.warship_delta for match in pairing.matches if match.family == "acquired") == 2
+    assert (reserved_warship, reserved_freighter, reserved_ships) == (0, 0, 0)
+
+
+def test_incoming_acquired_budget_encoding_table():
+    cases = (
+        ("pinned_warship", 1, 0, 1, (1, 0, 1), (1, 0, 1)),
+        ("pinned_freighter", 0, 1, 1, (0, 1, 1), (0, 1, 1)),
+        ("unknown", 1, 1, 1, (0, 0, 1), (None, None, 1)),
+        ("excess_in_zero_unknown", 1, 1, 0, (0, 0, 0), (0, 0, 0)),
+        ("excess_in_zero_warship", 1, 0, 0, (0, 0, 0), (0, 0, 0)),
+    )
+    for name, warship_delta, freighter_delta, excess_in, reserved, caps in cases:
+        row = PublicScoreboardRow(
+            player_id=1,
+            warship_delta=warship_delta,
+            freighter_delta=freighter_delta,
+            military_delta_2x=40,
+        )
+        this_budget = TransferBudget(
+            implied_ships_built=None,
+            net=warship_delta + freighter_delta,
+            excess_in=excess_in,
+            excess_out=0,
+        )
+        decided = incoming_acquired_budget(row, this_budget)
+        assert (
+            decided.reserved_warships,
+            decided.reserved_freighters,
+            decided.reserved_ships,
+        ) == reserved, name
+        assert (
+            decided.acquired_warship_cap,
+            decided.acquired_freighter_cap,
+            decided.acquired_ship_cap,
+        ) == caps, name
