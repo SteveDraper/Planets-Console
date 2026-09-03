@@ -1,6 +1,9 @@
 # MCP config may contain a GitHub PAT — do not commit
 .cursor/mcp.json
 
+# Local Cursor agent definition (vault-backed; not shared with the repo)
+.cursor/agents/planets-nu-wiki.md
+
 # Editor workspace files (local multi-root layout)
 *.code-workspace
 
