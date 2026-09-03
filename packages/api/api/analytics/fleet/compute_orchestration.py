@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
@@ -25,6 +25,9 @@ from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 from api.serialization.turn import turn_info_to_json
+
+if TYPE_CHECKING:
+    from api.compute.orchestrator import ComputeOrchestrator
 
 FLEET_OBSERVATION_LEG = "observation_leg"
 FLEET_FINALIZATION_LEG = "finalization_leg"
@@ -444,3 +447,35 @@ class FleetPersistencePolicy:
 
 
 FLEET_PERSISTENCE_POLICY = FleetPersistencePolicy()
+
+
+def wake_fleet_scope(
+    scope: ComputeScope,
+    *,
+    priority_band: str = "background",
+    orchestrator: ComputeOrchestrator | None = None,
+) -> bool:
+    """force_fresh-submit a fleet scope after durable wipe when no table stream is open.
+
+    Uses the node's retained orchestration bundle so a hollow terminal (durable
+    ledger gone, DAG still ``complete``) can be replaced without a live stream.
+    In-flight nodes attach; ``force_fresh`` never supersedes ``running``. No-op
+    when the process orchestrator has no node for the scope, or the node has no
+    bundle.
+    """
+    from api.compute.orchestrator import ComputeRequest
+    from api.compute.runtime import get_compute_orchestrator
+
+    resolved_orchestrator = orchestrator or get_compute_orchestrator()
+    node = resolved_orchestrator.nodes.get(scope)
+    if node is None or node.bundle is None:
+        return False
+    resolved_orchestrator.submit(
+        ComputeRequest(
+            scope=scope,
+            force_fresh=True,
+            bundle=node.bundle,
+            priority_band=priority_band,
+        )
+    )
+    return True

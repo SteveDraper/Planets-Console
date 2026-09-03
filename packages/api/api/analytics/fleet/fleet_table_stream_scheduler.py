@@ -192,8 +192,9 @@ class FleetTableStreamScheduler:
             # listeners and may re-enter scores persist / fleet reschedule paths that need
             # this lock (ABBA with pool workers finishing ``tier_solve`` persist).
             # force_fresh: scores evidence invalidation reschedules while a prior fleet@N
-            # node may still be ``complete`` on this orchestrator. Without force_fresh,
-            # submit attaches to that terminal node and never rematerializes refined ledgers.
+            # node may still be ``complete`` on this orchestrator (hollow after ledger
+            # wipe). Closed-stream wakes use the same primitive via ``wake_fleet_scope``.
+            # Without force_fresh, submit attaches to that terminal and never rematerializes.
             submit_binding = binding
             submit_scope = root_scope
 
