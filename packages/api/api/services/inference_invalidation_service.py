@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from api.analytics.fleet.compute_orchestration import wake_fleet_scope
+from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_stream_registry import reschedule_fleet_table_player
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
@@ -15,6 +17,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reschedule_all_inference_rows,
     reschedule_inference_row,
 )
+from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
@@ -60,10 +63,11 @@ class InferenceInvalidationService:
     ) -> set[int]:
         """Drop fleet ledgers >= host_turn and wake same-turn fleet after scores evidence changes.
 
-        Always reschedules ``fleet@host_turn`` for this player, even when no ledger was
+        Always wakes ``fleet@host_turn`` for this player, even when no ledger was
         cleared. A prior fleet persist may have refused with open scores evidence (no
         ``put_ledger``); without this wake, scores re-close would never rematerialize
-        that failed/empty scope.
+        that failed/empty scope. Open fleet table streams reschedule in place;
+        otherwise ``force_fresh`` submit replaces a hollow terminal on the DAG.
         """
         if self._fleet_persistence is None:
             return set()
@@ -86,13 +90,24 @@ class InferenceInvalidationService:
         turns_to_reschedule = set(cleared_turns)
         turns_to_reschedule.add(host_turn)
         for fleet_turn in sorted(turns_to_reschedule):
-            reschedule_fleet_table_player(
+            stream_woke = reschedule_fleet_table_player(
                 FleetTableStreamScope(
                     game_id=game_id,
                     perspective=perspective,
                     turn_number=fleet_turn,
                 ),
                 player_id,
+            )
+            if stream_woke:
+                continue
+            wake_fleet_scope(
+                ComputeScope(
+                    analytic_id=FLEET_ANALYTIC_ID,
+                    game_id=game_id,
+                    perspective=perspective,
+                    turn=fleet_turn,
+                    player_id=player_id,
+                )
             )
         return turns_to_reschedule
 

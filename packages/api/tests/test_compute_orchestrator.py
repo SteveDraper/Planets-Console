@@ -1075,6 +1075,109 @@ def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, back
     assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
 
 
+def test_stale_epoch_during_persist_does_not_complete(sample_turn):
+    """Invalidation during persist-then-complete must not stamp a hollow terminal."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    persistence = _RecordingPersistencePolicy()
+
+    def persist_and_invalidate(ctx, scope, result_wire):
+        if not persistence.persist_calls:
+            persistence.invalidate(ctx, scope)
+        persistence.persist_calls.append((scope, result_wire))
+
+    persistence.persist = persist_and_invalidate  # type: ignore[method-assign]
+    pool_submissions: list[tuple[str, str]] = []
+
+    def pool_submitter(node, step, **_kwargs) -> None:
+        pool_submissions.append((node.scope.analytic_id, step.backend))
+
+    compute_registry = build_compute_registry(
+        (
+            _pool_compute_registration(
+                SHARED_ID,
+                backend="thread",
+                persistence_policy=persistence,
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    assert handle.state == "running"
+
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+
+    assert handle.state == "running"
+    assert orchestrator.metrics.epoch_discards == 1
+    assert len(persistence.persist_calls) == 1
+    assert len(pool_submissions) == 2
+
+    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+
+    assert handle.state == "complete"
+    assert orchestrator.metrics.epoch_discards == 1
+    assert len(persistence.persist_calls) == 2
+
+
+def test_wake_fleet_scope_replaces_complete_node(sample_turn):
+    """Closed-stream fleet wake must supersede a hollow complete node."""
+    from api.analytics.fleet.compute_orchestration import wake_fleet_scope
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    persistence = _RecordingPersistencePolicy()
+    compute_registry = build_compute_registry(
+        (
+            TurnAnalyticRegistration(
+                catalog_entry=_catalog_entry(SHARED_ID),
+                compute=lambda _ctx: {"analyticId": SHARED_ID},
+                export_catalog=empty_export_catalog_for(SHARED_ID),
+                scope_key_spec=_ROW_SCOPE_KEY,
+                compute_profile=AnalyticComputeProfile(
+                    steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
+                ),
+                persistence_policy=persistence,
+                build_step_job_wires=(
+                    ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+                ),
+                run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
+            ),
+        )
+    )
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+    assert handle.state == "complete"
+    assert len(persistence.persist_calls) == 1
+
+    assert wake_fleet_scope(shared_scope, orchestrator=orchestrator) is True
+    assert len(persistence.persist_calls) == 2
+    assert orchestrator.nodes[shared_scope].state == "complete"
+
+
+def test_wake_fleet_scope_noops_when_node_absent(sample_turn):
+    from api.analytics.fleet.compute_orchestration import wake_fleet_scope
+
+    export_scope = _export_scope(sample_turn)
+    orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+
+    assert wake_fleet_scope(shared_scope, orchestrator=orchestrator) is False
+    assert shared_scope not in orchestrator.nodes
+
+
 def test_stale_epoch_discards_result_and_requeues_inline(sample_turn):
     ctx = make_fixture_query_context(
         sample_turn,

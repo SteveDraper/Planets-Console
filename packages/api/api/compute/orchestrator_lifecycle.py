@@ -170,6 +170,18 @@ class OrchestratorLifecycleMixin:
 
         self._observers.schedule_post_lock(_force_fresh_dependency)
 
+    def _abandon_persist_if_not_running_or_stale(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+    ) -> bool:
+        """Return True when persist/complete must not proceed. Caller holds the lock."""
+        if node.state != "running":
+            return True
+        if self._is_epoch_stale(node):
+            self._retry_step_after_epoch_bump(node)
+            return True
+        return False
+
     def _after_step_success(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
@@ -181,7 +193,10 @@ class OrchestratorLifecycleMixin:
 
         step_result = coerce_step_result(result_wire)
         registration = self._compute_registry[node.scope.analytic_id]
-        node.generation_at_submit = None
+        # Persist runs after this lock is released. Keep generation_at_submit so
+        # persist-then-complete can still discard if invalidation lands in that window.
+        if step_result.outcome != "persist":
+            node.generation_at_submit = None
 
         if step_result.outcome == "continue":
             if step_result.payload is not None:
@@ -245,8 +260,10 @@ class OrchestratorLifecycleMixin:
             ) -> None:
                 # Cancel/preempt may have aborted this node after the step succeeded
                 # but before post-lock persist. Do not persist or complete in that case.
+                # Epoch can also advance in this window (durable wipe while persist
+                # is queued); do not stamp ``complete`` over a deleted ledger.
                 with self._condition:
-                    if completed_node.state != "running":
+                    if self._abandon_persist_if_not_running_or_stale(completed_node):
                         return
                 ctx = self._ctx_for_node(completed_node)
                 try:
@@ -273,7 +290,7 @@ class OrchestratorLifecycleMixin:
                             self._fail_node(completed_node, exc)
                     return
                 with self._condition:
-                    if completed_node.state != "running":
+                    if self._abandon_persist_if_not_running_or_stale(completed_node):
                         return
                     if should_continue:
                         self._continue_node_step(completed_node, completed_registration)

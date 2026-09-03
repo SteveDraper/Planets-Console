@@ -375,7 +375,7 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 |------------|--------|
 | **Submit** | Record `generation_at_submit` |
 | **Complete** | If `generation != generation_at_submit`, discard result and re-queue node |
-| **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist` |
+| **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist`. `generation_at_submit` is kept through persist-then-complete (post-lock). If the epoch advances before persist or before `_complete_node`, discard and re-queue -- do not stamp `complete` over a deleted ledger. |
 
 Same semantics as former gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233); coordinator deleted in [#204](https://github.com/SteveDraper/Planets-Console/issues/204)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` reads the **turn-scoped** fleet epoch for `fleet@(host_turn - 1)` so in-flight `tier_solve` work is discarded when that prior fleet changes -- not when same-player scores/fleet activity on unrelated turns advances the player-scoped counter used by fleet compute / gap-fill. Fleet final `on_ledger_persisted` may wipe/reschedule ambient scores; **own-DAG elision** (#204) skips wipe and reschedule when `scores@(fleet_turn+1)` is already a non-terminal dependent of that fleet scope on the same DAG.
 

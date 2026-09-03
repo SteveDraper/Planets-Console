@@ -878,6 +878,7 @@ def test_scores_evidence_update_wakes_fleet_even_without_ledger_to_clear(
 
     def spy_reschedule(scope, player_id):
         rescheduled.append((scope.turn_number, player_id))
+        return True
 
     monkeypatch.setattr(
         "api.services.inference_invalidation_service.reschedule_fleet_table_player",
@@ -898,6 +899,52 @@ def test_scores_evidence_update_wakes_fleet_even_without_ledger_to_clear(
     assert persistence.player_invalidation_generation(628580, 1, 8) == gen_before + 1
     assert persistence.turn_invalidation_generation(628580, 1, 8, 4) == turn_gen_before + 1
     assert persistence.turn_invalidation_generation(628580, 1, 8, 5) == 0
+
+
+def test_scores_evidence_update_force_freshes_fleet_when_stream_closed(
+    persistence,
+    monkeypatch,
+):
+    """Closed-stream scores wipe must force_fresh fleet, not only stream reschedule."""
+    from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+
+    stream_calls: list[tuple[int, int]] = []
+    woken: list[ComputeScope] = []
+
+    def spy_reschedule(scope, player_id):
+        stream_calls.append((scope.turn_number, player_id))
+        return False
+
+    def spy_wake(scope, **_kwargs):
+        woken.append(scope)
+        return True
+
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
+        spy_reschedule,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.wake_fleet_scope",
+        spy_wake,
+    )
+    inference_persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    invalidation = InferenceInvalidationService(
+        inference_persistence,
+        fleet_persistence=persistence,
+    )
+
+    woken_turns = invalidation.on_inference_evidence_updated(628580, 1, 4, 8)
+
+    assert woken_turns == {4}
+    assert stream_calls == [(4, 8)]
+    assert len(woken) == 1
+    assert woken[0] == ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=1,
+        turn=4,
+        player_id=8,
+    )
 
 
 def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(sample_turn):
