@@ -86,6 +86,7 @@ The modal always renders `detail.solutions` and `diagnostics.constraints` like a
 ## 6. Ranked solutions list
 
 - Show **all** held top-K solutions (up to K = 20) in descending **inference solution rank weight** order (`objectiveValue` on the wire).
+- **Ship-first near-solution** lists stay that one order (not family sections or tabs). When both **mine-overshoot** and **ammo-top-up** are present, a subtitle states the mix; omit the subtitle when the held list is one family.
 - Modal scrolls within `max-h` (~90vh); no collapse or pruning in #48.
 - **Follow-on:** relative probability pruning and tail collapse -- see issue #88.
 
@@ -98,6 +99,8 @@ Each solution is one block:
 ### 7.1 Header
 
 `Solution {n} · Plausibility {objectiveValue}`
+
+On **ship-first near-solution**s, insert the **ship-first family tag** chip after the solution number: `Solution {n} · Mine leftover · Plausibility {objectiveValue}` or `Ammo top-up`. Chip copy maps from wire `shipFirstFamily` (`mine_overshoot` / `ammo_top_up`). Do not re-derive the family in the SPA.
 
 **Plausibility** is the UI label for wire field `objectiveValue` (**inference solution rank weight** in the glossary). Higher integer means more plausible. Treat it as **plausibility on a pseudo log-likelihood scale**: prior bin and combo weights are derived from `SCALE * log(p)` at catalog build, then summed (with ranking heuristics) into one integer rank score -- monotonic with prior support, but **not** a percentage, calibrated probability, or exact joint log-likelihood. Optional tooltip: *Composite rank score from action priors and parsimony penalties -- not a percentage.*
 
@@ -180,6 +183,7 @@ Frontend tests (`InferenceDetailModal.test.tsx` and helpers):
 | Issue | Scope |
 |-------|-------|
 | **#48** | This modal UX (icon table, plausibility header, live updates, accelerated segment UI removal) |
+| **#400** | Ship-first family chips + mixed-list subtitle (same modal, weight order; Core `shipFirstFamily`) |
 | **#53** | Scores **diagnostics panel** combo/tier presentation (not modal) |
 | **#88** | Relative plausibility field + solution-list pruning |
 | **#89** | Planets.nu aggregate-action icons (replace Lucide fallbacks) |
