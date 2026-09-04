@@ -800,8 +800,12 @@ _Avoid_: stuffing incoming hulls into `shipBuilds`, **unknown military ship** fo
 Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status (`mine_score_residual`) when leftover is not 0 after **inference expensive-tier abort** for that regime (decrease-shaped remainder beyond the **inference moderate residual** floor, **mine-residual sticky prior**, or **large minefield observation**). May persist ranked **ship-first near-solution**s plus leftover; empty list is leftover + placeholders only. Inference does not split observed vs unobserved minefields and does not exact-model this channel.
 _Avoid_: mine noise, mine slack, observed-mine decay, intractable residual (that is `no_exact_solution`), treating a non-empty ship-first list as `exact`
 
+**Mine-contaminated regime**:
+Scoreboard-row condition where unmodeled mine decrease makes hard military equality the wrong objective: any owner field with `units > 0` in the **recent minefield observation** window, or **mine-residual sticky prior**. Leftover 0 is `exact`; leftover above 0 is **mine-score residual**. Distinct from **inference moderate residual** (1-11 with no mine signal).
+_Avoid_: mine slack, treating in-regime leftover-0 as still residual
+
 **Ship-first near-solution**:
-A user-facing ranked explanation on a **mine-score residual** row: same `solutions[]` wire as exact (rank weight, actions, ship-builds) plus leftover overshoot. Leftover 0 is `exact`, not this. Distinct from **inference near-solution seed**.
+A user-facing ranked explanation on a **mine-score residual** row: same `solutions[]` wire as exact (rank weight, actions, ship-builds) plus leftover overshoot, with overshoot capped by the **worthwhile remainder bound**. Leftover 0 is `exact`, not this. Distinct from **inference near-solution seed**.
 _Avoid_: near-solution seed, band-feasible (as user-facing), approximate solution, mine slack
 
 **Inference moderate residual**:
@@ -839,6 +843,18 @@ _Avoid_: estimated decay, using RST units as a residual term
 **Mine-stock prior**:
 Owner-perspective histograms of total mine units and field count, mined from finished games by the **inference prior miner** into sibling `mine_stock_{category}.yaml` files (not stuffed into **inference build prior asset** aggregate tables). Partitioned game category (file) x race x host turn. Raw integer keys including empty-stock `0:` on the totals; web vs normal splits are extra histograms on the same sample. Converted to leftover military points **at solve time**, not at mine time. Distinct from **recent minefield observation** (fogged viewpoint RST) and from **inference ship-limit band**.
 _Avoid_: mine slack, storing decay points in the asset, nebula-split stock, turn-banding at mine time
+
+**Worthwhile remainder bound**:
+Hard upper cap on leftover overshoot (`explained - observed`, solver 2x) admitted for a **ship-first near-solution**. At this category × race × host turn: p90 of positive-stock `totalUnits` and `fieldCount` independently, equal-split default decay convert, then **remainder-bound turn mixture**, then **observed-stock floor**. Not **inference score band** (under-explain, internal seeds).
+_Avoid_: mine slack, ranking-only leftover penalty, RST tightening (observations floor the cap, they do not min it), p90 of empty-stock `0:`
+
+**Remainder-bound turn mixture**:
+Same-race blend of that turn's empirical **worthwhile remainder bound** with an interpolant of leftover 2x vs host turn. Weight is `n_total / (n_total + 20)` (`n_total` includes empty-stock samples). Empirical leftover is 0 when the cell has no positive-stock samples. The interpolant is isotonic in T and holds the last knot past the corpus; a missing cell is 100% interpolant.
+_Avoid_: 10-turn lookup band, race-pooled interpolant, **inference ship-limit band**, refuse-a-bound on thin cells, mixing `n_positive` (that invents early leftover)
+
+**Observed-stock floor**:
+Lower bound on the **worthwhile remainder bound** from this scoreboard turn's viewpoint-RST owner fields with `units > 0`, converted with exact per-field default decay (`round(0.95x) - 1`, then `54L/100` 2x). Rows with no visible owner fields do not raise the floor.
+_Avoid_: tightening / min with visible units, equal-split of observed totals, N-turn window-max stock as the floor, using fogged absence to shrink the prior
 
 **Inference prior mine-stock sample**:
 One counted mine-stock snapshot: `(game_id, player_id, host_turn T)` on a single stored owning-player `TurnInfo`. Fields with `ownerid == player_id` and `units > 0`. Does not require turn `T+1`, does not skip **adjunct** units, and does not use **inference ship-limit band**. Skip Horwasp, players eliminated on or before `T`, and `settings.nominefields` games.
