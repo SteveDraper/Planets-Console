@@ -3,8 +3,8 @@
 Evaluated only after cheap exact tiers through ``full_components``. A hard-equality
 exact from those tiers wins: the classifier does not fire. On cheap-unsat, any one
 disjunct is sufficient for abort. Planet/SB count drops and a warship-count drop
-block the scoreboard mine-shaped path (disjunct 1) only. Sticky prior and large
-minefield observation still abort of either remainder sign.
+block the scoreboard mine-shaped path (disjunct 1) only. Sticky prior and recent
+owner-field observation still abort of either remainder sign.
 """
 
 from __future__ import annotations
@@ -51,7 +51,6 @@ class HopelessRowFacts:
     starbase_delta: int
     sticky_prior: bool
     max_owner_minefield_units: int
-    large_minefield_min_units: int
 
 
 @dataclass(frozen=True)
@@ -147,14 +146,20 @@ def classify_hopeless_abort(
     leftover_2x: int,
     warship_delta: int,
 ) -> HopelessAbortDecision:
-    """Return expensive-tier abort status for a cheap-unsat scoreboard row."""
+    """Return expensive-tier abort status for a cheap-unsat scoreboard row.
+
+    Mine-contaminated regime (``mine_score_residual``): sticky prior, any owner
+    field ``units > 0`` in the recent window, or decrease-shaped leftover beyond
+    the moderate floor with mine-plausible counts. Leftover 1-11 with no regime
+    signal still aborts as ``moderate_residual``.
+    """
     points = leftover_points(leftover_2x)
-    large_observation = facts.max_owner_minefield_units >= facts.large_minefield_min_units
+    recent_owner_field = facts.max_owner_minefield_units > 0
     decrease_beyond_moderate = leftover_2x < 0 and points > MODERATE_RESIDUAL_MAX_POINTS
     mine_shaped_decrease = decrease_beyond_moderate and not scoreboard_mine_shaped_path_blocked(
         facts, warship_delta
     )
-    if facts.sticky_prior or large_observation or mine_shaped_decrease:
+    if facts.sticky_prior or recent_owner_field or mine_shaped_decrease:
         return HopelessAbortDecision(abort=True, status=STATUS_MINE_SCORE_RESIDUAL)
     if 1 <= points <= MODERATE_RESIDUAL_MAX_POINTS:
         return HopelessAbortDecision(abort=True, status=STATUS_MODERATE_RESIDUAL)
@@ -169,7 +174,6 @@ def build_hopeless_row_facts(
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     exact_host_turns: frozenset[int] = frozenset(),
     recent_window_turns: int,
-    large_minefield_min_units: int,
 ) -> HopelessRowFacts:
     """Assemble row facts from the observation, RST window, and sticky prior."""
     host_turn = turn.settings.turn
@@ -191,7 +195,6 @@ def build_hopeless_row_facts(
             turns_by_number=turns_by_number,
             exact_host_turns=exact_host_turns,
         ),
-        large_minefield_min_units=large_minefield_min_units,
     )
 
 
@@ -276,7 +279,6 @@ def hopeless_context_for_row(
         load_scoreboard_turn=load_scoreboard_turn,
         exact_host_turns=exact_turns,
         recent_window_turns=thresholds.recent_minefield_observation_turns,
-        large_minefield_min_units=thresholds.large_minefield_observation_min_units,
     )
 
 

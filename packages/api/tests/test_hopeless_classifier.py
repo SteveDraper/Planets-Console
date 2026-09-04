@@ -41,7 +41,6 @@ def _facts(**overrides: object) -> HopelessRowFacts:
         "starbase_delta": 0,
         "sticky_prior": False,
         "max_owner_minefield_units": 0,
-        "large_minefield_min_units": _LARGE_FIELD_MIN_UNITS,
     }
     values.update(overrides)
     return HopelessRowFacts(**values)
@@ -66,14 +65,14 @@ def test_sticky_prior_aborts_either_remainder_sign() -> None:
     assert positive.status == STATUS_MINE_SCORE_RESIDUAL
 
 
-def test_large_minefield_observation_aborts_either_remainder_sign() -> None:
+def test_owner_field_in_window_aborts_either_remainder_sign() -> None:
     negative = classify_hopeless_abort(
-        _facts(max_owner_minefield_units=_LARGE_FIELD_MIN_UNITS),
+        _facts(max_owner_minefield_units=1),
         leftover_2x=-40,
         warship_delta=0,
     )
     positive = classify_hopeless_abort(
-        _facts(max_owner_minefield_units=_LARGE_FIELD_MIN_UNITS),
+        _facts(max_owner_minefield_units=1),
         leftover_2x=80,
         warship_delta=0,
     )
@@ -83,9 +82,27 @@ def test_large_minefield_observation_aborts_either_remainder_sign() -> None:
     assert positive.status == STATUS_MINE_SCORE_RESIDUAL
 
 
-def test_sub_threshold_minefield_probe_does_not_abort() -> None:
-    decision = classify_hopeless_abort(
+def test_sub_1000_unit_owner_field_in_window_is_mine_score_residual() -> None:
+    """Regime entry (i): any owner field units > 0, including below the old 1000 gate."""
+    negative = classify_hopeless_abort(
         _facts(max_owner_minefield_units=_LARGE_FIELD_MIN_UNITS - 1),
+        leftover_2x=-40,
+        warship_delta=0,
+    )
+    positive = classify_hopeless_abort(
+        _facts(max_owner_minefield_units=_LARGE_FIELD_MIN_UNITS - 1),
+        leftover_2x=80,
+        warship_delta=0,
+    )
+    assert negative.abort is True
+    assert negative.status == STATUS_MINE_SCORE_RESIDUAL
+    assert positive.abort is True
+    assert positive.status == STATUS_MINE_SCORE_RESIDUAL
+
+
+def test_empty_minefield_window_is_not_regime_entry() -> None:
+    decision = classify_hopeless_abort(
+        _facts(max_owner_minefield_units=0),
         leftover_2x=80,
         warship_delta=0,
     )
@@ -93,7 +110,7 @@ def test_sub_threshold_minefield_probe_does_not_abort() -> None:
     assert decision.status is None
 
 
-def test_leftover_one_to_eleven_is_moderate_residual_without_sticky_or_large_field() -> None:
+def test_leftover_one_to_eleven_is_moderate_residual_without_sticky_or_owner_field() -> None:
     low = classify_hopeless_abort(_facts(), leftover_2x=2, warship_delta=0)
     high = classify_hopeless_abort(
         _facts(), leftover_2x=-(MODERATE_RESIDUAL_MAX_POINTS * 2), warship_delta=0
@@ -102,6 +119,14 @@ def test_leftover_one_to_eleven_is_moderate_residual_without_sticky_or_large_fie
     assert low.status == STATUS_MODERATE_RESIDUAL
     assert high.abort is True
     assert high.status == STATUS_MODERATE_RESIDUAL
+
+
+def test_moderate_leftover_with_owner_field_is_mine_score_residual() -> None:
+    decision = classify_hopeless_abort(
+        _facts(max_owner_minefield_units=1), leftover_2x=2, warship_delta=0
+    )
+    assert decision.abort is True
+    assert decision.status == STATUS_MINE_SCORE_RESIDUAL
 
 
 def test_positive_leftover_beyond_moderate_climbs_expensive() -> None:
@@ -128,15 +153,15 @@ def test_starbase_count_drop_blocks_mine_shaped_path() -> None:
     assert decision.abort is False
 
 
-def test_count_drop_still_aborts_when_sticky_or_large_field() -> None:
+def test_count_drop_still_aborts_when_sticky_or_owner_field() -> None:
     sticky = classify_hopeless_abort(_facts(sticky_prior=True), leftover_2x=-40, warship_delta=-1)
-    large = classify_hopeless_abort(
-        _facts(planet_delta=-1, max_owner_minefield_units=_LARGE_FIELD_MIN_UNITS),
+    owner_field = classify_hopeless_abort(
+        _facts(planet_delta=-1, max_owner_minefield_units=1),
         leftover_2x=-40,
         warship_delta=0,
     )
     assert sticky.status == STATUS_MINE_SCORE_RESIDUAL
-    assert large.status == STATUS_MINE_SCORE_RESIDUAL
+    assert owner_field.status == STATUS_MINE_SCORE_RESIDUAL
 
 
 def test_leftover_after_envelope_is_military_minus_min_warship_fill() -> None:
@@ -597,31 +622,20 @@ def test_sample_turn_count_drops_block_auto_built_mine_shaped_abort(
     assert EXPENSIVE_TIER_STEP_IDS.issubset(attempted)
 
 
-def test_yaml_override_lowers_large_minefield_observation_gate(tmp_path, sample_turn) -> None:
+def test_recent_owner_field_in_rst_window_is_regime_entry_without_size_gate(
+    sample_turn,
+) -> None:
     from dataclasses import replace
 
     from api.analytics.military_score_inference.hopeless_classifier import (
         hopeless_context_for_row,
     )
 
-    policy_path = tmp_path / "tier_policy.yaml"
-    policy_path.write_text(
-        "\n".join(
-            [
-                "solverThresholds:",
-                "  shipOnlyExactEarlyStopMinPlausibility: -300",
-                "  noNewExactSignaturesEarlyStopMinPlausibility: -300",
-                "  recentMinefieldObservationTurns: 3",
-                "  largeMinefieldObservationMinUnits: 500",
-                "",
-            ]
-        )
-    )
     observation = _observation(military_delta_2x=80, warship_delta=0)
-    turn = replace(sample_turn, minefields=[_minefield(owner_id=8, units=500)])
-    context = hopeless_context_for_row(observation, turn, policy_path=policy_path)
-    assert context.large_minefield_min_units == 500
-    assert context.max_owner_minefield_units == 500
+    turn = replace(sample_turn, minefields=[_minefield(owner_id=8, units=1)])
+    context = hopeless_context_for_row(observation, turn)
+    assert not hasattr(context, "large_minefield_min_units")
+    assert context.max_owner_minefield_units == 1
     decision = classify_hopeless_abort(
         context,
         leftover_2x=observation.military_delta_2x,
@@ -725,14 +739,13 @@ def test_exact_persist_clears_n_window_in_hopeless_context(sample_turn) -> None:
         perspective=8,
     )
     assert context.max_owner_minefield_units == 200
-    assert (
-        classify_hopeless_abort(
-            context,
-            leftover_2x=observation.military_delta_2x,
-            warship_delta=observation.warship_delta,
-        ).abort
-        is False
+    decision = classify_hopeless_abort(
+        context,
+        leftover_2x=observation.military_delta_2x,
+        warship_delta=observation.warship_delta,
     )
+    assert decision.abort is True
+    assert decision.status == STATUS_MINE_SCORE_RESIDUAL
 
 
 def test_initialize_tier_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> None:
