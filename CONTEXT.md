@@ -797,16 +797,20 @@ Incoming **public scoreboard pairing** on this scoreboard row: a matched hull th
 _Avoid_: stuffing incoming hulls into `shipBuilds`, **unknown military ship** for a paired incoming count
 
 **Mine-score residual**:
-Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status (`mine_score_residual`) when leftover is not 0 after **inference expensive-tier abort** for that regime (decrease-shaped remainder beyond the **inference moderate residual** floor, **mine-residual sticky prior**, or **large minefield observation**). May persist ranked **ship-first near-solution**s plus leftover; empty list is leftover + placeholders only. Inference does not split observed vs unobserved minefields and does not exact-model this channel.
+Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status (`mine_score_residual`) when leftover is not within partition slack after **inference expensive-tier abort** for that regime (decrease-shaped remainder beyond the **inference moderate residual** floor, **mine-residual sticky prior**, or **large minefield observation**). May persist ranked **ship-first near-solution**s plus leftover; empty list is leftover + placeholders only. Inference does not split observed vs unobserved minefields and does not exact-model this channel.
 _Avoid_: mine noise, mine slack, observed-mine decay, intractable residual (that is `no_exact_solution`), treating a non-empty ship-first list as `exact`
 
 **Mine-contaminated regime**:
-Scoreboard-row condition where unmodeled mine decrease makes hard military equality the wrong objective: any owner field with `units > 0` in the **recent minefield observation** window, or **mine-residual sticky prior**. Leftover 0 is `exact`; leftover above 0 is **mine-score residual**. Distinct from **inference moderate residual** (1-11 with no mine signal).
-_Avoid_: mine slack, treating in-regime leftover-0 as still residual
+Scoreboard-row condition where unmodeled mine decrease makes hard military equality the wrong objective: any owner field with `units > 0` in the **recent minefield observation** window, or **mine-residual sticky prior**. Distinct from **inference moderate residual** (1-11 with no mine signal). Leftover within partition slack is `exact` only when this turn's viewpoint-RST has no owner field with `units > 0`; leftover above slack is **mine-score residual**. Current-turn owner fields skip leftover-0 and use the **ship-first overshoot constraint**.
+_Avoid_: mine slack, treating leftover-0 as exact while current-turn owner fields are visible, treating in-regime leftover-0 as still residual when those fields are absent
 
 **Ship-first near-solution**:
-A user-facing ranked explanation on a **mine-score residual** row: same `solutions[]` wire as exact (rank weight, actions, ship-builds) plus leftover overshoot, with overshoot capped by the **worthwhile remainder bound**. Leftover 0 is `exact`, not this. Distinct from **inference near-solution seed**.
-_Avoid_: near-solution seed, band-feasible (as user-facing), approximate solution, mine slack
+A user-facing ranked explanation on a **mine-score residual** row: same `solutions[]` wire as exact (rank weight, actions, ship-builds) plus leftover overshoot (`explained - observed`, solver 2x). Feasible under the **ship-first overshoot constraint**. Rank by **inference solution rank weight**; leftover is a post-collection tie-break, not the CP-SAT objective. Leftover within partition slack is `exact`, not this -- and is not attempted when current-turn owner fields have `units > 0`. Distinct from **inference near-solution seed**.
+_Avoid_: near-solution seed, band-feasible (as user-facing), approximate solution, mine slack, inference score band
+
+**Ship-first overshoot constraint**:
+Runtime military-score window on the in-regime prefix (steps through `admit_ship_torpedoes`): `observed + slack < explained <= observed + floor(worthwhile remainder bound)` in solver 2x. Warship and freighter stay equalities. Overlay per prefix step, replacing **inference score band** retry -- never YAML `alpha`, never widened partition slack. Current-turn owner fields with `units > 0`: skip the exact pass; leftover 0 is not a legal outcome. Without those fields: exact (`±slack`) first; overshoot only if unsat. Overshoot hits merge into the user-facing list (weight then leftover); they are not seeds.
+_Avoid_: inference score band, military partition slack as the cap, a new YAML step, putting leftover in the CP-SAT objective
 
 **Inference moderate residual**:
 Unexplained military leftover of 1-11 points after the ship/freighter construction envelope (two 5.5-point posts / rounding cluster). Cheap-unsat takes **inference expensive-tier abort** but does not start **mine-residual sticky prior**. User-facing outcome is wire status `moderate_residual`, residual size, and count-constrained placeholders -- not a band action list.
@@ -829,8 +833,8 @@ Stopping after cheap exact **inference search tiers** (through the last modest-c
 _Avoid_: cancel, admission skip, no_exact_solution
 
 **Mine-residual sticky prior**:
-Per-player carry that this scoreboard row is in the mine-contaminated regime, derived from the prior host-turn persisted row (`status === mine_score_residual`), including when that row holds **ship-first near-solution**s. Cleared when the persisted row is `exact` (leftover 0). While set, a later cheap-unsat of either sign is enough for **inference expensive-tier abort**. Distinct from **recent minefield observation**.
-_Avoid_: muddy flag, hopeless latch, no_exact_solution sticky, a parallel sticky boolean beside status, clearing sticky because `solutions[]` is non-empty
+Per-player carry that this scoreboard row is in the mine-contaminated regime, derived from the prior host-turn persisted row (`status === mine_score_residual`), including when that row holds **ship-first near-solution**s. Cleared when the persisted row is `exact` (leftover within partition slack). Cannot clear on a turn with current-turn owner fields (`units > 0`), because leftover-0 exact is not produced that turn. While set, a later cheap-unsat of either sign is enough for **inference expensive-tier abort**. Distinct from **recent minefield observation**.
+_Avoid_: muddy flag, hopeless latch, no_exact_solution sticky, a parallel sticky boolean beside status, clearing sticky because `solutions[]` is non-empty, leftover-0 exact while current-turn owner fields are visible
 
 **Recent minefield observation**:
 Viewpoint-RST evidence that this owner appeared in stored `minefields` inside a short host-turn window (default 3, overridable on the **inference tier policy asset**). Not "laid this turn" and not a decay estimate. A cheap exact drops carry-forward of that window; a later turn may open a new window from its own RST.
@@ -845,16 +849,16 @@ Owner-perspective histograms of total mine units and field count, mined from fin
 _Avoid_: mine slack, storing decay points in the asset, nebula-split stock, turn-banding at mine time
 
 **Worthwhile remainder bound**:
-Hard upper cap on leftover overshoot (`explained - observed`, solver 2x) admitted for a **ship-first near-solution**. At this category × race × host turn: p90 of positive-stock `totalUnits` and `fieldCount` independently, equal-split default decay convert, then **remainder-bound turn mixture**, then **observed-stock floor**. Not **inference score band** (under-explain, internal seeds).
-_Avoid_: mine slack, ranking-only leftover penalty, RST tightening (observations floor the cap, they do not min it), p90 of empty-stock `0:`
+Hard upper cap on leftover overshoot (`explained - observed`, solver 2x) admitted for a **ship-first near-solution**. At this category × race × host turn: p90 of positive-stock `totalUnits` and `fieldCount` independently, equal-split default decay convert, then **remainder-bound turn mixture**, then **observed-stock floor**. CP-SAT uses `floor` of that real bound in 2x; if `floor(bound) <=` partition slack, the overshoot window is empty. Not **inference score band** (under-explain, internal seeds).
+_Avoid_: mine slack, ranking-only leftover penalty, RST tightening (observations floor the cap, they do not min it), p90 of empty-stock `0:`, ceil/round of the bound as the cap, adding slack on top of the cap
 
 **Remainder-bound turn mixture**:
 Same-race blend of that turn's empirical **worthwhile remainder bound** with an interpolant of leftover 2x vs host turn. Weight is `n_total / (n_total + 20)` (`n_total` includes empty-stock samples). Empirical leftover is 0 when the cell has no positive-stock samples. The interpolant is isotonic in T and holds the last knot past the corpus; a missing cell is 100% interpolant.
 _Avoid_: 10-turn lookup band, race-pooled interpolant, **inference ship-limit band**, refuse-a-bound on thin cells, mixing `n_positive` (that invents early leftover)
 
 **Observed-stock floor**:
-Lower bound on the **worthwhile remainder bound** from this scoreboard turn's viewpoint-RST owner fields with `units > 0`, converted with exact per-field default decay (`round(0.95x) - 1`, then `54L/100` 2x). Rows with no visible owner fields do not raise the floor.
-_Avoid_: tightening / min with visible units, equal-split of observed totals, N-turn window-max stock as the floor, using fogged absence to shrink the prior
+Lower bound on the **worthwhile remainder bound** from this scoreboard turn's viewpoint-RST owner fields with `units > 0`, converted with exact per-field default decay (`round(0.95x) - 1`, then `54L/100` 2x). Rows with no visible owner fields do not raise the floor. The same current-turn fields skip leftover-0 exact (see **ship-first overshoot constraint**).
+_Avoid_: tightening / min with visible units, equal-split of observed totals, N-turn window-max stock as the floor, using fogged absence to shrink the prior, N-turn window as the leftover-0 cut
 
 **Inference prior mine-stock sample**:
 One counted mine-stock snapshot: `(game_id, player_id, host_turn T)` on a single stored owning-player `TurnInfo`. Fields with `ownerid == player_id` and `units > 0`. Does not require turn `T+1`, does not skip **adjunct** units, and does not use **inference ship-limit band**. Skip Horwasp, players eliminated on or before `T`, and `settings.nominefields` games.
@@ -893,12 +897,12 @@ A filter applied at an **inference search tier** to shrink the full turn catalog
 _Avoid_: component eligibility (implementation name), preset, torp id list
 
 **Inference near-solution seed**:
-A band-feasible action multiset from tier *n* (exact pass at that tier was infeasible) carried into tier *n+1* to narrow search: fix ship-build counts from the seed, admit newly unlocked aggregate actions to close residual, then widen to a neighborhood if still infeasible before free search. Multiple seeds may be carried forward (capped per tier). An exact-feasible tier *n* result is emitted immediately; it is not a seed because there is no military-score remainder to refine. Never user-facing; not a **ship-first near-solution**.
-_Avoid_: warm start, hint, showing seeds as `solutions[]`
+A band-feasible action multiset from tier *n* (exact pass at that tier was infeasible) carried into tier *n+1* to narrow search: fix ship-build counts from the seed, admit newly unlocked aggregate actions to close residual, then widen to a neighborhood if still infeasible before free search. Multiple seeds may be carried forward (capped per tier). An exact-feasible tier *n* result is emitted immediately; it is not a seed because there is no military-score remainder to refine. Never user-facing; not a **ship-first near-solution**. Overshooting ship-first lists are not seeds.
+_Avoid_: warm start, hint, showing seeds as `solutions[]`, seeding from overshoot leftovers
 
 **Inference score band**:
-Relaxed military-score constraint `explained_2x >= observed_2x - alpha` with `alpha` from the tier policy. Warship and freighter equalities stay exact. The final **inference search tier** always uses `alpha = 0`. Each tier tries exact constraints first; **inference score band** applies only on retry after an infeasible exact pass at that tier. Band-feasible results seed the next tier only; they are never user-facing explanations. **Exact** solutions from any tier merge into **inference merged top-K**. If the full ladder yields zero exact solutions, status is `no_exact_solution` with band residual in diagnostics -- distinct from abort-before-expensive `moderate_residual` / `mine_score_residual`.
-_Avoid_: slack constraint, approximate solve
+Relaxed military-score constraint `explained_2x >= observed_2x - alpha` with `alpha` from the tier policy. Warship and freighter equalities stay exact. The final **inference search tier** always uses `alpha = 0`. Each tier tries exact constraints first; **inference score band** applies only on retry after an infeasible exact pass at that tier. Band-feasible results seed the next tier only; they are never user-facing explanations. **Exact** solutions from any tier merge into **inference merged top-K**. If the full ladder yields zero exact solutions, status is `no_exact_solution` with band residual in diagnostics -- distinct from abort-before-expensive `moderate_residual` / `mine_score_residual`. In-regime ship-first prefix does not run this retry (see **ship-first overshoot constraint**). Production `military_partition_slack_2x` shadows `alpha` in the CP-SAT adder; do not treat that shadow as this band.
+_Avoid_: slack constraint, approximate solve, using alpha or two-sided slack as the overshoot cap
 
 **Inference explanation signature**:
 Identity of one feasible explanation as the sorted multiset of aggregate action ids with counts plus ship-build combo ids with counts. Two ranked rows with the same signature are the same explanation for merge dedup and **inference solution streaming** -- regardless of display labels or which **inference search tier** found them. Re-discovery at a later tier is suppressed; first discovery wins.
