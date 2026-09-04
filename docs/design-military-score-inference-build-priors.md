@@ -388,6 +388,18 @@ No log conversion in miner (loader owns Laplace conversion).
 - [ ] Adjunct player-host-turns excluded; unconditional marginals on retained units
 - [ ] Unit tests on extraction (fixtures); `make lint` and relevant tests pass
 
+### 10.9 Mine-stock observation family (#398)
+
+Research spec: [docs/research/mine-stock-prior-mining-surface.md](research/mine-stock-prior-mining-surface.md) ([#396](https://github.com/SteveDraper/Planets-Console/issues/396)). Collection ticket: [#398](https://github.com/SteveDraper/Planets-Console/issues/398).
+
+Mine-stock is a **single-turn owner-perspective snapshot**, not a T/T+1 inventory delta. Same miner process (patterns, `loadall`, owning-player RST). Sibling asset `mine_stock_{category}.yaml` with its own `contributingGameIds`.
+
+**Sampling unit:** `(game_id, player_id, host_turn T)` on one stored owner-perspective `TurnInfo`. `owned = [f in minefields if f.ownerid == player_id and f.units > 0]`. Increment raw integer histograms of `totalUnits` (sum, including `0:`), `fieldCount` (len, including `0:`), `perFieldUnits` (each field; no empty-stock `0:`), plus web/normal splits from `Minefield.isweb`. Partition **race x host turn**. Do not convert to decay military points; do not join nebulas; do not pre-band turns; do not skip adjunct; do not partition on ship-limit band. Skip Horwasp, players eliminated on or before `T`, and games with `settings.nominefields`.
+
+**Replay:** `prior_weights_{category}.yaml` `contributingGameIds` is a skip-set for build-prior discovery. First mine-stock collection uses `--replay-mine-stock` to extract from those ids without merging hull/aggregate tables. Subsequent discovery runs also extract mine-stock for newly mined games.
+
+**CLI:** `scripts/run_inference_prior_miner.py --patterns ... --replay-mine-stock` (`--dry-run` reports without writing YAML).
+
 ---
 
 ## 11. #86 acceptance criteria

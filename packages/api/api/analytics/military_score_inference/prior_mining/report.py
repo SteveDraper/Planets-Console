@@ -9,6 +9,7 @@ from typing import Any
 from .accumulation import AggregateActionTally, PriorMiningAccumulation
 from .discovery import PatternDiscoveryResult
 from .merge import accumulation_mining_report_sections
+from .mine_stock import MineStockAccumulation, accumulation_mine_stock_report_section
 
 
 @dataclass
@@ -63,6 +64,16 @@ class PriorMiningReport:
     aggregate_action_tallies: dict[str, AggregateActionTally] = field(default_factory=dict)
     merged_categories: list[str] = field(default_factory=list)
     written_assets: list[str] = field(default_factory=list)
+    replay_mine_stock: bool = False
+    mine_stock_nominefields_skips: int = 0
+    mine_stock_horwasp_skips: int = 0
+    mine_stock_samples: int = 0
+    mine_stock_zero_stock: int = 0
+    mine_stock_infoturn_mismatches: int = 0
+    mine_stock_games_attempted: list[int] = field(default_factory=list)
+    mine_stock_games_added: list[int] = field(default_factory=list)
+    mine_stock_games_rejected: list[int] = field(default_factory=list)
+    mine_stock: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, sort_keys=True)
@@ -102,6 +113,19 @@ class PriorMiningReport:
             },
             "merged_categories": list(self.merged_categories),
             "written_assets": list(self.written_assets),
+            "replay_mine_stock": self.replay_mine_stock,
+            "mine_stock_nominefields_skips": self.mine_stock_nominefields_skips,
+            "mine_stock_horwasp_skips": self.mine_stock_horwasp_skips,
+            "mine_stock_samples": self.mine_stock_samples,
+            "mine_stock_zero_stock": self.mine_stock_zero_stock,
+            "mine_stock_infoturn_mismatches": self.mine_stock_infoturn_mismatches,
+            "mine_stock_games_attempted": list(self.mine_stock_games_attempted),
+            "mine_stock_games_added": list(self.mine_stock_games_added),
+            "mine_stock_games_rejected": list(self.mine_stock_games_rejected),
+            "mine_stock": {
+                category: _summarize_mine_stock_category(section)
+                for category, section in self.mine_stock.items()
+            },
         }
 
     def to_summary_json(self) -> str:
@@ -123,6 +147,24 @@ def merge_accumulation_into_report(
         target = report.aggregate_action_tallies.setdefault(action_id, AggregateActionTally())
         target.zero += tally.zero
         target.positive += tally.positive
+
+
+def merge_mine_stock_accumulation_into_report(
+    report: PriorMiningReport,
+    accumulation: MineStockAccumulation,
+    *,
+    category: str,
+) -> None:
+    """Add mine-stock sample counts and per-(race, turn) row counts to the report."""
+    section = accumulation_mine_stock_report_section(accumulation)
+    report.mine_stock_samples += accumulation.sample_count
+    report.mine_stock_zero_stock += accumulation.zero_stock_count
+    report.mine_stock_infoturn_mismatches += accumulation.infoturn_mismatches
+    existing = report.mine_stock.get(category)
+    if existing is None:
+        report.mine_stock[category] = section
+        return
+    report.mine_stock[category] = _merge_mine_stock_sections(existing, section)
 
 
 def _merge_ship_build_sections(
@@ -286,3 +328,55 @@ def _leaf_stats_from_count_tree(node: object, *, path_prefix: str = "") -> tuple
         unique_keys |= child_keys
         sample_count += child_count
     return unique_keys, sample_count
+
+
+def _merge_mine_stock_sections(
+    existing: dict[str, Any], incoming: dict[str, Any]
+) -> dict[str, Any]:
+    merged = dict(existing)
+    merged["sample_count"] = existing.get("sample_count", 0) + incoming.get("sample_count", 0)
+    merged["zero_stock_count"] = existing.get("zero_stock_count", 0) + incoming.get(
+        "zero_stock_count", 0
+    )
+    merged["infoturn_mismatches"] = existing.get("infoturn_mismatches", 0) + incoming.get(
+        "infoturn_mismatches", 0
+    )
+    merged["row_counts"] = _merge_row_counts(
+        existing.get("row_counts", {}),
+        incoming.get("row_counts", {}),
+    )
+    return merged
+
+
+def _merge_row_counts(existing: object, incoming: object) -> dict[str, dict[str, int]]:
+    merged: dict[str, dict[str, int]] = {}
+    existing_map = existing if isinstance(existing, dict) else {}
+    incoming_map = incoming if isinstance(incoming, dict) else {}
+    for race_key in set(existing_map) | set(incoming_map):
+        existing_turns = existing_map.get(race_key, {})
+        incoming_turns = incoming_map.get(race_key, {})
+        if not isinstance(existing_turns, dict):
+            existing_turns = {}
+        if not isinstance(incoming_turns, dict):
+            incoming_turns = {}
+        turns: dict[str, int] = {}
+        for turn_key in set(existing_turns) | set(incoming_turns):
+            turns[str(turn_key)] = int(existing_turns.get(turn_key, 0)) + int(
+                incoming_turns.get(turn_key, 0)
+            )
+        merged[str(race_key)] = turns
+    return merged
+
+
+def _summarize_mine_stock_category(section: dict[str, Any]) -> dict[str, Any]:
+    row_counts = section.get("row_counts", {})
+    cell_count = 0
+    if isinstance(row_counts, dict):
+        cell_count = sum(len(turns) for turns in row_counts.values() if isinstance(turns, dict))
+    return {
+        "sample_count": section.get("sample_count", 0),
+        "zero_stock_count": section.get("zero_stock_count", 0),
+        "infoturn_mismatches": section.get("infoturn_mismatches", 0),
+        "race_turn_cells": cell_count,
+        "row_counts": row_counts,
+    }

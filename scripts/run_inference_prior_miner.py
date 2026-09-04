@@ -28,7 +28,7 @@ from tests.inference_corpus.storage_loader import (  # noqa: E402
 
 app = typer.Typer(
     add_completion=False,
-    help="Discover finished games and mine inference build priors (#92).",
+    help="Discover finished games and mine inference build priors and mine-stock (#92, #398).",
 )
 
 
@@ -57,7 +57,7 @@ def run_command(
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="Discover and report tallies without writing prior weight assets.",
+        help="Discover and report tallies without writing prior-weight or mine-stock assets.",
     ),
     debug: bool = typer.Option(
         False,
@@ -72,6 +72,15 @@ def run_command(
         "--workers",
         min=1,
         help="Parallel extraction worker processes (default: 1).",
+    ),
+    replay_mine_stock: bool = typer.Option(
+        False,
+        "--replay-mine-stock",
+        help=(
+            "Extract mine-stock histograms from games already listed in "
+            "prior_weights_{category}.yaml contributingGameIds. Does not mine "
+            "new build-prior games."
+        ),
     ),
     username: str = typer.Option(
         "",
@@ -125,6 +134,7 @@ def run_command(
         debug=debug,
         workers=workers,
         loadall_params=loadall_params,
+        replay_mine_stock=replay_mine_stock,
     )
 
     report_json = mining_report.to_json()

@@ -6,10 +6,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from api.analytics.military_score_inference.prior_mining.report import (
-    PriorMiningReport,
-    pattern_report_from_discovery,
-)
 from api.analytics.military_score_inference.prior_weights_asset import (
     PriorWeightsAsset,
     default_prior_weights_dir,
@@ -28,7 +24,10 @@ from .discovery import (
     PatternDiscoveryResult,
     iter_accepted_games_for_pattern,
 )
-from .extraction_pool import ExtractionProcessPool, run_extractions_for_game
+from .extraction_pool import (
+    ExtractionProcessPool,
+    run_extractions_for_game,
+)
 from .log import LOGGER
 from .merge import (
     is_prior_weights_asset_present,
@@ -37,19 +36,28 @@ from .merge import (
     prior_weights_path_for_category,
     write_prior_weights_asset,
 )
+from .mine_stock_pipeline import (
+    MineStockCategoryState,
+    flush_mine_stock_for_category,
+    load_mine_stock_category_state,
+    process_prepared_mine_stock_game,
+    replay_mine_stock_for_category,
+)
 from .patterns import PriorMiningPattern, PriorMiningPatternConfig, load_prior_mining_patterns
+from .prefetch import prefetch_and_process_games
 from .prepare_game import PrepareGameResult
-from .prepare_pool import GamePreparePrefetcher
 from .report import (
     GameMiningErrorDetail,
-    IncompleteLoadAllDetail,
+    PriorMiningReport,
     merge_accumulation_into_report,
+    pattern_report_from_discovery,
 )
 
 
 @dataclass
 class CategoryMiningState:
     asset: PriorWeightsAsset
+    mine_stock: MineStockCategoryState
     initial_contributing_game_ids: frozenset[int] = frozenset()
     contributing_game_ids: set[int] = field(default_factory=set)
     pattern_contributed_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
@@ -72,46 +80,65 @@ def run_prior_miner(
     debug: bool = False,
     workers: int = 1,
     loadall_params: RefreshGameInfoParams | None = None,
+    replay_mine_stock: bool = False,
 ) -> PriorMiningReport:
     if workers < 1:
         raise ValueError("workers must be at least 1")
 
     pattern_config = load_prior_mining_patterns(patterns_path)
-    report = PriorMiningReport(dry_run=dry_run, debug=debug)
+    report = PriorMiningReport(dry_run=dry_run, debug=debug, replay_mine_stock=replay_mine_stock)
     LOGGER.info(
-        "starting prior miner (dry_run=%s, debug=%s, workers=%s, patterns=%s, storage_root=%s)",
+        "starting prior miner (dry_run=%s, debug=%s, workers=%s, replay_mine_stock=%s, "
+        "patterns=%s, storage_root=%s)",
         dry_run,
         debug,
         workers,
+        replay_mine_stock,
         patterns_path,
         storage_root,
     )
     category_states = _initialize_category_states(pattern_config, assets_dir=assets_dir)
     for category, state in category_states.items():
         LOGGER.info(
-            "category %s: %s prior contributing game(s)",
+            "category %s: %s prior contributing game(s), %s mine-stock contributing game(s)",
             category.value,
             len(state.contributing_game_ids),
+            len(state.mine_stock.game_ids),
         )
 
     try:
-        for pattern in pattern_config.patterns:
-            category = pattern.game_category
-            state = category_states[category]
-            LOGGER.info("running pattern %s for category %s", pattern.id, category.value)
-            pattern_result = _mine_pattern(
-                pattern=pattern,
-                state=state,
-                planets=planets,
-                turn_load=turn_load,
-                game_service=game_service,
-                storage_root=storage_root,
-                report=report,
-                debug=debug,
-                workers=workers,
-                loadall_params=loadall_params,
-            )
-            report.patterns.append(pattern_report_from_discovery(pattern_result))
+        if replay_mine_stock:
+            for category, state in category_states.items():
+                LOGGER.info("replaying mine-stock for category %s", category.value)
+                replay_mine_stock_for_category(
+                    category=category,
+                    prior_contributing_game_ids=state.asset.contributing_game_ids,
+                    mine_stock=state.mine_stock,
+                    turn_load=turn_load,
+                    game_service=game_service,
+                    storage_root=storage_root,
+                    report=report,
+                    workers=workers,
+                    loadall_params=loadall_params,
+                )
+        else:
+            for pattern in pattern_config.patterns:
+                category = pattern.game_category
+                state = category_states[category]
+                LOGGER.info("running pattern %s for category %s", pattern.id, category.value)
+                pattern_result = _mine_pattern(
+                    pattern=pattern,
+                    state=state,
+                    planets=planets,
+                    turn_load=turn_load,
+                    game_service=game_service,
+                    storage_root=storage_root,
+                    report=report,
+                    debug=debug,
+                    workers=workers,
+                    loadall_params=loadall_params,
+                )
+                report.patterns.append(pattern_report_from_discovery(pattern_result))
     except Exception as exc:
         report.aborted = True
         report.abort_message = str(exc)
@@ -134,50 +161,73 @@ def _flush_mined_category_results(
     report: PriorMiningReport,
     dry_run: bool,
 ) -> None:
-    """Merge accumulated counts into prior weight assets and record written paths."""
+    """Merge accumulated counts into prior-weight and mine-stock assets."""
     for category, state in category_states.items():
-        provenance_updates = _provenance_updates_for_state(state)
-        if not provenance_updates and not state.new_game_ids:
-            continue
-        output_path = prior_weights_path_for_category(category, base_dir=assets_dir)
-        if state.new_game_ids:
-            report.merged_categories.append(category.value)
-            merge_accumulation_into_report(report, state.accumulation)
-        if dry_run:
-            LOGGER.info(
-                "category %s: dry run -- would merge %s new game(s), "
-                "%s provenance id(s) (%s rejected)",
-                category.value,
-                len(state.new_game_ids),
-                len(provenance_updates),
-                len(state.rejected_game_ids),
-            )
-            continue
+        _flush_prior_weights_for_category(
+            category=category,
+            state=state,
+            assets_dir=assets_dir,
+            report=report,
+            dry_run=dry_run,
+        )
+        flush_mine_stock_for_category(
+            category=category,
+            mine_stock=state.mine_stock,
+            assets_dir=assets_dir,
+            report=report,
+            dry_run=dry_run,
+        )
+
+
+def _flush_prior_weights_for_category(
+    *,
+    category: GameCategory,
+    state: CategoryMiningState,
+    assets_dir: Path,
+    report: PriorMiningReport,
+    dry_run: bool,
+) -> None:
+    provenance_updates = _provenance_updates_for_state(state)
+    if not provenance_updates and not state.new_game_ids:
+        return
+    output_path = prior_weights_path_for_category(category, base_dir=assets_dir)
+    if state.new_game_ids:
+        report.merged_categories.append(category.value)
+        merge_accumulation_into_report(report, state.accumulation)
+    if dry_run:
         LOGGER.info(
-            "category %s: merging %s new game(s), %s provenance id(s) into %s",
+            "category %s: dry run -- would merge %s new game(s), %s provenance id(s) (%s rejected)",
             category.value,
             len(state.new_game_ids),
             len(provenance_updates),
+            len(state.rejected_game_ids),
+        )
+        return
+    LOGGER.info(
+        "category %s: merging %s new game(s), %s provenance id(s) into %s",
+        category.value,
+        len(state.new_game_ids),
+        len(provenance_updates),
+        output_path,
+    )
+    if not is_prior_weights_asset_present(category, base_dir=assets_dir):
+        LOGGER.info(
+            "category %s: creating new prior weights asset from template at %s",
+            category.value,
             output_path,
         )
-        if not is_prior_weights_asset_present(category, base_dir=assets_dir):
-            LOGGER.info(
-                "category %s: creating new prior weights asset from template at %s",
-                category.value,
-                output_path,
-            )
-        merged_asset = merge_accumulation_into_asset(
-            state.asset,
-            state.accumulation,
-            provenance_game_ids=provenance_updates,
-        )
-        write_prior_weights_asset(
-            output_path,
-            merged_asset,
-            name_catalog=state.name_catalog.build(),
-        )
-        report.written_assets.append(str(output_path))
-        LOGGER.info("wrote prior weights asset %s", output_path)
+    merged_asset = merge_accumulation_into_asset(
+        state.asset,
+        state.accumulation,
+        provenance_game_ids=provenance_updates,
+    )
+    write_prior_weights_asset(
+        output_path,
+        merged_asset,
+        name_catalog=state.name_catalog.build(),
+    )
+    report.written_assets.append(str(output_path))
+    LOGGER.info("wrote prior weights asset %s", output_path)
 
 
 def _mine_pattern(
@@ -234,69 +284,64 @@ def _mine_pattern(
         games_added=games_added,
     )
 
-    with GamePreparePrefetcher(
-        storage_root=storage_root, loadall_params=loadall_params
-    ) as prefetcher:
-        with ExtractionProcessPool(workers=workers, storage_root=storage_root) as extraction_pool:
-            scheduled_id = next(game_source, None)
-            pending_future = None
-            if scheduled_id is not None:
-                games_attempted.append(scheduled_id)
-                attempted_ids.add(scheduled_id)
-                pending_future = prefetcher.submit(scheduled_id)
+    def on_scheduled(game_id: int) -> None:
+        games_attempted.append(game_id)
+        attempted_ids.add(game_id)
 
-            while pending_future is not None:
-                prepared = pending_future.result()
+    def process_prepared(
+        prepared: PrepareGameResult,
+        extraction_pool: ExtractionProcessPool,
+    ) -> None:
+        LOGGER.info("mining game %s (pattern %s)", prepared.game_id, pattern.id)
+        try:
+            mined = _process_prepared_game(
+                prepared=prepared,
+                game_service=game_service,
+                turn_load=turn_load,
+                storage_root=storage_root,
+                workers=workers,
+                state=state,
+                report=report,
+                extraction_pool=extraction_pool,
+            )
+        except Exception as exc:
+            LOGGER.exception(
+                "game %s: mining failed with unexpected error (pattern %s)",
+                prepared.game_id,
+                pattern.id,
+            )
+            report.game_mining_errors.append(
+                GameMiningErrorDetail(game_id=prepared.game_id, message=str(exc))
+            )
+            mined = False
+        if mined:
+            games_added.append(prepared.game_id)
+            state.contributing_game_ids.add(prepared.game_id)
+            state.pattern_contributed_counts[pattern.id] += 1
+            state.new_game_ids.append(prepared.game_id)
+            LOGGER.info(
+                "game %s mined successfully (pattern %s)",
+                prepared.game_id,
+                pattern.id,
+            )
+        else:
+            games_rejected.append(prepared.game_id)
+            state.contributing_game_ids.add(prepared.game_id)
+            state.rejected_game_ids.append(prepared.game_id)
+            LOGGER.warning(
+                "game %s skipped during mining (pattern %s)",
+                prepared.game_id,
+                pattern.id,
+            )
 
-                next_scheduled_id = next(game_source, None)
-                if next_scheduled_id is not None:
-                    games_attempted.append(next_scheduled_id)
-                    attempted_ids.add(next_scheduled_id)
-                    pending_future = prefetcher.submit(next_scheduled_id)
-                else:
-                    pending_future = None
-
-                LOGGER.info("mining game %s (pattern %s)", prepared.game_id, pattern.id)
-                try:
-                    mined = _process_prepared_game(
-                        prepared=prepared,
-                        game_service=game_service,
-                        turn_load=turn_load,
-                        storage_root=storage_root,
-                        workers=workers,
-                        state=state,
-                        report=report,
-                        extraction_pool=extraction_pool,
-                    )
-                except Exception as exc:
-                    LOGGER.exception(
-                        "game %s: mining failed with unexpected error (pattern %s)",
-                        prepared.game_id,
-                        pattern.id,
-                    )
-                    report.game_mining_errors.append(
-                        GameMiningErrorDetail(game_id=prepared.game_id, message=str(exc))
-                    )
-                    mined = False
-                if mined:
-                    games_added.append(prepared.game_id)
-                    state.contributing_game_ids.add(prepared.game_id)
-                    state.pattern_contributed_counts[pattern.id] += 1
-                    state.new_game_ids.append(prepared.game_id)
-                    LOGGER.info(
-                        "game %s mined successfully (pattern %s)",
-                        prepared.game_id,
-                        pattern.id,
-                    )
-                else:
-                    games_rejected.append(prepared.game_id)
-                    state.contributing_game_ids.add(prepared.game_id)
-                    state.rejected_game_ids.append(prepared.game_id)
-                    LOGGER.warning(
-                        "game %s skipped during mining (pattern %s)",
-                        prepared.game_id,
-                        pattern.id,
-                    )
+    prefetch_and_process_games(
+        game_ids=game_source,
+        storage_root=storage_root,
+        loadall_params=loadall_params,
+        workers=workers,
+        on_scheduled=on_scheduled,
+        process_prepared=process_prepared,
+    )
 
     if debug:
         slots_remaining = max(0, target_successes - len(games_attempted))
@@ -332,7 +377,10 @@ def _initialize_category_states(
     states: dict[GameCategory, CategoryMiningState] = {}
     for category in categories:
         asset = load_or_bootstrap_asset(category, base_dir=assets_dir)
-        state = CategoryMiningState(asset=asset)
+        state = CategoryMiningState(
+            asset=asset,
+            mine_stock=load_mine_stock_category_state(category, assets_dir=assets_dir),
+        )
         if is_prior_weights_asset_present(category, base_dir=assets_dir):
             state.initial_contributing_game_ids = frozenset(asset.contributing_game_ids)
             state.contributing_game_ids.update(asset.contributing_game_ids)
@@ -401,38 +449,20 @@ def _process_prepared_game(
     report: PriorMiningReport,
     extraction_pool: ExtractionProcessPool,
 ) -> bool:
-    if prepared.outcome == "error":
-        report.game_mining_errors.append(
-            GameMiningErrorDetail(
-                game_id=prepared.game_id,
-                message=prepared.error_message or "unknown prepare error",
-            )
-        )
-        return False
-
-    if prepared.outcome == "skipped_not_finished":
-        report.games_skipped_incomplete_loadall += 1
-        return False
-
-    if prepared.outcome == "skipped_incomplete":
-        report.incomplete_loadall_details.append(
-            IncompleteLoadAllDetail(
-                game_id=prepared.game_id,
-                gaps=[
-                    {
-                        "perspective": gap.perspective,
-                        "username": gap.username,
-                        "missing_turns": list(gap.missing_turns),
-                    }
-                    for gap in prepared.incomplete_gaps
-                ],
-            )
-        )
-        report.games_skipped_incomplete_loadall += 1
+    info = process_prepared_mine_stock_game(
+        prepared=prepared,
+        game_service=game_service,
+        turn_load=turn_load,
+        storage_root=storage_root,
+        workers=workers,
+        mine_stock=state.mine_stock,
+        report=report,
+        extraction_pool=extraction_pool,
+    )
+    if info is None:
         return False
 
     game_id = prepared.game_id
-    info = game_service.get_game_info(game_id)
     extraction_summary = run_extractions_for_game(
         game_info=info,
         game_id=game_id,

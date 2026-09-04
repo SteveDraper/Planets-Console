@@ -15,14 +15,19 @@ from api.analytics.military_score_inference.prior_mining.component_name_catalog 
 )
 from api.analytics.military_score_inference.prior_mining.extraction_pool import (
     _apply_extraction_row_result,
+    _apply_mine_stock_row_result,
     enumerate_extraction_work_units,
+    enumerate_mine_stock_work_units,
     run_extractions_for_game,
+    run_mine_stock_extractions_for_game,
 )
 from api.analytics.military_score_inference.prior_mining.extraction_worker import (
     ExtractionRowResult,
     ExtractionSkipReason,
     ExtractionWorkUnit,
+    MineStockRowResult,
     extract_extraction_work_unit,
+    extract_mine_stock_work_unit,
 )
 from api.analytics.military_score_inference.prior_mining.report import PriorMiningReport
 from api.concepts.races import HORWASP_RACE_ID
@@ -182,3 +187,128 @@ def test_run_extractions_for_game_serial_matches_direct_unit_extract(tmp_path: P
     )
     assert pooled.hull_counts == direct.hull_counts
     assert pooled.aggregate_histograms == direct.aggregate_histograms
+
+
+def test_enumerate_mine_stock_work_units_includes_last_stored_turn() -> None:
+    game_info = _load_game_info()
+    turn_load = MagicMock()
+    turn_load.list_stored_turn_numbers.return_value = [2, 3]
+
+    units = enumerate_mine_stock_work_units(game_info, 628580, turn_load)
+
+    assert units
+    assert {unit.host_turn for unit in units} == {2, 3}
+    assert all(unit.game_id == 628580 for unit in units)
+
+
+def test_enumerate_mine_stock_work_units_skips_horwasp_and_eliminated() -> None:
+    from api.models.enums import PlayerStatus
+
+    game_info = _load_game_info()
+    horwasp_player_id = 2
+    eliminated_player_id = 3
+    game_info = replace(
+        game_info,
+        players=[
+            replace(player, raceid=HORWASP_RACE_ID)
+            if player.id == horwasp_player_id
+            else replace(
+                player,
+                status=int(PlayerStatus.ELIMINATED),
+                statusturn=2,
+            )
+            if player.id == eliminated_player_id
+            else player
+            for player in game_info.players
+        ],
+    )
+    turn_load = MagicMock()
+    turn_load.list_stored_turn_numbers.return_value = [2, 3]
+
+    units = enumerate_mine_stock_work_units(game_info, 628580, turn_load)
+
+    assert all(unit.player_id != horwasp_player_id for unit in units)
+    assert all(unit.player_id != eliminated_player_id for unit in units)
+
+
+def test_extract_mine_stock_work_unit_returns_sample_for_fixture() -> None:
+    unit = ExtractionWorkUnit(
+        game_id=628580,
+        player_id=2,
+        perspective=1,
+        host_turn=2,
+        race_id=2,
+    )
+    result = extract_mine_stock_work_unit(
+        turn_load=_mock_turn_load_for_host_turn_2(),
+        unit=unit,
+    )
+    assert result.outcome == "ok"
+    assert result.sample is not None
+    assert result.sample.host_turn == 2
+    assert result.sample.total_units >= 0
+    assert result.sample.field_count >= 0
+
+
+def test_apply_mine_stock_row_result_records_errors_without_raising() -> None:
+    from api.analytics.military_score_inference.prior_mining.extraction_pool import (
+        MineStockRunSummary,
+    )
+    from api.analytics.military_score_inference.prior_mining.mine_stock import (
+        MineStockAccumulation,
+    )
+
+    accumulation = MineStockAccumulation()
+    report = PriorMiningReport(dry_run=True)
+    unit = ExtractionWorkUnit(
+        game_id=628580,
+        player_id=2,
+        perspective=2,
+        host_turn=2,
+        race_id=2,
+    )
+    summary = MineStockRunSummary()
+    _apply_mine_stock_row_result(
+        MineStockRowResult(unit=unit, outcome="error", error_message="boom"),
+        accumulation=accumulation,
+        report=report,
+        summary=summary,
+    )
+    assert summary.extraction_errors == 1
+    assert report.extraction_errors[0].message == "boom"
+
+
+def test_run_mine_stock_extractions_for_game_serial_matches_direct_unit_extract() -> None:
+    from api.analytics.military_score_inference.prior_mining.mine_stock import (
+        MineStockAccumulation,
+    )
+
+    game_info = _load_game_info()
+    turn_load = _mock_turn_load_for_host_turn_2()
+    units = enumerate_mine_stock_work_units(game_info, 628580, turn_load)
+    assert units
+
+    direct = MineStockAccumulation()
+    for unit in units:
+        result = extract_mine_stock_work_unit(turn_load=turn_load, unit=unit)
+        if result.outcome == "ok" and result.sample is not None:
+            direct.add_sample(result.sample)
+
+    pooled = MineStockAccumulation()
+    report = PriorMiningReport(dry_run=True)
+    summary = run_mine_stock_extractions_for_game(
+        game_info=game_info,
+        game_id=628580,
+        turn_load=turn_load,
+        storage_root=Path("."),
+        workers=1,
+        accumulation=pooled,
+        report=report,
+    )
+    assert summary.units_ok == sum(
+        1
+        for unit in units
+        if extract_mine_stock_work_unit(turn_load=turn_load, unit=unit).outcome == "ok"
+    )
+    assert pooled.sample_count == direct.sample_count
+    assert pooled.histograms == direct.histograms
