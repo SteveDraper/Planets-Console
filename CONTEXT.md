@@ -797,12 +797,12 @@ Incoming **public scoreboard pairing** on this scoreboard row: a matched hull th
 _Avoid_: stuffing incoming hulls into `shipBuilds`, **unknown military ship** for a paired incoming count
 
 **Mine-score residual**:
-Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status (`mine_score_residual`) when leftover is not within partition slack after **inference expensive-tier abort** for that regime (decrease-shaped remainder beyond the **inference moderate residual** floor, **mine-residual sticky prior**, or **large minefield observation**). May persist ranked **ship-first near-solution**s plus leftover; empty list is leftover + placeholders only. Inference does not split observed vs unobserved minefields and does not exact-model this channel.
-_Avoid_: mine noise, mine slack, observed-mine decay, intractable residual (that is `no_exact_solution`), treating a non-empty ship-first list as `exact`
+Unmodeled strictly-decreasing military-score contribution from mine decay, sweep, or mutual elimination, and the row status (`mine_score_residual`) when leftover is not within partition slack in the **mine-contaminated regime**. May persist ranked **ship-first near-solution**s plus leftover; empty list is leftover + placeholders only. Inference does not split observed vs unobserved minefields and does not exact-model this channel.
+_Avoid_: mine noise, mine slack, observed-mine decay, intractable residual (that is `no_exact_solution`), treating a non-empty ship-first list as `exact`, large minefield observation as a third status signal
 
 **Mine-contaminated regime**:
-Scoreboard-row condition where unmodeled mine decrease makes hard military equality the wrong objective: any owner field with `units > 0` in the **recent minefield observation** window, or **mine-residual sticky prior**. Distinct from **inference moderate residual** (1-11 with no mine signal). Leftover within partition slack is `exact` only when this turn's viewpoint-RST has no owner field with `units > 0`; leftover above slack is **mine-score residual**. Current-turn owner fields skip leftover-0 and use the **ship-first overshoot constraint**.
-_Avoid_: mine slack, treating leftover-0 as exact while current-turn owner fields are visible, treating in-regime leftover-0 as still residual when those fields are absent
+Scoreboard-row condition where unmodeled mine decrease makes hard military equality the wrong objective: any owner field with `units > 0` in the **recent minefield observation** window, cheap-unsat decrease-shaped leftover beyond the **inference moderate residual** floor with mine-plausible counts, or **mine-residual sticky prior**. Distinct from **inference moderate residual** (1-11 with no mine signal). Leftover within partition slack is `exact` only when this turn's viewpoint-RST has no owner field with `units > 0`; leftover above slack is **mine-score residual**. Current-turn owner fields skip leftover-0 and use the **ship-first overshoot constraint**.
+_Avoid_: mine slack, treating leftover-0 as exact while current-turn owner fields are visible, treating in-regime leftover-0 as still residual when those fields are absent, large minefield observation, 1000-unit entry gate
 
 **Ship-first near-solution**:
 A user-facing ranked explanation on a **mine-score residual** row: same `solutions[]` wire as exact (rank weight, actions, ship-builds) plus leftover overshoot (`explained - observed`, solver 2x). Feasible under the **ship-first overshoot constraint**. Each row carries a **ship-first family tag**. Rank by **inference solution rank weight**; leftover is a post-collection tie-break, not the CP-SAT objective. **Ship-first stratified hold** applies when both families have hits. Leftover within partition slack is `exact`, not this -- and is not attempted when current-turn owner fields have `units > 0`. Distinct from **inference near-solution seed**.
@@ -841,24 +841,20 @@ Whether **military score build inference** may run for the loaded game. Inactive
 _Avoid_: greying the Scores analytic for Stealth, treating Stealth as Homeworld locator availability
 
 **Hopeless classifier**:
-Post-admission, post-cheap judgment that an exact build story is unlikely enough to trigger **inference expensive-tier abort**. Fires on cheap-unsat when any of: decrease-shaped unexplained military beyond the **inference moderate residual** floor; **mine-residual sticky prior**; **large minefield observation**. Distinct from **inference admission skip**. Must stay strict enough that ordinary ships+torps+defense-posts rows still climb cheap tiers.
-_Avoid_: skip (unqualified), early-stop (any-exact / ship-only ladder gates)
+Post-admission judgment that climbing the expensive tail is not worth it, triggering **inference expensive-tier abort**. Fires when the row is in the **mine-contaminated regime**, or when cheap-unsat leftover is **inference moderate residual** with no regime signal. Distinct from **inference admission skip**.
+_Avoid_: skip (unqualified), early-stop (any-exact / ship-only ladder gates), large minefield observation, treating classifier and regime as the same predicate
 
 **Inference expensive-tier abort**:
-Stopping after cheap exact **inference search tiers** (through the last modest-cap ship-polish step; production `full_components`) when the **hopeless classifier** fires, so fighter / starbase-post / raised-cap steps do not run. Does not skip cheap tiers or the row. Not `no_exact_solution` (terminal after a search we meant to finish).
+Refusing fighter / starbase-post / raised-cap **inference search tiers** when the **hopeless classifier** fires. Out of regime, that is after cheap exact through `full_components`. In regime, the ship-first prefix still runs and that tail still does not. Does not skip the row. Not `no_exact_solution` (terminal after a search we meant to finish).
 _Avoid_: cancel, admission skip, no_exact_solution
 
 **Mine-residual sticky prior**:
-Per-player carry that this scoreboard row is in the mine-contaminated regime, derived from the prior host-turn persisted row (`status === mine_score_residual`), including when that row holds **ship-first near-solution**s. Cleared when the persisted row is `exact` (leftover within partition slack). Cannot clear on a turn with current-turn owner fields (`units > 0`), because leftover-0 exact is not produced that turn. While set, a later cheap-unsat of either sign is enough for **inference expensive-tier abort**. Distinct from **recent minefield observation**.
-_Avoid_: muddy flag, hopeless latch, no_exact_solution sticky, a parallel sticky boolean beside status, clearing sticky because `solutions[]` is non-empty, leftover-0 exact while current-turn owner fields are visible
+Per-player carry that this scoreboard row is in the **mine-contaminated regime**, derived from the prior host-turn persisted row (`status === mine_score_residual`), including when that row holds **ship-first near-solution**s. Cleared when the persisted row is `exact` (leftover within partition slack and no current-turn owner fields). Cannot clear on a turn with current-turn owner fields (`units > 0`). Distinct from **recent minefield observation**.
+_Avoid_: muddy flag, hopeless latch, no_exact_solution sticky, a parallel sticky boolean beside status, clearing sticky because `solutions[]` is non-empty, leftover-0 exact while current-turn owner fields are visible, large minefield observation
 
 **Recent minefield observation**:
-Viewpoint-RST evidence that this owner appeared in stored `minefields` inside a short host-turn window (default 3, overridable on the **inference tier policy asset**). Not "laid this turn" and not a decay estimate. A cheap exact drops carry-forward of that window; a later turn may open a new window from its own RST.
-_Avoid_: minefield scan (unqualified), observed vs unobserved mines
-
-**Large minefield observation**:
-A **recent minefield observation** whose largest seen field for that owner is at least a policy minimum (default 1000 units, overridable on the **inference tier policy asset**). After cheap-unsat, sufficient for **inference expensive-tier abort** of either remainder sign. Sub-threshold probes do not themselves fire the **hopeless classifier**.
-_Avoid_: estimated decay, using RST units as a residual term
+Viewpoint-RST evidence that this owner appeared in stored `minefields` with any field `units > 0` inside a short host-turn window (default 3, overridable on the **inference tier policy asset**). Entry (i) into the **mine-contaminated regime**. Not "laid this turn" and not a decay estimate. Leftover-0 `exact` (no current-turn owner fields) drops carry-forward; a later turn may open a new window from its own RST, and (i) can re-enter if fields are still visible.
+_Avoid_: minefield scan (unqualified), observed vs unobserved mines, large minefield observation, 1000-unit size gate
 
 **Mine-stock prior**:
 Owner-perspective histograms of total mine units and field count, mined from finished games by the **inference prior miner** into sibling `mine_stock_{category}.yaml` files (not stuffed into **inference build prior asset** aggregate tables). Partitioned game category (file) x race x host turn. Raw integer keys including empty-stock `0:` on the totals; web vs normal splits are extra histograms on the same sample. Converted to leftover military points **at solve time**, not at mine time. Distinct from **recent minefield observation** (fogged viewpoint RST) and from **inference ship-limit band**.
