@@ -12,6 +12,7 @@ from api.concepts.races import is_horwasp
 from api.services.turn_load_service import TurnLoadService
 
 from .component_name_catalog import ComponentNameCatalog, ComponentNameCatalogBuilder
+from .mine_stock import MineStockSample, extract_mine_stock_sample
 from .observations import (
     PlayerHostTurnExtraction,
     _extract_player_host_turn,
@@ -55,6 +56,15 @@ class ExtractionRowResult:
     error_message: str | None = None
 
 
+@dataclass(frozen=True)
+class MineStockRowResult:
+    unit: ExtractionWorkUnit
+    outcome: Literal["ok", "skip", "error"]
+    sample: MineStockSample | None = None
+    skip_reason: ExtractionSkipReason | None = None
+    error_message: str | None = None
+
+
 def init_extraction_worker(storage_root: str) -> None:
     """Configure turn storage once per worker process."""
     global _worker_turn_load
@@ -63,13 +73,20 @@ def init_extraction_worker(storage_root: str) -> None:
     _worker_turn_load = make_turn_load_service_for_storage_root(Path(storage_root))
 
 
-def run_extraction_job(job: ExtractionJob) -> ExtractionRowResult:
-    """Run one extraction unit in a worker process."""
+def _worker_turn_load_for_job(job: ExtractionJob) -> TurnLoadService:
     if _worker_turn_load is None:
         init_extraction_worker(job.storage_root)
     assert _worker_turn_load is not None
+    return _worker_turn_load
+
+
+def run_extraction_job(job: ExtractionJob) -> ExtractionRowResult:
+    """Run one extraction unit in a worker process."""
     try:
-        return extract_extraction_work_unit(turn_load=_worker_turn_load, unit=job.unit)
+        return extract_extraction_work_unit(
+            turn_load=_worker_turn_load_for_job(job),
+            unit=job.unit,
+        )
     except Exception as exc:  # noqa: BLE001 - report and continue aggregation
         return ExtractionRowResult(
             unit=job.unit,
@@ -176,6 +193,46 @@ def _absorb_peer_turn_names(
     for other in other_perspectives:
         name_builder.absorb_turn(cache.get_turn_info(game_id, other, host_turn))
         name_builder.absorb_turn(cache.get_turn_info(game_id, other, score_turn_number))
+
+
+def run_mine_stock_job(job: ExtractionJob) -> MineStockRowResult:
+    """Run one mine-stock snapshot in a worker process."""
+    try:
+        return extract_mine_stock_work_unit(
+            turn_load=_worker_turn_load_for_job(job),
+            unit=job.unit,
+        )
+    except Exception as exc:  # noqa: BLE001 - report and continue aggregation
+        return MineStockRowResult(
+            unit=job.unit,
+            outcome="error",
+            error_message=str(exc),
+        )
+
+
+def extract_mine_stock_work_unit(
+    *,
+    turn_load: TurnLoadService,
+    unit: ExtractionWorkUnit,
+    turn_cache: MiningTurnCache | None = None,
+) -> MineStockRowResult:
+    """Extract one owner-perspective mine-stock snapshot from a stored turn."""
+    if is_horwasp(unit.race_id):
+        return MineStockRowResult(
+            unit=unit,
+            outcome="skip",
+            skip_reason=ExtractionSkipReason.HORWASP,
+        )
+
+    cache = turn_cache if turn_cache is not None else MiningTurnCache(turn_load)
+    turn = cache.get_turn_info(unit.game_id, unit.perspective, unit.host_turn)
+    sample = extract_mine_stock_sample(
+        turn,
+        player_id=unit.player_id,
+        race_id=unit.race_id,
+        host_turn=unit.host_turn,
+    )
+    return MineStockRowResult(unit=unit, outcome="ok", sample=sample)
 
 
 def work_unit_has_turn_pair(

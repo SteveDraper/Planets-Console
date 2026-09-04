@@ -832,6 +832,14 @@ _Avoid_: minefield scan (unqualified), observed vs unobserved mines
 A **recent minefield observation** whose largest seen field for that owner is at least a policy minimum (default 1000 units, overridable on the **inference tier policy asset**). After cheap-unsat, sufficient for **inference expensive-tier abort** of either remainder sign. Sub-threshold probes do not themselves fire the **hopeless classifier**.
 _Avoid_: estimated decay, using RST units as a residual term
 
+**Mine-stock prior**:
+Owner-perspective histograms of total mine units and field count, mined from finished games by the **inference prior miner** into sibling `mine_stock_{category}.yaml` files (not stuffed into **inference build prior asset** aggregate tables). Partitioned game category (file) x race x host turn. Raw integer keys including empty-stock `0:` on the totals; web vs normal splits are extra histograms on the same sample. Converted to leftover military points **at solve time**, not at mine time. Distinct from **recent minefield observation** (fogged viewpoint RST) and from **inference ship-limit band**.
+_Avoid_: mine slack, storing decay points in the asset, nebula-split stock, turn-banding at mine time
+
+**Inference prior mine-stock sample**:
+One counted mine-stock snapshot: `(game_id, player_id, host_turn T)` on a single stored owning-player `TurnInfo`. Fields with `ownerid == player_id` and `units > 0`. Does not require turn `T+1`, does not skip **adjunct** units, and does not use **inference ship-limit band**. Skip Horwasp, players eliminated on or before `T`, and `settings.nominefields` games.
+_Avoid_: T/T+1 inventory delta, fogged other-owner fields as own stock
+
 **Generic freighter combo**:
 Hull-id-0 identity standing for some **true freighter** when hulls are score-indistinguishable. On exact rows it is the solver-only **ship build combo**; on no-exact-list rows it is an observation-derived post-unsat placeholder with the same sentinel.
 _Avoid_: hull id 0 as a host hull, unknown freighter, treating the residual emission as a ranked solution
@@ -998,7 +1006,7 @@ One declarative row in the prior-miner config (replacing a hand-maintained game-
 _Avoid_: static game-id manifest as the primary input, inferring blitz/epic from `gametype` alone
 
 **Inference prior contributing games**:
-Ordered list of game ids already folded into a **inference build prior asset** for a category, stored as **`contributingGameIds`** (camelCase) in the asset YAML. Monotonic: miner appends on merge, never removes. Incremental runs skip these ids so observations are not double-counted. Parsed into `PriorWeightsAsset` as metadata; **ignored** by `resolve_prior_weights_catalog` (provenance only, not prior weights).
+Ordered list of game ids already folded into a **inference build prior asset** for a category, stored as **`contributingGameIds`** (camelCase) in the asset YAML. Monotonic: miner appends on merge, never removes. Incremental runs skip these ids so observations are not double-counted. Parsed into `PriorWeightsAsset` as metadata; **ignored** by `resolve_prior_weights_catalog` (provenance only, not prior weights). **Mine-stock prior** sibling files have their own `contributingGameIds` with the same monotonic semantics. First mine-stock collection **replays** the build-prior list (`--replay-mine-stock`) because that list is the discovery skip-set.
 _Avoid_: implicit full re-sample every run without provenance, using contributing ids as Laplace table keys
 
 **Inference prior player-host-turn**:
@@ -1043,7 +1051,7 @@ Coarse partition for **inference build prior** tables: whether ship-limit queue 
 _Avoid_: turn band, early/mid/late game (for priors v1)
 
 **Inference prior miner**:
-Offline pipeline (#92) driven by **inference prior mining pattern** config, upstream game discovery, and turn extraction; writes **inference build prior asset** count YAML with **inference prior contributing games** provenance. Incremental runs **merge in place** into `assets/analytics/scores/prior_weights_{category}.yaml` (add histogram/hull/component counts, append new game ids); `--dry-run` emits discovery/mining report only. Extraction and accumulation live in Core under `api/analytics/military_score_inference/prior_mining/` (unit-tested, importable). A thin Typer CLI in `scripts/` (pattern: `run_inference_corpus.py`) configures file storage (`--storage-root`), invokes the miner, and writes output. For each newly discovered game: **`loadall`** via `PlanetsNuClient`, import through existing loadall archive parsing into storage, then extract from `TurnLoadService`; skip download when storage already has a complete finished-game turn set for that id. Shared inventory-delta helpers move from the inference corpus harness into Core as part of this work; ship-build validation uses starbase order + T+1 spec match only (not corpus inventory-diff ship detection).
+Offline pipeline (#92, mine-stock family #398) driven by **inference prior mining pattern** config, upstream game discovery, and turn extraction; writes **inference build prior asset** count YAML and sibling **mine-stock prior** YAML, each with its own **inference prior contributing games** provenance. Incremental runs **merge in place** into `assets/analytics/scores/prior_weights_{category}.yaml` (add histogram/hull/component counts, append new game ids) and `assets/analytics/scores/mine_stock_{category}.yaml` (race x turn stock histograms). `--dry-run` emits discovery/mining report only. `--replay-mine-stock` extracts mine-stock from games already listed on the build-prior asset without mining new hull/aggregate observations. Extraction and accumulation live in Core under `api/analytics/military_score_inference/prior_mining/` (unit-tested, importable). A thin Typer CLI in `scripts/` (pattern: `run_inference_corpus.py`) configures file storage (`--storage-root`), invokes the miner, and writes output. For each newly discovered game: **`loadall`** via `PlanetsNuClient`, import through existing loadall archive parsing into storage, then extract from `TurnLoadService`; skip download when storage already has a complete finished-game turn set for that id. Shared inventory-delta helpers move from the inference corpus harness into Core as part of this work; ship-build validation uses starbase order + T+1 spec match only (not corpus inventory-diff ship detection).
 _Avoid_: tests-only miner (regression harness pattern), BFF route for mining
 
 **Inference prior ship-build observation**:
