@@ -38,6 +38,10 @@ from api.analytics.military_score_inference.solver import (
     STATUS_TIME_LIMITED,
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.military_score_inference.worthwhile_remainder_bound import (
+    worthwhile_remainder_bound_diagnostics,
+    worthwhile_remainder_bound_for_turn,
+)
 from api.models.game import TurnInfo
 
 
@@ -129,17 +133,21 @@ def finalize_policy_ladder_result(
     )
     if state.cancelled:
         stopped_reason = "cancelled"
+    diagnostics: dict[str, object] = {
+        **state.last_diagnostics,
+        "policy_step_id": catalog.policy_step_id,
+        "policy_step_index": catalog.policy_step_index,
+        "solution_count": len(merged_solutions),
+        "best_band_residual_2x": state.best_band_residual_2x,
+        "stopped_reason": stopped_reason,
+    }
+    bound = worthwhile_remainder_bound_for_turn(observation, turn)
+    if bound is not None:
+        diagnostics.update(worthwhile_remainder_bound_diagnostics(bound))
     result = InferenceResult(
         status=status,
         solutions=tuple(merged_solutions),
-        diagnostics={
-            **state.last_diagnostics,
-            "policy_step_id": catalog.policy_step_id,
-            "policy_step_index": catalog.policy_step_index,
-            "solution_count": len(merged_solutions),
-            "best_band_residual_2x": state.best_band_residual_2x,
-            "stopped_reason": stopped_reason,
-        },
+        diagnostics=diagnostics,
     )
     return (
         result,

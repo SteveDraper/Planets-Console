@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -184,6 +185,37 @@ def default_mine_stock_dir() -> Path:
     return Scores.assets_dir()
 
 
+STANDARD_MINE_STOCK_FILENAME = f"mine_stock_{GameCategory.STANDARD}.yaml"
+
+
+@lru_cache(maxsize=8)
+def _load_mine_stock_asset_cached(resolved_path: str) -> MineStockAsset:
+    return load_mine_stock_asset(Path(resolved_path))
+
+
+def load_mine_stock_for_category(
+    category: GameCategory,
+    *,
+    base_dir: Path | None = None,
+) -> tuple[MineStockAsset, Path, bool]:
+    """Load ``mine_stock_{category}.yaml``, falling back to standard when missing.
+
+    Same fallback shape as ``load_prior_weights_for_category``. Standard is required.
+    """
+    directory = default_mine_stock_dir() if base_dir is None else base_dir
+    category_path = mine_stock_path_for_category(category, base_dir=directory)
+    if category_path.is_file():
+        return _load_mine_stock_asset_cached(str(category_path.resolve())), category_path, False
+
+    if category == GameCategory.STANDARD:
+        raise FileNotFoundError(f"missing required mine-stock asset: {category_path}")
+
+    standard_path = directory / STANDARD_MINE_STOCK_FILENAME
+    if not standard_path.is_file():
+        raise FileNotFoundError(f"missing required mine-stock asset: {standard_path}")
+    return _load_mine_stock_asset_cached(str(standard_path.resolve())), standard_path, True
+
+
 def create_empty_mine_stock_asset(category: GameCategory) -> MineStockAsset:
     return MineStockAsset(
         version=MINE_STOCK_ASSET_VERSION,
@@ -312,6 +344,7 @@ def write_mine_stock_asset(path: Path, asset: MineStockAsset) -> None:
         allow_unicode=True,
     )
     path.write_text(header + body, encoding="utf-8")
+    _load_mine_stock_asset_cached.cache_clear()
 
 
 def mine_stock_asset_to_document(asset: MineStockAsset) -> dict[str, Any]:
