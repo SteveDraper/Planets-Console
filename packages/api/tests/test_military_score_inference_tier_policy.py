@@ -96,7 +96,6 @@ def test_policy_loader_reads_solver_thresholds():
     assert thresholds.no_new_exact_signatures_early_stop_min_plausibility == -300
     assert thresholds.near_best_objective_threshold == 250
     assert thresholds.recent_minefield_observation_turns == 3
-    assert thresholds.large_minefield_observation_min_units == 1000
 
 
 def test_policy_loader_rejects_non_int_solver_threshold():
@@ -120,28 +119,30 @@ def _solver_thresholds_document(**overrides: object) -> dict[str, object]:
     return {"solverThresholds": thresholds}
 
 
-def test_policy_loader_defaults_minefield_observation_thresholds_when_omitted():
+def test_policy_loader_defaults_minefield_observation_window_when_omitted():
     thresholds = parse_solver_thresholds(_solver_thresholds_document())
     assert thresholds.recent_minefield_observation_turns == 3
-    assert thresholds.large_minefield_observation_min_units == 1000
+    assert not hasattr(thresholds, "large_minefield_observation_min_units")
 
 
-def test_policy_loader_reads_minefield_observation_threshold_overrides():
+def test_policy_loader_reads_minefield_observation_window_override():
     thresholds = parse_solver_thresholds(
-        _solver_thresholds_document(
-            recentMinefieldObservationTurns=5,
-            largeMinefieldObservationMinUnits=2500,
-        )
+        _solver_thresholds_document(recentMinefieldObservationTurns=5)
     )
     assert thresholds.recent_minefield_observation_turns == 5
-    assert thresholds.large_minefield_observation_min_units == 2500
 
 
-def test_policy_loader_rejects_invalid_minefield_observation_thresholds():
+def test_policy_loader_ignores_large_minefield_observation_min_units_fossil():
+    thresholds = parse_solver_thresholds(
+        _solver_thresholds_document(largeMinefieldObservationMinUnits=2500)
+    )
+    assert not hasattr(thresholds, "large_minefield_observation_min_units")
+    assert thresholds.recent_minefield_observation_turns == 3
+
+
+def test_policy_loader_rejects_invalid_minefield_observation_window():
     with pytest.raises(ValueError, match="recentMinefieldObservationTurns"):
         parse_solver_thresholds(_solver_thresholds_document(recentMinefieldObservationTurns=0))
-    with pytest.raises(ValueError, match="largeMinefieldObservationMinUnits"):
-        parse_solver_thresholds(_solver_thresholds_document(largeMinefieldObservationMinUnits="-1"))
 
 
 def test_policy_loader_rejects_invalid_near_best_objective_threshold():
