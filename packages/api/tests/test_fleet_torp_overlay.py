@@ -24,6 +24,7 @@ from api.analytics.military_score_inference.fleet_torp_overlay import (
     launcher_belief_set_from_fleet_records,
     torp_load_action_id,
 )
+from api.analytics.military_score_inference.hopeless_classifier import HopelessRowFacts
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -345,6 +346,12 @@ def test_solve_with_policy_ladder_fleet_torp_overlay_belief_set(sample_turn):
     policy_steps, torp_step_index, escape_step_index = _torp_and_escape_step_indices()
     torp_step = policy_steps[torp_step_index]
     escape_step = policy_steps[escape_step_index]
+    out_of_regime = HopelessRowFacts(
+        planet_delta=0,
+        starbase_delta=0,
+        sticky_prior=False,
+        max_owner_minefield_units=0,
+    )
 
     empty_overlay = FleetTorpOverlay(
         belief_set=FleetLauncherBeliefSet(frozenset()),
@@ -354,6 +361,7 @@ def test_solve_with_policy_ladder_fleet_torp_overlay_belief_set(sample_turn):
         observation,
         sample_turn,
         fleet_torp_overlay=empty_overlay,
+        hopeless_context=out_of_regime,
         time_limit_seconds=60.0,
     )
 
@@ -391,6 +399,7 @@ def test_solve_with_policy_ladder_fleet_torp_overlay_belief_set(sample_turn):
         observation,
         sample_turn,
         fleet_torp_overlay=belief_overlay,
+        hopeless_context=out_of_regime,
         time_limit_seconds=60.0,
     )
     assert "admit_ship_torpedoes" in belief_attempted
