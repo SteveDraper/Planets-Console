@@ -3,6 +3,7 @@
 import json
 import math
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from api.compute.runtime import reset_orchestrators_for_tests
@@ -12,6 +13,7 @@ from api.storage import clear_backend_cache, get_storage
 from bff.analytics import ANALYTICS_LIST
 from bff.app import app
 from bff.core_client import clear_core_client_cache
+from bff.transport.inference_stream_responses import InferenceStreamCompleteEvent
 from export_chain_test_fixtures import seed_storage_analytics_fixture
 from fastapi.testclient import TestClient
 
@@ -141,7 +143,9 @@ def test_scores_inference_returns_row_detail():
     response = client.get(f"/analytics/scores/inference?{SCOPE_QS}&playerId={INFERENCE_PLAYER_ID}")
     assert response.status_code == 200
     inference = response.json()
-    assert inference["displayStatus"] in {"success", "failure", "pending"}
+    assert inference["displayStatus"] in get_args(
+        InferenceStreamCompleteEvent.model_fields["displayStatus"].annotation
+    )
     assert isinstance(inference["summary"], str)
     assert "status" in inference
     assert "diagnostics" in inference
