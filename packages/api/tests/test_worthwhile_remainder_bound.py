@@ -31,13 +31,18 @@ from api.concepts.minefield_decay import (
 )
 
 RACE_ID = 4
+OTHER_RACE_ID = 1
 BLOB_UNITS = 200
 EQUAL_SPLIT_FIELDS = 2
+MISALIGNED_FIELDS = 5
 # Independent of production convert: blob of 200 loses 11 units; two fields of 100 lose 12.
 BLOB_LOST_UNITS = 11
 EQUAL_SPLIT_LOST_UNITS = 12
 BLOB_LEFTOVER_2X = 5.94
 EQUAL_SPLIT_LEFTOVER_2X = 6.48
+# Five fields of 40 lose 15; leftover differs from the aligned two-field pair.
+MISALIGNED_LOST_UNITS = 15
+MISALIGNED_LEFTOVER_2X = 8.1
 # Visible 400 + 20: per-field lost 21 + 2; equal-split of 420 into 2 fields loses 22.
 OBSERVED_EXACT_LOST = 23
 OBSERVED_EQUAL_SPLIT_LOST = 22
@@ -130,6 +135,53 @@ def test_empirical_p90_drops_empty_stock_and_uses_equal_split_not_blob():
     assert bound.p90_field_count == EQUAL_SPLIT_FIELDS
     assert bound.empirical_leftover_2x == pytest.approx(EQUAL_SPLIT_LEFTOVER_2X)
     assert bound.empirical_leftover_2x != pytest.approx(BLOB_LEFTOVER_2X)
+
+
+def test_empirical_p90_pairs_misaligned_unit_and_field_histograms_independently():
+    histograms = {
+        RACE_ID: {
+            40: _cell(
+                total_units={0: 10.0, BLOB_UNITS: 90.0},
+                field_count={0: 10.0, EQUAL_SPLIT_FIELDS: 10.0, MISALIGNED_FIELDS: 80.0},
+            )
+        }
+    }
+    bound = _bound(histograms, host_turn=40, slack_2x=0)
+    assert bound.p90_total_units == BLOB_UNITS
+    assert bound.p90_field_count == MISALIGNED_FIELDS
+    assert (
+        sum(
+            lost_units_after_default_decay(units)
+            for units in equal_split_field_units(BLOB_UNITS, MISALIGNED_FIELDS)
+        )
+        == MISALIGNED_LOST_UNITS
+    )
+    assert bound.empirical_leftover_2x == pytest.approx(MISALIGNED_LEFTOVER_2X)
+    assert bound.empirical_leftover_2x != pytest.approx(EQUAL_SPLIT_LEFTOVER_2X)
+    assert bound.empirical_leftover_2x != pytest.approx(BLOB_LEFTOVER_2X)
+
+
+def test_other_race_histograms_do_not_change_bound():
+    own = {
+        RACE_ID: {
+            10: _empty_stock_cell(20.0),
+            40: _positive_stock_cell(80.0),
+        }
+    }
+    other = {
+        OTHER_RACE_ID: {
+            10: _cell(total_units={1000: 500.0}, field_count={20: 500.0}),
+            25: _cell(total_units={1000: 500.0}, field_count={20: 500.0}),
+            40: _cell(total_units={1000: 500.0}, field_count={20: 500.0}),
+        }
+    }
+    isolated = _bound(own, host_turn=25, slack_2x=0)
+    with_other = _bound({**own, **other}, host_turn=25, slack_2x=0)
+    other_race = _bound({**own, **other}, host_turn=25, slack_2x=0, race_id=OTHER_RACE_ID)
+    assert with_other == isolated
+    assert other_race != isolated
+    assert other_race.p90_total_units == 1000
+    assert other_race.p90_field_count == 20
 
 
 def test_sparse_missing_cell_is_one_hundred_percent_interpolant():
