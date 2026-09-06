@@ -5,12 +5,19 @@ from __future__ import annotations
 from dataclasses import replace
 
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.constraints import (
+    InferenceHardConstraints,
+    observation_to_constraints_payload,
+)
 from api.analytics.military_score_inference.hopeless_classifier import (
     EXPENSIVE_TIER_STEP_IDS,
     HopelessRowFacts,
 )
 from api.analytics.military_score_inference.inference_api_payload import (
     inference_result_to_api_payload,
+)
+from api.analytics.military_score_inference.military_score_window import (
+    OvershootMilitaryScoreWindow,
 )
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -272,6 +279,18 @@ def test_empty_overshoot_window_is_empty_list_residual(sample_turn, monkeypatch)
     assert result.status == STATUS_MINE_SCORE_RESIDUAL
     assert result.solutions == ()
     assert PLANET_OR_STARBASE_POST_STEP_IDS.isdisjoint(attempted)
+    assert problem is not None
+    assert isinstance(problem.military_score_window, OvershootMilitaryScoreWindow)
+    constraints_payload = observation_to_constraints_payload(
+        observation,
+        hard_constraints=InferenceHardConstraints.from_problem(problem),
+    )
+    military_lines = [
+        line for line in constraints_payload["appliedEqualities"] if "scoreDelta2x" in line
+    ]
+    assert military_lines
+    assert " <= " in military_lines[0]
+    assert "sum(scoreDelta2x * count) == " not in military_lines[0]
     payload = inference_result_to_api_payload(
         result,
         catalog,
@@ -417,8 +436,7 @@ def test_prefix_stop_only_marks_ladder_complete() -> None:
     state = PolicyLadderState(
         policy_steps=(step,),
         ship_first_overshoot=ShipFirstOvershootPlan(
-            active=True,
-            skip_leftover_0_exact=True,
+            mode="overshoot_only",
             cap_2x=40,
             overshoot_window_empty=False,
         ),

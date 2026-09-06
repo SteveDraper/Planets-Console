@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from api.analytics.military_score_inference.military_score_window import (
+    ExactMilitaryScoreWindow,
+    MilitaryScoreWindow,
+    military_window_alpha,
+    military_window_overshoot_cap_2x,
+)
+
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.ranking_heuristics import (
         InferenceRankingHeuristics,
@@ -181,8 +188,7 @@ class InferenceProblem:
     acquired_warship_cap: int | None = None  # None = no cap; 0 = hard disallow
     acquired_freighter_cap: int | None = None
     acquired_ship_cap: int | None = None
-    military_score_alpha: int = 0
-    military_overshoot_cap_2x: int | None = None
+    military_score_window: MilitaryScoreWindow = field(default_factory=ExactMilitaryScoreWindow)
     ranking_heuristics: InferenceRankingHeuristics = field(
         default_factory=_default_ranking_heuristics
     )
@@ -190,6 +196,14 @@ class InferenceProblem:
     tier_overflow_by_action_id: dict[str, TierOverflowBand] = field(default_factory=dict)
     # Within-tier near-best ranking band width T (always applied after first maximize).
     near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
+
+    @property
+    def military_score_alpha(self) -> int:
+        return military_window_alpha(self.military_score_window)
+
+    @property
+    def military_overshoot_cap_2x(self) -> int | None:
+        return military_window_overshoot_cap_2x(self.military_score_window)
 
 
 @dataclass(frozen=True)

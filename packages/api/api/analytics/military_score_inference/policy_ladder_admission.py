@@ -116,7 +116,7 @@ def maybe_ship_first_prefix_stop_after_step(
 ) -> bool:
     """Stop after ``admit_ship_torpedoes`` so in-regime search never admits planet/SB posts."""
     plan = state.ship_first_overshoot
-    if plan is None or not plan.active:
+    if plan is None or not plan.is_in_regime:
         return False
     if policy_step.id != SHIP_FIRST_PREFIX_LAST_STEP_ID:
         return False
@@ -180,7 +180,7 @@ def maybe_no_new_exact_signatures_early_stop(
     new_exact_before_step: int,
 ) -> bool:
     """Return True when catalog growth was a noop and best leftover-0 exact is plausible enough."""
-    if state.ship_first_overshoot is not None and state.ship_first_overshoot.active:
+    if state.ship_first_overshoot is not None and state.ship_first_overshoot.is_in_regime:
         return False
     if len(state.merged_solutions) != new_exact_before_step:
         return False

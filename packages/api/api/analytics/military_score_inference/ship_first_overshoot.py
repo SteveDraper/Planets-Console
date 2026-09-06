@@ -7,9 +7,13 @@ Runtime plan for prefix steps through ``admit_ship_torpedoes``: military window
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.hopeless_classifier import HopelessRowFacts
+from api.analytics.military_score_inference.military_score_window import (
+    OvershootMilitaryScoreWindow,
+)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceSolution,
@@ -29,19 +33,31 @@ PLANET_OR_STARBASE_POST_STEP_IDS = frozenset(
     }
 )
 
+ShipFirstOvershootMode = Literal["off", "exact_then_overshoot", "overshoot_only"]
+
 
 @dataclass(frozen=True)
 class ShipFirstOvershootPlan:
-    """Whether the in-regime prefix uses the overshoot window instead of band retry."""
+    """In-regime prefix military window: exact then overshoot, or overshoot only."""
 
-    active: bool
-    skip_leftover_0_exact: bool
+    mode: ShipFirstOvershootMode
     cap_2x: int | None
     overshoot_window_empty: bool
 
     @property
-    def run_overshoot(self) -> bool:
-        return self.active and not self.overshoot_window_empty and self.cap_2x is not None
+    def is_in_regime(self) -> bool:
+        return self.mode != "off"
+
+    @property
+    def skip_leftover_0_exact(self) -> bool:
+        return self.mode == "overshoot_only"
+
+    @property
+    def should_solve_overshoot(self) -> bool:
+        return self.is_in_regime and not self.overshoot_window_empty and self.cap_2x is not None
+
+    def overshoot_window(self) -> OvershootMilitaryScoreWindow:
+        return OvershootMilitaryScoreWindow(cap_2x=self.cap_2x)
 
 
 def current_turn_has_owner_minefields(turn: TurnInfo, player_id: int) -> bool:
@@ -62,25 +78,22 @@ def resolve_ship_first_overshoot_plan(
         known_regime = (
             hopeless_context.sticky_prior or hopeless_context.max_owner_minefield_units > 0
         )
-    active = skip_leftover_0 or known_regime
-    if not active:
+    if not (skip_leftover_0 or known_regime):
         return ShipFirstOvershootPlan(
-            active=False,
-            skip_leftover_0_exact=False,
+            mode="off",
             cap_2x=None,
             overshoot_window_empty=True,
         )
+    mode: ShipFirstOvershootMode = "overshoot_only" if skip_leftover_0 else "exact_then_overshoot"
     bound = worthwhile_remainder_bound_for_turn(observation, turn)
     if bound is None:
         return ShipFirstOvershootPlan(
-            active=True,
-            skip_leftover_0_exact=skip_leftover_0,
+            mode=mode,
             cap_2x=None,
             overshoot_window_empty=True,
         )
     return ShipFirstOvershootPlan(
-        active=True,
-        skip_leftover_0_exact=skip_leftover_0,
+        mode=mode,
         cap_2x=bound.cap_2x,
         overshoot_window_empty=bound.overshoot_window_empty,
     )

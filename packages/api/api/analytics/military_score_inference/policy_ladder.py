@@ -122,7 +122,7 @@ def finalize_policy_ladder_result(
     )
     if leftover_0 and not skip_leftover_0:
         merged_solutions = leftover_0
-    if plan is not None and plan.active:
+    if plan is not None and plan.is_in_regime:
         merged_solutions.sort(
             key=lambda solution: (
                 -solution.objective_value,
@@ -143,7 +143,7 @@ def finalize_policy_ladder_result(
     elif skip_leftover_0:
         status = STATUS_MINE_SCORE_RESIDUAL
     elif merged_solutions:
-        if plan is not None and plan.active:
+        if plan is not None and plan.is_in_regime:
             status = STATUS_MINE_SCORE_RESIDUAL
         elif prefix_residual:
             status = state.last_status if state.last_status else STATUS_MINE_SCORE_RESIDUAL
@@ -151,7 +151,7 @@ def finalize_policy_ladder_result(
             status = STATUS_TIME_LIMITED
         else:
             status = STATUS_NO_EXACT_SOLUTION
-    elif plan is not None and plan.active:
+    elif plan is not None and plan.is_in_regime:
         status = STATUS_MINE_SCORE_RESIDUAL
     else:
         status = STATUS_TIME_LIMITED if state.time_limited else state.last_status

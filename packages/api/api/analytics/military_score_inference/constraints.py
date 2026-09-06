@@ -1,6 +1,6 @@
 """Hard CP-SAT constraints and matching diagnostics for military score build inference."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ortools.sat.python import cp_model
 
@@ -11,6 +11,15 @@ from api.analytics.military_score_inference.idle_dock_pp import (
     idle_dock_implied_ships_built,
 )
 from api.analytics.military_score_inference.inference_objective import add_count_active_indicator
+from api.analytics.military_score_inference.military_score_window import (
+    ExactMilitaryScoreWindow,
+    MilitaryScoreWindow,
+    MilitaryWindowBounds,
+    applied_military_equality,
+    military_window_alpha,
+    military_window_bounds,
+    military_window_overshoot_cap_2x,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -140,8 +149,7 @@ class _SumEqualityConstraint:
         combo_count_vars: dict[str, cp_model.IntVar],
         observation: InferenceObservation,
         *,
-        military_score_alpha: int = 0,
-        military_overshoot_cap_2x: int | None = None,
+        military_score_window: MilitaryScoreWindow | None = None,
     ) -> None:
         rhs = getattr(observation, self.observation_attr)
         if self.coefficient_attr == "score_delta_2x":
@@ -152,19 +160,16 @@ class _SumEqualityConstraint:
                 action_count_vars,
                 combo_count_vars,
             )
-            partition_slack = observation.military_partition_slack_2x
-            if military_overshoot_cap_2x is not None:
-                model.add(lhs >= rhs + partition_slack + 1)
-                model.add(lhs <= rhs + military_overshoot_cap_2x)
-                return
-            if partition_slack > 0:
-                model.add(lhs >= rhs - partition_slack)
-                model.add(lhs <= rhs + partition_slack)
-                return
-            if military_score_alpha > 0:
-                model.add(lhs >= rhs - military_score_alpha)
-                return
-            model.add(lhs == rhs)
+            window = military_score_window or ExactMilitaryScoreWindow()
+            _add_military_window_bounds(
+                model,
+                lhs,
+                military_window_bounds(
+                    window,
+                    rhs=rhs,
+                    slack=observation.military_partition_slack_2x,
+                ),
+            )
             return
         lhs = sum(
             getattr(action, self.coefficient_attr) * action_count_vars[action.id]
@@ -174,6 +179,20 @@ class _SumEqualityConstraint:
             for combo in ship_build_combos
         )
         model.add(lhs == rhs)
+
+
+def _add_military_window_bounds(
+    model: cp_model.CpModel,
+    lhs,
+    bounds: MilitaryWindowBounds,
+) -> None:
+    if bounds.equal is not None:
+        model.add(lhs == bounds.equal)
+        return
+    if bounds.lower is not None:
+        model.add(lhs >= bounds.lower)
+    if bounds.upper is not None:
+        model.add(lhs <= bounds.upper)
 
 
 def _military_lhs(
@@ -234,17 +253,23 @@ class InferenceHardConstraints:
 
     enforce_priority_point_constraint: bool = False
     enforce_idle_dock_pp_equality: bool = False
-    military_score_alpha: int = 0
-    military_overshoot_cap_2x: int | None = None
+    military_score_window: MilitaryScoreWindow = field(default_factory=ExactMilitaryScoreWindow)
 
     @classmethod
     def from_problem(cls, problem: InferenceProblem) -> InferenceHardConstraints:
         return cls(
             enforce_priority_point_constraint=problem.enforce_priority_point_constraint,
             enforce_idle_dock_pp_equality=problem.enforce_idle_dock_pp_equality,
-            military_score_alpha=problem.military_score_alpha,
-            military_overshoot_cap_2x=problem.military_overshoot_cap_2x,
+            military_score_window=problem.military_score_window,
         )
+
+    @property
+    def military_score_alpha(self) -> int:
+        return military_window_alpha(self.military_score_window)
+
+    @property
+    def military_overshoot_cap_2x(self) -> int | None:
+        return military_window_overshoot_cap_2x(self.military_score_window)
 
     def enforced_equalities(self) -> tuple[_SumEqualityConstraint, ...]:
         if self.enforce_priority_point_constraint:
@@ -259,29 +284,13 @@ class InferenceHardConstraints:
     ) -> list[str]:
         strings: list[str] = []
         for constraint in self.enforced_equalities():
-            if (
-                constraint.coefficient_attr == "score_delta_2x"
-                and self.military_overshoot_cap_2x is not None
-            ):
-                slack = observation.military_partition_slack_2x
+            if constraint.coefficient_attr == "score_delta_2x":
                 strings.append(
-                    f"{observation.military_delta_2x + slack + 1} <= "
-                    f"sum(scoreDelta2x * count) <= "
-                    f"{observation.military_delta_2x + self.military_overshoot_cap_2x}"
-                )
-            elif (
-                constraint.coefficient_attr == "score_delta_2x"
-                and observation.military_partition_slack_2x > 0
-            ):
-                slack = observation.military_partition_slack_2x
-                strings.append(
-                    f"{observation.military_delta_2x - slack} <= "
-                    f"sum(scoreDelta2x * count) <= {observation.military_delta_2x + slack}"
-                )
-            elif constraint.coefficient_attr == "score_delta_2x" and self.military_score_alpha > 0:
-                strings.append(
-                    "sum(scoreDelta2x * count) >= "
-                    f"{observation.military_delta_2x - self.military_score_alpha}"
+                    applied_military_equality(
+                        self.military_score_window,
+                        military_delta_2x=observation.military_delta_2x,
+                        partition_slack_2x=observation.military_partition_slack_2x,
+                    )
                 )
             else:
                 strings.append(constraint.applied_equality_string(observation))
@@ -310,8 +319,7 @@ class InferenceHardConstraints:
                 action_count_vars,
                 combo_count_vars,
                 observation,
-                military_score_alpha=self.military_score_alpha,
-                military_overshoot_cap_2x=self.military_overshoot_cap_2x,
+                military_score_window=self.military_score_window,
             )
         model.add(
             sum(
