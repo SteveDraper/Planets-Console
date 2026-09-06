@@ -182,6 +182,7 @@ class InferenceProblem:
     acquired_freighter_cap: int | None = None
     acquired_ship_cap: int | None = None
     military_score_alpha: int = 0
+    military_overshoot_cap_2x: int | None = None
     ranking_heuristics: InferenceRankingHeuristics = field(
         default_factory=_default_ranking_heuristics
     )

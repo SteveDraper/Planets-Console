@@ -23,6 +23,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
+from api.analytics.military_score_inference.ship_first_overshoot import leftover_military_2x
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
@@ -153,14 +154,25 @@ def inference_result_to_api_payload(
             **(extra_diagnostics or {}),
         },
     )
-    leftover_2x = _functional_leftover_2x(result.status, observation)
+    leftover_2x = _functional_leftover_2x(
+        result.status,
+        observation,
+        rank1_overshoot_2x=(
+            leftover_military_2x(result.solutions[0], observation, catalog)
+            if result.status == STATUS_MINE_SCORE_RESIDUAL and result.solutions
+            else None
+        ),
+    )
     placeholders = None
     if result.status in FUNCTIONAL_LEFTOVER_STATUSES:
-        placeholders = post_unsat_placeholders_from_turn(
-            observation,
-            turn,
-            resolved_mask=resolved_mask,
-        )
+        if result.status == STATUS_MINE_SCORE_RESIDUAL and result.solutions:
+            placeholders = []
+        else:
+            placeholders = post_unsat_placeholders_from_turn(
+                observation,
+                turn,
+                resolved_mask=resolved_mask,
+            )
     return inference_api_payload(
         status=result.status,
         summary=format_inference_summary(
@@ -172,15 +184,20 @@ def inference_result_to_api_payload(
         observation=observation,
         catalog=catalog,
         placeholders=placeholders,
+        unexplained_military_delta_2x=leftover_2x,
     )
 
 
 def _functional_leftover_2x(
     status: str,
     observation: InferenceObservation | None,
+    *,
+    rank1_overshoot_2x: int | None = None,
 ) -> int | None:
     if status not in FUNCTIONAL_LEFTOVER_STATUSES:
         return None
+    if status == STATUS_MINE_SCORE_RESIDUAL and rank1_overshoot_2x is not None:
+        return rank1_overshoot_2x
     if observation is None:
         return None
     return observation.military_delta_2x
@@ -264,11 +281,16 @@ def inference_api_payload(
     observation: InferenceObservation | None = None,
     catalog: ActionCatalog | None = None,
     placeholders: list[dict[str, object]] | None = None,
+    unexplained_military_delta_2x: int | None = None,
 ) -> dict[str, object]:
     fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
         fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
     )
-    leftover_2x = _functional_leftover_2x(status, observation)
+    leftover_2x = (
+        unexplained_military_delta_2x
+        if unexplained_military_delta_2x is not None
+        else _functional_leftover_2x(status, observation)
+    )
     leftover_summary = _functional_leftover_status_summary(status, leftover_2x)
     product = product_payload_fields(status, leftover=leftover_2x, placeholders=placeholders)
     payload: dict[str, object] = {

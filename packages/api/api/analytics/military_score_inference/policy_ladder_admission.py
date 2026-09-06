@@ -22,16 +22,26 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 from api.analytics.military_score_inference.ranked_solution_buffer import (
     admit_ranked_solutions,
 )
+from api.analytics.military_score_inference.ship_first_overshoot import (
+    SHIP_FIRST_PREFIX_LAST_STEP_ID,
+    SHIP_FIRST_PREFIX_STOP_REASON,
+)
+from api.analytics.military_score_inference.solver import (
+    STATUS_EXACT,
+    STATUS_MINE_SCORE_RESIDUAL,
+)
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
     resolve_solver_thresholds,
 )
 
 __all__ = (
+    "held_leftover_0_solutions",
     "make_incremental_admitter",
     "maybe_early_stop_after_step",
     "maybe_expensive_tier_abort_after_step",
     "maybe_no_new_exact_signatures_early_stop",
+    "maybe_ship_first_prefix_stop_after_step",
 )
 
 
@@ -41,6 +51,42 @@ def _best_merged_solution(
     if not merged_solutions:
         return None
     return max(merged_solutions, key=lambda solution: solution.objective_value)
+
+
+def held_leftover_0_solutions(
+    state: PolicyLadderState,
+    observation: InferenceObservation,
+    catalog: ActionCatalog | None,
+) -> bool:
+    """True when merged top-K contains a leftover-0 exact against ``catalog``."""
+    if catalog is None:
+        return bool(state.merged_solutions)
+    return any(
+        solution_satisfies_exact_hard_equalities(solution, observation, catalog)
+        for solution in state.merged_solutions
+    )
+
+
+def maybe_ship_first_prefix_stop_after_step(
+    state: PolicyLadderState,
+    *,
+    policy_step: InferenceTierPolicyStep,
+    observation: InferenceObservation,
+    catalog: ActionCatalog | None,
+) -> bool:
+    """Stop after ``admit_ship_torpedoes`` so in-regime search never admits planet/SB posts."""
+    plan = state.ship_first_overshoot
+    if plan is None or not plan.active:
+        return False
+    if policy_step.id != SHIP_FIRST_PREFIX_LAST_STEP_ID:
+        return False
+    state.ladder_complete = True
+    state.ladder_early_stop_reason = SHIP_FIRST_PREFIX_STOP_REASON
+    if held_leftover_0_solutions(state, observation, catalog):
+        state.last_status = STATUS_EXACT
+    else:
+        state.last_status = STATUS_MINE_SCORE_RESIDUAL
+    return True
 
 
 def _solution_fully_explained_by_ship_builds_only(
@@ -97,7 +143,9 @@ def maybe_no_new_exact_signatures_early_stop(
     added_aggregate_action_ids: frozenset[str],
     new_exact_before_step: int,
 ) -> bool:
-    """Return True when catalog growth was a noop and best exact is plausible enough."""
+    """Return True when catalog growth was a noop and best leftover-0 exact is plausible enough."""
+    if state.ship_first_overshoot is not None and state.ship_first_overshoot.active:
+        return False
     if len(state.merged_solutions) != new_exact_before_step:
         return False
     if not state.merged_solutions:

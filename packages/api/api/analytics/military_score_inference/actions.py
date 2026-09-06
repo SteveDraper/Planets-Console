@@ -134,6 +134,7 @@ def build_inference_problem(
     max_solutions: int | None = None,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     military_score_alpha: int = 0,
+    military_overshoot_cap_2x: int | None = None,
     fixed_combo_counts: dict[str, int] | None = None,
     combo_count_neighborhood: int = 0,
 ) -> InferenceProblem:
@@ -156,6 +157,7 @@ def build_inference_problem(
         max_solutions=20 if max_solutions is None else max_solutions,
         time_limit_seconds=time_limit_seconds,
         military_score_alpha=military_score_alpha,
+        military_overshoot_cap_2x=military_overshoot_cap_2x,
         ranking_heuristics=catalog.ranking_heuristics,
         admission_caps_by_action_id=catalog.admission_caps_by_action_id,
         tier_overflow_by_action_id=catalog.tier_overflow_by_action_id,

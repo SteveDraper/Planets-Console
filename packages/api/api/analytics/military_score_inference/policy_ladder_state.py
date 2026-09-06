@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceSolution,
 )
+from api.analytics.military_score_inference.ship_first_overshoot import ShipFirstOvershootPlan
 from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import InferenceTierPolicyStep
 
@@ -55,3 +56,4 @@ class PolicyLadderState:
     hull_collision_twins_fell_back: bool = False
     hull_collision_twins_loaded: bool = False
     hopeless_context: HopelessRowFacts | None = None
+    ship_first_overshoot: ShipFirstOvershootPlan | None = None

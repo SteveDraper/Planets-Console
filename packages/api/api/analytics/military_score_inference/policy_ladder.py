@@ -30,9 +30,15 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     run_policy_ladder_tier_step,
 )
+from api.analytics.military_score_inference.ship_first_overshoot import (
+    SHIP_FIRST_PREFIX_STOP_REASON,
+    leftover_military_2x,
+    resolve_ship_first_overshoot_plan,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
+    STATUS_MINE_SCORE_RESIDUAL,
     STATUS_NO_EXACT_SOLUTION,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
@@ -108,18 +114,40 @@ def finalize_policy_ladder_result(
             state.policy_steps_attempted,
             state.step_diagnostics,
         )
-    merged_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
+    plan = state.ship_first_overshoot
+    skip_leftover_0 = plan is not None and plan.skip_leftover_0_exact
+    leftover_0 = [
+        solution
+        for solution in merged_solutions
+        if solution_satisfies_exact_hard_equalities(solution, observation, catalog)
+    ]
+    if skip_leftover_0:
+        merged_solutions = [solution for solution in merged_solutions if solution not in leftover_0]
+    elif leftover_0:
+        merged_solutions = leftover_0
+    if plan is not None and plan.active:
+        merged_solutions.sort(
+            key=lambda solution: (
+                -solution.objective_value,
+                leftover_military_2x(solution, observation, catalog),
+            )
+        )
+    else:
+        merged_solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
 
+    prefix_residual = state.ladder_early_stop_reason in (
+        "expensive_tier_abort",
+        SHIP_FIRST_PREFIX_STOP_REASON,
+    )
     if state.cancelled:
         status = STATUS_STOPPED
+    elif leftover_0 and not skip_leftover_0:
+        status = STATUS_EXACT
     elif merged_solutions:
-        if any(
-            solution_satisfies_exact_hard_equalities(solution, observation, catalog)
-            for solution in merged_solutions
-        ):
-            status = STATUS_EXACT
-        elif state.ladder_early_stop_reason == "expensive_tier_abort":
-            status = state.last_status
+        if plan is not None and plan.active:
+            status = STATUS_MINE_SCORE_RESIDUAL
+        elif prefix_residual:
+            status = state.last_status if state.last_status else STATUS_MINE_SCORE_RESIDUAL
         elif state.time_limited:
             status = STATUS_TIME_LIMITED
         else:
@@ -199,6 +227,11 @@ def solve_with_policy_ladder(
         prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
         prior_fleet_records=prior_fleet_records,
         hopeless_context=resolved_hopeless,
+        ship_first_overshoot=resolve_ship_first_overshoot_plan(
+            observation,
+            turn,
+            hopeless_context=resolved_hopeless,
+        ),
     )
     while not state.ladder_complete and state.next_step_index < len(state.policy_steps):
         if cancel_token is not None and cancel_token.is_cancelled():

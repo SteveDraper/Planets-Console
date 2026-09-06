@@ -1,5 +1,6 @@
 """Per-solution military score arithmetic for inference API payloads."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.models import (
@@ -10,6 +11,22 @@ from api.analytics.military_score_inference.models import (
     candidate_action_has_military_interval,
     candidate_military_subtotal_bounds_2x,
 )
+
+
+def catalog_explained_military_delta_2x(
+    solution: InferenceSolution,
+    actions_by_id: Mapping[str, CandidateAction],
+    combos_by_id: Mapping[str, ShipBuildCombo],
+) -> int:
+    """Point-score military 2x explained by this solution's catalog rows."""
+    explained = 0
+    for action in solution.actions:
+        catalog_action = actions_by_id[action.action_id]
+        explained += catalog_action.score_delta_2x * action.count
+    for ship_build in solution.ship_builds:
+        combo = combos_by_id[ship_build.combo_id]
+        explained += combo.score_delta_2x * ship_build.count
+    return explained
 
 
 @dataclass

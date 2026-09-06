@@ -1,7 +1,7 @@
 """Solve-time worthwhile remainder bound from mine-stock histograms (design §3.9).
 
 Loads ``mine_stock_{category}.yaml`` and converts exact-turn p90 stock to leftover
-2x. Does not attach the cap to CP-SAT; that is the overshoot-constraint phase.
+2x. The ship-first overshoot overlay (#413) attaches ``cap_2x`` to CP-SAT.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ LEFTOVER_MILITARY_2X_PER_LOST_UNIT = 54 / 100
 
 @dataclass(frozen=True)
 class WorthwhileRemainderBound:
-    """Real leftover bound plus the integer CP-SAT cap (constraint unwired)."""
+    """Real leftover bound plus the integer CP-SAT overshoot cap."""
 
     bound_2x: float
     cap_2x: int

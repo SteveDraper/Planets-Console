@@ -30,7 +30,7 @@ from api.analytics.military_score_inference.solver import (
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
-from tests.fixtures.military_score_inference import _observation
+from tests.fixtures.military_score_inference import _observation, without_player_minefields
 
 _LARGE_FIELD_MIN_UNITS = 1000
 
@@ -333,7 +333,7 @@ def test_expensive_tiers_are_not_entered_on_mine_residual_abort(sample_turn, mon
     observation = _observation(military_delta_2x=-40, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(),
         time_limit_seconds=60.0,
     )
@@ -349,7 +349,7 @@ def test_expensive_tiers_are_not_entered_on_moderate_residual_abort(
     observation = _observation(military_delta_2x=-10, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(),
         time_limit_seconds=60.0,
     )
@@ -363,7 +363,7 @@ def test_positive_leftover_still_climbs_expensive_tiers(sample_turn, monkeypatch
     observation = _observation(military_delta_2x=80, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(),
         time_limit_seconds=60.0,
     )
@@ -409,7 +409,7 @@ def test_abort_uses_catalog_envelope_leftover_not_raw_military(sample_turn, monk
     )
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(),
         time_limit_seconds=60.0,
     )
@@ -550,7 +550,7 @@ def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
     )
 
     def _solve_side_effect(problem, **kwargs):
-        if problem.policy_step_id == "full_components":
+        if problem.policy_step_id == "admit_ship_torpedoes":
             return _emit_mock_solver_solutions(ship_exact, **kwargs)
         return _emit_mock_solver_solutions(
             InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
@@ -574,12 +574,13 @@ def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
     observation = _observation(military_delta_2x=-40, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(sticky_prior=True),
         time_limit_seconds=60.0,
     )
     assert result.status == STATUS_EXACT
     assert EXPENSIVE_TIER_STEP_IDS.isdisjoint(attempted)
+    assert "modest_planet_defense" not in attempted
 
 
 def _minefield(*, owner_id: int, units: int, field_id: int = 1) -> object:

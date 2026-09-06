@@ -611,6 +611,7 @@ def solve_inference_problem(
         "policy_step_id": problem.policy_step_id,
         "policy_step_index": problem.policy_step_index,
         "military_score_alpha": problem.military_score_alpha,
+        "military_overshoot_cap_2x": problem.military_overshoot_cap_2x,
     }
     diagnostics["nearBestObjectiveThreshold"] = search.near_best_threshold
     if search.tier_max_objective is not None:

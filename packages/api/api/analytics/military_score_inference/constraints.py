@@ -141,6 +141,7 @@ class _SumEqualityConstraint:
         observation: InferenceObservation,
         *,
         military_score_alpha: int = 0,
+        military_overshoot_cap_2x: int | None = None,
     ) -> None:
         rhs = getattr(observation, self.observation_attr)
         if self.coefficient_attr == "score_delta_2x":
@@ -152,6 +153,10 @@ class _SumEqualityConstraint:
                 combo_count_vars,
             )
             partition_slack = observation.military_partition_slack_2x
+            if military_overshoot_cap_2x is not None:
+                model.add(lhs >= rhs + partition_slack + 1)
+                model.add(lhs <= rhs + military_overshoot_cap_2x)
+                return
             if partition_slack > 0:
                 model.add(lhs >= rhs - partition_slack)
                 model.add(lhs <= rhs + partition_slack)
@@ -230,6 +235,7 @@ class InferenceHardConstraints:
     enforce_priority_point_constraint: bool = False
     enforce_idle_dock_pp_equality: bool = False
     military_score_alpha: int = 0
+    military_overshoot_cap_2x: int | None = None
 
     @classmethod
     def from_problem(cls, problem: InferenceProblem) -> InferenceHardConstraints:
@@ -237,6 +243,7 @@ class InferenceHardConstraints:
             enforce_priority_point_constraint=problem.enforce_priority_point_constraint,
             enforce_idle_dock_pp_equality=problem.enforce_idle_dock_pp_equality,
             military_score_alpha=problem.military_score_alpha,
+            military_overshoot_cap_2x=problem.military_overshoot_cap_2x,
         )
 
     def enforced_equalities(self) -> tuple[_SumEqualityConstraint, ...]:
@@ -253,6 +260,16 @@ class InferenceHardConstraints:
         strings: list[str] = []
         for constraint in self.enforced_equalities():
             if (
+                constraint.coefficient_attr == "score_delta_2x"
+                and self.military_overshoot_cap_2x is not None
+            ):
+                slack = observation.military_partition_slack_2x
+                strings.append(
+                    f"{observation.military_delta_2x + slack + 1} <= "
+                    f"sum(scoreDelta2x * count) <= "
+                    f"{observation.military_delta_2x + self.military_overshoot_cap_2x}"
+                )
+            elif (
                 constraint.coefficient_attr == "score_delta_2x"
                 and observation.military_partition_slack_2x > 0
             ):
@@ -294,6 +311,7 @@ class InferenceHardConstraints:
                 combo_count_vars,
                 observation,
                 military_score_alpha=self.military_score_alpha,
+                military_overshoot_cap_2x=self.military_overshoot_cap_2x,
             )
         model.add(
             sum(
@@ -579,6 +597,7 @@ def observation_to_constraints_payload(
         "starbasesOwned": observation.starbases_owned,
         "isAfterShipLimit": observation.is_after_ship_limit,
         "militaryScoreAlpha": constraints.military_score_alpha,
+        "militaryOvershootCap2x": constraints.military_overshoot_cap_2x,
         "appliedEqualities": constraints.applied_equalities(
             observation,
             aggregate_action_ids=aggregate_action_ids,
