@@ -22,8 +22,8 @@ def lost_units_after_default_decay(units: int) -> int:
 def equal_split_field_units(total_units: int, field_count: int) -> tuple[int, ...]:
     """Split ``total_units`` across ``field_count`` fields as evenly as possible.
 
-    Remainder units go to the first fields. Empty or non-positive field counts
-    yield no fields (the blob approximation is a single implied field).
+    Remainder units go to the first fields. Non-positive ``field_count`` or
+    ``total_units`` yield no fields.
     """
     if field_count <= 0 or total_units <= 0:
         return ()
