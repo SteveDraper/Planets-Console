@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
@@ -25,6 +26,8 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
     InferenceSolutionAction,
+    InferenceSolutionShipBuild,
+    ShipBuildCombo,
 )
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.policy_ladder_admission import (
@@ -34,11 +37,15 @@ from api.analytics.military_score_inference.policy_ladder_admission import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.ranked_solution_buffer import solution_signature
+from api.analytics.military_score_inference.score_arithmetic import (
+    catalog_explained_military_delta_2x,
+)
 from api.analytics.military_score_inference.ship_first_overshoot import (
     PLANET_OR_STARBASE_POST_STEP_IDS,
     SHIP_FIRST_PREFIX_LAST_STEP_ID,
     SHIP_FIRST_PREFIX_STOP_REASON,
     ShipFirstOvershootPlan,
+    leftover_military_2x,
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
@@ -116,6 +123,40 @@ def _overshoot_solution(*, objective: int = -10) -> InferenceSolution:
     )
 
 
+def _rush_action() -> CandidateAction:
+    return CandidateAction(
+        id="build_rush",
+        label="Build Rush",
+        score_delta_2x=420,
+        warship_delta=1,
+        upper_bound=1,
+    )
+
+
+def _rush_catalog(*, policy_step_id: str = "", policy_step_index: int = 0) -> ActionCatalog:
+    return ActionCatalog(
+        aggregate_actions=(_rush_action(),),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+        policy_step_id=policy_step_id,
+        policy_step_index=policy_step_index,
+    )
+
+
+def _patch_catalog_from_turn(monkeypatch, catalog_factory) -> None:
+    def _catalog_from_turn(_observation, _turn, **kwargs):
+        policy_step = kwargs.get("policy_step")
+        return catalog_factory(
+            policy_step_id=policy_step.id if policy_step is not None else "",
+            policy_step_index=kwargs.get("policy_step_index", 0),
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.build_action_catalog_from_turn",
+        _catalog_from_turn,
+    )
+
+
 def test_skip_leftover_0_when_current_turn_owner_fields(sample_turn, monkeypatch) -> None:
     exact = InferenceResult(status=STATUS_EXACT, solutions=(_overshoot_solution(),), diagnostics={})
     overshoot = InferenceResult(
@@ -132,6 +173,7 @@ def test_skip_leftover_0_when_current_turn_owner_fields(sample_turn, monkeypatch
         modes.append("exact")
         return _emit_mock_solver_solutions(exact, **kwargs)
 
+    _patch_catalog_from_turn(monkeypatch, _rush_catalog)
     monkeypatch.setattr(
         "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
@@ -175,6 +217,7 @@ def test_exact_preempts_overshoot_without_current_turn_owner_fields(
         modes.append("exact")
         return _emit_mock_solver_solutions(exact, **kwargs)
 
+    _patch_catalog_from_turn(monkeypatch, _rush_catalog)
     monkeypatch.setattr(
         "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
@@ -221,6 +264,7 @@ def test_overshoot_after_exact_unsat_uses_phase_two_cap(sample_turn, monkeypatch
             **kwargs,
         )
 
+    _patch_catalog_from_turn(monkeypatch, _rush_catalog)
     monkeypatch.setattr(
         "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
@@ -331,18 +375,8 @@ def test_mine_score_residual_persists_ranked_solutions_and_rank1_leftover(sample
     observation = _observation(
         military_delta_2x=400, warship_delta=1, military_partition_slack_2x=1
     )
-    action = CandidateAction(
-        id="build_rush",
-        label="Build Rush",
-        score_delta_2x=420,
-        warship_delta=1,
-        upper_bound=1,
-    )
-    catalog = ActionCatalog(
-        aggregate_actions=(action,),
-        ship_build_combos=(),
-        probability_buckets_by_action_id={},
-    )
+    catalog = _rush_catalog()
+    action = catalog.aggregate_actions[0]
     solution = _overshoot_solution()
     result = InferenceResult(
         status=STATUS_MINE_SCORE_RESIDUAL,
@@ -365,13 +399,6 @@ def test_mine_score_residual_persists_ranked_solutions_and_rank1_leftover(sample
 
 
 def _interval_mix_actions() -> tuple[CandidateAction, CandidateAction]:
-    ship = CandidateAction(
-        id="build_rush",
-        label="Build Rush",
-        score_delta_2x=420,
-        warship_delta=1,
-        upper_bound=1,
-    )
     decrease = CandidateAction(
         id="loss:warship:envelope",
         label="Ship loss",
@@ -381,7 +408,7 @@ def _interval_mix_actions() -> tuple[CandidateAction, CandidateAction]:
         score_delta_2x_max=0,
         upper_bound=1,
     )
-    return ship, decrease
+    return _rush_action(), decrease
 
 
 def _interval_mix_solution() -> InferenceSolution:
@@ -454,13 +481,6 @@ def test_skip_leftover_0_interval_mix_persists_residual_not_empty_exact(
     solution = _interval_mix_solution()
     overshoot_steps: list[str] = []
 
-    def _catalog_from_turn(_observation, _turn, **kwargs):
-        policy_step = kwargs.get("policy_step")
-        return _interval_mix_catalog(
-            policy_step_id=policy_step.id if policy_step is not None else "",
-            policy_step_index=kwargs.get("policy_step_index", 0),
-        )
-
     def _solve_side_effect(problem, **kwargs):
         if problem.military_overshoot_cap_2x is None:
             return _emit_mock_solver_solutions(
@@ -473,10 +493,7 @@ def test_skip_leftover_0_interval_mix_persists_residual_not_empty_exact(
             **kwargs,
         )
 
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step.build_action_catalog_from_turn",
-        _catalog_from_turn,
-    )
+    _patch_catalog_from_turn(monkeypatch, _interval_mix_catalog)
     monkeypatch.setattr(
         "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
         _solve_side_effect,
@@ -511,3 +528,72 @@ def test_skip_leftover_0_interval_mix_persists_residual_not_empty_exact(
     assert row.status == STATUS_MINE_SCORE_RESIDUAL
     assert row.solutions
     assert row.unexplained_military_delta_2x == 20
+
+
+def _point_combo(*, combo_id: str = "combo_meteor", score_delta_2x: int = 4176) -> ShipBuildCombo:
+    return ShipBuildCombo(
+        combo_id=combo_id,
+        hull_id=24,
+        engine_id=9,
+        beam_id=10,
+        torp_id=10,
+        beam_count=4,
+        launcher_count=4,
+        labels=("Meteor",),
+        score_delta_2x=score_delta_2x,
+        warship_delta=1,
+        build_slot_usage=1,
+        upper_bound=2,
+    )
+
+
+def test_leftover_military_2x_matches_catalog_explained_minus_observed() -> None:
+    action = _rush_action()
+    combo = _point_combo()
+    catalog = ActionCatalog(
+        aggregate_actions=(action,),
+        ship_build_combos=(combo,),
+        probability_buckets_by_action_id={},
+    )
+    solution = InferenceSolution(
+        objective_value=-10,
+        actions=(InferenceSolutionAction(action_id=action.id, label=action.label, count=1),),
+        ship_builds=(InferenceSolutionShipBuild(combo_id=combo.combo_id, label="Meteor", count=2),),
+    )
+    observation = _observation(military_delta_2x=400, warship_delta=3)
+    explained = catalog_explained_military_delta_2x(
+        solution,
+        {action.id: action},
+        {combo.combo_id: combo},
+    )
+    assert leftover_military_2x(solution, observation, catalog) == explained - 400
+
+
+def test_leftover_military_2x_raises_on_missing_catalog_action() -> None:
+    catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
+    solution = _overshoot_solution()
+    observation = _observation(military_delta_2x=400, warship_delta=1)
+    with pytest.raises(KeyError):
+        leftover_military_2x(solution, observation, catalog)
+
+
+def test_leftover_military_2x_raises_on_missing_catalog_combo() -> None:
+    catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+    )
+    solution = InferenceSolution(
+        objective_value=-10,
+        actions=(),
+        ship_builds=(
+            InferenceSolutionShipBuild(combo_id="combo_missing", label="Meteor", count=1),
+        ),
+    )
+    observation = _observation(military_delta_2x=400, warship_delta=1)
+    with pytest.raises(KeyError):
+        leftover_military_2x(solution, observation, catalog)

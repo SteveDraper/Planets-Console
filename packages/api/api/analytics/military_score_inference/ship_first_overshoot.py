@@ -19,6 +19,9 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
 )
 from api.analytics.military_score_inference.prior_mining.mine_stock import owned_active_minefields
+from api.analytics.military_score_inference.score_arithmetic import (
+    catalog_explained_military_delta_2x,
+)
 from api.analytics.military_score_inference.worthwhile_remainder_bound import (
     worthwhile_remainder_bound_for_turn,
 )
@@ -105,17 +108,11 @@ def leftover_military_2x(
     catalog: ActionCatalog,
 ) -> int:
     """Raw overshoot ``explained - observed`` in solver 2x (post-sort leftover)."""
-    actions_by_id = {action.id: action for action in catalog.aggregate_actions}
-    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
-    explained = 0
-    for action in solution.actions:
-        catalog_action = actions_by_id.get(action.action_id)
-        if catalog_action is None:
-            continue
-        explained += catalog_action.score_delta_2x * action.count
-    for ship_build in solution.ship_builds:
-        combo = combos_by_id.get(ship_build.combo_id)
-        if combo is None:
-            continue
-        explained += combo.score_delta_2x * ship_build.count
-    return explained - observation.military_delta_2x
+    return (
+        catalog_explained_military_delta_2x(
+            solution,
+            {action.id: action for action in catalog.aggregate_actions},
+            {combo.combo_id: combo for combo in catalog.ship_build_combos},
+        )
+        - observation.military_delta_2x
+    )
