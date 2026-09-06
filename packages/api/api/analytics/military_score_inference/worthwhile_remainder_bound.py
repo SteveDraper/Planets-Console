@@ -14,7 +14,6 @@ from pathlib import Path
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.prior_mining.mine_stock import (
     MineStockAsset,
-    create_empty_mine_stock_asset,
     load_mine_stock_for_category,
     owned_active_minefields,
 )
@@ -128,7 +127,11 @@ def worthwhile_remainder_bound_for_turn(
     *,
     base_dir: Path | None = None,
 ) -> WorthwhileRemainderBound | None:
-    """Load the category mine-stock asset and compute the bound for this row."""
+    """Load the category mine-stock asset and compute the bound for this row.
+
+    Missing player or missing required yaml returns ``None`` -- no synthetic empty
+    asset. ``GameCategory.UNKNOWN`` loads standard, same as ``load_twins_for_turn``.
+    """
     try:
         player = player_by_id(turn, observation.player_id)
     except ValueError:
@@ -137,11 +140,12 @@ def worthwhile_remainder_bound_for_turn(
         turn.settings,
         player_count=len(players_by_id(turn)),
     )
+    if category == GameCategory.UNKNOWN:
+        category = GameCategory.STANDARD
     try:
         asset, _, _ = load_mine_stock_for_category(category, base_dir=base_dir)
     except FileNotFoundError:
-        fallback = GameCategory.STANDARD if category != GameCategory.STANDARD else category
-        asset = create_empty_mine_stock_asset(fallback)
+        return None
     owned = owned_active_minefields(turn, observation.player_id)
     return compute_worthwhile_remainder_bound(
         asset,

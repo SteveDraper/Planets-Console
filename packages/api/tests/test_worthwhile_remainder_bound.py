@@ -21,7 +21,9 @@ from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTI
 from api.analytics.military_score_inference.worthwhile_remainder_bound import (
     compute_worthwhile_remainder_bound,
     leftover_military_2x_from_lost_units,
+    worthwhile_remainder_bound_for_turn,
 )
+from api.analytics.turn_roster import players_by_id
 from api.concepts.game_category import GAME_CATEGORY_RULES_VERSION, GameCategory
 from api.concepts.minefield_decay import (
     equal_split_field_units,
@@ -43,10 +45,12 @@ OBSERVED_EXACT_LEFTOVER_2X = 12.42
 OBSERVED_EQUAL_SPLIT_LEFTOVER_2X = 11.88
 
 
-def _asset(histograms: MineStockHistograms) -> MineStockAsset:
+def _asset(
+    histograms: MineStockHistograms, *, category: GameCategory = GameCategory.STANDARD
+) -> MineStockAsset:
     return MineStockAsset(
         version=1,
-        category=GameCategory.STANDARD.value,
+        category=category.value,
         game_category_rules_version=GAME_CATEGORY_RULES_VERSION,
         histograms=histograms,
     )
@@ -83,6 +87,20 @@ def _bound(
         host_turn=host_turn,
         observed_field_units=observed_field_units,
         slack_2x=slack_2x,
+    )
+
+
+def _remainder_observation(turn, *, slack_2x: int = 1) -> InferenceObservation:
+    return InferenceObservation(
+        player_id=turn.player.id,
+        turn=turn.settings.turn,
+        military_delta_2x=40,
+        warship_delta=0,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=1,
+        is_after_ship_limit=False,
+        military_partition_slack_2x=slack_2x,
     )
 
 
@@ -229,6 +247,46 @@ def test_load_mine_stock_for_category_falls_back_to_standard(tmp_path: Path):
     assert fell_back is True
     assert path == tmp_path / "mine_stock_standard.yaml"
     assert asset.histograms[RACE_ID][40]["totalUnits"][BLOB_UNITS] == 3.0
+
+
+def test_missing_mine_stock_yaml_omits_remainder_bound(sample_turn, tmp_path: Path):
+    turn = replace(sample_turn, minefields=())
+    assert (
+        worthwhile_remainder_bound_for_turn(_remainder_observation(turn), turn, base_dir=tmp_path)
+        is None
+    )
+
+
+def test_unknown_category_uses_standard_mine_stock_not_unknown_yaml(sample_turn, tmp_path: Path):
+    host_turn = sample_turn.settings.turn
+    race_id = sample_turn.player.raceid
+    write_mine_stock_asset(
+        tmp_path / "mine_stock_standard.yaml",
+        _asset({race_id: {host_turn: _positive_stock_cell(80.0)}}),
+    )
+    write_mine_stock_asset(
+        tmp_path / "mine_stock_unknown.yaml",
+        _asset(
+            {race_id: {host_turn: _empty_stock_cell(100.0)}},
+            category=GameCategory.UNKNOWN,
+        ),
+    )
+    turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, campaignmode=False, endturn=100, shiplimit=499),
+        players=(),
+        minefields=(),
+    )
+    assert (
+        GameCategory.from_game_settings(turn.settings, player_count=len(players_by_id(turn)))
+        == GameCategory.UNKNOWN
+    )
+    bound = worthwhile_remainder_bound_for_turn(
+        _remainder_observation(turn), turn, base_dir=tmp_path
+    )
+    assert bound is not None
+    assert bound.p90_total_units == BLOB_UNITS
+    assert bound.empirical_leftover_2x == pytest.approx(EQUAL_SPLIT_LEFTOVER_2X)
 
 
 def test_ladder_diagnostics_record_remainder_bound(sample_turn, monkeypatch):
