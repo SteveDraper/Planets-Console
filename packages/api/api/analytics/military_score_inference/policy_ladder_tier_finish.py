@@ -187,8 +187,6 @@ def finish_tier_step(
         if maybe_ship_first_prefix_stop_after_step(
             state,
             policy_step=policy_step,
-            observation=observation,
-            catalog=catalog,
         ):
             _annotate_last_step_early_stop(state)
             return

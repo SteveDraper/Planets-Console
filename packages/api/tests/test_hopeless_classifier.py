@@ -566,11 +566,6 @@ def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
         "solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder."
-        "solution_satisfies_exact_hard_equalities",
-        lambda solution, observation, catalog: True,
-    )
     observation = _observation(military_delta_2x=-40, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,

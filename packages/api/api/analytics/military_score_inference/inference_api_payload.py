@@ -303,7 +303,12 @@ def inference_api_payload(
         "isComplete": status != STATUS_TIME_LIMITED or len(solutions) == 0,
         "solutions": (
             [
-                _serialize_solution_with_arithmetic(observation, catalog, solution)
+                _serialize_solution_with_arithmetic(
+                    observation,
+                    catalog,
+                    solution,
+                    assign_intervals_to_observed_slack=status != STATUS_MINE_SCORE_RESIDUAL,
+                )
                 for solution in solutions
             ]
             if observation is not None and catalog is not None
@@ -376,6 +381,8 @@ def _serialize_solution_with_arithmetic(
     observation: InferenceObservation,
     catalog: ActionCatalog,
     solution: InferenceSolution,
+    *,
+    assign_intervals_to_observed_slack: bool = True,
 ) -> dict[str, object]:
     actions_by_id = {action.id: action for action in catalog.aggregate_actions}
     combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
@@ -385,6 +392,7 @@ def _serialize_solution_with_arithmetic(
         observation,
         actions_by_id,
         combos_by_id,
+        assign_intervals_to_observed_slack=assign_intervals_to_observed_slack,
     )
     return payload
 

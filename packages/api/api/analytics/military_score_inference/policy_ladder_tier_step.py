@@ -48,7 +48,10 @@ from api.analytics.military_score_inference.policy_ladder_tier_finish import (
 from api.analytics.military_score_inference.prior_fleet_tech_raise import (
     resolve_prior_fleet_tech_raise_plan,
 )
-from api.analytics.military_score_inference.ranked_solution_buffer import admit_ranked_solution
+from api.analytics.military_score_inference.ranked_solution_buffer import (
+    admit_ranked_solution,
+    solution_signature,
+)
 from api.analytics.military_score_inference.score_arithmetic import (
     catalog_explained_military_delta_2x,
 )
@@ -496,6 +499,7 @@ def run_policy_ladder_tier_step(
         )
         if admitted:
             newly_admitted.append(solution)
+            state.overshoot_signatures.add(solution_signature(solution))
 
     for seed in seeds_for_step[: policy_step.max_seeds]:
         if stop_after_budget():
@@ -556,8 +560,9 @@ def run_policy_ladder_tier_step(
 
     held_exact = held_leftover_0_solutions(state, observation, catalog)
     band_residual_2x: int | None = None
-    if overlay_active:
-        if not held_exact and overlay is not None and overlay.run_overshoot:
+    if overlay_active and overlay is not None:
+        run_overshoot = overlay.run_overshoot and (skip_leftover_0 or not held_exact)
+        if run_overshoot:
             if not budget_exhausted() and run.remaining_seconds() > 0:
                 overshoot_result, overshoot_problem = _solve_catalog(
                     observation,

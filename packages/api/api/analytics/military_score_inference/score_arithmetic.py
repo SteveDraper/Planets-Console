@@ -48,17 +48,29 @@ def solution_military_score_arithmetic_payload(
     observation: InferenceObservation,
     actions_by_id: dict[str, CandidateAction],
     combos_by_id: dict[str, ShipBuildCombo] | None = None,
+    *,
+    assign_intervals_to_observed_slack: bool = True,
 ) -> dict[str, object]:
-    """Explain how solution action counts sum to the observed military score delta.
+    """Explain how solution action counts sum to a military score target.
 
-    Catalog envelopes on interval actions stay wide for search. Emitted line items
-    intersect those envelopes with leftover after the other elements of this
-    solution so the row is self-consistent and maximally tight.
+    Catalog envelopes on interval actions stay wide for search. Exact-pass rows
+    intersect those envelopes with leftover after the other elements so the row
+    is self-consistent around ``observed ± slack``. Residual overshoot rows
+    assign to catalog point-score explained instead, so ``matchesObserved`` is
+    not forced true while leftover is above slack.
     """
     combo_lookup = combos_by_id or {}
     contributions = _contributions_for_solution(solution, actions_by_id, combo_lookup)
-    _tighten_interval_contributions(contributions, observation)
-    _assign_interval_contributions(contributions, observation)
+    if assign_intervals_to_observed_slack:
+        target_2x = observation.military_delta_2x
+        assignment_slack_2x = observation.military_partition_slack_2x
+    else:
+        target_2x = catalog_explained_military_delta_2x(solution, actions_by_id, combo_lookup)
+        assignment_slack_2x = 0
+    _tighten_interval_contributions(
+        contributions, target_2x=target_2x, slack_2x=assignment_slack_2x
+    )
+    _assign_interval_contributions(contributions, target_2x=target_2x, slack_2x=assignment_slack_2x)
 
     line_items = [_line_item_payload(item) for item in contributions]
     explained_military_delta_2x = sum(item.assigned for item in contributions)
@@ -133,13 +145,13 @@ def _contributions_for_solution(
 
 def _tighten_interval_contributions(
     contributions: list[_Contribution],
-    observation: InferenceObservation,
+    *,
+    target_2x: int,
+    slack_2x: int,
 ) -> None:
     for item in contributions:
         item.tight_lo = item.catalog_lo
         item.tight_hi = item.catalog_hi
-    slack = observation.military_partition_slack_2x
-    observed = observation.military_delta_2x
     changed = True
     while changed:
         changed = False
@@ -153,8 +165,8 @@ def _tighten_interval_contributions(
                     continue
                 other_min += other.tight_lo
                 other_max += other.tight_hi
-            need_lo = observed - slack - other_max
-            need_hi = observed + slack - other_min
+            need_lo = target_2x - slack_2x - other_max
+            need_hi = target_2x + slack_2x - other_min
             new_lo = max(item.tight_lo, need_lo)
             new_hi = min(item.tight_hi, need_hi)
             if new_lo > new_hi:
@@ -167,24 +179,24 @@ def _tighten_interval_contributions(
 
 def _assign_interval_contributions(
     contributions: list[_Contribution],
-    observation: InferenceObservation,
+    *,
+    target_2x: int,
+    slack_2x: int,
 ) -> None:
-    slack = observation.military_partition_slack_2x
-    observed = observation.military_delta_2x
     sum_lo = sum(item.tight_lo for item in contributions)
     sum_hi = sum(item.tight_hi for item in contributions)
-    feasible_lo = max(sum_lo, observed - slack)
-    feasible_hi = min(sum_hi, observed + slack)
+    feasible_lo = max(sum_lo, target_2x - slack_2x)
+    feasible_hi = min(sum_hi, target_2x + slack_2x)
     if feasible_lo > feasible_hi:
         for item in contributions:
             item.assigned = item.catalog_lo
         return
-    if observed < feasible_lo:
+    if target_2x < feasible_lo:
         target = feasible_lo
-    elif observed > feasible_hi:
+    elif target_2x > feasible_hi:
         target = feasible_hi
     else:
-        target = observed
+        target = target_2x
     for item in contributions:
         item.assigned = item.tight_lo
     remainder = target - sum(item.assigned for item in contributions)

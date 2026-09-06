@@ -20,8 +20,18 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionAction,
 )
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
+from api.analytics.military_score_inference.policy_ladder_admission import (
+    leftover_0_solutions,
+    maybe_ship_first_prefix_stop_after_step,
+    solution_is_leftover_0_exact,
+)
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.ranked_solution_buffer import solution_signature
 from api.analytics.military_score_inference.ship_first_overshoot import (
     PLANET_OR_STARBASE_POST_STEP_IDS,
+    SHIP_FIRST_PREFIX_LAST_STEP_ID,
+    SHIP_FIRST_PREFIX_STOP_REASON,
+    ShipFirstOvershootPlan,
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
@@ -29,6 +39,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_MODERATE_RESIDUAL,
     STATUS_NO_EXACT_SOLUTION,
 )
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.military_score_inference.worthwhile_remainder_bound import (
     WorthwhileRemainderBound,
 )
@@ -163,11 +174,6 @@ def test_exact_preempts_overshoot_without_current_turn_owner_fields(
     )
     monkeypatch.setattr(
         "api.analytics.military_score_inference.policy_ladder_admission."
-        "solution_satisfies_exact_hard_equalities",
-        lambda *_args, **_kwargs: True,
-    )
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder."
         "solution_satisfies_exact_hard_equalities",
         lambda *_args, **_kwargs: True,
     )
@@ -336,4 +342,154 @@ def test_mine_score_residual_persists_ranked_solutions_and_rank1_leftover(sample
     assert row.status == STATUS_MINE_SCORE_RESIDUAL
     assert row.solutions
     assert row.placeholders == []
+    assert row.unexplained_military_delta_2x == 20
+
+
+def _interval_mix_actions() -> tuple[CandidateAction, CandidateAction]:
+    ship = CandidateAction(
+        id="build_rush",
+        label="Build Rush",
+        score_delta_2x=420,
+        warship_delta=1,
+        upper_bound=1,
+    )
+    decrease = CandidateAction(
+        id="loss:warship:envelope",
+        label="Ship loss",
+        score_delta_2x=0,
+        warship_delta=0,
+        score_delta_2x_min=-200,
+        score_delta_2x_max=0,
+        upper_bound=1,
+    )
+    return ship, decrease
+
+
+def _interval_mix_solution() -> InferenceSolution:
+    ship, decrease = _interval_mix_actions()
+    return InferenceSolution(
+        objective_value=-10,
+        actions=(
+            InferenceSolutionAction(action_id=ship.id, label=ship.label, count=1),
+            InferenceSolutionAction(action_id=decrease.id, label=decrease.label, count=1),
+        ),
+        ship_builds=(),
+    )
+
+
+def _interval_mix_catalog(*, policy_step_id: str = "", policy_step_index: int = 0) -> ActionCatalog:
+    ship, decrease = _interval_mix_actions()
+    return ActionCatalog(
+        aggregate_actions=(ship, decrease),
+        ship_build_combos=(),
+        probability_buckets_by_action_id={},
+        policy_step_id=policy_step_id,
+        policy_step_index=policy_step_index,
+    )
+
+
+def test_overshoot_admit_is_not_leftover_0_via_envelope_coverage() -> None:
+    observation = _observation(
+        military_delta_2x=400, warship_delta=1, military_partition_slack_2x=1
+    )
+    catalog = _interval_mix_catalog()
+    solution = _interval_mix_solution()
+    assert solution_is_leftover_0_exact(solution, observation, catalog) is True
+    assert (
+        solution_is_leftover_0_exact(solution, observation, catalog, admitted_under_overshoot=True)
+        is False
+    )
+    kept = leftover_0_solutions(
+        [solution],
+        observation,
+        catalog,
+        overshoot_signatures={solution_signature(solution)},
+    )
+    assert kept == []
+
+
+def test_prefix_stop_only_marks_ladder_complete() -> None:
+    step = next(
+        policy_step
+        for policy_step in resolve_tier_policies()
+        if policy_step.id == SHIP_FIRST_PREFIX_LAST_STEP_ID
+    )
+    state = PolicyLadderState(
+        policy_steps=(step,),
+        ship_first_overshoot=ShipFirstOvershootPlan(
+            active=True,
+            skip_leftover_0_exact=True,
+            cap_2x=40,
+            overshoot_window_empty=False,
+        ),
+        last_status=STATUS_NO_EXACT_SOLUTION,
+    )
+    assert maybe_ship_first_prefix_stop_after_step(state, policy_step=step) is True
+    assert state.ladder_complete is True
+    assert state.ladder_early_stop_reason == SHIP_FIRST_PREFIX_STOP_REASON
+    assert state.last_status == STATUS_NO_EXACT_SOLUTION
+
+
+def test_skip_leftover_0_interval_mix_persists_residual_not_empty_exact(
+    sample_turn, monkeypatch
+) -> None:
+    solution = _interval_mix_solution()
+    overshoot_steps: list[str] = []
+
+    def _catalog_from_turn(_observation, _turn, **kwargs):
+        policy_step = kwargs.get("policy_step")
+        return _interval_mix_catalog(
+            policy_step_id=policy_step.id if policy_step is not None else "",
+            policy_step_index=kwargs.get("policy_step_index", 0),
+        )
+
+    def _solve_side_effect(problem, **kwargs):
+        if problem.military_overshoot_cap_2x is None:
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
+        overshoot_steps.append(problem.policy_step_id)
+        return _emit_mock_solver_solutions(
+            InferenceResult(status=STATUS_EXACT, solutions=(solution,), diagnostics={}),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.build_action_catalog_from_turn",
+        _catalog_from_turn,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.ship_first_overshoot.worthwhile_remainder_bound_for_turn",
+        lambda *_args, **_kwargs: _open_bound(cap_2x=40),
+    )
+    turn = replace(sample_turn, minefields=(_minefield(units=50),))
+    observation = _observation(
+        military_delta_2x=400, warship_delta=1, military_partition_slack_2x=1
+    )
+    result, catalog, problem, attempted, _ = solve_with_policy_ladder(
+        observation,
+        turn,
+        hopeless_context=_facts(max_owner_minefield_units=50),
+        time_limit_seconds=60.0,
+    )
+    assert result.status == STATUS_MINE_SCORE_RESIDUAL
+    assert result.solutions
+    assert len(overshoot_steps) > 1
+    assert PLANET_OR_STARBASE_POST_STEP_IDS.isdisjoint(attempted)
+    payload = inference_result_to_api_payload(result, catalog, observation, turn, problem)
+    assert payload["status"] == STATUS_MINE_SCORE_RESIDUAL
+    assert payload["unexplainedMilitaryDelta2x"] == 20
+    arithmetic = payload["solutions"][0]["militaryScoreArithmetic"]
+    assert arithmetic["matchesObserved"] is False
+    assert arithmetic["explainedMilitaryDelta2x"] == 420
+    row = persisted_inference_row_from_wire_complete(
+        {"type": "complete", **{k: v for k, v in payload.items() if k != "diagnostics"}}
+    )
+    assert row.status == STATUS_MINE_SCORE_RESIDUAL
+    assert row.solutions
     assert row.unexplained_military_delta_2x == 20

@@ -30,6 +30,7 @@ class PolicyLadderState:
     step_diagnostics: list[dict[str, object]] = field(default_factory=list)
     merged_solutions: list[InferenceSolution] = field(default_factory=list)
     seen_signatures: set[tuple[tuple[str, int], ...]] = field(default_factory=set)
+    overshoot_signatures: set[tuple[tuple[str, int], ...]] = field(default_factory=set)
     catalog: ActionCatalog | None = None
     problem: InferenceProblem | None = None
     last_status: str = STATUS_NO_EXACT_SOLUTION

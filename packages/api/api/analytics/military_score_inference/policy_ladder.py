@@ -10,9 +10,6 @@ from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
 )
-from api.analytics.military_score_inference.constraints import (
-    solution_satisfies_exact_hard_equalities,
-)
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hopeless_classifier import (
     HopelessRowFacts,
@@ -26,6 +23,7 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
 )
+from api.analytics.military_score_inference.policy_ladder_admission import leftover_0_solutions
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     run_policy_ladder_tier_step,
@@ -116,14 +114,13 @@ def finalize_policy_ladder_result(
         )
     plan = state.ship_first_overshoot
     skip_leftover_0 = plan is not None and plan.skip_leftover_0_exact
-    leftover_0 = [
-        solution
-        for solution in merged_solutions
-        if solution_satisfies_exact_hard_equalities(solution, observation, catalog)
-    ]
-    if skip_leftover_0:
-        merged_solutions = [solution for solution in merged_solutions if solution not in leftover_0]
-    elif leftover_0:
+    leftover_0 = leftover_0_solutions(
+        merged_solutions,
+        observation,
+        catalog,
+        overshoot_signatures=state.overshoot_signatures,
+    )
+    if leftover_0 and not skip_leftover_0:
         merged_solutions = leftover_0
     if plan is not None and plan.active:
         merged_solutions.sort(
@@ -143,6 +140,8 @@ def finalize_policy_ladder_result(
         status = STATUS_STOPPED
     elif leftover_0 and not skip_leftover_0:
         status = STATUS_EXACT
+    elif skip_leftover_0:
+        status = STATUS_MINE_SCORE_RESIDUAL
     elif merged_solutions:
         if plan is not None and plan.active:
             status = STATUS_MINE_SCORE_RESIDUAL
@@ -152,6 +151,8 @@ def finalize_policy_ladder_result(
             status = STATUS_TIME_LIMITED
         else:
             status = STATUS_NO_EXACT_SOLUTION
+    elif plan is not None and plan.active:
+        status = STATUS_MINE_SCORE_RESIDUAL
     else:
         status = STATUS_TIME_LIMITED if state.time_limited else state.last_status
 
