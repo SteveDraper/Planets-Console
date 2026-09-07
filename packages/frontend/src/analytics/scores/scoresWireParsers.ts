@@ -82,10 +82,15 @@ export function readInferenceSolution(entry: unknown): ScoresInferenceSolution |
     }
   }
   const arithmetic = readMilitaryScoreArithmetic(entry.militaryScoreArithmetic)
+  const shipFirstFamily =
+    entry.shipFirstFamily === 'mine_overshoot' || entry.shipFirstFamily === 'ammo_top_up'
+      ? entry.shipFirstFamily
+      : undefined
   return {
     objectiveValue: entry.objectiveValue,
     actions,
     ...(shipBuilds.length > 0 ? { shipBuilds } : {}),
     ...(arithmetic != null ? { militaryScoreArithmetic: arithmetic } : {}),
+    ...(shipFirstFamily != null ? { shipFirstFamily } : {}),
   }
 }

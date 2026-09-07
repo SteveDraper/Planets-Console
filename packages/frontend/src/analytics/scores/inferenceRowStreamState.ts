@@ -33,6 +33,9 @@ export function streamSolutionsToRowSolutions(
       ...(militaryScoreArithmetic != null
         ? { militaryScoreArithmetic }
         : {}),
+      ...(solution.shipFirstFamily != null
+        ? { shipFirstFamily: solution.shipFirstFamily }
+        : {}),
     }
   })
 }

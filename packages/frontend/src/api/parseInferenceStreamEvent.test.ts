@@ -141,6 +141,31 @@ describe('parseInferenceStreamEvent', () => {
     }
   })
 
+  it('parses shipFirstFamily on mine-score residual complete solutions', () => {
+    const event = parseInferenceStreamEvent(
+      JSON.stringify({
+        type: 'complete',
+        status: 'mine_score_residual',
+        displayStatus: 'mine_score_residual',
+        summary: 'Mine-score leftover (10)',
+        solutionCount: 1,
+        isComplete: true,
+        solutions: [
+          {
+            objectiveValue: -10,
+            actions: [{ actionId: 'build_rush', label: 'Build Rush', count: 1 }],
+            shipFirstFamily: 'ammo_top_up',
+          },
+        ],
+        unexplainedMilitaryDelta2x: 20,
+      })
+    )
+    expect(event?.type).toBe('complete')
+    if (event?.type === 'complete') {
+      expect(event.solutions?.[0]?.shipFirstFamily).toBe('ammo_top_up')
+    }
+  })
+
   it('parses complete events with leftover and empty placeholders', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({

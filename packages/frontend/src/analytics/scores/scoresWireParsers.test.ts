@@ -35,6 +35,15 @@ describe('readInferenceSolution', () => {
     })
   })
 
+  it('parses shipFirstFamily on residual near-solutions', () => {
+    const parsed = readInferenceSolution({
+      objectiveValue: -10,
+      actions: [{ actionId: 'build_rush', label: 'Build Rush', count: 1 }],
+      shipFirstFamily: 'mine_overshoot',
+    })
+    expect(parsed?.shipFirstFamily).toBe('mine_overshoot')
+  })
+
   it('parses counterpartyPlayerId on gift/trade/acquired actions', () => {
     const parsed = readInferenceSolution({
       objectiveValue: 0,
