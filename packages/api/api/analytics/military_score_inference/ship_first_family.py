@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
 from api.analytics.military_score_inference.score_arithmetic import (
     catalog_explained_military_delta_2x,
 )
+from api.analytics.military_score_inference.ship_first_overshoot import leftover_military_2x
 
 SHIP_FIRST_FAMILY_HOLD_FLOOR = 3
 _HOLD_FAMILIES: tuple[ShipFirstFamily, ShipFirstFamily] = ("mine_overshoot", "ammo_top_up")
@@ -47,14 +48,15 @@ def _catalog_lookups(
 def non_torp_military_2x(solution: InferenceSolution, catalog: ActionCatalog) -> int:
     """Point-score military 2x excluding ``ship_torps_loaded_*`` ammo loads."""
     actions_by_id, combos_by_id = _catalog_lookups(catalog)
-    explained = 0
-    for action in solution.actions:
-        if is_torp_load_action_id(action.action_id):
-            continue
-        explained += actions_by_id[action.action_id].score_delta_2x * action.count
-    for ship_build in solution.ship_builds:
-        explained += combos_by_id[ship_build.combo_id].score_delta_2x * ship_build.count
-    return explained
+    without_torps = replace(
+        solution,
+        actions=tuple(
+            action
+            for action in solution.actions
+            if not is_torp_load_action_id(action.action_id)
+        ),
+    )
+    return catalog_explained_military_delta_2x(without_torps, actions_by_id, combos_by_id)
 
 
 def classify_ship_first_family(
@@ -68,10 +70,9 @@ def classify_ship_first_family(
     modest torps inflate leftover. Otherwise torps lifting the total above slack
     are ammo-top-up. Leftover-0 exact is untagged.
     """
-    actions_by_id, combos_by_id = _catalog_lookups(catalog)
-    explained = catalog_explained_military_delta_2x(solution, actions_by_id, combos_by_id)
+    leftover = leftover_military_2x(solution, observation, catalog)
     slack = observation.military_partition_slack_2x
-    if explained - observation.military_delta_2x <= slack:
+    if leftover <= slack:
         return None
     if non_torp_military_2x(solution, catalog) > observation.military_delta_2x + slack:
         return "mine_overshoot"
