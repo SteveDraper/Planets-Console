@@ -20,6 +20,7 @@ import {
   sortSolutionLineItemsForDisplay,
 } from './solutionLineItemDisplayOrder'
 import {
+  SHIP_FIRST_MIX_PHRASE,
   shipFirstFamilyChipLabel,
   shipFirstListMixesFamilies,
 } from './shipFirstFamilyChrome'
@@ -295,7 +296,7 @@ export function InferenceDetailModal({
         ) : null}
 
         {shipFirstListMixesFamilies(detail.solutions) ? (
-          <p className="text-xs text-slate-400">Mix of mine leftover and ammo top-up.</p>
+          <p className="text-xs text-slate-400">{SHIP_FIRST_MIX_PHRASE}.</p>
         ) : null}
 
         <div className="flex flex-col gap-3">

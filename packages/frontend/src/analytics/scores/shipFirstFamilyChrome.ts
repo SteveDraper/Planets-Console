@@ -6,6 +6,9 @@ export const SHIP_FIRST_FAMILY_CHIP_LABEL = {
   ammo_top_up: 'Ammo top-up',
 } as const
 
+/** Mix-list phrase without trailing punctuation; join/period is applied at each call site. */
+export const SHIP_FIRST_MIX_PHRASE = 'Mix of mine leftover and ammo top-up'
+
 export type ShipFirstFamilyTag = keyof typeof SHIP_FIRST_FAMILY_CHIP_LABEL
 
 export function shipFirstFamilyChipLabel(family: ShipFirstFamilyTag): string {
@@ -41,7 +44,7 @@ export function shipFirstResidualAccessibleLabel(detail: ScoresInferenceRowDetai
   const countPart = count === 1 ? '1 probable build' : `${count} probable builds`
   const parts = [countPart]
   if (shipFirstListMixesFamilies(detail.solutions)) {
-    parts.push('Mix of mine leftover and ammo top-up')
+    parts.push(SHIP_FIRST_MIX_PHRASE)
   }
   if (detail.unexplainedMilitaryDelta2x != null) {
     parts.push(`Leftover ${militaryChangeFromDelta2x(detail.unexplainedMilitaryDelta2x)}`)
