@@ -291,6 +291,111 @@ def test_overshoot_after_exact_unsat_uses_phase_two_cap(sample_turn, monkeypatch
     assert PLANET_OR_STARBASE_POST_STEP_IDS.isdisjoint(attempted)
 
 
+def test_overshoot_admit_tags_ship_first_family(sample_turn, monkeypatch) -> None:
+    overshoot = InferenceResult(
+        status=STATUS_EXACT,
+        solutions=(_overshoot_solution(),),
+        diagnostics={},
+    )
+    modes: list[str] = []
+
+    def _solve_side_effect(problem, **kwargs):
+        if problem.military_overshoot_cap_2x is not None:
+            modes.append("overshoot")
+            return _emit_mock_solver_solutions(overshoot, **kwargs)
+        modes.append("exact")
+        return _emit_mock_solver_solutions(
+            InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+            **kwargs,
+        )
+
+    _patch_catalog_from_turn(monkeypatch, _rush_catalog)
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.ship_first_overshoot.worthwhile_remainder_bound_for_turn",
+        lambda *_args, **_kwargs: _open_bound(cap_2x=40),
+    )
+    turn = replace(sample_turn, minefields=(_minefield(units=50),))
+    observation = _observation(
+        military_delta_2x=400, warship_delta=1, military_partition_slack_2x=1
+    )
+    result, catalog, problem, attempted, _ = solve_with_policy_ladder(
+        observation,
+        turn,
+        hopeless_context=_facts(max_owner_minefield_units=50),
+        time_limit_seconds=60.0,
+    )
+    assert "exact" not in modes
+    assert "overshoot" in modes
+    assert result.status == STATUS_MINE_SCORE_RESIDUAL
+    assert result.solutions
+    assert leftover_military_2x(result.solutions[0], observation, catalog) == 20
+    assert result.solutions[0].ship_first_family == "mine_overshoot"
+    assert PLANET_OR_STARBASE_POST_STEP_IDS.isdisjoint(attempted)
+    payload = inference_result_to_api_payload(result, catalog, observation, turn, problem)
+    assert payload["solutions"][0]["shipFirstFamily"] == "mine_overshoot"
+    row = persisted_inference_row_from_wire_complete(
+        {"type": "complete", **{k: v for k, v in payload.items() if k != "diagnostics"}}
+    )
+    assert row.solutions[0]["shipFirstFamily"] == "mine_overshoot"
+
+
+def test_leftover_0_exact_omits_ship_first_family(sample_turn, monkeypatch) -> None:
+    exact = InferenceResult(status=STATUS_EXACT, solutions=(_overshoot_solution(),), diagnostics={})
+    modes: list[str] = []
+
+    def _solve_side_effect(problem, **kwargs):
+        if problem.military_overshoot_cap_2x is not None:
+            modes.append("overshoot")
+            return _emit_mock_solver_solutions(
+                InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+                **kwargs,
+            )
+        modes.append("exact")
+        return _emit_mock_solver_solutions(exact, **kwargs)
+
+    _patch_catalog_from_turn(monkeypatch, _rush_catalog)
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve_side_effect,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_admission."
+        "solution_satisfies_exact_hard_equalities",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.ship_first_overshoot.worthwhile_remainder_bound_for_turn",
+        lambda *_args, **_kwargs: _open_bound(cap_2x=40),
+    )
+    turn = without_player_minefields(sample_turn, _VIEWPOINT_PLAYER_ID)
+    observation = _observation(
+        military_delta_2x=420, warship_delta=1, military_partition_slack_2x=1
+    )
+    result, catalog, problem, attempted, _ = solve_with_policy_ladder(
+        observation,
+        turn,
+        hopeless_context=_facts(sticky_prior=True),
+        time_limit_seconds=60.0,
+    )
+    assert "exact" in modes
+    assert "overshoot" not in modes
+    assert result.status == STATUS_EXACT
+    assert result.solutions
+    assert leftover_military_2x(result.solutions[0], observation, catalog) == 0
+    assert result.solutions[0].ship_first_family is None
+    assert PLANET_OR_STARBASE_POST_STEP_IDS.isdisjoint(attempted)
+    payload = inference_result_to_api_payload(result, catalog, observation, turn, problem)
+    assert "shipFirstFamily" not in payload["solutions"][0]
+    row = persisted_inference_row_from_wire_complete(
+        {"type": "complete", **{k: v for k, v in payload.items() if k != "diagnostics"}}
+    )
+    assert "shipFirstFamily" not in row.solutions[0]
+
+
 def test_empty_overshoot_window_is_empty_list_residual(sample_turn, monkeypatch) -> None:
     modes: list[str] = []
 
