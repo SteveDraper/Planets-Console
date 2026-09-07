@@ -51,9 +51,7 @@ def non_torp_military_2x(solution: InferenceSolution, catalog: ActionCatalog) ->
     without_torps = replace(
         solution,
         actions=tuple(
-            action
-            for action in solution.actions
-            if not is_torp_load_action_id(action.action_id)
+            action for action in solution.actions if not is_torp_load_action_id(action.action_id)
         ),
     )
     return catalog_explained_military_delta_2x(without_torps, actions_by_id, combos_by_id)
