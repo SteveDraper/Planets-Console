@@ -221,6 +221,37 @@ describe('InferenceDetailModal', () => {
     expect(hullImage).not.toBeNull()
   })
 
+  it('shows minefield-decay warning when explained military exceeds observed', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          solutions: [
+            {
+              ...defenseSolution,
+              militaryScoreArithmetic: {
+                ...defenseSolution.militaryScoreArithmetic,
+                explainedMilitaryChange: 49,
+                matchesObserved: false,
+              },
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        'Explained military change exceeds the observed scoreboard delta - this could be due to minefield decay'
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/does not match the observed scoreboard delta/)
+    ).toBeNull()
+  })
+
   it('shows reconciliation warning when explained military does not match observed', () => {
     render(
       <InferenceDetailModal
@@ -371,7 +402,9 @@ describe('InferenceDetailModal', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Solution 1')
     expect(screen.getByRole('dialog')).toHaveTextContent('Plausibility 40')
     expect(
-      screen.getByText(/Explained military change does not match the observed scoreboard delta/)
+      screen.getByText(
+        'Explained military change exceeds the observed scoreboard delta - this could be due to minefield decay'
+      )
     ).toBeInTheDocument()
   })
 

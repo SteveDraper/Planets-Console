@@ -33,6 +33,13 @@ type InferenceDetailModalProps = {
   isGloballyPaused?: boolean
 }
 
+function militaryMismatchWarning(arithmetic: MilitaryScoreArithmetic): string {
+  if (arithmetic.explainedMilitaryChange > arithmetic.observedMilitaryChange) {
+    return 'Explained military change exceeds the observed scoreboard delta - this could be due to minefield decay'
+  }
+  return 'Explained military change does not match the observed scoreboard delta.'
+}
+
 function SolutionActionTable({
   solution,
   arithmetic,
@@ -82,9 +89,7 @@ function SolutionActionTable({
           </span>
         </div>
         {!arithmetic.matchesObserved ? (
-          <p className="text-amber-300/90">
-            Explained military change does not match the observed scoreboard delta.
-          </p>
+          <p className="text-amber-300/90">{militaryMismatchWarning(arithmetic)}</p>
         ) : null}
       </div>
     </div>
