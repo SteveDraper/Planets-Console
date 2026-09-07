@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -24,12 +23,14 @@ from api.analytics.military_score_inference.score_arithmetic import (
 )
 
 SHIP_FIRST_FAMILY_HOLD_FLOOR = 3
+_HOLD_FAMILIES: tuple[ShipFirstFamily, ShipFirstFamily] = ("mine_overshoot", "ammo_top_up")
 
 __all__ = (
     "SHIP_FIRST_FAMILY_HOLD_FLOOR",
     "admit_ship_first_ranked_solution",
     "classify_ship_first_family",
     "non_torp_military_2x",
+    "select_ship_first_hold",
     "tag_ship_first_near_solution",
 )
 
@@ -97,7 +98,7 @@ def _rank_key(
 
 
 def _family_counts(solutions: list[InferenceSolution]) -> dict[ShipFirstFamily, int]:
-    counts: dict[ShipFirstFamily, int] = {"mine_overshoot": 0, "ammo_top_up": 0}
+    counts: dict[ShipFirstFamily, int] = dict.fromkeys(_HOLD_FAMILIES, 0)
     for solution in solutions:
         family = solution.ship_first_family
         if family is not None:
@@ -105,14 +106,51 @@ def _family_counts(solutions: list[InferenceSolution]) -> dict[ShipFirstFamily, 
     return counts
 
 
-def _insert_ranked(
-    solutions: list[InferenceSolution],
-    candidate: InferenceSolution,
+def _take_family_floor(
+    ranked: list[InferenceSolution],
+    family: ShipFirstFamily,
+    take: int,
+) -> tuple[list[InferenceSolution], list[InferenceSolution]]:
+    kept: list[InferenceSolution] = []
+    rest: list[InferenceSolution] = []
+    for solution in ranked:
+        if take and solution.ship_first_family == family:
+            kept.append(solution)
+            take -= 1
+        else:
+            rest.append(solution)
+    return kept, rest
+
+
+def select_ship_first_hold(
+    pool: list[InferenceSolution],
+    k: int,
     leftover_2x: Callable[[InferenceSolution], int],
-) -> None:
-    keys = [_rank_key(held, leftover_2x) for held in solutions]
-    index = bisect_right(keys, _rank_key(candidate, leftover_2x))
-    solutions.insert(index, candidate)
+) -> list[InferenceSolution]:
+    """Select up to ``k`` solutions from ``pool`` under stratified hold.
+
+    Mixed families: floor of :data:`SHIP_FIRST_FAMILY_HOLD_FLOOR` each (or every
+    hit if fewer), then remaining slots by rank weight then leftover. One family:
+    top-K by the same key. When ``2 * floor > k``, take the best of each family
+    first until ``k`` is full.
+    """
+    if k <= 0:
+        return []
+    ranked = sorted(pool, key=lambda solution: _rank_key(solution, leftover_2x))
+    counts = _family_counts(pool)
+    mixed = all(counts[family] > 0 for family in _HOLD_FAMILIES)
+    if not mixed:
+        return ranked[:k]
+    selected: list[InferenceSolution] = []
+    remaining = ranked
+    for family in _HOLD_FAMILIES:
+        take = min(SHIP_FIRST_FAMILY_HOLD_FLOOR, counts[family])
+        kept, remaining = _take_family_floor(remaining, family, take)
+        selected.extend(kept)
+    selected.extend(remaining)
+    selected = selected[:k]
+    selected.sort(key=lambda solution: _rank_key(solution, leftover_2x))
+    return selected
 
 
 def admit_ship_first_ranked_solution(
@@ -135,50 +173,19 @@ def admit_ship_first_ranked_solution(
     signature = solution_signature(candidate)
     if signature in seen_signatures:
         return False
-    if len(solutions) < max_solutions:
-        seen_signatures.add(signature)
-        _insert_ranked(solutions, candidate, leftover_2x)
-        if on_admitted is not None:
-            on_admitted(candidate)
-        return True
-
-    pool = [*solutions, candidate]
-    pool_counts = _family_counts(pool)
-    mixed = pool_counts["mine_overshoot"] > 0 and pool_counts["ammo_top_up"] > 0
-
-    def quota(family: ShipFirstFamily) -> int:
-        if not mixed:
-            return 0
-        return min(SHIP_FIRST_FAMILY_HOLD_FLOOR, pool_counts[family])
-
-    eligible: list[InferenceSolution] = []
-    for held in solutions:
-        resulting_counts = _family_counts(
-            [solution for solution in solutions if solution is not held] + [candidate]
-        )
-        if mixed and any(
-            resulting_counts[family] < quota(family) for family in ("mine_overshoot", "ammo_top_up")
-        ):
-            continue
-        eligible.append(held)
-    if not eligible:
-        return False
-
-    victim = max(eligible, key=lambda solution: _rank_key(solution, leftover_2x))
-    held_counts = _family_counts(solutions)
-    candidate_family = candidate.ship_first_family
-    floor_fill = (
-        mixed
-        and candidate_family is not None
-        and held_counts[candidate_family] < SHIP_FIRST_FAMILY_HOLD_FLOOR
+    proposed = select_ship_first_hold(
+        [*solutions, candidate],
+        max_solutions,
+        leftover_2x,
     )
-    if _rank_key(candidate, leftover_2x) >= _rank_key(victim, leftover_2x) and not floor_fill:
+    if not any(held is candidate for held in proposed):
         return False
-
-    seen_signatures.remove(solution_signature(victim))
-    solutions.remove(victim)
+    dropped = {solution_signature(held) for held in solutions} - {
+        solution_signature(kept) for kept in proposed
+    }
+    seen_signatures.difference_update(dropped)
     seen_signatures.add(signature)
-    _insert_ranked(solutions, candidate, leftover_2x)
+    solutions[:] = proposed
     if on_admitted is not None:
         on_admitted(candidate)
     return True

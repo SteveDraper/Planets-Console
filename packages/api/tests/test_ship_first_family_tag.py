@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.ship_first_family import (
     SHIP_FIRST_FAMILY_HOLD_FLOOR,
     admit_ship_first_ranked_solution,
     classify_ship_first_family,
+    select_ship_first_hold,
     tag_ship_first_near_solution,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_MINE_SCORE_RESIDUAL
@@ -174,6 +175,100 @@ def test_ammo_top_up_may_span_most_of_leftover_no_torp_cap() -> None:
     solution = _solution(objective=-10, ship_count=1, torp_count=1)
 
     assert classify_ship_first_family(solution, observation, catalog) == "ammo_top_up"
+
+
+def _action_ids(solutions: list[InferenceSolution]) -> list[str]:
+    return [solution.actions[0].action_id for solution in solutions]
+
+
+def test_select_ship_first_hold_mixed_pool_picks_floor_then_rank() -> None:
+    leftovers = {
+        "mine_spill": 0,
+        "mine_best": 1,
+        "mine_mid": 2,
+        "mine_floor": 3,
+        "ammo_best": 4,
+        "ammo_mid": 5,
+        "ammo_floor": 6,
+        "ammo_spill": 9,
+    }
+
+    def leftover_of(solution: InferenceSolution) -> int:
+        return leftovers[solution.actions[0].action_id]
+
+    pool = [
+        _solution(objective=20, action_id="mine_spill", family="mine_overshoot"),
+        _solution(objective=5, action_id="mine_best", family="mine_overshoot"),
+        _solution(objective=4, action_id="mine_mid", family="mine_overshoot"),
+        _solution(objective=3, action_id="mine_floor", family="mine_overshoot"),
+        _solution(objective=5, action_id="ammo_best", family="ammo_top_up"),
+        _solution(objective=4, action_id="ammo_mid", family="ammo_top_up"),
+        _solution(objective=3, action_id="ammo_floor", family="ammo_top_up"),
+        _solution(objective=1, action_id="ammo_spill", family="ammo_top_up"),
+    ]
+    held_ids = _action_ids(select_ship_first_hold(pool, 7, leftover_of))
+    assert held_ids == [
+        "mine_spill",
+        "mine_best",
+        "ammo_best",
+        "mine_mid",
+        "ammo_mid",
+        "mine_floor",
+        "ammo_floor",
+    ]
+    assert "ammo_spill" not in held_ids
+
+
+def test_select_ship_first_hold_one_family_is_top_k() -> None:
+    def leftover_of(_solution: InferenceSolution) -> int:
+        return 10
+
+    pool = [
+        _solution(objective=-index, action_id=f"mine_{index}", family="mine_overshoot")
+        for index in range(5)
+    ]
+    held_ids = _action_ids(select_ship_first_hold(pool, 3, leftover_of))
+    assert held_ids == ["mine_0", "mine_1", "mine_2"]
+
+
+def test_select_ship_first_hold_mixed_stays_within_k_when_floors_exceed_k() -> None:
+    def leftover_of(_solution: InferenceSolution) -> int:
+        return 1
+
+    pool = [
+        _solution(objective=10 - index, action_id=f"mine_{index}", family="mine_overshoot")
+        for index in range(3)
+    ] + [
+        _solution(objective=-index, action_id=f"ammo_{index}", family="ammo_top_up")
+        for index in range(3)
+    ]
+    held = select_ship_first_hold(pool, 4, leftover_of)
+    assert len(held) == 4
+    families = [solution.ship_first_family for solution in held]
+    assert families.count("mine_overshoot") == 3
+    assert families.count("ammo_top_up") == 1
+    assert _action_ids(held) == ["mine_0", "mine_1", "mine_2", "ammo_0"]
+
+
+def test_admit_ship_first_rejects_duplicate_signature() -> None:
+    held: list[InferenceSolution] = []
+    seen: set[tuple[tuple[str, int], ...]] = set()
+
+    def leftover_of(_solution: InferenceSolution) -> int:
+        return 1
+
+    first = _solution(objective=1, action_id="mine_0", family="mine_overshoot")
+    duplicate = _solution(objective=99, action_id="mine_0", family="mine_overshoot")
+    assert admit_ship_first_ranked_solution(
+        held, seen, first, max_solutions=4, leftover_2x=leftover_of
+    )
+    assert (
+        admit_ship_first_ranked_solution(
+            held, seen, duplicate, max_solutions=4, leftover_2x=leftover_of
+        )
+        is False
+    )
+    assert _action_ids(held) == ["mine_0"]
 
 
 def test_stratified_hold_keeps_floor_when_both_families_present() -> None:
