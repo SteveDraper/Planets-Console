@@ -89,27 +89,14 @@ function InferenceStatusCell({
     )
   }
 
-  if (detail.displayStatus === 'success' && detail.solutionCount > 0) {
+  const isResidualList = isCompleteShipFirstResidualList(detail)
+  if ((detail.displayStatus === 'success' && detail.solutionCount > 0) || isResidualList) {
     return (
       <InferenceCellChrome {...chromeProps}>
         <InferenceSolutionCountBadge
           count={detail.solutionCount}
           isSearching={false}
-          label={label}
-          disabled={!canOpenInferenceDetail(detail)}
-          onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
-        />
-      </InferenceCellChrome>
-    )
-  }
-
-  if (isCompleteShipFirstResidualList(detail)) {
-    return (
-      <InferenceCellChrome {...chromeProps}>
-        <InferenceSolutionCountBadge
-          count={detail.solutionCount}
-          isSearching={false}
-          tone="residual"
+          tone={isResidualList ? 'residual' : 'exact'}
           label={label}
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
