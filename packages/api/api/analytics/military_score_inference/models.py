@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from api.analytics.military_score_inference.military_score_window import (
     ExactMilitaryScoreWindow,
@@ -227,11 +227,15 @@ class InferenceSolutionShipBuild:
     launcher_count: int = 0
 
 
+ShipFirstFamily = Literal["mine_overshoot", "ammo_top_up"]
+
+
 @dataclass(frozen=True)
 class InferenceSolution:
     objective_value: int
     actions: tuple[InferenceSolutionAction, ...]
     ship_builds: tuple[InferenceSolutionShipBuild, ...] = ()
+    ship_first_family: ShipFirstFamily | None = None
 
 
 @dataclass(frozen=True)

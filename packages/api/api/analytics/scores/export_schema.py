@@ -219,6 +219,15 @@ _SOLUTION_WIRE_SCHEMA: dict[str, Any] = {
             "items": _SHIP_BUILD_ITEM_SCHEMA,
         },
         "militaryScoreArithmetic": _MILITARY_SCORE_ARITHMETIC_SCHEMA,
+        "shipFirstFamily": {
+            "type": "string",
+            "enum": ["mine_overshoot", "ammo_top_up"],
+            "description": (
+                "Core-owned ship-first family tag on an in-regime near-solution. "
+                "Omitted on leftover-0 exact. SPA chrome reads this field; it does "
+                "not re-derive the family."
+            ),
+        },
     },
 }
 

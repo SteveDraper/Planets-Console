@@ -243,6 +243,7 @@ export type ScoresInferenceSolution = {
   actions: ScoresInferenceSolutionAction[]
   shipBuilds?: ScoresInferenceSolutionShipBuild[]
   militaryScoreArithmetic?: ScoresInferenceMilitaryScoreArithmetic
+  shipFirstFamily?: 'mine_overshoot' | 'ammo_top_up'
 }
 
 export type ScoresInferenceRowDetail = {

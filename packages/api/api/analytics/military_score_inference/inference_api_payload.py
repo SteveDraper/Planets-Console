@@ -370,11 +370,14 @@ def _serialize_solution_ship_builds(
 
 
 def _serialize_solution_core(solution: InferenceSolution) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "objectiveValue": solution.objective_value,
         "actions": _serialize_solution_actions(solution),
         "shipBuilds": _serialize_solution_ship_builds(solution),
     }
+    if solution.ship_first_family is not None:
+        payload["shipFirstFamily"] = solution.ship_first_family
+    return payload
 
 
 def _serialize_solution_with_arithmetic(

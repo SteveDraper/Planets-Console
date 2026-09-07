@@ -50,6 +50,7 @@ export const inferenceStreamSolutionPayloadSchema = z.object({
   actions: z.array(inferenceSolutionActionSchema),
   shipBuilds: z.array(inferenceSolutionShipBuildSchema).optional(),
   militaryScoreArithmetic: z.record(z.string(), z.unknown()).optional(),
+  shipFirstFamily: z.enum(['mine_overshoot', 'ammo_top_up']).optional(),
 })
 
 const inferenceStreamPlayerScopeSchema = z.object({

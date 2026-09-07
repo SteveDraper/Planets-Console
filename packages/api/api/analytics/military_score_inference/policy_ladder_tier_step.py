@@ -54,13 +54,19 @@ from api.analytics.military_score_inference.prior_fleet_tech_raise import (
     resolve_prior_fleet_tech_raise_plan,
 )
 from api.analytics.military_score_inference.ranked_solution_buffer import (
-    admit_ranked_solution,
     solution_signature,
 )
 from api.analytics.military_score_inference.score_arithmetic import (
     catalog_explained_military_delta_2x,
 )
-from api.analytics.military_score_inference.ship_first_overshoot import ShipFirstOvershootPlan
+from api.analytics.military_score_inference.ship_first_family import (
+    admit_ship_first_ranked_solution,
+    tag_ship_first_near_solution,
+)
+from api.analytics.military_score_inference.ship_first_overshoot import (
+    ShipFirstOvershootPlan,
+    leftover_military_2x,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_STOPPED,
@@ -494,16 +500,18 @@ def run_policy_ladder_tier_step(
         return False
 
     def admit_overshoot(solution: InferenceSolution) -> None:
-        admitted = admit_ranked_solution(
+        tagged = tag_ship_first_near_solution(solution, observation, catalog)
+        admitted = admit_ship_first_ranked_solution(
             state.merged_solutions,
             state.seen_signatures,
-            solution,
+            tagged,
             max_solutions=state.resolved_max_solutions,
+            leftover_2x=lambda held: leftover_military_2x(held, observation, catalog),
             on_admitted=None,
         )
         if admitted:
-            newly_admitted.append(solution)
-            state.overshoot_signatures.add(solution_signature(solution))
+            newly_admitted.append(tagged)
+            state.overshoot_signatures.add(solution_signature(tagged))
 
     for seed in seeds_for_step[: policy_step.max_seeds]:
         if stop_after_budget():
