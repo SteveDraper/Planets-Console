@@ -239,6 +239,51 @@ describe('ScoresTableView', () => {
     expect(screen.getByText('27')).toBeInTheDocument()
   })
 
+  it('shows a blue count badge for complete mine-score residual with ship-first near-solutions', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'mine_score_residual',
+              status: 'mine_score_residual',
+              summary: 'Mine-score leftover (27)',
+              solutionCount: 2,
+              isComplete: true,
+              solutions: [
+                {
+                  objectiveValue: 10,
+                  actions: [],
+                  shipFirstFamily: 'mine_overshoot',
+                },
+                {
+                  objectiveValue: 8,
+                  actions: [],
+                  shipFirstFamily: 'ammo_top_up',
+                },
+              ],
+              diagnostics: {},
+              placeholders: [],
+              unexplainedMilitaryDelta2x: 54,
+            },
+          ],
+        })}
+      />
+    )
+
+    const badge = screen.getByLabelText(
+      '2 probable builds. Mix of mine leftover and ammo top-up. Leftover 27.'
+    )
+    expect(badge).toHaveTextContent('2')
+    expect(badge.className).toContain('text-sky-400')
+    expect(screen.queryByText('27')).toBeNull()
+    fireEvent.click(badge)
+    expect(screen.getByRole('dialog')).toHaveTextContent('Solution 1')
+  })
+
   it('opens inference detail modal when success icon is clicked', () => {
     render(
       <ScoresTableView

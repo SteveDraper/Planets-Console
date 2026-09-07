@@ -4,6 +4,10 @@ import {
   fleetTorpInputAppendsToInferenceAccessibleLabel,
   readFleetTorpInputStatusFromDetail,
 } from './fleetTorpInputStatus'
+import {
+  isCompleteShipFirstResidualList,
+  shipFirstResidualAccessibleLabel,
+} from './shipFirstFamilyChrome'
 
 export type InferenceDisplayStatus = ScoresInferenceRowDetail['displayStatus']
 
@@ -30,6 +34,9 @@ function baseInferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string 
     detail.displayStatus === 'moderate_residual' ||
     detail.displayStatus === 'mine_score_residual'
   ) {
+    if (isCompleteShipFirstResidualList(detail)) {
+      return shipFirstResidualAccessibleLabel(detail)
+    }
     return detail.summary || 'Build inference leftover'
   }
   return detail.summary || 'No build inference result'

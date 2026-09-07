@@ -91,6 +91,27 @@ def test_residual_statuses_map_to_matching_display_status() -> None:
     assert mine["unexplainedMilitaryDelta2x"] == 54
 
 
+def test_mine_score_residual_with_solutions_stays_residual_display_status() -> None:
+    mine = inference_from_core(
+        _core_row(
+            status="mine_score_residual",
+            summary="Mine-score leftover (27)",
+            solution_count=2,
+            solutions=[
+                {"objectiveValue": 10, "shipFirstFamily": "mine_overshoot"},
+                {"objectiveValue": 8, "shipFirstFamily": "ammo_top_up"},
+            ],
+            unexplained_military_delta_2x=54,
+            placeholders=[],
+        ),
+        player_id=4,
+    )
+    assert mine["displayStatus"] == "mine_score_residual"
+    assert mine["solutionCount"] == 2
+    assert mine["status"] == "mine_score_residual"
+    assert mine["unexplainedMilitaryDelta2x"] == 54
+
+
 def test_failure_statuses_stay_failure() -> None:
     for status in ("no_exact_solution", "invalid_problem", "solver_error", "fetch_error"):
         shaped = inference_from_core(_core_row(status=status), player_id=5)
@@ -168,6 +189,13 @@ def test_stamp_inference_stream_display_status_on_complete_only() -> None:
                         "solutionCount": 0,
                         "isComplete": True,
                     },
+                    {
+                        "type": "complete",
+                        "status": "mine_score_residual",
+                        "summary": "Mine-score leftover (27)",
+                        "solutionCount": 2,
+                        "isComplete": True,
+                    },
                 ]
             )
         )
@@ -177,6 +205,8 @@ def test_stamp_inference_stream_display_status_on_complete_only() -> None:
     assert events[1]["status"] == "dead"
     assert events[2]["displayStatus"] == "failure"
     assert events[2]["status"] == "novel_terminal"
+    assert events[3]["displayStatus"] == "mine_score_residual"
+    assert events[3]["solutionCount"] == 2
 
 
 def test_scores_inference_table_stream_stamps_display_status() -> None:

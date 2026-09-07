@@ -331,6 +331,77 @@ describe('InferenceDetailModal', () => {
     expect(screen.getByText('Solution 2 · Plausibility 80')).toBeInTheDocument()
   })
 
+  it('shows family chips and a mixed-list subtitle for ship-first near-solutions', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          displayStatus: 'mine_score_residual',
+          status: 'mine_score_residual',
+          summary: 'Mine-score leftover (27)',
+          solutionCount: 2,
+          unexplainedMilitaryDelta2x: 54,
+          solutions: [
+            {
+              ...defenseSolution,
+              objectiveValue: 40,
+              shipFirstFamily: 'mine_overshoot',
+              militaryScoreArithmetic: {
+                ...defenseSolution.militaryScoreArithmetic,
+                matchesObserved: false,
+                explainedMilitaryChange: 49,
+                explainedMilitaryDelta2x: 98,
+              },
+            },
+            {
+              objectiveValue: 30,
+              actions: [],
+              shipFirstFamily: 'ammo_top_up',
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(screen.getByText('Mix of mine leftover and ammo top-up.')).toBeInTheDocument()
+    expect(screen.getByText('Mine leftover')).toBeInTheDocument()
+    expect(screen.getByText('Ammo top-up')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('Solution 1')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Plausibility 40')
+    expect(
+      screen.getByText(/Explained military change does not match the observed scoreboard delta/)
+    ).toBeInTheDocument()
+  })
+
+  it('omits the mixed-list subtitle when only one ship-first family is held', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          displayStatus: 'mine_score_residual',
+          status: 'mine_score_residual',
+          summary: 'Mine-score leftover (27)',
+          solutionCount: 1,
+          unexplainedMilitaryDelta2x: 54,
+          solutions: [
+            {
+              objectiveValue: 40,
+              actions: [],
+              shipFirstFamily: 'mine_overshoot',
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(screen.queryByText('Mix of mine leftover and ammo top-up.')).toBeNull()
+    expect(screen.getByText('Mine leftover')).toBeInTheDocument()
+  })
+
   it('shows fleet torpedo overlay input status and belief set torp ids', () => {
     render(
       <InferenceDetailModal

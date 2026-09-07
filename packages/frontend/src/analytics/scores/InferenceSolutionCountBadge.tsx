@@ -7,6 +7,7 @@ type InferenceSolutionCountBadgeProps = {
   label: string
   disabled?: boolean
   onClick?: () => void
+  tone?: 'exact' | 'residual'
 }
 
 export function InferenceSolutionCountBadge({
@@ -16,10 +17,13 @@ export function InferenceSolutionCountBadge({
   label,
   disabled = false,
   onClick,
+  tone = 'exact',
 }: InferenceSolutionCountBadgeProps) {
+  const isResidual = tone === 'residual'
   const className = cn(
-    'relative inline-flex h-6 min-w-6 items-center justify-center overflow-visible rounded px-1.5 text-xs font-medium text-emerald-400',
-    isIncomplete ? 'border border-dashed border-emerald-500/70' : 'border border-emerald-500/70',
+    'relative inline-flex h-6 min-w-6 items-center justify-center overflow-visible rounded px-1.5 text-xs font-medium border',
+    isResidual ? 'text-sky-400 border-sky-500/70' : 'text-emerald-400 border-emerald-500/70',
+    isIncomplete && 'border-dashed',
     !disabled && onClick != null && 'hover:bg-white/10',
     disabled && 'cursor-default opacity-60',
     isSearching && 'inference-solution-count-searching'

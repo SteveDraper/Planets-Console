@@ -157,9 +157,10 @@ With **Tabular** selected, the main area shows **one section per enabled analyti
 
 **Scores** includes an **Include build inference** checkbox under the analytic tile. When that option is on, the scoreboard gains a **Build inference** column:
 
-- A solid count is a ranked exact explanation; click it to open the existing detail surface.
+- A solid green count is a ranked exact explanation; click it to open the existing detail surface.
+- A solid blue count is a ranked ship-first near-solution list on a mine-score leftover row. The count is the number of held explanations; leftover size is in the tooltip (named as a mix when both mine leftover and ammo top-up appear). Click it for the same detail surface.
 - A muted dash means the row was skipped (for example the viewpoint owner, a dead player, or inbound Full Alliance). Hover for the reason; there is no detail modal.
-- Amber leftover vs violet leftover markers distinguish moderate military leftover from mine-score leftover; leftover size is the unexplained military points. Click either to open the existing detail surface.
+- Amber leftover vs violet leftover markers distinguish moderate military leftover from empty-list mine-score leftover; leftover size is the unexplained military points. Click either to open the existing detail surface.
 - A red X means no exact explanation after a search that was meant to finish (`no_exact_solution`) or a solver/problem failure. Click it for the same detail surface (placeholders and leftover can appear there).
 - In **Stealth Mode** the Scores table still shows planet counts, but **Include build inference** is greyed out because the military column is unpublished.
 

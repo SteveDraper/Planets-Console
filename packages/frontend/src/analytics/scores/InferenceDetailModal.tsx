@@ -19,6 +19,10 @@ import {
   formatSolutionLineItemLabel,
   sortSolutionLineItemsForDisplay,
 } from './solutionLineItemDisplayOrder'
+import {
+  shipFirstFamilyChipLabel,
+  shipFirstListMixesFamilies,
+} from './shipFirstFamilyChrome'
 
 type InferenceDetailModalProps = {
   isOpen: boolean
@@ -94,13 +98,31 @@ function SolutionSection({
   index: number
 }) {
   const arithmetic = readMilitaryScoreArithmetic(solution.militaryScoreArithmetic)
+  const familyLabel =
+    solution.shipFirstFamily != null
+      ? shipFirstFamilyChipLabel(solution.shipFirstFamily)
+      : null
   return (
     <section className="rounded border border-[#52575d]/70 bg-[#2a2d30] p-3">
       <h3
         className="text-xs font-medium text-slate-200"
         title="Composite rank score from action priors and parsimony penalties -- not a percentage."
       >
-        Solution {index + 1} · Plausibility {solution.objectiveValue}
+        Solution {index + 1}
+        {familyLabel != null ? (
+          <>
+            {' '}
+            ·{' '}
+            <span className="inline-flex rounded-full border border-sky-500/50 bg-sky-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-sky-300">
+              {familyLabel}
+            </span>
+            {' '}
+            ·{' '}
+          </>
+        ) : (
+          ' · '
+        )}
+        Plausibility {solution.objectiveValue}
       </h3>
       {arithmetic != null && arithmetic.lineItems.length > 0 ? (
         <SolutionActionTable solution={solution} arithmetic={arithmetic} />
@@ -270,6 +292,10 @@ export function InferenceDetailModal({
 
         {detail.solutions.length === 0 && detail.summary.trim().length > 0 ? (
           <p className="text-xs text-slate-300">{detail.summary}</p>
+        ) : null}
+
+        {shipFirstListMixesFamilies(detail.solutions) ? (
+          <p className="text-xs text-slate-400">Mix of mine leftover and ammo top-up.</p>
         ) : null}
 
         <div className="flex flex-col gap-3">
