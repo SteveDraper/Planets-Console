@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceSolution,
 )
+from api.analytics.military_score_inference.ship_first_overshoot import ShipFirstOvershootPlan
 from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import InferenceTierPolicyStep
 
@@ -29,6 +30,7 @@ class PolicyLadderState:
     step_diagnostics: list[dict[str, object]] = field(default_factory=list)
     merged_solutions: list[InferenceSolution] = field(default_factory=list)
     seen_signatures: set[tuple[tuple[str, int], ...]] = field(default_factory=set)
+    overshoot_signatures: set[tuple[tuple[str, int], ...]] = field(default_factory=set)
     catalog: ActionCatalog | None = None
     problem: InferenceProblem | None = None
     last_status: str = STATUS_NO_EXACT_SOLUTION
@@ -55,3 +57,4 @@ class PolicyLadderState:
     hull_collision_twins_fell_back: bool = False
     hull_collision_twins_loaded: bool = False
     hopeless_context: HopelessRowFacts | None = None
+    ship_first_overshoot: ShipFirstOvershootPlan | None = None

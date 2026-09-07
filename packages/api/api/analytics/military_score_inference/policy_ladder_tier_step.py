@@ -23,6 +23,11 @@ from api.analytics.military_score_inference.degrade_aggregate_probe import (
     probe_degrade_aggregate_rewrites,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+from api.analytics.military_score_inference.military_score_window import (
+    BandMilitaryScoreWindow,
+    ExactMilitaryScoreWindow,
+    MilitaryScoreWindow,
+)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -30,6 +35,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
 )
 from api.analytics.military_score_inference.policy_ladder_admission import (
+    held_leftover_0_solutions,
     make_incremental_admitter,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -47,6 +53,14 @@ from api.analytics.military_score_inference.policy_ladder_tier_finish import (
 from api.analytics.military_score_inference.prior_fleet_tech_raise import (
     resolve_prior_fleet_tech_raise_plan,
 )
+from api.analytics.military_score_inference.ranked_solution_buffer import (
+    admit_ranked_solution,
+    solution_signature,
+)
+from api.analytics.military_score_inference.score_arithmetic import (
+    catalog_explained_military_delta_2x,
+)
+from api.analytics.military_score_inference.ship_first_overshoot import ShipFirstOvershootPlan
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_STOPPED,
@@ -64,16 +78,11 @@ def _explained_military_score_2x(
     solution: InferenceSolution,
     catalog: ActionCatalog,
 ) -> int:
-    actions_by_id = {action.id: action for action in catalog.aggregate_actions}
-    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
-    explained = 0
-    for action in solution.actions:
-        catalog_action = actions_by_id[action.action_id]
-        explained += catalog_action.score_delta_2x * action.count
-    for ship_build in solution.ship_builds:
-        combo = combos_by_id[ship_build.combo_id]
-        explained += combo.score_delta_2x * ship_build.count
-    return explained
+    return catalog_explained_military_delta_2x(
+        solution,
+        {action.id: action for action in catalog.aggregate_actions},
+        {combo.combo_id: combo for combo in catalog.ship_build_combos},
+    )
 
 
 def _solve_catalog(
@@ -83,7 +92,7 @@ def _solve_catalog(
     race_id: int | None = None,
     max_solutions: int,
     time_limit_seconds: float,
-    military_score_alpha: int = 0,
+    military_score_window: MilitaryScoreWindow | None = None,
     fixed_combo_counts: dict[str, int] | None = None,
     combo_count_neighborhood: int = 0,
     cancel_token: InferenceCancelToken | None = None,
@@ -96,7 +105,7 @@ def _solve_catalog(
         race_id=race_id,
         max_solutions=max_solutions,
         time_limit_seconds=time_limit_seconds,
-        military_score_alpha=military_score_alpha,
+        military_score_window=military_score_window,
         fixed_combo_counts=fixed_combo_counts,
         combo_count_neighborhood=combo_count_neighborhood,
     )
@@ -400,13 +409,16 @@ def run_policy_ladder_tier_step(
     held_no_goods: tuple[InferenceSolution, ...] = tuple(state.merged_solutions)
 
     new_exact_before_step = len(state.merged_solutions)
-    seeds_for_step = list(state.band_seeds)
+    overlay = state.ship_first_overshoot
+    overlay_mode = overlay.mode if overlay is not None else "off"
+    skip_leftover_0 = overlay_mode == "overshoot_only"
+    seeds_for_step = [] if overlay_mode != "off" else list(state.band_seeds)
     state.band_seeds = []
 
     def budget_exhausted() -> bool:
         return run.peek_stop() is not None
 
-    if policy_step.run_degrade_aggregate_probe and state.merged_solutions:
+    if policy_step.run_degrade_aggregate_probe and state.merged_solutions and not skip_leftover_0:
         for rewrite in probe_degrade_aggregate_rewrites(
             state.merged_solutions,
             turn=turn,
@@ -460,6 +472,39 @@ def run_policy_ladder_tier_step(
             finish_step()
         return True
 
+    def record_solve(
+        result: InferenceResult,
+        problem: InferenceProblem,
+    ) -> bool:
+        """Apply solve outcome. Return True when the tier should abort."""
+        state.last_status = result.status
+        state.last_diagnostics = dict(result.diagnostics)
+        state.problem = problem
+        if result.status == STATUS_INVALID_PROBLEM:
+            finish_step()
+            state.ladder_complete = True
+            return True
+        if result.status == STATUS_STOPPED:
+            state.cancelled = True
+            finish_step()
+            state.ladder_complete = True
+            return True
+        if result.status == STATUS_TIME_LIMITED:
+            state.time_limited = True
+        return False
+
+    def admit_overshoot(solution: InferenceSolution) -> None:
+        admitted = admit_ranked_solution(
+            state.merged_solutions,
+            state.seen_signatures,
+            solution,
+            max_solutions=state.resolved_max_solutions,
+            on_admitted=None,
+        )
+        if admitted:
+            newly_admitted.append(solution)
+            state.overshoot_signatures.add(solution_signature(solution))
+
     for seed in seeds_for_step[: policy_step.max_seeds]:
         if stop_after_budget():
             return
@@ -492,70 +537,108 @@ def run_policy_ladder_tier_step(
     if stop_after_budget():
         return
 
-    # Include anything admitted during seed progression so the main catalog
-    # solve does not rediscover those structures.
     held_no_goods = tuple(state.merged_solutions)
-    exact_result, problem = _solve_catalog(
-        observation,
-        catalog,
-        race_id=player_race_id,
-        max_solutions=catalog_solve_max,
-        time_limit_seconds=run.remaining_seconds(),
-        cancel_token=cancel_token,
-        on_solution=admit_solution,
-        seed_no_good_solutions=held_no_goods,
-    )
-    state.last_status = exact_result.status
-    state.last_diagnostics = dict(exact_result.diagnostics)
-    state.problem = problem
-    if exact_result.status == STATUS_INVALID_PROBLEM:
-        finish_step()
-        state.ladder_complete = True
-        return
-    if exact_result.status == STATUS_STOPPED:
-        state.cancelled = True
-        finish_step()
-        state.ladder_complete = True
-        return
-
-    if exact_result.status == STATUS_TIME_LIMITED:
-        state.time_limited = True
-
     band_residual_2x: int | None = None
-    if not exact_result.solutions and policy_step.alpha > 0:
-        if not budget_exhausted() and run.remaining_seconds() > 0:
-            band_result, band_problem = _solve_catalog(
+
+    def _solve_overshoot_catalog(plan: ShipFirstOvershootPlan) -> bool:
+        overshoot_result, overshoot_problem = _solve_catalog(
+            observation,
+            catalog,
+            race_id=player_race_id,
+            max_solutions=catalog_solve_max,
+            time_limit_seconds=run.remaining_seconds(),
+            military_score_window=plan.overshoot_window(),
+            cancel_token=cancel_token,
+            on_solution=admit_overshoot,
+            seed_no_good_solutions=tuple(state.merged_solutions),
+        )
+        return record_solve(overshoot_result, overshoot_problem)
+
+    def _solve_military_window() -> bool:
+        """Exact, overshoot, or band for this step. True aborts the tier."""
+        nonlocal band_residual_2x
+        if overlay_mode == "overshoot_only" and overlay is not None:
+            if (
+                overlay.should_solve_overshoot
+                and not budget_exhausted()
+                and run.remaining_seconds() > 0
+            ):
+                return _solve_overshoot_catalog(overlay)
+            state.problem = build_inference_problem(
                 observation,
                 catalog,
                 race_id=player_race_id,
-                max_solutions=policy_step.max_seeds,
+                max_solutions=catalog_solve_max,
                 time_limit_seconds=run.remaining_seconds(),
-                military_score_alpha=policy_step.alpha,
-                cancel_token=cancel_token,
-                seed_no_good_solutions=tuple(state.merged_solutions),
+                military_score_window=overlay.overshoot_window(),
             )
-            state.problem = band_problem
-            state.last_diagnostics = dict(band_result.diagnostics)
-            if band_result.status == STATUS_STOPPED:
-                state.cancelled = True
-                finish_step()
-                state.ladder_complete = True
-                return
-            if band_result.solutions:
-                state.band_seeds = list(band_result.solutions[: policy_step.max_seeds])
-                best_solution = band_result.solutions[0]
-                explained = _explained_military_score_2x(best_solution, catalog)
-                band_residual_2x = observation.military_delta_2x - explained
-                if (
-                    state.best_band_residual_2x is None
-                    or band_residual_2x < state.best_band_residual_2x
-                ):
-                    state.best_band_residual_2x = band_residual_2x
-            elif band_result.status == STATUS_INVALID_PROBLEM:
-                state.last_status = band_result.status
-                finish_step()
-                state.ladder_complete = True
-                return
+            return False
+
+        exact_result, problem = _solve_catalog(
+            observation,
+            catalog,
+            race_id=player_race_id,
+            max_solutions=catalog_solve_max,
+            time_limit_seconds=run.remaining_seconds(),
+            military_score_window=ExactMilitaryScoreWindow(),
+            cancel_token=cancel_token,
+            on_solution=admit_solution,
+            seed_no_good_solutions=held_no_goods,
+        )
+        if record_solve(exact_result, problem):
+            return True
+
+        if overlay_mode == "exact_then_overshoot" and overlay is not None:
+            held_exact = held_leftover_0_solutions(state, observation, catalog)
+            if (
+                overlay.should_solve_overshoot
+                and not held_exact
+                and not budget_exhausted()
+                and run.remaining_seconds() > 0
+            ):
+                return _solve_overshoot_catalog(overlay)
+            return False
+
+        if exact_result.solutions or policy_step.alpha <= 0:
+            return False
+        if budget_exhausted() or run.remaining_seconds() <= 0:
+            return False
+        band_result, band_problem = _solve_catalog(
+            observation,
+            catalog,
+            race_id=player_race_id,
+            max_solutions=policy_step.max_seeds,
+            time_limit_seconds=run.remaining_seconds(),
+            military_score_window=BandMilitaryScoreWindow(alpha=policy_step.alpha),
+            cancel_token=cancel_token,
+            seed_no_good_solutions=tuple(state.merged_solutions),
+        )
+        state.problem = band_problem
+        state.last_diagnostics = dict(band_result.diagnostics)
+        if band_result.status == STATUS_STOPPED:
+            state.cancelled = True
+            finish_step()
+            state.ladder_complete = True
+            return True
+        if band_result.solutions:
+            state.band_seeds = list(band_result.solutions[: policy_step.max_seeds])
+            best_solution = band_result.solutions[0]
+            explained = _explained_military_score_2x(best_solution, catalog)
+            band_residual_2x = observation.military_delta_2x - explained
+            if (
+                state.best_band_residual_2x is None
+                or band_residual_2x < state.best_band_residual_2x
+            ):
+                state.best_band_residual_2x = band_residual_2x
+        elif band_result.status == STATUS_INVALID_PROBLEM:
+            state.last_status = band_result.status
+            finish_step()
+            state.ladder_complete = True
+            return True
+        return False
+
+    if _solve_military_window():
+        return
 
     finish_step(
         finish_mode=TierStepFinishMode.COMPLETE,

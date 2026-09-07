@@ -6,6 +6,12 @@ from api.analytics.military_score_inference.constraints import (
     InferenceHardConstraints,
     observation_to_constraints_payload,
 )
+from api.analytics.military_score_inference.military_score_window import (
+    BandMilitaryScoreWindow,
+    OvershootMilitaryScoreWindow,
+    military_window_alpha,
+    military_window_overshoot_cap_2x,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -195,7 +201,7 @@ def test_military_score_band_constraint_allows_lower_explained_score():
         observation=observation,
         aggregate_actions=(build_action,),
         probability_buckets_by_action_id={},
-        military_score_alpha=50,
+        military_score_window=BandMilitaryScoreWindow(alpha=50),
     )
 
     assert solve_inference_problem(exact_problem).status == STATUS_NO_EXACT_SOLUTION
@@ -207,6 +213,89 @@ def test_military_score_band_constraint_allows_lower_explained_score():
     )
     assert band_payload["militaryScoreAlpha"] == 50
     assert any(">= 400" in line for line in band_payload["appliedEqualities"])
+
+
+def test_overshoot_window_rejects_under_explain_and_admits_overshoot():
+    """Ship-first window is one-sided overshoot, not inference score band."""
+    under = CandidateAction(
+        id="under_explain",
+        label="Under",
+        score_delta_2x=380,
+        warship_delta=1,
+        upper_bound=1,
+    )
+    over = CandidateAction(
+        id="overshoot",
+        label="Over",
+        score_delta_2x=420,
+        warship_delta=1,
+        upper_bound=1,
+    )
+    observation = _observation(
+        military_delta_2x=400,
+        warship_delta=1,
+        military_partition_slack_2x=1,
+    )
+    under_overshoot = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(under,),
+        probability_buckets_by_action_id={},
+        military_score_window=OvershootMilitaryScoreWindow(cap_2x=50),
+    )
+    over_overshoot = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(over,),
+        probability_buckets_by_action_id={},
+        military_score_window=OvershootMilitaryScoreWindow(cap_2x=50),
+    )
+    exact_over = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(over,),
+        probability_buckets_by_action_id={},
+    )
+
+    # Band window is under-explain retry, isolated from partition slack.
+    band_no_slack = InferenceProblem(
+        observation=_observation(military_delta_2x=400, warship_delta=1),
+        aggregate_actions=(under,),
+        probability_buckets_by_action_id={},
+        military_score_window=BandMilitaryScoreWindow(alpha=50),
+    )
+    assert solve_inference_problem(band_no_slack).status == STATUS_EXACT
+    assert solve_inference_problem(under_overshoot).status == STATUS_NO_EXACT_SOLUTION
+    assert solve_inference_problem(exact_over).status == STATUS_NO_EXACT_SOLUTION
+    result = solve_inference_problem(over_overshoot)
+    assert result.status == STATUS_EXACT
+    assert result.solutions[0].actions[0].action_id == "overshoot"
+
+    payload = observation_to_constraints_payload(
+        observation,
+        hard_constraints=InferenceHardConstraints.from_problem(over_overshoot),
+    )
+    assert payload["militaryOvershootCap2x"] == 50
+    applied = payload["appliedEqualities"]
+    assert any("402 <= sum(scoreDelta2x * count) <= 450" in line for line in applied)
+
+
+def test_overshoot_window_keeps_warship_equality():
+    pad = CandidateAction(
+        id="military_pad",
+        label="Pad",
+        score_delta_2x=420,
+        warship_delta=0,
+        upper_bound=1,
+    )
+    observation = _observation(
+        military_delta_2x=400,
+        warship_delta=1,
+        military_partition_slack_2x=1,
+    )
+    problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(pad,),
+        military_score_window=OvershootMilitaryScoreWindow(cap_2x=50),
+    )
+    assert solve_inference_problem(problem).status == STATUS_NO_EXACT_SOLUTION
 
 
 def test_scoreboard_partition_slack_allows_half_point_military_rounding():
@@ -368,3 +457,41 @@ def test_acquired_cap_n_limits_acquired_count():
     result = solve_inference_problem(within_cap)
     assert result.status == STATUS_EXACT
     assert _action_count(result.solutions[0], warship.id) == 2
+
+
+def test_military_score_window_cannot_encode_band_and_overshoot_together() -> None:
+    band = BandMilitaryScoreWindow(alpha=50)
+    overshoot = OvershootMilitaryScoreWindow(cap_2x=50)
+    assert military_window_alpha(band) == 50
+    assert military_window_overshoot_cap_2x(band) is None
+    assert military_window_alpha(overshoot) == 0
+    assert military_window_overshoot_cap_2x(overshoot) == 50
+    problem = InferenceProblem(
+        observation=_observation(military_delta_2x=400, warship_delta=1),
+        aggregate_actions=(),
+        military_score_window=band,
+    )
+    assert problem.military_score_alpha == 50
+    assert problem.military_overshoot_cap_2x is None
+
+
+def test_empty_overshoot_window_diagnostics_are_not_exact_equality() -> None:
+    observation = _observation(
+        military_delta_2x=400,
+        warship_delta=1,
+        military_partition_slack_2x=1,
+    )
+    problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(),
+        military_score_window=OvershootMilitaryScoreWindow(cap_2x=1),
+    )
+    payload = observation_to_constraints_payload(
+        observation,
+        hard_constraints=InferenceHardConstraints.from_problem(problem),
+    )
+    assert payload["militaryOvershootCap2x"] == 1
+    military_lines = [line for line in payload["appliedEqualities"] if "scoreDelta2x" in line]
+    assert military_lines
+    assert " <= " in military_lines[0]
+    assert "sum(scoreDelta2x * count) == " not in military_lines[0]

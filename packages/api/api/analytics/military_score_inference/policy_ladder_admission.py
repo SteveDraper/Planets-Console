@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterable
 
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.constraints import (
@@ -20,7 +20,13 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.ranked_solution_buffer import (
+    SolutionSignature,
     admit_ranked_solutions,
+    solution_signature,
+)
+from api.analytics.military_score_inference.ship_first_overshoot import (
+    SHIP_FIRST_PREFIX_LAST_STEP_ID,
+    SHIP_FIRST_PREFIX_STOP_REASON,
 )
 from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
@@ -28,10 +34,14 @@ from api.analytics.military_score_inference.tier_policy import (
 )
 
 __all__ = (
+    "held_leftover_0_solutions",
+    "leftover_0_solutions",
     "make_incremental_admitter",
     "maybe_early_stop_after_step",
     "maybe_expensive_tier_abort_after_step",
     "maybe_no_new_exact_signatures_early_stop",
+    "maybe_ship_first_prefix_stop_after_step",
+    "solution_is_leftover_0_exact",
 )
 
 
@@ -41,6 +51,78 @@ def _best_merged_solution(
     if not merged_solutions:
         return None
     return max(merged_solutions, key=lambda solution: solution.objective_value)
+
+
+def solution_is_leftover_0_exact(
+    solution: InferenceSolution,
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+    *,
+    admitted_under_overshoot: bool = False,
+) -> bool:
+    """True when an exact-pass hit matches observed military within slack.
+
+    Envelope coverage is the exact-pass leftover-0 test because that solve is
+    pinned into ``observed ± slack``. Overshoot admits are never leftover-0:
+    the window already required leftover strictly above slack.
+    """
+    if admitted_under_overshoot:
+        return False
+    return solution_satisfies_exact_hard_equalities(solution, observation, catalog)
+
+
+def leftover_0_solutions(
+    solutions: Iterable[InferenceSolution],
+    observation: InferenceObservation,
+    catalog: ActionCatalog,
+    *,
+    overshoot_signatures: Collection[SolutionSignature],
+) -> list[InferenceSolution]:
+    """Exact-pass leftover-0 hits; overshoot admits are excluded."""
+    return [
+        solution
+        for solution in solutions
+        if solution_is_leftover_0_exact(
+            solution,
+            observation,
+            catalog,
+            admitted_under_overshoot=solution_signature(solution) in overshoot_signatures,
+        )
+    ]
+
+
+def held_leftover_0_solutions(
+    state: PolicyLadderState,
+    observation: InferenceObservation,
+    catalog: ActionCatalog | None,
+) -> bool:
+    """True when merged top-K contains an exact-pass leftover-0 hit against ``catalog``."""
+    if catalog is None:
+        return bool(state.merged_solutions)
+    return bool(
+        leftover_0_solutions(
+            state.merged_solutions,
+            observation,
+            catalog,
+            overshoot_signatures=state.overshoot_signatures,
+        )
+    )
+
+
+def maybe_ship_first_prefix_stop_after_step(
+    state: PolicyLadderState,
+    *,
+    policy_step: InferenceTierPolicyStep,
+) -> bool:
+    """Stop after ``admit_ship_torpedoes`` so in-regime search never admits planet/SB posts."""
+    plan = state.ship_first_overshoot
+    if plan is None or not plan.is_in_regime:
+        return False
+    if policy_step.id != SHIP_FIRST_PREFIX_LAST_STEP_ID:
+        return False
+    state.ladder_complete = True
+    state.ladder_early_stop_reason = SHIP_FIRST_PREFIX_STOP_REASON
+    return True
 
 
 def _solution_fully_explained_by_ship_builds_only(
@@ -97,7 +179,9 @@ def maybe_no_new_exact_signatures_early_stop(
     added_aggregate_action_ids: frozenset[str],
     new_exact_before_step: int,
 ) -> bool:
-    """Return True when catalog growth was a noop and best exact is plausible enough."""
+    """Return True when catalog growth was a noop and best leftover-0 exact is plausible enough."""
+    if state.ship_first_overshoot is not None and state.ship_first_overshoot.is_in_regime:
+        return False
     if len(state.merged_solutions) != new_exact_before_step:
         return False
     if not state.merged_solutions:

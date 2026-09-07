@@ -183,3 +183,45 @@ def test_point_actions_keep_catalog_military_and_can_mismatch():
     assert arithmetic["matchesObserved"] is False
     assert arithmetic["lineItems"][0]["scoreDelta2xSubtotal"] == 125
     assert "scoreDelta2xSubtotalMin" not in arithmetic["lineItems"][0]
+
+
+def test_interval_overshoot_residual_does_not_pin_to_observed_slack():
+    ship = CandidateAction(
+        id="build_rush",
+        label="Build Rush",
+        score_delta_2x=420,
+        warship_delta=1,
+        upper_bound=1,
+    )
+    decrease = CandidateAction(
+        id="loss:warship:envelope",
+        label="Ship loss",
+        score_delta_2x=0,
+        score_delta_2x_min=-200,
+        score_delta_2x_max=0,
+        upper_bound=1,
+    )
+    solution = InferenceSolution(
+        objective_value=-10,
+        actions=(
+            InferenceSolutionAction(action_id=ship.id, label=ship.label, count=1),
+            InferenceSolutionAction(action_id=decrease.id, label=decrease.label, count=1),
+        ),
+    )
+    observation = _observation(military_delta_2x=400, slack=1)
+    actions_by_id = {ship.id: ship, decrease.id: decrease}
+    exact_arithmetic = solution_military_score_arithmetic_payload(
+        solution, observation, actions_by_id
+    )
+    residual_arithmetic = solution_military_score_arithmetic_payload(
+        solution,
+        observation,
+        actions_by_id,
+        assign_intervals_to_observed_slack=False,
+    )
+    assert exact_arithmetic["matchesObserved"] is True
+    assert exact_arithmetic["explainedMilitaryDelta2x"] == 400
+    assert residual_arithmetic["matchesObserved"] is False
+    assert residual_arithmetic["explainedMilitaryDelta2x"] == 420
+    leftover_2x = residual_arithmetic["explainedMilitaryDelta2x"] - 400
+    assert leftover_2x > observation.military_partition_slack_2x

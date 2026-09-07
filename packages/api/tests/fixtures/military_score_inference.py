@@ -8,6 +8,7 @@ import pytest
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.models.components import Beam, Engine, Hull, Torpedo
+from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_from_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "api" / "storage" / "assets"
@@ -45,6 +46,14 @@ def _observation(
         military_partition_slack_2x=military_partition_slack_2x,
         planet_delta=planet_delta,
         starbase_delta=starbase_delta,
+    )
+
+
+def without_player_minefields(turn: TurnInfo, player_id: int) -> TurnInfo:
+    """Drop viewpoint-RST owner fields so tests stay out of the ship-first overlay."""
+    return replace(
+        turn,
+        minefields=tuple(field for field in turn.minefields if field.ownerid != player_id),
     )
 
 

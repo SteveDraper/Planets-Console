@@ -30,7 +30,9 @@ from api.analytics.military_score_inference.models import (
     InferenceObservation,
     ShipBuildCombo,
 )
-from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
+from api.analytics.military_score_inference.policy_ladder import (
+    solve_with_policy_ladder as _solve_with_policy_ladder,
+)
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.analytics.military_score_inference.solver import STATUS_EXACT, solve_inference_problem
 from api.analytics.military_score_inference.tier_policy import (
@@ -41,11 +43,23 @@ from api.analytics.military_score_inference.tier_policy import (
     resolve_tier_policies,
 )
 
-from tests.fixtures.military_score_inference import _observation, legacy_fleet_torp_overlay
+from tests.fixtures.military_score_inference import (
+    _observation,
+    legacy_fleet_torp_overlay,
+    without_player_minefields,
+)
 from tests.fixtures.military_score_inference_prior_weights import (
     minimal_prior_catalog,
     probability_buckets_for_test_action,
 )
+
+
+def solve_with_policy_ladder(observation, turn, **kwargs):
+    return _solve_with_policy_ladder(
+        observation,
+        without_player_minefields(turn, observation.player_id),
+        **kwargs,
+    )
 
 
 def _torp_step():

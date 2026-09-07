@@ -861,7 +861,7 @@ Owner-perspective histograms of total mine units and field count, mined from fin
 _Avoid_: mine slack, storing decay points in the asset, nebula-split stock, turn-banding at mine time
 
 **Worthwhile remainder bound**:
-Hard upper cap on leftover overshoot (`explained - observed`, solver 2x) admitted for a **ship-first near-solution**. At this category × race × host turn: p90 of positive-stock `totalUnits` and `fieldCount` independently, equal-split default decay convert, then **remainder-bound turn mixture**, then **observed-stock floor**. Solve-time load of `mine_stock_{category}.yaml` computes `floor` of that real bound in 2x (diagnostics); if `floor(bound) <=` partition slack, the overshoot window is empty. CP-SAT overlay is later. Not **inference score band** (under-explain, internal seeds).
+Hard upper cap on leftover overshoot (`explained - observed`, solver 2x) admitted for a **ship-first near-solution**. At this category × race × host turn: p90 of positive-stock `totalUnits` and `fieldCount` independently, equal-split default decay convert, then **remainder-bound turn mixture**, then **observed-stock floor**. Solve-time load of `mine_stock_{category}.yaml` computes `floor` of that real bound in 2x (diagnostics and the **ship-first overshoot constraint** window). If `floor(bound) <=` partition slack, the overshoot window is empty. Not **inference score band** (under-explain, internal seeds).
 _Avoid_: mine slack, ranking-only leftover penalty, RST tightening (observations floor the cap, they do not min it), p90 of empty-stock `0:`, ceil/round of the bound as the cap, adding slack on top of the cap
 
 **Remainder-bound turn mixture**:

@@ -40,6 +40,9 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_complete_factory import row_complete_stopped
+from api.analytics.military_score_inference.ship_first_overshoot import (
+    resolve_ship_first_overshoot_plan,
+)
 from api.analytics.military_score_inference.solver import STATUS_TIME_LIMITED
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.game import TurnInfo
@@ -67,7 +70,7 @@ def new_ladder_state(
         prior_fleet_records: tuple[FleetShipRecord, ...] = session.prior_fleet_records
     else:
         prior_fleet_records = ()
-    return PolicyLadderState(
+    state = PolicyLadderState(
         policy_steps=tuple(resolve_tier_policies(None)),
         resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
@@ -75,6 +78,13 @@ def new_ladder_state(
         prior_fleet_records=prior_fleet_records,
         hopeless_context=hopeless_context,
     )
+    if session is not None:
+        state.ship_first_overshoot = resolve_ship_first_overshoot_plan(
+            session.observation,
+            session.turn,
+            hopeless_context=hopeless_context,
+        )
+    return state
 
 
 @dataclass(frozen=True)

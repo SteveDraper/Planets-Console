@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.policy_ladder_admission import (
     maybe_early_stop_after_step,
     maybe_expensive_tier_abort_after_step,
     maybe_no_new_exact_signatures_early_stop,
+    maybe_ship_first_prefix_stop_after_step,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.prior_fleet_tech_raise import (
@@ -182,8 +183,15 @@ def finish_tier_step(
         ):
             _annotate_last_step_early_stop(state)
             return
+    if finish_mode is not TierStepFinishMode.DIAGNOSTICS_ONLY:
+        if maybe_ship_first_prefix_stop_after_step(
+            state,
+            policy_step=policy_step,
+        ):
+            _annotate_last_step_early_stop(state)
+            return
     # BUDGET_STOP: advance only -- no ship-only / no-new-signature early-stop
-    # and no expensive-tier abort.
+    # and no expensive-tier abort. In-regime prefix still stops before posts.
 
     if state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True

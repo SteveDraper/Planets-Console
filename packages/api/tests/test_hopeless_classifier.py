@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 
+from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.hopeless_classifier import (
     EXPENSIVE_TIER_STEP_IDS,
     MODERATE_RESIDUAL_MAX_POINTS,
@@ -15,6 +16,7 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
     InferenceSolutionShipBuild,
+    ShipBuildCombo,
 )
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -30,7 +32,7 @@ from api.analytics.military_score_inference.solver import (
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
-from tests.fixtures.military_score_inference import _observation
+from tests.fixtures.military_score_inference import _observation, without_player_minefields
 
 _LARGE_FIELD_MIN_UNITS = 1000
 
@@ -333,7 +335,7 @@ def test_expensive_tiers_are_not_entered_on_mine_residual_abort(sample_turn, mon
     observation = _observation(military_delta_2x=-40, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(),
         time_limit_seconds=60.0,
     )
@@ -349,7 +351,7 @@ def test_expensive_tiers_are_not_entered_on_moderate_residual_abort(
     observation = _observation(military_delta_2x=-10, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(),
         time_limit_seconds=60.0,
     )
@@ -363,7 +365,7 @@ def test_positive_leftover_still_climbs_expensive_tiers(sample_turn, monkeypatch
     observation = _observation(military_delta_2x=80, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(),
         time_limit_seconds=60.0,
     )
@@ -409,7 +411,7 @@ def test_abort_uses_catalog_envelope_leftover_not_raw_military(sample_turn, monk
     )
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(),
         time_limit_seconds=60.0,
     )
@@ -524,6 +526,45 @@ def test_finalize_honors_abort_status_when_merged_solutions_fail_hard_equalities
     assert result.diagnostics["stopped_reason"] == "expensive_tier_abort"
 
 
+def _exact_combo_catalog(*, policy_step_id: str = "", policy_step_index: int = 0) -> ActionCatalog:
+    return ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(
+            ShipBuildCombo(
+                combo_id="combo_exact",
+                hull_id=1,
+                engine_id=1,
+                beam_id=None,
+                torp_id=None,
+                beam_count=0,
+                launcher_count=0,
+                labels=("Exact",),
+                score_delta_2x=0,
+                warship_delta=1,
+                build_slot_usage=1,
+                upper_bound=1,
+            ),
+        ),
+        probability_buckets_by_action_id={},
+        policy_step_id=policy_step_id,
+        policy_step_index=policy_step_index,
+    )
+
+
+def _patch_catalog_from_turn(monkeypatch, catalog_factory) -> None:
+    def _catalog_from_turn(_observation, _turn, **kwargs):
+        policy_step = kwargs.get("policy_step")
+        return catalog_factory(
+            policy_step_id=policy_step.id if policy_step is not None else "",
+            policy_step_index=kwargs.get("policy_step_index", 0),
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.build_action_catalog_from_turn",
+        _catalog_from_turn,
+    )
+
+
 def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
     ship_exact = InferenceResult(
         status=STATUS_EXACT,
@@ -550,7 +591,7 @@ def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
     )
 
     def _solve_side_effect(problem, **kwargs):
-        if problem.policy_step_id == "full_components":
+        if problem.policy_step_id == "admit_ship_torpedoes":
             return _emit_mock_solver_solutions(ship_exact, **kwargs)
         return _emit_mock_solver_solutions(
             InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
@@ -566,20 +607,17 @@ def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
         "solution_satisfies_exact_hard_equalities",
         lambda solution, observation, catalog: True,
     )
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder."
-        "solution_satisfies_exact_hard_equalities",
-        lambda solution, observation, catalog: True,
-    )
+    _patch_catalog_from_turn(monkeypatch, _exact_combo_catalog)
     observation = _observation(military_delta_2x=-40, warship_delta=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
-        sample_turn,
+        without_player_minefields(sample_turn, observation.player_id),
         hopeless_context=_facts(sticky_prior=True),
         time_limit_seconds=60.0,
     )
     assert result.status == STATUS_EXACT
     assert EXPENSIVE_TIER_STEP_IDS.isdisjoint(attempted)
+    assert "modest_planet_defense" not in attempted
 
 
 def _minefield(*, owner_id: int, units: int, field_id: int = 1) -> object:
