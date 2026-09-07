@@ -21,6 +21,9 @@ from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     fleet_torp_complete_wire_fields,
 )
+from api.analytics.military_score_inference.ship_first_family import (
+    is_ship_first_overshoot_list,
+)
 from api.analytics.military_score_inference.tier_emission_ledger import (
     compact_tier_emissions_from_step_diagnostics,
     tier_emissions_from_wire_complete,
@@ -135,6 +138,8 @@ def domain_event_to_wire_events(
 ) -> list[dict[str, object]]:
     """Convert one scheduler domain event into zero or more NDJSON wire dicts."""
     if isinstance(event, HeldSolutionsUpdated):
+        if is_ship_first_overshoot_list(event.solutions):
+            return []
         wire_observation = event.observation or observation
         serialized = serialize_solutions_with_arithmetic(
             wire_observation,

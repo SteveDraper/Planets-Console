@@ -44,6 +44,24 @@ describe('inferenceAccessibleLabel', () => {
       })
     ).toBe('Best: one build')
   })
+
+  it('puts count first and leftover second for ship-first residual lists', () => {
+    expect(
+      inferenceAccessibleLabel(
+        detail({
+          displayStatus: 'mine_score_residual',
+          status: 'mine_score_residual',
+          summary: 'Mine-score leftover (27)',
+          solutionCount: 1,
+          isComplete: true,
+          solutions: [
+            { objectiveValue: 10, actions: [], shipFirstFamily: 'mine_overshoot' },
+          ],
+          unexplainedMilitaryDelta2x: 54,
+        })
+      )
+    ).toBe('1 probable build. Leftover 27.')
+  })
 })
 
 describe('canOpenInferenceDetail', () => {

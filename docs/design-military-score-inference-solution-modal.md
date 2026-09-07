@@ -183,7 +183,7 @@ Frontend tests (`InferenceDetailModal.test.tsx` and helpers):
 | Issue | Scope |
 |-------|-------|
 | **#48** | This modal UX (icon table, plausibility header, live updates, accelerated segment UI removal) |
-| **#400** / **#414** | Core `shipFirstFamily` + stratified hold shipped #414; modal chips + mixed-list subtitle remain #415 |
+| **#400** / **#414** / **#415** | Core `shipFirstFamily` + stratified hold shipped #414; modal chips + mixed-list subtitle shipped #415 |
 | **#53** | Scores **diagnostics panel** combo/tier presentation (not modal) |
 | **#88** | Relative plausibility field + solution-list pruning |
 | **#89** | Planets.nu aggregate-action icons (replace Lucide fallbacks) |

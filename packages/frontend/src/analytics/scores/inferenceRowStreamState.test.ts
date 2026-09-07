@@ -269,6 +269,36 @@ describe('reduceRowStreamState', () => {
     expect(detail.placeholders).toEqual([])
   })
 
+  it('maps mine-score residual complete with ship-first solutions without flipping to success', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'mine_score_residual',
+      displayStatus: 'mine_score_residual',
+      summary: 'Mine-score leftover (27)',
+      solutionCount: 2,
+      isComplete: true,
+      solutions: [
+        {
+          objectiveValue: 10,
+          actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+          shipFirstFamily: 'mine_overshoot',
+        },
+        {
+          objectiveValue: 8,
+          actions: [{ actionId: 'a2', label: 'Load torps', count: 1 }],
+          shipFirstFamily: 'ammo_top_up',
+        },
+      ],
+      placeholders: [],
+      unexplainedMilitaryDelta2x: 54,
+    })
+    const detail = rowDetailFromStreamState(4, next)
+    expect(detail.displayStatus).toBe('mine_score_residual')
+    expect(detail.solutionCount).toBe(2)
+    expect(detail.solutions[0]?.shipFirstFamily).toBe('mine_overshoot')
+    expect(detail.unexplainedMilitaryDelta2x).toBe(54)
+  })
+
   it('shows held time_limited complete using BFF success chrome', () => {
     const next = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',

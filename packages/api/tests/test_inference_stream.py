@@ -370,3 +370,83 @@ def test_row_domain_event_to_wire_events_solution_includes_session_fleet_torp_st
     row = ScheduledInferenceRow(player_id=score.ownerid, session=session)
     wire_events = row_domain_event_to_wire_events(row, event)
     assert wire_events[0]["fleetTorpInputStatus"] == "pending"
+
+
+def test_held_overshoot_list_does_not_emit_solution_events(sample_turn) -> None:
+    from api.analytics.military_score_inference.actions import ActionCatalog
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.inference_stream_domain_events import (
+        HeldSolutionsUpdated,
+    )
+
+    score = sample_turn.scores[0]
+    observation = build_inference_observation(score, sample_turn)
+    overshoot = InferenceSolution(
+        objective_value=10,
+        actions=(InferenceSolutionAction(action_id="a1", label="Action A", count=1),),
+        ship_first_family="mine_overshoot",
+    )
+    event = HeldSolutionsUpdated(
+        solutions=(overshoot,),
+        catalog=ActionCatalog((), (), {}),
+        observation=observation,
+    )
+    wire_events = domain_event_to_wire_events(
+        event,
+        observation=observation,
+        turn=sample_turn,
+    )
+    assert wire_events == []
+
+
+def test_held_leftover_0_list_still_emits_solution_events(sample_turn) -> None:
+    from api.analytics.military_score_inference.actions import ActionCatalog
+    from api.analytics.military_score_inference.analytic import build_inference_observation
+    from api.analytics.military_score_inference.inference_stream_domain_events import (
+        HeldSolutionsUpdated,
+    )
+
+    score = sample_turn.scores[0]
+    observation = build_inference_observation(score, sample_turn)
+    exact = InferenceSolution(
+        objective_value=10,
+        actions=(InferenceSolutionAction(action_id="a1", label="Action A", count=1),),
+    )
+    event = HeldSolutionsUpdated(
+        solutions=(exact,),
+        catalog=ActionCatalog((), (), {}),
+        observation=observation,
+    )
+    wire_events = domain_event_to_wire_events(
+        event,
+        observation=observation,
+        turn=sample_turn,
+    )
+    assert len(wire_events) == 1
+    assert wire_events[0]["type"] == "solution"
+    assert "shipFirstFamily" not in wire_events[0]["solutions"][0]
+
+
+def test_mine_score_residual_complete_carries_overshooting_list() -> None:
+    solution = InferenceSolution(
+        objective_value=42,
+        actions=(InferenceSolutionAction(action_id="action_a", label="Build fighter", count=2),),
+        ship_first_family="ammo_top_up",
+    )
+    complete = row_complete_to_complete_wire_event(
+        row_complete_with_summary(
+            InferenceResult(
+                status=STATUS_MINE_SCORE_RESIDUAL,
+                solutions=(solution,),
+                diagnostics={},
+            ),
+            summary="Mine-score leftover (27)",
+        ),
+    )
+    events = [json.loads(line) for line in stream_inference_ndjson(lambda: iter([complete]))]
+
+    assert [event["type"] for event in events] == ["complete"]
+    assert events[0]["status"] == STATUS_MINE_SCORE_RESIDUAL
+    assert events[0]["solutionCount"] == 1
+    assert events[0]["solutions"][0]["shipFirstFamily"] == "ammo_top_up"
+    assert events[0]["solutions"][0]["objectiveValue"] == 42

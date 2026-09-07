@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.ship_first_family import (
     SHIP_FIRST_FAMILY_HOLD_FLOOR,
     admit_ship_first_ranked_solution,
     classify_ship_first_family,
+    is_ship_first_overshoot_list,
     select_ship_first_hold,
     tag_ship_first_near_solution,
 )
@@ -167,6 +168,13 @@ def test_leftover_0_exact_is_not_tagged() -> None:
     assert classify_ship_first_family(solution, observation, catalog) is None
     tagged = tag_ship_first_near_solution(solution, observation, catalog)
     assert tagged.ship_first_family is None
+
+
+def test_overshoot_list_is_detected_from_family_tag() -> None:
+    leftover_0 = _solution(objective=0, ship_count=1)
+    overshoot = _solution(objective=-10, ship_count=1, family="mine_overshoot")
+    assert is_ship_first_overshoot_list((leftover_0,)) is False
+    assert is_ship_first_overshoot_list((overshoot,)) is True
 
 
 def test_ammo_top_up_may_span_most_of_leftover_no_torp_cap() -> None:

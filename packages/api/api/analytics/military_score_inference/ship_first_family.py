@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 
 from api.analytics.military_score_inference.actions import ActionCatalog
@@ -30,10 +30,20 @@ __all__ = (
     "SHIP_FIRST_FAMILY_HOLD_FLOOR",
     "admit_ship_first_ranked_solution",
     "classify_ship_first_family",
+    "is_ship_first_overshoot_list",
     "non_torp_military_2x",
     "select_ship_first_hold",
     "tag_ship_first_near_solution",
 )
+
+
+def is_ship_first_overshoot_list(solutions: Iterable[InferenceSolution]) -> bool:
+    """True when the held list is overshooting near-solutions, not leftover-0 exact.
+
+    Incremental ``solution`` events stay leftover-0 / exact only; overshooting
+    ship-first lists ride on terminal ``complete``.
+    """
+    return any(solution.ship_first_family is not None for solution in solutions)
 
 
 def _catalog_lookups(

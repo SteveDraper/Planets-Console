@@ -17,12 +17,14 @@ import {
   fleetTorpInputScopeBannerText,
   readFleetTorpInputStatusFromDetail,
 } from './fleetTorpInputStatus'
+import { militaryChangeFromDelta2x } from './inferenceConstraints'
 import {
   canOpenInferenceDetail,
   inferenceAccessibleLabel,
   isActivelySearchingInference,
   isIncompleteInferenceRow,
 } from './inferenceStatus'
+import { isCompleteShipFirstResidualList } from './shipFirstFamilyChrome'
 import {
   BUILD_INFERENCE_COLUMN,
   isBuildInferenceColumn,
@@ -87,12 +89,14 @@ function InferenceStatusCell({
     )
   }
 
-  if (detail.displayStatus === 'success' && detail.solutionCount > 0) {
+  const isResidualList = isCompleteShipFirstResidualList(detail)
+  if ((detail.displayStatus === 'success' && detail.solutionCount > 0) || isResidualList) {
     return (
       <InferenceCellChrome {...chromeProps}>
         <InferenceSolutionCountBadge
           count={detail.solutionCount}
           isSearching={false}
+          tone={isResidualList ? 'residual' : 'exact'}
           label={label}
           disabled={!canOpenInferenceDetail(detail)}
           onClick={canOpenInferenceDetail(detail) ? onOpenDetail : undefined}
@@ -136,7 +140,7 @@ function InferenceStatusCell({
     detail.displayStatus === 'moderate_residual' ||
     detail.displayStatus === 'mine_score_residual'
   ) {
-    const leftover = Math.floor((detail.unexplainedMilitaryDelta2x ?? 0) / 2)
+    const leftover = militaryChangeFromDelta2x(detail.unexplainedMilitaryDelta2x ?? 0)
     const isMine = detail.displayStatus === 'mine_score_residual'
     return (
       <InferenceCellChrome {...chromeProps}>
