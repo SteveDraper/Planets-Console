@@ -34,6 +34,28 @@ _Avoid_: layout, chrome (without "shell" context)
 The working set that scopes turn-scoped work: selected **game id**, **turn**, and **perspective** (resolved **viewpoint**, including spectator slot `0`). The caller holds it (SPA client state, or explicit MCP tool arguments); the server has no session memory of the selection.
 _Avoid_: session context (ambiguous with login credentials), query scope (implementation term), MCP context resource, inferred latest turn, inferred login slot, viewpoint name as the MCP argument
 
+### Packaged install
+
+**Console package**:
+The downloaded macOS or Windows artifact that runs Planets Console without a git, Python, Node, or `uv` toolchain. Double-click starts the one-process server and opens the SPA in a browser on loopback.
+_Avoid_: desktop app (native SPA window), single-server deployment (from-source `run_deploy.sh`), installer (when meaning the whole product)
+
+**Bundler**:
+The build-time tool that collects the one-process server, Python runtime, native libraries, and prebuilt SPA into a **console package**. Distinct from dmg/msi installer wrappers. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).
+_Avoid_: freeze (that is **compute diagnostic mode**), freezer, packager (when meaning a GUI-toolkit app shell)
+
+**Process host**:
+The OS-app identity of a running **console package** -- macOS Dock, Windows taskbar -- whose Quit stops the packaged server. Closing the browser does not. It does not embed the SPA. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).
+_Avoid_: host (VGA Planets rules or Planets.nu), desktop app, native SPA window, tray-only agent, Electron, Tauri
+
+**Single-instance**:
+At most one **process host** per user for the **console package**. A second activation reuses that process instead of starting another server. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).
+_Avoid_: mutex (implementation), allow a second server on another loopback port
+
+**Console data directory**:
+OS per-user directory that holds the packaged process's **file backend** store (and support logs), independent of the install location so replacing the **console package** does not wipe games or **account API keys**.
+_Avoid_: `.data` (repo cwd), portable next-to-exe store
+
 ### Login and shell controls
 
 **Login identity**:
