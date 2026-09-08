@@ -525,9 +525,9 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
     walk_scopes: list[tuple[str, int]] = []
     original_dependency_walk = AnalyticQueryContext.dependency_walk_unavailable
 
-    def tracking_dependency_walk_unavailable(self, analytic_id, scope):
+    def tracking_dependency_walk_unavailable(self, analytic_id, scope, **kwargs):
         walk_scopes.append((analytic_id, scope.turn))
-        return original_dependency_walk(self, analytic_id, scope)
+        return original_dependency_walk(self, analytic_id, scope, **kwargs)
 
     orchestrator_calls: list[tuple[str, int]] = []
 

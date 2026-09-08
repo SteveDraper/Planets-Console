@@ -40,6 +40,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.scores_exports_helpers import minimal_stream_query_context
+from tests.scores_row_lifecycle_test_helpers import _patch_scores_dag_without_fleet_deps
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -319,10 +320,8 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     monkeypatch,
     request,
 ):
-    from api.compute.dag import PlannedComputeNode
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
-    from api.compute.scope import ComputeScope
 
     reset_inference_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
@@ -354,22 +353,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     )
     controller.attach()
 
-    def scores_only_dag(_ctx, analytic_id, export_scope, **_kwargs):
-        return (
-            PlannedComputeNode(
-                scope=ComputeScope(
-                    analytic_id=analytic_id,
-                    game_id=export_scope.game_id,
-                    perspective=export_scope.perspective,
-                    turn=export_scope.turn,
-                    player_id=export_scope.player_id,
-                ),
-                export_scope=export_scope,
-                dependency_scopes=(),
-            ),
-        )
-
-    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
 
     for player_id in player_ids:
         scheduled = _schedule_player_row(
@@ -1004,10 +988,8 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
     """
     import concurrent.futures
 
-    from api.compute.dag import PlannedComputeNode
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
-    from api.compute.scope import ComputeScope
 
     reset_inference_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
@@ -1039,22 +1021,7 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
     )
     controller.attach()
 
-    def scores_only_dag(_ctx, analytic_id, export_scope, **_kwargs):
-        return (
-            PlannedComputeNode(
-                scope=ComputeScope(
-                    analytic_id=analytic_id,
-                    game_id=export_scope.game_id,
-                    perspective=export_scope.perspective,
-                    turn=export_scope.turn,
-                    player_id=export_scope.player_id,
-                ),
-                export_scope=export_scope,
-                dependency_scopes=(),
-            ),
-        )
-
-    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
 
     scheduled = _schedule_player_row(
         scheduler,
@@ -1161,10 +1128,8 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
         CachedCompleteRowAdmission,
         ScheduleRowAdmission,
     )
-    from api.compute.dag import PlannedComputeNode
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
-    from api.compute.scope import ComputeScope
 
     reset_inference_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
@@ -1207,22 +1172,7 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
         ScheduleRowAdmission,
     )
 
-    def scores_only_dag(_ctx, analytic_id, export_scope, **_kwargs):
-        return (
-            PlannedComputeNode(
-                scope=ComputeScope(
-                    analytic_id=analytic_id,
-                    game_id=export_scope.game_id,
-                    perspective=export_scope.perspective,
-                    turn=export_scope.turn,
-                    player_id=export_scope.player_id,
-                ),
-                export_scope=export_scope,
-                dependency_scopes=(),
-            ),
-        )
-
-    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
 
     scheduled = _schedule_player_row(
         scheduler,

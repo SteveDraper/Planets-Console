@@ -45,6 +45,12 @@ def _wait_until(predicate, *, timeout_seconds: float = 2.0) -> None:
 
 
 def _patch_scores_dag_without_fleet_deps(monkeypatch) -> None:
+    """Isolate scores RowRun from fleet ``ENSURE_DEPENDENCIES``.
+
+    Stubs DAG plan to a scores-only node and skips chain-fill. Prepare walks the
+    real catalog with ``force_root`` (entry ``step_kind``), which would otherwise
+    demand-load ``fleet@T-1`` for single-turn fixtures that never plan fleet.
+    """
     from api.compute.dag import PlannedComputeNode
     from api.compute.dag import plan_compute_dag as real_plan
     from api.compute.scope import normalize_export_scope_to_compute_scope
@@ -73,3 +79,7 @@ def _patch_scores_dag_without_fleet_deps(monkeypatch) -> None:
         )
 
     monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
+    monkeypatch.setattr(
+        "api.compute.orchestrator_submission.prepare_dependency_chain_turns",
+        lambda *_args, **_kwargs: None,
+    )

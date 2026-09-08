@@ -121,6 +121,55 @@ def _fleet_scope(ctx, turn: int, player_id: int) -> ExportScope:
     )
 
 
+@pytest.mark.parametrize(
+    ("force_root", "expected_fetched"),
+    [
+        pytest.param(True, [2], id="entry_step_fills_prior_hole"),
+        pytest.param(False, [], id="ensure_walk_skips_satisfied_root"),
+    ],
+)
+def test_prepare_force_root_controls_fill_on_satisfied_root(
+    sample_turn,
+    force_root: bool,
+    expected_fetched: list[int],
+):
+    """Entry-step plan must fill -1 holes; ensure walks must not demand-load them.
+
+    Scores RowRun uses force_root (an already-ensured root still walks fleet@T-1).
+    Satisfied ensure/query must not fetch sparse history the DAG will not visit.
+    """
+    from api.analytics.export_turn_fill import prepare_dependency_chain_turns
+    from api.compute.dag import plan_compute_dag
+    from api.compute.registry import COMPUTE_REGISTRY
+
+    turns = {1: clone_turn_at(sample_turn, 1), 3: clone_turn_at(sample_turn, 3)}
+    player_id = first_player_id(sample_turn)
+    requested: list[int] = []
+
+    def ensure_turn(turn_number: int) -> TurnInfo | None:
+        requested.append(turn_number)
+        turns[turn_number] = clone_turn_at(sample_turn, turn_number)
+        return turns[turn_number]
+
+    ctx = _fleet_prepare_context(turns)
+    ctx.ensure_turn = ensure_turn
+    scope = _fleet_scope(ctx, 3, player_id)
+    ctx.mark_scope_ensured("fleet", scope)
+
+    prepare_dependency_chain_turns(ctx, "fleet", scope, force_root=force_root)
+
+    assert requested == expected_fetched
+    if force_root:
+        planned = plan_compute_dag(
+            ctx,
+            "fleet",
+            scope,
+            compute_registry=COMPUTE_REGISTRY,
+            force_root=True,
+        )
+        assert planned
+
+
 def test_prepare_fetches_holes_then_fleet_walk_succeeds(sample_turn):
     from api.analytics.export_turn_fill import prepare_dependency_chain_turns
     from api.compute.dag import plan_compute_dag

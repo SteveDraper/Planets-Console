@@ -3,9 +3,12 @@
 Self-chained analytics (``EnsureDependency`` on themselves at ``turn_delta=-1``)
 need contiguous stored turns from the ensure floor through the shell turn. This
 helper is the shared fill policy when the dependency walk reports a hole.
-Orchestrator ``submit`` / ``ensure_scopes`` call :func:`prepare_dependency_chain_turns`
-**before** acquiring the orchestrator lock so loadturn I/O never runs under that lock.
-``plan_compute_dag`` only walks already-stored turns.
+``force_root`` must match the subsequent ``plan_compute_dag`` walk so an entry
+step still fills prior-turn holes when the cheap walk would treat the root as
+satisfied. Orchestrator ``submit`` / ``ensure_scopes`` call
+:func:`prepare_dependency_chain_turns` **before** acquiring the orchestrator
+lock so loadturn I/O never runs under that lock. ``plan_compute_dag`` only
+walks already-stored turns.
 """
 
 from __future__ import annotations
@@ -170,15 +173,23 @@ def prepare_dependency_chain_turns(
     ctx: AnalyticQueryContext,
     analytic_id: str,
     scope: ExportScope,
+    *,
+    force_root: bool = False,
 ) -> None:
     """Fill missing turns on the ensure chain, or raise ``DependencyChainFillError``.
 
-    No-op when the dependency walk can already complete. Login-backed
-    ``ctx.ensure_turn`` fetches holes from Planets.nu into storage. Callers
-    that plan a compute DAG must invoke this **before** ``plan_compute_dag``
-    and **outside** the orchestrator lock.
+    No-op when the dependency walk can already complete. Pass ``force_root`` to
+    match ``plan_compute_dag`` so a satisfied root still inspects ``-1`` edges
+    (scores RowRun / entry ``step_kind``). Login-backed ``ctx.ensure_turn``
+    fetches holes from Planets.nu into storage. Callers that plan a compute DAG
+    must invoke this **before** ``plan_compute_dag`` and **outside** the
+    orchestrator lock.
     """
-    unavailable = ctx.dependency_walk_unavailable(analytic_id, scope)
+    unavailable = ctx.dependency_walk_unavailable(
+        analytic_id,
+        scope,
+        force_root=force_root,
+    )
     if unavailable is None:
         return
     if unavailable == "turn_not_stored":
@@ -189,7 +200,11 @@ def prepare_dependency_chain_turns(
         )
         if fill.still_missing is not None:
             raise _fill_error(scope, fill)
-        unavailable = ctx.dependency_walk_unavailable(analytic_id, scope)
+        unavailable = ctx.dependency_walk_unavailable(
+            analytic_id,
+            scope,
+            force_root=force_root,
+        )
         if unavailable is None:
             return
     raise _walk_unavailable_error(ctx, scope, unavailable)

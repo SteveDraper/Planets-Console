@@ -2732,3 +2732,28 @@ def test_ensure_scopes_prepares_dependency_chain_before_dag_plan(monkeypatch, sa
     )
     assert order[0] == "fill"
     assert order.index("fill") < order.index("plan")
+
+
+def test_submit_passes_force_root_matching_entry_step(monkeypatch, sample_turn):
+    seen: list[bool] = []
+
+    def fake_prepare(*_args, **kwargs) -> None:
+        seen.append(kwargs.get("force_root", False))
+
+    monkeypatch.setattr(
+        "api.compute.orchestrator_submission.prepare_dependency_chain_turns",
+        fake_prepare,
+    )
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    registry = _diamond_compute_registry()
+    scope = _compute_scope(ROOT_ID, _export_scope(sample_turn))
+    ComputeOrchestrator(compute_registry=registry).submit(
+        ComputeRequest(ctx=ctx, scope=scope, step_kind="materialize"),
+    )
+    ComputeOrchestrator(compute_registry=registry).submit(
+        ComputeRequest(ctx=ctx, scope=scope),
+    )
+    assert seen == [True, False]
