@@ -356,7 +356,7 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
 - Own the **fleet stream** session above table vs map **view mode** (call site survives `viewMode` toggles -- e.g. shell main area -- not only inside the table tile)
 - Keep registry map analytic registration for enablement; paint via a dedicated **screen-fixed** overlay pane (homeworld-markers pattern), not `mergeLayer` planet nodes and not map-LY-scaled disks
 - **Fleet location ring** encoding (AFK constants for #128):
-  - Outer diameter (px): `min(20, 8 + 2 * floor(log2(max(1, shipCount))))` (1 ship → 8px; hard cap 20px)
+  - Outer diameter (px): `min(20, 14 + 2 * floor(log2(max(1, shipCount))))` (1 ship → 14px; 8+ → 20px)
   - Arc length ∝ that player's ship count / stack total
   - Strength fraction: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `scale` = `FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE` (`10000`, frontend AFK constant); `t = clamp(E / scale, 0, 1)`
   - Stroke opacity: `clamp(0.40 + 0.55 * t, 0.40, 0.95)`

@@ -35,24 +35,22 @@ function record(partial: Partial<FleetTableRecord> & Pick<FleetTableRecord, 'rec
 }
 
 describe('fleetLocationRingDiameterPx', () => {
-  it('is 8px for a single ship', () => {
-    expect(fleetLocationRingDiameterPx(1)).toBe(8)
+  it('is 14px for a single ship', () => {
+    expect(fleetLocationRingDiameterPx(1)).toBe(14)
   })
 
-  it('grows with floor(log2(shipCount)) and caps at 20', () => {
-    expect(fleetLocationRingDiameterPx(2)).toBe(10)
-    expect(fleetLocationRingDiameterPx(3)).toBe(10)
-    expect(fleetLocationRingDiameterPx(4)).toBe(12)
-    expect(fleetLocationRingDiameterPx(8)).toBe(14)
-    expect(fleetLocationRingDiameterPx(16)).toBe(16)
-    expect(fleetLocationRingDiameterPx(32)).toBe(18)
-    expect(fleetLocationRingDiameterPx(64)).toBe(20)
+  it('grows with floor(log2(shipCount)) and caps at 20 from 8 ships', () => {
+    expect(fleetLocationRingDiameterPx(2)).toBe(16)
+    expect(fleetLocationRingDiameterPx(3)).toBe(16)
+    expect(fleetLocationRingDiameterPx(4)).toBe(18)
+    expect(fleetLocationRingDiameterPx(7)).toBe(18)
+    expect(fleetLocationRingDiameterPx(8)).toBe(20)
     expect(fleetLocationRingDiameterPx(1024)).toBe(20)
   })
 
   it('treats non-positive counts as 1 ship', () => {
-    expect(fleetLocationRingDiameterPx(0)).toBe(8)
-    expect(fleetLocationRingDiameterPx(-3)).toBe(8)
+    expect(fleetLocationRingDiameterPx(0)).toBe(14)
+    expect(fleetLocationRingDiameterPx(-3)).toBe(14)
   })
 })
 
@@ -79,6 +77,9 @@ describe('fleetLocationRingStrokeWidthPx', () => {
     // Diameter 8 → R=4; max stroke = 1 to keep inner ≥ 3 (hole floor wins over 2.5 min stroke).
     expect(fleetLocationRingStrokeWidthPx(8, 0)).toBe(1)
     expect(fleetLocationRingStrokeWidthPx(8, 1)).toBe(1)
+    // Production min diameter 14 → R=7; max stroke = 4; weak keeps 2.5.
+    expect(fleetLocationRingStrokeWidthPx(14, 0)).toBe(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX)
+    expect(fleetLocationRingStrokeWidthPx(14, 1)).toBe(4)
     // Diameter 20 → R=10; max stroke = 7; weak keeps 2.5; mid t uses t * maxStroke.
     expect(fleetLocationRingStrokeWidthPx(20, 0)).toBe(FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX)
     expect(fleetLocationRingStrokeWidthPx(20, 0.5)).toBe(3.5)
@@ -159,11 +160,11 @@ describe('buildFleetLocationRingStacks', () => {
     const stacked = stacks.find((s) => s.key === '100,200')!
     expect(stacked.shipCount).toBe(3)
     expect(stacked.hostMilitaryPointsSum).toBe(50)
-    expect(stacked.diameterPx).toBe(10)
+    expect(stacked.diameterPx).toBe(16)
     expect(stacked.strengthFraction).toBe(0.5)
     expect(stacked.opacity).toBeCloseTo(0.675)
-    // Diameter 10 → R=5; maxStroke=2; t=0.5 → hole floor caps below the 2.5 min stroke.
-    expect(stacked.strokeWidthPx).toBe(2)
+    // Diameter 16 → R=8; maxStroke=5; t=0.5 → 2.5 (min stroke).
+    expect(stacked.strokeWidthPx).toBe(2.5)
     expect(stacked.arcs).toHaveLength(2)
     expect(stacked.arcs[0]).toMatchObject({
       playerId: 8,
@@ -183,7 +184,7 @@ describe('buildFleetLocationRingStacks', () => {
     expect(alone.hostMilitaryPointsSum).toBe(5)
     expect(alone.strengthFraction).toBe(0.05)
     expect(alone.opacity).toBeCloseTo(0.4 + 0.55 * 0.05)
-    expect(alone.diameterPx).toBe(8)
+    expect(alone.diameterPx).toBe(14)
   })
 
   it('defaults strength scale to 10000', () => {
@@ -204,8 +205,8 @@ describe('buildFleetLocationRingStacks', () => {
     const [stack] = buildFleetLocationRingStacks(ships)
     expect(stack!.strengthFraction).toBe(1)
     expect(stack!.opacity).toBe(0.95)
-    // Diameter 8 → max stroke 1 so the inner hole stays ≥ 3px.
-    expect(stack!.strokeWidthPx).toBe(1)
+    // Diameter 14 → R=7; max stroke 4 so the inner hole stays ≥ 3px.
+    expect(stack!.strokeWidthPx).toBe(4)
   })
 
   it('excludes records without lastSeen or lastSeen on another turn', () => {

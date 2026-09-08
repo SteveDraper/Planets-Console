@@ -11,7 +11,7 @@ function sampleStack(): FleetLocationRingStack {
     shipCount: 1,
     hostMilitaryPointsSum: 20,
     strengthFraction: 0.003,
-    diameterPx: 10,
+    diameterPx: 14,
     opacity: 0.4,
     strokeWidthPx: 2.5,
     arcs: [
