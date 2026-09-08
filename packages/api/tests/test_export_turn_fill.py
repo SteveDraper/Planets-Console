@@ -121,6 +121,43 @@ def _fleet_scope(ctx, turn: int, player_id: int) -> ExportScope:
     )
 
 
+def test_prepare_fills_holes_when_root_walk_is_already_available(sample_turn):
+    """Cheap walk short-circuit must not skip chain-fill (scores RowRun / ensured root).
+
+    Game 683364: scores@21 looked ensure-satisfied, prepare returned, plan still
+    required fleet@20 and raised turn_not_stored.
+    """
+    from api.analytics.export_turn_fill import prepare_dependency_chain_turns
+    from api.compute.dag import plan_compute_dag
+    from api.compute.registry import COMPUTE_REGISTRY
+
+    turns = {1: clone_turn_at(sample_turn, 1), 3: clone_turn_at(sample_turn, 3)}
+    player_id = first_player_id(sample_turn)
+    requested: list[int] = []
+
+    def ensure_turn(turn_number: int) -> TurnInfo | None:
+        requested.append(turn_number)
+        turns[turn_number] = clone_turn_at(sample_turn, turn_number)
+        return turns[turn_number]
+
+    ctx = _fleet_prepare_context(turns)
+    ctx.ensure_turn = ensure_turn
+    scope = _fleet_scope(ctx, 3, player_id)
+    ctx.mark_scope_ensured("fleet", scope)
+
+    prepare_dependency_chain_turns(ctx, "fleet", scope)
+
+    assert requested == [2]
+    planned = plan_compute_dag(
+        ctx,
+        "fleet",
+        scope,
+        compute_registry=COMPUTE_REGISTRY,
+        force_root=True,
+    )
+    assert planned
+
+
 def test_prepare_fetches_holes_then_fleet_walk_succeeds(sample_turn):
     from api.analytics.export_turn_fill import prepare_dependency_chain_turns
     from api.compute.dag import plan_compute_dag

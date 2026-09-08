@@ -2,9 +2,10 @@
 
 Self-chained analytics (``EnsureDependency`` on themselves at ``turn_delta=-1``)
 need contiguous stored turns from the ensure floor through the shell turn. This
-helper is the shared fill policy when the dependency walk reports a hole.
-Orchestrator ``submit`` / ``ensure_scopes`` call :func:`prepare_dependency_chain_turns`
-**before** acquiring the orchestrator lock so loadturn I/O never runs under that lock.
+helper fills holes on ``[ensure floor, scope.turn)`` even when the cheap
+dependency walk short-circuits as available. Orchestrator ``submit`` /
+``ensure_scopes`` call :func:`prepare_dependency_chain_turns` **before**
+acquiring the orchestrator lock so loadturn I/O never runs under that lock.
 ``plan_compute_dag`` only walks already-stored turns.
 """
 
@@ -173,23 +174,21 @@ def prepare_dependency_chain_turns(
 ) -> None:
     """Fill missing turns on the ensure chain, or raise ``DependencyChainFillError``.
 
-    No-op when the dependency walk can already complete. Login-backed
+    Fills ``[ensure floor, scope.turn)`` even when the cheap dependency walk
+    short-circuits as available (root already ensure-satisfied). ``plan_compute_dag``
+    may still walk those prior turns with ``force_root=True``. Login-backed
     ``ctx.ensure_turn`` fetches holes from Planets.nu into storage. Callers
     that plan a compute DAG must invoke this **before** ``plan_compute_dag``
     and **outside** the orchestrator lock.
     """
+    fill = fill_missing_dependency_chain_turns(
+        ctx,
+        scope,
+        ensure_turn=ctx.ensure_turn,
+    )
+    if fill.still_missing is not None:
+        raise _fill_error(scope, fill)
     unavailable = ctx.dependency_walk_unavailable(analytic_id, scope)
     if unavailable is None:
         return
-    if unavailable == "turn_not_stored":
-        fill = fill_missing_dependency_chain_turns(
-            ctx,
-            scope,
-            ensure_turn=ctx.ensure_turn,
-        )
-        if fill.still_missing is not None:
-            raise _fill_error(scope, fill)
-        unavailable = ctx.dependency_walk_unavailable(analytic_id, scope)
-        if unavailable is None:
-            return
     raise _walk_unavailable_error(ctx, scope, unavailable)
