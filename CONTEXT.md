@@ -41,8 +41,12 @@ The downloaded macOS or Windows artifact that runs Planets Console without a git
 _Avoid_: desktop app (native SPA window), single-server deployment (from-source `run_deploy.sh`), installer (when meaning the whole product)
 
 **Bundler**:
-The build-time tool that collects the one-process server, Python runtime, native libraries, and prebuilt SPA into a **console package**. Distinct from dmg/msi installer wrappers. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).
+The build-time tool that collects the one-process server, Python runtime, native libraries, and prebuilt SPA into a runnable tree. Distinct from the **installer wrapper**. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).
 _Avoid_: freeze (that is **compute diagnostic mode**), freezer, packager (when meaning a GUI-toolkit app shell)
+
+**Installer wrapper**:
+The pack step that turns **bundler** output into the downloadable **console package** file. It does not own the **console data directory**. See [ADR 0028](docs/adr/0028-console-package-ci-and-installer-wrappers.md).
+_Avoid_: bundler, freeze, zip of the onedir, installer (when meaning the whole product)
 
 **Process host**:
 The OS-app identity of a running **console package** -- macOS Dock, Windows taskbar -- whose Quit stops the packaged server. Closing the browser does not. It does not embed the SPA. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).

@@ -4,7 +4,7 @@ Status: accepted
 
 v1 **console package** on macOS Apple Silicon and Windows x64 is produced by one **bundler**: PyInstaller 6.15+, onedir, `--windowed`. The running app is a thin **process host** (regular Mac `.app` + AppKit; Windows GUI subsystem + unowned HWND for a taskbar button) that translates OS Quit/Close into uvicorn `should_exit`. The SPA stays in the default browser. **Single-instance**: a second activation reuses that process (Windows: per-user lock file); two servers must not share one **console data directory**.
 
-Unsigned v1 is acceptable. No Electron/Tauri SPA window. No tray in v1. Installer wrappers, CI, and user-facing procedure text are later tickets. Launch-wait and reopen copy are [User-facing v1 install and upgrade procedure](https://github.com/SteveDraper/Planets-Console/issues/430); the **process host** must still handle Mac reopen without creating a native window.
+Unsigned v1 is acceptable. No Electron/Tauri SPA window. No tray in v1. **Installer wrapper**s and CI are [ADR 0028](0028-console-package-ci-and-installer-wrappers.md). Launch-wait and reopen copy are [User-facing v1 install and upgrade procedure](https://github.com/SteveDraper/Planets-Console/issues/430); the **process host** must still handle Mac reopen without creating a native window.
 
 ## Considered options
 
