@@ -17,7 +17,7 @@ import {
 export const FLEET_LOCATION_RING_MIN_STROKE_WIDTH_PX = 2.5
 /** Minimum clear hole radius (px); stroke never grows past outerRadius - this. */
 export const FLEET_LOCATION_RING_MIN_INNER_RADIUS_PX = 3
-export const FLEET_LOCATION_RING_MIN_DIAMETER_PX = 8
+export const FLEET_LOCATION_RING_MIN_DIAMETER_PX = 14
 export const FLEET_LOCATION_RING_MAX_DIAMETER_PX = 20
 /** Absolute host-mil-points scale for location-ring strength fraction (AFK constant). */
 export const FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE = 10_000
@@ -71,7 +71,7 @@ export function fleetLocationRingStackKey(x: number, y: number): string {
   return `${x},${y}`
 }
 
-/** Outer diameter in screen px: min(20, 8 + 2 * floor(log2(max(1, shipCount)))). */
+/** Outer diameter in screen px: min(20, 14 + 2 * floor(log2(max(1, shipCount)))). */
 export function fleetLocationRingDiameterPx(shipCount: number): number {
   const n = Math.max(1, shipCount)
   return Math.min(

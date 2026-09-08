@@ -45,7 +45,7 @@ function sampleStack(overrides: Partial<FleetLocationRingStack> = {}): FleetLoca
     shipCount: 2,
     hostMilitaryPointsSum: 30,
     strengthFraction: 0.003,
-    diameterPx: 10,
+    diameterPx: 16,
     opacity: 0.4,
     strokeWidthPx: 2.5,
     arcs: [
