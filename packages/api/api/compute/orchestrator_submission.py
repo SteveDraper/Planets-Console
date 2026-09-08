@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import prepare_dependency_chain_turns
-from api.compute.dag import PlannedComputeNode, plan_compute_dag
+from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_compute_dag
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
@@ -37,6 +37,7 @@ def prepare_compute_request_dependency_chain(
         query_ctx,
         request.scope.analytic_id,
         compute_scope_to_export_scope(request.scope),
+        force_root=force_root_for_entry_step(request.step_kind),
     )
 
 
@@ -279,7 +280,7 @@ class OrchestratorSubmissionMixin:
             root_scope.analytic_id,
             export_scope,
             compute_registry=self._compute_registry,
-            force_root=entry_step_kind is not None,
+            force_root=force_root_for_entry_step(entry_step_kind),
         )
         self._turn_cache.prefetch_planned_nodes(
             planned_nodes,

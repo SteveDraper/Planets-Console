@@ -121,11 +121,22 @@ def _fleet_scope(ctx, turn: int, player_id: int) -> ExportScope:
     )
 
 
-def test_prepare_fills_holes_when_root_walk_is_already_available(sample_turn):
-    """Cheap walk short-circuit must not skip chain-fill (scores RowRun / ensured root).
+@pytest.mark.parametrize(
+    ("force_root", "expected_fetched"),
+    [
+        pytest.param(True, [2], id="entry_step_fills_prior_hole"),
+        pytest.param(False, [], id="ensure_walk_skips_satisfied_root"),
+    ],
+)
+def test_prepare_force_root_controls_fill_on_satisfied_root(
+    sample_turn,
+    force_root: bool,
+    expected_fetched: list[int],
+):
+    """Entry-step plan must fill -1 holes; ensure walks must not demand-load them.
 
-    Game 683364: scores@21 looked ensure-satisfied, prepare returned, plan still
-    required fleet@20 and raised turn_not_stored.
+    Scores RowRun uses force_root (an already-ensured root still walks fleet@T-1).
+    Satisfied ensure/query must not fetch sparse history the DAG will not visit.
     """
     from api.analytics.export_turn_fill import prepare_dependency_chain_turns
     from api.compute.dag import plan_compute_dag
@@ -145,17 +156,18 @@ def test_prepare_fills_holes_when_root_walk_is_already_available(sample_turn):
     scope = _fleet_scope(ctx, 3, player_id)
     ctx.mark_scope_ensured("fleet", scope)
 
-    prepare_dependency_chain_turns(ctx, "fleet", scope)
+    prepare_dependency_chain_turns(ctx, "fleet", scope, force_root=force_root)
 
-    assert requested == [2]
-    planned = plan_compute_dag(
-        ctx,
-        "fleet",
-        scope,
-        compute_registry=COMPUTE_REGISTRY,
-        force_root=True,
-    )
-    assert planned
+    assert requested == expected_fetched
+    if force_root:
+        planned = plan_compute_dag(
+            ctx,
+            "fleet",
+            scope,
+            compute_registry=COMPUTE_REGISTRY,
+            force_root=True,
+        )
+        assert planned
 
 
 def test_prepare_fetches_holes_then_fleet_walk_succeeds(sample_turn):

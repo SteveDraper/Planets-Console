@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 import time
 
-import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -20,37 +19,7 @@ from api.analytics.military_score_inference.tier_policy import resolve_tier_poli
 from api.analytics.scores.tier_row_run_registry import get_row_run
 
 from tests.scores_exports_helpers import minimal_stream_query_context
-
-
-def _patch_scores_dag_without_fleet_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    from api.compute.dag import PlannedComputeNode
-    from api.compute.dag import plan_compute_dag as real_plan
-    from api.compute.scope import normalize_export_scope_to_compute_scope
-
-    def scores_only_dag(ctx, analytic_id, export_scope, *, compute_registry, force_root=False):
-        if analytic_id != "scores":
-            return real_plan(
-                ctx,
-                analytic_id,
-                export_scope,
-                compute_registry=compute_registry,
-                force_root=force_root,
-            )
-        registration = compute_registry[analytic_id]
-        scope = normalize_export_scope_to_compute_scope(
-            export_scope,
-            analytic_id=analytic_id,
-            scope_key_spec=registration.scope_key_spec,
-        )
-        return (
-            PlannedComputeNode(
-                scope=scope,
-                export_scope=export_scope,
-                dependency_scopes=(),
-            ),
-        )
-
-    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
+from tests.scores_row_lifecycle_test_helpers import _patch_scores_dag_without_fleet_deps
 
 
 def _session_for_player(

@@ -33,6 +33,15 @@ def _pending_key(analytic_id: str, export_scope: ExportScope) -> tuple[str, Expo
     return (analytic_id, export_scope)
 
 
+def force_root_for_entry_step(entry_step_kind: str | None) -> bool:
+    """Whether plan (and chain-fill) must walk children of a satisfied root.
+
+    An explicit entry ``step_kind`` still runs on an already-ensured scope, so
+    prior-turn ``ENSURE_DEPENDENCIES`` edges must be stored before DAG plan.
+    """
+    return entry_step_kind is not None
+
+
 def plan_compute_dag(
     ctx: AnalyticQueryContext,
     analytic_id: str,

@@ -298,6 +298,7 @@ class AnalyticQueryContext:
         scope: ExportScope,
         *,
         catch_ensure_cycle: bool = False,
+        force_root: bool = False,
     ) -> DependencyWalkResult | UnavailableReason:
         try:
             walk_result = walk_dependency_tree(
@@ -305,6 +306,7 @@ class AnalyticQueryContext:
                 analytic_id,
                 scope,
                 visiting=set(),
+                force_root=force_root,
             )
         except ExportCycleDetectedError:
             if catch_ensure_cycle:
@@ -382,17 +384,22 @@ class AnalyticQueryContext:
         self,
         analytic_id: str,
         scope: ExportScope,
+        *,
+        force_root: bool = False,
     ) -> UnavailableReason | None:
         """Return walk-time unavailability without running ensure work.
 
         Production ensure runs through the compute orchestrator (``ensure_scope`` /
         ``query``). Callers that need a cheap ``turn_not_stored`` / cycle check
         before submit (e.g. homeworld turn fill) use this walk-only probe.
+        ``force_root`` must match the subsequent ``plan_compute_dag`` walk so an
+        entry step still sees prior-turn holes on an already-ensured root.
         """
         walk_outcome = self._walk_export_dependencies(
             analytic_id,
             scope,
             catch_ensure_cycle=False,
+            force_root=force_root,
         )
         if not isinstance(walk_outcome, DependencyWalkResult):
             return walk_outcome

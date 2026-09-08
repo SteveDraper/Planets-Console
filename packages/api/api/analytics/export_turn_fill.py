@@ -2,11 +2,13 @@
 
 Self-chained analytics (``EnsureDependency`` on themselves at ``turn_delta=-1``)
 need contiguous stored turns from the ensure floor through the shell turn. This
-helper fills holes on ``[ensure floor, scope.turn)`` even when the cheap
-dependency walk short-circuits as available. Orchestrator ``submit`` /
-``ensure_scopes`` call :func:`prepare_dependency_chain_turns` **before**
-acquiring the orchestrator lock so loadturn I/O never runs under that lock.
-``plan_compute_dag`` only walks already-stored turns.
+helper is the shared fill policy when the dependency walk reports a hole.
+``force_root`` must match the subsequent ``plan_compute_dag`` walk so an entry
+step still fills prior-turn holes when the cheap walk would treat the root as
+satisfied. Orchestrator ``submit`` / ``ensure_scopes`` call
+:func:`prepare_dependency_chain_turns` **before** acquiring the orchestrator
+lock so loadturn I/O never runs under that lock. ``plan_compute_dag`` only
+walks already-stored turns.
 """
 
 from __future__ import annotations
@@ -171,24 +173,38 @@ def prepare_dependency_chain_turns(
     ctx: AnalyticQueryContext,
     analytic_id: str,
     scope: ExportScope,
+    *,
+    force_root: bool = False,
 ) -> None:
     """Fill missing turns on the ensure chain, or raise ``DependencyChainFillError``.
 
-    Fills ``[ensure floor, scope.turn)`` even when the cheap dependency walk
-    short-circuits as available (root already ensure-satisfied). ``plan_compute_dag``
-    may still walk those prior turns with ``force_root=True``. Login-backed
-    ``ctx.ensure_turn`` fetches holes from Planets.nu into storage. Callers
-    that plan a compute DAG must invoke this **before** ``plan_compute_dag``
-    and **outside** the orchestrator lock.
+    No-op when the dependency walk can already complete. Pass ``force_root`` to
+    match ``plan_compute_dag`` so a satisfied root still inspects ``-1`` edges
+    (scores RowRun / entry ``step_kind``). Login-backed ``ctx.ensure_turn``
+    fetches holes from Planets.nu into storage. Callers that plan a compute DAG
+    must invoke this **before** ``plan_compute_dag`` and **outside** the
+    orchestrator lock.
     """
-    fill = fill_missing_dependency_chain_turns(
-        ctx,
+    unavailable = ctx.dependency_walk_unavailable(
+        analytic_id,
         scope,
-        ensure_turn=ctx.ensure_turn,
+        force_root=force_root,
     )
-    if fill.still_missing is not None:
-        raise _fill_error(scope, fill)
-    unavailable = ctx.dependency_walk_unavailable(analytic_id, scope)
     if unavailable is None:
         return
+    if unavailable == "turn_not_stored":
+        fill = fill_missing_dependency_chain_turns(
+            ctx,
+            scope,
+            ensure_turn=ctx.ensure_turn,
+        )
+        if fill.still_missing is not None:
+            raise _fill_error(scope, fill)
+        unavailable = ctx.dependency_walk_unavailable(
+            analytic_id,
+            scope,
+            force_root=force_root,
+        )
+        if unavailable is None:
+            return
     raise _walk_unavailable_error(ctx, scope, unavailable)
