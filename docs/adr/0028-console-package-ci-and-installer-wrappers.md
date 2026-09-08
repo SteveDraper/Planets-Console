@@ -19,7 +19,7 @@ User OS is not the runner OS: Apple Silicon macOS 11 through 15 and 26, Windows 
 ## Consequences
 
 - Glossary: **installer wrapper** in [CONTEXT.md](../../CONTEXT.md). The **bundler** (PyInstaller) still does not emit `.dmg` or a Windows setup `.exe`.
-- Tag glob and Release asset names stay with version source on the map.
+- Tag glob and Release asset names: [ADR 0029](0029-console-package-identity-and-install-over.md).
 - Research notes (not on `main`): `docs/research/console-package-github-actions.md`, `docs/research/console-package-installer-wrappers.md`.
 
 See also: [Choose v1 CI and installer wrappers](https://github.com/SteveDraper/Planets-Console/issues/429), [ADR 0027](0027-console-package-bundler-and-process-host.md), map [v1 Mac and Windows console package](https://github.com/SteveDraper/Planets-Console/issues/423).

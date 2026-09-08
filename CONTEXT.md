@@ -37,16 +37,16 @@ _Avoid_: session context (ambiguous with login credentials), query scope (implem
 ### Packaged install
 
 **Console package**:
-The downloaded macOS or Windows artifact that runs Planets Console without a git, Python, Node, or `uv` toolchain. Double-click starts the one-process server and opens the SPA in a browser on loopback.
-_Avoid_: desktop app (native SPA window), single-server deployment (from-source `run_deploy.sh`), installer (when meaning the whole product)
+The installed, double-clickable Planets Console on macOS (`.app` in Applications) or Windows (Start Menu app under `%LocalAppData%\Programs`) that runs without a git, Python, Node, or `uv` toolchain.
+_Avoid_: desktop app (native SPA window), single-server deployment (from-source `run_deploy.sh`), installer (when meaning the whole product), the GitHub Release `.dmg` or setup `.exe` (those are **installer wrapper** outputs)
 
 **Bundler**:
 The build-time tool that collects the one-process server, Python runtime, native libraries, and prebuilt SPA into a runnable tree. Distinct from the **installer wrapper**. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).
 _Avoid_: freeze (that is **compute diagnostic mode**), freezer, packager (when meaning a GUI-toolkit app shell)
 
 **Installer wrapper**:
-The pack step that turns **bundler** output into the downloadable **console package** file. It does not own the **console data directory**. See [ADR 0028](docs/adr/0028-console-package-ci-and-installer-wrappers.md).
-_Avoid_: bundler, freeze, zip of the onedir, installer (when meaning the whole product)
+The pack step that turns **bundler** output into the GitHub Release download (Mac `.dmg`, Windows setup `.exe`). It does not own the **console data directory**. See [ADR 0028](docs/adr/0028-console-package-ci-and-installer-wrappers.md).
+_Avoid_: bundler, freeze, zip of the onedir, installer (when meaning the whole product), console package (the installed app)
 
 **Process host**:
 The OS-app identity of a running **console package** -- macOS Dock, Windows taskbar -- whose Quit stops the packaged server. Closing the browser does not. It does not embed the SPA. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).
@@ -56,9 +56,17 @@ _Avoid_: host (VGA Planets rules or Planets.nu), desktop app, native SPA window,
 At most one **process host** per user for the **console package**. A second activation reuses that process instead of starting another server. See [ADR 0027](docs/adr/0027-console-package-bundler-and-process-host.md).
 _Avoid_: mutex (implementation), allow a second server on another loopback port
 
+**Listen-then-open**:
+The **process host** rule that the default browser opens only after `GET /health` succeeds on the bound `127.0.0.1` port, not after a timer. See [ADR 0029](docs/adr/0029-console-package-identity-and-install-over.md).
+_Avoid_: sleep-then-open, localhost (IPv6)
+
 **Console data directory**:
-OS per-user directory that holds the packaged process's **file backend** store (and support logs), independent of the install location so replacing the **console package** does not wipe games or **account API keys**.
+OS per-user directory that holds the packaged process's **file backend** store (and support logs): macOS `~/Library/Application Support/Planets Console/`, Windows `%LOCALAPPDATA%\Planets Console\`. Independent of the install location so **install-over** does not wipe games or **account API keys**. See [ADR 0029](docs/adr/0029-console-package-identity-and-install-over.md).
 _Avoid_: `.data` (repo cwd), portable next-to-exe store
+
+**Install-over**:
+Replacing a **console package** in the same install location without touching the **console data directory**. See [ADR 0029](docs/adr/0029-console-package-identity-and-install-over.md).
+_Avoid_: upgrade (ambiguous with **lazy credential migrate**), uninstall-then-install, migrate
 
 ### Login and shell controls
 
