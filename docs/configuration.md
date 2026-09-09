@@ -143,7 +143,7 @@ uv run serve -c api.storage_asset_path=/data/store.json -c bff=@bff.yaml
 ## How it’s used
 
 - Config is loaded at server startup in the CLI (before uvicorn runs). The amalgamated config is built; then `server` host/port are used for the uvicorn bind, and `api` and `bff` sub-configs are passed into their layers via `set_config()`.
-- The CLI uses `server.host` and `server.port` for `uvicorn.run(host=..., port=...)`. The Core API uses `api` config for storage (e.g. `get_storage()` reads `storage_backend`, `storage_root`, and `storage_asset_path`). The BFF uses `bff` config (e.g. CORS middleware uses `cors_origins`).
+- The CLI uses `server.host` and `server.port` for `uvicorn.run(host=..., port=...)`, and passes `timeout_graceful_shutdown=5` so SIGTERM does not wait forever on local NDJSON/MCP streams. The Core API uses `api` config for storage (e.g. `get_storage()` reads `storage_backend`, `storage_root`, and `storage_asset_path`). The BFF uses `bff` config (e.g. CORS middleware uses `cors_origins`).
 - Repo `.config.yaml` uses `file` + `storage_root: ./.data` for local dev. Unit tests and CI fixtures set `storage_backend: ephemeral` explicitly.
 - Implementation lives in: `packages/server/server/config.py` (loading, override parsing, and `ServerConfig`), `packages/api/api/config.py` (API sub-config), `packages/bff/bff/config.py` (BFF sub-config).
 

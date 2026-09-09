@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from api.config import ApiConfig
 from bff.config import BffConfig
-from server.cli import app
+from server.cli import GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS, app
 from server.config import RootConfig, ServerConfig
 from typer.testing import CliRunner
 
@@ -67,6 +67,8 @@ def test_serve_passes_loaded_host_port_to_uvicorn():
     assert mock_uvicorn.call_args[1]["port"] == 9000
     assert mock_uvicorn.call_args[1]["reload"] is False
     assert mock_uvicorn.call_args[1]["factory"] is True
+    shutdown_timeout = mock_uvicorn.call_args[1]["timeout_graceful_shutdown"]
+    assert shutdown_timeout == GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS
 
 
 def test_serve_config_subcommand_help():
