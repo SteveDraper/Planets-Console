@@ -28,6 +28,7 @@ export function combineMapData(
   const regionOverlays: CombinedMapData['regionOverlays'] = []
   const wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances'] = []
   const homeworldMarkers: CombinedMapData['homeworldMarkers'] = []
+  const minefields: CombinedMapData['minefields'] = []
   const context: MapLayerMergeContext = {
     baseMapAnalyticId,
     nodes,
@@ -36,6 +37,7 @@ export function combineMapData(
     regionOverlays,
     wormholeUnknownEntrances,
     homeworldMarkers,
+    minefields,
     waypointsByKey: new Map<string, { x: number; y: number }>(),
     baselineDegraded: undefined,
     baselineTurn: undefined,
@@ -54,6 +56,7 @@ export function combineMapData(
     regionOverlays: context.regionOverlays,
     wormholeUnknownEntrances,
     homeworldMarkers: context.homeworldMarkers,
+    minefields: context.minefields,
     baselineDegraded: context.baselineDegraded,
     baselineTurn: context.baselineTurn,
     nuIonStorms: context.nuIonStorms,

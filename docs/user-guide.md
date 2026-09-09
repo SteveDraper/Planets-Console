@@ -92,9 +92,10 @@ The left column is titled **Analytics**. Each row is one analytic with a **check
 - Check an analytic to **include** it in the current view (tabular tables or map layers, depending on mode).
 - Analytics that **do not support** the current mode stay visible but look **greyed out**; their checkboxes are disabled until you switch mode.
 - The **base map** layer (planet positions as nodes) is **not** listed here; in **map** mode it is still fetched and combined automatically with whatever map-capable analytics you enable (see below).
-- Which analytics are enabled, and **Stellar Cartography** layer toggles when that analytic is used, are **remembered in the browser** and restored when you reload the page.
+- Which analytics are enabled, and **Stellar Cartography** layer toggles when that analytic is used, are **remembered in the browser** and restored when you reload the page. **Minefields** type enablement, color policy, and stance colors persist the same way.
 - **Connections** is a separate **selectable** analytic: it adds **travel reachability** edges between planets. Enable its checkbox to load those edges; see [Connections analytic](#connections-analytic-map-mode).
 - **Stellar Cartography** is a **map-only** selectable analytic: it draws hazard overlays and wormhole links on the starmap. See [Stellar Cartography analytic](#stellar-cartography-analytic-map-mode).
+- **Minefields** is a **map-only** selectable analytic: it paints known minefields from the current turn. See [Minefields analytic](#minefields-analytic-map-mode).
 
 ![Analytics list with some enabled and one greyed for current mode](images/user-guide/08-analytics-bar.png)
 
@@ -145,6 +146,18 @@ While a **planet hover or pinned label** is active, cartography tooltips are sup
 
 Technical detail, layer gates, and API contracts live in [design-stellar-cartography-analytic.md](design-stellar-cartography-analytic.md) and [design-stellar-cartography-map-rendering.md](design-stellar-cartography-map-rendering.md).
 
+### Minefields analytic (map mode)
+
+**Minefields** paints **known minefields** from the current viewpoint turn: last-known disks the host already listed, including stale intel (`infoturn` older than the shell turn). It is **map-only**; in tabular mode the tile is **greyed out**. Games with **No Minefields** (`nominefields`) grey the tile with *This game has no minefields*. A game that hides other players' fields (`minefieldsvisible` off) still shows whatever is on this RST -- often stale.
+
+- **Enable** it with the **Minefields** checkbox in the sidebar.
+- Use the **chevron** to expand per-type controls. **Normal** and **web** mines can be toggled independently (both on by default).
+- **Color** policy per type: **Owner** (shared per-player palette, ignoring the global player-color mode) or **Stance** (your fields plus inbound Safe Passage vs everyone else). Web defaults to stance (purple pair); normal defaults to owner. Stance colors are editable when that policy is selected.
+
+Overlaps mix with a commutative lighter blend. Concentric rings show size **before** this turn's decay (solid) and **after** (dashed). Stale fields keep full-strength outlines but dimmer fills. Hover lists **every** overlapping enabled-type field under the pointer (smallest first), with type, owner, units, radii, last-updated turn, and friendly code when known.
+
+Technical detail: [design-minefields-analytic.md](design-minefields-analytic.md). Paint channel: [ADR 0030](adr/0030-minefield-map-pane.md).
+
 ---
 
 ## Main area -- tabular mode
@@ -172,7 +185,7 @@ With **Tabular** selected, the main area shows **one section per enabled analyti
 
 ## Main area -- map mode
 
-With **Map** selected, the main area shows an interactive **graph map** (React Flow): **planets as nodes**. Optional layers come from enabled map analytics: **Connections** adds **travel edges** between planets; **Stellar Cartography** adds hazard overlays and wormhole links (see the [Analytics sidebar](#analytics-sidebar)).
+With **Map** selected, the main area shows an interactive **graph map** (React Flow): **planets as nodes**. Optional layers come from enabled map analytics: **Connections** adds **travel edges** between planets; **Stellar Cartography** adds hazard overlays and wormhole links; **Minefields** paints known minefield disks (see the [Analytics sidebar](#analytics-sidebar)).
 
 ### Pan and zoom
 
@@ -190,6 +203,7 @@ Map layers combine the **base map** (planet nodes from the current turn) with ev
 
 - **Connections** adds **edges** between planet nodes using the same ids as the base map.
 - **Stellar Cartography** adds SVG overlays (nebulae, storms, clusters, black holes, debris disk borders) plus **wormhole** edges and endpoint markers. You can turn individual cartography layers off in the sidebar without disabling the whole analytic.
+- **Minefields** adds owner/stance-colored disks with pre- and post-decay rings. You can hide normal or web types, or switch color policy, without disabling the whole analytic.
 
 If no map-capable analytic is enabled **and** the app cannot build a base map, you may see a message explaining that. The base planet map still loads when only Stellar Cartography or Connections is enabled.
 
@@ -274,8 +288,9 @@ Opening the login flow shows a centered dialog: **Log in to planets.nu**, fields
 | Viewpoint | Choose perspective player when allowed |
 | Tabular / Map | Switch main content |
 | Scale | Map zoom (map mode only) |
-| Analytics | Enable/disable each analytic (persisted); grey = wrong mode; **Connections** = travel edges; **Stellar Cartography** = hazard overlays and wormholes (map only) |
+| Analytics | Enable/disable each analytic (persisted); grey = wrong mode; **Connections** = travel edges; **Stellar Cartography** = hazard overlays and wormholes (map only); **Minefields** = known minefield disks (map only) |
 | Stellar Cartography layers | Expand the analytic row in map mode; per-layer checkboxes gated by game settings; wormholes **Off** / **On hover** / **Always** |
+| Minefields types | Expand the analytic row in map mode; per-type enable + owner/stance color |
 | Map options | Planet label content and detail level |
 | Map readout | Bottom-left: map `x`, `y`, and zoom under the pointer |
 | Cartography hover | Stacked tooltip at pointer cell for enabled layers (suppressed when a planet label is active) |
@@ -283,4 +298,4 @@ Opening the login flow shows a centered dialog: **Log in to planets.nu**, fields
 | Zoom | Higher zoom shows warp well grid, then fainter full coordinate grid (see map section) |
 | Error bar | Read errors; dismiss per message |
 
-For how the app stores session vs server state, see [Frontend and backend state](design-frontend-and-backend-state.md). For configuration of the server and config files, see [Configuration](configuration.md). For the Connections reachability model and BFF contract, see [design-connections-analytic.md](design-connections-analytic.md). For Stellar Cartography registration, layers, and map rendering, see [design-stellar-cartography-analytic.md](design-stellar-cartography-analytic.md) and [design-stellar-cartography-map-rendering.md](design-stellar-cartography-map-rendering.md).
+For how the app stores session vs server state, see [Frontend and backend state](design-frontend-and-backend-state.md). For configuration of the server and config files, see [Configuration](configuration.md). For the Connections reachability model and BFF contract, see [design-connections-analytic.md](design-connections-analytic.md). For Stellar Cartography registration, layers, and map rendering, see [design-stellar-cartography-analytic.md](design-stellar-cartography-analytic.md) and [design-stellar-cartography-map-rendering.md](design-stellar-cartography-map-rendering.md). For Minefields, see [design-minefields-analytic.md](design-minefields-analytic.md).

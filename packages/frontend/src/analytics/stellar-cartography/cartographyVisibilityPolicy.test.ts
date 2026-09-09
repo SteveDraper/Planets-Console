@@ -150,6 +150,7 @@ describe('cartographyVisibilityPolicy', () => {
         regionOverlays: [],
         wormholeUnknownEntrances: [{ x: 50, y: 60 }],
         homeworldMarkers: [],
+        minefields: [],
       }
       const policy = cartographyVisibilityPolicy({
         ...baseConfig,
@@ -173,6 +174,7 @@ describe('cartographyVisibilityPolicy', () => {
         regionOverlays: [],
         wormholeUnknownEntrances: [{ x: 50, y: 60 }],
         homeworldMarkers: [],
+        minefields: [],
       }
       const parts = cartographyVisibilityPolicy(baseConfig).mapFrameParts(data)
 

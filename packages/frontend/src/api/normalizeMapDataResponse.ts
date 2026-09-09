@@ -12,6 +12,7 @@ import type {
   PlanetPairRoute,
   StellarCartographyOverlayCircle,
 } from "./bffCartographyTypes"
+import { parseKnownMinefields } from "../analytics/minefields/wireSchema"
 import { normalizeOverlayCircle } from "./normalizeMapOverlayCircle"
 import { normalizeMapRegionOverlays } from "./normalizeMapRegionOverlay"
 import {
@@ -208,6 +209,10 @@ export function normalizeMapDataResponse(raw: unknown): MapDataResponse {
   const regionOverlaysRaw = o.regionOverlays ?? o.region_overlays
   if (Array.isArray(regionOverlaysRaw)) {
     out.regionOverlays = normalizeMapRegionOverlays(regionOverlaysRaw)
+  }
+  const minefieldsRaw = o.minefields
+  if (Array.isArray(minefieldsRaw)) {
+    out.minefields = parseKnownMinefields(minefieldsRaw)
   }
   const metaRaw = o.meta
   const meta = normalizeMapMeta(metaRaw)

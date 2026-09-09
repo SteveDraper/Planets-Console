@@ -260,6 +260,8 @@ export interface paths {
          *     **homeworld-locator** returns candidate ``markers`` / ``rows`` (empty nodes/edges), optional
          *     boundary ``regionOverlays`` for circular sector paint, plus availability and baseline metadata.
          *
+         *     **minefields** returns known-field facts (``minefields`` array with pre/post-decay radii).
+         *
          *     Nodes use fixed Cartesian coordinates (x, y). The SPA fetches base-map first, then
          *     enabled map analytics, and merges layers (see docs/design-connections-analytic.md).
          */

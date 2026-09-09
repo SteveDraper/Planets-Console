@@ -49,6 +49,7 @@ const displayMapData = {
   regionOverlays: [],
   wormholeUnknownEntrances: [],
   homeworldMarkers: [],
+  minefields: [],
 }
 
 function renderShowingMap(

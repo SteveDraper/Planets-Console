@@ -442,6 +442,45 @@ describe('normalizeMapDataResponse', () => {
     })
   })
 
+  it('parses minefields facts and drops invalid entries', () => {
+    const out = normalizeMapDataResponse({
+      analyticId: 'minefields',
+      nodes: [],
+      edges: [],
+      minefields: [
+        {
+          id: 18,
+          ownerId: 2,
+          isWeb: false,
+          isHidden: false,
+          x: 2131,
+          y: 1417,
+          units: 85,
+          infoTurn: 111,
+          friendlyCode: '???',
+          preRadius: 9,
+          postRadius: 8,
+        },
+        { id: 'bad' },
+      ],
+    })
+    expect(out.minefields).toEqual([
+      {
+        id: 18,
+        ownerId: 2,
+        isWeb: false,
+        isHidden: false,
+        x: 2131,
+        y: 1417,
+        units: 85,
+        infoTurn: 111,
+        friendlyCode: '???',
+        preRadius: 9,
+        postRadius: 8,
+      },
+    ])
+  })
+
   it('omits meta when wire payload has no recognized fields', () => {
     const out = normalizeMapDataResponse({
       analyticId: 'stellar-cartography',

@@ -313,6 +313,41 @@ def test_list_analytics_includes_homeworld_locator_analytic():
     }
 
 
+def test_list_analytics_includes_minefields_map_analytic():
+    response = client.get("/analytics")
+    assert response.status_code == 200
+    analytics = response.json()["analytics"]
+    minefields = next(a for a in analytics if a["id"] == "minefields")
+    assert minefields == {
+        "id": "minefields",
+        "name": "Minefields",
+        "supportsTable": False,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
+def test_minefields_map_returns_known_field_facts():
+    response = client.get(f"/analytics/minefields/map?{SCOPE_QS}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analyticId"] == "minefields"
+    assert data["nodes"] == []
+    assert data["edges"] == []
+    assert isinstance(data["minefields"], list)
+    assert len(data["minefields"]) >= 1
+    field = data["minefields"][0]
+    assert "id" in field
+    assert "ownerId" in field
+    assert "preRadius" in field
+    assert "postRadius" in field
+
+
+def test_minefields_table_returns_validation_error():
+    response = client.get(f"/analytics/minefields/table?{SCOPE_QS}")
+    assert response.status_code == 422
+
+
 def test_visibility_map_returns_region_overlays():
     storage = get_storage()
     with open(ASSETS_DIR / "turn_stellar_cartography_sample.json") as f:

@@ -112,6 +112,39 @@ describe('composeMapHoverContributions', () => {
     })
   })
 
+  it('minefield mergesWith planet and fleet in role order', () => {
+    const result = composeMapHoverContributions([
+      contribution({
+        id: 'planet:1',
+        role: 'planet',
+        kind: 'descriptive',
+        title: 'Planet',
+        placement: { mode: 'anchor', flowX: 1, flowY: 2 },
+      }),
+      contribution({
+        id: 'fleet:1',
+        role: 'fleet',
+        kind: 'descriptive',
+        title: 'Fleet',
+      }),
+      contribution({
+        id: 'minefield:1',
+        role: 'minefield',
+        kind: 'descriptive',
+        title: 'Minefields',
+        placement: { mode: 'cursor' },
+      }),
+    ])
+
+    expect(result.suppressedIds).toEqual([])
+    expect(result.descriptiveHosts).toHaveLength(1)
+    expect(result.descriptiveHosts[0]!.sections.map((s) => s.role)).toEqual([
+      'planet',
+      'fleet',
+      'minefield',
+    ])
+  })
+
   it('region mergesWith cartography as titled cursor sections in role order', () => {
     const result = composeMapHoverContributions([
       contribution({

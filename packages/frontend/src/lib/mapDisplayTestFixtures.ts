@@ -8,6 +8,7 @@ export const sampleMap: CombinedMapData = {
   regionOverlays: [],
   wormholeUnknownEntrances: [],
   homeworldMarkers: [],
+  minefields: [],
 }
 
 export const turnTwoMap: CombinedMapData = {

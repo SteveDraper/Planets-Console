@@ -110,6 +110,7 @@ const emptyCombined = {
   regionOverlays: [],
   wormholeUnknownEntrances: [],
   homeworldMarkers: [],
+  minefields: [],
 }
 
 function createWrapper() {

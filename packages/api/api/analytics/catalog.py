@@ -67,6 +67,13 @@ TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = (
         supports_map=True,
         type="selectable",
     ),
+    TurnAnalyticCatalogEntry(
+        id="minefields",
+        name="Minefields",
+        supports_table=False,
+        supports_map=True,
+        type="selectable",
+    ),
 )
 
 _CATALOG_BY_ID: dict[str, TurnAnalyticCatalogEntry] = {
