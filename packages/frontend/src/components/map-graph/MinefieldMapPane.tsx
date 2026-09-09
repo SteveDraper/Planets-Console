@@ -7,16 +7,15 @@ import { useMemo } from 'react'
 import { useStore } from '@xyflow/react'
 import type { CombinedMapData } from '../../api/bff'
 import {
-  ANNULUS_FILL_OPACITY,
-  INTERIOR_FILL_OPACITY,
-  STALE_FILL_OPACITY_FACTOR,
-  STROKE_OPACITY,
-  minefieldTypeId,
-} from '../../analytics/minefields/types'
-import {
   minefieldTypePreferences,
   resolveMinefieldPaintColor,
 } from '../../analytics/minefields/minefieldPaint'
+import {
+  minefieldPaintOps,
+  type MinefieldFillOp,
+  type MinefieldStrokeOp,
+} from '../../analytics/minefields/minefieldPaintOps'
+import { minefieldTypeId } from '../../analytics/minefields/types'
 import type { KnownMinefield } from '../../analytics/minefields/wireSchema'
 import { useMinefieldsPreferencesStore } from '../../stores/minefieldsPreferences'
 import { usePlayerColorsStore } from '../../stores/playerColors'
@@ -28,10 +27,6 @@ import {
 import { safeZoomScale } from './geometry'
 import { mapPaneZClass } from './mapPaneZOrder'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
-
-function fillOpacity(base: number, stale: boolean): number {
-  return stale ? base * STALE_FILL_OPACITY_FACTOR : base
-}
 
 function annulusPath(cx: number, cy: number, outerR: number, innerR: number): string {
   return [
@@ -74,7 +69,23 @@ export function MinefieldMapPane({
   const scale = safeZoomScale(rawScale)
   const viewport: CartographyOverlayViewport = { width, height, tx, ty, scale }
   const strokeWidth = 1
-  const strokes = [...visible].sort((a, b) => a.id - b.id)
+  const painted = visible.map((field) => {
+    const geo = minefieldPaneGeometry(field, viewport)
+    return {
+      id: field.id,
+      color: resolveMinefieldPaintColor({
+        isWeb: field.isWeb,
+        ownerId: field.ownerId,
+        preferences: minefieldTypePreferences(types, field.isWeb),
+        paintSnapshot,
+        viewpointPlayerId,
+        inboundRelationFromByPlayerId: inbound,
+      }),
+      geo,
+      ops: minefieldPaintOps(geo.preR, geo.postR, field.infoTurn < shellTurn),
+    }
+  })
+  const strokes = [...painted].sort((a, b) => a.id - b.id)
 
   return (
     <div
@@ -84,38 +95,25 @@ export function MinefieldMapPane({
     >
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         <g style={{ mixBlendMode: 'plus-lighter' }}>
-          {visible.map((field) => (
+          {painted.map((item) => (
             <MinefieldFills
-              key={`fill-${field.id}`}
-              field={field}
-              color={resolveMinefieldPaintColor({
-                isWeb: field.isWeb,
-                ownerId: field.ownerId,
-                preferences: minefieldTypePreferences(types, field.isWeb),
-                paintSnapshot,
-                viewpointPlayerId,
-                inboundRelationFromByPlayerId: inbound,
-              })}
-              stale={field.infoTurn < shellTurn}
-              viewport={viewport}
+              key={`fill-${item.id}`}
+              cx={item.geo.cx}
+              cy={item.geo.cy}
+              color={item.color}
+              fills={item.ops.fills}
             />
           ))}
         </g>
         <g>
-          {strokes.map((field) => (
+          {strokes.map((item) => (
             <MinefieldStrokes
-              key={`stroke-${field.id}`}
-              field={field}
-              color={resolveMinefieldPaintColor({
-                isWeb: field.isWeb,
-                ownerId: field.ownerId,
-                preferences: minefieldTypePreferences(types, field.isWeb),
-                paintSnapshot,
-                viewpointPlayerId,
-                inboundRelationFromByPlayerId: inbound,
-              })}
-              viewport={viewport}
+              key={`stroke-${item.id}`}
+              cx={item.geo.cx}
+              cy={item.geo.cy}
+              color={item.color}
               strokeWidth={strokeWidth}
+              strokes={item.ops.strokes}
             />
           ))}
         </g>
@@ -125,126 +123,70 @@ export function MinefieldMapPane({
 }
 
 function MinefieldFills({
-  field,
+  cx,
+  cy,
   color,
-  stale,
-  viewport,
+  fills,
 }: {
-  field: KnownMinefield
+  cx: number
+  cy: number
   color: string
-  stale: boolean
-  viewport: CartographyOverlayViewport
+  fills: readonly MinefieldFillOp[]
 }) {
-  const { cx, cy, preR, postR } = minefieldPaneGeometry(field, viewport)
-  if (preR <= 0) return null
-
-  if (postR <= 0) {
-    return (
+  if (fills.length === 0) return null
+  const nodes = fills.map((fill, index) =>
+    fill.kind === 'disk' ? (
       <circle
+        key={index}
         cx={cx}
         cy={cy}
-        r={preR}
+        r={fill.radius}
         fill={color}
-        fillOpacity={fillOpacity(ANNULUS_FILL_OPACITY, stale)}
+        fillOpacity={fill.opacity}
         stroke="none"
       />
-    )
-  }
-
-  const interior = (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={postR}
-      fill={color}
-      fillOpacity={fillOpacity(INTERIOR_FILL_OPACITY, stale)}
-      stroke="none"
-    />
-  )
-  if (preR === postR) {
-    return interior
-  }
-  return (
-    <g>
-      {interior}
+    ) : (
       <path
-        d={annulusPath(cx, cy, preR, postR)}
+        key={index}
+        d={annulusPath(cx, cy, fill.outerRadius, fill.innerRadius)}
         fill={color}
-        fillOpacity={fillOpacity(ANNULUS_FILL_OPACITY, stale)}
+        fillOpacity={fill.opacity}
         fillRule="evenodd"
         stroke="none"
       />
-    </g>
+    )
   )
+  return nodes.length === 1 ? nodes[0] : <g>{nodes}</g>
 }
 
 function MinefieldStrokes({
-  field,
+  cx,
+  cy,
   color,
-  viewport,
   strokeWidth,
+  strokes,
 }: {
-  field: KnownMinefield
+  cx: number
+  cy: number
   color: string
-  viewport: CartographyOverlayViewport
   strokeWidth: number
+  strokes: readonly MinefieldStrokeOp[]
 }) {
-  const { cx, cy, preR, postR } = minefieldPaneGeometry(field, viewport)
-  if (preR <= 0) return null
-  const dash = `${4} ${3}`
-
-  if (postR <= 0) {
-    return (
-      <circle
-        cx={cx}
-        cy={cy}
-        r={preR}
-        fill="none"
-        stroke={color}
-        strokeOpacity={STROKE_OPACITY}
-        strokeWidth={strokeWidth}
-      />
-    )
-  }
-
-  if (preR === postR) {
-    return (
-      <circle
-        cx={cx}
-        cy={cy}
-        r={preR}
-        fill="none"
-        stroke={color}
-        strokeOpacity={STROKE_OPACITY}
-        strokeWidth={strokeWidth}
-        strokeDasharray={dash}
-      />
-    )
-  }
-
-  return (
-    <g>
-      <circle
-        cx={cx}
-        cy={cy}
-        r={preR}
-        fill="none"
-        stroke={color}
-        strokeOpacity={STROKE_OPACITY}
-        strokeWidth={strokeWidth}
-      />
-      <circle
-        cx={cx}
-        cy={cy}
-        r={postR}
-        fill="none"
-        stroke={color}
-        strokeOpacity={STROKE_OPACITY}
-        strokeWidth={strokeWidth}
-        strokeDasharray={dash}
-      />
-    </g>
-  )
+  if (strokes.length === 0) return null
+  const nodes = strokes.map((stroke, index) => (
+    <circle
+      key={index}
+      cx={cx}
+      cy={cy}
+      r={stroke.radius}
+      fill="none"
+      stroke={color}
+      strokeOpacity={stroke.opacity}
+      strokeWidth={strokeWidth}
+      strokeDasharray={stroke.dasharray}
+    />
+  ))
+  return nodes.length === 1 ? nodes[0] : <g>{nodes}</g>
 }
 
 function minefieldPaneGeometry(
