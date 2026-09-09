@@ -403,7 +403,7 @@ The SPA owner (under **map mode**) of pane pointer state, hit epoch, contributio
 _Avoid_: hover manager (undersells click/menu scope), MapGraph (implementation host), tooltip service (too narrow)
 
 **Map interaction contributor**:
-A registration on the **map interaction surface** that supplies hit-testing plus typed hover blocks (sync lines/rich content and/or async fetch), scoped by contributor role (planet, fleet, region, cartography, …). Click / context-menu handlers are the same registration concept in a later slice.
+A registration on the **map interaction surface** that supplies hit-testing plus typed hover blocks (sync lines/rich content and/or async fetch), scoped by contributor role (planet, fleet, minefield, region, cartography, …). Click / context-menu handlers are the same registration concept in a later slice.
 _Avoid_: overlay hover handler, analytic-private mouse listener, pointer-events hit circle as the primary path
 
 **Map hover composition policy**:
@@ -428,7 +428,39 @@ _Avoid_: fleet player visibility, sensor picture (homeworld evidence sense), sca
 
 **Visibility region kind**:
 One toggleable shaded coverage family inside the **Visibility analytic**. v1 kinds: **ship scan coverage** (where non-special-case ships are detectable within ship-scan range of **planet and ship** origins -- starbases are not separate origins; they share planet coordinates); **active Sensor Sweep coverage** (union of sensor-mission range disks around ships whose mission is **Sensor Sweep** or **Bioscan** this turn); **potential Sensor Sweep coverage** (same range around non-bioscan ships that could set Sensor Sweep, plus bioscan hulls that use Bioscan instead); **active minefield detect coverage** (union of minefield-detect range disks around ships on **Mine Sweep** this turn); **potential minefield detect coverage** (same range around ships that could set Mine Sweep -- any starship). Geometry is boolean coverage footprint -- industry and defense-post gates describe what Sensor Sweep reports are possible inside those regions, not the disk shape; ion-storm center hiding affects minefield *reports*, not detect-disk shape. Probability banding is out of scope for v1. Sensor-mission range and minefield detect range each default to 200 ly (Host labels); bind a `GameSettings` field if one is present (none exposed on turn settings today). Advanced Bioscan nebula-planet exceptions are a documented follow-on if they differ from the shared \(V(P)\) model. Scan origins for all kinds include the viewpoint player's units and **Share Intel** partners' units (product approximation: either `relationto` or `relationfrom` ≥ Share Intel). Full Alliance adds no extra region-origin rules beyond Share Intel for this analytic. For ship-scan and Sensor Sweep kinds, nebula handling matches ship/planet visibility: at point \(P\), effective range is \(\min(\mathrm{baseRange},\, V(P))\) when \(P\) is in a nebula (else `baseRange`), using Core cartography \(V(P)\) from density; **Nebula Scanner**–equipped ship origins apply a 100 ly floor inside nebulae (still capped by `baseRange` if smaller). **Minefield detect** kinds are ideal disks only -- nebulae do not reduce minefield scan distance (Nu help). Coverage is emitted as hybrid **map region overlay** geometry where nebula modulation applies (ideal disks + nebula-local patches), else disk-only. Cloak, Stealth Armor range reduction, Hide in Warp Well, and other special detection abilities remain v1 exclusions (documented, not drawn).
-_Avoid_: cartography layer, fleet player visibility, detection probability field, treating Sensor Sweep nebula rules as a boolean punch-out distinct from ship \(V(P)\), applying nebula denting to minefield detect disks
+_Avoid_: cartography layer, fleet player visibility, detection probability field, treating Sensor Sweep nebula rules as a boolean punch-out distinct from ship \(V(P)\), applying nebula denting to minefield detect disks, treating detect coverage as the minefields themselves (that is the **Minefields analytic**)
+
+**Minefields analytic**:
+A map-only **turn analytic** (`analytic_id` `minefields`) that paints **known minefield**s from the shell turn's **TurnInfo** `minefields[]`. Selectable in the sidebar; greyed in tabular **view mode**; unavailable when `GameSettings.nominefields`; not Visibility detect coverage, not Cartography, not homeworld evidence.
+_Avoid_: folding fields into Visibility or Cartography, base-map always-on mines, Console-side last-seen ledger of fields the host has dropped
+
+**Known minefield**:
+One `Minefield` on the current **perspective** **TurnInfo** (`id`, `ownerid`, `isweb`, `ishidden`, `units`, `infoturn`, `friendlycode`, `x`, `y`, `radius`). The host's known set for that RST -- including fields whose `infoturn` is older than the shell turn. Not a reconstructed history across stored turns.
+_Avoid_: only-in-scan-range fields, fleet last-seen analog, treating a missing RST field as still present
+
+**Minefield type**:
+Whether a **known minefield** is **normal** (`isweb` false) or **web** (`isweb` true). The **Minefields analytic** sidebar enables and paints each type independently.
+_Avoid_: regular vs web as separate analytics, Crystal-only web layer
+
+**Minefield pre-decay radius**:
+`floor(sqrt(units))` for a **known minefield** -- last-known size before this host turn's decay. Prefer `units` over the stored `radius` field when they disagree.
+_Avoid_: using stored `radius` as the decay input, ly as a stroke width
+
+**Minefield post-decay radius**:
+`floor(sqrt(remaining units))` after one decay step on that field. Default remaining is `round(0.95x) - 1`; if the pre-decay disk intersects any known nebula on this RST, remaining is `round(0.85x) - 1`. Whole field switches rate; nebulae do not stack.
+_Avoid_: center-in-nebula-only, partial-area decay, Cartography nebula-layer toggle as the known set, dense/hardened rates (follow-on)
+
+**Minefield paint policy**:
+Per **minefield type**, mutually exclusive fill coloring: **owner** (shared **per-player** palette, ignoring global **player color mode**) or **stance** (inbound `relationfrom >= Safe Passage` plus the viewpoint's own fields vs everyone else). Stance threshold is locked to Safe Passage, not the Settings **diplomacy color threshold**.
+_Avoid_: Nu my/ally/enemy three-bucket mines, following global player color mode for owner paint, encoding web-immunity host settings in color
+
+**Minefield map pane**:
+Dedicated MapGraph SVG overlay for the **Minefields analytic**. Not `overlayCircles` and not **map region overlay**s. Fills composite with isolated commutative `plus-lighter`; 1px screen-stable strokes are source-over after fills.
+_Avoid_: cartography overlay circles, Visibility region kinds, painter's-algorithm z-order by radius
+
+**Minefield hover**:
+One **descriptive** **map hover contribution** (role `minefield`) listing every enabled-type **known minefield** whose pre-decay disk contains the pointer -- same many-rows idea as a **fleet location ring** tooltip listing every ship in the stack. Click / context menu out of scope.
+_Avoid_: picking only the smallest field, one contribution per overlapping field, analytic-private mouse capture
 
 **Stellar Cartography**:
 NuHost optional map geography (star clusters, nebulae, wormholes, black holes, debris disks, and related ion-storm behavior). Exposed in the console as one map-only **turn analytic** with per-element layer toggles.
@@ -767,8 +799,8 @@ Single NDJSON connection for all **fleet player visibility**-enabled players on 
 _Avoid_: per-player HTTP connections, admission-order wire drain, separate map NDJSON protocol, map-mode `GET …/fleet/map` as the live SPA path, treating the stream as table-only
 
 **Player color**:
-Shared SPA identity color for a **Player**, used by any analytic or chrome that needs per-player paint (including **fleet location ring**s). Resolved under the active **player color mode**. Consumers keep calling `usePlayerColor(playerId)` / `colorForPlayerId(playerId)`; shell + Settings install the resolution inputs. Default palette in **per-player** mode (when not overridden): `playerId % 16` into `#38bdf8 #f472b6 #a78bfa #34d399 #fbbf24 #fb7185 #22d3ee #a3e635 #f97316 #818cf8 #2dd4bf #e879f9 #60a5fa #f43f5e #c084fc #84cc16`. Policy knobs and per-player overrides are global localStorage ([#289](https://github.com/SteveDraper/Planets-Console/issues/289)), not per-analytic sidebar state.
-_Avoid_: fleet-only color store, relying on often-empty host `Relation.color` as the sole source, baking Settings UI into every consumer, changing every paint call site when mode inputs change
+Shared SPA identity color for a **Player**, used by any analytic or chrome that needs per-player paint (including **fleet location ring**s and **Minefields analytic** owner paint). Resolved under the active **player color mode**. Consumers keep calling `usePlayerColor(playerId)` / `colorForPlayerId(playerId)`; shell + Settings install the resolution inputs. Default palette in **per-player** mode (when not overridden): `playerId % 16` into `#38bdf8 #f472b6 #a78bfa #34d399 #fbbf24 #fb7185 #22d3ee #a3e635 #f97316 #818cf8 #2dd4bf #e879f9 #60a5fa #f43f5e #c084fc #84cc16`. Policy knobs and per-player overrides are global localStorage ([#289](https://github.com/SteveDraper/Planets-Console/issues/289)), not per-analytic sidebar state.
+_Avoid_: fleet-only color store, relying on often-empty host `Relation.color` as the sole source, baking Settings UI into every consumer, changing every paint call site when mode inputs change, treating Crystal **raceid** 7 as a purple preset (colors are `playerId % 16`, not race)
 
 **Player color mode**:
 Mutually exclusive paint policy for **player color**: **per-player** (independent override or default per **Player**) or **diplomacy-family** (two families -- **diplomacy color family** and **non-diplomacy color family** -- each with its own base color and tonal variants). Switching modes changes which policy paints; both modes' settings are preserved.
