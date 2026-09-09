@@ -26,6 +26,7 @@ import {
   type CartographyOverlayViewport,
 } from '../../lib/cartography/cartographyOverlayGeometry'
 import { safeZoomScale } from './geometry'
+import { mapPaneZClass } from './mapPaneZOrder'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 
 function fillOpacity(base: number, stale: boolean): number {
@@ -77,7 +78,7 @@ export function MinefieldMapPane({
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-[7]"
+      className={`pointer-events-none absolute inset-0 ${mapPaneZClass('minefields')}`}
       style={{ isolation: 'isolate' }}
       aria-hidden
     >

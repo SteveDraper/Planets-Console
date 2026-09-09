@@ -8,6 +8,7 @@ import { useStore } from '@xyflow/react'
 import type { CombinedMapData, MapPlanetSnapshot, RouteMapWaypoint } from '../../api/bff'
 import { usePlanetMapPaintState } from '../../map-interaction/contributors/PlanetMapInteraction'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
+import { mapPaneZClass } from './mapPaneZOrder'
 
 /** Fixed pixel size of the planet dot on screen (independent of zoom). */
 const DOT_PIXELS = 4
@@ -71,7 +72,7 @@ export function FixedSizeDotsOverlay({
   const scale = safeZoomScale(rawScale)
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+    <div className={`pointer-events-none absolute inset-0 ${mapPaneZClass('planetDots')}`} aria-hidden>
       <div className="absolute inset-0" aria-hidden>
         {routeWaypoints.map((w) => {
           const { cx, cy } = flowCenterFromMapNode({ x: w.gx, y: w.gy })

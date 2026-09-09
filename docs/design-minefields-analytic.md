@@ -25,7 +25,7 @@ Related: [Adding a turn analytic](design-adding-a-turn-analytic.md), [Stellar Ca
 
 ## Map pane (ADR 0030)
 
-Z-order: cartography SVG < Visibility/homeworld **map region overlay**s < minefields pane < planet dots / fleet rings.
+Z-order (named stack in `packages/frontend/src/components/map-graph/mapPaneZOrder.ts`): cartography SVG (warp wells, coordinate grid) < Visibility/homeworld **map region overlay** fills < minefields pane < planet dots (homeworld markers at or above dots) < fleet location rings (heading trails with fleet chrome).
 
 - Wrapper `isolation: isolate`. Fills `plus-lighter` (order-independent). Strokes second pass, source-over, sort by `id`. 1 CSS px strokes (pane-space `strokeWidth: 1`).
 - Interior `0 → postRadius` fill 0.22; annulus `postRadius → preRadius` fill 0.10. Stale fills `× 0.55` (`infoTurn <` shell turn). Strokes opacity 0.9, not dimmed.

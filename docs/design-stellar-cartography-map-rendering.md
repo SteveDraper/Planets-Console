@@ -27,7 +27,7 @@ How the console draws and interacts with **Stellar Cartography** on the React Fl
 
 | Concern | Rule |
 |---------|------|
-| **Planet dots** | Always on top of cartography (pane dots at `z-[5]`) |
+| **Planet dots** | Always on top of cartography (named MapGraph overlay stack; dots above cartography, region fills, and minefields) |
 | **Connection edges** | Strongest routing cue; cartography lines **lower contrast** than `#b1b1b7` connection edges (50% opacity) |
 | **Cartography SVG pane** | Above coordinate grid, below planet dots |
 | **SVG paint order** (bottom -> top) | Debris disk borders, nebulae, ion storms, star clusters, black holes |

@@ -6,6 +6,7 @@ import {
   WARP_WELL_OVERLAY_ZOOM_THRESHOLD,
 } from '../../lib/warpWellOverlay'
 import { safeZoomScale } from './geometry'
+import { mapPaneZClass } from './mapPaneZOrder'
 
 /** Slightly warmer than the coordinate grid so both remain distinguishable. */
 const WARP_WELL_STROKE = '#78716c'
@@ -45,7 +46,7 @@ export function NormalWarpWellOutlinesOverlay({ mapNodes }: { mapNodes: Combined
   if (lines.length === 0) return null
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+    <div className={`pointer-events-none absolute inset-0 ${mapPaneZClass('cartography')}`} aria-hidden>
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         <g stroke={WARP_WELL_STROKE} strokeWidth={1}>
           {lines.map(({ key, x1, y1, x2, y2 }) => (

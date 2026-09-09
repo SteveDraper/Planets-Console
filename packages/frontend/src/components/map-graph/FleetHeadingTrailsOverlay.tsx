@@ -10,6 +10,7 @@ import {
 } from '../../analytics/fleet/fleetHeadingTrails'
 import { usePlayerColor } from '../../stores/playerColors'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
+import { mapPaneZClass } from './mapPaneZOrder'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 
 type FleetHeadingTrailsOverlayProps = {
@@ -29,7 +30,7 @@ export function FleetHeadingTrailsOverlay({ trails }: FleetHeadingTrailsOverlayP
   const scale = safeZoomScale(rawScale)
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[7]">
+    <div className={`pointer-events-none absolute inset-0 ${mapPaneZClass('fleetHeadingTrails')}`}>
       <svg
         className="h-full w-full"
         viewBox={`0 0 ${width} ${height}`}

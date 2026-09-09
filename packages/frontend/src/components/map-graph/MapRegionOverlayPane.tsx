@@ -3,6 +3,7 @@ import { useStore } from '@xyflow/react'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { buildMapRegionOverlayPaneShapes } from '../../lib/mapRegionOverlay'
 import { safeZoomScale } from './geometry'
+import { mapPaneZClass } from './mapPaneZOrder'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 
 /**
@@ -39,7 +40,7 @@ export function MapRegionOverlayPane({
   if (groups.length === 0) return null
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[6]" aria-hidden>
+    <div className={`pointer-events-none absolute inset-0 ${mapPaneZClass('regionOverlays')}`} aria-hidden>
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         <defs>
           {groups.map((group) => {
