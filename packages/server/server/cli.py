@@ -9,7 +9,8 @@ from server.config import load_config
 
 app = typer.Typer()
 
-# Local-only app: do not wait forever on NDJSON/MCP streams after SIGTERM.
+# All `serve` invocations (dev and deploy via scripts/run_deploy.sh): bound
+# graceful shutdown so SIGTERM does not wait forever on NDJSON/MCP streams.
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 CONFIG_OPTION_HELP = (
