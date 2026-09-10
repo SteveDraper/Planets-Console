@@ -114,17 +114,24 @@ def test_run_passes_sidecar_when_lock_is_held(tmp_path, monkeypatch):
         "server.process_host.runtime.configure_support_logging",
         lambda _data_dir: tmp_path / "logs" / "process-host.log",
     )
-    seen: dict[str, object] = {}
+    reopened: list[object] = []
+    primary_called: list[str] = []
 
     def fake_reopen(port_path):
-        seen["port_path"] = port_path
+        reopened.append(port_path)
+        return 0
+
+    def fake_primary(*_args, **_kwargs):
+        primary_called.append("called")
         return 0
 
     monkeypatch.setattr("server.process_host.runtime._reopen_existing_instance", fake_reopen)
+    monkeypatch.setattr("server.process_host.runtime._run_as_primary", fake_primary)
     holder = SingleInstanceLock(tmp_path / LOCK_FILE_NAME)
     assert holder.try_acquire() is True
     try:
         assert _run() == 0
-        assert seen["port_path"] == holder.port_path
+        assert reopened == [holder.port_path]
+        assert primary_called == []
     finally:
         holder.release()

@@ -19,7 +19,12 @@ from bundle_console_package import (
 )
 from server.package_identity import VERSION_SIDECAR_NAME, version_from_pyproject
 
+from tests.console_package_install_over_helpers import (
+    assert_text_excludes_console_data_directory,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_SPEC_PATH = Path(__file__).resolve().parents[1] / "console_package.spec"
 
 
 def test_version_from_pyproject_is_full_semver_not_short():
@@ -57,10 +62,47 @@ def test_collect_policy_does_not_add_tests_scripts_docs_or_frontend_src():
     assert "tests" not in joined_dest
 
 
+def _spec_call_keyword(tree: ast.AST, func_name: str, keyword: str) -> str | None:
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == func_name
+        ):
+            for kw in node.keywords:
+                if kw.arg == keyword:
+                    return ast.unparse(kw.value)
+    return None
+
+
+def test_collect_policy_and_spec_do_not_place_console_data_directory_in_bundle():
+    """Install-over: freeze datas/dests and spec layout are not the OS data dir.
+
+    macOS Finder replace of ``{display_name}.app`` and Windows onedir COLLECT
+    must not collect ``Library/Application Support/{name}`` or
+    ``%LOCALAPPDATA%\\{name}`` into the app tree.
+    """
+    policy = collect_policy(REPO_ROOT)
+    for source, dest in policy.datas:
+        assert_text_excludes_console_data_directory(
+            f"{source}::{dest}",
+            where=f"collect policy datas {source!r} -> {dest!r}",
+        )
+    spec_text = _SPEC_PATH.read_text(encoding="utf-8")
+    assert_text_excludes_console_data_directory(spec_text, where="console_package.spec")
+    tree = ast.parse(spec_text)
+    assert _spec_call_keyword(tree, "Analysis", "datas") == "list(policy.datas)"
+    assert _spec_call_keyword(tree, "COLLECT", "name") == "policy.name"
+    bundle_name = _spec_call_keyword(tree, "BUNDLE", "name")
+    assert bundle_name in (
+        'f"{policy.display_name}.app"',
+        "f'{policy.display_name}.app'",
+    )
+
+
 def test_spec_import_surface_exists():
     """console_package.spec must import names that exist on bundle_console_package."""
-    spec_path = Path(__file__).resolve().parents[1] / "console_package.spec"
-    tree = ast.parse(spec_path.read_text(encoding="utf-8"))
+    tree = ast.parse(_SPEC_PATH.read_text(encoding="utf-8"))
     imported: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "bundle_console_package":
