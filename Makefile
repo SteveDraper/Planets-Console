@@ -1,4 +1,4 @@
-.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_mcp_adapter test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe
+.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_mcp_adapter test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe bundle_console_package
 
 # Use workspace venv (Python 3.14) and ensure dev deps (pytest, ruff) are installed.
 # `test` runs lint and unit tests (API fast suite; see `test_api_full` for solver/corpus integration).
@@ -59,7 +59,7 @@ test_mcp_adapter:
 
 test_scripts:
 	uv sync --extra dev
-	PYTHONPATH=scripts:packages/bff:packages/api uv run python -m pytest scripts/tests
+	PYTHONPATH=scripts:packages/server:packages/bff:packages/api uv run python -m pytest scripts/tests
 
 test_frontend:
 	cd packages/frontend && npm run test
@@ -93,3 +93,11 @@ inference_corpus_probe:
 		$(if $(FROM_TURN),--from-turn $(FROM_TURN),) \
 		$(if $(TO_TURN),--to-turn $(TO_TURN),) \
 		$(if $(MAX_COMPLEXITY),--max-complexity $(MAX_COMPLEXITY),)
+
+# Local console-package bundler (PyInstaller onedir --windowed). Requires a prebuilt SPA.
+# CI / installer wrappers are a separate ticket.
+bundle_console_package:
+	uv sync --extra package --extra dev
+	PYTHONPATH=packages/server:packages/api:packages/bff:packages/mcp_adapter \
+		uv run python scripts/bundle_console_package.py
+

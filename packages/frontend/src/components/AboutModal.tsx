@@ -79,7 +79,7 @@ export function AboutModal({
         </div>
         <div className="flex flex-col gap-3 text-xs text-slate-300">
           <div>
-            <p className="text-sm font-medium text-slate-200">Planets Analytic Console</p>
+            <p className="text-sm font-medium text-slate-200">Planets Console</p>
             <p className="mt-1 text-slate-400">
               <span className="text-slate-400">Author:</span>{' '}
               <span className="text-slate-200">Steve Draper</span>

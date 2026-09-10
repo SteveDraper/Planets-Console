@@ -21,3 +21,7 @@ local/
 
 # Frontend (packages/frontend has its own .gitignore for node_modules, dist)
 node_modules/
+
+# PyInstaller bundler output (console package onedir / .app)
+build/
+dist/
