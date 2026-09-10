@@ -48,9 +48,7 @@ def console_data_directory() -> Path:
 def packaged_file_backend_override_specs() -> tuple[str, ...]:
     """``--config`` specs that point the file backend at the console data directory.
 
-    The **process host** passes these into ``load_config`` with
-    ``discover_default=False`` so packaged launch does not cwd-walk
-    ``.config.yaml``.
+    Applied by ``load_packaged_config``, the packaged-load seam.
     """
     return (
         "api.storage_backend=file",

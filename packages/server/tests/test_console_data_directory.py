@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from api.config import ApiConfig
-from server.config import load_config
+from server.config import load_config, load_packaged_config
 from server.console_data_directory import (
     CONSOLE_PACKAGE_DISPLAY_NAME,
     ConsoleDataDirectoryError,
@@ -75,7 +75,7 @@ def test_packaged_override_specs_set_file_backend_storage_root():
     )
 
 
-def test_packaged_overrides_do_not_use_cwd_config_yaml(tmp_path, monkeypatch):
+def test_load_packaged_config_ignores_cwd_config_yaml(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".config.yaml").write_text(
         "api:\n  storage_backend: file\n  storage_root: ./.data\n  include_dummy_data: true\n",
@@ -86,14 +86,29 @@ def test_packaged_overrides_do_not_use_cwd_config_yaml(tmp_path, monkeypatch):
         "server.console_data_directory.console_data_directory",
         return_value=data_dir,
     ):
-        root = load_config(
-            override_specs=list(packaged_file_backend_override_specs()),
-            discover_default=False,
-        )
+        root = load_packaged_config()
     assert root.api.storage_backend == "file"
     assert root.api.storage_root == str(data_dir)
     assert root.api.include_dummy_data is False
     assert ApiConfig().storage_root == "./.data"
+
+
+def test_load_packaged_config_extra_overrides_apply_after_packaged_specs(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".config.yaml").write_text(
+        "api:\n  include_dummy_data: true\n",
+        encoding="utf-8",
+    )
+    data_dir = tmp_path / "Library" / "Application Support" / "Planets Console"
+    with patch(
+        "server.console_data_directory.console_data_directory",
+        return_value=data_dir,
+    ):
+        root = load_packaged_config(override_specs=["server.port=9000"])
+    assert root.api.storage_backend == "file"
+    assert root.api.storage_root == str(data_dir)
+    assert root.api.include_dummy_data is False
+    assert root.server.port == 9000
 
 
 def test_load_config_still_discovers_cwd_yaml_by_default(tmp_path, monkeypatch):

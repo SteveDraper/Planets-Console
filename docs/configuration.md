@@ -8,7 +8,7 @@ The backend process (API + BFF) uses an **amalgamated config** with sub-configs 
 - **Search order:** The process looks for `.config.yaml` in the current working directory, then in each parent directory (up to 10 levels). The first file found is used as the base config.
 - **If none is found:** The base config is empty; defaults come from the `server`, `api`, and `bff` config dataclasses (see below).
 
-The repository includes a default `.config.yaml` at the project root so that running the server from the repo uses it unless overrides are given.
+The repository includes a default `.config.yaml` at the project root so that running the server from the repo uses it unless overrides are given. Packaged launch (`serve --packaged` / `load_packaged_config()`) skips this search.
 
 ## Config structure
 
@@ -80,7 +80,7 @@ bff:
 
 ## Command-line overrides
 
-The server accepts one or more **`--config`** (or **`-c`**) options. Each value is an override spec. Specs are applied in order after loading the base config (from `.config.yaml` or from a full replacement; see below).
+The server accepts one or more **`--config`** (or **`-c`**) options. Each value is an override spec. Specs are applied in order after loading the base config (from `.config.yaml` or from a full replacement; see below). **`--packaged`** skips `.config.yaml` discovery and loads via `load_packaged_config()`; extra `--config` specs still apply after the packaged defaults (later wins). `--config` alone is not packaged launch.
 
 ### Syntax
 
@@ -115,6 +115,12 @@ uv run serve
 # or: python -m server.cli
 ```
 
+Packaged console launch (file backend at the OS console data directory; no `.config.yaml` discovery):
+
+```bash
+uv run serve --packaged
+```
+
 Override bind port or API asset path:
 
 ```bash
@@ -145,7 +151,7 @@ uv run serve -c api.storage_asset_path=/data/store.json -c bff=@bff.yaml
 - Config is loaded at server startup in the CLI (before uvicorn runs). The amalgamated config is built; then `server` host/port are used for the uvicorn bind, and `api` and `bff` sub-configs are passed into their layers via `set_config()`.
 - The CLI uses `server.host` and `server.port` for `uvicorn.run(host=..., port=...)`, and passes `timeout_graceful_shutdown=5` so SIGTERM does not wait forever on NDJSON/MCP streams. That cap applies to every `serve` process, including deploy (`scripts/run_deploy.sh` execs `uv run serve`). The Core API uses `api` config for storage (e.g. `get_storage()` reads `storage_backend`, `storage_root`, and `storage_asset_path`). The BFF uses `bff` config (e.g. CORS middleware uses `cors_origins`).
 - Repo `.config.yaml` uses `file` + `storage_root: ./.data` for local dev. Unit tests and CI fixtures set `storage_backend: ephemeral` explicitly. The **console package** does not load that file; see below.
-- Implementation lives in: `packages/server/server/config.py` (loading, override parsing, and `ServerConfig`), `packages/api/api/config.py` (API sub-config), `packages/bff/bff/config.py` (BFF sub-config), `packages/server/server/console_data_directory.py` (packaged OS data directory).
+- Implementation lives in: `packages/server/server/config.py` (loading, `load_packaged_config`, override parsing, and `ServerConfig`), `packages/api/api/config.py` (API sub-config), `packages/bff/bff/config.py` (BFF sub-config), `packages/server/server/console_data_directory.py` (OS console data directory Path helper).
 
 ## Packaged console data directory
 
@@ -158,7 +164,7 @@ A **console package** process points the **file backend** `storage_root` (and su
 
 Repo `.config.yaml` and `ApiConfig.storage_root` stay `./.data` for clone / `run_dev` / `run_deploy`. The code default does not change.
 
-Packaged launch sets `api.storage_backend=file` and `api.storage_root=<console data directory>` via `--config` (or the same specs in-process) from `packaged_file_backend_override_specs()`, and calls `load_config(..., discover_default=False)` so cwd-walk discovery of `.config.yaml` cannot apply. The **process host** is what passes those overrides ([Process host and bundler](https://github.com/SteveDraper/Planets-Console/issues/431)). Install-over and uninstall must not delete this directory.
+Packaged launch uses one loader: `load_packaged_config()` (CLI: `serve --packaged`). That call sets `api.storage_backend=file` and `api.storage_root` to the console data directory, and does not cwd-walk `.config.yaml`. Extra `--config` specs may still apply after the packaged defaults (later wins). `console_data_directory()` is the Path helper for logs and lock files; it does not load config. The **process host** invokes this loader ([Process host and bundler](https://github.com/SteveDraper/Planets-Console/issues/431)). Install-over and uninstall must not delete this directory.
 
 ## Planets.nu client JavaScript (reference)
 
@@ -181,11 +187,12 @@ The config override system and CLI usage are covered by unit tests under `packag
 - **Override spec parsing (`_parse_override_spec`):** Full replace `@path`; leaf literal `key=value`; substructure from file `key=@path`; invalid spec (no `=`) raises `ValueError`.
 - **Literal parsing (`_parse_literal`):** Boolean (`true`/`false`/`yes`/`no`); integer and float; string (including paths).
 - **Override application (`_apply_override`):** Leaf literal updates a value; leaf override on a nested key raises `ValueError`; full-replace key `@` raises; substructure from file loads YAML and merges.
-- **Load config (`load_config`):** With `default_config_path` to a fixture YAML, returns `RootConfig` with expected `server`, `api`, and `bff` values; leaf overrides (`server.port=9000`, `api.storage_asset_path=...`) apply correctly; full replace (`@file`) uses the given file; substructure override (`bff=@file`) merges the file into that section; with no config file (and `_find_default_config` returning `None`), uses internal defaults; later overrides win when keys repeat; full-replace “last wins” when multiple `@file` specs are given; `discover_default=False` skips cwd-walk `.config.yaml` (packaged launch).
-- **Console data directory (`test_console_data_directory.py`):** macOS expands `Path.home()`; Windows expands `LOCALAPPDATA`; unsupported OS and missing `LOCALAPPDATA` raise; the helper ignores cwd `.config.yaml` / `./.data`; packaged override specs set `api.storage_backend=file` and `api.storage_root` without discovering YAML.
+- **Load config (`load_config`):** With `default_config_path` to a fixture YAML, returns `RootConfig` with expected `server`, `api`, and `bff` values; leaf overrides (`server.port=9000`, `api.storage_asset_path=...`) apply correctly; full replace (`@file`) uses the given file; substructure override (`bff=@file`) merges the file into that section; with no config file (and `_find_default_config` returning `None`), uses internal defaults; later overrides win when keys repeat; full-replace "last wins" when multiple `@file` specs are given.
+- **Packaged load (`load_packaged_config`):** File backend at the console data directory; ignores cwd `.config.yaml` (including `include_dummy_data`); extra override specs apply after packaged defaults; `ApiConfig().storage_root` remains `./.data`. Default `load_config` / `serve` still discover YAML.
+- **Console data directory (`test_console_data_directory.py`):** macOS expands `Path.home()`; Windows expands `LOCALAPPDATA`; unsupported OS and missing `LOCALAPPDATA` raise; the Path helper ignores cwd `.config.yaml` / `./.data`; packaged override specs set `api.storage_backend=file` and `api.storage_root`.
 
 ### CLI (`test_cli.py`)
 
-- **Help:** `serve --help` includes the `--config` / `-c` option and override syntax.
-- **Config subcommand:** `serve config` prints the configuration and override-syntax documentation (e.g. “Configuration”, “Override syntax”, `server.host`, `server.port`).
-- **Config option wiring:** Invoking `serve --config server.port=9000` calls `load_config(override_specs=["server.port=9000"])` and passes the loaded `root.server.host` and `root.server.port` into `uvicorn.run`.
+- **Help:** `serve --help` includes the `--config` / `-c` option, `--packaged`, and override syntax.
+- **Config subcommand:** `serve config` prints the configuration and override-syntax documentation (e.g. "Configuration", "Override syntax", `server.host`, `server.port`, `--packaged`).
+- **Config option wiring:** Invoking `serve --config server.port=9000` calls `load_config(override_specs=["server.port=9000"])` and passes the loaded `root.server.host` and `root.server.port` into `uvicorn.run`. `serve --packaged` calls `load_packaged_config` (discovery stays off); extra `--config` specs are passed through.

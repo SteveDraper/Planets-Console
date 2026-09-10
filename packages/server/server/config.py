@@ -10,6 +10,8 @@ from api.config import ApiConfig, HomeworldLocatorConfig
 from bff.config import BffConfig
 from omegaconf import OmegaConf
 
+from server.console_data_directory import packaged_file_backend_override_specs
+
 DEFAULT_CONFIG_FILENAME = ".config.yaml"
 
 
@@ -215,8 +217,7 @@ def load_config(
         instead of searching for .config.yaml.
     discover_default: when True (clone / ``run_dev`` / ``run_deploy``), cwd-walk
         for ``.config.yaml`` if no explicit base file is given. Packaged launch
-        passes False and sets ``api.storage_root`` via override specs from
-        ``console_data_directory`` so a nearby YAML cannot hijack the store.
+        uses ``load_packaged_config``, which passes False here.
     """
     override_specs = override_specs or []
     # Resolve full-file replacements first (last @file wins)
@@ -372,3 +373,16 @@ def load_config(
         diagnostics_buffer_size=raw_db,
     )
     return RootConfig(server=server_config, api=api_config, bff=bff_config)
+
+
+def load_packaged_config(override_specs: list[str] | None = None) -> RootConfig:
+    """Load amalgamated config for packaged console launch.
+
+    The only supported packaged-load seam: file backend at the OS console data
+    directory, and no cwd-walk of ``.config.yaml``. Extra ``override_specs``
+    apply after the packaged specs (later wins).
+    """
+    specs = list(packaged_file_backend_override_specs())
+    if override_specs:
+        specs.extend(override_specs)
+    return load_config(override_specs=specs, discover_default=False)
