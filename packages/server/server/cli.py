@@ -5,7 +5,7 @@ import uvicorn
 from api import config as api_config
 from bff import config as bff_config
 
-from server.config import load_config
+from server.config import load_config, load_packaged_config
 
 app = typer.Typer()
 
@@ -15,7 +15,12 @@ GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 CONFIG_OPTION_HELP = (
     "Override config (repeatable). Forms: key.leaf=value, key=@file, or @file for "
-    "full config. Base: .config.yaml. See 'serve config' for details."
+    "full config. Base: .config.yaml unless --packaged. See 'serve config' for details."
+)
+
+PACKAGED_OPTION_HELP = (
+    "Packaged console launch: file backend at the OS console data directory; "
+    "skip .config.yaml discovery. Extra --config specs still apply (later wins)."
 )
 
 
@@ -23,6 +28,7 @@ CONFIG_OPTION_HELP = (
 def main(
     ctx: typer.Context,
     reload: bool = typer.Option(False, help="Enable reload"),
+    packaged: bool = typer.Option(False, "--packaged", help=PACKAGED_OPTION_HELP),
     config: list[str] = typer.Option(
         [],
         "--config",
@@ -33,7 +39,11 @@ def main(
     """Run the Planets Console server (API + BFF + MCP)."""
     if ctx.invoked_subcommand is not None:
         return
-    root = load_config(override_specs=config if config else None)
+    override_specs = config if config else None
+    if packaged:
+        root = load_packaged_config(override_specs=override_specs)
+    else:
+        root = load_config(override_specs=override_specs)
     api_config.set_config(root.api)
     bff_config.set_config(root.bff)
     uvicorn.run(
@@ -61,6 +71,8 @@ CONFIG_HELP_TEXT = """
 Configuration (amalgamated server + api + bff)
 ==============================================
 Base file: .config.yaml (searched from cwd upward). Override with -c/--config.
+--packaged skips that search and uses the OS console data directory as the
+file-backend root. Extra --config specs still apply (later wins).
 
 Override syntax (can be repeated):
   1. Leaf:       --config key.path.leaf=<value>

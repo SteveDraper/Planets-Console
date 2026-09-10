@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import click
 from api.config import ApiConfig
 from bff.config import BffConfig
 from server.cli import GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS, app
@@ -16,8 +17,11 @@ runner = CliRunner()
 def test_serve_help_includes_config_option():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "--config" in result.output or "-c" in result.output
-    assert "key.leaf=value" in result.output or "Override" in result.output
+    # Rich emits "--flag" as separate styled "-" spans when color is on (CI).
+    help_text = click.unstyle(result.output)
+    assert "--config" in help_text or "-c" in help_text
+    assert "--packaged" in help_text
+    assert "key.leaf=value" in help_text or "Override" in help_text
 
 
 def test_serve_config_prints_documentation():
@@ -37,11 +41,13 @@ def test_serve_calls_load_config_with_config_args():
     )
     with (
         patch("server.cli.load_config", return_value=fake_root) as mock_load,
+        patch("server.cli.load_packaged_config") as mock_packaged,
         patch("uvicorn.run") as mock_uvicorn,
     ):
         result = runner.invoke(app, ["--config", "server.port=9000"])
     assert result.exit_code == 0
     mock_load.assert_called_once()
+    mock_packaged.assert_not_called()
     call_kw = mock_load.call_args[1]
     assert "override_specs" in call_kw
     assert call_kw["override_specs"] == ["server.port=9000"]
@@ -75,3 +81,29 @@ def test_serve_config_subcommand_help():
     result = runner.invoke(app, ["config", "--help"])
     assert result.exit_code == 0
     assert "config" in result.output.lower()
+
+
+def test_serve_packaged_calls_load_packaged_config():
+    fake_root = RootConfig(
+        server=ServerConfig(host="127.0.0.1", port=8000),
+        api=ApiConfig(),
+        bff=BffConfig(),
+    )
+    with (
+        patch("server.cli.load_packaged_config", return_value=fake_root) as mock_packaged,
+        patch("server.cli.load_config") as mock_load,
+        patch("uvicorn.run") as mock_uvicorn,
+    ):
+        result = runner.invoke(app, ["--packaged", "--config", "server.port=9000"])
+    assert result.exit_code == 0
+    mock_packaged.assert_called_once()
+    mock_load.assert_not_called()
+    assert mock_packaged.call_args[1]["override_specs"] == ["server.port=9000"]
+    mock_uvicorn.assert_called_once()
+
+
+def test_serve_config_help_mentions_packaged():
+    result = runner.invoke(app, ["config"])
+    assert result.exit_code == 0
+    assert "--packaged" in result.output
+    assert "console data directory" in result.output.lower()
