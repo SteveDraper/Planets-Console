@@ -1,7 +1,7 @@
 """Installed console package identity (display name, OS ids, version).
 
-Keep these strings aligned with ADR 0029. Do not rename bundle id or
-AppUserModelID after v1 ships.
+Keep these strings aligned with ADR 0029. Do not rename bundle id,
+AppUserModelID, or Inno AppId after v1 ships.
 
 Version comes from root ``pyproject.toml`` ``[project].version``. A frozen
 process host reads the same value from a one-line sidecar the bundler ships.
@@ -21,6 +21,9 @@ CFBUNDLE_IDENTIFIER = "com.github.stevedraper.planets-console"
 
 # Windows Application User Model ID. Do not change after first ship.
 APP_USER_MODEL_ID = "SteveDraper.PlanetsConsole"
+
+# Inno Setup AppId (per-user). Do not change after first ship.
+INNO_APP_ID = "{933C1FA0-3D30-4611-AE34-2F7C14C5253B}"
 
 # Dest name under the frozen resource root (``sys._MEIPASS``).
 VERSION_SIDECAR_NAME = "console_package_version.txt"

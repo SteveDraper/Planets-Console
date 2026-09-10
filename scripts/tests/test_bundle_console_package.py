@@ -10,9 +10,11 @@ import bundle_console_package as bundler
 import pytest
 from bundle_console_package import (
     BUNDLE_NAME,
+    MACOSX_DEPLOYMENT_TARGET,
     analysis_binaries,
     assert_collect_policy_runtime_only,
     collect_policy,
+    ensure_macos_deployment_target,
     macos_info_plist,
     write_placeholder_ico,
     write_placeholder_png,
@@ -142,3 +144,20 @@ def test_placeholder_png_and_ico_round_trip(tmp_path):
     ico = tmp_path / "icon.ico"
     write_placeholder_ico(ico, size=16)
     assert ico.read_bytes()[:4] == b"\x00\x00\x01\x00"
+
+
+def test_ensure_macos_deployment_target_forces_11_on_darwin(monkeypatch):
+    monkeypatch.setattr(bundler.sys, "platform", "darwin")
+    env: dict[str, str] = {}
+    ensure_macos_deployment_target(env)
+    assert env["MACOSX_DEPLOYMENT_TARGET"] == MACOSX_DEPLOYMENT_TARGET == "11"
+    env["MACOSX_DEPLOYMENT_TARGET"] = "15.0"
+    ensure_macos_deployment_target(env)
+    assert env["MACOSX_DEPLOYMENT_TARGET"] == "11"
+
+
+def test_ensure_macos_deployment_target_is_noop_off_darwin(monkeypatch):
+    monkeypatch.setattr(bundler.sys, "platform", "win32")
+    env: dict[str, str] = {}
+    ensure_macos_deployment_target(env)
+    assert "MACOSX_DEPLOYMENT_TARGET" not in env

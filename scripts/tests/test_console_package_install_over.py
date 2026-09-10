@@ -25,11 +25,10 @@ _EXPECTED_INNO_SOURCES = (
 
 _CHECKED_SECTIONS = ("Files", "Dirs", "InstallDelete", "UninstallDelete")
 
-_WRAPPER_SKIP_REASON = (
-    "Inno installer wrapper sources are absent at the explicit paths "
-    "scripts/console_package.iss and scripts/console_package.iss.in. "
-    "See ADR 0028 and https://github.com/SteveDraper/Planets-Console/issues/429. "
-    "Freeze-tree install-over is pinned in test_bundle_console_package.py."
+_WRAPPER_MISSING_REASON = (
+    "Inno installer wrapper source is required at scripts/console_package.iss "
+    "(or scripts/console_package.iss.in). See ADR 0028 and "
+    "https://github.com/SteveDraper/Planets-Console/issues/433."
 )
 
 
@@ -47,7 +46,7 @@ def test_inno_files_and_uninstall_do_not_include_console_data_directory():
     """Inno [Files] / uninstall-delete must not mention the console data directory."""
     present = [path for path in _EXPECTED_INNO_SOURCES if path.is_file()]
     if not present:
-        pytest.skip(_WRAPPER_SKIP_REASON)
+        pytest.fail(_WRAPPER_MISSING_REASON)
     saw_section = False
     for path in present:
         text = path.read_text(encoding="utf-8")

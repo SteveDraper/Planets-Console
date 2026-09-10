@@ -176,7 +176,21 @@ Local bundle (requires `cd packages/frontend && npm run build` first):
 make bundle_console_package
 ```
 
-That runs `scripts/bundle_console_package.py` / `scripts/console_package.spec`. Collect policy ships the prebuilt SPA (`packages/frontend/dist`), runtime `assets/analytics/`, and a one-line version sidecar -- not tests, `scripts/`, `docs/`, or frontend `src/`. Identity: display name **Planets Console**, `CFBundleIdentifier` `com.github.stevedraper.planets-console`, `AppUserModelID` `SteveDraper.PlanetsConsole`, version from root `pyproject.toml` (`0.1.0`, not `0.1`). Installer wrappers and CI are a separate ticket.
+That runs `scripts/bundle_console_package.py` / `scripts/console_package.spec`. Collect policy ships the prebuilt SPA (`packages/frontend/dist`), runtime `assets/analytics/`, and a one-line version sidecar -- not tests, `scripts/`, `docs/`, or frontend `src/`. Identity: display name **Planets Console**, `CFBundleIdentifier` `com.github.stevedraper.planets-console`, `AppUserModelID` `SteveDraper.PlanetsConsole`, version from root `pyproject.toml` (`0.1.0`, not `0.1`). On macOS the bundler sets `MACOSX_DEPLOYMENT_TARGET=11`.
+
+## Installer wrappers and CI
+
+The **installer wrapper** turns bundler output into GitHub Release downloads ([ADR 0028](adr/0028-console-package-ci-and-installer-wrappers.md), [ADR 0029](adr/0029-console-package-identity-and-install-over.md)). It does not write config or own the **console data directory**.
+
+Local wrap after `make bundle_console_package`:
+
+```bash
+make wrap_console_package
+```
+
+That runs `scripts/wrap_console_package.py`. On macOS it builds a UDZO `.dmg` (volume name **Planets Console**, Applications symlink). On Windows it compiles `scripts/console_package.iss` with Inno Setup (`PrivilegesRequired=lowest`, `{app}` `%LocalAppData%\Programs\Planets Console`, Start Menu, no Desktop shortcut, `AppId` `{933C1FA0-3D30-4611-AE34-2F7C14C5253B}`). Assets are `Planets-Console-<version>-macos-arm64.dmg` and `Planets-Console-<version>-windows-x64-setup.exe`.
+
+CI workflow [`.github/workflows/console-package-release.yml`](../.github/workflows/console-package-release.yml) runs on tag glob `v*.*.*` (refused unless the tag equals `v` plus root pyproject version) and on `workflow_dispatch`. It does **not** use `on: release: published`. Freeze jobs use pinned runners `macos-15` and `windows-2025` (not `*-latest`): SPA build, bundler, wrapper, then `gh release create` (or reattach with `--clobber`) in the same run. Release title is **Planets Console `<version>`**. Uploaded files are unsigned.
 
 ## Planets.nu client JavaScript (reference)
 
@@ -205,8 +219,9 @@ The config override system and CLI usage are covered by unit tests under `packag
 - **Process host (`test_process_host_*.py`):** loopback URLs never use `localhost`; port scan skips an occupied preferred port; `GET /health` wait then `webbrowser.open` (no fixed sleep when health is already 200); per-user lock file; frozen `FRONTEND_DIST` from `sys._MEIPASS`; OS Quit sets uvicorn `should_exit`.
 - **Launch contract (`test_process_host_launch.py`):** primary start waits for `GET /health` before opening `http://127.0.0.1:<port>/`; health timeout never opens the SPA and names the support log; packaged `storage_root` is the console data directory, not cwd `./.data`; `main()` shows the start-failure dialog and exits 1 (macOS osascript / Windows `MessageBoxW` contracts); missing SPA still writes `logs/process-host.log` under the data directory.
 - **Single-instance (`test_process_host_single_instance.py`):** a held lock reopens the existing instance via the port sidecar and does not call `_run_as_primary` (a no-op `_run` fails this pin).
-- **Install-over:** Bundler collect policy datas/dests and `console_package.spec` must not place the OS console data directory (`Library/Application Support/{display name}` / `%LOCALAPPDATA%\{display name}`) inside the freeze tree (`test_bundle_console_package.py`). That pin is always on. A secondary scan of explicit Inno paths (`scripts/console_package.iss`, `scripts/console_package.iss.in`) checks `[Files]` / `[UninstallDelete]` (and related sections) when those files are present; if they are absent the scan skips and points at [ADR 0028](adr/0028-console-package-ci-and-installer-wrappers.md) / [issue 429](https://github.com/SteveDraper/Planets-Console/issues/429) (`test_console_package_install_over.py`). Absence is not a pass.
-- **Bundler collect policy (`scripts/tests/test_bundle_console_package.py`):** datas are SPA dist + `assets/analytics` + version sidecar; pytest excluded; macOS Info.plist identity and full pyproject version; freeze dests/spec cannot collect the console data directory.
+- **Install-over:** Bundler collect policy datas/dests and `console_package.spec` must not place the OS console data directory (`Library/Application Support/{display name}` / `%LOCALAPPDATA%\{display name}`) inside the freeze tree (`test_bundle_console_package.py`). That pin is always on. Inno wrapper sources (`scripts/console_package.iss`, optionally `scripts/console_package.iss.in`) must exist; `[Files]` / `[UninstallDelete]` (and related sections) must not mention the console data directory (`test_console_package_install_over.py`).
+- **Bundler collect policy (`scripts/tests/test_bundle_console_package.py`):** datas are SPA dist + `assets/analytics` + version sidecar; pytest excluded; macOS Info.plist identity and full pyproject version; freeze dests/spec cannot collect the console data directory; freeze sets `MACOSX_DEPLOYMENT_TARGET=11` on Darwin.
+- **Installer wrappers (`scripts/tests/test_wrap_console_package.py`):** Release asset names and title; tag must equal `v` + pyproject version; Mac staging copies the `.app` and an Applications symlink; `hdiutil` is UDZO with volume name **Planets Console**; Inno is per-user Start Menu with no Desktop shortcut and the ADR `AppId`; workflow pins `macos-15` / `windows-2025`, tag glob plus `workflow_dispatch`, and `gh release create` / reattach.
 
 ### CLI (`test_cli.py`)
 

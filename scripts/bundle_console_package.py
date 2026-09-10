@@ -8,10 +8,12 @@ tree, tests, or scripts.
 from __future__ import annotations
 
 import argparse
+import os
 import struct
 import subprocess
 import sys
 import zlib
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +28,7 @@ ANALYTICS_ASSETS_RELATIVE = Path("assets") / "analytics"
 BUNDLE_NAME = "Planets Console"
 DIST_DIR_RELATIVE = Path("dist") / "console-package"
 WORK_DIR_RELATIVE = Path("build") / "console-package"
+MACOSX_DEPLOYMENT_TARGET = "11"
 
 # Uvicorn factory / protocol loaders are string-imported. OR-Tools SAT is lazy
 # relative to the process host module graph.
@@ -238,6 +241,13 @@ def pyinstaller_args(repo_root: Path) -> list[str]:
     ]
 
 
+def ensure_macos_deployment_target(environ: MutableMapping[str, str] | None = None) -> None:
+    """Pin the Mac freeze floor to macOS 11 (``macosx_11_0`` wheels)."""
+    env = os.environ if environ is None else environ
+    if sys.platform == "darwin":
+        env["MACOSX_DEPLOYMENT_TARGET"] = MACOSX_DEPLOYMENT_TARGET
+
+
 def validate_inputs(repo_root: Path, policy: CollectPolicy) -> None:
     assert_collect_policy_runtime_only(policy)
     if not policy.entry.is_file():
@@ -266,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = args.repo_root.resolve()
     policy = collect_policy(repo_root)
     validate_inputs(repo_root, policy)
+    ensure_macos_deployment_target()
     try:
         import PyInstaller.__main__
     except ImportError:
