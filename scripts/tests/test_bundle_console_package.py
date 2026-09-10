@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import replace
 from pathlib import Path
 
+import bundle_console_package as bundler
 import pytest
 from bundle_console_package import (
     BUNDLE_NAME,
+    analysis_binaries,
     assert_collect_policy_runtime_only,
     collect_policy,
     macos_info_plist,
@@ -49,6 +52,20 @@ def test_collect_policy_does_not_add_tests_scripts_docs_or_frontend_src():
     assert "packages/frontend/src" not in blob
     joined_dest = " ".join(dest for _src, dest in policy.datas)
     assert "tests" not in joined_dest
+
+
+def test_spec_import_surface_exists():
+    """console_package.spec must import names that exist on bundle_console_package."""
+    spec_path = Path(__file__).resolve().parents[1] / "console_package.spec"
+    tree = ast.parse(spec_path.read_text(encoding="utf-8"))
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "bundle_console_package":
+            imported.extend(alias.name for alias in node.names)
+    assert "analysis_binaries" in imported
+    for name in imported:
+        assert hasattr(bundler, name), f"spec imports {name!r} but it is missing"
+    assert callable(analysis_binaries)
 
 
 def test_macos_plist_identity_and_full_version():

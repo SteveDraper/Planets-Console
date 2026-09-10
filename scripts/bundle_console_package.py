@@ -142,6 +142,9 @@ def macos_info_plist(policy: CollectPolicy) -> dict[str, object]:
         "NSSupportsSuddenTermination": False,
         "LSBackgroundOnly": False,
     }
+
+
+def analysis_binaries() -> list:
     """Native libs PyInstaller will not infer from Python imports alone."""
     from PyInstaller.utils.hooks import collect_dynamic_libs
 
