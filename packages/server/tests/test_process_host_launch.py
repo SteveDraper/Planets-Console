@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import subprocess
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -52,7 +53,7 @@ def _stub_primary_server(monkeypatch, tmp_path, *, wait_for_health, open_spa) ->
 
 
 def test_run_as_primary_opens_spa_only_after_health_on_loopback(tmp_path, monkeypatch):
-    events: list[tuple[str, int]] = []
+    events: list[tuple[str, ...]] = []
 
     def wait_for_health(port, **_kwargs):
         events.append(("health", port))
@@ -60,19 +61,25 @@ def test_run_as_primary_opens_spa_only_after_health_on_loopback(tmp_path, monkey
     def open_spa(port):
         events.append(("open", port))
 
+    class RecordingThread(threading.Thread):
+        def start(self):
+            events.append(("start",))
+            super().start()
+
     _stub_primary_server(
         monkeypatch,
         tmp_path,
         wait_for_health=wait_for_health,
         open_spa=open_spa,
     )
+    monkeypatch.setattr("server.process_host.runtime.threading.Thread", RecordingThread)
     lock = MagicMock()
     log_path = tmp_path / "logs" / "process-host.log"
 
     assert _run_as_primary(lock, log_path) == 0
 
     lock.write_bound_port.assert_called_once_with(8123)
-    assert events == [("health", 8123), ("open", 8123)]
+    assert events == [("start",), ("health", 8123), ("open", 8123)]
 
 
 def test_run_as_primary_does_not_open_spa_when_health_never_succeeds(tmp_path, monkeypatch):
