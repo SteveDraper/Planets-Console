@@ -45,6 +45,8 @@ def test_require_tag_matches_version_accepts_v_prefix_and_full_ref():
         wrap.require_tag_matches_version("v1.2.3-rc1", "1.2.3")
     with pytest.raises(ValueError, match="v0.1.0"):
         wrap.require_tag_matches_version("v0.2.0", "0.1.0")
+    with pytest.raises(ValueError, match="must equal"):
+        wrap.require_tag_matches_version("main", "1.2.3")
 
 
 def test_emit_github_output_appends_key_value_lines(tmp_path):
@@ -189,7 +191,12 @@ def test_release_workflow_pinned_runners_tag_and_dispatch():
     assert "gh release upload" in text
     assert "--clobber" in text
     assert "needs.prepare.outputs.release_title" in text
-    assert "--check-tag" in text
+    assert (
+        "      - name: Refuse git ref that does not match pyproject version\n"
+        "        run: uv run --python 3.14 --no-project python "
+        'scripts/wrap_console_package.py --check-tag "${{ github.ref_name }}"\n'
+    ) in text
+    assert "github.ref_type" not in text
     assert (
         "uv run --python 3.14 --no-project python "
         "scripts/wrap_console_package.py --emit-github-output"

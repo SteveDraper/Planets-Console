@@ -46,8 +46,7 @@ jobs:
         id: meta
         run: uv run --python 3.14 --no-project python scripts/wrap_console_package.py --emit-github-output
 
-      - name: Refuse tag that does not match pyproject version
-        if: github.ref_type == 'tag'
+      - name: Refuse git ref that does not match pyproject version
         run: uv run --python 3.14 --no-project python scripts/wrap_console_package.py --check-tag "${{ github.ref_name }}"
 
   build:
