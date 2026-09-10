@@ -10,6 +10,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "uvicorn[standard]>=0.30.0",
     "typer>=0.12.0",
+    "pyobjc-framework-Cocoa>=11.0; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

@@ -12,8 +12,14 @@ import os
 import platform
 from pathlib import Path
 
-# Folder name matches the installed product display name.
-CONSOLE_PACKAGE_DISPLAY_NAME = "Planets Console"
+from server.package_identity import CONSOLE_PACKAGE_DISPLAY_NAME
+
+__all__ = [
+    "CONSOLE_PACKAGE_DISPLAY_NAME",
+    "ConsoleDataDirectoryError",
+    "console_data_directory",
+    "packaged_file_backend_override_specs",
+]
 
 
 class ConsoleDataDirectoryError(RuntimeError):

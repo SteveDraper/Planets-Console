@@ -156,9 +156,9 @@ describe('Header', () => {
     await user.click(screen.getByRole('button', { name: /open menu/i }))
     await user.click(screen.getByRole('button', { name: /^about$/i }))
     expect(screen.getByRole('dialog', { name: /^about$/i })).toBeInTheDocument()
-    expect(screen.getByText('Planets Analytic Console')).toBeInTheDocument()
+    expect(screen.getByText('Planets Console')).toBeInTheDocument()
     expect(screen.getByText('Steve Draper')).toBeInTheDocument()
-    expect(screen.getByText('0.1')).toBeInTheDocument()
+    expect(screen.getByText('0.1.0')).toBeInTheDocument()
   })
 
   it('renders viewpoint as a dropdown and reports changes', async () => {
