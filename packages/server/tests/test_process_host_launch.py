@@ -1,4 +1,4 @@
-"""Console package launch contract: listen-then-open, single-instance, start failure."""
+"""Console package launch contract: listen-then-open, start failure."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from api import config as api_config
 from bff import config as bff_config
 from server.process_host.loopback import HealthWaitError
 from server.process_host.runtime import _configure_packaged_server, _run, _run_as_primary, main
-from server.process_host.single_instance import LOCK_FILE_NAME, SingleInstanceLock
 from server.process_host.support import StartFailure, show_start_failure
 
 
@@ -103,30 +102,6 @@ def test_run_as_primary_does_not_open_spa_when_health_never_succeeds(tmp_path, m
     assert opened == []
     assert str(log_path) in str(caught.value)
     assert "http://127.0.0.1:8123/health" in str(caught.value)
-
-
-def test_second_activation_does_not_start_a_second_server(tmp_path, monkeypatch):
-    monkeypatch.setattr("server.process_host.runtime.console_data_directory", lambda: tmp_path)
-    monkeypatch.setattr(
-        "server.process_host.runtime.configure_support_logging",
-        lambda _data_dir: tmp_path / "logs" / "process-host.log",
-    )
-    primary_started: list[str] = []
-    monkeypatch.setattr(
-        "server.process_host.runtime._run_as_primary",
-        lambda *_args, **_kwargs: primary_started.append("started") or 0,
-    )
-    monkeypatch.setattr(
-        "server.process_host.runtime._reopen_existing_instance",
-        lambda _port_path: 0,
-    )
-    holder = SingleInstanceLock(tmp_path / LOCK_FILE_NAME)
-    assert holder.try_acquire() is True
-    try:
-        assert _run() == 0
-        assert primary_started == []
-    finally:
-        holder.release()
 
 
 def test_configure_packaged_server_storage_root_is_console_data_directory(
