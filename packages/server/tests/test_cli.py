@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import click
 from api.config import ApiConfig
 from bff.config import BffConfig
 from server.cli import GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS, app
@@ -16,9 +17,11 @@ runner = CliRunner()
 def test_serve_help_includes_config_option():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "--config" in result.output or "-c" in result.output
-    assert "--packaged" in result.output
-    assert "key.leaf=value" in result.output or "Override" in result.output
+    # Rich emits "--flag" as separate styled "-" spans when color is on (CI).
+    help_text = click.unstyle(result.output)
+    assert "--config" in help_text or "-c" in help_text
+    assert "--packaged" in help_text
+    assert "key.leaf=value" in help_text or "Override" in help_text
 
 
 def test_serve_config_prints_documentation():
