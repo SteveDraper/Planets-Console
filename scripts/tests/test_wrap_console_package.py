@@ -23,9 +23,8 @@ def test_release_asset_names_and_title_follow_adr():
     version = "0.1.0"
     assert wrap.macos_dmg_asset_name(version) == "Planets-Console-0.1.0-macos-arm64.dmg"
     assert wrap.windows_setup_asset_name(version) == "Planets-Console-0.1.0-windows-x64-setup.exe"
-    assert wrap.release_title(version) == "Planets Console 0.1.0"
+    assert wrap.release_title(version) == f"{CONSOLE_PACKAGE_DISPLAY_NAME} {version}"
     assert wrap.release_tag(version) == "v0.1.0"
-    assert wrap.DMG_VOLUME_NAME == CONSOLE_PACKAGE_DISPLAY_NAME == "Planets Console"
 
 
 def test_release_metadata_uses_pyproject_version():
@@ -33,7 +32,7 @@ def test_release_metadata_uses_pyproject_version():
     meta = wrap.release_metadata(version)
     assert meta["version"] == version
     assert meta["release_tag"] == f"v{version}"
-    assert meta["release_title"] == f"Planets Console {version}"
+    assert meta["release_title"] == f"{CONSOLE_PACKAGE_DISPLAY_NAME} {version}"
     assert meta["macos_dmg_asset"] == f"Planets-Console-{version}-macos-arm64.dmg"
     assert meta["windows_setup_asset"] == f"Planets-Console-{version}-windows-x64-setup.exe"
 
@@ -52,11 +51,13 @@ def test_require_tag_matches_version_accepts_v_prefix_and_full_ref():
 def test_emit_github_output_appends_key_value_lines(tmp_path):
     path = tmp_path / "github_output"
     path.write_text("preexisting=1\n", encoding="utf-8")
-    wrap.emit_github_output(path, {"version": "0.1.0", "release_title": "Planets Console 0.1.0"})
+    wrap.emit_github_output(
+        path, {"version": "0.1.0", "release_title": f"{CONSOLE_PACKAGE_DISPLAY_NAME} 0.1.0"}
+    )
     text = path.read_text(encoding="utf-8")
     assert text.startswith("preexisting=1\n")
     assert "version=0.1.0\n" in text
-    assert "release_title=Planets Console 0.1.0\n" in text
+    assert f"release_title={CONSOLE_PACKAGE_DISPLAY_NAME} 0.1.0\n" in text
 
 
 def test_main_check_tag_matches_pyproject():
@@ -80,7 +81,7 @@ def test_main_emit_github_output(tmp_path, monkeypatch):
     version = version_from_pyproject(REPO_ROOT)
     assert f"version={version}\n" in text
     assert f"release_tag=v{version}\n" in text
-    assert f"release_title=Planets Console {version}\n" in text
+    assert f"release_title={CONSOLE_PACKAGE_DISPLAY_NAME} {version}\n" in text
 
 
 def test_main_emit_github_output_requires_env(monkeypatch):
@@ -106,11 +107,11 @@ def test_stage_macos_dmg_root_copies_app_and_applications_symlink(tmp_path):
 def test_hdiutil_create_args_are_udzo_with_planets_console_volume(tmp_path):
     src = tmp_path / "stage"
     dmg = tmp_path / "Planets-Console-0.1.0-macos-arm64.dmg"
-    args = wrap.hdiutil_create_args("Planets Console", src, dmg)
+    args = wrap.hdiutil_create_args(CONSOLE_PACKAGE_DISPLAY_NAME, src, dmg)
     assert args[0] == "hdiutil"
     assert args[1] == "create"
     assert "-volname" in args
-    assert args[args.index("-volname") + 1] == "Planets Console"
+    assert args[args.index("-volname") + 1] == CONSOLE_PACKAGE_DISPLAY_NAME
     assert "-format" in args
     assert args[args.index("-format") + 1] == "UDZO"
     assert "-ov" in args
@@ -122,17 +123,24 @@ def test_hdiutil_create_args_are_udzo_with_planets_console_volume(tmp_path):
 def test_macos_and_windows_bundler_output_paths():
     assert wrap.macos_app_path(REPO_ROOT) == REPO_ROOT / DIST_DIR_RELATIVE / f"{BUNDLE_NAME}.app"
     assert wrap.windows_onedir_path(REPO_ROOT) == REPO_ROOT / DIST_DIR_RELATIVE / BUNDLE_NAME
-    exe = wrap.windows_onedir_path(REPO_ROOT) / wrap.WINDOWS_EXE_NAME
-    assert exe.name == "Planets Console.exe"
+    exe = wrap.windows_onedir_path(REPO_ROOT) / f"{BUNDLE_NAME}.exe"
+    assert exe.name == f"{BUNDLE_NAME}.exe"
 
 
 def test_inno_script_is_per_user_start_menu_no_desktop():
     text = _ISS_PATH.read_text(encoding="utf-8")
     assert "PrivilegesRequired=lowest" in text
     assert r"DefaultDirName={localappdata}\Programs\{#MyAppName}" in text
-    assert '#define MyAppName "Planets Console"' in text
-    assert f"AppId={{{INNO_APP_ID}" in text
-    assert INNO_APP_ID == "{933C1FA0-3D30-4611-AE34-2F7C14C5253B}"
+    assert "#ifndef MyAppName" in text
+    assert "#ifndef MyAppExeName" in text
+    assert "#ifndef MyAppId" in text
+    assert "#error MyAppName must be defined (ISCC /DMyAppName=...)" in text
+    assert "#error MyAppExeName must be defined (ISCC /DMyAppExeName=...)" in text
+    assert "#error MyAppId must be defined (ISCC /DMyAppId=...)" in text
+    assert "AppId={#MyAppId}" in text
+    assert CONSOLE_PACKAGE_DISPLAY_NAME not in text
+    assert INNO_APP_ID not in text
+    assert INNO_APP_ID.removeprefix("{").removesuffix("}") not in text
     assert r'Name: "{autoprograms}\{#MyAppName}"' in text
     assert "autodesktop" not in text.lower()
     assert "desktopicon" not in text.lower()
@@ -157,6 +165,9 @@ def test_iscc_compile_args_pass_defines(tmp_path):
     )
     assert args[0] == str(iscc)
     assert "/DMyAppVersion=0.1.0" in args
+    assert f"/DMyAppName={CONSOLE_PACKAGE_DISPLAY_NAME}" in args
+    assert f"/DMyAppExeName={BUNDLE_NAME}.exe" in args
+    assert f"/DMyAppId={{{INNO_APP_ID}" in args
     assert f"/DSourceDir={source}" in args
     assert f"/DOutputDir={output}" in args
     assert "/DOutputBaseFilename=Planets-Console-0.1.0-windows-x64-setup" in args

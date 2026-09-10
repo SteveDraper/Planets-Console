@@ -15,6 +15,7 @@ from server.package_identity import (
     APP_USER_MODEL_ID,
     CFBUNDLE_IDENTIFIER,
     CONSOLE_PACKAGE_DISPLAY_NAME,
+    INNO_APP_ID,
     VERSION_SIDECAR_NAME,
     console_package_version,
     version_from_pyproject,
@@ -37,6 +38,7 @@ def test_package_identity_matches_adr_0029():
     assert CONSOLE_PACKAGE_DISPLAY_NAME == "Planets Console"
     assert CFBUNDLE_IDENTIFIER == "com.github.stevedraper.planets-console"
     assert APP_USER_MODEL_ID == "SteveDraper.PlanetsConsole"
+    assert INNO_APP_ID == "{933C1FA0-3D30-4611-AE34-2F7C14C5253B}"
     version = console_package_version()
     assert version == version_from_pyproject(REPO_ROOT)
     assert version != "0.1"

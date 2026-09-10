@@ -4,6 +4,15 @@
 #ifndef MyAppVersion
   #error MyAppVersion must be defined (ISCC /DMyAppVersion=...)
 #endif
+#ifndef MyAppName
+  #error MyAppName must be defined (ISCC /DMyAppName=...)
+#endif
+#ifndef MyAppExeName
+  #error MyAppExeName must be defined (ISCC /DMyAppExeName=...)
+#endif
+#ifndef MyAppId
+  #error MyAppId must be defined (ISCC /DMyAppId=...)
+#endif
 #ifndef SourceDir
   #error SourceDir must be defined (ISCC /DSourceDir=...)
 #endif
@@ -14,11 +23,8 @@
   #error OutputBaseFilename must be defined (ISCC /DOutputBaseFilename=...)
 #endif
 
-#define MyAppName "Planets Console"
-#define MyAppExeName "Planets Console.exe"
-
 [Setup]
-AppId={{933C1FA0-3D30-4611-AE34-2F7C14C5253B}
+AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}

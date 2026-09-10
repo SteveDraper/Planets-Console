@@ -22,18 +22,15 @@ if str(_SERVER_SRC) not in sys.path:
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from server.package_identity import (  # noqa: E402
+    CONSOLE_PACKAGE_DISPLAY_NAME,
+    INNO_APP_ID,
+    version_from_pyproject,
+)
+
 ISS_RELATIVE = Path("scripts") / "console_package.iss"
 INSTALLER_OUTPUT_RELATIVE = Path("dist") / "console-package-installers"
 ASSET_NAME_PREFIX = "Planets-Console"
-# Same string as CONSOLE_PACKAGE_DISPLAY_NAME / bundler BUNDLE_NAME (ADR 0029).
-DMG_VOLUME_NAME = "Planets Console"
-WINDOWS_EXE_NAME = "Planets Console.exe"
-
-
-def _version_from_pyproject(repo_root: Path) -> str:
-    from server.package_identity import version_from_pyproject
-
-    return version_from_pyproject(repo_root)
 
 
 def _bundle_layout() -> tuple[str, Path, Path]:
@@ -47,7 +44,7 @@ def release_tag(version: str) -> str:
 
 
 def release_title(version: str) -> str:
-    return f"{DMG_VOLUME_NAME} {version}"
+    return f"{CONSOLE_PACKAGE_DISPLAY_NAME} {version}"
 
 
 def macos_dmg_asset_name(version: str) -> str:
@@ -153,7 +150,7 @@ def wrap_macos_dmg(repo_root: Path) -> Path:
         raise FileNotFoundError(
             f"bundler .app is missing at {app}; run: make bundle_console_package"
         )
-    version = _version_from_pyproject(repo_root)
+    version = version_from_pyproject(repo_root)
     output_dir = installer_output_dir(repo_root)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_dmg = output_dir / macos_dmg_asset_name(version)
@@ -162,7 +159,7 @@ def wrap_macos_dmg(repo_root: Path) -> Path:
     stage_macos_dmg_root(app, stage)
     subprocess.run(
         hdiutil_create_args(
-            DMG_VOLUME_NAME,
+            CONSOLE_PACKAGE_DISPLAY_NAME,
             stage,
             output_dmg,
             executable=find_hdiutil(),
@@ -190,6 +187,18 @@ def find_iscc() -> Path:
     raise FileNotFoundError("Inno Setup ISCC.exe is required to wrap the Windows console package")
 
 
+def _windows_exe_name() -> str:
+    bundle_name, _, _ = _bundle_layout()
+    return f"{bundle_name}.exe"
+
+
+def _inno_app_id_compiler_value(app_id: str) -> str:
+    """Inno Setup treats `{` as the start of a constant; AppId uses a doubled brace."""
+    if not app_id.startswith("{") or not app_id.endswith("}"):
+        raise ValueError(f"Inno AppId must be a braced GUID, got {app_id!r}")
+    return "{" + app_id
+
+
 def iscc_compile_args(
     iscc: Path,
     iss: Path,
@@ -202,6 +211,9 @@ def iscc_compile_args(
     return [
         str(iscc),
         f"/DMyAppVersion={version}",
+        f"/DMyAppName={CONSOLE_PACKAGE_DISPLAY_NAME}",
+        f"/DMyAppExeName={_windows_exe_name()}",
+        f"/DMyAppId={_inno_app_id_compiler_value(INNO_APP_ID)}",
         f"/DSourceDir={source_dir}",
         f"/DOutputDir={output_dir}",
         f"/DOutputBaseFilename={output_base_filename}",
@@ -211,7 +223,7 @@ def iscc_compile_args(
 
 def wrap_windows_setup(repo_root: Path) -> Path:
     onedir = windows_onedir_path(repo_root)
-    exe = onedir / WINDOWS_EXE_NAME
+    exe = onedir / _windows_exe_name()
     if not exe.is_file():
         raise FileNotFoundError(
             f"bundler onedir exe is missing at {exe}; run: make bundle_console_package"
@@ -219,7 +231,7 @@ def wrap_windows_setup(repo_root: Path) -> Path:
     iss = iss_path(repo_root)
     if not iss.is_file():
         raise FileNotFoundError(f"Inno script is missing: {iss}")
-    version = _version_from_pyproject(repo_root)
+    version = version_from_pyproject(repo_root)
     output_dir = installer_output_dir(repo_root)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_base = windows_setup_asset_name(version).removesuffix(".exe")
@@ -272,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
-    version = _version_from_pyproject(repo_root)
+    version = version_from_pyproject(repo_root)
     if args.check_tag is not None:
         try:
             require_tag_matches_version(args.check_tag, version)
