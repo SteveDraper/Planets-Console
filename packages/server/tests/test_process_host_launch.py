@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from api import config as api_config
 from bff import config as bff_config
+from server.package_identity import CONSOLE_PACKAGE_DISPLAY_NAME
 from server.process_host.loopback import HealthWaitError
 from server.process_host.runtime import _configure_packaged_server, _run, _run_as_primary, main
 from server.process_host.support import StartFailure, show_start_failure
@@ -113,7 +114,7 @@ def test_configure_packaged_server_storage_root_is_console_data_directory(
         "api:\n  storage_backend: file\n  storage_root: ./.data\n",
         encoding="utf-8",
     )
-    data_dir = tmp_path / "Library" / "Application Support" / "Planets Console"
+    data_dir = tmp_path / "Library" / "Application Support" / CONSOLE_PACKAGE_DISPLAY_NAME
     monkeypatch.setattr(
         "server.console_data_directory.console_data_directory",
         lambda: data_dir,
@@ -151,7 +152,7 @@ def test_main_unexpected_error_shows_dialog_pointing_at_data_folder(monkeypatch)
 
     assert main() == 1
     assert shown
-    assert "Planets Console could not start" in shown[0]
+    assert f"{CONSOLE_PACKAGE_DISPLAY_NAME} could not start" in shown[0]
     assert "boom" in shown[0]
     assert "data folder" in shown[0].lower()
 
@@ -192,7 +193,7 @@ def test_start_failure_macos_dialog_contract(monkeypatch):
     assert args[0] == "osascript"
     assert args[1] == "-e"
     script = args[2]
-    assert 'with title "Planets Console"' in script
+    assert f'with title "{CONSOLE_PACKAGE_DISPLAY_NAME}"' in script
     assert r"Could not bind \"loopback\"" in script
     assert 'buttons {"OK"}' in script
     assert 'default button "OK"' in script
@@ -221,6 +222,6 @@ def test_start_failure_windows_dialog_contract(monkeypatch):
     assert called["args"] == (
         None,
         "Could not bind 127.0.0.1",
-        "Planets Console",
+        CONSOLE_PACKAGE_DISPLAY_NAME,
         0x10,
     )
