@@ -204,13 +204,19 @@ def load_config(
     override_specs: list[str] | None = None,
     *,
     default_config_path: Path | None = None,
+    discover_default: bool = True,
 ) -> RootConfig:
     """
     Load amalgamated config: default .config.yaml plus optional overrides.
 
     override_specs: list of strings from --config
         (e.g. ['api.storage_backend=file', 'bff=@bff.yaml']).
-    default_config_path: if set, use this as base instead of searching for .config.yaml.
+    default_config_path: if set and the path is a file, use this as base
+        instead of searching for .config.yaml.
+    discover_default: when True (clone / ``run_dev`` / ``run_deploy``), cwd-walk
+        for ``.config.yaml`` if no explicit base file is given. Packaged launch
+        passes False and sets ``api.storage_root`` via override specs from
+        ``console_data_directory`` so a nearby YAML cannot hijack the store.
     """
     override_specs = override_specs or []
     # Resolve full-file replacements first (last @file wins)
@@ -229,7 +235,7 @@ def load_config(
     elif default_config_path is not None and default_config_path.is_file():
         conf = OmegaConf.load(default_config_path)
     else:
-        found = _find_default_config()
+        found = _find_default_config() if discover_default else None
         if found is not None:
             conf = OmegaConf.load(found)
         else:

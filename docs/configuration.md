@@ -32,7 +32,7 @@ The amalgamated config has three top-level keys:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `storage_backend` | string | `ephemeral` | Backend identifier: `ephemeral` (in-memory) or `file` (durable JSON under `storage_root`). See [ADR 0001](adr/0001-breakpoint-file-storage.md). |
-| `storage_root` | string | `./.data` | Root directory for the file backend. Ignored when `storage_backend` is `ephemeral`. Created on first write if missing. Gitignored in the repo. |
+| `storage_root` | string | `./.data` | Root directory for the file backend. Ignored when `storage_backend` is `ephemeral`. Created on first write if missing. Gitignored in the repo. **Console package** launch does not use this default; see [Packaged console data directory](#packaged-console-data-directory). |
 | `storage_asset_path` | string or null | null | **Ephemeral only:** path to a JSON file used to initialise the in-memory store. If null, the store starts empty. If set, the path must exist and be a file (otherwise startup fails). |
 | `include_dummy_data` | bool | false | When true, seed sample game data (game 628580, turn 111) on startup **only for paths that are not already present** (idempotent skip-if-present). For development and testing only. |
 | `credentials_obfuscation_secret` | string or null | null | Optional secret mixed into HKDF when wrapping **account API keys** at rest. When null, derivation uses the OS native machine id only. See [ADR 0007](adr/0007-account-api-key-and-silent-login.md) and [design-account-api-key-and-silent-login.md](design-account-api-key-and-silent-login.md). |
@@ -144,8 +144,21 @@ uv run serve -c api.storage_asset_path=/data/store.json -c bff=@bff.yaml
 
 - Config is loaded at server startup in the CLI (before uvicorn runs). The amalgamated config is built; then `server` host/port are used for the uvicorn bind, and `api` and `bff` sub-configs are passed into their layers via `set_config()`.
 - The CLI uses `server.host` and `server.port` for `uvicorn.run(host=..., port=...)`, and passes `timeout_graceful_shutdown=5` so SIGTERM does not wait forever on NDJSON/MCP streams. That cap applies to every `serve` process, including deploy (`scripts/run_deploy.sh` execs `uv run serve`). The Core API uses `api` config for storage (e.g. `get_storage()` reads `storage_backend`, `storage_root`, and `storage_asset_path`). The BFF uses `bff` config (e.g. CORS middleware uses `cors_origins`).
-- Repo `.config.yaml` uses `file` + `storage_root: ./.data` for local dev. Unit tests and CI fixtures set `storage_backend: ephemeral` explicitly.
-- Implementation lives in: `packages/server/server/config.py` (loading, override parsing, and `ServerConfig`), `packages/api/api/config.py` (API sub-config), `packages/bff/bff/config.py` (BFF sub-config).
+- Repo `.config.yaml` uses `file` + `storage_root: ./.data` for local dev. Unit tests and CI fixtures set `storage_backend: ephemeral` explicitly. The **console package** does not load that file; see below.
+- Implementation lives in: `packages/server/server/config.py` (loading, override parsing, and `ServerConfig`), `packages/api/api/config.py` (API sub-config), `packages/bff/bff/config.py` (BFF sub-config), `packages/server/server/console_data_directory.py` (packaged OS data directory).
+
+## Packaged console data directory
+
+A **console package** process points the **file backend** `storage_root` (and support logs) at the OS per-user **console data directory**, not `./.data` and not a next-to-exe store. Paths are expanded in process (`~` / `%LOCALAPPDATA%`); they are not frozen into YAML at CI time. There is no user-facing config file in this directory in v1. The **installer wrapper** does not write or patch config.
+
+| OS | Console data directory |
+|----|------------------------|
+| macOS | `~/Library/Application Support/Planets Console/` |
+| Windows | `%LOCALAPPDATA%\Planets Console\` |
+
+Repo `.config.yaml` and `ApiConfig.storage_root` stay `./.data` for clone / `run_dev` / `run_deploy`. The code default does not change.
+
+Packaged launch sets `api.storage_backend=file` and `api.storage_root=<console data directory>` via `--config` (or the same specs in-process) from `packaged_file_backend_override_specs()`, and calls `load_config(..., discover_default=False)` so cwd-walk discovery of `.config.yaml` cannot apply. The **process host** is what passes those overrides ([Process host and bundler](https://github.com/SteveDraper/Planets-Console/issues/431)). Install-over and uninstall must not delete this directory.
 
 ## Planets.nu client JavaScript (reference)
 
@@ -168,7 +181,8 @@ The config override system and CLI usage are covered by unit tests under `packag
 - **Override spec parsing (`_parse_override_spec`):** Full replace `@path`; leaf literal `key=value`; substructure from file `key=@path`; invalid spec (no `=`) raises `ValueError`.
 - **Literal parsing (`_parse_literal`):** Boolean (`true`/`false`/`yes`/`no`); integer and float; string (including paths).
 - **Override application (`_apply_override`):** Leaf literal updates a value; leaf override on a nested key raises `ValueError`; full-replace key `@` raises; substructure from file loads YAML and merges.
-- **Load config (`load_config`):** With `default_config_path` to a fixture YAML, returns `RootConfig` with expected `server`, `api`, and `bff` values; leaf overrides (`server.port=9000`, `api.storage_asset_path=...`) apply correctly; full replace (`@file`) uses the given file; substructure override (`bff=@file`) merges the file into that section; with no config file (and `_find_default_config` returning `None`), uses internal defaults; later overrides win when keys repeat; full-replace “last wins” when multiple `@file` specs are given.
+- **Load config (`load_config`):** With `default_config_path` to a fixture YAML, returns `RootConfig` with expected `server`, `api`, and `bff` values; leaf overrides (`server.port=9000`, `api.storage_asset_path=...`) apply correctly; full replace (`@file`) uses the given file; substructure override (`bff=@file`) merges the file into that section; with no config file (and `_find_default_config` returning `None`), uses internal defaults; later overrides win when keys repeat; full-replace “last wins” when multiple `@file` specs are given; `discover_default=False` skips cwd-walk `.config.yaml` (packaged launch).
+- **Console data directory (`test_console_data_directory.py`):** macOS expands `Path.home()`; Windows expands `LOCALAPPDATA`; unsupported OS and missing `LOCALAPPDATA` raise; the helper ignores cwd `.config.yaml` / `./.data`; packaged override specs set `api.storage_backend=file` and `api.storage_root` without discovering YAML.
 
 ### CLI (`test_cli.py`)
 
