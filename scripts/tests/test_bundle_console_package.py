@@ -14,32 +14,35 @@ from bundle_console_package import (
     assert_collect_policy_runtime_only,
     collect_policy,
     macos_info_plist,
-    version_from_pyproject,
     write_placeholder_ico,
     write_placeholder_png,
 )
+from server.package_identity import VERSION_SIDECAR_NAME, version_from_pyproject
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_version_from_pyproject_is_full_semver_not_short():
     version = version_from_pyproject(REPO_ROOT)
-    assert version == "0.1.0"
     assert version != "0.1"
     assert version.count(".") >= 2
 
 
-def test_collect_policy_ships_spa_and_analytics_assets_only():
+def test_collect_policy_ships_spa_analytics_and_version_sidecar():
     policy = collect_policy(REPO_ROOT)
     dests = {dest for _src, dest in policy.datas}
-    assert dests == {"packages/frontend/dist", "assets/analytics"}
+    assert dests == {"packages/frontend/dist", "assets/analytics", VERSION_SIDECAR_NAME}
     sources = [Path(src) for src, _dest in policy.datas]
     assert any(src.as_posix().endswith("packages/frontend/dist") for src in sources)
     assert any(src.as_posix().endswith("assets/analytics") for src in sources)
+    sidecar = next(Path(src) for src, dest in policy.datas if dest == VERSION_SIDECAR_NAME)
+    assert sidecar.is_file()
+    assert sidecar.read_text(encoding="utf-8").strip() == version_from_pyproject(REPO_ROOT)
     assert_collect_policy_runtime_only(policy)
     assert "pytest" in policy.excludes
     assert policy.entry.name == "process_host_entry.py"
     assert policy.name == BUNDLE_NAME == "Planets Console"
+    assert policy.version == version_from_pyproject(REPO_ROOT)
 
 
 def test_collect_policy_does_not_add_tests_scripts_docs_or_frontend_src():
@@ -74,8 +77,8 @@ def test_macos_plist_identity_and_full_version():
     assert plist["CFBundleIdentifier"] == "com.github.stevedraper.planets-console"
     assert plist["CFBundleName"] == "Planets Console"
     assert plist["CFBundleDisplayName"] == "Planets Console"
-    assert plist["CFBundleShortVersionString"] == "0.1.0"
-    assert plist["CFBundleVersion"] == "0.1.0"
+    assert plist["CFBundleShortVersionString"] == version_from_pyproject(REPO_ROOT)
+    assert plist["CFBundleVersion"] == version_from_pyproject(REPO_ROOT)
     assert plist["LSBackgroundOnly"] is False
     assert plist["NSSupportsSuddenTermination"] is False
 

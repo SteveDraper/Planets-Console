@@ -1,4 +1,4 @@
-"""Freeze and ``python -m`` entry for the packaged process host."""
+"""PyInstaller freeze entry for the packaged process host."""
 
 from server.process_host.runtime import main
 

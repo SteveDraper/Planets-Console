@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import sys
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from server.package_identity import (
     APP_USER_MODEL_ID,
     CFBUNDLE_IDENTIFIER,
     CONSOLE_PACKAGE_DISPLAY_NAME,
+    VERSION_SIDECAR_NAME,
     console_package_version,
+    version_from_pyproject,
+    write_version_sidecar,
 )
 from server.process_host.bundled_paths import (
     FRONTEND_DIST_ENV,
@@ -23,14 +30,55 @@ from server.process_host.native_windows import SC_RESTORE, _sys_command
 from server.process_host.runtime import ProcessHostSession
 from server.process_host.support import configure_support_logging, show_start_failure
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def test_package_identity_matches_adr_0029():
     assert CONSOLE_PACKAGE_DISPLAY_NAME == "Planets Console"
     assert CFBUNDLE_IDENTIFIER == "com.github.stevedraper.planets-console"
     assert APP_USER_MODEL_ID == "SteveDraper.PlanetsConsole"
     version = console_package_version()
-    assert version == "0.1.0"
+    assert version == version_from_pyproject(REPO_ROOT)
     assert version != "0.1"
+    assert version.count(".") >= 2
+
+
+def test_frontend_app_version_json_matches_root_pyproject():
+    app_version = json.loads(
+        (REPO_ROOT / "packages" / "frontend" / "src" / "assets" / "appVersion.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert app_version["version"] == version_from_pyproject(REPO_ROOT)
+
+
+def test_process_host_package_exposes_no_main_wrapper():
+    import server.process_host as process_host
+
+    assert not hasattr(process_host, "main")
+
+
+def test_console_package_version_reads_frozen_sidecar(tmp_path, monkeypatch):
+    write_version_sidecar(tmp_path / VERSION_SIDECAR_NAME, "9.8.7")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert console_package_version() == "9.8.7"
+
+
+def test_console_package_version_raises_when_frozen_sidecar_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    with pytest.raises(FileNotFoundError, match="version sidecar"):
+        console_package_version()
+
+
+def test_version_from_pyproject_raises_when_version_missing(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "planets-console"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="version"):
+        version_from_pyproject(tmp_path)
 
 
 def test_apply_frontend_dist_env_uses_meipass_when_frozen(tmp_path, monkeypatch):

@@ -164,7 +164,7 @@ A **console package** process points the **file backend** `storage_root` (and su
 
 Repo `.config.yaml` and `ApiConfig.storage_root` stay `./.data` for clone / `run_dev` / `run_deploy`. The code default does not change.
 
-Packaged launch uses one loader: `load_packaged_config()` (CLI: `serve --packaged`). That call sets `api.storage_backend=file` and `api.storage_root` to the console data directory, and does not cwd-walk `.config.yaml`. Extra `--config` specs may still apply after the packaged defaults (later wins). `console_data_directory()` is the Path helper for logs and lock files; it does not load config. The **process host** (`python -m server.process_host_entry`, and the PyInstaller entry) invokes this loader, forces bind `127.0.0.1`, tries port 8000 then the next free port, **listen-then-open**s `http://127.0.0.1:<port>/` after `GET /health`, and writes support logs plus a single-instance lock under this directory. Install-over and uninstall must not delete this directory.
+Packaged launch uses one loader: `load_packaged_config()` (CLI: `serve --packaged`). That call sets `api.storage_backend=file` and `api.storage_root` to the console data directory, and does not cwd-walk `.config.yaml`. Extra `--config` specs may still apply after the packaged defaults (later wins). `console_data_directory()` is the Path helper for logs and lock files; it does not load config. The **process host** (`python -m server.process_host`, and the PyInstaller freeze script `process_host_entry.py`) invokes this loader, forces bind `127.0.0.1`, tries port 8000 then the next free port, **listen-then-open**s `http://127.0.0.1:<port>/` after `GET /health`, and writes support logs plus a single-instance lock under this directory. Install-over and uninstall must not delete this directory.
 
 ## Process host and bundler
 
@@ -176,7 +176,7 @@ Local bundle (requires `cd packages/frontend && npm run build` first):
 make bundle_console_package
 ```
 
-That runs `scripts/bundle_console_package.py` / `scripts/console_package.spec`. Collect policy ships the prebuilt SPA (`packages/frontend/dist`) and runtime `assets/analytics/` only -- not tests, `scripts/`, `docs/`, or frontend `src/`. Identity: display name **Planets Console**, `CFBundleIdentifier` `com.github.stevedraper.planets-console`, `AppUserModelID` `SteveDraper.PlanetsConsole`, version from root `pyproject.toml` (`0.1.0`, not `0.1`). Installer wrappers and CI are a separate ticket.
+That runs `scripts/bundle_console_package.py` / `scripts/console_package.spec`. Collect policy ships the prebuilt SPA (`packages/frontend/dist`), runtime `assets/analytics/`, and a one-line version sidecar -- not tests, `scripts/`, `docs/`, or frontend `src/`. Identity: display name **Planets Console**, `CFBundleIdentifier` `com.github.stevedraper.planets-console`, `AppUserModelID` `SteveDraper.PlanetsConsole`, version from root `pyproject.toml` (`0.1.0`, not `0.1`). Installer wrappers and CI are a separate ticket.
 
 ## Planets.nu client JavaScript (reference)
 
@@ -203,7 +203,7 @@ The config override system and CLI usage are covered by unit tests under `packag
 - **Packaged load (`load_packaged_config`):** File backend at the console data directory; ignores cwd `.config.yaml` (including `include_dummy_data`); extra override specs apply after packaged defaults; `ApiConfig().storage_root` remains `./.data`. Default `load_config` / `serve` still discover YAML.
 - **Console data directory (`test_console_data_directory.py`):** macOS expands `Path.home()`; Windows expands `LOCALAPPDATA`; unsupported OS and missing `LOCALAPPDATA` raise; the Path helper ignores cwd `.config.yaml` / `./.data`; packaged override specs set `api.storage_backend=file` and `api.storage_root`.
 - **Process host (`test_process_host_*.py`):** loopback URLs never use `localhost`; port scan skips an occupied preferred port; `GET /health` wait then `webbrowser.open`; per-user lock file; frozen `FRONTEND_DIST` from `sys._MEIPASS`; OS Quit sets uvicorn `should_exit`.
-- **Bundler collect policy (`scripts/tests/test_bundle_console_package.py`):** datas are SPA dist + `assets/analytics` only; pytest excluded; macOS Info.plist identity and full pyproject version.
+- **Bundler collect policy (`scripts/tests/test_bundle_console_package.py`):** datas are SPA dist + `assets/analytics` + version sidecar; pytest excluded; macOS Info.plist identity and full pyproject version.
 
 ### CLI (`test_cli.py`)
 

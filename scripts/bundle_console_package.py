@@ -1,7 +1,8 @@
 """PyInstaller collect policy and bundler for the v1 console package.
 
 Freeze from the process host entry import graph. Bundled datas are the prebuilt
-SPA and runtime ``assets/analytics`` only -- not the git tree, tests, or scripts.
+SPA, runtime ``assets/analytics``, and a one-line version sidecar -- not the git
+tree, tests, or scripts.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ import argparse
 import struct
 import subprocess
 import sys
-import tomllib
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,29 +78,27 @@ class CollectPolicy:
     app_user_model_id: str
 
 
-def version_from_pyproject(repo_root: Path = REPO_ROOT) -> str:
-    """Read ``[project].version`` from the workspace root pyproject.toml."""
-    payload = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
-    version = payload["project"]["version"]
-    if not isinstance(version, str) or not version:
-        raise ValueError("root pyproject.toml is missing [project].version")
-    return version
-
-
 def collect_policy(repo_root: Path = REPO_ROOT) -> CollectPolicy:
     """Return the runtime-only collect policy. Does not import PyInstaller."""
     from server.package_identity import (
         APP_USER_MODEL_ID,
         CFBUNDLE_IDENTIFIER,
         CONSOLE_PACKAGE_DISPLAY_NAME,
+        VERSION_SIDECAR_NAME,
+        version_from_pyproject,
+        write_version_sidecar,
     )
 
     spa = repo_root / SPA_DIST_RELATIVE
     assets = repo_root / ANALYTICS_ASSETS_RELATIVE
     entry = repo_root / ENTRY_RELATIVE
+    version = version_from_pyproject(repo_root)
+    sidecar = repo_root / WORK_DIR_RELATIVE / VERSION_SIDECAR_NAME
+    write_version_sidecar(sidecar, version)
     datas = (
         (str(spa), str(SPA_DIST_RELATIVE).replace("\\", "/")),
         (str(assets), str(ANALYTICS_ASSETS_RELATIVE).replace("\\", "/")),
+        (str(sidecar), VERSION_SIDECAR_NAME),
     )
     return CollectPolicy(
         entry=entry,
@@ -110,7 +108,7 @@ def collect_policy(repo_root: Path = REPO_ROOT) -> CollectPolicy:
         name=CONSOLE_PACKAGE_DISPLAY_NAME,
         bundle_identifier=CFBUNDLE_IDENTIFIER,
         display_name=CONSOLE_PACKAGE_DISPLAY_NAME,
-        version=version_from_pyproject(repo_root),
+        version=version,
         app_user_model_id=APP_USER_MODEL_ID,
     )
 
