@@ -19,6 +19,19 @@ from server.process_host.loopback import (
 )
 
 
+class _HealthOkResponse:
+    status = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def getcode(self):
+        return 200
+
+
 def test_spa_and_health_urls_use_ipv4_loopback_never_localhost():
     assert spa_url(8000) == "http://127.0.0.1:8000/"
     assert health_url(8000) == "http://127.0.0.1:8000/health"
@@ -45,28 +58,29 @@ def test_next_free_loopback_port_skips_occupied_preferred():
         occupied.close()
 
 
+def test_wait_for_health_returns_without_sleep_when_already_up():
+    slept: list[float] = []
+
+    wait_for_health(
+        8000,
+        timeout_seconds=2.0,
+        urlopen=lambda _url, timeout=1.0: _HealthOkResponse(),
+        sleep=slept.append,
+        monotonic=lambda: 0.0,
+    )
+    assert slept == []
+
+
 def test_wait_for_health_succeeds_on_http_200():
     calls = {"n": 0}
     clock = {"t": 0.0}
-
-    class _Response:
-        status = 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def getcode(self):
-            return 200
 
     def urlopen(url, timeout=1.0):
         calls["n"] += 1
         assert url == "http://127.0.0.1:8123/health"
         if calls["n"] == 1:
             raise URLError("connection refused")
-        return _Response()
+        return _HealthOkResponse()
 
     def monotonic():
         current = clock["t"]
