@@ -12,6 +12,7 @@ from types import TracebackType
 from typing import TextIO
 
 LOCK_FILE_NAME = "process-host.lock"
+PORT_FILE_NAME = "process-host.port"
 _LOCK_BYTE_COUNT = 1
 
 
@@ -50,37 +51,47 @@ def _unlock(handle: TextIO) -> None:
     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _write_published_port_file(path: Path, payload: str) -> None:
+    with open(path, "w", encoding="utf-8") as published:
+        published.write(payload)
+        published.flush()
+        os.fsync(published.fileno())
+
+
 class SingleInstanceLock:
     """Exclusive lock file in the console data directory.
 
-    The holder writes JSON ``{"pid": int, "port": int}`` after bind. A second
-    activation that cannot acquire the lock reads that port and listen-then-opens.
+    Bound port lives in an unlocked sidecar (``port_path``). Waiters read that
+    file; they never open the lock file. Windows ``LockFile`` is mandatory, so
+    a waiter ``Path.read_text`` of the locked lock file would fail.
     """
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    def __init__(self, lock_path: Path) -> None:
+        self.lock_path = lock_path
+        self.port_path = lock_path.with_name(PORT_FILE_NAME)
         self._handle: TextIO | None = None
 
     def try_acquire(self) -> bool:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(self.path, "a+", encoding="utf-8")
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(self.lock_path, "a+", encoding="utf-8")
         try:
             _lock_exclusive(handle)
         except OSError:
             handle.close()
             return False
         self._handle = handle
+        try:
+            _write_published_port_file(self.port_path, "")
+        except OSError:
+            self.release()
+            raise
         return True
 
     def write_bound_port(self, port: int) -> None:
         if self._handle is None:
             raise RuntimeError("write_bound_port requires an acquired lock")
         payload = json.dumps({"pid": os.getpid(), "port": port}, separators=(",", ":"))
-        self._handle.seek(0)
-        self._handle.truncate()
-        self._handle.write(payload)
-        self._handle.flush()
-        os.fsync(self._handle.fileno())
+        _write_published_port_file(self.port_path, payload)
 
     def release(self) -> None:
         handle = self._handle
@@ -94,7 +105,7 @@ class SingleInstanceLock:
 
     def __enter__(self) -> SingleInstanceLock:
         if not self.try_acquire():
-            raise SingleInstanceBusy(f"console package already running: {self.path}")
+            raise SingleInstanceBusy(f"console package already running: {self.lock_path}")
         return self
 
     def __exit__(
@@ -107,26 +118,26 @@ class SingleInstanceLock:
 
 
 def read_published_port(
-    path: Path,
+    port_path: Path,
     *,
     timeout_seconds: float = 30.0,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> int:
-    """Read the bound port published by the process that holds the lock."""
+    """Read the bound port from the unlocked sidecar the lock holder publishes."""
     deadline = monotonic() + timeout_seconds
     last_error: BaseException | None = None
     while monotonic() < deadline:
         try:
-            raw = path.read_text(encoding="utf-8").strip()
+            raw = port_path.read_text(encoding="utf-8").strip()
             if raw:
                 payload = json.loads(raw)
                 port = payload["port"]
                 if isinstance(port, int) and 1 <= port <= 65535:
                     return port
-                last_error = SingleInstancePortError(f"invalid port in lock file: {port!r}")
+                last_error = SingleInstancePortError(f"invalid port in {port_path}: {port!r}")
         except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
             last_error = exc
         sleep(0.1)
     detail = f": {last_error}" if last_error is not None else ""
-    raise SingleInstancePortError(f"Timed out waiting for a bound port in {path}{detail}")
+    raise SingleInstancePortError(f"Timed out waiting for a bound port in {port_path}{detail}")

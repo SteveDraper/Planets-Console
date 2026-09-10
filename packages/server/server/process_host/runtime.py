@@ -82,7 +82,7 @@ def _run() -> int:
     )
     lock = SingleInstanceLock(data_dir / LOCK_FILE_NAME)
     if not lock.try_acquire():
-        return _reopen_existing_instance(lock.path)
+        return _reopen_existing_instance(lock.port_path)
 
     try:
         return _run_as_primary(lock, log_path)
@@ -90,9 +90,9 @@ def _run() -> int:
         lock.release()
 
 
-def _reopen_existing_instance(lock_path: Path) -> int:
+def _reopen_existing_instance(port_path: Path) -> int:
     try:
-        port = read_published_port(lock_path)
+        port = read_published_port(port_path)
         wait_for_health(port, timeout_seconds=30.0)
         open_spa(port)
         return 0
