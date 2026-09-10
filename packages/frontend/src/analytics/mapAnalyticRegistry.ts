@@ -11,12 +11,14 @@ import {
   CONNECTIONS_ANALYTIC_ID,
   FLEET_ANALYTIC_ID,
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
+  MINEFIELDS_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
   VISIBILITY_ANALYTIC_ID,
 } from './mapAnalyticIds'
 import { stellarCartographyMapAnalytic } from './stellar-cartography/mapAnalytic'
 import { fleetMapAnalytic } from './fleet/mapAnalytic'
 import { homeworldLocatorMapAnalytic } from './homeworld-locator/mapAnalytic'
+import { minefieldsMapAnalytic } from './minefields/mapAnalytic'
 import { visibilityMapAnalytic } from './visibility/mapAnalytic'
 import type { CombineMapDataOptionsBase } from './mapLayers'
 
@@ -39,6 +41,7 @@ export type MapLayerMergeContext = {
   regionOverlays: CombinedMapData['regionOverlays']
   wormholeUnknownEntrances: CombinedMapData['wormholeUnknownEntrances']
   homeworldMarkers: CombinedMapData['homeworldMarkers']
+  minefields: CombinedMapData['minefields']
   waypointsByKey: Map<string, { x: number; y: number }>
   baselineDegraded: boolean | undefined
   baselineTurn: number | null | undefined
@@ -113,6 +116,7 @@ const mapAnalyticRegistry: Record<string, MapAnalyticRegistration> = {
   [FLEET_ANALYTIC_ID]: fleetMapAnalytic,
   [VISIBILITY_ANALYTIC_ID]: visibilityMapAnalytic,
   [HOMEWORLD_LOCATOR_ANALYTIC_ID]: homeworldLocatorMapAnalytic,
+  [MINEFIELDS_ANALYTIC_ID]: minefieldsMapAnalytic,
 }
 
 /** Canonical map analytic ids with explicit registry entries. */
@@ -123,6 +127,7 @@ export const REGISTERED_MAP_ANALYTIC_IDS = [
   FLEET_ANALYTIC_ID,
   VISIBILITY_ANALYTIC_ID,
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
+  MINEFIELDS_ANALYTIC_ID,
 ] as const satisfies readonly string[]
 
 export type RegisteredMapAnalyticId = (typeof REGISTERED_MAP_ANALYTIC_IDS)[number]

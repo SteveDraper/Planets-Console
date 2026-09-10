@@ -13,6 +13,7 @@ from api.analytics.fleet.registration import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.homeworld_locator.registration import (
     REGISTRATION as HOMEWORLD_LOCATOR_REGISTRATION,
 )
+from api.analytics.minefields import REGISTRATION as MINEFIELDS_REGISTRATION
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import (
     TurnAnalyticHandler,
@@ -33,6 +34,7 @@ _IMPORTED_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
     FLEET_REGISTRATION,
     VISIBILITY_REGISTRATION,
     HOMEWORLD_LOCATOR_REGISTRATION,
+    MINEFIELDS_REGISTRATION,
 )
 
 validate_turn_analytic_registrations(_IMPORTED_REGISTRATIONS)

@@ -2,17 +2,21 @@
  * Register / unregister a **map interaction contributor** for the lifetime of
  * the calling component. Pass ``null`` when the analytic is disabled.
  *
- * ``revision`` bumps the registry when contributor inputs change without an
- * id/role change (e.g. fleet stacks), so the hover engine recollects.
+ * ``revisionDeps`` is a ``useEffect``-style list: each element is compared with
+ * ``Object.is``. Pass an inline list of inputs that should bump the registry
+ * (so the hover engine recollects) even when id/role are unchanged. Do not pass
+ * a single boxed value whose identity is new every render.
  */
 
 import { useEffect, useRef } from 'react'
 import type { MapInteractionContributor } from './mapInteractionContributorTypes'
 import { useMapInteractionRegistry } from './mapInteractionRegistry'
 
+const NO_REVISION_DEPS: readonly unknown[] = []
+
 export function useMapInteractionContributor(
   contributor: MapInteractionContributor | null,
-  revision: unknown = 0
+  revisionDeps: readonly unknown[] = NO_REVISION_DEPS
 ): void {
   const { register, unregister } = useMapInteractionRegistry()
   const latestRef = useRef(contributor)
@@ -45,5 +49,7 @@ export function useMapInteractionContributor(
     }
     register(wrapper)
     return () => unregister(id)
-  }, [id, role, hasFetch, hasSticky, register, unregister, revision])
+    // ``revisionDeps`` is caller-owned input identity, spread like ``useEffect``.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, role, hasFetch, hasSticky, register, unregister, ...revisionDeps])
 }

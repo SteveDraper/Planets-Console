@@ -6,6 +6,7 @@ import {
   hasVectorOverlayShapes,
 } from '../../lib/cartography/stellarCartographyOverlay'
 import { safeZoomScale } from './geometry'
+import { mapPaneZClass } from './mapPaneZOrder'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 import { StellarCartographyVectorOverlay } from './StellarCartographyVectorOverlay'
 import { WormholeEndpointMarkers } from './WormholeEndpointMarkers'
@@ -50,7 +51,7 @@ export function StellarCartographyOverlayPane({
   if (!hasVector && !hasMarkers) return null
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+    <div className={`pointer-events-none absolute inset-0 ${mapPaneZClass('cartography')}`} aria-hidden>
       {hasVector ? (
         <StellarCartographyVectorOverlay shapes={shapes} width={width} height={height} />
       ) : null}

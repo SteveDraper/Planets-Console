@@ -4,10 +4,12 @@
  */
 
 import type { HomeworldMapMarker } from '../analytics/homeworld-locator/wireSchema'
+import type { KnownMinefield } from '../analytics/minefields/wireSchema'
 import type { components } from './schema-games'
 import type { MapRegionOverlay } from './mapRegionOverlayTypes'
 
 export type { MapRegionOverlay } from './mapRegionOverlayTypes'
+export type { KnownMinefield } from '../analytics/minefields/wireSchema'
 
 /** Game map cell coordinates from OpenAPI `MapCellModel`. */
 export type MapCell = components['schemas']['MapCellModel']
@@ -189,6 +191,8 @@ export type MapDataResponse = {
   regionOverlays?: MapRegionOverlay[]
   /** Homeworld locator candidate markers (empty nodes/edges for that analytic). */
   homeworldMarkers?: HomeworldMapMarkerWire[]
+  /** Known minefields for the Minefields analytic pane. */
+  minefields?: KnownMinefield[]
   /** Homeworld locator: baseline used a turn later than 1. */
   baselineDegraded?: boolean
   /** Homeworld locator: turn number used when baseline is degraded. */
@@ -234,6 +238,8 @@ export type CombinedMapData = {
   wormholeUnknownEntrances: WormholeUnknownEntrance[]
   /** Homeworld locator markers resolved onto base-map planet coordinates. */
   homeworldMarkers: HomeworldMapMarkerDisplay[]
+  /** Known minefields for the dedicated minefield map pane. */
+  minefields: KnownMinefield[]
   /** Homeworld locator: baseline used a turn later than 1. */
   baselineDegraded?: boolean
   /** Homeworld locator: turn number used when baseline is degraded. */

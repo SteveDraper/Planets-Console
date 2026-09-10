@@ -72,6 +72,7 @@ export type {
   HomeworldMapMarkerWire,
   IllustrativeRouteStep,
   IonStormOverlayCircle,
+  KnownMinefield,
   MapCell,
   MapDataResponse,
   MapEdge,

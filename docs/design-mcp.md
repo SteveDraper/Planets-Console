@@ -83,7 +83,7 @@ v1 is read-only advisor information at human *analysis* parity -- not every SPA 
 **In v1**
 
 - Stored-game list, **GameInfo** (stored + refresh), **turn-ensure**, stored perspectives
-- All catalog analytics' *information*: **base-map**, **scores**, **connections**, **stellar-cartography**, **fleet**, **visibility**, **homeworld-locator**
+- All catalog analytics' *information*: **base-map**, **scores**, **connections**, **stellar-cartography**, **fleet**, **visibility**, **homeworld-locator**, **minefields**
 - All existing concept HTTP, including warp-well point/cells and flare points
 - Stored **TurnInfo** as **MCP TurnInfo fallback** (named-object fields only; MCP descriptions steer to distilled queries)
 - **MCP disk proximity** (ships, planets, and cartography features within X ly of a coordinate) -- the only new Core helper in v1 ([ADR 0021](adr/0021-mcp-v1-wrap-existing-gated-fills.md))

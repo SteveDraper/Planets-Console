@@ -61,6 +61,7 @@ const sampleData = {
   regionOverlays: [],
   wormholeUnknownEntrances: [{ x: 50, y: 60 }],
   homeworldMarkers: [],
+  minefields: [],
 } satisfies CombinedMapData
 
 function cartographyPolicy(

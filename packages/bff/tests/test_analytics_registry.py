@@ -79,6 +79,17 @@ def test_registry_metadata_keeps_homeworld_locator_selectable_map_only():
     }
 
 
+def test_registry_metadata_keeps_minefields_selectable_map_only():
+    minefields = next(a for a in ANALYTICS_LIST if a["id"] == "minefields")
+    assert minefields == {
+        "id": "minefields",
+        "name": "Minefields",
+        "supportsTable": False,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
 def test_fleet_table_dispatch_forwards_to_core():
     calls = []
 
@@ -232,6 +243,50 @@ def test_stellar_cartography_map_dispatch_forwards_to_core():
             {"diagnostics": NOOP_DIAGNOSTICS},
         )
     ]
+
+
+def test_minefields_map_dispatch_forwards_to_core():
+    calls = []
+
+    def load_core(game_id, perspective, turn, analytic_id, **kwargs):
+        calls.append((game_id, perspective, turn, analytic_id, kwargs))
+        return {
+            "analyticId": "minefields",
+            "minefields": [],
+            "nodes": [],
+            "edges": [],
+        }
+
+    data = get_map_response(
+        "minefields",
+        TurnScope(628580, 1, 111),
+        ConnectionsMapQuery(
+            warp_speed=9,
+            gravitonic_movement=False,
+            flare_mode=FlareConnectionMode.OFF,
+            flare_depth=1,
+            include_illustrative_routes=False,
+        ),
+        load_core,
+        NOOP_DIAGNOSTICS,
+    )
+    assert data["analyticId"] == "minefields"
+    assert data["minefields"] == []
+    assert calls == [
+        (
+            628580,
+            1,
+            111,
+            "minefields",
+            {"diagnostics": NOOP_DIAGNOSTICS},
+        )
+    ]
+
+
+def test_minefields_table_dispatch_raises_validation_error():
+    scope = TurnScope(628580, 1, 111)
+    with pytest.raises(BFFValidationError, match="does not support table"):
+        get_table_response("minefields", scope, lambda *a, **k: {}, NOOP_DIAGNOSTICS)
 
 
 def test_scores_table_dispatch_shapes_core_rows():

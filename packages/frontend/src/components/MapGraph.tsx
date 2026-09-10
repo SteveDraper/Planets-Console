@@ -27,6 +27,7 @@ import { nodeTypes, toFlowNodes } from './map-graph/nodes'
 import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
+import { MinefieldMapPane } from './map-graph/MinefieldMapPane'
 import { MapAttentionOrchestrator } from './map-graph/MapAttentionOrchestrator'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
 import { FleetHeadingTrailsOverlay } from './map-graph/FleetHeadingTrailsOverlay'
@@ -36,7 +37,7 @@ import { useFleetHeadingTrails } from '../analytics/fleet/useFleetHeadingTrails'
 import { useFleetLocationRingStacks } from '../analytics/fleet/useFleetLocationRingStacks'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
-import { FLEET_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
+import { FLEET_ANALYTIC_ID, MINEFIELDS_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
 import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
 import {
   useEffectiveHomeworldSectorIndexes,
@@ -68,6 +69,7 @@ import { FleetMapInteractionContributor } from '../map-interaction/contributors/
 import { RegionMapInteractionContributor } from '../map-interaction/contributors/RegionMapInteractionContributor'
 import { CartographyMapInteractionContributor } from '../map-interaction/contributors/CartographyMapInteractionContributor'
 import { WormholeMapInteractionContributor } from '../map-interaction/contributors/WormholeMapInteractionContributor'
+import { MinefieldMapInteractionContributor } from '../map-interaction/contributors/MinefieldMapInteractionContributor'
 
 type MapGraphProps = {
   data: CombinedMapData
@@ -236,6 +238,7 @@ function MapGraphFlow({
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
+  const minefieldsEnabled = enabledAnalyticIds.includes(MINEFIELDS_ANALYTIC_ID)
   const fleetStacks = useFleetLocationRingStacks(analyticScope, fleetEnabled)
   const fleetHeadingTrails = useFleetHeadingTrails(
     analyticScope,
@@ -329,6 +332,7 @@ function MapGraphFlow({
         />
       ) : null}
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
+      <MinefieldMapPane minefields={data.minefields} shellTurn={analyticScope.turn} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
       <FleetHeadingTrailsOverlay trails={fleetHeadingTrails} />
@@ -351,6 +355,12 @@ function MapGraphFlow({
           stacks={fleetStacks}
           analyticScope={analyticScope}
           enabled={fleetEnabled}
+        />
+        <MinefieldMapInteractionContributor
+          minefields={data.minefields}
+          roster={roster}
+          shellTurn={analyticScope.turn}
+          enabled={minefieldsEnabled}
         />
         <RegionMapInteractionContributor regionOverlays={regionOverlays} />
         <CartographyMapInteractionContributor cartography={cartography} />

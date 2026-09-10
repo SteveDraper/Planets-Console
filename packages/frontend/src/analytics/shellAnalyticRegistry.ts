@@ -8,6 +8,7 @@ import {
   CONNECTIONS_ANALYTIC_ID,
   FLEET_ANALYTIC_ID,
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
+  MINEFIELDS_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
   VISIBILITY_ANALYTIC_ID,
 } from './mapAnalyticIds'
@@ -20,6 +21,7 @@ import {
 import type { ShellAnalyticStreamSlot, ShellLivedStreamMountSlot } from './shellLivedStream'
 import { stellarCartographyShellAnalytic } from './stellar-cartography/shell'
 import { visibilityShellAnalytic } from './visibility/shell'
+import { minefieldsShellAnalytic } from './minefields/shell'
 
 export type {
   ShellAnalyticStreamSlot,
@@ -93,6 +95,7 @@ const shellAnalyticRegistry: Record<string, ShellAnalyticRegistration> = {
     HOMEWORLD_LOCATOR_ANALYTIC_ID,
     homeworldLocatorShellAnalytic
   ),
+  [MINEFIELDS_ANALYTIC_ID]: withComposedQueryParams(MINEFIELDS_ANALYTIC_ID, minefieldsShellAnalytic),
 }
 
 /** Selectable catalog ids that currently ship custom Shell chrome. */
@@ -103,6 +106,7 @@ export const CUSTOM_SHELL_CHROME_ANALYTIC_IDS = [
   FLEET_ANALYTIC_ID,
   VISIBILITY_ANALYTIC_ID,
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
+  MINEFIELDS_ANALYTIC_ID,
 ] as const satisfies readonly string[]
 
 export type CustomShellChromeAnalyticId = (typeof CUSTOM_SHELL_CHROME_ANALYTIC_IDS)[number]

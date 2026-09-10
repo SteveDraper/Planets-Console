@@ -17,6 +17,7 @@ export type MapHoverContributionKind = 'descriptive' | 'map-element'
 export type MapInteractionContributorRole =
   | 'planet'
   | 'fleet'
+  | 'minefield'
   | 'region'
   | 'cartography'
   | 'wormhole'

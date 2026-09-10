@@ -4,6 +4,7 @@ import type { HomeworldMapMarkerDisplay } from '../../analytics/homeworld-locato
 import { isHomeworldPlanetAttention } from '../../lib/mapAttention'
 import { useMapAttentionRequestStore } from '../../stores/mapAttentionRequest'
 import { flowCenterFromMapNode, safeZoomScale } from './geometry'
+import { mapPaneZClass } from './mapPaneZOrder'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
 
 /** Outer ring diameter in screen pixels (independent of zoom). */
@@ -34,7 +35,7 @@ export function HomeworldMarkersOverlay({
   const baseRadius = MARKER_DIAMETER_PX / 2
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[6]" aria-hidden>
+    <div className={`pointer-events-none absolute inset-0 ${mapPaneZClass('homeworldMarkers')}`} aria-hidden>
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         {markers.map((marker) => {
           const { cx, cy } = flowCenterFromMapNode({ x: marker.x, y: marker.y })

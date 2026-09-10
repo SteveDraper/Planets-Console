@@ -148,5 +148,6 @@ Unregistered selectable ids keep generic checkbox + generic table -- not an erro
 | `fleet` | `fleet.py` | `fleet.py` | yes | yes (per-player overlay) | shell chrome + shell-lived stream (`src/analytics/fleet/`) |
 | `visibility` | `visibility.py` | `visibility.py` | no | yes (region overlays) | shell chrome + map registry (`src/analytics/visibility/`) |
 | `homeworld-locator` | `homeworld_locator/` | `homeworld_locator.py` | yes | yes (markers) | shell chrome + `availability` (`src/analytics/homeworld-locator/`) |
+| `minefields` | `minefields.py` | `minefields.py` | no | yes (minefield pane) | shell chrome + `availability` + map registry (`src/analytics/minefields/`) |
 
 `fleet` is the first **selectable** analytic that supports both table and map.

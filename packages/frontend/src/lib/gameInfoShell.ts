@@ -3,6 +3,7 @@ import type { GameInfoShellContext } from '../stores/shell'
 import { resolveRaceDisplayNameFromGameInfo } from './planetsNuRaceDisplayName'
 import { stellarCartographySettingsGatesFromGameInfo } from './stellarCartographySettings'
 import { homeworldLocatorInactiveReasonFromGameInfo } from '../analytics/homeworld-locator/homeworldAvailability'
+import { minefieldsInactiveReasonFromGameInfo } from '../analytics/minefields/minefieldsAvailability'
 
 import { ELIMINATED_PLAYER_WIRE_STATUS } from './turnPlayerUsernames'
 
@@ -265,5 +266,6 @@ export function buildGameInfoShellContext(data: GameInfoResponse): GameInfoShell
     sectorDisplayName: getSectorDisplayNameFromGameInfo(data),
     stellarCartographyGates: stellarCartographySettingsGatesFromGameInfo(data),
     homeworldInactiveReason: homeworldLocatorInactiveReasonFromGameInfo(data),
+    minefieldsInactiveReason: minefieldsInactiveReasonFromGameInfo(data),
   }
 }

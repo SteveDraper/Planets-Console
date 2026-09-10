@@ -27,6 +27,7 @@ const SELECTABLE_TURN_ANALYTIC_IDS = [
   'fleet',
   'visibility',
   'homeworld-locator',
+  'minefields',
 ] as const
 
 const UNREGISTERED_SELECTABLE: AnalyticItem = {
@@ -144,7 +145,7 @@ describe('shell analytic registry', () => {
 describe('shell dispatch has no analytic id branches', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const srcRoot = join(here, '..')
-  const idBranch = /\b(?:analyticId|a\.id|\.id|id)\s*===\s*['`](?:scores|connections|stellar-cartography|fleet|visibility|homeworld-locator)['`]/
+  const idBranch = /\b(?:analyticId|a\.id|\.id|id)\s*===\s*['`](?:scores|connections|stellar-cartography|fleet|visibility|homeworld-locator|minefields)['`]/
 
   it('keeps App, AnalyticsBar, MainArea, and generic table/map fetch free of id switches', () => {
     const app = readFileSync(join(srcRoot, 'App.tsx'), 'utf8')

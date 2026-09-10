@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Panel, useStore } from '@xyflow/react'
 import { clientToFlowPosition, safeZoomScale } from './geometry'
+import { mapPaneZClass } from './mapPaneZOrder'
 
 /** Show grid when zoom >= this (pixels per flow unit). */
 const GRID_ZOOM_THRESHOLD = 15
@@ -107,7 +108,7 @@ export function CoordinateGridOverlay() {
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-[5]"
+      className={`pointer-events-none absolute inset-0 ${mapPaneZClass('cartography')}`}
       aria-hidden
     >
       <svg

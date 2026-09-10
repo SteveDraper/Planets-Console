@@ -11,9 +11,20 @@ uv run serve "$@" &
 BACKEND_PID=$!
 set +m
 
+# Match serve's uvicorn timeout_graceful_shutdown; then SIGKILL so uv+python
+# cannot linger after the listen socket is already closed.
+GRACEFUL_SHUTDOWN_SECONDS=5
+
 cleanup() {
-  # Kill backend process group (uv + uvicorn)
+  # SIGTERM the backend process group (uv + uvicorn)
   kill -- -"$BACKEND_PID" 2>/dev/null || true
+  waited=0
+  while [ "$waited" -lt "$GRACEFUL_SHUTDOWN_SECONDS" ]; do
+    kill -0 "$BACKEND_PID" 2>/dev/null || break
+    sleep 1
+    waited=$((waited + 1))
+  done
+  kill -9 -- -"$BACKEND_PID" 2>/dev/null || true
   # Fallback: kill anything still bound to port 8000 (e.g. if process group kill missed a child)
   lsof -t -i :8000 2>/dev/null | xargs kill -9 2>/dev/null || true
 }

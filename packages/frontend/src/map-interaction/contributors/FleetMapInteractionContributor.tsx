@@ -53,8 +53,8 @@ export function FleetMapInteractionContributor({
     }
   }, [enabled, stacks, analyticScope])
 
-  // Re-register when stacks change so the hover engine recollects (version bump).
-  useMapInteractionContributor(contributor, stacks)
+  // Re-register when stacks identity changes so the hover engine recollects.
+  useMapInteractionContributor(contributor, [stacks])
 
   return null
 }

@@ -8,6 +8,7 @@ import {
   CONNECTIONS_ANALYTIC_ID,
   FLEET_ANALYTIC_ID,
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
+  MINEFIELDS_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
   VISIBILITY_ANALYTIC_ID,
 } from './mapAnalyticIds'
@@ -22,6 +23,7 @@ import {
 } from './mapAnalyticRegistry'
 import { visibilityMapAnalytic } from './visibility/mapAnalytic'
 import { homeworldLocatorMapAnalytic } from './homeworld-locator/mapAnalytic'
+import { minefieldsMapAnalytic } from './minefields/mapAnalytic'
 import {
   defaultConnectionsParams,
   sampleScope,
@@ -46,6 +48,7 @@ describe('map analytic registry', () => {
       FLEET_ANALYTIC_ID,
       VISIBILITY_ANALYTIC_ID,
       HOMEWORLD_LOCATOR_ANALYTIC_ID,
+      MINEFIELDS_ANALYTIC_ID,
     ])
     for (const analyticId of REGISTERED_MAP_ANALYTIC_IDS) {
       expect(isRegisteredMapAnalytic(analyticId)).toBe(true)
@@ -60,6 +63,7 @@ describe('map analytic registry', () => {
     expect(mapAnalyticRegistrationFor(HOMEWORLD_LOCATOR_ANALYTIC_ID)).toBe(
       homeworldLocatorMapAnalytic
     )
+    expect(mapAnalyticRegistrationFor(MINEFIELDS_ANALYTIC_ID)).toBe(minefieldsMapAnalytic)
   })
 
   it('throws for unregistered map analytics', () => {
@@ -144,6 +148,23 @@ describe('map analytic registry', () => {
       'map',
       sampleScope,
       'sectors-v7',
+    ])
+    expect(spec.enabled).toBe(true)
+  })
+
+  it('wires minefields to the default query spec and custom merger', () => {
+    const registration = mapAnalyticRegistrationFor(MINEFIELDS_ANALYTIC_ID)
+    expect(registration).toBe(minefieldsMapAnalytic)
+    expect(registration.buildQuerySpec).toBeUndefined()
+    expect(registration.mergeLayer).not.toBe(defaultMapLayerMerger)
+
+    const spec = mapAnalyticQuerySpecFor(MINEFIELDS_ANALYTIC_ID, queryContext)
+    expect(spec.queryKey).toEqual([
+      'analytic',
+      MINEFIELDS_ANALYTIC_ID,
+      'map',
+      sampleScope,
+      'planet-v2',
     ])
     expect(spec.enabled).toBe(true)
   })

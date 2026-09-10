@@ -93,8 +93,8 @@ function DescriptiveHostChrome({
   const showTitles = host.sections.length > 1
   const cursorHost = host.placement.mode === 'cursor'
 
-  // Above map paint overlays (region z-6, fleet rings z-7) so the opaque panel
-  // occludes ring/fill opacity rather than letting those layers composite on top.
+  // Above map paint overlays so the opaque panel occludes ring/fill opacity
+  // rather than letting those layers composite on top.
   const chromeClass =
     pos.pinned
       ? 'pointer-events-auto absolute z-[20] isolate max-w-xs font-mono text-xs text-gray-300'

@@ -224,6 +224,35 @@ describe('combineMapData', () => {
     })
   })
 
+  it('merges known minefields from the minefields analytic', () => {
+    const minefields: MapDataResponse = {
+      analyticId: 'minefields',
+      nodes: [],
+      edges: [],
+      minefields: [
+        {
+          id: 18,
+          ownerId: 2,
+          isWeb: false,
+          isHidden: false,
+          x: 2131,
+          y: 1417,
+          units: 85,
+          infoTurn: 111,
+          friendlyCode: '???',
+          preRadius: 9,
+          postRadius: 8,
+        },
+      ],
+    }
+
+    const combined = combineMapData(['minefields'], [minefields], {
+      liveConnectionsParams: null,
+    })
+
+    expect(combined.minefields).toEqual(minefields.minefields)
+  })
+
   it('merges homeworld sector region overlays with markers', () => {
     const baseWithPlanets: MapDataResponse = {
       analyticId: 'base-map',

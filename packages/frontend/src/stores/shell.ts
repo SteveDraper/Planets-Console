@@ -23,6 +23,8 @@ export type GameInfoShellContext = {
   stellarCartographyGates: StellarCartographySettingsGates
   /** When set, Homeworld locator is inactive (catalog greyed + hint). */
   homeworldInactiveReason: string | null
+  /** When set, Minefields analytic is inactive (catalog greyed + hint). */
+  minefieldsInactiveReason?: string | null
 }
 
 type ShellState = {

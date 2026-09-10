@@ -9,6 +9,10 @@ from server.config import load_config
 
 app = typer.Typer()
 
+# All `serve` invocations (dev and deploy via scripts/run_deploy.sh): bound
+# graceful shutdown so SIGTERM does not wait forever on NDJSON/MCP streams.
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
 CONFIG_OPTION_HELP = (
     "Override config (repeatable). Forms: key.leaf=value, key=@file, or @file for "
     "full config. Base: .config.yaml. See 'serve config' for details."
@@ -38,6 +42,7 @@ def main(
         port=root.server.port,
         reload=reload,
         factory=True,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
     )
 
 
