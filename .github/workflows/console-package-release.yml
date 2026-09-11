@@ -1,0 +1,142 @@
+# Build unsigned GitHub Release assets for the v1 console package.
+#
+# Freeze hosts are pinned (macos-15 Apple Silicon, windows-2025 x64), not
+# *-latest. Trigger is version-tag push plus workflow_dispatch -- not a
+# published-release event, because GITHUB_TOKEN creating a Release will not
+# start a second release workflow.
+
+name: console-package-release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: console-package-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_title: ${{ steps.meta.outputs.release_title }}
+      macos_dmg_asset: ${{ steps.meta.outputs.macos_dmg_asset }}
+      windows_setup_asset: ${{ steps.meta.outputs.windows_setup_asset }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Emit release metadata
+        id: meta
+        run: uv run --python 3.14 --no-project python scripts/wrap_console_package.py --emit-github-output
+
+      - name: Refuse git ref that does not match pyproject version
+        run: uv run --python 3.14 --no-project python scripts/wrap_console_package.py --check-tag "${{ github.ref_name }}"
+
+  build:
+    name: build-${{ matrix.os }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+          - os: windows-2025
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Sync workspace with bundler extra
+        run: uv sync --extra package
+        working-directory: .
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: packages/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: packages/frontend
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
+      - name: Build SPA
+        run: npm run build
+        working-directory: packages/frontend
+
+      - name: Bundle console package
+        run: uv run python scripts/bundle_console_package.py
+
+      - name: Wrap installer
+        run: uv run python scripts/wrap_console_package.py
+
+      - name: Upload installer asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: dist/console-package-installers/*
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download installer assets
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or reattach GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_TITLE: ${{ needs.prepare.outputs.release_title }}
+          MACOS_DMG: release-assets/${{ needs.prepare.outputs.macos_dmg_asset }}
+          WINDOWS_SETUP: release-assets/${{ needs.prepare.outputs.windows_setup_asset }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$MACOS_DMG" "$WINDOWS_SETUP" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$MACOS_DMG" "$WINDOWS_SETUP" \
+              --title "$RELEASE_TITLE" \
+              --generate-notes
+          fi
