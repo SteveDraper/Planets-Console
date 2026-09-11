@@ -35,14 +35,37 @@ def test_version_from_pyproject_is_full_semver_not_short():
     assert version.count(".") >= 2
 
 
+def _pyinstaller_datas_relpath(source: str, dest_dir: str) -> str:
+    """Relative path PyInstaller writes under ``sys._MEIPASS`` for a file datas entry.
+
+    Analysis ``datas`` dest is a directory. Dest equal to the filename nests the file.
+    """
+    name = Path(source).name
+    if dest_dir in (".", "./"):
+        return name
+    return f"{dest_dir.replace('\\', '/').rstrip('/')}/{name}"
+
+
+def test_version_sidecar_lands_at_meipass_filename_not_nested_folder():
+    policy = collect_policy(REPO_ROOT)
+    matches = [(src, dest) for src, dest in policy.datas if Path(src).name == VERSION_SIDECAR_NAME]
+    assert len(matches) == 1
+    source, dest = matches[0]
+    assert Path(source).is_file()
+    assert _pyinstaller_datas_relpath(source, dest) == VERSION_SIDECAR_NAME
+    assert dest == "."
+
+
 def test_collect_policy_ships_spa_analytics_and_version_sidecar():
     policy = collect_policy(REPO_ROOT)
     dests = {dest for _src, dest in policy.datas}
-    assert dests == {"packages/frontend/dist", "assets/analytics", VERSION_SIDECAR_NAME}
+    assert dests == {"packages/frontend/dist", "assets/analytics", "."}
     sources = [Path(src) for src, _dest in policy.datas]
     assert any(src.as_posix().endswith("packages/frontend/dist") for src in sources)
     assert any(src.as_posix().endswith("assets/analytics") for src in sources)
-    sidecar = next(Path(src) for src, dest in policy.datas if dest == VERSION_SIDECAR_NAME)
+    sidecar = next(
+        Path(src) for src, dest in policy.datas if Path(src).name == VERSION_SIDECAR_NAME
+    )
     assert sidecar.is_file()
     assert sidecar.read_text(encoding="utf-8").strip() == version_from_pyproject(REPO_ROOT)
     assert_collect_policy_runtime_only(policy)

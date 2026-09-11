@@ -29,6 +29,9 @@ BUNDLE_NAME = "Planets Console"
 DIST_DIR_RELATIVE = Path("dist") / "console-package"
 WORK_DIR_RELATIVE = Path("build") / "console-package"
 MACOSX_DEPLOYMENT_TARGET = "11"
+# PyInstaller Analysis datas dest is a directory. "." puts the sidecar file at
+# ``sys._MEIPASS / VERSION_SIDECAR_NAME`` (a dest equal to the filename nests it).
+FROZEN_ROOT_DATAS_DEST = "."
 
 # Uvicorn factory / protocol loaders are string-imported. OR-Tools SAT is lazy
 # relative to the process host module graph.
@@ -101,7 +104,7 @@ def collect_policy(repo_root: Path = REPO_ROOT) -> CollectPolicy:
     datas = (
         (str(spa), str(SPA_DIST_RELATIVE).replace("\\", "/")),
         (str(assets), str(ANALYTICS_ASSETS_RELATIVE).replace("\\", "/")),
-        (str(sidecar), VERSION_SIDECAR_NAME),
+        (str(sidecar), FROZEN_ROOT_DATAS_DEST),
     )
     return CollectPolicy(
         entry=entry,

@@ -74,6 +74,17 @@ def test_console_package_version_raises_when_frozen_sidecar_missing(tmp_path, mo
         console_package_version()
 
 
+def test_console_package_version_raises_when_sidecar_path_is_a_directory(tmp_path, monkeypatch):
+    """A dest-as-filename collect layout must not count as a present sidecar file."""
+    nested = tmp_path / VERSION_SIDECAR_NAME
+    nested.mkdir()
+    write_version_sidecar(nested / VERSION_SIDECAR_NAME, "9.8.7")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    with pytest.raises(FileNotFoundError, match="version sidecar"):
+        console_package_version()
+
+
 def test_version_from_pyproject_raises_when_version_missing(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "planets-console"\n',
