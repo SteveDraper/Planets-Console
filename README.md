@@ -1,8 +1,75 @@
 # Planets Console
 
-Analytic console for [planets.nu](https://planets.nu) game state (VGA Planets–style). See the [project overview](.cursor/rules/overview.mdc) and [architecture](.cursor/rules/architecture.mdc) for layout and layering.
+Analytic console for [planets.nu](https://planets.nu) game state (VGA Planets–style).
+
+## Download and install
+
+Use these steps to run **Planets Console** on your computer. You do not need developer tools.
+
+Supported computers: an **Apple silicon** Mac on macOS 11 or later, or **64-bit Windows** 10 or 11. Intel Macs are not supported.
+
+### Download
+
+1. Open the [GitHub Releases](https://github.com/SteveDraper/Planets-Console/releases) page.
+2. Open the latest release. The title looks like **Planets Console 0.1.0**.
+3. Download the file for your computer:
+   - **Mac (Apple silicon):** `Planets-Console-<version>-macos-arm64.dmg`
+   - **Windows (64-bit):** `Planets-Console-<version>-windows-x64-setup.exe`
+
+`<version>` is the version number on that release (for example `0.1.0`).
+
+### Mac
+
+1. Open the `.dmg`. Drag **Planets Console** to **Applications**.
+2. Eject the disk image (the volume is named **Planets Console**).
+3. Open **Planets Console** from **Applications**, not from the disk image.
+
+The first time, macOS may block the app. **Control-click** (or right-click) **Planets Console**, choose **Open**, then **Open** again. If that is not offered, open **System Settings** → **Privacy & Security** and use **Open Anyway**.
+
+### Windows
+
+1. Run the setup file. You do not need administrator rights.
+2. If Windows shows **Windows protected your PC**, click **More info**, then **Run anyway**.
+3. Finish setup. There is no Desktop shortcut; open **Planets Console** from the **Start Menu**.
+
+If **Smart App Control** blocks the setup or the app and there is no **Run anyway** (or similar) way through, this version is not supported on that PC.
+
+### First launch
+
+Open **Planets Console** from Applications (Mac) or the Start Menu (Windows). Wait until your default browser opens an address like `http://127.0.0.1:8000/`. The number after the last colon may be higher than `8000` if that one is already in use. The address is always `127.0.0.1`, never `localhost`.
+
+You will see **Planets Console** in the Dock (Mac) or on the taskbar (Windows), but the app does not show its own window. The browser is the console.
+
+Closing the browser tab or window does **not** quit Planets Console. To quit, use **Quit** from the Dock or **Cmd-Q** (Mac), or **Close** from the taskbar button (Windows).
+
+If Planets Console is already running, clicking it again in the Dock, Start Menu, or taskbar reopens `http://127.0.0.1:<port>/` in the browser.
+
+### Update
+
+To install a newer release, download it and install again in the same place. Do **not** uninstall first. Your data folder is left alone.
+
+### Uninstall and your data
+
+Uninstalling removes the app (drag **Planets Console** out of Applications on a Mac, or remove it from **Settings → Apps** on Windows). It does **not** delete your data folder.
+
+The data folder is:
+
+- **Mac:** `~/Library/Application Support/Planets Console/`
+- **Windows:** `%LOCALAPPDATA%\Planets Console\` (usually `C:\Users\<you>\AppData\Local\Planets Console\`)
+
+Copying that folder to another computer does **not** bring your planets.nu login with it.
+
+### This computer only
+
+Planets Console is available only on this computer. Other devices on your network cannot open it.
+
+### If it does not start
+
+If start fails, a dialog appears on this computer and points at a log file in the data folder (inside a `logs` subfolder). The browser will not open.
 
 ## Developer setup
+
+See the [project overview](.cursor/rules/overview.mdc) and [architecture](.cursor/rules/architecture.mdc) for layout and layering.
 
 ### Prerequisites
 
@@ -130,6 +197,7 @@ make check_frontend_api_no_monolithic_schema   # fails if src/api/schema.ts exis
 
 ### User documentation
 
+- **[Download and install](#download-and-install)** -- Mac and Windows app from GitHub Releases.
 - **[User guide](docs/user-guide.md)** -- full tour of the console UI (header, analytics, tabular and map views, map options, login). Image paths under `docs/images/user-guide/` are placeholders for screenshots.  *Note* - way out of date currently!
 
 ### Design documentation
