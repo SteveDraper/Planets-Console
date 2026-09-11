@@ -193,6 +193,18 @@ make check_frontend_api_no_monolithic_schema   # fails if src/api/schema.ts exis
 
 `make check_frontend_api_slices` dumps the BFF OpenAPI spec, filters per-router slices, and runs `openapi-typescript --check` on each committed `packages/frontend/src/api/schema-<slice>.ts`. `make check_frontend_api_no_monolithic_schema` blocks reintroducing monolithic `schema.ts` (both run in `make ci`).
 
+## Cut a release
+
+From a clean working tree, bump version, open a PR, merge it when prompted, then tag:
+
+```bash
+make release                 # 0.1.0 -> 0.1.1 (revision)
+make release ARGS='--minor'  # 0.1.1 -> 0.2.0
+make release ARGS='--major'  # 0.2.0 -> 1.0.0
+```
+
+Do not create the GitHub Release in the UI. Pushing the tag starts **console-package-release**. See [configuration](docs/configuration.md).
+
 ## Documentation
 
 ### User documentation

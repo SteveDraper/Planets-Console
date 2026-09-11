@@ -192,6 +192,16 @@ That runs `scripts/wrap_console_package.py`. On macOS it builds a UDZO `.dmg` (v
 
 CI workflow [`.github/workflows/console-package-release.yml`](../.github/workflows/console-package-release.yml) runs on tag glob `v*.*.*` and on `workflow_dispatch`; both fail unless the git ref name equals `v` plus root pyproject version. It does **not** use `on: release: published`. Freeze jobs use pinned runners `macos-15` and `windows-2025` (not `*-latest`): SPA build, bundler, wrapper, then `gh release create` (or reattach with `--clobber`) in the same run. Release title is **Planets Console `<version>`**. Uploaded files are unsigned.
 
+Cut a release from a clean tree (do not create the GitHub Release in the UI):
+
+```bash
+make release              # revision bump, e.g. 0.1.0 -> 0.1.1
+make release ARGS='--minor'
+make release ARGS='--major'
+```
+
+That runs `scripts/make_release.py`. It reads root `pyproject.toml`, bumps the version (and About `appVersion.json`), opens branch `release_<major>.<minor>.<revision>` as a PR, waits until you merge it, tags merged `main` with `v<version>`, and pushes the tag. `--major` and `--minor` together are illegal. Default with neither flag is a revision bump.
+
 ## Planets.nu client JavaScript (reference)
 
 The live [planets.nu](https://planets.nu) browser client is not vendored in this repo. Host-aligned tooltip math and map rendering for Stellar Cartography (black holes, ion storms, nebulae, etc.) should be checked against the deployed client bundle when behaviour is unclear.
@@ -222,6 +232,7 @@ The config override system and CLI usage are covered by unit tests under `packag
 - **Install-over:** Bundler collect policy datas/dests and `console_package.spec` must not place the OS console data directory (`Library/Application Support/{display name}` / `%LOCALAPPDATA%\{display name}`) inside the freeze tree (`test_bundle_console_package.py`). That pin is always on. Inno wrapper source `scripts/console_package.iss` must exist; `[Files]` / `[UninstallDelete]` (and related sections) must not mention the console data directory (`test_console_package_install_over.py`).
 - **Bundler collect policy (`scripts/tests/test_bundle_console_package.py`):** datas are SPA dist + `assets/analytics` + version sidecar at PyInstaller dest `.` (file at `sys._MEIPASS / console_package_version.txt`, not a folder of that name); pytest excluded; macOS Info.plist identity and full pyproject version; freeze dests/spec cannot collect the console data directory; freeze sets `MACOSX_DEPLOYMENT_TARGET=11` on Darwin.
 - **Installer wrappers (`scripts/tests/test_wrap_console_package.py`):** Release asset names and title; git ref must equal `v` + pyproject version (`--check-tag` always runs); Mac staging copies the `.app` and an Applications symlink; `hdiutil` is UDZO with volume name **Planets Console**; Inno is per-user Start Menu with no Desktop shortcut and the ADR `AppId`; workflow pins `macos-15` / `windows-2025`, tag glob plus `workflow_dispatch`, and `gh release create` / reattach.
+- **Release cut (`scripts/tests/test_make_release.py`):** revision/minor/major bumps; `--major` and `--minor` together fail; version files are root pyproject plus About `appVersion.json`; branch `release_<version>` and tag `v<version>`; dirty tree and existing tag refused; PR merge is verified before the tag is pushed.
 
 ### CLI (`test_cli.py`)
 

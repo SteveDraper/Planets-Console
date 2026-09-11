@@ -1,4 +1,4 @@
-.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_mcp_adapter test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe bundle_console_package wrap_console_package
+.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_mcp_adapter test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe bundle_console_package wrap_console_package release
 
 # Use workspace venv (Python 3.14) and ensure dev deps (pytest, ruff) are installed.
 # `test` runs lint and unit tests (API fast suite; see `test_api_full` for solver/corpus integration).
@@ -105,4 +105,10 @@ wrap_console_package:
 	uv sync --extra package --extra dev
 	PYTHONPATH=scripts:packages/server \
 		uv run python scripts/wrap_console_package.py
+
+# Bump version, open a release PR, wait for merge, tag and push (starts console-package-release).
+# Extra flags: make release ARGS='--minor'  or  ARGS='--major'
+release:
+	uv sync --extra dev
+	PYTHONPATH=scripts:packages/server uv run python scripts/make_release.py $(ARGS)
 
