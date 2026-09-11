@@ -78,6 +78,26 @@ def test_main_rejects_major_and_minor_together(capsys):
     assert "--minor" in err
 
 
+def test_pr_is_merged_uses_state_and_merged_at_not_merged_boolean(tmp_path):
+    seen: list[list[str]] = []
+
+    def runner(args: list[str], **_kwargs) -> CompletedProcess[str]:
+        seen.append(list(args))
+        return _ok(json.dumps({"state": "MERGED", "mergedAt": "2026-09-11T16:31:58Z"}))
+
+    assert release._pr_is_merged(runner, tmp_path, "https://example.test/pull/1")
+    json_fields = seen[0][seen[0].index("--json") + 1]
+    assert json_fields == release.GH_PR_VIEW_JSON_FIELDS == "state,mergedAt"
+    assert "merged" not in json_fields.split(",")
+
+
+def test_pr_is_merged_false_when_open_and_merged_at_null(tmp_path):
+    def runner(_args: list[str], **_kwargs) -> CompletedProcess[str]:
+        return _ok(json.dumps({"state": "OPEN", "mergedAt": None}))
+
+    assert not release._pr_is_merged(runner, tmp_path, "https://example.test/pull/1")
+
+
 class _MatchingRunner:
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
@@ -100,8 +120,11 @@ def _ok(stdout: str = "", returncode: int = 0) -> CompletedProcess[str]:
 
 
 def _merged_pr_json(*, merged: bool) -> CompletedProcess[str]:
-    state = "MERGED" if merged else "OPEN"
-    return _ok(json.dumps({"merged": merged, "state": state}))
+    if merged:
+        body = {"state": "MERGED", "mergedAt": "2026-09-11T16:31:58Z"}
+    else:
+        body = {"state": "OPEN", "mergedAt": None}
+    return _ok(json.dumps(body))
 
 
 _PYPROJECT_010 = '[project]\nname = "planets-console"\nversion = "0.1.0"\n'
@@ -138,7 +161,12 @@ def test_cut_release_bumps_revision_opens_pr_waits_then_tags(tmp_path):
     def pr_view(_args: list[str]) -> CompletedProcess[str]:
         pr_checks["n"] += 1
         merged = pr_checks["n"] >= 2
-        body = json.dumps({"merged": merged, "state": "MERGED" if merged else "OPEN"})
+        body = json.dumps(
+            {
+                "state": "MERGED" if merged else "OPEN",
+                "mergedAt": "2026-09-11T16:31:58Z" if merged else None,
+            }
+        )
         return _ok(body)
 
     runner.when(_cmd_starts("gh", "pr", "view"), pr_view)

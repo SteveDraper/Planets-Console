@@ -37,6 +37,7 @@ if str(_SERVER_SRC) not in sys.path:
 from server.package_identity import version_from_pyproject  # noqa: E402
 
 APP_VERSION_JSON_RELATIVE = Path("packages") / "frontend" / "src" / "assets" / "appVersion.json"
+GH_PR_VIEW_JSON_FIELDS = "state,mergedAt"
 PYPROJECT_RELATIVE = Path("pyproject.toml")
 _VERSION_LINE = re.compile(r'^(version\s*=\s*")([^"]+)(")', re.MULTILINE)
 
@@ -154,14 +155,14 @@ def _tag_exists(runner: CommandRunner, repo_root: Path, tag: str) -> bool:
 def _pr_is_merged(runner: CommandRunner, repo_root: Path, pr_url: str) -> bool:
     view = _run(
         runner,
-        ["gh", "pr", "view", pr_url, "--json", "merged,state"],
+        ["gh", "pr", "view", pr_url, "--json", GH_PR_VIEW_JSON_FIELDS],
         cwd=repo_root,
     )
     try:
         payload = json.loads(view.stdout)
     except json.JSONDecodeError as exc:
         raise ReleaseError(f"gh pr view did not return JSON: {view.stdout!r}") from exc
-    return bool(payload.get("merged")) or payload.get("state") == "MERGED"
+    return payload.get("state") == "MERGED" or payload.get("mergedAt") is not None
 
 
 def _wait_for_merged_pr(
