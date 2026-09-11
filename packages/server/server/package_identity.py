@@ -25,7 +25,7 @@ APP_USER_MODEL_ID = "SteveDraper.PlanetsConsole"
 # Inno Setup AppId (per-user). Do not change after first ship.
 INNO_APP_ID = "{933C1FA0-3D30-4611-AE34-2F7C14C5253B}"
 
-# Dest name under the frozen resource root (``sys._MEIPASS``).
+# Filename under the frozen resource root (``sys._MEIPASS``).
 VERSION_SIDECAR_NAME = "console_package_version.txt"
 
 _ROOT_PROJECT_NAME = "planets-console"
