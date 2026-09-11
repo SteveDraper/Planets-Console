@@ -12,6 +12,7 @@ from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecu
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from api.compute.backend_runtime import effective_compute_backend
 from api.compute.profile import ComputeBackend, ComputeStepSpec
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
@@ -159,6 +160,7 @@ class ComputeWorkerPool:
         self._on_item_finished: Callable[[PoolWorkItem], None] | None = None
         self._interpreter_executor: InterpreterPoolExecutor | None = None
         self._process_executor: ProcessPoolExecutor | None = None
+        self._logged_backend_remaps: set[tuple[str, str]] = set()
         # Futures retained from executor.submit until done-callback finishes so
         # diagnostics can distinguish pending/running/done orphaned in-flight rows.
         # Dedicated lock: never nest with the diagnostics controller lock. Done
@@ -435,15 +437,21 @@ class ComputeWorkerPool:
         process backends submit to their executors and complete via done callbacks
         so a stuck remote future cannot pin a pool worker thread (and stall the
         rest of the queue under freeze single-step).
+
+        A frozen process remaps ``interpreter`` to ``thread`` before dispatch:
+        PyInstaller subinterpreters cannot import application modules.
         """
         orchestrator = self._lookup_orchestrator(item.orchestrator_id)
         if orchestrator is None:
             self._notify_item_finished(item)
             return
-        if item.backend == "thread":
+        backend = effective_compute_backend(item.backend)
+        if backend != item.backend:
+            self._log_backend_remap(item.backend, backend)
+        if backend == "thread":
             try:
                 with self._condition:
-                    self._record_backend_execution_locked(item.backend)
+                    self._record_backend_execution_locked(backend)
                 self._complete_from_callable(
                     item.orchestrator_id,
                     item.scope,
@@ -454,7 +462,7 @@ class ComputeWorkerPool:
             finally:
                 self._notify_item_finished(item)
             return
-        if item.backend in {"interpreter", "process"}:
+        if backend in {"interpreter", "process"}:
             if item.job_wire is None or item.run_step is None:
                 self._notify_item_finished(item)
                 raise RuntimeError(
@@ -462,8 +470,8 @@ class ComputeWorkerPool:
                     f"requires a pre-built job wire and run_step"
                 )
             with self._condition:
-                self._record_backend_execution_locked(item.backend)
-                if item.backend == "interpreter":
+                self._record_backend_execution_locked(backend)
+                if backend == "interpreter":
                     executor = self._interpreter_executor_locked()
                 else:
                     executor = self._process_executor_locked()
@@ -477,7 +485,24 @@ class ComputeWorkerPool:
             )
             return
         self._notify_item_finished(item)
-        raise RuntimeError(f"unsupported pool backend {item.backend!r}")
+        raise RuntimeError(f"unsupported pool backend {backend!r}")
+
+    def _log_backend_remap(
+        self,
+        declared: ComputeBackend,
+        effective: ComputeBackend,
+    ) -> None:
+        key = (declared, effective)
+        with self._condition:
+            if key in self._logged_backend_remaps:
+                return
+            self._logged_backend_remaps.add(key)
+        logger.info(
+            "Compute backend %r remapped to %r in a frozen process; "
+            "InterpreterPoolExecutor cannot import application modules under PyInstaller",
+            declared,
+            effective,
+        )
 
     def _register_remote_future(self, item: PoolWorkItem, future: Future[object]) -> None:
         record = remote_future_record(

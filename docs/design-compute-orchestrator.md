@@ -282,7 +282,7 @@ Declared per analytic on `AnalyticComputeProfile` (`ComputeStepSpec` per `step_k
 |---------|-----|-------------------|
 | **inline** | Cheap, dependency-free work on orchestrator thread | cache probe, materialize-from-persistence, JSONPath projection |
 | **thread** | In-process; shared memory for session state | scores tier steps (CP-SAT releases GIL) |
-| **interpreter** | `InterpreterPoolExecutor` (Python 3.14); true multi-core without process overhead | fleet materialization leg |
+| **interpreter** | `InterpreterPoolExecutor` (Python 3.14); true multi-core without process overhead | fleet observation leg. **Packaged (`sys.frozen`) runtime remaps this to `thread`**: PyInstaller subinterpreters do not get the frozen importer, so the initializer cannot import `api` (`NotShareableError` / `BrokenInterpreterPool`; [#451](https://github.com/SteveDraper/Planets-Console/issues/451)). Fleet observation is Python ledger/JSON bookkeeping, not SAT, so the GIL trade is acceptable. |
 | **process** | `ProcessPoolExecutor`; strongest isolation | prior-mining extraction (existing) |
 
 Registry built at import; unknown `step_kind` or backend → `RuntimeError` at startup.
