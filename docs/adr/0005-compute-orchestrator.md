@@ -33,6 +33,10 @@ Supersedes the phase 3 "BFF/MCP uniform API" wording in locked choice 12. Phase 
 
 Supersedes the earlier “per-stream orchestrator binding” parity wording. The bridge of one orchestrator per `AnalyticQueryContext` (plus process-wide scope lease [#222](https://github.com/SteveDraper/Planets-Console/issues/222)) is retired in favor of the singleton above. Follow-ons: process/shell-scoped export services ([#239](https://github.com/SteveDraper/Planets-Console/issues/239)); origin-set prune-on-close ([#240](https://github.com/SteveDraper/Planets-Console/issues/240)).
 
+## Amendment ([#451](https://github.com/SteveDraper/Planets-Console/issues/451))
+
+Declared `interpreter` steps are unchanged. A frozen console-package process remaps them to `thread` at pool dispatch: PyInstaller subinterpreters do not receive the frozen importer, so `InterpreterPoolExecutor` cannot reconstruct application callables (`NotShareableError` / `BrokenInterpreterPool`).
+
 ## Consequences
 
 - New `packages/api/api/compute/` package; extend `TurnAnalyticRegistration` with scope profile, compute profile, persistence policy, wire builders.

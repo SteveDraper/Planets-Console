@@ -284,7 +284,7 @@ ENSURE_DEPENDENCIES = (
 )
 ```
 
-Same-turn **scores** is not an ENSURE edge on fleet observation. Finalization waits on scores via `PersistDeferredError` (orchestrator `waiting_deps` + `force_fresh` on scores `tier_solve`). Compute profile: `observation_leg` (interpreter, non-final host ledger + continue; no ship-observation ingest) then `finalization_leg` (inline, scores refine then observation ingest + final persist).
+Same-turn **scores** is not an ENSURE edge on fleet observation. Finalization waits on scores via `PersistDeferredError` (orchestrator `waiting_deps` + `force_fresh` on scores `tier_solve`). Compute profile: `observation_leg` (declared interpreter, remapped to thread in a frozen console package -- [#451](https://github.com/SteveDraper/Planets-Console/issues/451); non-final host ledger + continue; no ship-observation ingest) then `finalization_leg` (inline, scores refine then observation ingest + final persist).
 
 Wire **scores** provider edge for prior-turn belief:
 
