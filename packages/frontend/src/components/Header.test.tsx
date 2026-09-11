@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Header } from './Header'
+import { getAppVersionDisplayString } from '../lib/appVersion'
 import { LAST_LOGIN_USERNAME_STORAGE_KEY } from '../lib/rememberedLoginUsername'
 import { useDisplayPreferencesStore } from '../stores/displayPreferences'
 import { useSessionStore } from '../stores/session'
@@ -158,7 +159,7 @@ describe('Header', () => {
     expect(screen.getByRole('dialog', { name: /^about$/i })).toBeInTheDocument()
     expect(screen.getByText('Planets Console')).toBeInTheDocument()
     expect(screen.getByText('Steve Draper')).toBeInTheDocument()
-    expect(screen.getByText('0.1.0')).toBeInTheDocument()
+    expect(screen.getByText(getAppVersionDisplayString())).toBeInTheDocument()
   })
 
   it('renders viewpoint as a dropdown and reports changes', async () => {
