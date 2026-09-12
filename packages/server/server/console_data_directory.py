@@ -14,11 +14,14 @@ from pathlib import Path
 
 from server.package_identity import CONSOLE_PACKAGE_DISPLAY_NAME
 
+OPERATOR_CONFIG_FILENAME = ".config.yaml"
+
 __all__ = [
     "CONSOLE_PACKAGE_DISPLAY_NAME",
     "ConsoleDataDirectoryError",
     "console_data_directory",
     "packaged_file_backend_override_specs",
+    "packaged_operator_config_path",
 ]
 
 
@@ -33,8 +36,9 @@ def console_data_directory() -> Path:
     Windows: ``%LOCALAPPDATA%\\Planets Console\\``
 
     Packaged ``api.storage_root`` and support logs both point here. Independent
-    of install location so **install-over** does not wipe games or account API
-    keys. v1 **console package** is macOS and Windows only.
+    of install location so **install-over** does not wipe games, account API
+    keys, or an optional operator ``.config.yaml``. v1 **console package** is
+    macOS and Windows only.
     """
     system = platform.system()
     if system == "Darwin":
@@ -49,6 +53,15 @@ def console_data_directory() -> Path:
     raise ConsoleDataDirectoryError(
         f"Unsupported platform for the console data directory: {system!r}"
     )
+
+
+def packaged_operator_config_path() -> Path:
+    """Optional amalgamated ``.config.yaml`` under the console data directory.
+
+    Packaged launch loads this file when it exists. Install-over does not
+    delete it. The installer does not create it.
+    """
+    return console_data_directory() / OPERATOR_CONFIG_FILENAME
 
 
 def packaged_file_backend_override_specs() -> tuple[str, ...]:

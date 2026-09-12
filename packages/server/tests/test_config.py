@@ -190,6 +190,24 @@ def test_load_config_full_replace_last_wins():
     assert root.server.host == "0.0.0.0"
 
 
+def test_load_config_remap_interpreter_backend_to_thread_bool():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(
+        override_specs=["api.remap_interpreter_backend_to_thread=true"],
+        default_config_path=base,
+    )
+    assert root.api.remap_interpreter_backend_to_thread is True
+
+
+def test_load_config_remap_interpreter_backend_to_thread_string_raises():
+    base = FIXTURES_DIR / "base.yaml"
+    with pytest.raises(TypeError, match="remap_interpreter_backend_to_thread"):
+        load_config(
+            override_specs=["api.remap_interpreter_backend_to_thread=notabool"],
+            default_config_path=base,
+        )
+
+
 def test_load_config_compute_diagnostics_start_frozen_bool():
     base = FIXTURES_DIR / "base.yaml"
     root = load_config(

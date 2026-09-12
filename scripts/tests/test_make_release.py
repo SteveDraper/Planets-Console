@@ -182,6 +182,13 @@ def test_cut_release_bumps_revision_opens_pr_waits_then_tags(tmp_path):
     assert json.loads(app_path.read_text(encoding="utf-8"))["version"] == "0.1.1"
     commands = [" ".join(c) for c in runner.calls]
     assert "git checkout -b release_0.1.1" in commands
+    uv_lock_index = next(i for i, cmd in enumerate(runner.calls) if cmd[:2] == ["uv", "lock"])
+    add_index = next(i for i, cmd in enumerate(runner.calls) if cmd[:2] == ["git", "add"])
+    assert uv_lock_index < add_index
+    assert runner.calls[add_index][2:] == [
+        path.as_posix() for path in release.RELEASE_VERSION_PATHS
+    ]
+    assert "uv.lock" in runner.calls[add_index]
     assert any(c.startswith("gh pr create") for c in commands)
     assert "git tag v0.1.1" in commands
     assert "git push origin v0.1.1" in commands
