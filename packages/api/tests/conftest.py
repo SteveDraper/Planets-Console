@@ -84,23 +84,33 @@ def _isolate_compute_diagnostics_state(request: pytest.FixtureRequest):
     # Force the flag off at setup too -- a prior diagnostics process/crash can leave
     # compute_diagnostics=True, which wires freeze gates into unrelated stream tests.
     cfg = get_config()
-    if cfg.compute_diagnostics or cfg.compute_diagnostics_start_frozen:
+    if (
+        cfg.compute_diagnostics
+        or cfg.compute_diagnostics_start_frozen
+        or cfg.remap_interpreter_backend_to_thread
+    ):
         set_config(
             replace(
                 cfg,
                 compute_diagnostics=False,
                 compute_diagnostics_start_frozen=False,
+                remap_interpreter_backend_to_thread=False,
             )
         )
     yield
     reset_compute_diagnostics_for_tests()
     cfg = get_config()
-    if cfg.compute_diagnostics or cfg.compute_diagnostics_start_frozen:
+    if (
+        cfg.compute_diagnostics
+        or cfg.compute_diagnostics_start_frozen
+        or cfg.remap_interpreter_backend_to_thread
+    ):
         set_config(
             replace(
                 cfg,
                 compute_diagnostics=False,
                 compute_diagnostics_start_frozen=False,
+                remap_interpreter_backend_to_thread=False,
             )
         )
 

@@ -12,7 +12,7 @@ from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecu
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from api.compute.backend_runtime import effective_compute_backend
+from api.compute.backend_runtime import effective_compute_backend, process_is_frozen
 from api.compute.profile import ComputeBackend, ComputeStepSpec
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
@@ -438,8 +438,9 @@ class ComputeWorkerPool:
         so a stuck remote future cannot pin a pool worker thread (and stall the
         rest of the queue under freeze single-step).
 
-        A frozen process remaps ``interpreter`` to ``thread`` before dispatch:
-        PyInstaller subinterpreters cannot import application modules.
+        Frozen processes and ``api.remap_interpreter_backend_to_thread`` remap
+        ``interpreter`` to ``thread`` before dispatch: PyInstaller
+        subinterpreters cannot import application modules.
         """
         orchestrator = self._lookup_orchestrator(item.orchestrator_id)
         if orchestrator is None:
@@ -497,12 +498,14 @@ class ComputeWorkerPool:
             if key in self._logged_backend_remaps:
                 return
             self._logged_backend_remaps.add(key)
-        logger.info(
-            "Compute backend %r remapped to %r in a frozen process; "
-            "InterpreterPoolExecutor cannot import application modules under PyInstaller",
-            declared,
-            effective,
-        )
+        if process_is_frozen():
+            reason = (
+                "frozen process; InterpreterPoolExecutor cannot import "
+                "application modules under PyInstaller"
+            )
+        else:
+            reason = "api.remap_interpreter_backend_to_thread"
+        logger.info("Compute backend %r remapped to %r (%s)", declared, effective, reason)
 
     def _register_remote_future(self, item: PoolWorkItem, future: Future[object]) -> None:
         record = remote_future_record(

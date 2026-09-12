@@ -8,7 +8,7 @@ The backend process (API + BFF) uses an **amalgamated config** with sub-configs 
 - **Search order:** The process looks for `.config.yaml` in the current working directory, then in each parent directory (up to 10 levels). The first file found is used as the base config.
 - **If none is found:** The base config is empty; defaults come from the `server`, `api`, and `bff` config dataclasses (see below).
 
-The repository includes a default `.config.yaml` at the project root so that running the server from the repo uses it unless overrides are given. Packaged launch (`serve --packaged` / `load_packaged_config()`) skips this search.
+The repository includes a default `.config.yaml` at the project root so that running the server from the repo uses it unless overrides are given. Packaged launch (`serve --packaged` / `load_packaged_config()`) skips this **cwd** search. It still loads an optional `.config.yaml` from the **console data directory** when that file exists (see [Packaged console data directory](#packaged-console-data-directory)).
 
 ## Config structure
 
@@ -35,6 +35,10 @@ The amalgamated config has three top-level keys:
 | `storage_root` | string | `./.data` | Root directory for the file backend. Ignored when `storage_backend` is `ephemeral`. Created on first write if missing. Gitignored in the repo. **Console package** launch does not use this default; see [Packaged console data directory](#packaged-console-data-directory). |
 | `storage_asset_path` | string or null | null | **Ephemeral only:** path to a JSON file used to initialise the in-memory store. If null, the store starts empty. If set, the path must exist and be a file (otherwise startup fails). |
 | `include_dummy_data` | bool | false | When true, seed sample game data (game 628580, turn 111) on startup **only for paths that are not already present** (idempotent skip-if-present). For development and testing only. |
+| `compute_diagnostics` | bool | false | Enable the Diagnostics **Compute** tab (orchestrator snapshot, concurrency timeline, freeze/single-step). Off by default, including in the console package. |
+| `compute_diagnostics_start_frozen` | bool | false | When compute diagnostics are on, arm freeze mode on first shell/game contact. |
+| `compute_diagnostics_timeline_capacity` | integer | `5000` | Ring-buffer capacity for the compute concurrency timeline (drop oldest on wrap). Must be `>= 1`. |
+| `remap_interpreter_backend_to_thread` | bool | false | When true, run declared `interpreter` compute steps (fleet observation) on the thread pool, matching the PyInstaller frozen remap. A frozen process remaps regardless. Use in unpackaged/dev to reproduce packaged GIL behaviour. |
 | `credentials_obfuscation_secret` | string or null | null | Optional secret mixed into HKDF when wrapping **account API keys** at rest. When null, derivation uses the OS native machine id only. See [ADR 0007](adr/0007-account-api-key-and-silent-login.md) and [design-account-api-key-and-silent-login.md](design-account-api-key-and-silent-login.md). |
 | `homeworld_locator` | object | see below | Server-side **homeworld locator config** (YAML, not SPA UI). Nested fields below. |
 | `homeworld_locator.min_baseline_clans` | integer | `10000` | Floor clan count for **homeworld baseline profile** matching (below default `homeworldclans`, above casual colonies). |
@@ -80,7 +84,7 @@ bff:
 
 ## Command-line overrides
 
-The server accepts one or more **`--config`** (or **`-c`**) options. Each value is an override spec. Specs are applied in order after loading the base config (from `.config.yaml` or from a full replacement; see below). **`--packaged`** skips `.config.yaml` discovery and loads via `load_packaged_config()`; extra `--config` specs still apply after the packaged defaults (later wins). `--config` alone is not packaged launch.
+The server accepts one or more **`--config`** (or **`-c`**) options. Each value is an override spec. Specs are applied in order after loading the base config (from `.config.yaml` or from a full replacement; see below). **`--packaged`** skips cwd `.config.yaml` discovery and loads via `load_packaged_config()` (optional console-data-directory `.config.yaml`, then packaged storage specs); extra `--config` specs still apply after those (later wins). `--config` alone is not packaged launch.
 
 ### Syntax
 
@@ -150,12 +154,22 @@ uv run serve -c api.storage_asset_path=/data/store.json -c bff=@bff.yaml
 
 - Config is loaded at server startup in the CLI (before uvicorn runs). The amalgamated config is built; then `server` host/port are used for the uvicorn bind, and `api` and `bff` sub-configs are passed into their layers via `set_config()`.
 - The CLI uses `server.host` and `server.port` for `uvicorn.run(host=..., port=...)`, and passes `timeout_graceful_shutdown=5` so SIGTERM does not wait forever on NDJSON/MCP streams. That cap applies to every `serve` process, including deploy (`scripts/run_deploy.sh` execs `uv run serve`). The Core API uses `api` config for storage (e.g. `get_storage()` reads `storage_backend`, `storage_root`, and `storage_asset_path`). The BFF uses `bff` config (e.g. CORS middleware uses `cors_origins`).
-- Repo `.config.yaml` uses `file` + `storage_root: ./.data` for local dev. Unit tests and CI fixtures set `storage_backend: ephemeral` explicitly. The **console package** does not load that file; see below.
+- Repo `.config.yaml` uses `file` + `storage_root: ./.data` for local dev. Unit tests and CI fixtures set `storage_backend: ephemeral` explicitly. The **console package** does not load the repo file; it may load `.config.yaml` from the console data directory (see below).
 - Implementation lives in: `packages/server/server/config.py` (loading, `load_packaged_config`, override parsing, and `ServerConfig`), `packages/api/api/config.py` (API sub-config), `packages/bff/bff/config.py` (BFF sub-config), `packages/server/server/console_data_directory.py` (OS console data directory Path helper), `packages/server/server/process_host/` (packaged **process host**), `scripts/bundle_console_package.py` (**bundler** collect policy).
 
 ## Packaged console data directory
 
-A **console package** process points the **file backend** `storage_root` (and support logs) at the OS per-user **console data directory**, not `./.data` and not a next-to-exe store. Paths are expanded in process (`~` / `%LOCALAPPDATA%`); they are not frozen into YAML at CI time. There is no user-facing config file in this directory in v1. The **installer wrapper** does not write or patch config.
+A **console package** process points the **file backend** `storage_root` (and support logs) at the OS per-user **console data directory**, not `./.data` and not a next-to-exe store. Paths are expanded in process (`~` / `%LOCALAPPDATA%`); they are not frozen into YAML at CI time. The **installer wrapper** does not write or patch config. Install-over and uninstall must not delete this directory.
+
+Optional operator config: if `{console data directory}/.config.yaml` exists, packaged launch loads it as the amalgamated base (same shape as the repo file), then applies packaged `api.storage_backend=file` and `api.storage_root=<data directory>` (those two always win over the file), then any extra `--config` specs. That is how to turn on **compute diagnostics** or **interpreter-to-thread remap** on an installed app without rebuilding; the file survives install-over. Example:
+
+```yaml
+api:
+  compute_diagnostics: true
+  remap_interpreter_backend_to_thread: true
+```
+
+macOS path: `~/Library/Application Support/Planets Console/.config.yaml`. Windows: `%LOCALAPPDATA%\Planets Console\.config.yaml`. Restart the app after creating or editing the file. Do not put this YAML inside the `.app` / install tree -- that is replaced on install-over and is not read.
 
 | OS | Console data directory |
 |----|------------------------|
@@ -164,7 +178,7 @@ A **console package** process points the **file backend** `storage_root` (and su
 
 Repo `.config.yaml` and `ApiConfig.storage_root` stay `./.data` for clone / `run_dev` / `run_deploy`. The code default does not change.
 
-Packaged launch uses one loader: `load_packaged_config()` (CLI: `serve --packaged`). That call sets `api.storage_backend=file` and `api.storage_root` to the console data directory, and does not cwd-walk `.config.yaml`. Extra `--config` specs may still apply after the packaged defaults (later wins). `console_data_directory()` is the Path helper for logs and lock files; it does not load config. The **process host** (`python -m server.process_host`, and the PyInstaller freeze script `process_host_entry.py`) invokes this loader, forces bind `127.0.0.1`, tries port 8000 then the next free port, **listen-then-open**s `http://127.0.0.1:<port>/` after `GET /health`, and writes support logs plus a single-instance lock under this directory. Install-over and uninstall must not delete this directory.
+Packaged launch uses one loader: `load_packaged_config()` (CLI: `serve --packaged`). That call sets `api.storage_backend=file` and `api.storage_root` to the console data directory, does not cwd-walk `.config.yaml`, and loads `{console data directory}/.config.yaml` when present. Extra `--config` specs may still apply after the packaged defaults (later wins). `console_data_directory()` is the Path helper for logs, lock files, and that operator YAML; it does not by itself load config. The **process host** (`python -m server.process_host`, and the PyInstaller freeze script `process_host_entry.py`) invokes this loader, forces bind `127.0.0.1`, tries port 8000 then the next free port, **listen-then-open**s `http://127.0.0.1:<port>/` after `GET /health`, and writes support logs plus a single-instance lock under this directory. Install-over and uninstall must not delete this directory.
 
 ## Process host and bundler
 
@@ -224,7 +238,7 @@ The config override system and CLI usage are covered by unit tests under `packag
 - **Literal parsing (`_parse_literal`):** Boolean (`true`/`false`/`yes`/`no`); integer and float; string (including paths).
 - **Override application (`_apply_override`):** Leaf literal updates a value; leaf override on a nested key raises `ValueError`; full-replace key `@` raises; substructure from file loads YAML and merges.
 - **Load config (`load_config`):** With `default_config_path` to a fixture YAML, returns `RootConfig` with expected `server`, `api`, and `bff` values; leaf overrides (`server.port=9000`, `api.storage_asset_path=...`) apply correctly; full replace (`@file`) uses the given file; substructure override (`bff=@file`) merges the file into that section; with no config file (and `_find_default_config` returning `None`), uses internal defaults; later overrides win when keys repeat; full-replace "last wins" when multiple `@file` specs are given.
-- **Packaged load (`load_packaged_config`):** File backend at the console data directory; ignores cwd `.config.yaml` (including `include_dummy_data`); extra override specs apply after packaged defaults; `ApiConfig().storage_root` remains `./.data`. Default `load_config` / `serve` still discover YAML.
+- **Packaged load (`load_packaged_config`):** File backend at the console data directory; ignores cwd `.config.yaml` (including `include_dummy_data`); loads `{console data directory}/.config.yaml` when present (compute diagnostics / remap flags); packaged storage specs still pin `storage_root` after that file; extra override specs apply after packaged defaults; `ApiConfig().storage_root` remains `./.data`. Default `load_config` / `serve` still discover YAML.
 - **Console data directory (`test_console_data_directory.py`):** macOS expands `Path.home()`; Windows expands `LOCALAPPDATA`; unsupported OS and missing `LOCALAPPDATA` raise; the Path helper ignores cwd `.config.yaml` / `./.data`; packaged override specs set `api.storage_backend=file` and `api.storage_root`.
 - **Process host (`test_process_host_*.py`):** loopback URLs never use `localhost`; port scan skips an occupied preferred port; `GET /health` wait then `webbrowser.open` (no fixed sleep when health is already 200); per-user lock file; frozen `FRONTEND_DIST` from `sys._MEIPASS`; OS Quit sets uvicorn `should_exit`.
 - **Launch contract (`test_process_host_launch.py`):** primary start waits for `GET /health` before opening `http://127.0.0.1:<port>/`; health timeout never opens the SPA and names the support log; packaged `storage_root` is the console data directory, not cwd `./.data`; `main()` shows the start-failure dialog and exits 1 (macOS osascript / Windows `MessageBoxW` contracts); missing SPA still writes `logs/process-host.log` under the data directory.

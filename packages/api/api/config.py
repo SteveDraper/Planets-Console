@@ -74,6 +74,14 @@ class ApiConfig:
     compute_diagnostics_timeline_capacity: int = 5000
     """Ring-buffer capacity for the compute concurrency timeline (drop oldest on wrap)."""
 
+    remap_interpreter_backend_to_thread: bool = False
+    """When true, run declared ``interpreter`` compute steps on the thread pool.
+
+    Matches the PyInstaller frozen remap (subinterpreters cannot import ``api``).
+    A frozen process remaps regardless of this flag. Use in unpackaged/dev to
+    reproduce packaged GIL behaviour.
+    """
+
     credentials_obfuscation_secret: str | None = None
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
 

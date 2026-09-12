@@ -93,6 +93,61 @@ def test_load_packaged_config_ignores_cwd_config_yaml(tmp_path, monkeypatch):
     assert ApiConfig().storage_root == "./.data"
 
 
+def test_load_packaged_config_reads_operator_yaml_from_data_directory(tmp_path):
+    data_dir = tmp_path / "Library" / "Application Support" / "Planets Console"
+    data_dir.mkdir(parents=True)
+    (data_dir / ".config.yaml").write_text(
+        "api:\n  compute_diagnostics: true\n  remap_interpreter_backend_to_thread: true\n",
+        encoding="utf-8",
+    )
+    with patch(
+        "server.console_data_directory.console_data_directory",
+        return_value=data_dir,
+    ):
+        root = load_packaged_config()
+    assert root.api.compute_diagnostics is True
+    assert root.api.remap_interpreter_backend_to_thread is True
+    assert root.api.storage_backend == "file"
+    assert root.api.storage_root == str(data_dir)
+
+
+def test_load_packaged_config_operator_yaml_cannot_override_storage_root(tmp_path):
+    data_dir = tmp_path / "Library" / "Application Support" / "Planets Console"
+    data_dir.mkdir(parents=True)
+    (data_dir / ".config.yaml").write_text(
+        "api:\n  storage_root: /tmp/elsewhere\n  include_dummy_data: true\n",
+        encoding="utf-8",
+    )
+    with patch(
+        "server.console_data_directory.console_data_directory",
+        return_value=data_dir,
+    ):
+        root = load_packaged_config()
+    assert root.api.storage_root == str(data_dir)
+    assert root.api.include_dummy_data is True
+
+
+def test_load_packaged_config_prefers_data_dir_yaml_over_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".config.yaml").write_text(
+        "api:\n  include_dummy_data: true\n  compute_diagnostics: false\n",
+        encoding="utf-8",
+    )
+    data_dir = tmp_path / "Library" / "Application Support" / "Planets Console"
+    data_dir.mkdir(parents=True)
+    (data_dir / ".config.yaml").write_text(
+        "api:\n  compute_diagnostics: true\n",
+        encoding="utf-8",
+    )
+    with patch(
+        "server.console_data_directory.console_data_directory",
+        return_value=data_dir,
+    ):
+        root = load_packaged_config()
+    assert root.api.compute_diagnostics is True
+    assert root.api.include_dummy_data is False
+
+
 def test_load_packaged_config_extra_overrides_apply_after_packaged_specs(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".config.yaml").write_text(

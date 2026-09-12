@@ -379,7 +379,9 @@ def test_pool_dispatches_interpreter_backend(sample_turn):
 
 def test_effective_compute_backend_remaps_interpreter_when_frozen(monkeypatch):
     from api.compute.backend_runtime import effective_compute_backend
+    from api.config import ApiConfig, set_config
 
+    set_config(ApiConfig(storage_backend="ephemeral", remap_interpreter_backend_to_thread=False))
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
 
     assert effective_compute_backend("interpreter") == "thread"
@@ -390,10 +392,23 @@ def test_effective_compute_backend_remaps_interpreter_when_frozen(monkeypatch):
 
 def test_effective_compute_backend_keeps_interpreter_when_not_frozen(monkeypatch):
     from api.compute.backend_runtime import effective_compute_backend
+    from api.config import ApiConfig, set_config
 
+    set_config(ApiConfig(storage_backend="ephemeral", remap_interpreter_backend_to_thread=False))
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
 
     assert effective_compute_backend("interpreter") == "interpreter"
+
+
+def test_effective_compute_backend_remaps_interpreter_when_config_flag_set(monkeypatch):
+    from api.compute.backend_runtime import effective_compute_backend
+    from api.config import ApiConfig, set_config
+
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
+    set_config(ApiConfig(storage_backend="ephemeral", remap_interpreter_backend_to_thread=True))
+
+    assert effective_compute_backend("interpreter") == "thread"
+    assert effective_compute_backend("thread") == "thread"
 
 
 def test_pool_remaps_interpreter_backend_to_thread_when_frozen(sample_turn, monkeypatch):
@@ -401,6 +416,49 @@ def test_pool_remaps_interpreter_backend_to_thread_when_frozen(sample_turn, monk
 
     def _forbidden_interpreter_pool(*_args, **_kwargs):
         raise AssertionError("InterpreterPoolExecutor must not start in a frozen process")
+
+    monkeypatch.setattr(
+        "api.compute.pools.InterpreterPoolExecutor",
+        _forbidden_interpreter_pool,
+    )
+    compute_registry = build_compute_registry((_interpreter_backend_registration(),))
+    ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+    pool = ComputeWorkerPool(worker_count=1)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
+    scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
+    scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn=scope.turn,
+        player_id=scope.player_id,
+    )
+
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if handle.state == "complete":
+            break
+        time.sleep(0.01)
+
+    pool.shutdown()
+    assert handle.state == "complete", handle.error
+    assert handle.result_wire == {"result": _FLEET_ANALYTIC_ID}
+    assert pool.metrics.thread_executions == 1
+    assert pool.metrics.interpreter_executions == 0
+
+
+def test_pool_remaps_interpreter_backend_to_thread_when_config_flag_set(sample_turn, monkeypatch):
+    from api.config import ApiConfig, set_config
+
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
+    set_config(ApiConfig(storage_backend="ephemeral", remap_interpreter_backend_to_thread=True))
+
+    def _forbidden_interpreter_pool(*_args, **_kwargs):
+        raise AssertionError(
+            "InterpreterPoolExecutor must not start when remap_interpreter_backend_to_thread is set"
+        )
 
     monkeypatch.setattr(
         "api.compute.pools.InterpreterPoolExecutor",

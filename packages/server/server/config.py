@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,12 @@ from api.config import ApiConfig, HomeworldLocatorConfig
 from bff.config import BffConfig
 from omegaconf import OmegaConf
 
-from server.console_data_directory import packaged_file_backend_override_specs
+from server.console_data_directory import (
+    packaged_file_backend_override_specs,
+    packaged_operator_config_path,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_FILENAME = ".config.yaml"
 
@@ -101,6 +107,14 @@ def _apply_override(conf: Any, key: str, value: str | tuple[str, str]) -> None:
                 "structure (use key=@file to replace)"
             )
         OmegaConf.update(conf, key, _parse_literal(value), merge=False)
+
+
+def _require_api_bool(api_dict: dict[str, Any], key: str, default: bool) -> bool:
+    """Return a boolean ``api.<key>``; raise TypeError on a non-bool value."""
+    raw = api_dict.get(key, default)
+    if not isinstance(raw, bool):
+        raise TypeError(f"api.{key} must be a boolean, got {type(raw).__name__}: {raw!r}")
+    return raw
 
 
 def _parse_api_storage_root(raw: object) -> str:
@@ -217,7 +231,8 @@ def load_config(
         instead of searching for .config.yaml.
     discover_default: when True (clone / ``run_dev`` / ``run_deploy``), cwd-walk
         for ``.config.yaml`` if no explicit base file is given. Packaged launch
-        uses ``load_packaged_config``, which passes False here.
+        uses ``load_packaged_config``, which passes False here and instead
+        loads optional ``.config.yaml`` from the console data directory.
     """
     override_specs = override_specs or []
     # Resolve full-file replacements first (last @file wins)
@@ -267,27 +282,22 @@ def load_config(
         host=str(server_dict.get("host", ServerConfig().host)),
         port=int(server_dict.get("port", ServerConfig().port)),
     )
-    include_dummy = api_dict.get("include_dummy_data", ApiConfig().include_dummy_data)
-    if not isinstance(include_dummy, bool):
-        raise TypeError(
-            f"api.include_dummy_data must be a boolean, got "
-            f"{type(include_dummy).__name__}: {include_dummy!r}"
-        )
-    raw_compute_diag = api_dict.get("compute_diagnostics", ApiConfig().compute_diagnostics)
-    if not isinstance(raw_compute_diag, bool):
-        raise TypeError(
-            f"api.compute_diagnostics must be a boolean, got "
-            f"{type(raw_compute_diag).__name__}: {raw_compute_diag!r}"
-        )
-    raw_start_frozen = api_dict.get(
+    include_dummy = _require_api_bool(
+        api_dict, "include_dummy_data", ApiConfig().include_dummy_data
+    )
+    raw_compute_diag = _require_api_bool(
+        api_dict, "compute_diagnostics", ApiConfig().compute_diagnostics
+    )
+    raw_start_frozen = _require_api_bool(
+        api_dict,
         "compute_diagnostics_start_frozen",
         ApiConfig().compute_diagnostics_start_frozen,
     )
-    if not isinstance(raw_start_frozen, bool):
-        raise TypeError(
-            f"api.compute_diagnostics_start_frozen must be a boolean, got "
-            f"{type(raw_start_frozen).__name__}: {raw_start_frozen!r}"
-        )
+    raw_remap_interpreter = _require_api_bool(
+        api_dict,
+        "remap_interpreter_backend_to_thread",
+        ApiConfig().remap_interpreter_backend_to_thread,
+    )
     raw_timeline_capacity = api_dict.get(
         "compute_diagnostics_timeline_capacity",
         ApiConfig().compute_diagnostics_timeline_capacity,
@@ -325,6 +335,7 @@ def load_config(
         compute_diagnostics=raw_compute_diag,
         compute_diagnostics_start_frozen=raw_start_frozen,
         compute_diagnostics_timeline_capacity=raw_timeline_capacity,
+        remap_interpreter_backend_to_thread=raw_remap_interpreter,
         credentials_obfuscation_secret=cred_secret,
         homeworld_locator=_parse_homeworld_locator_config(api_dict.get("homeworld_locator")),
     )
@@ -378,11 +389,20 @@ def load_config(
 def load_packaged_config(override_specs: list[str] | None = None) -> RootConfig:
     """Load amalgamated config for packaged console launch.
 
-    The only supported packaged-load seam: file backend at the OS console data
-    directory, and no cwd-walk of ``.config.yaml``. Extra ``override_specs``
-    apply after the packaged specs (later wins).
+    File backend at the OS console data directory; no cwd-walk of
+    ``.config.yaml``. If ``{console data directory}/.config.yaml`` exists, it
+    is the base amalgamated file (survives install-over). Packaged storage
+    specs then apply, then extra ``override_specs`` (later wins).
     """
+    operator_config = packaged_operator_config_path()
+    default_config_path = operator_config if operator_config.is_file() else None
+    if default_config_path is not None:
+        _LOGGER.info("Loading packaged operator config from %s", default_config_path)
     specs = list(packaged_file_backend_override_specs())
     if override_specs:
         specs.extend(override_specs)
-    return load_config(override_specs=specs, discover_default=False)
+    return load_config(
+        override_specs=specs,
+        default_config_path=default_config_path,
+        discover_default=False,
+    )
