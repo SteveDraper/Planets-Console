@@ -10,7 +10,8 @@ revision to 0. ``--major`` increments major and resets minor and revision to 0.
 ``--major`` and ``--minor`` together are illegal.
 
 Also writes ``packages/frontend/src/assets/appVersion.json`` so About stays in
-sync with root pyproject.
+sync with root pyproject, then runs ``uv lock`` so ``uv.lock`` records the
+same workspace root version.
 
 Usage:
   uv run python scripts/make_release.py
@@ -39,6 +40,12 @@ from server.package_identity import version_from_pyproject  # noqa: E402
 APP_VERSION_JSON_RELATIVE = Path("packages") / "frontend" / "src" / "assets" / "appVersion.json"
 GH_PR_VIEW_JSON_FIELDS = "state,mergedAt"
 PYPROJECT_RELATIVE = Path("pyproject.toml")
+UV_LOCK_RELATIVE = Path("uv.lock")
+RELEASE_VERSION_PATHS = (
+    PYPROJECT_RELATIVE,
+    APP_VERSION_JSON_RELATIVE,
+    UV_LOCK_RELATIVE,
+)
 _VERSION_LINE = re.compile(r'^(version\s*=\s*")([^"]+)(")', re.MULTILINE)
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -214,13 +221,13 @@ def cut_release(
 
     _run(run, ["git", "checkout", "-b", branch], cwd=root)
     write_release_version_files(root, str(new))
+    _run(run, ["uv", "lock"], cwd=root)
     _run(
         run,
         [
             "git",
             "add",
-            PYPROJECT_RELATIVE.as_posix(),
-            APP_VERSION_JSON_RELATIVE.as_posix(),
+            *[path.as_posix() for path in RELEASE_VERSION_PATHS],
         ],
         cwd=root,
     )
@@ -242,8 +249,8 @@ def cut_release(
             f"Bump console package version to {new}",
             "--body",
             (
-                f"Bumps root `pyproject.toml` and About `appVersion.json` from "
-                f"`{current}` to `{new}`.\n\n"
+                f"Bumps root `pyproject.toml`, About `appVersion.json`, and "
+                f"`uv.lock` from `{current}` to `{new}`.\n\n"
                 f"After this PR is merged, tag `{tag}` will be pushed so "
                 f"`console-package-release` can publish GitHub Release assets.\n"
             ),
