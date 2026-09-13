@@ -409,6 +409,8 @@ def _file_mix(backend: FileStorageBackend) -> None:
 
 def test_file_backend_get_list_mix_does_not_scale_like_sleep_control(tmp_path):
     backend = _file_backend(tmp_path)
+    # Warm the mix before timing so 1-thread and 8-thread walls share a hot cache.
+    _file_mix(backend)
 
     single_file_wall = _run_parallel(1, lambda: _file_mix(backend))
     eight_file_wall = _run_parallel(WORKER_COUNT, lambda: _file_mix(backend))
