@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from api.analytics.export_context import make_analytic_query_context
@@ -26,6 +27,7 @@ from api.analytics.fleet.types import (
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.compute.scope import ComputeScope
 from api.compute.wire import DependencyOutputs
 from api.serialization.inference_row_persistence import PersistedInferenceRow
@@ -74,7 +76,16 @@ def _counting_seeded_backend(tmp_path: Path) -> tuple[CountingStorageBackend, Fi
 
 
 def _fleet_ctx(sample_turn, persistence: FleetSnapshotPersistenceService):
-    stored = {sample_turn.settings.turn: sample_turn}
+    prior_turn_number = sample_turn.settings.turn - 1
+    prior_turn = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=prior_turn_number),
+        game=replace(sample_turn.game, turn=prior_turn_number),
+    )
+    stored = {
+        sample_turn.settings.turn: sample_turn,
+        prior_turn_number: prior_turn,
+    }
 
     def load_turn(turn_number: int):
         return stored.get(turn_number)
@@ -324,6 +335,67 @@ def test_job_wire_build_skips_disk_when_dependency_outputs_has_final_prior(tmp_p
     assert counts.list_calls == 0
     assert counts.put_calls == 0
     assert counts.get_calls == 0
+    assert counts.get_keys == []
+    assert counts.json_load_calls == 0
+
+
+def test_scores_resolve_prior_skips_disk_when_dependency_outputs_has_final_prior(
+    tmp_path, sample_turn
+):
+    """Final prior on DependencyOutputs is enough; do not re-get the fleet document."""
+    counting, counts = _counting_seeded_backend(tmp_path)
+    persistence = FleetSnapshotPersistenceService(counting)
+    player_id = first_player_id(sample_turn)
+    prior_turn = TURN_NUMBER - 1
+    prior_ledger = ensure_fleet_baseline_for_player(
+        GAME_ID,
+        PERSPECTIVE,
+        sample_turn,
+        player_id,
+    )
+    persisted = PersistedFleetLedger(
+        ledger=prior_ledger,
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    persistence.put_ledger(GAME_ID, PERSPECTIVE, prior_turn, player_id, persisted)
+    counts.reset()
+
+    prior_scope = ComputeScope(
+        analytic_id="fleet",
+        game_id=GAME_ID,
+        perspective=PERSPECTIVE,
+        turn=prior_turn,
+        player_id=player_id,
+    )
+    outputs = DependencyOutputs()
+    outputs.put(
+        prior_scope,
+        {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)},
+    )
+    ctx = _fleet_ctx(sample_turn, persistence)
+
+    with count_file_backend_syscalls(counts):
+        resolution = resolve_prior_fleet_for_scores(
+            ctx,
+            game_id=GAME_ID,
+            perspective=PERSPECTIVE,
+            turn_number=TURN_NUMBER,
+            player_id=player_id,
+            turn=sample_turn,
+            dependency_outputs=outputs,
+            overlay_ensure=False,
+        )
+
+    prior_fleet_key = persistence.document_key(GAME_ID, PERSPECTIVE, prior_turn)
+    assert resolution.input_status == "applied"
+    assert resolution.overlay is not None
+    assert counts.list_calls == 0
+    assert counts.put_calls == 0
+    assert counts.get_calls == 0
+    assert prior_fleet_key not in counts.get_keys
     assert counts.get_keys == []
     assert counts.json_load_calls == 0
 
