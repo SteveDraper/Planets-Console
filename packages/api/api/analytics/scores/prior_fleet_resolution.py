@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from api.analytics.export_context import AnalyticQueryContext, export_service_for
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.fleet.prior_selection import select_fleet_prior_persisted
+from api.analytics.fleet.prior_selection import resolve_fleet_prior_persisted
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import FleetTurnSnapshot, PersistedFleetLedger
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
@@ -119,18 +119,21 @@ def resolve_prior_fleet_for_scores(
             if isinstance(persisted_wire, dict):
                 prior_from_deps = persisted_fleet_ledger_from_json(persisted_wire)
 
-    prior_from_disk: PersistedFleetLedger | None = None
     fleet_services = fleet_compute_services(ctx)
-    if fleet_services is not None:
-        prior_from_disk = fleet_services.persistence.get_ledger(
+
+    def load_prior_from_disk() -> PersistedFleetLedger | None:
+        if fleet_services is None:
+            return None
+        return fleet_services.persistence.get_ledger(
             game_id,
             perspective,
             prior_fleet_scope.turn,
             prior_fleet_scope.player_id,
         )
-    prior_persisted = select_fleet_prior_persisted(
+
+    prior_persisted = resolve_fleet_prior_persisted(
         from_dependency_outputs=prior_from_deps,
-        from_disk=prior_from_disk,
+        load_from_disk=load_prior_from_disk,
     )
     if prior_persisted is not None and prior_turn is not None:
         return _resolution_from_persisted_fleet(

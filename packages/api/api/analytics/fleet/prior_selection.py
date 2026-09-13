@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from api.analytics.fleet.types import PersistedFleetLedger
 
 
@@ -24,3 +26,17 @@ def select_fleet_prior_persisted(
     if from_dependency_outputs is not None:
         return from_dependency_outputs
     return from_disk
+
+
+def resolve_fleet_prior_persisted(
+    *,
+    from_dependency_outputs: PersistedFleetLedger | None,
+    load_from_disk: Callable[[], PersistedFleetLedger | None],
+) -> PersistedFleetLedger | None:
+    """Select a prior ledger, reading disk only when DepOutputs is not already final."""
+    if from_dependency_outputs is not None and from_dependency_outputs.provenance.is_final:
+        return from_dependency_outputs
+    return select_fleet_prior_persisted(
+        from_dependency_outputs=from_dependency_outputs,
+        from_disk=load_from_disk(),
+    )

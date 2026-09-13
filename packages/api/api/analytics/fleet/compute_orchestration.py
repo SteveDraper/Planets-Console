@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
-from api.analytics.fleet.prior_selection import select_fleet_prior_persisted
+from api.analytics.fleet.prior_selection import resolve_fleet_prior_persisted
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
     persisted_fleet_ledger_from_json,
@@ -127,15 +127,14 @@ def build_fleet_materialization_leg_job_wire(
             persisted_wire = prior_wire.get("persistedLedgerWire")
             if isinstance(persisted_wire, dict):
                 prior_from_deps = persisted_fleet_ledger_from_json(persisted_wire)
-        prior_from_disk = services.persistence.get_ledger(
-            scope.game_id,
-            scope.perspective,
-            prior_scope.turn,
-            player_id,
-        )
-        prior_persisted = select_fleet_prior_persisted(
+        prior_persisted = resolve_fleet_prior_persisted(
             from_dependency_outputs=prior_from_deps,
-            from_disk=prior_from_disk,
+            load_from_disk=lambda: services.persistence.get_ledger(
+                scope.game_id,
+                scope.perspective,
+                prior_scope.turn,
+                player_id,
+            ),
         )
 
     if prior_persisted is None:
