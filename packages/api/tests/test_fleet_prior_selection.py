@@ -25,22 +25,35 @@ def _persisted(*, name: str, final: bool) -> PersistedFleetLedger:
 
 def test_select_prefers_final_dependency_outputs_over_disk():
     deps = _persisted(name="deps", final=True)
-    disk = _persisted(name="disk", final=True)
+    loads: list[int] = []
+
+    def load_from_disk() -> PersistedFleetLedger | None:
+        loads.append(1)
+        return _persisted(name="disk", final=True)
+
     selected = select_fleet_prior_persisted(
         from_dependency_outputs=deps,
-        from_disk=disk,
+        load_from_disk=load_from_disk,
     )
     assert selected is deps
+    assert loads == []
 
 
 def test_select_prefers_final_disk_over_non_final_dependency_outputs():
     deps = _persisted(name="deps", final=False)
     disk = _persisted(name="disk", final=True)
+    loads: list[int] = []
+
+    def load_from_disk() -> PersistedFleetLedger | None:
+        loads.append(1)
+        return disk
+
     selected = select_fleet_prior_persisted(
         from_dependency_outputs=deps,
-        from_disk=disk,
+        load_from_disk=load_from_disk,
     )
     assert selected is disk
+    assert loads == [1]
 
 
 def test_resolve_skips_disk_when_dependency_outputs_is_final():
