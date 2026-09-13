@@ -24,6 +24,8 @@ from api.analytics.fleet.types import (
 )
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.file_backend_io_accounting import CountingStorageBackend, FileIoCounts
+
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
 
@@ -92,6 +94,21 @@ def test_put_ledger_round_trip(persistence, sample_ledger):
     assert loaded.provenance.turn_evidence_at_n is True
     assert loaded.provenance.prior_ledger_at_n_minus_1 is False
     assert loaded.materialization_version == FLEET_MATERIALIZATION_VERSION
+
+
+def test_put_ledger_loads_document_once(memory_backend, sample_ledger):
+    counts = FileIoCounts()
+    persistence = FleetSnapshotPersistenceService(CountingStorageBackend(memory_backend, counts))
+    persisted = PersistedFleetLedger(ledger=sample_ledger)
+
+    persistence.put_ledger(628580, 1, 111, 8, persisted)
+    assert counts.get_calls == 1
+    assert counts.put_calls == 1
+
+    counts.reset()
+    persistence.put_ledger(628580, 1, 111, 8, persisted)
+    assert counts.get_calls == 1
+    assert counts.put_calls == 1
 
 
 def test_put_snapshot_stamps_non_final_provenance_per_ledger(persistence, sample_ledger):

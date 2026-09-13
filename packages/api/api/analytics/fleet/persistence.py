@@ -135,13 +135,8 @@ class FleetSnapshotPersistenceService:
             provenance=persisted.provenance,
             materialization_version=FLEET_MATERIALIZATION_VERSION,
         )
-        prior = self._prior_ledger_for_notification(
-            game_id,
-            perspective,
-            turn_number,
-            player_id,
-        )
         document = self._load_or_create_document(game_id, perspective, turn_number)
+        prior = self._prior_from_loaded_document(document, player_id)
         ledgers = self._ledgers_object(document)
         ledgers[str(player_id)] = persisted_fleet_ledger_to_json(to_store)
         self._write_document(game_id, perspective, turn_number, document)
@@ -274,16 +269,11 @@ class FleetSnapshotPersistenceService:
         )
         self._notify_snapshot_persisted_legacy(game_id, perspective, turn_number)
 
-    def _prior_ledger_for_notification(
+    def _prior_from_loaded_document(
         self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
+        document: dict[str, object],
         player_id: int,
     ) -> PersistedFleetLedger | None:
-        document = self._load_document(game_id, perspective, turn_number)
-        if document is None:
-            return None
         ledger_wire = self._ledger_wire_from_document(document, player_id)
         if ledger_wire is None:
             return None
