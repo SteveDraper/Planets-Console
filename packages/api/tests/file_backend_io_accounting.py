@@ -1,4 +1,4 @@
-"""Call-count instrumentation for FileStorageBackend worker I/O (#459).
+"""Call-count instrumentation for FileStorageBackend worker I/O.
 
 Wraps the existing file backend; this is not a second storage implementation.
 Counts are protocol methods (get/put/list/delete) plus the open / json / iterdir

@@ -1,4 +1,4 @@
-"""File-backend worker I/O accounting and GIL convoy characterization (#459)."""
+"""File-backend worker I/O accounting and GIL convoy characterization."""
 
 from __future__ import annotations
 
