@@ -27,7 +27,6 @@ TURN_NUMBER = 111
 TURN_KEY = f"games/{GAME_ID}/{PERSPECTIVE}/turns/{TURN_NUMBER}"
 ANALYTICS_PREFIX = f"{TURN_KEY}/analytics"
 FLEET_KEY = f"{ANALYTICS_PREFIX}/fleet"
-SCORES_KEY = f"{ANALYTICS_PREFIX}/scores"
 TURNS_PREFIX = f"games/{GAME_ID}/{PERSPECTIVE}/turns"
 
 # Sibling analytic documents so ``list(analytics)`` stats a populated directory.
