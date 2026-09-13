@@ -88,7 +88,7 @@ def resolve_prior_fleet_for_scores(
 ) -> PriorTurnFleetTorpResolution:
     """Resolve prior-turn fleet torp overlay for scores wire build and ensure admit.
 
-    Prefers a final DepOutputs / disk ledger via ``select_fleet_prior_persisted``,
+    Prefers a final DepOutputs / disk ledger via ``resolve_fleet_prior_persisted``,
     then falls back to ``resolve_prior_turn_fleet_torp_overlay``.
     """
     if turn_number == WILDCARD or not isinstance(turn_number, int):
