@@ -11,19 +11,22 @@ from typing import Any
 
 from api.compute.backend_runtime import process_is_frozen
 from api.compute.sat_gil_overlap import measure_sat_gil_overlap
-from api.storage.file_json_jobs import time_file_json_jobs
+from api.storage.file_json_jobs import time_file_json_jobs, time_large_document_jobs
 
 PROBE_FLAG = "--console-package-probe"
 OUTPUT_FLAG = "--output"
 
 
 def run_packaged_runtime_probe(*, storage_root: Path) -> dict[str, Any]:
-    """Run Solve GIL overlap, tmp-tree file+JSON jobs, and interpreter import try.
+    """Run Solve GIL overlap, tmp-tree file+JSON jobs, large-document jobs, import try.
 
     ``storage_root`` must be a temporary directory, not the console data directory.
+    Large-document jobs time ``json.loads`` / ``deep_copy_value`` / get / put of a
+    synthetic ~775 KB / ~38k-node fleet-shaped blob (1-thread and 8-thread).
     """
     gil = measure_sat_gil_overlap()
     file_json = time_file_json_jobs(storage_root)
+    large_document = time_large_document_jobs(storage_root / "large-document")
     return {
         "pythonProgressedDuringSolve": gil.python_progressed_during_solve,
         "frozen": process_is_frozen(),
@@ -33,6 +36,7 @@ def run_packaged_runtime_probe(*, storage_root: Path) -> dict[str, Any]:
             "wallSeconds": file_json.wall_seconds,
             "protocolCounts": file_json.protocol_counts,
         },
+        "largeDocument": large_document.to_probe_json(),
         "interpreterPoolImportError": _interpreter_pool_import_error(),
         "gil": {
             "overlapFraction": gil.overlap_fraction,

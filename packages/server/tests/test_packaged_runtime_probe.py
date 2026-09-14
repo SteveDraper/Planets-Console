@@ -22,6 +22,18 @@ def test_packaged_runtime_probe_json_reports_gil_file_jobs_and_interpreter_error
     assert payload["fileJson"]["protocolCounts"]["get"] == 800
     assert payload["fileJson"]["protocolCounts"]["list"] == 400
     assert payload["fileJson"]["protocolCounts"]["put"] >= 1
+    large = payload["largeDocument"]
+    assert large["encodedBytes"] >= 775_000
+    assert large["nodeCount"] >= 38_000
+    assert large["playerCount"] == 11
+    assert large["iterations"] == 8
+    assert large["workerCount"] == 8
+    assert large["jsonLoadsSingleSeconds"] > 0.0
+    assert large["deepCopySingleSeconds"] > 0.0
+    assert large["getSingleSeconds"] > 0.0
+    assert large["putSingleSeconds"] > 0.0
+    assert large["jsonLoadsThroughputRatio"] > 0.0
+    assert large["getThroughputRatio"] > 0.0
     error = payload["interpreterPoolImportError"]
     assert error is None or isinstance(error, str)
     assert storage_root.is_dir()
@@ -51,6 +63,25 @@ def test_main_console_package_probe_writes_output_and_skips_app(tmp_path, monkey
                 "wallSeconds": 0.01,
                 "protocolCounts": {"get": 800, "list": 400, "put": 5},
             },
+            "largeDocument": {
+                "encodedBytes": 775_000,
+                "nodeCount": 38_000,
+                "playerCount": 11,
+                "iterations": 8,
+                "workerCount": 8,
+                "jsonLoadsSingleSeconds": 0.01,
+                "jsonLoadsEightWallSeconds": 0.08,
+                "jsonLoadsThroughputRatio": 1.0,
+                "deepCopySingleSeconds": 0.01,
+                "deepCopyEightWallSeconds": 0.08,
+                "deepCopyThroughputRatio": 1.0,
+                "getSingleSeconds": 0.01,
+                "getEightWallSeconds": 0.08,
+                "getThroughputRatio": 1.0,
+                "putSingleSeconds": 0.02,
+                "putEightWallSeconds": 0.16,
+                "putThroughputRatio": 1.0,
+            },
             "interpreterPoolImportError": None,
         },
     )
@@ -66,4 +97,5 @@ def test_main_console_package_probe_writes_output_and_skips_app(tmp_path, monkey
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["pythonProgressedDuringSolve"] is True
     assert payload["fileJson"]["jobCount"] == 400
+    assert payload["largeDocument"]["encodedBytes"] == 775_000
     assert not (tmp_path / "Application Support").exists()
