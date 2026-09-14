@@ -53,7 +53,7 @@ def test_probe_workflow_is_macos_15_and_runs_both_baselines():
     on_block = on_rest[:on_end]
     assert "workflow_dispatch:" in on_block
     assert "pull_request:" not in on_block
-    assert "branches:\n      - Issue_461" in on_block
+    assert "push:" not in on_block
     assert "macos-latest" not in text
     assert "runs-on: macos-15" in text
     assert "--console-package-probe" in text
