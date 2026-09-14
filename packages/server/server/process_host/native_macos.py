@@ -25,7 +25,12 @@ def handle_macos_quit(
     request_stop: Callable[[], None],
     stop_run_loop: Callable[[], None],
 ) -> int:
-    """Stop uvicorn and NSApp.run(); cancel Cocoa terminate so Python can join."""
+    """Stop uvicorn and NSApp.run(); cancel Cocoa terminate so the host can join.
+
+    ``TerminateNow`` would call C ``exit()`` inside the AppKit callback and skip
+    uvicorn's graceful stop. The process host still skips CPython teardown after
+    that join (``exit_without_interpreter_teardown``).
+    """
     request_stop()
     stop_run_loop()
     return TERMINATE_CANCEL

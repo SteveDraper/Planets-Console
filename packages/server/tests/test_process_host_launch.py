@@ -14,7 +14,13 @@ from api import config as api_config
 from bff import config as bff_config
 from server.package_identity import CONSOLE_PACKAGE_DISPLAY_NAME
 from server.process_host.loopback import HealthWaitError
-from server.process_host.runtime import _configure_packaged_server, _run, _run_as_primary, main
+from server.process_host.runtime import (
+    _configure_packaged_server,
+    _run,
+    _run_as_primary,
+    exit_without_interpreter_teardown,
+    main,
+)
 from server.process_host.support import StartFailure, show_start_failure
 
 
@@ -32,6 +38,16 @@ class _FakeUvicornServer:
 
     def run(self) -> None:
         return None
+
+
+@pytest.fixture
+def stub_hard_exit(monkeypatch):
+    codes: list[int] = []
+    monkeypatch.setattr(
+        "server.process_host.runtime.exit_without_interpreter_teardown",
+        lambda code: codes.append(code),
+    )
+    return codes
 
 
 def _stub_primary_server(monkeypatch, tmp_path, *, wait_for_health, open_spa) -> None:
@@ -52,7 +68,9 @@ def _stub_primary_server(monkeypatch, tmp_path, *, wait_for_health, open_spa) ->
     monkeypatch.setattr("server.process_host.runtime._run_native_loop", lambda session: None)
 
 
-def test_run_as_primary_opens_spa_only_after_health_on_loopback(tmp_path, monkeypatch):
+def test_run_as_primary_opens_spa_only_after_health_on_loopback(
+    tmp_path, monkeypatch, stub_hard_exit
+):
     events: list[tuple[str, ...]] = []
 
     def wait_for_health(port, **_kwargs):
@@ -79,10 +97,14 @@ def test_run_as_primary_opens_spa_only_after_health_on_loopback(tmp_path, monkey
     assert _run_as_primary(lock, log_path) == 0
 
     lock.write_bound_port.assert_called_once_with(8123)
+    lock.release.assert_called_once()
     assert events == [("start",), ("health", 8123), ("open", 8123)]
+    assert stub_hard_exit == [0]
 
 
-def test_run_as_primary_does_not_open_spa_when_health_never_succeeds(tmp_path, monkeypatch):
+def test_run_as_primary_does_not_open_spa_when_health_never_succeeds(
+    tmp_path, monkeypatch, stub_hard_exit
+):
     opened: list[int] = []
 
     def wait_for_health(port, **_kwargs):
@@ -101,8 +123,22 @@ def test_run_as_primary_does_not_open_spa_when_health_never_succeeds(tmp_path, m
         _run_as_primary(lock, log_path)
 
     assert opened == []
+    assert stub_hard_exit == []
+    lock.release.assert_not_called()
     assert str(log_path) in str(caught.value)
     assert "http://127.0.0.1:8123/health" in str(caught.value)
+
+
+def test_exit_without_interpreter_teardown_calls_os_exit(monkeypatch):
+    exited: list[int] = []
+    monkeypatch.setattr(
+        "server.process_host.runtime.os._exit",
+        lambda code: exited.append(code),
+    )
+
+    exit_without_interpreter_teardown(0)
+
+    assert exited == [0]
 
 
 def test_configure_packaged_server_storage_root_is_console_data_directory(
