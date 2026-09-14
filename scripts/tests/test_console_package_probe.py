@@ -78,3 +78,5 @@ def test_configuration_docs_document_local_probe_command():
     assert "make console_package_probe" in text
     assert "--console-package-probe" in text
     assert "FROZEN=1" in text
+    assert "largeDocument" in text
+    assert "775" in text
