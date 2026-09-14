@@ -30,6 +30,7 @@ def test_makefile_documents_uv_and_frozen_probe_commands():
     assert "FROZEN" in text
     assert "bundle_console_package" in text
     assert "Planets Console.app" in text
+    assert "open -n -W" in text
 
 
 def test_pr_ci_stays_ubuntu_make_ci_without_freeze():
@@ -59,6 +60,7 @@ def test_probe_workflow_is_macos_15_and_runs_both_baselines():
     assert "--console-package-probe" in text
     assert "python -m server.process_host" in text
     assert "Planets Console.app" in text
+    assert "open -n -W" in text
     assert "uv-probe.json" in text
     assert "frozen-probe.json" in text
     assert "actions/upload-artifact@v4" in text
@@ -80,3 +82,6 @@ def test_configuration_docs_document_local_probe_command():
     assert "FROZEN=1" in text
     assert "largeDocument" in text
     assert "775" in text
+    assert "observationPersist" in text
+    assert "appKitOn" in text
+    assert "NSApplication" in text or "AppKit" in text

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from collections.abc import Callable
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from server.package_identity import CONSOLE_PACKAGE_DISPLAY_NAME
 
 _LOGGER = logging.getLogger("server.process_host.native_macos")
 _KEEP_DELEGATE: list[object] = []
+_T = TypeVar("_T")
+_APPKIT_START_TIMEOUT_SECONDS = 15.0
 
 # NSApplicationTerminateCancel. TerminateNow (1) makes terminate: call exit().
 TERMINATE_CANCEL = 0
@@ -92,6 +96,91 @@ def run_appkit_loop(callbacks: MacosHostCallbacks) -> None:
     _install_app_menu(app, CONSOLE_PACKAGE_DISPLAY_NAME)
     _LOGGER.info("Starting AppKit event loop")
     app.run()
+
+
+class _ProbeHostCallbacks:
+    """Process-host callbacks for the occupancy probe: no SPA, no uvicorn."""
+
+    def request_stop(self) -> None:
+        return None
+
+    def reopen_browser(self) -> None:
+        return None
+
+
+def run_work_while_appkit_runs(
+    work: Callable[[], _T],
+    *,
+    run_loop: Callable[[MacosHostCallbacks], None] | None = None,
+    wait_until_running: Callable[[], None] | None = None,
+    stop_loop: Callable[[], None] | None = None,
+    own_appkit: Callable[[], None] | None = None,
+) -> _T:
+    """Run ``work`` on a worker thread while the main thread blocks in AppKit.
+
+    Does not open the SPA or use the console data directory. ``run_loop``
+    defaults to ``run_appkit_loop``. Tests inject a fake loop / wait / stop.
+    NSApplication is created on this (main) thread before the worker starts so
+    a ``sharedApplication`` poll cannot bind the main event queue off-thread.
+    """
+    result: list[_T] = []
+    errors: list[BaseException] = []
+    resolved_run = run_loop or run_appkit_loop
+    resolved_wait = wait_until_running or _wait_until_appkit_running
+    resolved_stop = stop_loop or _stop_shared_appkit_run_loop
+    if own_appkit is not None:
+        own_appkit()
+    elif run_loop is None:
+        _own_appkit_on_main_thread()
+
+    def worker() -> None:
+        resolved_wait()
+        try:
+            result.append(work())
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            resolved_stop()
+
+    thread = threading.Thread(target=worker, name="console-package-probe-appkit")
+    thread.start()
+    resolved_run(_ProbeHostCallbacks())
+    thread.join(timeout=120.0)
+    if thread.is_alive():
+        raise RuntimeError("AppKit-on probe worker did not finish")
+    if errors:
+        raise errors[0]
+    if not result:
+        raise RuntimeError("AppKit-on probe worker produced no result")
+    return result[0]
+
+
+def _own_appkit_on_main_thread() -> None:
+    """Create the shared NSApplication on the caller (must be the main thread)."""
+    from AppKit import (  # type: ignore[import-untyped]
+        NSApplication,
+        NSApplicationActivationPolicyRegular,
+    )
+
+    app = NSApplication.sharedApplication()
+    app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+
+
+def _wait_until_appkit_running() -> None:
+    from AppKit import NSApplication  # type: ignore[import-untyped]
+
+    deadline = time.monotonic() + _APPKIT_START_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if bool(NSApplication.sharedApplication().isRunning()):
+            return
+        time.sleep(0.01)
+    raise RuntimeError("NSApplication.run did not start within the probe timeout")
+
+
+def _stop_shared_appkit_run_loop() -> None:
+    from AppKit import NSApplication  # type: ignore[import-untyped]
+
+    _stop_appkit_run_loop(NSApplication.sharedApplication())
 
 
 def _stop_appkit_run_loop(app: object) -> None:

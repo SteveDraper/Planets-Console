@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from api.storage.base import JSONValue
+from api.storage.base import JSONValue, StorageBackend
 from api.storage.file import FileStorageBackend
 from api.storage.path_utils import deep_copy_value
 
@@ -27,6 +27,11 @@ _ANALYTICS_PREFIX = f"{_TURN_KEY}/analytics"
 _FLEET_KEY = f"{_ANALYTICS_PREFIX}/fleet"
 _ANALYTIC_SIBLINGS = ("fleet", "scores", "homeworld-locator")
 _LARGE_FLEET_KEY = f"{_ANALYTICS_PREFIX}/fleet"
+PROBE_GAME_ID = _GAME_ID
+PROBE_PERSPECTIVE = _PERSPECTIVE
+PROBE_TURN_NUMBER = _TURN_NUMBER
+PROBE_TURN_KEY = _TURN_KEY
+PROBE_FLEET_KEY = _FLEET_KEY
 
 
 @dataclass(frozen=True)
@@ -83,6 +88,12 @@ class LargeDocumentJobTiming:
         }
 
 
+def open_probe_file_backend(storage_root: Path) -> StorageBackend:
+    """File backend on a caller tmp tree. Probe code must not import ``FileStorageBackend``."""
+    storage_root.mkdir(parents=True, exist_ok=True)
+    return FileStorageBackend(storage_root)
+
+
 def json_node_count(value: JSONValue) -> int:
     """Count dicts, lists, and scalars in a JSON value (keys are not nodes)."""
     if isinstance(value, dict):
@@ -107,10 +118,14 @@ def synthetic_large_fleet_document(
     encoded_bytes = 0
     nodes = 0
     while encoded_bytes < min_bytes or nodes < min_nodes:
-        for player_index in range(player_count):
+        if ship_id < player_count:
+            for player_index in range(player_count):
+                ship_id += 1
+                ships_by_player[player_index].append(_synthetic_ship(ship_id))
+        else:
             ship_id += 1
-            ships_by_player[player_index].append(_synthetic_ship(ship_id))
-        if ship_id % (player_count * 50) != 0 and encoded_bytes > 0:
+            ships_by_player[0].append(_synthetic_ship(ship_id))
+        if ship_id % 50 != 0 and encoded_bytes > 0:
             continue
         document = _fleet_document(ships_by_player)
         encoded_bytes = len(json.dumps(document, separators=(",", ":")).encode("utf-8"))
@@ -232,18 +247,30 @@ def time_large_document_jobs(
 
 
 def _synthetic_ship(ship_id: int) -> dict[str, JSONValue]:
+    """One codec-valid fleet ship record (persistable prior ledger row)."""
     return {
-        "id": ship_id,
-        "hullId": (ship_id % 50) + 1,
-        "name": f"probe-ship-{ship_id:05d}",
-        "friendlyCode": f"{ship_id % 1000:03d}",
-        "position": {"x": ship_id % 4000, "y": (ship_id * 7) % 4000},
-        "cargo": {
-            "neutronium": ship_id % 200,
-            "duranium": ship_id % 50,
-            "molybdenum": ship_id % 40,
-            "supplies": ship_id % 100,
+        "recordId": f"probe-{ship_id:05d}",
+        "disposition": "active",
+        "qualifiers": {},
+        "fields": {
+            "shipId": {"kind": "known", "value": ship_id},
+            "hull": {"kind": "known", "value": (ship_id % 50) + 1},
+            "engine": {"kind": "unknown"},
+            "beams": {"kind": "unknown"},
+            "launchers": {"kind": "unknown"},
+            "builtTurn": {"kind": "known", "value": 1},
+            "location": {"kind": "unknown"},
         },
+        "buildOptionSets": [],
+        "events": [
+            {
+                "eventId": f"probe-ev-{ship_id:05d}",
+                "kind": "scoreboard_delta",
+                "turn": 1,
+                "source": "probe",
+                "payload": {"name": f"probe-ship-{ship_id:05d}"},
+            }
+        ],
     }
 
 
@@ -253,8 +280,12 @@ def _fleet_document(
     ledgers: dict[str, JSONValue] = {}
     for player_index, ships in enumerate(ships_by_player, start=1):
         ledgers[str(player_index)] = {
-            "ledger": {"playerId": player_index, "ships": ships},
-            "provenance": {"turnEvidenceAtN": True, "priorLedgerAtNMinus1": True},
+            "ledger": {
+                "playerId": player_index,
+                "playerName": f"probe-{player_index}",
+                "records": ships,
+            },
+            "provenance": {"turnEvidenceAtN": False, "priorLedgerAtNMinus1": True},
             "materializationVersion": 1,
         }
     return {

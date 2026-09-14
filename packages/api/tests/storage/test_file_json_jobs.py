@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 
+from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.storage.file_json_jobs import (
     LARGE_DOCUMENT_TARGET_BYTES,
     LARGE_DOCUMENT_TARGET_NODES,
     json_node_count,
+    open_probe_file_backend,
     synthetic_large_fleet_document,
     time_file_json_jobs,
     time_large_document_jobs,
@@ -24,6 +26,17 @@ def test_synthetic_large_fleet_document_meets_683364_size_floors():
     assert len(ledgers) == 11
     assert len(encoded) >= LARGE_DOCUMENT_TARGET_BYTES
     assert json_node_count(document) >= LARGE_DOCUMENT_TARGET_NODES
+    player_one = document["ledgers"]["1"]
+    assert isinstance(player_one, dict)
+    persisted = persisted_fleet_ledger_from_json(player_one)
+    assert persisted.ledger.player_id == 1
+    assert persisted.ledger.records
+
+
+def test_open_probe_file_backend_is_storage_protocol(tmp_path):
+    backend = open_probe_file_backend(tmp_path / "probe-backend")
+    backend.put("games/628580/info", {"name": "probe"})
+    assert backend.get("games/628580/info") == {"name": "probe"}
 
 
 def test_time_file_json_jobs_tiny_mix_counts(tmp_path):

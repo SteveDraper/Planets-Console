@@ -34,6 +34,19 @@ def test_packaged_runtime_probe_json_reports_gil_file_jobs_and_interpreter_error
     assert large["putSingleSeconds"] > 0.0
     assert large["jsonLoadsThroughputRatio"] > 0.0
     assert large["getThroughputRatio"] > 0.0
+    observation = payload["observationPersist"]
+    assert observation["encodedBytes"] >= 775_000
+    assert observation["nodeCount"] >= 38_000
+    assert observation["playerCount"] == 11
+    assert observation["recordCount"] >= 1
+    assert observation["observationLegSeconds"] > 0.0
+    assert observation["persistSeconds"] > 0.0
+    assert observation["totalSeconds"] > 0.0
+    app_kit_on = payload["appKitOn"]
+    assert app_kit_on["ran"] is False
+    assert app_kit_on["pythonProgressedDuringSolve"] is None
+    assert app_kit_on["gil"] is None
+    assert app_kit_on["largeDocument"] is None
     error = payload["interpreterPoolImportError"]
     assert error is None or isinstance(error, str)
     assert storage_root.is_dir()
@@ -82,6 +95,21 @@ def test_main_console_package_probe_writes_output_and_skips_app(tmp_path, monkey
                 "putEightWallSeconds": 0.16,
                 "putThroughputRatio": 1.0,
             },
+            "observationPersist": {
+                "encodedBytes": 775_000,
+                "nodeCount": 38_000,
+                "playerCount": 11,
+                "recordCount": 100,
+                "observationLegSeconds": 0.01,
+                "persistSeconds": 0.02,
+                "totalSeconds": 0.03,
+            },
+            "appKitOn": {
+                "ran": False,
+                "pythonProgressedDuringSolve": None,
+                "gil": None,
+                "largeDocument": None,
+            },
             "interpreterPoolImportError": None,
         },
     )
@@ -98,4 +126,6 @@ def test_main_console_package_probe_writes_output_and_skips_app(tmp_path, monkey
     assert payload["pythonProgressedDuringSolve"] is True
     assert payload["fileJson"]["jobCount"] == 400
     assert payload["largeDocument"]["encodedBytes"] == 775_000
+    assert payload["observationPersist"]["encodedBytes"] == 775_000
+    assert payload["appKitOn"]["ran"] is False
     assert not (tmp_path / "Application Support").exists()

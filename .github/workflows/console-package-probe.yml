@@ -67,8 +67,8 @@ jobs:
 
       - name: Run occupancy probe in bundled onedir
         run: |
-          bin="dist/console-package/Planets Console.app/Contents/MacOS/Planets Console"
-          "$bin" --console-package-probe --output probe-results/frozen-probe.json
+          app="dist/console-package/Planets Console.app"
+          open -n -W "$app" --args --console-package-probe --output "$(pwd)/probe-results/frozen-probe.json"
 
       - name: Show probe JSON
         run: |

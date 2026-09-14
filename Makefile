@@ -106,12 +106,13 @@ wrap_console_package:
 	PYTHONPATH=scripts:packages/server \
 		uv run python scripts/wrap_console_package.py
 
-# Occupancy probe for packaged vs uv GIL overlap and file+JSON I/O.
+# Occupancy probe: GIL overlap, file+JSON, observation persist, AppKit-on (frozen Mac).
 # Default is unpackaged ``uv``. After ``make bundle_console_package``,
 # ``make console_package_probe FROZEN=1`` runs the bundled Mac process host.
 # Not part of ``make ci`` / ``make test``.
 PROBE_OUTPUT ?= console-package-probe.json
-CONSOLE_PACKAGE_MAC_BIN = dist/console-package/Planets Console.app/Contents/MacOS/Planets Console
+CONSOLE_PACKAGE_APP = dist/console-package/Planets Console.app
+CONSOLE_PACKAGE_MAC_BIN = $(CONSOLE_PACKAGE_APP)/Contents/MacOS/Planets Console
 console_package_probe:
 ifndef FROZEN
 	uv sync --extra dev
@@ -123,7 +124,7 @@ else
 		echo "bundled process host missing at $(CONSOLE_PACKAGE_MAC_BIN); run: make bundle_console_package" >&2; \
 		exit 1; \
 	}
-	"$(CONSOLE_PACKAGE_MAC_BIN)" --console-package-probe --output "$(PROBE_OUTPUT)"
+	open -n -W "$(CONSOLE_PACKAGE_APP)" --args --console-package-probe --output "$(abspath $(PROBE_OUTPUT))"
 endif
 
 # Bump version, open a release PR, wait for merge, tag and push (starts console-package-release).
