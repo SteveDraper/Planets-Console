@@ -192,6 +192,20 @@ make bundle_console_package
 
 That runs `scripts/bundle_console_package.py` / `scripts/console_package.spec`. Collect policy ships the prebuilt SPA (`packages/frontend/dist`), runtime `assets/analytics/`, and a one-line version sidecar -- not tests, `scripts/`, `docs/`, or frontend `src/`. Identity: display name **Planets Console**, `CFBundleIdentifier` `com.github.stevedraper.planets-console`, `AppUserModelID` `SteveDraper.PlanetsConsole`, version from root `pyproject.toml` (`0.1.0`, not `0.1`). On macOS the bundler sets `MACOSX_DEPLOYMENT_TARGET=11`.
 
+Occupancy probe (GIL overlap during `Solve()` plus tmp-tree file+JSON jobs; no SPA settle, no Application Support store). Unpackaged baseline:
+
+```bash
+make console_package_probe
+```
+
+That runs `uv run python -m server.process_host --console-package-probe` and writes `console-package-probe.json` (override with `PROBE_OUTPUT=...`). After `make bundle_console_package`, the same probe inside the onedir:
+
+```bash
+make console_package_probe FROZEN=1
+```
+
+Both paths skip the native process-host loop and listen-then-open. GitHub Actions workflow [`.github/workflows/console-package-probe.yml`](../.github/workflows/console-package-probe.yml) is `workflow_dispatch` only on `macos-15`: it bundles, runs both baselines, and uploads `uv-probe.json` / `frozen-probe.json`. It is not part of `make ci` or the ubuntu PR workflow.
+
 ## Installer wrappers and CI
 
 The **installer wrapper** turns bundler output into GitHub Release downloads ([ADR 0028](adr/0028-console-package-ci-and-installer-wrappers.md), [ADR 0029](adr/0029-console-package-identity-and-install-over.md)). It does not write config or own the **console data directory**.
@@ -242,6 +256,7 @@ The config override system and CLI usage are covered by unit tests under `packag
 - **Console data directory (`test_console_data_directory.py`):** macOS expands `Path.home()`; Windows expands `LOCALAPPDATA`; unsupported OS and missing `LOCALAPPDATA` raise; the Path helper ignores cwd `.config.yaml` / `./.data`; packaged override specs set `api.storage_backend=file` and `api.storage_root`.
 - **Process host (`test_process_host_*.py`):** loopback URLs never use `localhost`; port scan skips an occupied preferred port; `GET /health` wait then `webbrowser.open` (no fixed sleep when health is already 200); per-user lock file; frozen `FRONTEND_DIST` from `sys._MEIPASS`; OS Quit sets uvicorn `should_exit`.
 - **Launch contract (`test_process_host_launch.py`):** primary start waits for `GET /health` before opening `http://127.0.0.1:<port>/`; health timeout never opens the SPA and names the support log; packaged `storage_root` is the console data directory, not cwd `./.data`; `main()` shows the start-failure dialog and exits 1 (macOS osascript / Windows `MessageBoxW` contracts); missing SPA still writes `logs/process-host.log` under the data directory.
+- **Occupancy probe (`test_packaged_runtime_probe.py`, `scripts/tests/test_console_package_probe.py`):** `--console-package-probe` writes JSON (`pythonProgressedDuringSolve`, file+JSON counts/wall, interpreter-pool error) to `--output` and does not start the SPA or use the console data directory; `make console_package_probe` / `FROZEN=1` are documented; dispatch-only `macos-15` workflow runs uv + frozen probes; ubuntu `make ci` does not freeze.
 - **Single-instance (`test_process_host_single_instance.py`):** a held lock reopens the existing instance via the port sidecar and does not call `_run_as_primary` (a no-op `_run` fails this pin).
 - **Install-over:** Bundler collect policy datas/dests and `console_package.spec` must not place the OS console data directory (`Library/Application Support/{display name}` / `%LOCALAPPDATA%\{display name}`) inside the freeze tree (`test_bundle_console_package.py`). That pin is always on. Inno wrapper source `scripts/console_package.iss` must exist; `[Files]` / `[UninstallDelete]` (and related sections) must not mention the console data directory (`test_console_package_install_over.py`).
 - **Bundler collect policy (`scripts/tests/test_bundle_console_package.py`):** datas are SPA dist + `assets/analytics` + version sidecar at PyInstaller dest `.` (file at `sys._MEIPASS / console_package_version.txt`, not a folder of that name); pytest excluded; macOS Info.plist identity and full pyproject version; freeze dests/spec cannot collect the console data directory; freeze sets `MACOSX_DEPLOYMENT_TARGET=11` on Darwin.

@@ -1,4 +1,4 @@
-.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_mcp_adapter test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe bundle_console_package wrap_console_package release
+.PHONY: test lint ci ci_full typecheck_frontend check_frontend_api_slices check_frontend_api_no_monolithic_schema test_bff test_api test_api_full test_server test_mcp_adapter test_scripts test_frontend generate generate_frontend_api inference_corpus inference_corpus_discover inference_corpus_probe bundle_console_package wrap_console_package console_package_probe release
 
 # Use workspace venv (Python 3.14) and ensure dev deps (pytest, ruff) are installed.
 # `test` runs lint and unit tests (API fast suite; see `test_api_full` for solver/corpus integration).
@@ -105,6 +105,26 @@ wrap_console_package:
 	uv sync --extra package --extra dev
 	PYTHONPATH=scripts:packages/server \
 		uv run python scripts/wrap_console_package.py
+
+# Occupancy probe for packaged vs uv GIL overlap and file+JSON I/O.
+# Default is unpackaged ``uv``. After ``make bundle_console_package``,
+# ``make console_package_probe FROZEN=1`` runs the bundled Mac process host.
+# Not part of ``make ci`` / ``make test``.
+PROBE_OUTPUT ?= console-package-probe.json
+CONSOLE_PACKAGE_MAC_BIN = dist/console-package/Planets Console.app/Contents/MacOS/Planets Console
+console_package_probe:
+ifndef FROZEN
+	uv sync --extra dev
+	PYTHONPATH=packages/server:packages/api:packages/bff:packages/mcp_adapter \
+		uv run python -m server.process_host --console-package-probe --output "$(PROBE_OUTPUT)"
+else
+	uv sync --extra package --extra dev
+	@test -x "$(CONSOLE_PACKAGE_MAC_BIN)" || { \
+		echo "bundled process host missing at $(CONSOLE_PACKAGE_MAC_BIN); run: make bundle_console_package" >&2; \
+		exit 1; \
+	}
+	"$(CONSOLE_PACKAGE_MAC_BIN)" --console-package-probe --output "$(PROBE_OUTPUT)"
+endif
 
 # Bump version, open a release PR, wait for merge, tag and push (starts console-package-release).
 # Extra flags: make release ARGS='--minor'  or  ARGS='--major'

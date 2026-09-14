@@ -1,0 +1,83 @@
+# Packaged onedir occupancy probe (GIL overlap + file+JSON I/O).
+#
+# Dispatch-only on macos-15. Does not run on pull_request. Default PR CI
+# stays ubuntu-latest + make ci (no freeze). Release installer CI is
+# console-package-release.yml and does not execute this probe.
+
+name: console-package-probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: console-package-probe-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: probe
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Sync workspace with bundler extra
+        run: uv sync --extra package --extra dev
+        working-directory: .
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: packages/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: packages/frontend
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
+      - name: Build SPA
+        run: npm run build
+        working-directory: packages/frontend
+
+      - name: Bundle console package
+        run: uv run python scripts/bundle_console_package.py
+
+      - name: Run occupancy probe under uv
+        run: |
+          mkdir -p probe-results
+          PYTHONPATH=packages/server:packages/api:packages/bff:packages/mcp_adapter \
+            uv run python -m server.process_host --console-package-probe --output probe-results/uv-probe.json
+
+      - name: Run occupancy probe in bundled onedir
+        run: |
+          bin="dist/console-package/Planets Console.app/Contents/MacOS/Planets Console"
+          "$bin" --console-package-probe --output probe-results/frozen-probe.json
+
+      - name: Show probe JSON
+        run: |
+          python3 -m json.tool probe-results/uv-probe.json
+          python3 -m json.tool probe-results/frozen-probe.json
+
+      - name: Upload probe JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-package-probe
+          path: probe-results/*.json
+          if-no-files-found: error

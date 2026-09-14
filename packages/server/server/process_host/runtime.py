@@ -57,6 +57,17 @@ class ProcessHostSession:
 
 def main() -> int:
     """Entry for the packaged process host. Returns a process exit code."""
+    # Literal matches packaged_runtime_probe.PROBE_FLAG; keep this check lazy so
+    # a normal launch does not import the occupancy probe (OR-Tools + SAT).
+    if "--console-package-probe" in sys.argv:
+        from server.process_host.packaged_runtime_probe import (
+            run_console_package_probe_if_requested,
+        )
+
+        exit_code = run_console_package_probe_if_requested(sys.argv)
+        if exit_code is None:
+            raise RuntimeError("console-package probe flag was set but the probe declined")
+        return exit_code
     try:
         return _run()
     except StartFailure as exc:
