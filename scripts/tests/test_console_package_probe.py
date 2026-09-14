@@ -26,6 +26,8 @@ def test_makefile_documents_uv_and_frozen_probe_commands():
     text = _MAKEFILE.read_text(encoding="utf-8")
     assert "console_package_probe:" in text
     assert "--console-package-probe" in text
+    assert "--scores-solve-tree" in text
+    assert "SCORES_SOLVE_TREE" in text
     assert "python -m server.process_host" in text
     assert "FROZEN" in text
     assert "bundle_console_package" in text
@@ -83,5 +85,7 @@ def test_configuration_docs_document_local_probe_command():
     assert "largeDocument" in text
     assert "775" in text
     assert "observationPersist" in text
+    assert "scoresSolve" in text
+    assert "SCORES_SOLVE_TREE" in text
     assert "appKitOn" in text
     assert "NSApplication" in text or "AppKit" in text

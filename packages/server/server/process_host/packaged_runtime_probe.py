@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from api.analytics.fleet.observation_persist_jobs import time_observation_persist_jobs
+from api.analytics.scores.tier_solve_jobs import time_scores_tier_solve_jobs
 from api.compute.backend_runtime import process_is_frozen
 from api.compute.sat_gil_overlap import SatGilOverlap, measure_sat_gil_overlap
 from api.storage.file_json_jobs import (
@@ -22,11 +23,13 @@ from api.storage.file_json_jobs import (
 
 PROBE_FLAG = "--console-package-probe"
 OUTPUT_FLAG = "--output"
+SCORES_SOLVE_TREE_FLAG = "--scores-solve-tree"
 
 
 def run_packaged_runtime_probe(
     *,
     storage_root: Path,
+    scores_solve_tree: Path | None = None,
     checkpoint: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run Solve GIL overlap, tmp-tree file+JSON jobs, large-document jobs, import try.
@@ -37,8 +40,10 @@ def run_packaged_runtime_probe(
     Frozen macOS also times GIL + large-document while ``NSApplication.run`` is
     on the main thread (no SPA). ``observationPersist`` times observation_leg
     plus ``FleetPersistencePolicy.persist`` of that document.
-    ``checkpoint`` is invoked after CLI measurements and before AppKit-on so a
-    later ``NSApplication.run`` abort still leaves a JSON file.
+    ``scoresSolve`` times one real ``run_scores_tier_solve`` ``Solve()`` when
+    ``scores_solve_tree`` points at an existing game tree (not copied into the
+    repo). ``checkpoint`` is invoked after CLI measurements and before AppKit-on
+    so a later ``NSApplication.run`` abort still leaves a JSON file.
     """
     gil = measure_sat_gil_overlap()
     file_json = time_file_json_jobs(storage_root)
@@ -46,6 +51,7 @@ def run_packaged_runtime_probe(
     observation_persist = time_observation_persist_jobs(
         open_probe_file_backend(storage_root / "observation-persist")
     )
+    scores_solve = _scores_solve_json(scores_solve_tree)
     payload: dict[str, Any] = {
         "pythonProgressedDuringSolve": gil.python_progressed_during_solve,
         "frozen": process_is_frozen(),
@@ -57,11 +63,13 @@ def run_packaged_runtime_probe(
         },
         "largeDocument": large_document.to_probe_json(),
         "observationPersist": observation_persist.to_probe_json(),
+        "scoresSolve": scores_solve,
         "appKitOn": {
             "ran": False,
             "pythonProgressedDuringSolve": None,
             "gil": None,
             "largeDocument": None,
+            "scoresSolve": None,
         },
         "interpreterPoolImportError": _interpreter_pool_import_error(),
         "gil": _gil_probe_json(gil),
@@ -69,7 +77,10 @@ def run_packaged_runtime_probe(
     if checkpoint is not None:
         checkpoint(payload)
     if _should_run_appkit_on():
-        payload["appKitOn"] = _app_kit_on_measurements(storage_root / "appkit-on")
+        payload["appKitOn"] = _app_kit_on_measurements(
+            storage_root / "appkit-on",
+            scores_solve_tree=scores_solve_tree,
+        )
     return payload
 
 
@@ -78,12 +89,14 @@ def run_console_package_probe_if_requested(argv: list[str] | None = None) -> int
 
     Returns an exit code when the flag is present, otherwise ``None`` so the
     process host can continue into the normal SPA launch. Uses a tmp tree, not
-    the console data directory.
+    the console data directory. Optional ``--scores-solve-tree`` reads an
+    existing game tree in place (no dump copy, no SPA).
     """
     args = list(sys.argv if argv is None else argv)
     if PROBE_FLAG not in args:
         return None
-    output_path = _output_path_from_argv(args)
+    output_path = _path_flag_from_argv(args, OUTPUT_FLAG)
+    scores_solve_tree = _path_flag_from_argv(args, SCORES_SOLVE_TREE_FLAG)
 
     def write_payload(payload: dict[str, Any]) -> None:
         text = json.dumps(payload, indent=2) + "\n"
@@ -94,6 +107,7 @@ def run_console_package_probe_if_requested(argv: list[str] | None = None) -> int
     with TemporaryDirectory(prefix="console-package-probe-") as tmp:
         payload = run_packaged_runtime_probe(
             storage_root=Path(tmp),
+            scores_solve_tree=scores_solve_tree,
             checkpoint=write_payload if output_path is not None else None,
         )
     text = json.dumps(payload, indent=2) + "\n"
@@ -111,50 +125,64 @@ def _gil_probe_json(gil: SatGilOverlap) -> dict[str, object]:
     }
 
 
+def _scores_solve_json(scores_solve_tree: Path | None) -> dict[str, object] | None:
+    if scores_solve_tree is None:
+        return None
+    timing = time_scores_tier_solve_jobs(open_probe_file_backend(scores_solve_tree))
+    return timing.to_probe_json()
+
+
 def _should_run_appkit_on() -> bool:
     """Frozen macOS process host only. ``uv`` stays off AppKit (issue 468)."""
     return process_is_frozen() and sys.platform == "darwin"
 
 
-def _app_kit_on_measurements(storage_root: Path) -> dict[str, object]:
+def _app_kit_on_measurements(
+    storage_root: Path,
+    *,
+    scores_solve_tree: Path | None = None,
+) -> dict[str, object]:
     """GIL + large-document while AppKit runs, or a structured skip."""
     skipped: dict[str, object] = {
         "ran": False,
         "pythonProgressedDuringSolve": None,
         "gil": None,
         "largeDocument": None,
+        "scoresSolve": None,
     }
     if not _should_run_appkit_on():
         return skipped
 
     from server.process_host.native_macos import run_work_while_appkit_runs
 
-    def measure() -> tuple[SatGilOverlap, LargeDocumentJobTiming]:
+    def measure() -> tuple[SatGilOverlap, LargeDocumentJobTiming, dict[str, object] | None]:
         return (
             measure_sat_gil_overlap(),
             time_large_document_jobs(storage_root / "large-document"),
+            _scores_solve_json(scores_solve_tree),
         )
 
-    gil, large_document = run_work_while_appkit_runs(measure)
+    gil, large_document, scores_solve = run_work_while_appkit_runs(measure)
     return {
         "ran": True,
         "pythonProgressedDuringSolve": gil.python_progressed_during_solve,
         "gil": _gil_probe_json(gil),
         "largeDocument": large_document.to_probe_json(),
+        "scoresSolve": scores_solve,
     }
 
 
-def _output_path_from_argv(argv: list[str]) -> Path | None:
+def _path_flag_from_argv(argv: list[str], flag: str) -> Path | None:
     for index, arg in enumerate(argv):
-        if arg == OUTPUT_FLAG:
+        if arg == flag:
             if index + 1 >= len(argv):
-                raise ValueError(f"{OUTPUT_FLAG} requires a path")
+                raise ValueError(f"{flag} requires a path")
             return Path(argv[index + 1])
-        prefix = f"{OUTPUT_FLAG}="
+        prefix = f"{flag}="
         if arg.startswith(prefix):
             value = arg[len(prefix) :]
             if not value:
-                raise ValueError(f"{OUTPUT_FLAG} requires a path")
+                raise ValueError(f"{flag} requires a path")
             return Path(value)
     return None
 

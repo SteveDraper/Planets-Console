@@ -107,24 +107,31 @@ wrap_console_package:
 		uv run python scripts/wrap_console_package.py
 
 # Occupancy probe: GIL overlap, file+JSON, observation persist, AppKit-on (frozen Mac).
+# Optional ``SCORES_SOLVE_TREE`` points at an existing game tree (e.g. ./.data) so
+# the probe times one real scores ``tier_solve`` ``Solve()`` without opening the SPA.
 # Default is unpackaged ``uv``. After ``make bundle_console_package``,
 # ``make console_package_probe FROZEN=1`` runs the bundled Mac process host.
 # Not part of ``make ci`` / ``make test``.
 PROBE_OUTPUT ?= console-package-probe.json
 CONSOLE_PACKAGE_APP = dist/console-package/Planets Console.app
 CONSOLE_PACKAGE_MAC_BIN = $(CONSOLE_PACKAGE_APP)/Contents/MacOS/Planets Console
+ifneq ($(strip $(SCORES_SOLVE_TREE)),)
+SCORES_SOLVE_ARGS = --scores-solve-tree "$(abspath $(SCORES_SOLVE_TREE))"
+else
+SCORES_SOLVE_ARGS =
+endif
 console_package_probe:
 ifndef FROZEN
 	uv sync --extra dev
 	PYTHONPATH=packages/server:packages/api:packages/bff:packages/mcp_adapter \
-		uv run python -m server.process_host --console-package-probe --output "$(PROBE_OUTPUT)"
+		uv run python -m server.process_host --console-package-probe --output "$(PROBE_OUTPUT)" $(SCORES_SOLVE_ARGS)
 else
 	uv sync --extra package --extra dev
 	@test -x "$(CONSOLE_PACKAGE_MAC_BIN)" || { \
 		echo "bundled process host missing at $(CONSOLE_PACKAGE_MAC_BIN); run: make bundle_console_package" >&2; \
 		exit 1; \
 	}
-	open -n -W "$(CONSOLE_PACKAGE_APP)" --args --console-package-probe --output "$(abspath $(PROBE_OUTPUT))"
+	open -n -W "$(CONSOLE_PACKAGE_APP)" --args --console-package-probe --output "$(abspath $(PROBE_OUTPUT))" $(SCORES_SOLVE_ARGS)
 endif
 
 # Bump version, open a release PR, wait for merge, tag and push (starts console-package-release).
