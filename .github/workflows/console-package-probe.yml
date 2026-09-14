@@ -8,6 +8,11 @@ name: console-package-probe
 
 on:
   workflow_dispatch:
+  # workflow_dispatch cannot see a workflow that is not yet on the default
+  # branch. Push on this slice branch starts the macos-15 probe before merge.
+  push:
+    branches:
+      - Issue_461
 
 permissions:
   contents: read
