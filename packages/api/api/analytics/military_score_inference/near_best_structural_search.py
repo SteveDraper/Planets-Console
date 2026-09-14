@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
     ShipBuildCombo,
 )
+from api.compute.sat_gil_overlap import invoke_cp_sat_solve
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
@@ -280,11 +281,8 @@ def collect_near_best_structural_hits(
         # ``num_search_workers`` to non-zero values makes OR-Tools return
         # MODEL_INVALID on this model (empty search; fleet warships stay "?").
         solver.parameters.num_workers = configured_sat_search_workers()
-        if cancel_token is not None:
-            callback = _StopSearchOnCancel(cancel_token)
-            last_solver_status = solver.solve(model, callback)
-        else:
-            last_solver_status = solver.solve(model)
+        callback = _StopSearchOnCancel(cancel_token) if cancel_token is not None else None
+        last_solver_status = invoke_cp_sat_solve(solver, model, callback)
 
         if cancel_token is not None and cancel_token.is_cancelled():
             stopped_reason = "cancelled"

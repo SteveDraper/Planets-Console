@@ -19,6 +19,9 @@ from api.analytics.military_score_inference.tier_policy import resolve_tier_poli
 from api.compute.sat_gil_overlap import (
     GIL_MIN_OVERLAP_FRACTION,
     GIL_MIN_SOLVE_WALL_SECONDS,
+    capture_cp_sat_solve_overlap,
+    invoke_cp_sat_solve,
+    long_enough_cp_model,
     measure_sat_gil_overlap,
 )
 from ortools.sat.python import cp_model
@@ -138,3 +141,20 @@ def test_ortools_solve_releases_gil_to_python_thread():
         f"wall={overlap.solve_wall_seconds:.3f}s status={overlap.solve_status_name})"
     )
     assert overlap.overlap_fraction >= GIL_MIN_OVERLAP_FRACTION
+
+
+def test_capture_cp_sat_solve_overlap_records_each_solve():
+    model = long_enough_cp_model()
+    solver = cp_model.CpSolver()
+    solver.parameters.num_workers = 1
+    solver.parameters.max_time_in_seconds = 0.2
+
+    with capture_cp_sat_solve_overlap() as captures:
+        first = invoke_cp_sat_solve(solver, model)
+        second = invoke_cp_sat_solve(solver, model)
+
+    assert len(captures) == 2
+    assert captures[0].solve_wall_seconds > 0.0
+    assert captures[1].solve_wall_seconds > 0.0
+    assert solver.status_name(first)
+    assert solver.status_name(second)

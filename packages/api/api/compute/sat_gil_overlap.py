@@ -5,7 +5,10 @@ from __future__ import annotations
 import random
 import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import TypeVar
 
 from ortools.sat.python import cp_model
 
@@ -16,6 +19,8 @@ GIL_3SAT_VARS = 250
 GIL_3SAT_CLAUSES = 1065
 GIL_3SAT_SEED = 0
 GIL_CALIBRATION_SECONDS = 0.05
+
+_Status = TypeVar("_Status")
 
 
 @dataclass(frozen=True)
@@ -51,13 +56,11 @@ def uncontended_spin_rate() -> float:
     return increments / GIL_CALIBRATION_SECONDS
 
 
-def measure_sat_gil_overlap() -> SatGilOverlap:
-    """Run one ``Solve()`` while another thread burns Python, then score overlap."""
-    model = long_enough_cp_model()
-    solver = cp_model.CpSolver()
-    solver.parameters.num_workers = 1
-    solver.parameters.max_time_in_seconds = GIL_SOLVE_CAP_SECONDS
-
+def measure_callable_gil_overlap(
+    run_solve: Callable[[], _Status],
+    status_name: Callable[[_Status], str],
+) -> tuple[_Status, SatGilOverlap]:
+    """Run ``run_solve`` while another thread burns Python, then score overlap."""
     increment_count = 0
     spin_started = threading.Event()
     stop_spin = threading.Event()
@@ -79,7 +82,7 @@ def measure_sat_gil_overlap() -> SatGilOverlap:
 
     count_before = increment_count
     solve_started = time.perf_counter()
-    status = solver.solve(model)
+    status = run_solve()
     solve_wall = time.perf_counter() - solve_started
     count_after = increment_count
     stop_spin.set()
@@ -88,10 +91,60 @@ def measure_sat_gil_overlap() -> SatGilOverlap:
     progressed = count_after - count_before
     calibrated_rate = uncontended_spin_rate()
     overlap_fraction = (progressed / solve_wall) / calibrated_rate if solve_wall > 0 else 0.0
-    return SatGilOverlap(
+    return status, SatGilOverlap(
         python_progressed_during_solve=overlap_fraction >= GIL_MIN_OVERLAP_FRACTION,
         overlap_fraction=overlap_fraction,
         solve_wall_seconds=solve_wall,
-        solve_status_name=solver.status_name(status),
+        solve_status_name=status_name(status),
         spin_increments=progressed,
     )
+
+
+def measure_sat_gil_overlap() -> SatGilOverlap:
+    """Run one toy ``Solve()`` while another thread burns Python, then score overlap."""
+    model = long_enough_cp_model()
+    solver = cp_model.CpSolver()
+    solver.parameters.num_workers = 1
+    solver.parameters.max_time_in_seconds = GIL_SOLVE_CAP_SECONDS
+    _status, overlap = measure_callable_gil_overlap(
+        lambda: solver.solve(model),
+        solver.status_name,
+    )
+    return overlap
+
+
+_solve_captures: list[SatGilOverlap] | None = None
+
+
+@contextmanager
+def capture_cp_sat_solve_overlap() -> Iterator[list[SatGilOverlap]]:
+    """Record GIL overlap for each ``invoke_cp_sat_solve`` in the block."""
+    global _solve_captures
+    if _solve_captures is not None:
+        raise RuntimeError("nested capture_cp_sat_solve_overlap")
+    captures: list[SatGilOverlap] = []
+    _solve_captures = captures
+    try:
+        yield captures
+    finally:
+        _solve_captures = None
+
+
+def invoke_cp_sat_solve(
+    solver: cp_model.CpSolver,
+    model: cp_model.CpModel,
+    callback: cp_model.CpSolverSolutionCallback | None = None,
+) -> int:
+    """Call ``solver.solve``, wrapping captured calls with a GIL spinner."""
+
+    def run() -> int:
+        if callback is None:
+            return solver.solve(model)
+        return solver.solve(model, callback)
+
+    captures = _solve_captures
+    if captures is None:
+        return run()
+    status, overlap = measure_callable_gil_overlap(run, solver.status_name)
+    captures.append(overlap)
+    return status
