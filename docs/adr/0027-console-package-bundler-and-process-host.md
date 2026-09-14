@@ -20,6 +20,7 @@ Unsigned v1 is acceptable. No Electron/Tauri SPA window. No tray in v1. **Instal
 ## Consequences
 
 - Glossary: **bundler**, **process host**, **single-instance** in [CONTEXT.md](../../CONTEXT.md). Do not call the bundler **freeze** (that is **compute diagnostic mode**). Do not call the **process host** bare **host** (VGA Planets rules).
+- OS Quit still sets uvicorn `should_exit` and joins that thread (5s graceful cap). The process host then `os._exit`s so CPython does not run `Py_Finalize` GC on a packaged heap. Cocoa `TerminateNow` remains cancelled so that join happens; macOS `exit()` inside the AppKit callback would skip it.
 - First implementation may still need hidden-imports (OR-Tools SAT, uvicorn factory string) and a Windows VC++ redistributable; that is not a second bundler.
 - Research notes (not on `main`): `docs/research/console-package-freeze-stack.md`, `docs/research/console-package-process-host.md`.
 

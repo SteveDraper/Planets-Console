@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 from dataclasses import dataclass
@@ -36,6 +37,28 @@ from server.process_host.single_instance import (
 from server.process_host.support import StartFailure, configure_support_logging, show_start_failure
 
 _LOGGER = logging.getLogger("server.process_host")
+
+
+def exit_without_interpreter_teardown(code: int = 0) -> None:
+    """End the process without CPython ``Py_Finalize`` module GC.
+
+    Packaged heaps can be many gigabytes after a long session. Interpreter
+    shutdown then holds the GIL in ``gc_collect_main`` for minutes after OS
+    Quit has already stopped uvicorn. ``os._exit`` skips that sweep.
+    """
+    for handler in logging.root.handlers:
+        try:
+            handler.flush()
+        except OSError:
+            pass
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.flush()
+        except OSError:
+            pass
+    os._exit(code)
 
 
 @dataclass
@@ -140,6 +163,10 @@ def _run_as_primary(lock: SingleInstanceLock, log_path: Path) -> int:
     _run_native_loop(session)
     session.request_stop()
     thread.join(timeout=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS + 1.0)
+    # ``os._exit`` skips ``_run``'s ``finally``, so drop the lock first.
+    lock.release()
+    _LOGGER.info("Stopped server; exiting without interpreter teardown")
+    exit_without_interpreter_teardown(0)
     return 0
 
 
