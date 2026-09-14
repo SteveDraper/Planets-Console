@@ -218,14 +218,10 @@ def time_large_document_jobs(
         worker_count=worker_count,
         json_loads_single_seconds=loads_single,
         json_loads_eight_wall_seconds=loads_eight,
-        json_loads_throughput_ratio=_throughput_ratio(
-            loads_single, loads_eight, worker_count
-        ),
+        json_loads_throughput_ratio=_throughput_ratio(loads_single, loads_eight, worker_count),
         deep_copy_single_seconds=copy_single,
         deep_copy_eight_wall_seconds=copy_eight,
-        deep_copy_throughput_ratio=_throughput_ratio(
-            copy_single, copy_eight, worker_count
-        ),
+        deep_copy_throughput_ratio=_throughput_ratio(copy_single, copy_eight, worker_count),
         get_single_seconds=get_single,
         get_eight_wall_seconds=get_eight,
         get_throughput_ratio=_throughput_ratio(get_single, get_eight, worker_count),
@@ -312,9 +308,7 @@ def _parallel_wall(worker_count: int, worker: Callable[[], None]) -> float:
     return time.perf_counter() - started
 
 
-def _throughput_ratio(
-    single_wall: float, parallel_wall: float, worker_count: int
-) -> float:
+def _throughput_ratio(single_wall: float, parallel_wall: float, worker_count: int) -> float:
     if parallel_wall <= 0.0:
         return float("inf")
     return (worker_count * single_wall) / parallel_wall
