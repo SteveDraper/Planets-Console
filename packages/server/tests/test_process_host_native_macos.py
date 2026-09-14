@@ -8,6 +8,7 @@ from server.process_host.native_macos import (
     handle_macos_quit,
     handle_macos_reopen,
     macos_quit_menu_item,
+    run_work_while_appkit_runs,
 )
 
 # NSApplicationTerminateNow -- terminate: calls exit() if shouldTerminate returns this.
@@ -42,3 +43,50 @@ def test_macos_quit_menu_item_is_cmd_q_terminate():
     assert title == f"Quit {CONSOLE_PACKAGE_DISPLAY_NAME}"
     assert action == "terminate:"
     assert key_equivalent == "q"
+
+
+def test_run_work_while_appkit_runs_does_not_open_spa():
+    reopened: list[str] = []
+    loop_calls: list[str] = []
+
+    def fake_run_loop(callbacks) -> None:
+        loop_calls.append("run")
+        assert callbacks.reopen_browser() is None
+
+    def fake_wait() -> None:
+        return None
+
+    def fake_stop() -> None:
+        loop_calls.append("stop")
+
+    value = run_work_while_appkit_runs(
+        lambda: 17,
+        run_loop=fake_run_loop,
+        wait_until_running=fake_wait,
+        stop_loop=fake_stop,
+    )
+
+    assert value == 17
+    assert set(loop_calls) == {"run", "stop"}
+    assert reopened == []
+
+
+def test_run_work_while_appkit_runs_owns_appkit_on_main_before_worker():
+    order: list[str] = []
+
+    def own() -> None:
+        order.append("own")
+
+    def fake_run_loop(_callbacks) -> None:
+        order.append("run")
+
+    value = run_work_while_appkit_runs(
+        lambda: 3,
+        run_loop=fake_run_loop,
+        wait_until_running=lambda: order.append("wait"),
+        stop_loop=lambda: order.append("stop"),
+        own_appkit=own,
+    )
+
+    assert value == 3
+    assert order[0] == "own"
