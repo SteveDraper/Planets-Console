@@ -70,7 +70,7 @@ def test_production_standard_prior_asset_loads():
 
 
 def test_load_prior_weights_for_category_reuses_default_dir(monkeypatch):
-    prior_weights_asset_module._default_prior_weights_by_category.clear()
+    prior_weights_asset_module._load_default_prior_weights_for_category.cache_clear()
     loads = {"count": 0}
     real_load = prior_weights_asset_module.load_prior_weights_asset
 
@@ -109,7 +109,7 @@ def test_load_prior_weights_custom_base_dir_is_not_reused(monkeypatch):
 
 
 def test_load_prior_weights_single_default_load_under_threads(monkeypatch):
-    prior_weights_asset_module._default_prior_weights_by_category.clear()
+    prior_weights_asset_module._load_default_prior_weights_for_category.cache_clear()
     loads = {"count": 0}
     real_load = prior_weights_asset_module.load_prior_weights_asset
 

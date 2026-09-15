@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any, Literal, TypeAlias, overload
 
 import yaml
@@ -499,8 +500,9 @@ def create_empty_prior_weights_asset(category: GameCategory) -> PriorWeightsAsse
     )
 
 
-_default_prior_weights_by_category: dict[GameCategory, tuple[PriorWeightsAsset, Path, bool]] = {}
-_default_prior_weights_lock = threading.Lock()
+# lru_cache computes misses without holding its lock. Serialize default-path
+# fills so concurrent first callers share one YAML parse.
+_default_prior_weights_lock = Lock()
 
 
 def _load_prior_weights_from_directory(
@@ -520,6 +522,13 @@ def _load_prior_weights_from_directory(
     return load_prior_weights_asset(standard_path), standard_path, True
 
 
+@lru_cache(maxsize=None)
+def _load_default_prior_weights_for_category(
+    category: GameCategory,
+) -> tuple[PriorWeightsAsset, Path, bool]:
+    return _load_prior_weights_from_directory(category, default_prior_weights_dir())
+
+
 def load_prior_weights_for_category(
     category: GameCategory,
     *,
@@ -532,14 +541,6 @@ def load_prior_weights_for_category(
     Caller-supplied ``base_dir`` (tests and mining) is not reused.
     """
     if base_dir is None:
-        cached = _default_prior_weights_by_category.get(category)
-        if cached is not None:
-            return cached
         with _default_prior_weights_lock:
-            cached = _default_prior_weights_by_category.get(category)
-            if cached is not None:
-                return cached
-            loaded = _load_prior_weights_from_directory(category, default_prior_weights_dir())
-            _default_prior_weights_by_category[category] = loaded
-            return loaded
+            return _load_default_prior_weights_for_category(category)
     return _load_prior_weights_from_directory(category, base_dir)
