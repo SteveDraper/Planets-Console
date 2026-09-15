@@ -8,6 +8,7 @@ Runtime catalog widens use step-local mechanisms (e.g. ``include_component_ids``
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -747,15 +748,30 @@ def _validate_production_escape_tier(steps: tuple[InferenceTierPolicyStep, ...])
         raise ValueError(f"{TORP_ESCAPE_TIER_STEP_ID} must have alpha > 0")
 
 
+_default_tier_policies: tuple[InferenceTierPolicyStep, ...] | None = None
+_default_tier_policies_lock = threading.Lock()
+
+
 def resolve_tier_policies(
     base_path: Path | None = None,
 ) -> tuple[InferenceTierPolicyStep, ...]:
-    """Load and validate the static tier policy ladder from ``base_path`` (or the default asset)."""
-    policy_path = default_tier_policy_path() if base_path is None else base_path
-    steps = parse_tier_policy_steps(load_tier_policy_document(policy_path))
+    """Load and validate the static tier policy ladder from ``base_path`` (or the default asset).
+
+    The production asset (``base_path is None``) is reused for the process lifetime so
+    concurrent scores ``tier_solve`` workers do not re-parse YAML under the GIL.
+    """
+    global _default_tier_policies
+    if base_path is None and _default_tier_policies is not None:
+        return _default_tier_policies
     if base_path is None:
-        _validate_production_escape_tier(steps)
-    return steps
+        with _default_tier_policies_lock:
+            if _default_tier_policies is not None:
+                return _default_tier_policies
+            steps = parse_tier_policy_steps(load_tier_policy_document(default_tier_policy_path()))
+            _validate_production_escape_tier(steps)
+            _default_tier_policies = steps
+            return steps
+    return parse_tier_policy_steps(load_tier_policy_document(base_path))
 
 
 def torp_escape_tier_index(steps: tuple[InferenceTierPolicyStep, ...]) -> int | None:

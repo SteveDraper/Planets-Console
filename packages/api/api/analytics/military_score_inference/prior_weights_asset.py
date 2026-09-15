@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -498,12 +499,14 @@ def create_empty_prior_weights_asset(category: GameCategory) -> PriorWeightsAsse
     )
 
 
-def load_prior_weights_for_category(
+_default_prior_weights_by_category: dict[GameCategory, tuple[PriorWeightsAsset, Path, bool]] = {}
+_default_prior_weights_lock = threading.Lock()
+
+
+def _load_prior_weights_from_directory(
     category: GameCategory,
-    *,
-    base_dir: Path | None = None,
+    directory: Path,
 ) -> tuple[PriorWeightsAsset, Path, bool]:
-    directory = default_prior_weights_dir() if base_dir is None else base_dir
     category_path = directory / f"prior_weights_{category}.yaml"
     if category_path.is_file():
         return load_prior_weights_asset(category_path), category_path, False
@@ -515,3 +518,28 @@ def load_prior_weights_for_category(
     if not standard_path.is_file():
         raise FileNotFoundError(f"missing required prior weights asset: {standard_path}")
     return load_prior_weights_asset(standard_path), standard_path, True
+
+
+def load_prior_weights_for_category(
+    category: GameCategory,
+    *,
+    base_dir: Path | None = None,
+) -> tuple[PriorWeightsAsset, Path, bool]:
+    """Load the prior-weights YAML for ``category``.
+
+    Production assets (``base_dir is None``) are reused for the process lifetime so
+    concurrent scores ``tier_solve`` workers do not re-parse YAML under the GIL.
+    Caller-supplied ``base_dir`` (tests and mining) is not reused.
+    """
+    if base_dir is None:
+        cached = _default_prior_weights_by_category.get(category)
+        if cached is not None:
+            return cached
+        with _default_prior_weights_lock:
+            cached = _default_prior_weights_by_category.get(category)
+            if cached is not None:
+                return cached
+            loaded = _load_prior_weights_from_directory(category, default_prior_weights_dir())
+            _default_prior_weights_by_category[category] = loaded
+            return loaded
+    return _load_prior_weights_from_directory(category, base_dir)

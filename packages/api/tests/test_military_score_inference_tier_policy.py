@@ -1,8 +1,10 @@
 """Tests for YAML inference search tier policy loading and catalog behavior."""
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
+import api.analytics.military_score_inference.tier_policy as tier_policy_module
 import pytest
 from api.analytics.military_score_inference.actions import (
     build_action_catalog,
@@ -404,6 +406,55 @@ def test_policy_loader_rejects_missing_final_alpha_zero():
 def test_resolve_tier_policies_returns_yaml_steps():
     steps = resolve_tier_policies()
     assert len(steps) == 10
+
+
+def test_resolve_tier_policies_reuses_default_asset(monkeypatch):
+    tier_policy_module._default_tier_policies = None
+    loads = {"count": 0}
+    real_load = tier_policy_module.load_tier_policy_document
+
+    def wrapped_load(path: Path) -> dict:
+        loads["count"] += 1
+        return real_load(path)
+
+    monkeypatch.setattr(tier_policy_module, "load_tier_policy_document", wrapped_load)
+    first = resolve_tier_policies()
+    second = resolve_tier_policies()
+    assert first is second
+    assert loads["count"] == 1
+
+
+def test_resolve_tier_policies_custom_path_is_not_reused(tmp_path: Path, monkeypatch):
+    dest = tmp_path / "tier_policy.yaml"
+    dest.write_bytes(default_tier_policy_path().read_bytes())
+    loads = {"count": 0}
+    real_load = tier_policy_module.load_tier_policy_document
+
+    def wrapped_load(path: Path) -> dict:
+        loads["count"] += 1
+        return real_load(path)
+
+    monkeypatch.setattr(tier_policy_module, "load_tier_policy_document", wrapped_load)
+    first = resolve_tier_policies(dest)
+    second = resolve_tier_policies(dest)
+    assert first is not second
+    assert loads["count"] == 2
+
+
+def test_resolve_tier_policies_single_default_load_under_threads(monkeypatch):
+    tier_policy_module._default_tier_policies = None
+    loads = {"count": 0}
+    real_load = tier_policy_module.load_tier_policy_document
+
+    def wrapped_load(path: Path) -> dict:
+        loads["count"] += 1
+        return real_load(path)
+
+    monkeypatch.setattr(tier_policy_module, "load_tier_policy_document", wrapped_load)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: resolve_tier_policies(), range(8)))
+    assert loads["count"] == 1
+    assert all(result is results[0] for result in results)
 
 
 def test_early_step_uses_tech_level_bands_not_lowest_component_id(sample_turn):

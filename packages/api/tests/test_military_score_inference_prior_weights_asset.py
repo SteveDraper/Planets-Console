@@ -1,7 +1,9 @@
 """Tests for inference build prior asset parsing and loading."""
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import api.analytics.military_score_inference.prior_weights_asset as prior_weights_asset_module
 import pytest
 from api.analytics.military_score_inference.aggregate_action_registry import AGGREGATE_ACTION_SPECS
 from api.analytics.military_score_inference.prior_weights_asset import (
@@ -65,6 +67,63 @@ def test_production_standard_prior_asset_loads():
     assert path.name == "prior_weights_standard.yaml"
     assert asset.category == GameCategory.STANDARD
     assert asset.version == 4
+
+
+def test_load_prior_weights_for_category_reuses_default_dir(monkeypatch):
+    prior_weights_asset_module._default_prior_weights_by_category.clear()
+    loads = {"count": 0}
+    real_load = prior_weights_asset_module.load_prior_weights_asset
+
+    def wrapped_load(path: Path, *, require_complete_aggregates: bool = True):
+        loads["count"] += 1
+        return real_load(path, require_complete_aggregates=require_complete_aggregates)
+
+    monkeypatch.setattr(prior_weights_asset_module, "load_prior_weights_asset", wrapped_load)
+    first = load_prior_weights_for_category(GameCategory.STANDARD)
+    second = load_prior_weights_for_category(GameCategory.STANDARD)
+    assert first[0] is second[0]
+    assert first[1] == second[1]
+    assert first[2] is second[2]
+    assert loads["count"] == 1
+
+
+def test_load_prior_weights_custom_base_dir_is_not_reused(monkeypatch):
+    loads = {"count": 0}
+    real_load = prior_weights_asset_module.load_prior_weights_asset
+
+    def wrapped_load(path: Path, *, require_complete_aggregates: bool = True):
+        loads["count"] += 1
+        return real_load(path, require_complete_aggregates=require_complete_aggregates)
+
+    monkeypatch.setattr(prior_weights_asset_module, "load_prior_weights_asset", wrapped_load)
+    first = load_prior_weights_for_category(
+        GameCategory.STANDARD,
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
+    )
+    second = load_prior_weights_for_category(
+        GameCategory.STANDARD,
+        base_dir=HAND_SEEDED_PRIOR_WEIGHTS_DIR,
+    )
+    assert first[0] is not second[0]
+    assert loads["count"] == 2
+
+
+def test_load_prior_weights_single_default_load_under_threads(monkeypatch):
+    prior_weights_asset_module._default_prior_weights_by_category.clear()
+    loads = {"count": 0}
+    real_load = prior_weights_asset_module.load_prior_weights_asset
+
+    def wrapped_load(path: Path, *, require_complete_aggregates: bool = True):
+        loads["count"] += 1
+        return real_load(path, require_complete_aggregates=require_complete_aggregates)
+
+    monkeypatch.setattr(prior_weights_asset_module, "load_prior_weights_asset", wrapped_load)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(
+            pool.map(lambda _: load_prior_weights_for_category(GameCategory.STANDARD), range(8))
+        )
+    assert loads["count"] == 1
+    assert all(result[0] is results[0][0] for result in results)
 
 
 def test_missing_category_falls_back_to_standard(tmp_path: Path):
