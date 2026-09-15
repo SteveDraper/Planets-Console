@@ -8,9 +8,11 @@ Runtime catalog widens use step-local mechanisms (e.g. ``include_component_ids``
 
 from __future__ import annotations
 
-import threading
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any, Literal
 
 import yaml
@@ -163,6 +165,22 @@ def load_tier_policy_document(path: Path) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise ValueError(f"tier policy root must be a mapping: {path}")
     return document
+
+
+# lru_cache computes misses without holding its lock. Serialize default-path
+# fills so concurrent first callers share one YAML parse and one derived view.
+_default_tier_policy_lock = Lock()
+
+
+def _locked_default[T](cached: Callable[[], T]) -> T:
+    with _default_tier_policy_lock:
+        return cached()
+
+
+@lru_cache(maxsize=1)
+def load_default_tier_policy_document() -> dict[str, Any]:
+    """Cached load of the shipped tier policy YAML (process-lifetime)."""
+    return load_tier_policy_document(default_tier_policy_path())
 
 
 def _parse_component_ids(raw: object, *, axis: str, step_id: str) -> tuple[int, ...]:
@@ -582,21 +600,18 @@ def parse_aggregate_probability_bins(
     return parsed
 
 
-_default_aggregate_probability_bins: dict[str, tuple[ProbabilityBinBounds, ...]] | None = None
+@lru_cache(maxsize=1)
+def _default_aggregate_probability_bins() -> dict[str, tuple[ProbabilityBinBounds, ...]]:
+    return parse_aggregate_probability_bins(load_default_tier_policy_document())
 
 
 def resolve_aggregate_probability_bins(
     base_path: Path | None = None,
 ) -> dict[str, tuple[ProbabilityBinBounds, ...]]:
     """Load aggregate ranking bin geometry from tier_policy.yaml."""
-    global _default_aggregate_probability_bins
-    if base_path is None and _default_aggregate_probability_bins is not None:
-        return _default_aggregate_probability_bins
-    policy_path = default_tier_policy_path() if base_path is None else base_path
-    parsed = parse_aggregate_probability_bins(load_tier_policy_document(policy_path))
     if base_path is None:
-        _default_aggregate_probability_bins = parsed
-    return parsed
+        return _locked_default(_default_aggregate_probability_bins)
+    return parse_aggregate_probability_bins(load_tier_policy_document(base_path))
 
 
 def aggregate_bin_bounds_for_key(
@@ -646,9 +661,6 @@ def parse_solver_thresholds(document: dict[str, Any]) -> SolverThresholds:
     )
 
 
-_default_solver_thresholds: SolverThresholds | None = None
-
-
 def parse_fleet_inference_tuning(document: dict[str, Any]) -> FleetInferenceTuning:
     raw_tuning = document.get("fleetInferenceTuning")
     if not isinstance(raw_tuning, dict):
@@ -675,29 +687,26 @@ def parse_fleet_inference_tuning(document: dict[str, Any]) -> FleetInferenceTuni
     )
 
 
-_default_fleet_inference_tuning: FleetInferenceTuning | None = None
+@lru_cache(maxsize=1)
+def _default_fleet_inference_tuning() -> FleetInferenceTuning:
+    return parse_fleet_inference_tuning(load_default_tier_policy_document())
 
 
 def resolve_fleet_inference_tuning(base_path: Path | None = None) -> FleetInferenceTuning:
-    global _default_fleet_inference_tuning
-    if base_path is None and _default_fleet_inference_tuning is not None:
-        return _default_fleet_inference_tuning
-    policy_path = default_tier_policy_path() if base_path is None else base_path
-    parsed = parse_fleet_inference_tuning(load_tier_policy_document(policy_path))
     if base_path is None:
-        _default_fleet_inference_tuning = parsed
-    return parsed
+        return _locked_default(_default_fleet_inference_tuning)
+    return parse_fleet_inference_tuning(load_tier_policy_document(base_path))
+
+
+@lru_cache(maxsize=1)
+def _default_solver_thresholds() -> SolverThresholds:
+    return parse_solver_thresholds(load_default_tier_policy_document())
 
 
 def resolve_solver_thresholds(base_path: Path | None = None) -> SolverThresholds:
-    global _default_solver_thresholds
-    if base_path is None and _default_solver_thresholds is not None:
-        return _default_solver_thresholds
-    policy_path = default_tier_policy_path() if base_path is None else base_path
-    parsed = parse_solver_thresholds(load_tier_policy_document(policy_path))
     if base_path is None:
-        _default_solver_thresholds = parsed
-    return parsed
+        return _locked_default(_default_solver_thresholds)
+    return parse_solver_thresholds(load_tier_policy_document(base_path))
 
 
 def _near_best_objective_threshold_default(document: dict[str, Any]) -> int:
@@ -748,8 +757,11 @@ def _validate_production_escape_tier(steps: tuple[InferenceTierPolicyStep, ...])
         raise ValueError(f"{TORP_ESCAPE_TIER_STEP_ID} must have alpha > 0")
 
 
-_default_tier_policies: tuple[InferenceTierPolicyStep, ...] | None = None
-_default_tier_policies_lock = threading.Lock()
+@lru_cache(maxsize=1)
+def _default_tier_policies() -> tuple[InferenceTierPolicyStep, ...]:
+    steps = parse_tier_policy_steps(load_default_tier_policy_document())
+    _validate_production_escape_tier(steps)
+    return steps
 
 
 def resolve_tier_policies(
@@ -757,20 +769,12 @@ def resolve_tier_policies(
 ) -> tuple[InferenceTierPolicyStep, ...]:
     """Load and validate the static tier policy ladder from ``base_path`` (or the default asset).
 
-    The production asset (``base_path is None``) is reused for the process lifetime so
-    concurrent scores ``tier_solve`` workers do not re-parse YAML under the GIL.
+    Default-path results reuse the process-lifetime YAML document from
+    ``load_default_tier_policy_document`` so concurrent scores ``tier_solve``
+    workers do not re-read the shipped file.
     """
-    global _default_tier_policies
-    if base_path is None and _default_tier_policies is not None:
-        return _default_tier_policies
     if base_path is None:
-        with _default_tier_policies_lock:
-            if _default_tier_policies is not None:
-                return _default_tier_policies
-            steps = parse_tier_policy_steps(load_tier_policy_document(default_tier_policy_path()))
-            _validate_production_escape_tier(steps)
-            _default_tier_policies = steps
-            return steps
+        return _locked_default(_default_tier_policies)
     return parse_tier_policy_steps(load_tier_policy_document(base_path))
 
 

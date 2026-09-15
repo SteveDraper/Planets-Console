@@ -27,8 +27,11 @@ from api.analytics.military_score_inference.tier_policy import (
     ComponentFilter,
     compute_aggregate_admission_caps,
     default_tier_policy_path,
+    load_default_tier_policy_document,
     parse_solver_thresholds,
     parse_tier_policy_steps,
+    resolve_aggregate_probability_bins,
+    resolve_fleet_inference_tuning,
     resolve_solver_thresholds,
     resolve_tier_policies,
 )
@@ -41,6 +44,14 @@ from tests.fixtures.military_score_inference import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _clear_default_tier_policy_caches() -> None:
+    load_default_tier_policy_document.cache_clear()
+    tier_policy_module._default_tier_policies.cache_clear()
+    tier_policy_module._default_aggregate_probability_bins.cache_clear()
+    tier_policy_module._default_solver_thresholds.cache_clear()
+    tier_policy_module._default_fleet_inference_tuning.cache_clear()
 
 
 def solve_with_policy_ladder(observation, turn, **kwargs):
@@ -96,10 +107,7 @@ def test_policy_loader_validates_final_alpha_zero():
 
 
 def test_policy_loader_reads_aggregate_probability_bins():
-    from api.analytics.military_score_inference.tier_policy import (
-        aggregate_bin_bounds_for_key,
-        resolve_aggregate_probability_bins,
-    )
+    from api.analytics.military_score_inference.tier_policy import aggregate_bin_bounds_for_key
 
     bins = resolve_aggregate_probability_bins()
     assert "planet_defense_posts_added_total" in bins
@@ -409,7 +417,7 @@ def test_resolve_tier_policies_returns_yaml_steps():
 
 
 def test_resolve_tier_policies_reuses_default_asset(monkeypatch):
-    tier_policy_module._default_tier_policies = None
+    _clear_default_tier_policy_caches()
     loads = {"count": 0}
     real_load = tier_policy_module.load_tier_policy_document
 
@@ -442,7 +450,7 @@ def test_resolve_tier_policies_custom_path_is_not_reused(tmp_path: Path, monkeyp
 
 
 def test_resolve_tier_policies_single_default_load_under_threads(monkeypatch):
-    tier_policy_module._default_tier_policies = None
+    _clear_default_tier_policy_caches()
     loads = {"count": 0}
     real_load = tier_policy_module.load_tier_policy_document
 
@@ -455,6 +463,45 @@ def test_resolve_tier_policies_single_default_load_under_threads(monkeypatch):
         results = list(pool.map(lambda _: resolve_tier_policies(), range(8)))
     assert loads["count"] == 1
     assert all(result is results[0] for result in results)
+
+
+def test_default_resolvers_share_one_document_load(monkeypatch):
+    _clear_default_tier_policy_caches()
+    loads = {"count": 0}
+    real_load = tier_policy_module.load_tier_policy_document
+
+    def wrapped_load(path: Path) -> dict:
+        loads["count"] += 1
+        return real_load(path)
+
+    monkeypatch.setattr(tier_policy_module, "load_tier_policy_document", wrapped_load)
+    resolve_tier_policies()
+    resolve_aggregate_probability_bins()
+    resolve_solver_thresholds()
+    resolve_fleet_inference_tuning()
+    assert loads["count"] == 1
+
+
+def test_default_resolvers_single_document_load_under_threads(monkeypatch):
+    _clear_default_tier_policy_caches()
+    loads = {"count": 0}
+    real_load = tier_policy_module.load_tier_policy_document
+
+    def wrapped_load(path: Path) -> dict:
+        loads["count"] += 1
+        return real_load(path)
+
+    monkeypatch.setattr(tier_policy_module, "load_tier_policy_document", wrapped_load)
+
+    def _resolve_all(_index: int) -> None:
+        resolve_tier_policies()
+        resolve_aggregate_probability_bins()
+        resolve_solver_thresholds()
+        resolve_fleet_inference_tuning()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(_resolve_all, range(8)))
+    assert loads["count"] == 1
 
 
 def test_early_step_uses_tech_level_bands_not_lowest_component_id(sample_turn):
