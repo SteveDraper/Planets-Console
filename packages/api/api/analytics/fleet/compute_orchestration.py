@@ -43,7 +43,11 @@ FLEET_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
 FLEET_COMPUTE_PROFILE = AnalyticComputeProfile(
     steps=(
-        ComputeStepSpec(step_kind=FLEET_OBSERVATION_LEG, backend="interpreter"),
+        ComputeStepSpec(
+            step_kind=FLEET_OBSERVATION_LEG,
+            backend="interpreter",
+            gil_overlap="exclusive",
+        ),
         ComputeStepSpec(step_kind=FLEET_FINALIZATION_LEG, backend="inline"),
     ),
 )

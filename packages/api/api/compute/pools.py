@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from api.compute.backend_runtime import effective_compute_backend, process_is_frozen
-from api.compute.profile import ComputeBackend, ComputeStepSpec
+from api.compute.gil_overlap import (
+    frozen_gil_overlap_enabled,
+    pool_item_may_run_under_gil_overlap,
+)
+from api.compute.profile import ComputeBackend, ComputeStepSpec, GilOverlapClass
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
 from api.compute.wire import RunStepFn
@@ -71,6 +75,7 @@ class PoolWorkItem:
     step_index: int
     job_wire: object | None = None
     run_step: RunStepFn | None = None
+    gil_overlap: GilOverlapClass = "default"
 
 
 @dataclass
@@ -161,6 +166,7 @@ class ComputeWorkerPool:
         self._interpreter_executor: InterpreterPoolExecutor | None = None
         self._process_executor: ProcessPoolExecutor | None = None
         self._logged_backend_remaps: set[tuple[str, str]] = set()
+        self._executing: list[PoolWorkItem] = []
         # Futures retained from executor.submit until done-callback finishes so
         # diagnostics can distinguish pending/running/done orphaned in-flight rows.
         # Dedicated lock: never nest with the diagnostics controller lock. Done
@@ -281,15 +287,11 @@ class ComputeWorkerPool:
     def take_next_item_for_tests(self) -> PoolWorkItem | None:
         """Dequeue one item using live predicate / on_dequeued hooks (tests only)."""
         with self._condition:
-            on_dequeued = self._on_item_dequeued
-            item = dequeue_next_work_item(self._work_queue, predicate=self._dequeue_predicate)
-            if item is None:
-                return None
-            self._metrics.dequeues += 1
-            # Same critical section as pop -- grant burn must be atomic with selection.
-            if on_dequeued is not None:
-                on_dequeued(item, len(self._work_queue))
-            return item
+            return self._pop_runnable_item_locked()
+
+    def finish_item_for_tests(self, item: PoolWorkItem) -> None:
+        """Mark a test-dequeued item finished so overlap admission can drain."""
+        self._notify_item_finished(item)
 
     def register(self, orchestrator: ComputeOrchestrator) -> int:
         """Register an orchestrator for pool completion routing; return its registration id."""
@@ -332,6 +334,7 @@ class ComputeWorkerPool:
             step_index=node.step_index,
             job_wire=job_wire,
             run_step=run_step,
+            gil_overlap=step.gil_overlap,
         )
         with self._condition:
             self._work_queue.append(item)
@@ -404,19 +407,51 @@ class ComputeWorkerPool:
     def _take_next_item(self) -> PoolWorkItem | None:
         with self._condition:
             while not self._shutdown:
-                predicate = self._dequeue_predicate
-                on_dequeued = self._on_item_dequeued
-                item = dequeue_next_work_item(self._work_queue, predicate=predicate)
+                item = self._pop_runnable_item_locked()
                 if item is not None:
-                    self._metrics.dequeues += 1
-                    self._last_dequeue_monotonic = time.monotonic()
-                    # Same critical section as pop -- grant burn must be atomic with selection.
-                    # Callback may take the diagnostics controller lock (pool -> controller).
-                    if on_dequeued is not None:
-                        on_dequeued(item, len(self._work_queue))
                     return item
                 self._condition.wait(timeout=_DEQUEUE_WAIT_SECONDS)
             return None
+
+    def _pop_runnable_item_locked(self) -> PoolWorkItem | None:
+        on_dequeued = self._on_item_dequeued
+        item = dequeue_next_work_item(
+            self._work_queue,
+            predicate=self._combined_dequeue_predicate_locked,
+        )
+        if item is None:
+            return None
+        self._executing.append(item)
+        self._metrics.dequeues += 1
+        self._last_dequeue_monotonic = time.monotonic()
+        # Same critical section as pop -- grant burn must be atomic with selection.
+        # Callback may take the diagnostics controller lock (pool -> controller).
+        if on_dequeued is not None:
+            on_dequeued(item, len(self._work_queue))
+        return item
+
+    def _combined_dequeue_predicate_locked(self, item: PoolWorkItem) -> bool:
+        if not pool_item_may_run_under_gil_overlap(
+            item.gil_overlap,
+            enabled=frozen_gil_overlap_enabled(),
+            native_release_in_flight=sum(
+                1 for running in self._executing if running.gil_overlap == "native_release"
+            ),
+            exclusive_queued=any(queued.gil_overlap == "exclusive" for queued in self._work_queue),
+            exclusive_in_flight=sum(
+                1 for running in self._executing if running.gil_overlap == "exclusive"
+            ),
+        ):
+            return False
+        if self._dequeue_predicate is not None:
+            return self._dequeue_predicate(item)
+        return True
+
+    def _remove_executing_locked(self, item: PoolWorkItem) -> None:
+        for index, running in enumerate(self._executing):
+            if running is item:
+                del self._executing[index]
+                return
 
     def _record_backend_execution_locked(self, backend: ComputeBackend) -> None:
         if backend == "thread":
@@ -528,7 +563,9 @@ class ComputeWorkerPool:
 
     def _notify_item_finished(self, item: PoolWorkItem) -> None:
         with self._condition:
+            self._remove_executing_locked(item)
             on_finished = self._on_item_finished
+            self._condition.notify_all()
         if on_finished is not None:
             on_finished(item)
 

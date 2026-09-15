@@ -191,6 +191,20 @@ def test_validate_compute_registration_skips_when_profile_absent():
         ),
         (
             {
+                "compute_profile": AnalyticComputeProfile(
+                    steps=(
+                        ComputeStepSpec(
+                            step_kind="materialize",
+                            backend="thread",
+                            gil_overlap="unknown",
+                        ),
+                    ),
+                ),
+            },
+            "unknown gil_overlap",
+        ),
+        (
+            {
                 "build_step_job_wires": (),
             },
             "missing build_step_job_wire",
