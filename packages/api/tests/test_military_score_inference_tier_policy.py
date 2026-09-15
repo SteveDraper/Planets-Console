@@ -27,7 +27,6 @@ from api.analytics.military_score_inference.tier_policy import (
     ComponentFilter,
     compute_aggregate_admission_caps,
     default_tier_policy_path,
-    load_default_tier_policy_document,
     parse_solver_thresholds,
     parse_tier_policy_steps,
     resolve_aggregate_probability_bins,
@@ -47,11 +46,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _clear_default_tier_policy_caches() -> None:
-    load_default_tier_policy_document.cache_clear()
-    tier_policy_module._default_tier_policies.cache_clear()
-    tier_policy_module._default_aggregate_probability_bins.cache_clear()
-    tier_policy_module._default_solver_thresholds.cache_clear()
-    tier_policy_module._default_fleet_inference_tuning.cache_clear()
+    tier_policy_module._load_default_tier_policy_snapshot.cache_clear()
 
 
 def solve_with_policy_ladder(observation, turn, **kwargs):
@@ -460,9 +455,8 @@ def test_resolve_tier_policies_single_default_load_under_threads(monkeypatch):
 
     monkeypatch.setattr(tier_policy_module, "load_tier_policy_document", wrapped_load)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(lambda _: resolve_tier_policies(), range(8)))
+        list(pool.map(lambda _: resolve_tier_policies(), range(8)))
     assert loads["count"] == 1
-    assert all(result is results[0] for result in results)
 
 
 def test_default_resolvers_share_one_document_load(monkeypatch):

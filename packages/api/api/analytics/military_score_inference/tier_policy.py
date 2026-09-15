@@ -8,7 +8,6 @@ Runtime catalog widens use step-local mechanisms (e.g. ``include_component_ids``
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -165,22 +164,6 @@ def load_tier_policy_document(path: Path) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise ValueError(f"tier policy root must be a mapping: {path}")
     return document
-
-
-# lru_cache computes misses without holding its lock. Serialize default-path
-# fills so concurrent first callers share one YAML parse and one derived view.
-_default_tier_policy_lock = Lock()
-
-
-def _locked_default[T](cached: Callable[[], T]) -> T:
-    with _default_tier_policy_lock:
-        return cached()
-
-
-@lru_cache(maxsize=1)
-def load_default_tier_policy_document() -> dict[str, Any]:
-    """Cached load of the shipped tier policy YAML (process-lifetime)."""
-    return load_tier_policy_document(default_tier_policy_path())
 
 
 def _parse_component_ids(raw: object, *, axis: str, step_id: str) -> tuple[int, ...]:
@@ -600,17 +583,12 @@ def parse_aggregate_probability_bins(
     return parsed
 
 
-@lru_cache(maxsize=1)
-def _default_aggregate_probability_bins() -> dict[str, tuple[ProbabilityBinBounds, ...]]:
-    return parse_aggregate_probability_bins(load_default_tier_policy_document())
-
-
 def resolve_aggregate_probability_bins(
     base_path: Path | None = None,
 ) -> dict[str, tuple[ProbabilityBinBounds, ...]]:
     """Load aggregate ranking bin geometry from tier_policy.yaml."""
     if base_path is None:
-        return _locked_default(_default_aggregate_probability_bins)
+        return _default_tier_policy_snapshot().bins
     return parse_aggregate_probability_bins(load_tier_policy_document(base_path))
 
 
@@ -687,25 +665,15 @@ def parse_fleet_inference_tuning(document: dict[str, Any]) -> FleetInferenceTuni
     )
 
 
-@lru_cache(maxsize=1)
-def _default_fleet_inference_tuning() -> FleetInferenceTuning:
-    return parse_fleet_inference_tuning(load_default_tier_policy_document())
-
-
 def resolve_fleet_inference_tuning(base_path: Path | None = None) -> FleetInferenceTuning:
     if base_path is None:
-        return _locked_default(_default_fleet_inference_tuning)
+        return _default_tier_policy_snapshot().tuning
     return parse_fleet_inference_tuning(load_tier_policy_document(base_path))
-
-
-@lru_cache(maxsize=1)
-def _default_solver_thresholds() -> SolverThresholds:
-    return parse_solver_thresholds(load_default_tier_policy_document())
 
 
 def resolve_solver_thresholds(base_path: Path | None = None) -> SolverThresholds:
     if base_path is None:
-        return _locked_default(_default_solver_thresholds)
+        return _default_tier_policy_snapshot().thresholds
     return parse_solver_thresholds(load_tier_policy_document(base_path))
 
 
@@ -757,11 +725,35 @@ def _validate_production_escape_tier(steps: tuple[InferenceTierPolicyStep, ...])
         raise ValueError(f"{TORP_ESCAPE_TIER_STEP_ID} must have alpha > 0")
 
 
+@dataclass(frozen=True)
+class _DefaultTierPolicySnapshot:
+    steps: tuple[InferenceTierPolicyStep, ...]
+    bins: dict[str, tuple[ProbabilityBinBounds, ...]]
+    thresholds: SolverThresholds
+    tuning: FleetInferenceTuning
+
+
+# lru_cache computes misses without holding its lock. Serialize default-path
+# YAML fill so concurrent first callers share one parse.
+_default_tier_policy_lock = Lock()
+
+
 @lru_cache(maxsize=1)
-def _default_tier_policies() -> tuple[InferenceTierPolicyStep, ...]:
-    steps = parse_tier_policy_steps(load_default_tier_policy_document())
+def _load_default_tier_policy_snapshot() -> _DefaultTierPolicySnapshot:
+    document = load_tier_policy_document(default_tier_policy_path())
+    steps = parse_tier_policy_steps(document)
     _validate_production_escape_tier(steps)
-    return steps
+    return _DefaultTierPolicySnapshot(
+        steps=steps,
+        bins=parse_aggregate_probability_bins(document),
+        thresholds=parse_solver_thresholds(document),
+        tuning=parse_fleet_inference_tuning(document),
+    )
+
+
+def _default_tier_policy_snapshot() -> _DefaultTierPolicySnapshot:
+    with _default_tier_policy_lock:
+        return _load_default_tier_policy_snapshot()
 
 
 def resolve_tier_policies(
@@ -769,12 +761,11 @@ def resolve_tier_policies(
 ) -> tuple[InferenceTierPolicyStep, ...]:
     """Load and validate the static tier policy ladder from ``base_path`` (or the default asset).
 
-    Default-path results reuse the process-lifetime YAML document from
-    ``load_default_tier_policy_document`` so concurrent scores ``tier_solve``
-    workers do not re-read the shipped file.
+    Default-path results reuse the process-lifetime snapshot so concurrent scores
+    ``tier_solve`` workers do not re-read the shipped file.
     """
     if base_path is None:
-        return _locked_default(_default_tier_policies)
+        return _default_tier_policy_snapshot().steps
     return parse_tier_policy_steps(load_tier_policy_document(base_path))
 
 
