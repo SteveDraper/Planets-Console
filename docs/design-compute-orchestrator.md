@@ -285,7 +285,17 @@ Declared per analytic on `AnalyticComputeProfile` (`ComputeStepSpec` per `step_k
 | **interpreter** | `InterpreterPoolExecutor` (Python 3.14); true multi-core without process overhead | fleet observation leg. **Packaged (`sys.frozen`) runtime remaps this to `thread`**: PyInstaller subinterpreters do not get the frozen importer, so the initializer cannot import `api` (`NotShareableError` / `BrokenInterpreterPool`; [#451](https://github.com/SteveDraper/Planets-Console/issues/451)). Unpackaged/dev can match that remap with `api.remap_interpreter_backend_to_thread: true`. Fleet observation is Python ledger/JSON bookkeeping, not SAT, so the GIL trade is acceptable for the packaged path. |
 | **process** | `ProcessPoolExecutor`; strongest isolation | prior-mining extraction (existing) |
 
-Registry built at import; unknown `step_kind` or backend → `RuntimeError` at startup.
+`ComputeStepSpec.gil_overlap` is analytic-agnostic pool admission (not a diagnostics special case):
+
+| Class | Meaning | v1 owners |
+|-------|---------|-----------|
+| **default** | No overlap constraint | inline steps, most thread work |
+| **exclusive** | Python holds the GIL for the whole remapped-thread step | fleet `observation_leg` |
+| **native_release** | Native work is supposed to drop the GIL (`Solve()`) | scores `tier_solve` |
+
+**Frozen process only.** The global pool will not dequeue `exclusive` while `native_release` is in-flight, and will not dequeue `native_release` while `exclusive` is queued or in-flight (SAT drain, then observation, then SAT again). Unpackaged remapped-dev keeps overlapping; that path already stays ~1× isolated under SAT overlap ([#474](https://github.com/SteveDraper/Planets-Console/issues/474), [#475](https://github.com/SteveDraper/Planets-Console/issues/475)). Compose with the freeze dequeue predicate. Do not hardcode fleet/scores step names in diagnostics.
+
+Registry built at import; unknown `step_kind`, backend, or `gil_overlap` → `RuntimeError` at startup.
 
 ### Parallel worker contract
 
@@ -414,7 +424,7 @@ Extend `TurnAnalyticRegistration`:
 | Field | Purpose |
 |-------|---------|
 | `scope_key_spec` | Which axes and parameters form compute identity |
-| `compute_profile` | `ComputeStepSpec` list (step_kind, backend) |
+| `compute_profile` | `ComputeStepSpec` list (step_kind, backend, optional `gil_overlap`) |
 | `persistence_policy` | satisfied / persist / invalidate hooks |
 | `build_step_job_wire` | Per step_kind: scope + dependency outputs → JobWire |
 | `run_step` | Per step_kind: JobWire → ResultWire (or reference to leaf function) |

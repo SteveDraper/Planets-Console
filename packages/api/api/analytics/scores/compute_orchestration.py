@@ -49,7 +49,11 @@ SCORES_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
     steps=(
         ComputeStepSpec(step_kind=SCORES_MATERIALIZE, backend="inline"),
-        ComputeStepSpec(step_kind=SCORES_TIER_SOLVE, backend="thread"),
+        ComputeStepSpec(
+            step_kind=SCORES_TIER_SOLVE,
+            backend="thread",
+            gil_overlap="native_release",
+        ),
     ),
     # REST table is a TurnInfo projection. Inference ensure/stream is a
     # different caller; routing table GET through ensure would wait on

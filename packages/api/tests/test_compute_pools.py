@@ -89,14 +89,17 @@ def _work_item(
     step_index: int = 0,
     backend: str = "thread",
     orchestrator_id: int = 0,
+    step_kind: str | None = None,
+    gil_overlap: str = "default",
 ) -> PoolWorkItem:
     return PoolWorkItem(
         orchestrator_id=orchestrator_id,
         scope=scope,
-        step_kind="tier1" if step_index == 0 else "tier2",
+        step_kind=step_kind or ("tier1" if step_index == 0 else "tier2"),
         backend=backend,
         priority_band=priority_band,
         step_index=step_index,
+        gil_overlap=gil_overlap,
     )
 
 
@@ -942,5 +945,81 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
         health = pool.worker_health()
         assert health["aliveWorkers"] == 1
         assert health["workerExceptionCount"] >= 1
+    finally:
+        pool.shutdown()
+
+
+def test_frozen_exclusive_waits_for_in_flight_native_release(sample_turn, monkeypatch):
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
+    player_ids = [row.ownerid for row in sample_turn.scores[:2]]
+    sat = _work_item(
+        scope=_scope_for_player(sample_turn, player_ids[0]),
+        step_kind="tier_solve",
+        gil_overlap="native_release",
+    )
+    observation = _work_item(
+        scope=_scope_for_player(sample_turn, player_ids[1]),
+        step_kind="observation_leg",
+        gil_overlap="exclusive",
+    )
+    pool = ComputeWorkerPool(worker_count=0)
+    try:
+        pool.enqueue_for_tests(sat)
+        taken_sat = pool.take_next_item_for_tests()
+        assert taken_sat is sat
+        pool.enqueue_for_tests(observation)
+        assert pool.take_next_item_for_tests() is None
+        pool.finish_item_for_tests(taken_sat)
+        assert pool.take_next_item_for_tests() is observation
+    finally:
+        pool.shutdown()
+
+
+def test_frozen_native_release_waits_while_exclusive_is_queued(sample_turn, monkeypatch):
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
+    player_ids = [row.ownerid for row in sample_turn.scores[:2]]
+    sat = _work_item(
+        scope=_scope_for_player(sample_turn, player_ids[0]),
+        step_kind="tier_solve",
+        gil_overlap="native_release",
+    )
+    observation = _work_item(
+        scope=_scope_for_player(sample_turn, player_ids[1]),
+        step_kind="observation_leg",
+        gil_overlap="exclusive",
+    )
+    pool = ComputeWorkerPool(worker_count=0)
+    try:
+        pool.enqueue_for_tests(sat)
+        pool.enqueue_for_tests(observation)
+        taken = pool.take_next_item_for_tests()
+        assert taken is observation
+        assert pool.take_next_item_for_tests() is None
+        pool.finish_item_for_tests(taken)
+        assert pool.take_next_item_for_tests() is sat
+    finally:
+        pool.shutdown()
+
+
+def test_unpackaged_overlap_does_not_hold_exclusive(sample_turn, monkeypatch):
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
+    player_ids = [row.ownerid for row in sample_turn.scores[:2]]
+    sat = _work_item(
+        scope=_scope_for_player(sample_turn, player_ids[0]),
+        step_kind="tier_solve",
+        gil_overlap="native_release",
+    )
+    observation = _work_item(
+        scope=_scope_for_player(sample_turn, player_ids[1]),
+        step_kind="observation_leg",
+        gil_overlap="exclusive",
+    )
+    pool = ComputeWorkerPool(worker_count=0)
+    try:
+        pool.enqueue_for_tests(sat)
+        taken_sat = pool.take_next_item_for_tests()
+        assert taken_sat is sat
+        pool.enqueue_for_tests(observation)
+        assert pool.take_next_item_for_tests() is observation
     finally:
         pool.shutdown()

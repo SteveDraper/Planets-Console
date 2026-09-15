@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 ComputeBackend = Literal["inline", "thread", "interpreter", "process"]
+GilOverlapClass = Literal["default", "exclusive", "native_release"]
 
 VALID_COMPUTE_BACKENDS: frozenset[str] = frozenset({"inline", "thread", "interpreter", "process"})
+VALID_GIL_OVERLAP_CLASSES: frozenset[str] = frozenset({"default", "exclusive", "native_release"})
 
 
 @dataclass(frozen=True)
@@ -16,6 +18,8 @@ class ComputeStepSpec:
 
     step_kind: str
     backend: ComputeBackend
+    # Frozen-process pool admission: exclusive Python vs native SAT that drops the GIL.
+    gil_overlap: GilOverlapClass = "default"
 
 
 @dataclass(frozen=True)
