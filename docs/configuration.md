@@ -213,6 +213,8 @@ make console_package_probe FROZEN=1 SCORES_SOLVE_TREE=./.data
 
 Both paths skip listen-then-open and the console data directory. Frozen macOS launches the `.app` via LaunchServices (`open -n -W`) so `NSApplication.run` owns the main event queue (exec of `Contents/MacOS` is a Background process and AppKit asserts). It enters `NSApplication.run` only long enough for `appKitOn` measurements; `uv` does not start AppKit. GitHub Actions workflow [`.github/workflows/console-package-probe.yml`](../.github/workflows/console-package-probe.yml) is `workflow_dispatch` only on `macos-15`: it bundles, runs both baselines, and uploads `uv-probe.json` / `frozen-probe.json`. It is not part of `make ci` or the ubuntu PR workflow.
 
+Default-path scores YAML (`tier_policy.yaml`, `prior_weights_*.yaml`) is loaded once per process so concurrent `tier_solve` workers do not re-parse it under the GIL. To re-check packaged SAT-only occupancy after a bundle: LaunchServices `open -n` of the `.app`, stream fleet+scores for game **683364** / viewpoint **1** / turn **27**, and `sample` the process-host pid while `globalInFlight` is near 8 and the reconstructed mix is SAT-only (same method as `/tmp/issue478/live`). CPU-while-full should sit materially above one core; worker stacks should not convoy in `yaml.safe_load` / prior-weights parse.
+
 ## Installer wrappers and CI
 
 The **installer wrapper** turns bundler output into GitHub Release downloads ([ADR 0028](adr/0028-console-package-ci-and-installer-wrappers.md), [ADR 0029](adr/0029-console-package-identity-and-install-over.md)). It does not write config or own the **console data directory**.
