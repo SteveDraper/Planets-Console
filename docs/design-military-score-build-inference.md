@@ -162,7 +162,7 @@ When the row has no ranked action list (**inference moderate residual**, empty-l
 
 **Generic freighter on the same row**
 
-- Observation-derived post-unsat **generic freighter combo** (hull id 0) for unexplained positive `freighterchange`. Same sentinel as the solver combo; not a ranked solution. Exact 0-military solves still emit `combo_freighter` in `solutions[]` as today. Negative freighter count is unmatched **ship loss** / outgoing **gift** / **trade** in §3.7 (not a negative placeholder).
+- Observation-derived post-unsat **generic freighter combo** (hull id 0) for unexplained positive `freighterchange`. Same sentinel as the solver combo; not a ranked solution. Exact 0-military solves still emit `combo_freighter` in `solutions[]` as today. Negative freighter count is unmatched **ship loss** / outgoing **gift** / **trade** when there is a **departure pin** ([§3.7](#37-ship-loss-gift-and-trade)); otherwise a **placeholder departure** ([§3.12](#312-pinned-vs-uncharacterized-departure)).
 
 **Wire**
 
@@ -199,7 +199,7 @@ Several compatible counterparties are distinct ranked **inference explanation si
 
 **Catalog.** Departures are **prior-fleet decrease candidate**s: **active** **fleet ship record**s on that player's prior-turn **fleet acquisition ledger**. Hull-known or option-set-bounded records contribute that military; unknown-hull inferred records contribute only that record's envelope. Cannot lose more warships or freighters than prior active rows of that class. Do **not** invert the ship-build combo catalog as `warship_delta = -1` fills (junk-exact). Missing or non-final prior ledger uses the same wait / **scores inference row invalidation** path as today's prior-turn fleet overlay.
 
-These families are ranked `solutions[]` actions (counts + pairing when it exists), not post-unsat placeholders. **Unknown military ship** still only for unexplained **positive** remainder after them (`N <= 0` does not emit). Same-row negative freighter count is a departure family, not a negative generic-freighter placeholder.
+These families are ranked `solutions[]` actions (counts + pairing when it exists), not post-unsat placeholders, and they require a **departure pin** on every military-moving class on the row ([§3.12](#312-pinned-vs-uncharacterized-departure)). **Unknown military ship** still only for unexplained **positive** remainder after them (`N <= 0` does not emit). Same-row negative freighter count is a departure family when pinned, else a **placeholder departure**.
 
 **Idle-dock PP equality** binds on the same steps: pre-limit PQ/PPQ, planet/SB counts did not drop, observed PP on `2 × (starbases − ships built)`. Off-lattice or planet/SB count drop: skip PP enforcement; still admit decrease families. Classic PBP and PLS: no idle-dock constraint. After ship-limit: [Post-limit PP accounting for military score build inference](https://github.com/SteveDraper/Planets-Console/issues/364).
 
@@ -216,6 +216,7 @@ Locked in [Inference product-status persist and stream contract](https://github.
 | Product | `status` |
 |---------|----------|
 | Exact (including **ship loss** / **gift** / **trade** / **acquired ship**) | `exact` |
+| **Uncharacterized roster** ([§3.12](#312-pinned-vs-uncharacterized-departure); chrome follow-on) | `uncharacterized_roster` |
 | **Inference moderate residual** | `moderate_residual` |
 | **Mine-score residual** | `mine_score_residual` |
 | No-solution after a search we meant to finish | `no_exact_solution` |
@@ -223,21 +224,22 @@ Locked in [Inference product-status persist and stream contract](https://github.
 
 "Intractable residual" is informal for `no_exact_solution`, not a distinct status. **Stealth Mode** is **build inference availability**, not a row status. `invalid_problem`, `solver_error`, `time_limited`, `stopped`, `paused`, `pending`, `fetch_error` stay as today. Junk-exact, long unsat, and catalog hole stay named diagnostics; junk-exact remains `exact` chrome.
 
-**Persist.** `exact` / `no_exact_solution` / `moderate_residual` / `mine_score_residual` join functional persist. Skip statuses join fallback-complete with `no_prior_turn` / `player_not_found` (and existing `invalid_problem` / `solver_error`). All of those close fleet turn evidence. Do not persist `fetch_error`, in-progress, or `paused`. **Mine-residual sticky prior** is derived from the prior host-turn persisted row (`status === mine_score_residual`), including when that row holds **ship-first near-solution**s; no parallel sticky flag. Cleared when the persisted row is `exact` (leftover within partition slack). Current-turn owner fields with `units > 0` skip leftover-0, so sticky cannot clear that turn ([§3.10](#310-ship-first-overshoot-constraint)). ADR 0002 write gate statuses are unchanged.
+**Persist.** `exact` / `no_exact_solution` / `moderate_residual` / `mine_score_residual` / `uncharacterized_roster` join functional persist. Skip statuses join fallback-complete with `no_prior_turn` / `player_not_found` (and existing `invalid_problem` / `solver_error`). All of those close fleet turn evidence. Do not persist `fetch_error`, in-progress, or `paused`. **Mine-residual sticky prior** is derived from the prior host-turn persisted row (`status === mine_score_residual`), including when that row holds **ship-first near-solution**s; no parallel sticky flag. `uncharacterized_roster` does **not** start sticky. Cleared when the persisted row is `exact` (leftover within partition slack). Current-turn owner fields with `units > 0` skip leftover-0, so sticky cannot clear that turn ([§3.10](#310-ship-first-overshoot-constraint)). ADR 0002 write gate statuses are unchanged.
 
-**Functional payload.** Three residual shapes:
+**Functional payload.** Residual shapes:
 
 - Leftover within partition slack is `exact` (existing exact payload; leftover field omitted) -- only when this turn's viewpoint-RST has no owner field with `units > 0`.
 - **Mine-score residual** with a non-empty **ship-first near-solution** list: same `solutions[]` wire as exact (rank weight, actions, ship-builds, `militaryScoreArithmetic`) plus Core **ship-first family tag** per solution; `solutionCount = N`; `placeholders []`; `unexplainedMilitaryDelta2x` = rank-1 overshoot `explained - observed` (2x units). No per-solution leftover field -- arithmetic already has explained vs observed.
-- Empty-list **mine-score residual**, **inference moderate residual**, and `no_exact_solution`: `solutions[]` empty; `placeholders[]` is the §3.6 collection (**unknown military ship** hull `-1` with per-unit military bounds; observation-derived **generic freighter combo** hull `0`); `unexplainedMilitaryDelta2x` on the row is today's observation delta (not explained-minus-observed).
+- Empty-list **mine-score residual**, **inference moderate residual**, and `no_exact_solution`: `solutions[]` empty; `placeholders[]` is the §3.6 collection (**unknown military ship** hull `-1` with per-unit military bounds; observation-derived **generic freighter combo** hull `0`); leftover on the row is a **point leftover** (today's observation delta, not explained-minus-observed).
+- **Uncharacterized roster** ([§3.12](#312-pinned-vs-uncharacterized-departure)): `solutions[]` empty; `placeholders[]` includes **placeholder departure**s (+count builds still §3.6); **lattice signature**s on a sibling collection; leftover is **unknown-loss leftover** (point or bound). Not mine sticky.
 
 Skip: status + summary only. Band residual and named compute failures stay diagnostics (wire/live-only). **Inference moderate residual** and `no_exact_solution` do not carry user-facing near-solutions.
 
-**Stream.** Incremental `solution` events remain leftover-0 / `exact` only (full held top-K, as today). Overshooting **ship-first near-solution** lists do not emit `solution` events; they ride on terminal `complete` with `status` `mine_score_residual` (and persist replay of that `complete`). Empty-list residual / skip / `no_exact_solution` terminals still emit one `complete` with that functional payload and `solutionCount` 0. No `solution` event for placeholders. Fleet and MCP read persist/export, not this NDJSON stream. Option-set / id-constraint mapping for **unknown military ship** stays unspecified.
+**Stream.** Incremental `solution` events remain leftover-0 / `exact` only (full held top-K, as today). Overshooting **ship-first near-solution** lists do not emit `solution` events; they ride on terminal `complete` with `status` `mine_score_residual` (and persist replay of that `complete`). Empty-list residual / skip / `no_exact_solution` / `uncharacterized_roster` terminals still emit one `complete` with that functional payload and `solutionCount` 0. No `solution` event for placeholders or **lattice signature**s. Fleet and MCP read persist/export, not this NDJSON stream. Option-set / id-constraint mapping for **unknown military ship** stays unspecified.
 
-**Export.** `$.meta.searchStatus` stays lifecycle-only (`complete` for these terminals). Product `status`, leftover (`unexplainedMilitaryDelta2x`), and `placeholders` are siblings of `$.solutions`. `$.solutions` may be non-empty on `mine_score_residual`. Shipped by [Scores analytic exports](https://github.com/SteveDraper/Planets-Console/issues/97); export precedence is unchanged.
+**Export.** `$.meta.searchStatus` stays lifecycle-only (`complete` for these terminals). Product `status`, leftover (point or **unknown-loss leftover**), `placeholders`, and **lattice signature**s are siblings of `$.solutions`. `$.solutions` may be non-empty on `mine_score_residual`. Shipped by [Scores analytic exports](https://github.com/SteveDraper/Planets-Console/issues/97); export precedence is unchanged. Tagged leftover and `uncharacterized_roster` are the §3.12 persist/stream follow-on.
 
-**SPA chrome** (not modal layout). BFF `displayStatus` stays `mine_score_residual` when `status` is that value (does not flip to `success` because `solutionCount > 0`). Skip: muted cell, tooltip, no modal. Exact: green solid N. Complete **mine-score residual** with **N > 0**: the same **inference solution count indicator** in blue (probable build first; leftover secondary -- tooltip / accessible name, not a second numeral). When the list mixes **mine-overshoot** and **ammo-top-up**, tooltip/aria names the mix and still quotes rank-1 leftover. Empty-list **mine-score residual** and **inference moderate residual**: distinct residual markers + leftover size. `no_exact_solution` keeps the red X. Click opens the existing **inference solution detail modal**: one weight-ordered list + explained-vs-observed mismatch when **N > 0**; **ship-first family tag** chip on each header; mixed-list subtitle when both families are present; summary when the list is empty. Do not design a new modal, split N, family sections, or leftover-on-cell beside N. Family tag / **ship-first stratified hold**: [§3.11](#311-ship-first-family-tag-and-stratified-hold).
+**SPA chrome** (not modal layout). BFF `displayStatus` stays `mine_score_residual` when `status` is that value (does not flip to `success` because `solutionCount > 0`). Skip: muted cell, tooltip, no modal. Exact: green solid N. Complete **mine-score residual** with **N > 0**: the same **inference solution count indicator** in blue (probable build first; leftover secondary -- tooltip / accessible name, not a second numeral). When the list mixes **mine-overshoot** and **ammo-top-up**, tooltip/aria names the mix and still quotes rank-1 leftover. Empty-list **mine-score residual** and **inference moderate residual**: distinct residual markers + leftover size. `no_exact_solution` keeps the red X. **Uncharacterized roster** chrome (cell + bound leftover + lattice signatures in the modal) is a follow-on implementation ticket -- do not silently reuse `exact` or render a bound as a point leftover. Click opens the existing **inference solution detail modal**: one weight-ordered list + explained-vs-observed mismatch when **N > 0**; **ship-first family tag** chip on each header; mixed-list subtitle when both families are present; summary when the list is empty. Do not design a new modal, split N, family sections, or leftover-on-cell beside N. Family tag / **ship-first stratified hold**: [§3.11](#311-ship-first-family-tag-and-stratified-hold).
 
 ### 3.9 Worthwhile remainder bound
 
@@ -291,6 +293,48 @@ No ternary mixed family. No leftover-fraction classifier. Tag omitted on leftove
 **Stratified hold.** Default K = 20. When both families have at least one hit: floor **3** per family (or every hit if that family has fewer than 3); remaining slots by rank weight then leftover; never evict below the floor while the other family is over it. When only one family is feasible, that family may fill all K (no empty-family padding). Exact leftover-0 top-K stays weight-only eviction.
 
 **Chrome.** Cell stays one blue **N** ([#402](https://github.com/SteveDraper/Planets-Console/issues/402)). Mixed-list tooltip/aria names both families and still quotes rank-1 leftover. Modal stays one weight-ordered list (not sections or tabs). Each ship-first header includes a family chip (`Mine leftover` / `Ammo top-up`). Mixed-list subtitle when both families are present; omit the subtitle when the held list is one family. Rank-1 row leftover is unchanged.
+
+### 3.12 Pinned vs uncharacterized departure
+
+Locked in [Pinned vs uncharacterized departure: design (docs only)](https://github.com/SteveDraper/Planets-Console/issues/483) (**design only**). Implementation follow-ons: pin [#486](https://github.com/SteveDraper/Planets-Console/issues/486), SAT admission [#487](https://github.com/SteveDraper/Planets-Console/issues/487), emit [#488](https://github.com/SteveDraper/Planets-Console/issues/488), persist [#489](https://github.com/SteveDraper/Planets-Console/issues/489), fleet [#490](https://github.com/SteveDraper/Planets-Console/issues/490), chrome [#491](https://github.com/SteveDraper/Planets-Console/issues/491). Combat / explosion report extras: [#485](https://github.com/SteveDraper/Planets-Console/issues/485). Current unique-fill catalog width remains locked by [#482](https://github.com/SteveDraper/Planets-Console/issues/482) until [#487](https://github.com/SteveDraper/Planets-Console/issues/487) replaces those tests.
+
+Fog-of-war departures are usually a class count plus a military delta, not a hull. Exact-solving that with a construction catalog is spurious independently of SAT cost. Two current failure modes are the same mistake in opposite directions: unpriced warships collapse replacement capacity to 0; a last-turn `scores.inference` unique-fill opens the full replacement catalog. Unique-fill is not a **departure pin**.
+
+**Count-lattice signal.** The warship / freighter / idle-dock PP equalities cannot hold without a roster change (departure, hidden build, or both). Sources: unmatched `shipchange` / `freighterchange` drop, **public scoreboard pairing** gift / trade / acquired, idle-dock or dock-cap hidden build vs departure. Not a walk of **prior-fleet decrease candidate**s. A unique-filled persist on a quiet class-count turn is not a signal.
+
+**Fleet alibi cull (before pin).** Drop prior-ledger rows whose **known `shipId`** appears in this-turn viewpoint `TurnInfo.ships` still owned by that player. Scores at T cannot wait on fleet@T. Un-id'd inferred rows cannot be alibied. Hull-only match is not v1.
+
+**Departure pin (per class).** After alibi, remainders `R`, class drop `D`:
+
+- Fail if any row in `R` lacks **known spec** (RST / later collapse already on the ledger -- not option-set unique-fill, not envelope-only).
+- `|R| == D` and every remainder has known spec: **exact-set pin** (mixed hulls allowed). Those record ids are named for fleet@T.
+- `|R| > D` and every remainder has known spec **and** they share hull+mounts: **spec-only pin** (military determined, ids not named). Do not retire fleet rows.
+- `|R| > D` with mixed specs, or `|R| < D`: fail.
+
+`extras` (combat / explosion / VCR) is [#485](https://github.com/SteveDraper/Planets-Console/issues/485), not v1.
+
+**SAT admission.** Refuse the entire military SAT only when a signaled class that can move military (warships, or unknown class) is unpinned. An unpinned **true-freighter** drop does not refuse SAT. No hull catalog, fighters, posts, ammo, or departure envelope as solver slack on a refused row. Planet/SB deltas stay observation.
+
+**Case 1 (pin holds on every military-moving class).** SAT as §3.7: priced **ship loss** / **gift** / **trade** / **acquired ship**. Exact-set pin: scores persist names record ids plus `lost` vs `traded` (pairing counterparty when known); fleet@T retires those **fleet ship record**s. Spec-only pin does not retire anyone (**fleet count discrepancy** / **fleet possibly lost** stay fleet's job).
+
+**Case 2 (unpinned military-moving class).** Status **uncharacterized roster**. `solutions[]` empty. No `tier_solve` military catalog. Do not start **mine-residual sticky prior**. Close the count / PP lattice by emit:
+
+- **Placeholder departure** on `placeholders[]`: class warship|freighter, `count` = drop magnitude, optional pairing counterparty. Sign lives in the type, not hull `-1`.
+- Hidden **builds** reuse +count **unknown military ship** / **generic freighter combo**.
+- No per-unit military envelope on the departure placeholder (would become a next-turn decrease candidate).
+- **Lattice signature**s (sibling of `solutions[]`): when idle-dock class is unpinned, emit **both** warship and freighter pairs (build + departure) as alternatives. Not SAT-ranked, not `solution` stream events, not fake `objectiveValue`.
+- Leftover is **unknown-loss leftover** (below).
+
+**Unknown-loss leftover (persist, stream, export, chrome).** Sum type, not a display envelope on the placeholder:
+
+- `point` -- today's `unexplainedMilitaryDelta2x` (pinned military-moving classes, or freighter-only unpin).
+- `unknown_loss_bound` -- `lowerBound2x = max(0, observed_drop_2x − max_possible_lost_construction_2x)`. Max from remaining same-class envelopes, else the race warship construction max times unpinned count. Interpretable as a lower bound on actual unexplained military (includes unknown lost-ship contribution). A 0 bound with this tag is still not a point leftover.
+
+**Occupancy.** An `uncharacterized_roster` persist must not unique-fill into next turn's replacement catalog. **Placeholder departure**s are not ingested as **fleet inferred acquisition**s.
+
+**SPA chrome** is a follow-on implementation ticket: must not reuse `exact`, must not render a bound as a point leftover, must surface lattice signatures without plausibility ranking. Design-doc names the wire; do not implement chrome in the design PR.
+
+**Tests (implementation follow-ons, not this design PR).** Table-driven leave-signal x pin/fail (alibi, exact-set, spec-only, unique-fill is not a pin, unpinned sibling fails). Lattice emit (net -1 warship, idle-dock 0-build +1 PP with both class signatures, gift count + counterparty). Unique-fill persist combo does not pin. Case 1 still SAT when fields are RST-known. Do not replay 683364 combo counts as assertions -- [#482](https://github.com/SteveDraper/Planets-Console/issues/482) locks current width until the admission follow-on replaces those tests.
 
 ---
 
@@ -633,6 +677,7 @@ The first implementation should prefer correct "unknown or ambiguous" output ove
 | Worthwhile remainder bound (#399 / loader shipped #412; CP-SAT shipped #413) | Hard overshoot cap for in-regime **ship-first near-solution**s. Exact host turn; p90 of positive-stock units and field count, equal-split decay convert; **remainder-bound turn mixture** `n_total/(n_total+20)` with same-race isotonic leftover vs T (hold last knot); **observed-stock floor** from current-turn visible owner fields (exact per-field decay). Solve-time `cap_2x = floor(bound)` on `mine_stock_{category}.yaml` (diagnostics and CP-SAT window). Not score band, not RST tighten, not a 10-turn lookup band. §3.9. |
 | Ship-first overshoot constraint (#401 / shipped #413) | New military window on the in-regime prefix, not `alpha` and not widened partition slack. `observed + slack < explained <= observed + cap_2x`. Current-turn owner fields (`units > 0`) skip leftover-0 exact. No those fields: exact-preempt, then overshoot. Overlay per prefix step, replacing band retry; no in-regime `alpha` retry; overshoots are not seeds. Rank weight + near-best as exact; leftover post-sort only. §3.10. |
 | Ship-first family tag / stratified hold (#400 / shipped #414) | Belief torps stay in the prefix; no extra torp-military fraction of the bound. Structural Core tag: non-torp `> observed + slack` is **mine-overshoot**, else **ammo-top-up** (torps lift into the window). Wire `shipFirstFamily`. Stratified hold: floor 3 per family when both have hits; rest of K by weight then leftover. One family may fill all K. SPA chips / mixed tooltip / modal subtitle shipped #415. §3.11. |
+| Pinned vs uncharacterized departure (#483 design; implementation follow-ons on that issue) | **Count-lattice signal** from pairing / idle-dock, not unique-fill. **Departure pin** after **fleet alibi** cull: exact-set or spec-only **known spec**; last-turn inference singleton is not a pin. Refuse military SAT only when an unpinned class can move military. Case 2: **uncharacterized roster**, **placeholder departure**, **unknown-loss leftover**, **lattice signature**s (not `solutions[]`). Exact-set pin retires fleet rows at fleet@T; spec-only does not. Combat/explosion extras: #485. §3.12. |
 
 ### Still open
 
