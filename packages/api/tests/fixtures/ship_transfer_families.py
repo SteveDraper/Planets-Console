@@ -91,6 +91,71 @@ def _class_only_warship_record() -> FleetShipRecord:
     )
 
 
+def _singleton_unknown_hull_warship() -> FleetShipRecord:
+    """Scoreboard warship, unknown fields, one precise option set (no envelopes)."""
+    record = _class_only_warship_record()
+    record.record_id = "singleton-unknown"
+    record.build_option_sets = [
+        FleetBuildOptionSet(
+            combo_id="combo_24_1_1_none_2_0",
+            hull_id=24,
+            engine_id=1,
+            beam_id=1,
+            beam_count=2,
+            launcher_count=0,
+        )
+    ]
+    return record
+
+
+def _multi_hull_unknown_warship() -> FleetShipRecord:
+    """Same class-only shape with two hulls and no military envelopes."""
+    record = _class_only_warship_record()
+    record.record_id = "fan-unknown"
+    record.build_option_sets = [
+        FleetBuildOptionSet(
+            hull_id=24,
+            engine_id=1,
+            beam_id=1,
+            beam_count=2,
+            launcher_count=0,
+        ),
+        FleetBuildOptionSet(
+            hull_id=71,
+            engine_id=1,
+            beam_count=0,
+            launcher_count=0,
+        ),
+    ]
+    return record
+
+
+def _enveloped_multi_hull_unknown_warship() -> FleetShipRecord:
+    """Multi-hull fan that unique-fill cannot pin, but envelopes still admit."""
+    record = _multi_hull_unknown_warship()
+    record.record_id = "fan-unknown-enveloped"
+    record.build_option_sets = [
+        FleetBuildOptionSet(
+            hull_id=24,
+            engine_id=1,
+            beam_id=1,
+            beam_count=2,
+            launcher_count=0,
+            military_score_delta_2x_min=20,
+            military_score_delta_2x_max=80,
+        ),
+        FleetBuildOptionSet(
+            hull_id=71,
+            engine_id=1,
+            beam_count=0,
+            launcher_count=0,
+            military_score_delta_2x_min=20,
+            military_score_delta_2x_max=80,
+        ),
+    ]
+    return record
+
+
 def _unknown_hull_envelope_warship_record() -> FleetShipRecord:
     return FleetShipRecord(
         record_id="unknown-hull-envelope",
