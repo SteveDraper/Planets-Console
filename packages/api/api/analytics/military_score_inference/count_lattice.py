@@ -6,7 +6,7 @@ Contract: design-military-score-build-inference.md §3.12.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -158,9 +158,10 @@ def departure_pin(
     ``record_id``s. Spec-only and fail do not. Unique-fill is not a pin.
     """
     remainder_sets = _remainder_sets_after_alibi(
-        observation,
+        observation.player_id,
         prior_ledger,
         this_turn_ships,
+        class_drops_from_observation(observation),
         hulls_by_id=hulls_by_id,
     )
     pins: list[DeparturePin] = []
@@ -171,26 +172,31 @@ def departure_pin(
     return tuple(pins)
 
 
+def class_drops_from_observation(
+    observation: InferenceObservation,
+) -> dict[FleetShipClass, int]:
+    """v1 class drop D: non-negative scoreboard column loss per class."""
+    return {
+        "warship": max(0, -observation.warship_delta),
+        "freighter": max(0, -observation.freighter_delta),
+    }
+
+
 def _alibi_ship_ids(this_turn_ships: Sequence[Ship], player_id: int) -> frozenset[int]:
     return frozenset(
         ship.id for ship in this_turn_ships if ship.ownerid == player_id and ship.id > 0
     )
 
 
-def _class_drop(observation: InferenceObservation, ship_class: FleetShipClass) -> int:
-    if ship_class == "warship":
-        return max(0, -observation.warship_delta)
-    return max(0, -observation.freighter_delta)
-
-
 def _remainder_sets_after_alibi(
-    observation: InferenceObservation,
+    player_id: int,
     prior_ledger: FleetAcquisitionLedger,
     this_turn_ships: Sequence[Ship],
+    class_drops: Mapping[FleetShipClass, int],
     *,
     hulls_by_id: dict[int, Hull],
 ) -> tuple[ClassRemainderSet, ...]:
-    alibi_ids = _alibi_ship_ids(this_turn_ships, observation.player_id)
+    alibi_ids = _alibi_ship_ids(this_turn_ships, player_id)
     remainders_by_class: dict[FleetShipClass, list[FleetShipRecord]] = {
         "warship": [],
         "freighter": [],
@@ -209,7 +215,7 @@ def _remainder_sets_after_alibi(
         ClassRemainderSet(
             ship_class=ship_class,
             remainders=tuple(remainders),
-            drop=_class_drop(observation, ship_class),
+            drop=class_drops[ship_class],
         )
         for ship_class, remainders in remainders_by_class.items()
     )

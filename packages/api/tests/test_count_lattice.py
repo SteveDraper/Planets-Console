@@ -14,6 +14,8 @@ from api.analytics.fleet.types import (
 from api.analytics.military_score_inference.count_lattice import (
     CountLatticeClassEvent,
     DeparturePin,
+    _remainder_sets_after_alibi,
+    class_drops_from_observation,
     count_lattice_signal,
     departure_pin,
     record_has_known_spec,
@@ -356,3 +358,25 @@ def test_unique_option_hull_id_cannot_unique_fill_into_a_pin(synthetic_catalog_c
         hulls_by_id=synthetic_catalog_context["hulls_by_id"],
     )
     assert pins == (DeparturePin(kind="fail", ship_class="warship", record_ids=()),)
+
+
+def test_class_drops_from_observation_are_scoreboard_column_losses():
+    drops = class_drops_from_observation(
+        _observation(warship_delta=-2, freighter_delta=1, military_delta_2x=-80)
+    )
+    assert drops == {"warship": 2, "freighter": 0}
+
+
+def test_remainder_sets_honor_injected_class_drops(synthetic_catalog_context):
+    record, _ = _known_warship_record(synthetic_catalog_context)
+    remainder_sets = _remainder_sets_after_alibi(
+        PLAYER_ID,
+        _ledger(record),
+        (),
+        {"warship": 2, "freighter": 0},
+        hulls_by_id=synthetic_catalog_context["hulls_by_id"],
+    )
+    by_class = {item.ship_class: item for item in remainder_sets}
+    assert by_class["warship"].drop == 2
+    assert by_class["warship"].remainders == (record,)
+    assert by_class["freighter"].drop == 0
