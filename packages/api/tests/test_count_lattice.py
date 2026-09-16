@@ -284,6 +284,16 @@ def test_ten_identical_known_diamond_flames_drop_one_is_spec_only_pin(
     assert pins == (DeparturePin(kind="spec_only", ship_class="warship", record_ids=()),)
 
 
+def test_zero_drop_class_is_omitted_not_fail(synthetic_catalog_context):
+    record, _ = _known_warship_record(synthetic_catalog_context)
+    pins = _pin(
+        _observation(warship_delta=0, military_delta_2x=0),
+        (record,),
+        hulls_by_id=synthetic_catalog_context["hulls_by_id"],
+    )
+    assert pins == ()
+
+
 def test_ten_mixed_known_hulls_drop_one_fails(synthetic_catalog_context):
     records = tuple(
         _known_spec_warship(
@@ -298,7 +308,7 @@ def test_ten_mixed_known_hulls_drop_one_fails(synthetic_catalog_context):
         records,
         hulls_by_id=synthetic_catalog_context["hulls_by_id"],
     )
-    assert pins == ()
+    assert pins == (DeparturePin(kind="fail", ship_class="warship", record_ids=()),)
 
 
 def test_known_spec_plus_unique_fill_sibling_fails(synthetic_catalog_context):
@@ -308,7 +318,7 @@ def test_known_spec_plus_unique_fill_sibling_fails(synthetic_catalog_context):
         (known, _singleton_unknown_hull_warship()),
         hulls_by_id=synthetic_catalog_context["hulls_by_id"],
     )
-    assert pins == ()
+    assert pins == (DeparturePin(kind="fail", ship_class="warship", record_ids=()),)
 
 
 def test_last_turn_inference_singleton_option_set_is_not_known_spec(
@@ -321,7 +331,7 @@ def test_last_turn_inference_singleton_option_set_is_not_known_spec(
         (unique_fill,),
         hulls_by_id=synthetic_catalog_context["hulls_by_id"],
     )
-    assert pins == ()
+    assert pins == (DeparturePin(kind="fail", ship_class="warship", record_ids=()),)
 
 
 def test_unid_inferred_row_cannot_be_alibied_by_hull_only_sighting(
@@ -334,7 +344,7 @@ def test_unid_inferred_row_cannot_be_alibied_by_hull_only_sighting(
         (_viewpoint_ship(ship_id=99, hullid=24),),
         hulls_by_id=synthetic_catalog_context["hulls_by_id"],
     )
-    assert pins == ()
+    assert pins == (DeparturePin(kind="fail", ship_class="warship", record_ids=()),)
 
 
 def test_unique_option_hull_id_cannot_unique_fill_into_a_pin(synthetic_catalog_context):
@@ -345,4 +355,4 @@ def test_unique_option_hull_id_cannot_unique_fill_into_a_pin(synthetic_catalog_c
         (unique_fill,),
         hulls_by_id=synthetic_catalog_context["hulls_by_id"],
     )
-    assert pins == ()
+    assert pins == (DeparturePin(kind="fail", ship_class="warship", record_ids=()),)

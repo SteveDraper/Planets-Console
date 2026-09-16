@@ -32,7 +32,7 @@ from api.models.components import Hull
 from api.models.ship import Ship
 
 CountLatticeEventSource = Literal["unmatched_drop", "pairing", "idle_dock"]
-DeparturePinKind = Literal["exact_set", "spec_only"]
+DeparturePinKind = Literal["fail", "exact_set", "spec_only"]
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,9 @@ def departure_pin(
 ) -> tuple[DeparturePin, ...]:
     """Pin remaining same-class rows after fleet-alibi cull, or fail that class.
 
-    Exact-set names ``record_id``s. Spec-only does not. Unique-fill is not a pin.
+    One result per class with drop D > 0: fail, exact-set, or spec-only.
+    Omit a class when D <= 0 (no departure to pin). Exact-set names
+    ``record_id``s. Spec-only and fail do not. Unique-fill is not a pin.
     """
     alibi_ids = _alibi_ship_ids(this_turn_ships, observation.player_id)
     remainders_by_class: dict[FleetShipClass, list[FleetShipRecord]] = {
@@ -196,7 +198,7 @@ def _pin_class(
         return None
     spec_keys = [_known_spec_key(record) for record in remainders]
     if any(spec_key is None for spec_key in spec_keys):
-        return None
+        return DeparturePin(kind="fail", ship_class=ship_class)
     if len(remainders) == drop:
         return DeparturePin(
             kind="exact_set",
@@ -205,7 +207,7 @@ def _pin_class(
         )
     if len(remainders) > drop and len(set(spec_keys)) == 1:
         return DeparturePin(kind="spec_only", ship_class=ship_class)
-    return None
+    return DeparturePin(kind="fail", ship_class=ship_class)
 
 
 def _known_spec_key(record: FleetShipRecord) -> tuple[int, int, int, int] | None:
