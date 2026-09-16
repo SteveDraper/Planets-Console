@@ -8,6 +8,9 @@ from dataclasses import dataclass
 
 from api.analytics.military_score_inference.actions import DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
+from api.analytics.military_score_inference.military_sat_admission import (
+    STATUS_MILITARY_SAT_REFUSED,
+)
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -20,6 +23,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.military_score_inference.row_complete_factory import (
     row_complete_from_ladder_finalize,
     row_complete_stopped,
+    row_complete_with_summary,
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.models.game import TurnInfo
@@ -99,6 +103,10 @@ def _outcome_after_ladder_complete(
     observation: InferenceObservation,
     turn: TurnInfo,
 ) -> TierJobOutcome:
+    if state.last_status == STATUS_MILITARY_SAT_REFUSED and state.catalog is None:
+        result, *_ = finalize_policy_ladder_result(state, observation, turn)
+        return TierJobOutcome(row_complete=row_complete_with_summary(result))
+
     orchestration = run.orchestration
     if orchestration is not None:
         advance = orchestration.finish_ladder_segment(state, observation, turn)

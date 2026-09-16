@@ -7,6 +7,10 @@ from typing import Any
 
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.military_sat_admission import (
+    MILITARY_SAT_REFUSED_SUMMARY,
+    STATUS_MILITARY_SAT_REFUSED,
+)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -245,6 +249,8 @@ def format_inference_summary(
         return "Build inference halted"
     if result.status == STATUS_TIME_LIMITED and not result.solutions:
         return "Inference timed out before finding a solution"
+    if result.status == STATUS_MILITARY_SAT_REFUSED:
+        return MILITARY_SAT_REFUSED_SUMMARY
     if not result.solutions:
         return "No feasible build explanation found"
 
@@ -270,6 +276,15 @@ def _format_solution_brief(solution: InferenceSolution) -> str:
         else:
             parts.append(f"{ship_build.count}x {ship_build.label}")
     return "; ".join(parts) if parts else "no actions"
+
+
+def _inference_row_is_complete(
+    status: str,
+    solutions: tuple[InferenceSolution, ...],
+) -> bool:
+    if status == STATUS_MILITARY_SAT_REFUSED:
+        return False
+    return status != STATUS_TIME_LIMITED or len(solutions) == 0
 
 
 def inference_api_payload(
@@ -300,7 +315,8 @@ def inference_api_payload(
         # Zero-solution timeouts are terminal failures (visible error in the SPA).
         # Timeouts that already hold solutions stay incomplete so partial top-K can
         # keep streaming until a durable stop/persist path closes the row.
-        "isComplete": status != STATUS_TIME_LIMITED or len(solutions) == 0,
+        # Military SAT refusal is in-memory only until uncharacterized-roster persist.
+        "isComplete": _inference_row_is_complete(status, solutions),
         "solutions": (
             [
                 _serialize_solution_with_arithmetic(

@@ -1,8 +1,9 @@
-"""Unique-fill persist shape vs next-turn ship-build catalog width (#482).
+"""Unique-fill persist does not open next-turn ship-build catalog width (#487).
 
-A singleton option set unique-fills and opens a warship departure slot. A
-multi-hull fan without envelopes does not. With warship_delta == 0 that slot
-is the only warship build bound, so the precise persist is the wide catalog.
+A singleton option set unique-fills and is a decrease candidate, but it is not
+a departure pin. Extra warship replacement capacity requires known spec.
+A multi-hull fan without envelopes is still not a candidate. Envelope-only
+fans remain candidates but do not open extra-warship capacity.
 """
 
 from api.analytics.military_score_inference.prior_fleet_decrease_candidates import (
@@ -12,7 +13,6 @@ from api.analytics.military_score_inference.prior_fleet_decrease_candidates impo
 from api.analytics.military_score_inference.ship_build_combos import (
     GENERIC_FREIGHTER_COMBO_ID,
     generate_ship_build_combos,
-    ship_build_combo_id,
     ship_build_upper_bound,
 )
 from api.analytics.military_score_inference.ship_transfer_families import (
@@ -23,33 +23,10 @@ from api.concepts.ship_build_military import ship_build_military_score_delta_2x
 from tests.fixtures.military_score_inference import _observation
 from tests.fixtures.ship_transfer_families import (
     _enveloped_multi_hull_unknown_warship,
+    _known_warship_record,
     _multi_hull_unknown_warship,
     _singleton_unknown_hull_warship,
     _transfer_catalog_kwargs,
-)
-
-# Synthetic catalog product when extra_warship_capacity is 1 and slot mode is
-# "none": Serpent full beams, plus the fighter-bay carrier. Do not assert live
-# 683364 combo counts.
-_WIDE_WARSHIP_COMBO_IDS = frozenset(
-    {
-        ship_build_combo_id(
-            hull_id=24,
-            engine_id=1,
-            beam_id=1,
-            torp_id=None,
-            beam_count=2,
-            launcher_count=0,
-        ),
-        ship_build_combo_id(
-            hull_id=71,
-            engine_id=1,
-            beam_id=None,
-            torp_id=None,
-            beam_count=0,
-            launcher_count=0,
-        ),
-    }
 )
 
 
@@ -132,11 +109,12 @@ def test_enveloped_multi_hull_fan_is_interval_decrease_candidate(
     assert decrease_capacity_by_class(candidates) == (1, 0)
 
 
-def test_unique_fill_widens_net_zero_warship_catalog_vs_unenveloped_fan(
+def test_unique_fill_does_not_open_net_zero_warship_catalog(
     synthetic_catalog_context,
 ):
     military_2x = _singleton_fill_military_2x(synthetic_catalog_context)
     observation = _net_zero_observation(military_delta_2x=military_2x)
+    known, _ = _known_warship_record(synthetic_catalog_context)
 
     singleton = _fragment_for(
         synthetic_catalog_context, _singleton_unknown_hull_warship(), observation
@@ -145,13 +123,15 @@ def test_unique_fill_widens_net_zero_warship_catalog_vs_unenveloped_fan(
     enveloped = _fragment_for(
         synthetic_catalog_context, _enveloped_multi_hull_unknown_warship(), observation
     )
+    pinned = _fragment_for(synthetic_catalog_context, known, observation)
 
     assert singleton.prior_warship_departure_cap == 1
-    assert singleton.extra_warship_capacity == 1
+    assert singleton.extra_warship_capacity == 0
     assert fan.prior_warship_departure_cap == 0
     assert fan.extra_warship_capacity == 0
     assert enveloped.prior_warship_departure_cap == 1
-    assert enveloped.extra_warship_capacity == 1
+    assert enveloped.extra_warship_capacity == 0
+    assert pinned.extra_warship_capacity == 1
 
     assert (
         ship_build_upper_bound(
@@ -160,7 +140,7 @@ def test_unique_fill_widens_net_zero_warship_catalog_vs_unenveloped_fan(
             is_freighter=False,
             extra_warship_capacity=singleton.extra_warship_capacity,
         )
-        == 1
+        == 0
     )
     assert (
         ship_build_upper_bound(
@@ -170,6 +150,15 @@ def test_unique_fill_widens_net_zero_warship_catalog_vs_unenveloped_fan(
             extra_warship_capacity=fan.extra_warship_capacity,
         )
         == 0
+    )
+    assert (
+        ship_build_upper_bound(
+            observation,
+            is_warship=True,
+            is_freighter=False,
+            extra_warship_capacity=pinned.extra_warship_capacity,
+        )
+        == 1
     )
 
     singleton_combos = generate_ship_build_combos(
@@ -191,7 +180,7 @@ def test_unique_fill_widens_net_zero_warship_catalog_vs_unenveloped_fan(
         extra_freighter_capacity=enveloped.extra_freighter_capacity,
     )
 
-    assert _warship_combo_ids(singleton_combos) == _WIDE_WARSHIP_COMBO_IDS
+    assert _warship_combo_ids(singleton_combos) == frozenset()
     assert _warship_combo_ids(fan_combos) == frozenset()
     assert not any(combo.combo_id == GENERIC_FREIGHTER_COMBO_ID for combo in fan_combos)
-    assert _warship_combo_ids(enveloped_combos) == _WIDE_WARSHIP_COMBO_IDS
+    assert _warship_combo_ids(enveloped_combos) == frozenset()

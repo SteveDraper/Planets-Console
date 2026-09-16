@@ -99,6 +99,29 @@ def test_catalog_solver_genuine_loss_stays_exact_with_transfer_penalty(
     assert f"{SHIP_LOSS_ACTION_PREFIX}warship:point:{military_2x}" in best_action_ids
 
 
+def test_catalog_solver_spec_only_pin_still_priced_sat(synthetic_catalog_build_context):
+    records = tuple(
+        _known_warship_record(synthetic_catalog_build_context, record_id=f"same-{index}")[0]
+        for index in range(10)
+    )
+    _record, military_2x = _known_warship_record(synthetic_catalog_build_context)
+    observation = replace(
+        _observation(military_delta_2x=-military_2x, warship_delta=-1),
+        priority_point_delta=1,
+    )
+    catalog = build_action_catalog(
+        observation,
+        **synthetic_catalog_build_context,
+        prior_fleet_records=records,
+    )
+    result = solve_inference_problem(
+        build_inference_problem(observation, catalog, time_limit_seconds=5.0)
+    )
+    assert result.status == STATUS_EXACT
+    best_action_ids = {action.action_id for action in result.solutions[0].actions}
+    assert f"{SHIP_LOSS_ACTION_PREFIX}warship:point:{military_2x}" in best_action_ids
+
+
 def test_catalog_solver_class_flip_trade_when_matching_hull_is_not_first_group(
     synthetic_catalog_context,
 ):

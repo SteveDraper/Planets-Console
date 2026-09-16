@@ -52,6 +52,9 @@ from api.analytics.military_score_inference.inference_target import (
     observation_from_deltas,
     prior_scoreboard_row_score,
 )
+from api.analytics.military_score_inference.military_sat_admission import (
+    military_sat_refusal_from_turn,
+)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -308,7 +311,22 @@ def _run_corpus_prebuilt_inference(
     catalog: ActionCatalog,
     *,
     turn: TurnInfo | None = None,
-) -> tuple[InferenceResult, ActionCatalog, InferenceProblem, list[str], list[dict[str, object]]]:
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+) -> tuple[
+    InferenceResult,
+    ActionCatalog | None,
+    InferenceProblem | None,
+    list[str],
+    list[dict[str, object]],
+]:
+    if turn is not None:
+        refusal = military_sat_refusal_from_turn(
+            resolved_observation,
+            turn,
+            prior_fleet_records,
+        )
+        if refusal is not None:
+            return refusal, None, None, [], []
     race_id = (
         player_by_id(turn, resolved_observation.player_id).raceid if turn is not None else None
     )
@@ -386,7 +404,12 @@ def _run_solver_inference_path(
             assert path == InferencePath.CORPUS_PREBUILT
             assert solve_catalog is not None
             result, solve_catalog, problem, policy_steps_attempted, step_diagnostics = (
-                _run_corpus_prebuilt_inference(resolved_observation, solve_catalog, turn=turn)
+                _run_corpus_prebuilt_inference(
+                    resolved_observation,
+                    solve_catalog,
+                    turn=turn,
+                    prior_fleet_records=prior_fleet_records,
+                )
             )
         if solve_catalog is None or problem is None:
             return (

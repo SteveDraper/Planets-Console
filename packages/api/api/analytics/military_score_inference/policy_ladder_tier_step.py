@@ -23,6 +23,9 @@ from api.analytics.military_score_inference.degrade_aggregate_probe import (
     probe_degrade_aggregate_rewrites,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
+from api.analytics.military_score_inference.military_sat_admission import (
+    military_sat_refusal_from_turn,
+)
 from api.analytics.military_score_inference.military_score_window import (
     BandMilitaryScoreWindow,
     ExactMilitaryScoreWindow,
@@ -252,6 +255,18 @@ def run_policy_ladder_tier_step(
     if state.ladder_complete or state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True
         return
+
+    if state.catalog is None:
+        refusal = military_sat_refusal_from_turn(
+            observation,
+            turn,
+            state.prior_fleet_records,
+        )
+        if refusal is not None:
+            state.last_status = refusal.status
+            state.last_diagnostics = dict(refusal.diagnostics)
+            state.ladder_complete = True
+            return
 
     ladder_started_at = ensure_ladder_clock_started(state)
     step_index = state.next_step_index
