@@ -1,6 +1,8 @@
-"""SAT admission from count-lattice signal and departure pin (#487)."""
+"""SAT admission from departure pin-fail and unknown-class outgoing leaves."""
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 from api.analytics.fleet.types import FleetAcquisitionLedger
 from api.analytics.military_score_inference.count_lattice import (
@@ -21,9 +23,11 @@ from api.analytics.military_score_inference.military_sat_admission import (
     military_sat_refusal_result,
     resolve_military_sat_admission,
 )
-from api.analytics.military_score_inference.models import InferenceResult
+from api.analytics.military_score_inference.models import InferenceObservation, InferenceResult
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 from api.analytics.military_score_inference.public_scoreboard_pairing import (
+    PublicScoreboardPairing,
+    PublicScoreboardRow,
     classify_public_scoreboard_pairing,
     public_scoreboard_row_from_observation,
     transfer_budget_for_row,
@@ -31,21 +35,28 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
 
 from tests.fixtures.military_score_inference import _observation, without_player_minefields
+from tests.fixtures.pp_gap_transfer import federation_row, mixed_residual_receiver_row
 from tests.fixtures.ship_transfer_families import (
     _class_only_freighter_record,
     _known_warship_record,
     _multi_hull_unknown_warship,
+    _peer_row,
     _singleton_unknown_hull_warship,
 )
 
 PLAYER_ID = 8
+_EMPTY_PAIRING = PublicScoreboardPairing(
+    matches=(),
+    unmatched_warship_drop=0,
+    unmatched_freighter_drop=0,
+)
 
 
 def _ledger(*records):
     return FleetAcquisitionLedger(player_id=PLAYER_ID, records=list(records))
 
 
-def _signal(observation, *, peer_rows=(), settings=None):
+def _pairing_and_idle_dock(observation, *, peer_rows=(), settings=None):
     row = public_scoreboard_row_from_observation(observation)
     pairing = classify_public_scoreboard_pairing(
         row,
@@ -58,6 +69,11 @@ def _signal(observation, *, peer_rows=(), settings=None):
         settings=settings,
         is_after_ship_limit=observation.is_after_ship_limit,
     )
+    return pairing, idle_dock
+
+
+def _signal(observation, *, peer_rows=(), settings=None):
+    pairing, idle_dock = _pairing_and_idle_dock(observation, peer_rows=peer_rows, settings=settings)
     return count_lattice_signal(observation, pairing, idle_dock)
 
 
@@ -70,8 +86,38 @@ def _pin(observation, records, this_turn_ships=(), *, hulls_by_id):
     )
 
 
-def _admission(signal, pins):
-    return military_sat_admission(signal, pins)
+def _admission(signal, pins, pairing=_EMPTY_PAIRING):
+    return military_sat_admission(signal, pins, pairing)
+
+
+def _resolve(observation, records, hulls_by_id, *, peer_rows=(), settings=None):
+    pairing, idle_dock = _pairing_and_idle_dock(observation, peer_rows=peer_rows, settings=settings)
+    return resolve_military_sat_admission(
+        observation,
+        pairing=pairing,
+        idle_dock=idle_dock,
+        prior_ledger=FleetAcquisitionLedger(
+            player_id=observation.player_id,
+            records=list(records),
+        ),
+        this_turn_ships=(),
+        hulls_by_id=hulls_by_id,
+    )
+
+
+def _observation_from_row(row: PublicScoreboardRow) -> InferenceObservation:
+    return InferenceObservation(
+        player_id=row.player_id,
+        turn=15,
+        military_delta_2x=row.military_delta_2x,
+        warship_delta=row.warship_delta,
+        freighter_delta=row.freighter_delta,
+        priority_point_delta=row.priority_point_delta,
+        starbases_owned=row.starbases,
+        is_after_ship_limit=False,
+        planet_delta=row.planet_delta,
+        starbase_delta=row.starbase_delta,
+    )
 
 
 def _warship_drop_signal() -> CountLatticeSignal:
@@ -83,12 +129,6 @@ def _warship_drop_signal() -> CountLatticeSignal:
 def _freighter_drop_signal() -> CountLatticeSignal:
     return CountLatticeSignal(
         events=(CountLatticeClassEvent(ship_class="freighter", source="unmatched_drop", count=1),)
-    )
-
-
-def _unknown_class_signal() -> CountLatticeSignal:
-    return CountLatticeSignal(
-        events=(CountLatticeClassEvent(ship_class=None, source="pairing", count=1),)
     )
 
 
@@ -118,15 +158,9 @@ def test_unpinned_warship_drop_refuses_sat():
     assert refused.diagnostics["satAdmitted"] is False
 
 
-def test_missing_warship_pin_on_leave_signal_refuses_sat():
+def test_pin_absence_on_warship_lattice_event_is_not_fail():
     admission = _admission(_warship_drop_signal(), pins=())
-    assert admission.admitted is False
-    assert admission.refused_class == "warship"
-
-
-def test_unknown_class_signal_refuses_sat():
-    admission = _admission(_unknown_class_signal(), pins=())
-    assert admission.admitted is False
+    assert admission.admitted is True
     assert admission.refused_class is None
 
 
@@ -236,25 +270,10 @@ def test_unpinned_freighter_drop_with_class_only_record_admits_sat(
 
 def test_resolve_admission_uses_pin_not_unique_fill(synthetic_catalog_context):
     observation = _observation(warship_delta=-1, freighter_delta=0, military_delta_2x=-40)
-    row = public_scoreboard_row_from_observation(observation)
-    pairing = classify_public_scoreboard_pairing(
-        row,
-        (),
-        settings=None,
-        is_after_ship_limit=False,
-    )
-    idle_dock = transfer_budget_for_row(
-        row,
-        settings=None,
-        is_after_ship_limit=False,
-    )
-    admission = resolve_military_sat_admission(
+    admission = _resolve(
         observation,
-        pairing=pairing,
-        idle_dock=idle_dock,
-        prior_ledger=_ledger(_singleton_unknown_hull_warship()),
-        this_turn_ships=(),
-        hulls_by_id=synthetic_catalog_context["hulls_by_id"],
+        (_singleton_unknown_hull_warship(),),
+        synthetic_catalog_context["hulls_by_id"],
     )
     assert admission.admitted is False
     assert admission.refused_class == "warship"
@@ -371,3 +390,152 @@ def test_spec_only_pin_still_enters_sat(sample_turn, monkeypatch, synthetic_cata
     assert catalog is not None
     assert attempted
     assert sat_calls
+
+
+def _peer_score(
+    sample_turn, *, ownerid: int, shipchange: int, freighterchange: int, militarychange: int
+):
+    return replace(
+        sample_turn.scores[0],
+        ownerid=ownerid,
+        shipchange=shipchange,
+        freighterchange=freighterchange,
+        militarychange=militarychange,
+        planetchange=0,
+        starbasechange=0,
+    )
+
+
+def _turn_with_peer(sample_turn, observation, peer_score):
+    return replace(
+        without_player_minefields(sample_turn, observation.player_id),
+        scores=(peer_score,),
+    )
+
+
+def test_known_class_acquired_warship_with_no_drop_admits_sat(synthetic_catalog_context):
+    record, military_2x = _known_warship_record(synthetic_catalog_context)
+    observation = _observation(
+        warship_delta=1,
+        freighter_delta=0,
+        military_delta_2x=military_2x,
+    )
+    peer = _peer_row(3, warship=-1, military_2x=-military_2x)
+    pairing, _idle_dock = _pairing_and_idle_dock(observation, peer_rows=(peer,))
+    assert pairing.matches[0].family == "acquired"
+    assert pairing.matches[0].warship_delta == 1
+    admission = _resolve(
+        observation,
+        (record,),
+        synthetic_catalog_context["hulls_by_id"],
+        peer_rows=(peer,),
+    )
+    assert not any(pin.ship_class == "warship" for pin in admission.pins)
+    assert any(
+        event.source == "pairing" and event.ship_class == "warship"
+        for event in admission.signal.events
+    )
+    assert admission.admitted is True
+
+
+def test_class_flip_receiving_warship_admits_sat(synthetic_catalog_context):
+    observation = _observation(warship_delta=1, freighter_delta=-1, military_delta_2x=40)
+    peer = _peer_row(3, warship=-1, freighter=1, military_2x=-40)
+    pairing, _idle_dock = _pairing_and_idle_dock(observation, peer_rows=(peer,))
+    assert pairing.matches[0].family == "trade"
+    assert pairing.matches[0].warship_delta == 1
+    admission = _resolve(
+        observation,
+        (_class_only_freighter_record(),),
+        synthetic_catalog_context["hulls_by_id"],
+        peer_rows=(peer,),
+    )
+    assert any(
+        event.source == "pairing" and event.ship_class == "warship"
+        for event in admission.signal.events
+    )
+    assert not any(pin.ship_class == "warship" for pin in admission.pins)
+    assert any(pin.kind == "fail" and pin.ship_class == "freighter" for pin in admission.pins)
+    assert admission.admitted is True
+
+
+def test_class_flip_receiving_warship_still_enters_sat(sample_turn, monkeypatch):
+    sat_calls: list = []
+    _patch_sat(monkeypatch, sat_calls)
+    observation = _observation(warship_delta=1, freighter_delta=-1, military_delta_2x=40)
+    turn = _turn_with_peer(
+        sample_turn,
+        observation,
+        _peer_score(
+            sample_turn,
+            ownerid=3,
+            shipchange=-1,
+            freighterchange=1,
+            militarychange=-20,
+        ),
+    )
+    result, catalog, _problem, attempted, _ = solve_with_policy_ladder(
+        observation,
+        turn,
+        prior_fleet_records=(_class_only_freighter_record(),),
+    )
+    assert result.status != STATUS_MILITARY_SAT_REFUSED
+    assert catalog is not None
+    assert attempted
+    assert sat_calls
+
+
+def test_count_flat_military_trade_admits_sat(synthetic_catalog_context):
+    observation = _observation(warship_delta=0, freighter_delta=0, military_delta_2x=-40)
+    peer = _peer_row(3, warship=0, military_2x=40)
+    pairing, _idle_dock = _pairing_and_idle_dock(observation, peer_rows=(peer,))
+    assert pairing.matches[0].family == "trade"
+    assert pairing.matches[0].warship_delta == 0
+    admission = _resolve(
+        observation,
+        (),
+        synthetic_catalog_context["hulls_by_id"],
+        peer_rows=(peer,),
+    )
+    assert any(
+        event.source == "pairing" and event.ship_class is None for event in admission.signal.events
+    )
+    assert admission.pins == ()
+    assert admission.admitted is True
+
+
+def test_outgoing_unpinned_warship_gift_refuses_sat(synthetic_catalog_context):
+    observation = _observation(warship_delta=-1, freighter_delta=0, military_delta_2x=-40)
+    peer = _peer_row(3, warship=1, military_2x=40)
+    pairing, _idle_dock = _pairing_and_idle_dock(observation, peer_rows=(peer,))
+    assert pairing.matches[0].family == "gift"
+    assert pairing.matches[0].warship_delta == -1
+    admission = _resolve(
+        observation,
+        (_singleton_unknown_hull_warship(),),
+        synthetic_catalog_context["hulls_by_id"],
+        peer_rows=(peer,),
+    )
+    assert admission.pins == (DeparturePin(kind="fail", ship_class="warship"),)
+    assert admission.admitted is False
+    assert admission.refused_class == "warship"
+
+
+def test_unknown_class_outgoing_gift_refuses_sat(sample_turn, synthetic_catalog_context):
+    observation = _observation_from_row(federation_row())
+    peer = mixed_residual_receiver_row()
+    pairing, _idle_dock = _pairing_and_idle_dock(
+        observation, peer_rows=(peer,), settings=sample_turn.settings
+    )
+    assert pairing.matches[0].family == "gift"
+    assert pairing.matches[0].is_unpinned_class_choice()
+    admission = _resolve(
+        observation,
+        (),
+        synthetic_catalog_context["hulls_by_id"],
+        peer_rows=(peer,),
+        settings=sample_turn.settings,
+    )
+    assert admission.pins == ()
+    assert admission.admitted is False
+    assert admission.refused_class is None
