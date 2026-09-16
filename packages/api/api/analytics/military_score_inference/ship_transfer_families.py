@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from api.analytics.fleet.types import FleetShipClass, FleetShipRecord
+from api.analytics.military_score_inference.count_lattice import record_has_known_spec
 from api.analytics.military_score_inference.models import CandidateAction, InferenceObservation
 from api.analytics.military_score_inference.prior_fleet_decrease_candidates import (
     PriorFleetDecreaseCandidate,
@@ -108,10 +109,10 @@ def ship_transfer_combo_capacity(
 ) -> tuple[int, int, int, int, int]:
     """Warship/freighter extra combo capacity and reserved incoming acquired counts.
 
-    Extra combo slots are prior-fleet departures when the class did not grow, so
-    loss+replace (net 0) can still build. Incoming acquired counts are reserved
-    out of the build bound so they are not explained as ship-build combos.
-    Reserved incoming is ``this_budget.excess_in`` (class-split when the
+    Extra combo slots are caller-supplied departure capacity when the class did
+    not grow, so loss+replace (net 0) can still build. Incoming acquired counts
+    are reserved out of the build bound so they are not explained as ship-build
+    combos. Reserved incoming is ``this_budget.excess_in`` (class-split when the
     receiver residual pins warship or freighter; unknown class reserves the
     total only). Pairing names counterparties; it does not size the reserve.
     """
@@ -223,10 +224,14 @@ def build_ship_transfer_catalog_fragment(
     prior_warship_departure_cap, prior_freighter_departure_cap = decrease_capacity_by_class(
         candidates
     )
+    known_spec_warship_cap, known_spec_freighter_cap = _known_spec_decrease_capacity(
+        prior_fleet_records,
+        candidates,
+    )
     extra_warship, extra_freighter, *_ = ship_transfer_combo_capacity(
         observation,
-        prior_warship_departure_cap,
-        prior_freighter_departure_cap,
+        known_spec_warship_cap,
+        known_spec_freighter_cap,
         this_budget=this_budget,
     )
     acquired = incoming_acquired_budget(this_row, this_budget)
@@ -243,6 +248,17 @@ def build_ship_transfer_catalog_fragment(
         prior_warship_departure_cap=prior_warship_departure_cap,
         prior_freighter_departure_cap=prior_freighter_departure_cap,
         prior_departure_group_caps=_prior_departure_group_caps(candidates),
+    )
+
+
+def _known_spec_decrease_capacity(
+    records: tuple[FleetShipRecord, ...],
+    candidates: tuple[PriorFleetDecreaseCandidate, ...],
+) -> tuple[int, int]:
+    """Replacement combo slots come from known spec, not unique-fill or envelopes."""
+    known_ids = {record.record_id for record in records if record_has_known_spec(record)}
+    return decrease_capacity_by_class(
+        tuple(candidate for candidate in candidates if candidate.record_id in known_ids)
     )
 
 
