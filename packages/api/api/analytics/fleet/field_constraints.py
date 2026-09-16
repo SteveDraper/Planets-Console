@@ -21,6 +21,16 @@ def known_positive_component_id(field: FleetFieldConstraint) -> int | None:
     return value
 
 
+def known_non_negative_component_id(field: FleetFieldConstraint) -> int | None:
+    """Known integer component id, including confirmed-empty ``0`` mounts."""
+    if not isinstance(field, FleetFieldKnown):
+        return None
+    value = field.value
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    return value
+
+
 def known_built_turn_value(record: FleetShipRecord) -> int | None:
     built_turn = record.fields.built_turn
     if isinstance(built_turn, FleetFieldKnown) and isinstance(built_turn.value, int):

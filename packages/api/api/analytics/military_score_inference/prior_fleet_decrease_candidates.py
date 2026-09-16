@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from api.analytics.fleet.field_constraints import (
+    known_non_negative_component_id,
+    known_positive_component_id,
+)
 from api.analytics.fleet.ship_class import record_ship_class
 from api.analytics.fleet.types import (
     FleetBuildOptionSet,
-    FleetFieldKnown,
     FleetShipClass,
     FleetShipRecord,
 )
@@ -135,7 +138,7 @@ def _known_fill_military_2x(
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
 ) -> int | None:
-    hull_id = _known_positive_id(record.fields.hull)
+    hull_id = known_positive_component_id(record.fields.hull)
     if hull_id is None:
         hull_id = _unique_option_hull_id(record.build_option_sets)
     if hull_id is None:
@@ -148,9 +151,9 @@ def _known_fill_military_2x(
     if hull is None:
         return None
     option_set = _unique_bounded_option_set(record.build_option_sets, hull_id=hull_id)
-    engine_id = _known_positive_id(record.fields.engine)
-    beam_id = _known_non_negative_id(record.fields.beams)
-    torp_id = _known_non_negative_id(record.fields.launchers)
+    engine_id = known_positive_component_id(record.fields.engine)
+    beam_id = known_non_negative_component_id(record.fields.beams)
+    torp_id = known_non_negative_component_id(record.fields.launchers)
     beam_count = None
     launcher_count = None
     if option_set is not None:
@@ -176,24 +179,6 @@ def _known_fill_military_2x(
         beam_count=beam_count,
         launcher_count=launcher_count,
     )
-
-
-def _known_positive_id(constraint: object) -> int | None:
-    if not isinstance(constraint, FleetFieldKnown):
-        return None
-    value = constraint.value
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        return None
-    return value
-
-
-def _known_non_negative_id(constraint: object) -> int | None:
-    if not isinstance(constraint, FleetFieldKnown):
-        return None
-    value = constraint.value
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        return None
-    return value
 
 
 def _unique_option_hull_id(option_sets: list[FleetBuildOptionSet]) -> int | None:
