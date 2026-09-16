@@ -18,8 +18,7 @@ from api.analytics.military_score_inference.hopeless_classifier import (
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.military_sat_admission import (
-    military_sat_refusal_result,
-    resolve_military_sat_admission_from_turn,
+    STATUS_MILITARY_SAT_REFUSED,
 )
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -109,6 +108,18 @@ def finalize_policy_ladder_result(
     merged_solutions = list(state.merged_solutions)
 
     if catalog is None or problem is None:
+        if state.last_status == STATUS_MILITARY_SAT_REFUSED:
+            return (
+                InferenceResult(
+                    status=STATUS_MILITARY_SAT_REFUSED,
+                    solutions=(),
+                    diagnostics=dict(state.last_diagnostics),
+                ),
+                None,
+                None,
+                state.policy_steps_attempted,
+                state.step_diagnostics,
+            )
         return (
             _missing_tier_state_result(state, merged_solutions),
             None,
@@ -220,15 +231,6 @@ def solve_with_policy_ladder(
     absolute floor even when soft-global remainder is already <= 0. Steps with
     ``min_seconds == 0`` and zero spendable skip inside the tier step.
     """
-    refusal = military_sat_refusal_result(
-        resolve_military_sat_admission_from_turn(
-            observation,
-            turn,
-            prior_fleet_records,
-        )
-    )
-    if refusal is not None:
-        return refusal, None, None, [], []
     resolved_max_solutions = max_solutions if max_solutions is not None else 20
     resolved_hopeless = hopeless_context
     if resolved_hopeless is None:

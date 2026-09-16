@@ -53,8 +53,7 @@ from api.analytics.military_score_inference.inference_target import (
     prior_scoreboard_row_score,
 )
 from api.analytics.military_score_inference.military_sat_admission import (
-    military_sat_refusal_result,
-    resolve_military_sat_admission_from_turn,
+    military_sat_refusal_from_turn,
 )
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -321,12 +320,10 @@ def _run_corpus_prebuilt_inference(
     list[dict[str, object]],
 ]:
     if turn is not None:
-        refusal = military_sat_refusal_result(
-            resolve_military_sat_admission_from_turn(
-                resolved_observation,
-                turn,
-                prior_fleet_records,
-            )
+        refusal = military_sat_refusal_from_turn(
+            resolved_observation,
+            turn,
+            prior_fleet_records,
         )
         if refusal is not None:
             return refusal, None, None, [], []

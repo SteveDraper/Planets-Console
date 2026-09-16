@@ -9,9 +9,7 @@ from dataclasses import dataclass
 from api.analytics.military_score_inference.actions import DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.military_sat_admission import (
-    MILITARY_SAT_REFUSED_SUMMARY,
-    military_sat_refusal_result,
-    resolve_military_sat_admission_from_turn,
+    STATUS_MILITARY_SAT_REFUSED,
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
@@ -105,6 +103,10 @@ def _outcome_after_ladder_complete(
     observation: InferenceObservation,
     turn: TurnInfo,
 ) -> TierJobOutcome:
+    if state.last_status == STATUS_MILITARY_SAT_REFUSED and state.catalog is None:
+        result, *_ = finalize_policy_ladder_result(state, observation, turn)
+        return TierJobOutcome(row_complete=row_complete_with_summary(result))
+
     orchestration = run.orchestration
     if orchestration is not None:
         advance = orchestration.finish_ladder_segment(state, observation, turn)
@@ -172,20 +174,6 @@ def _run_inference_tier_job_locked(
         return _outcome_when_accelerated_segments_exhausted(run)
 
     observation, turn = solve_context(run)
-    refusal = military_sat_refusal_result(
-        resolve_military_sat_admission_from_turn(
-            observation,
-            turn,
-            state.prior_fleet_records,
-        )
-    )
-    if refusal is not None:
-        return TierJobOutcome(
-            row_complete=row_complete_with_summary(
-                refusal,
-                summary=MILITARY_SAT_REFUSED_SUMMARY,
-            )
-        )
 
     def on_admitted(_solution: InferenceSolution) -> None:
         if orchestration is None or orchestration.should_emit_streaming_solutions():

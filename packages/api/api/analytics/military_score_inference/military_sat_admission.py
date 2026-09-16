@@ -163,3 +163,18 @@ def military_sat_refusal_result(
             "satAdmitted": False,
         },
     )
+
+
+def military_sat_refusal_from_turn(
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+) -> InferenceResult | None:
+    """Refuse result for a turn, or None when SAT may run."""
+    return military_sat_refusal_result(
+        resolve_military_sat_admission_from_turn(
+            observation,
+            turn,
+            prior_fleet_records,
+        )
+    )

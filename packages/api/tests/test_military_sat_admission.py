@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 from api.analytics.fleet.types import FleetAcquisitionLedger
+from api.analytics.military_score_inference.accelerated_start import (
+    ACCEL_WINDOW_SEGMENT_ID,
+    REPORTED_HOST_TURN_SEGMENT_ID,
+    AcceleratedInferenceSegment,
+)
+from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.analytic import _run_corpus_prebuilt_inference
 from api.analytics.military_score_inference.count_lattice import (
     CountLatticeClassEvent,
     CountLatticeSignal,
@@ -16,6 +23,18 @@ from api.analytics.military_score_inference.inference_api_payload import (
     format_inference_summary,
     inference_api_payload,
 )
+from api.analytics.military_score_inference.inference_path import InferencePath
+from api.analytics.military_score_inference.inference_row_runner import (
+    InferenceTierJobCallbacks,
+    run_inference_tier_job,
+)
+from api.analytics.military_score_inference.inference_stream_orchestration import (
+    InferenceStreamOrchestration,
+    new_ladder_state,
+)
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
+)
 from api.analytics.military_score_inference.military_sat_admission import (
     STATUS_MILITARY_SAT_REFUSED,
     class_can_move_military,
@@ -25,6 +44,10 @@ from api.analytics.military_score_inference.military_sat_admission import (
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceResult
 from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_tier_step import (
+    run_policy_ladder_tier_step,
+)
 from api.analytics.military_score_inference.public_scoreboard_pairing import (
     PublicScoreboardPairing,
     PublicScoreboardRow,
@@ -32,7 +55,9 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
     public_scoreboard_row_from_observation,
     transfer_budget_for_row,
 )
+from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
 from tests.fixtures.military_score_inference import _observation, without_player_minefields
 from tests.fixtures.pp_gap_transfer import federation_row, mixed_residual_receiver_row
@@ -315,23 +340,40 @@ def _patch_sat(monkeypatch, calls: list):
     )
 
 
-def test_unpinned_warship_drop_does_not_build_catalog_or_run_sat(sample_turn, monkeypatch):
-    sat_calls: list = []
-    catalog_calls: list = []
-
+def _patch_catalog_must_not_build(monkeypatch, calls: list):
     def _catalog(*args, **kwargs):
-        catalog_calls.append(1)
+        calls.append(1)
         raise AssertionError("military catalog must not be built")
 
-    _patch_sat(monkeypatch, sat_calls)
     monkeypatch.setattr(
         "api.analytics.military_score_inference.policy_ladder_tier_step.build_action_catalog_from_turn",
         _catalog,
     )
+
+
+def _unpinned_warship_drop_observation_turn(sample_turn):
     observation = _observation(warship_delta=-1, freighter_delta=0, military_delta_2x=-40)
+    turn = without_player_minefields(sample_turn, observation.player_id)
+    return observation, turn
+
+
+def _quiet_tier_job_callbacks():
+    return InferenceTierJobCallbacks(
+        emit_tier_started_progress=lambda: None,
+        emit_progress=lambda: None,
+        emit_held_solutions=lambda _observation: None,
+    )
+
+
+def test_unpinned_warship_drop_does_not_build_catalog_or_run_sat(sample_turn, monkeypatch):
+    sat_calls: list = []
+    catalog_calls: list = []
+    _patch_sat(monkeypatch, sat_calls)
+    _patch_catalog_must_not_build(monkeypatch, catalog_calls)
+    observation, turn = _unpinned_warship_drop_observation_turn(sample_turn)
     result, catalog, problem, attempted, _ = solve_with_policy_ladder(
         observation,
-        without_player_minefields(sample_turn, observation.player_id),
+        turn,
         prior_fleet_records=(_singleton_unknown_hull_warship(),),
     )
     assert result.status == STATUS_MILITARY_SAT_REFUSED
@@ -539,3 +581,145 @@ def test_unknown_class_outgoing_gift_refuses_sat(sample_turn, synthetic_catalog_
     assert admission.pins == ()
     assert admission.admitted is False
     assert admission.refused_class is None
+
+
+def test_tier_step_refuses_before_catalog_or_sat(sample_turn, monkeypatch):
+    sat_calls: list = []
+    catalog_calls: list = []
+    _patch_sat(monkeypatch, sat_calls)
+    _patch_catalog_must_not_build(monkeypatch, catalog_calls)
+    observation, turn = _unpinned_warship_drop_observation_turn(sample_turn)
+    state = PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies(None)),
+        prior_fleet_records=(_singleton_unknown_hull_warship(),),
+    )
+    run_policy_ladder_tier_step(
+        state,
+        observation,
+        turn,
+        time_limit_seconds=1.0,
+    )
+    assert state.ladder_complete is True
+    assert state.catalog is None
+    assert state.problem is None
+    assert state.last_status == STATUS_MILITARY_SAT_REFUSED
+    assert state.policy_steps_attempted == []
+    assert state.started_at is None
+    assert sat_calls == []
+    assert catalog_calls == []
+
+
+def test_stream_tier_job_surfaces_military_sat_refused_without_sat(sample_turn, monkeypatch):
+    sat_calls: list = []
+    catalog_calls: list = []
+    _patch_sat(monkeypatch, sat_calls)
+    _patch_catalog_must_not_build(monkeypatch, catalog_calls)
+    observation, turn = _unpinned_warship_drop_observation_turn(sample_turn)
+    session = InferenceRowStreamSession(
+        player_id=observation.player_id,
+        observation=observation,
+        turn=turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=turn.settings.turn,
+        prior_fleet_records=(_singleton_unknown_hull_warship(),),
+    )
+    run = RowRun(session)
+    run.ladder_state = new_ladder_state(session)
+    outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
+    assert outcome.enqueue_continuation is False
+    assert outcome.row_complete is not None
+    assert outcome.row_complete.result.status == STATUS_MILITARY_SAT_REFUSED
+    assert outcome.row_complete.wire_payload.is_complete is False
+    assert sat_calls == []
+    assert catalog_calls == []
+
+
+def test_stream_sat_refuse_does_not_continue_accelerated_segments(sample_turn, monkeypatch):
+    sat_calls: list = []
+    catalog_calls: list = []
+    _patch_sat(monkeypatch, sat_calls)
+    _patch_catalog_must_not_build(monkeypatch, catalog_calls)
+    observation, turn = _unpinned_warship_drop_observation_turn(sample_turn)
+    score = next(row for row in turn.scores if row.ownerid == observation.player_id)
+    orchestration = InferenceStreamOrchestration(
+        path=InferencePath.ACCELERATED_SPLIT,
+        row_score=score,
+        row_turn=turn,
+        solve_score=score,
+        solve_turn=turn,
+        segments=(
+            AcceleratedInferenceSegment(
+                segment_id=ACCEL_WINDOW_SEGMENT_ID,
+                host_turn=1,
+                military_delta_2x=-40,
+                warship_delta=-1,
+                freighter_delta=0,
+                priority_point_delta=0,
+            ),
+            AcceleratedInferenceSegment(
+                segment_id=REPORTED_HOST_TURN_SEGMENT_ID,
+                host_turn=2,
+                military_delta_2x=20,
+                warship_delta=1,
+                freighter_delta=0,
+                priority_point_delta=0,
+            ),
+        ),
+    )
+    session = InferenceRowStreamSession(
+        player_id=observation.player_id,
+        observation=observation,
+        turn=turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=turn.settings.turn,
+        prior_fleet_records=(_singleton_unknown_hull_warship(),),
+    )
+    run = RowRun(session)
+    run.orchestration = orchestration
+    run.ladder_state = orchestration.new_ladder_state(session)
+    outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
+    assert outcome.enqueue_continuation is False
+    assert outcome.next_ladder_state is None
+    assert outcome.row_complete is not None
+    assert outcome.row_complete.result.status == STATUS_MILITARY_SAT_REFUSED
+    assert outcome.row_complete.wire_payload.is_complete is False
+    assert orchestration.segment_solves == []
+    assert sat_calls == []
+    assert catalog_calls == []
+
+
+def test_corpus_prebuilt_does_not_run_sat_when_refused(sample_turn, monkeypatch):
+    sat_calls: list = []
+    problem_calls: list = []
+
+    def _solve(problem, **kwargs):
+        sat_calls.append(problem)
+        return InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={})
+
+    def _problem(*args, **kwargs):
+        problem_calls.append(1)
+        raise AssertionError("corpus SAT must not build a problem when refused")
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.analytic.solve_inference_problem",
+        _solve,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.analytic.build_inference_problem",
+        _problem,
+    )
+    observation, turn = _unpinned_warship_drop_observation_turn(sample_turn)
+    result, catalog, problem, attempted, _ = _run_corpus_prebuilt_inference(
+        observation,
+        ActionCatalog((), (), {}),
+        turn=turn,
+        prior_fleet_records=(_singleton_unknown_hull_warship(),),
+    )
+    assert result.status == STATUS_MILITARY_SAT_REFUSED
+    assert catalog is None
+    assert problem is None
+    assert attempted == []
+    assert sat_calls == []
+    assert problem_calls == []
