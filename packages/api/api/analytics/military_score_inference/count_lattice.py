@@ -57,6 +57,13 @@ class DeparturePin:
     record_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ClassRemainderSet:
+    ship_class: FleetShipClass
+    remainders: tuple[FleetShipRecord, ...]
+    drop: int
+
+
 def count_lattice_signal(
     observation: InferenceObservation,
     pairing: PublicScoreboardPairing,
@@ -150,28 +157,15 @@ def departure_pin(
     Omit a class when D <= 0 (no departure to pin). Exact-set names
     ``record_id``s. Spec-only and fail do not. Unique-fill is not a pin.
     """
-    alibi_ids = _alibi_ship_ids(this_turn_ships, observation.player_id)
-    remainders_by_class: dict[FleetShipClass, list[FleetShipRecord]] = {
-        "warship": [],
-        "freighter": [],
-    }
-    for record in prior_ledger.records:
-        if record.disposition != "active":
-            continue
-        ship_id = known_ship_id_value(record)
-        if ship_id is not None and ship_id in alibi_ids:
-            continue
-        ship_class = record_ship_class(record, hulls_by_id)
-        if ship_class is None:
-            continue
-        remainders_by_class[ship_class].append(record)
+    remainder_sets = _remainder_sets_after_alibi(
+        observation,
+        prior_ledger,
+        this_turn_ships,
+        hulls_by_id=hulls_by_id,
+    )
     pins: list[DeparturePin] = []
-    for ship_class, remainders in remainders_by_class.items():
-        pin = _pin_class(
-            ship_class,
-            remainders,
-            _class_drop(observation, ship_class),
-        )
+    for remainder_set in remainder_sets:
+        pin = _pin_class(remainder_set)
         if pin is not None:
             pins.append(pin)
     return tuple(pins)
@@ -189,13 +183,44 @@ def _class_drop(observation: InferenceObservation, ship_class: FleetShipClass) -
     return max(0, -observation.freighter_delta)
 
 
-def _pin_class(
-    ship_class: FleetShipClass,
-    remainders: list[FleetShipRecord],
-    drop: int,
-) -> DeparturePin | None:
+def _remainder_sets_after_alibi(
+    observation: InferenceObservation,
+    prior_ledger: FleetAcquisitionLedger,
+    this_turn_ships: Sequence[Ship],
+    *,
+    hulls_by_id: dict[int, Hull],
+) -> tuple[ClassRemainderSet, ...]:
+    alibi_ids = _alibi_ship_ids(this_turn_ships, observation.player_id)
+    remainders_by_class: dict[FleetShipClass, list[FleetShipRecord]] = {
+        "warship": [],
+        "freighter": [],
+    }
+    for record in prior_ledger.records:
+        if record.disposition != "active":
+            continue
+        ship_id = known_ship_id_value(record)
+        if ship_id is not None and ship_id in alibi_ids:
+            continue
+        ship_class = record_ship_class(record, hulls_by_id)
+        if ship_class is None:
+            continue
+        remainders_by_class[ship_class].append(record)
+    return tuple(
+        ClassRemainderSet(
+            ship_class=ship_class,
+            remainders=tuple(remainders),
+            drop=_class_drop(observation, ship_class),
+        )
+        for ship_class, remainders in remainders_by_class.items()
+    )
+
+
+def _pin_class(remainder_set: ClassRemainderSet) -> DeparturePin | None:
+    drop = remainder_set.drop
     if drop <= 0:
         return None
+    remainders = remainder_set.remainders
+    ship_class = remainder_set.ship_class
     spec_keys = [_known_spec_key(record) for record in remainders]
     if any(spec_key is None for spec_key in spec_keys):
         return DeparturePin(kind="fail", ship_class=ship_class)
