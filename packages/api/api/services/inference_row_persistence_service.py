@@ -163,7 +163,8 @@ class InferenceRowPersistenceService:
     ) -> bool:
         """True when the prior host-turn persisted row is ``mine_score_residual``.
 
-        Skip, ``no_exact_solution``, and ``moderate_residual`` do not set sticky.
+        Skip, ``no_exact_solution``, ``moderate_residual``, and
+        ``uncharacterized_roster`` do not set sticky.
         Readers (hopeless classifier) derive sticky from this persist, not a flag.
         """
         if host_turn <= 1:

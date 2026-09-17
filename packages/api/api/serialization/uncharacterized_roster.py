@@ -1,8 +1,6 @@
 """Codecs for uncharacterized-roster leftover, departures, and lattice signatures.
 
-Phase 3 introduces the in-memory / live-payload shape. Durable persist of these
-fields is phase 4 -- do not encode an unknown-loss bound as a point
-``unexplainedMilitaryDelta2x``.
+Do not encode an unknown-loss bound as a point ``unexplainedMilitaryDelta2x``.
 """
 
 from __future__ import annotations

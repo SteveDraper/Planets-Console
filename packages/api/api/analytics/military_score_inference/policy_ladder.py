@@ -181,10 +181,23 @@ def finalize_policy_ladder_result(
     bound = worthwhile_remainder_bound_for_turn(observation, turn)
     if bound is not None:
         diagnostics.update(worthwhile_remainder_bound_diagnostics(bound))
+    departure_pins = None
+    if status == STATUS_EXACT:
+        from api.analytics.military_score_inference.departure_pin_persist import (
+            persistable_departure_pins_from_turn,
+        )
+
+        pins = persistable_departure_pins_from_turn(
+            observation,
+            turn,
+            state.prior_fleet_records,
+        )
+        departure_pins = pins or None
     result = InferenceResult(
         status=status,
         solutions=tuple(merged_solutions),
         diagnostics=diagnostics,
+        departure_pins=departure_pins,
     )
     return (
         result,

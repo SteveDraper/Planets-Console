@@ -21,7 +21,10 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_STOPPED
-from api.serialization.inference_row_persistence import PersistedInferenceRow
+from api.serialization.inference_row_persistence import (
+    PersistedInferenceRow,
+    wire_complete_from_persisted_row,
+)
 from api.transport.inference_stream import inference_complete_functional_fields
 
 TerminalWireSearchStatus = Literal["complete", "stopped"]
@@ -154,11 +157,7 @@ def product_fields_from_persisted_row(
     persisted_row: PersistedInferenceRow,
 ) -> InferenceProductPayload:
     """Extract product status, placeholders, and leftover from a persisted inference row."""
-    return product_payload_fields(
-        persisted_row.status,
-        placeholders=persisted_row.placeholders,
-        leftover=persisted_row.unexplained_military_delta_2x,
-    )
+    return product_fields_from_wire_complete(wire_complete_from_persisted_row(persisted_row))
 
 
 def solutions_from_persisted_row(

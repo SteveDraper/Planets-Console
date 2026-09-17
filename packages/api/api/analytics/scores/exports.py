@@ -58,6 +58,8 @@ PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.status", requires=("player_id",)),
     PathPrefixScopeRule(prefix="$.placeholders", requires=("player_id",)),
     PathPrefixScopeRule(prefix="$.unexplainedMilitaryDelta2x", requires=("player_id",)),
+    PathPrefixScopeRule(prefix="$.leftover", requires=("player_id",)),
+    PathPrefixScopeRule(prefix="$.latticeSignatures", requires=("player_id",)),
 )
 
 ORDERING_SEMANTICS = {
@@ -488,6 +490,10 @@ def build_scores_export_materialized_tree(
         tree["placeholders"] = product.placeholders
     if product.unexplained_military_delta_2x is not None:
         tree["unexplainedMilitaryDelta2x"] = product.unexplained_military_delta_2x
+    if product.leftover is not None:
+        tree["leftover"] = product.leftover
+    if product.lattice_signatures is not None:
+        tree["latticeSignatures"] = product.lattice_signatures
     if payload.diagnostics is not None:
         tree["diagnostics"] = payload.diagnostics
     tier_emissions = _tier_emissions_from_resolved(resolved)

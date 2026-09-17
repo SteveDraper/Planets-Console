@@ -20,7 +20,10 @@ from api.analytics.military_score_inference.solver import (
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
-from api.analytics.scores.export_wire import ranked_solutions_from_wire
+from api.analytics.scores.export_wire import (
+    product_fields_from_persisted_row,
+    ranked_solutions_from_wire,
+)
 from api.concepts.accelerated_scoreboard import first_reliable_accelerated_scoreboard_turn
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
@@ -113,11 +116,7 @@ def _payload_for_host_turn_from_row(
         solutions=ranked_solutions_from_wire(row.solutions),
         solutions_held=row.solution_count,
         search_status=_search_status_from_persisted_row(row),
-        product=product_payload_fields(
-            row.status,
-            placeholders=row.placeholders,
-            leftover=row.unexplained_military_delta_2x,
-        ),
+        product=product_fields_from_persisted_row(row),
     )
 
 

@@ -85,6 +85,7 @@ def inference_complete_event(
     unexplained_military_delta_2x: int | None = None,
     leftover: dict[str, object] | None = None,
     lattice_signatures: list[dict[str, object]] | None = None,
+    departure_pins: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "complete",
@@ -103,6 +104,8 @@ def inference_complete_event(
         payload["leftover"] = leftover
     if lattice_signatures is not None:
         payload["latticeSignatures"] = lattice_signatures
+    if departure_pins is not None:
+        payload["departurePins"] = departure_pins
     if diagnostics is not None:
         payload["diagnostics"] = diagnostics
     if host_turn_targets is not None:

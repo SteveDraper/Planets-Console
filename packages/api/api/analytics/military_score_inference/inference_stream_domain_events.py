@@ -41,6 +41,7 @@ class RowCompleteWirePayload:
     unexplained_military_delta_2x: int | None = None
     leftover: dict[str, object] | None = None
     lattice_signatures: list[dict[str, object]] | None = None
+    departure_pins: list[dict[str, object]] | None = None
 
 
 @dataclass(frozen=True)

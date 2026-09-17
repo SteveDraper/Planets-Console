@@ -252,3 +252,4 @@ class InferenceResult:
     placeholder_departures: tuple[PlaceholderDeparture, ...] = ()
     leftover: UnknownLossLeftover | None = None
     lattice_signatures: tuple[LatticeSignature, ...] = ()
+    departure_pins: list[dict[str, object]] | None = None

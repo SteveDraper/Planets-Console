@@ -32,6 +32,9 @@ from api.analytics.military_score_inference.solver import (
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
 )
+from api.analytics.military_score_inference.uncharacterized_roster import (
+    STATUS_UNCHARACTERIZED_ROSTER,
+)
 from api.analytics.scores.export_precedence import (
     is_durable_turn_evidence_row_status,
     resolve_scores_export,
@@ -60,6 +63,7 @@ def test_complete_search_statuses_are_persistable_union_fallback_complete():
         STATUS_NO_EXACT_SOLUTION,
         STATUS_MODERATE_RESIDUAL,
         STATUS_MINE_SCORE_RESIDUAL,
+        STATUS_UNCHARACTERIZED_ROSTER,
         STATUS_INVALID_PROBLEM,
         STATUS_SOLVER_ERROR,
         *INFERENCE_ADMISSION_SKIP_STATUSES,

@@ -83,6 +83,7 @@ PERSISTABLE_INFERENCE_STATUSES = frozenset(
         STATUS_NO_EXACT_SOLUTION,
         STATUS_MODERATE_RESIDUAL,
         STATUS_MINE_SCORE_RESIDUAL,
+        STATUS_UNCHARACTERIZED_ROSTER,
     }
 )
 FALLBACK_COMPLETE_PERSISTED_STATUSES = INFERENCE_ADMISSION_SKIP_STATUSES | frozenset(
@@ -211,6 +212,7 @@ def inference_result_to_api_payload(
         leftover=result.leftover,
         placeholder_departures=result.placeholder_departures,
         lattice_signatures=result.lattice_signatures,
+        departure_pins=result.departure_pins,
     )
 
 
@@ -337,6 +339,7 @@ def inference_api_payload(
     leftover: UnknownLossLeftover | None = None,
     placeholder_departures: tuple[PlaceholderDeparture, ...] = (),
     lattice_signatures: tuple[LatticeSignature, ...] = (),
+    departure_pins: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
         fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
@@ -368,7 +371,7 @@ def inference_api_payload(
         # Zero-solution timeouts are terminal failures (visible error in the SPA).
         # Timeouts that already hold solutions stay incomplete so partial top-K can
         # keep streaming until a durable stop/persist path closes the row.
-        # Uncharacterized roster is a closed in-memory product; persist is phase 4.
+        # Uncharacterized roster is a closed product (no in-flight solution events).
         "isComplete": _inference_row_is_complete(status, solutions),
         "solutions": (
             [
@@ -393,6 +396,8 @@ def inference_api_payload(
         payload["leftover"] = leftover_wire
     if signatures_wire is not None:
         payload["latticeSignatures"] = signatures_wire
+    if departure_pins:
+        payload["departurePins"] = departure_pins
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:

@@ -1,7 +1,8 @@
 """Case-2 emit: placeholder departures, unknown-loss leftover, lattice signatures.
 
 In-memory product for refused military SAT (unpinned military-moving class).
-Persist / stream / export of the status is phase 4. Contract: design §3.12.
+Persist, stream, and export carry this status as a functional terminal.
+Contract: design §3.12.
 """
 
 from __future__ import annotations

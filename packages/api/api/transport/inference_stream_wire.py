@@ -103,6 +103,11 @@ def inference_api_payload_to_wire_complete(
             if isinstance(payload.get("latticeSignatures"), list)
             else None
         ),
+        departure_pins=(
+            [entry for entry in payload.get("departurePins", []) if isinstance(entry, dict)]
+            if isinstance(payload.get("departurePins"), list)
+            else None
+        ),
     )
 
 
@@ -134,6 +139,7 @@ def row_complete_to_complete_wire_event(
         unexplained_military_delta_2x=payload.unexplained_military_delta_2x,
         leftover=payload.leftover,
         lattice_signatures=payload.lattice_signatures,
+        departure_pins=payload.departure_pins,
     )
 
 
