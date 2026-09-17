@@ -61,7 +61,6 @@ from api.concepts.hulls import (
     is_unknown_military_ship_sentinel_hull_id,
 )
 from api.models.game import TurnInfo
-from api.serialization.uncharacterized_roster import PLACEHOLDER_DEPARTURE_ID
 
 UNKNOWN_MILITARY_SHIP_LABEL = "Unknown military ship"
 
@@ -236,8 +235,6 @@ def _assign_persist_placeholders_to_unit_rows(
 
 
 def _placeholder_ship_class(placeholder: Mapping[str, object]) -> FleetShipClass | None:
-    if placeholder.get("id") == PLACEHOLDER_DEPARTURE_ID:
-        return None
     hull_id = placeholder.get("hullId")
     if isinstance(hull_id, int) and not isinstance(hull_id, bool):
         if is_unknown_military_ship_sentinel_hull_id(hull_id):
