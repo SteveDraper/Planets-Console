@@ -22,7 +22,12 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
     tier_emissions_from_wire_complete,
 )
 from api.serialization.codecs import DACITE_CONFIG, dataclass_to_json
-from api.serialization.uncharacterized_roster import leftover_from_json, leftover_to_json
+from api.serialization.uncharacterized_roster import (
+    departure_pins_from_json,
+    departure_pins_to_json,
+    leftover_from_json,
+    leftover_to_json,
+)
 from api.transport.inference_stream import inference_complete_functional_fields
 
 INFERENCE_ROW_PERSISTENCE_VERSION = 2
@@ -112,8 +117,8 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
     if isinstance(raw_signatures, list):
         signatures = [entry for entry in raw_signatures if isinstance(entry, dict)]
         row = replace(row, lattice_signatures=signatures)
-    if isinstance(raw_departure_pins, list):
-        departure_pins = [entry for entry in raw_departure_pins if isinstance(entry, dict)]
+    departure_pins = _durable_departure_pins(raw_departure_pins)
+    if departure_pins is not None:
         row = replace(row, departure_pins=departure_pins)
     if not isinstance(raw_targets, list):
         return row
@@ -155,8 +160,10 @@ def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
         payload["unexplainedMilitaryDelta2x"] = unexplained
     if row.lattice_signatures is not None:
         payload["latticeSignatures"] = row.lattice_signatures
-    if row.departure_pins is not None:
-        payload["departurePins"] = row.departure_pins
+    payload.pop("departurePins", None)
+    departure_pins = _durable_departure_pins(row.departure_pins)
+    if departure_pins is not None:
+        payload["departurePins"] = departure_pins
     if row.host_turn_targets is not None:
         payload["host_turn_targets"] = [
             host_turn_functional_target_to_persistence_dict(target)
@@ -233,7 +240,7 @@ def persisted_inference_row_from_wire_complete(
         unexplained_military_delta_2x=unexplained,
         leftover=leftover_wire,
         lattice_signatures=_object_dicts(raw_signatures),
-        departure_pins=_object_dicts(raw_departure_pins),
+        departure_pins=_durable_departure_pins(raw_departure_pins),
         persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
 
@@ -269,8 +276,9 @@ def wire_complete_from_persisted_row(row: PersistedInferenceRow) -> dict[str, ob
         payload["unexplainedMilitaryDelta2x"] = unexplained
     if row.lattice_signatures is not None:
         payload["latticeSignatures"] = row.lattice_signatures
-    if row.departure_pins is not None:
-        payload["departurePins"] = row.departure_pins
+    departure_pins = _durable_departure_pins(row.departure_pins)
+    if departure_pins is not None:
+        payload["departurePins"] = departure_pins
     return payload
 
 
@@ -287,6 +295,13 @@ def _durable_leftover_fields(
             return leftover_wire, None
         return leftover_wire, leftover.unexplained_military_delta_2x
     return None, unexplained_military_delta_2x
+
+
+def _durable_departure_pins(raw_departure_pins: object) -> list[dict[str, object]] | None:
+    """Canonical exact-set pin wire; omit when empty or absent."""
+    if not isinstance(raw_departure_pins, list) or not raw_departure_pins:
+        return None
+    return departure_pins_to_json(departure_pins_from_json(raw_departure_pins))
 
 
 def _object_dicts(value: object) -> list[dict[str, object]] | None:

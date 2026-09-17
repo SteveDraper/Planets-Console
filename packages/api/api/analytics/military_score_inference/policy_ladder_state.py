@@ -12,10 +12,14 @@ from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHul
 from api.analytics.military_score_inference.hull_collision_twins_asset import (
     HullCollisionTwinsAsset,
 )
+from api.analytics.military_score_inference.military_sat_admission import MilitarySatAdmission
 from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceResult,
     InferenceSolution,
+)
+from api.analytics.military_score_inference.public_scoreboard_pairing import (
+    PublicScoreboardPairing,
 )
 from api.analytics.military_score_inference.ship_first_overshoot import ShipFirstOvershootPlan
 from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
@@ -37,6 +41,8 @@ class PolicyLadderState:
     last_status: str = STATUS_NO_EXACT_SOLUTION
     last_diagnostics: dict[str, object] = field(default_factory=dict)
     refused_result: InferenceResult | None = None
+    sat_admission: MilitarySatAdmission | None = None
+    scoreboard_pairing: PublicScoreboardPairing | None = None
     resolved_max_solutions: int = 20
     time_limited: bool = False
     band_seeds: list[InferenceSolution] = field(default_factory=list)

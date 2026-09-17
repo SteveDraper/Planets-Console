@@ -37,6 +37,8 @@ from api.analytics.military_score_inference.uncharacterized_roster import (
     unknown_loss_bound_2x,
 )
 from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    ExactSetDeparturePin,
+    ExactSetPinRecord,
     LatticeSignature,
     PlaceholderBuild,
     PlaceholderDeparture,
@@ -52,6 +54,8 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.uncharacterized_roster import (
     PLACEHOLDER_DEPARTURE_ID,
     UncharacterizedRosterCodecError,
+    departure_pins_from_json,
+    departure_pins_to_json,
     lattice_signature_from_json,
     lattice_signature_to_json,
     leftover_from_json,
@@ -425,6 +429,52 @@ def test_lattice_signature_codec_round_trip():
     assert lattice_signature_from_json(wire) == signature
     with pytest.raises(UncharacterizedRosterCodecError, match="objectiveValue"):
         lattice_signature_from_json({**wire, "objectiveValue": 1})
+
+
+def test_exact_set_departure_pin_codec_round_trip():
+    pin = ExactSetDeparturePin(
+        ship_class="warship",
+        records=(
+            ExactSetPinRecord(record_id="r1", disposition="lost"),
+            ExactSetPinRecord(
+                record_id="r2",
+                disposition="traded",
+                counterparty_player_id=5,
+            ),
+        ),
+    )
+    wire = departure_pins_to_json((pin,))
+    assert wire == [
+        {
+            "kind": "exact_set",
+            "shipClass": "warship",
+            "records": [
+                {"recordId": "r1", "disposition": "lost"},
+                {
+                    "recordId": "r2",
+                    "disposition": "traded",
+                    "counterpartyPlayerId": 5,
+                },
+            ],
+        }
+    ]
+    assert departure_pins_from_json(wire) == (pin,)
+    with pytest.raises(UncharacterizedRosterCodecError, match="counterpartyPlayerId"):
+        departure_pins_from_json(
+            [
+                {
+                    "kind": "exact_set",
+                    "shipClass": "warship",
+                    "records": [
+                        {
+                            "recordId": "r1",
+                            "disposition": "lost",
+                            "counterpartyPlayerId": 5,
+                        }
+                    ],
+                }
+            ]
+        )
 
 
 def test_product_payload_fields_omits_point_leftover_for_roster():

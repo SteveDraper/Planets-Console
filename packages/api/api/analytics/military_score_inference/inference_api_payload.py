@@ -41,12 +41,14 @@ from api.analytics.military_score_inference.uncharacterized_roster import (
     UNCHARACTERIZED_ROSTER_SUMMARY,
 )
 from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    ExactSetDeparturePin,
     LatticeSignature,
     PlaceholderDeparture,
     UnknownLossLeftover,
 )
 from api.models.game import TurnInfo
 from api.serialization.uncharacterized_roster import (
+    departure_pins_to_json,
     lattice_signature_to_json,
     leftover_to_json,
     placeholder_departure_to_json,
@@ -436,7 +438,7 @@ def inference_api_payload(
     leftover: UnknownLossLeftover | None = None,
     placeholder_departures: tuple[PlaceholderDeparture, ...] = (),
     lattice_signatures: tuple[LatticeSignature, ...] = (),
-    departure_pins: list[dict[str, object]] | None = None,
+    departure_pins: tuple[ExactSetDeparturePin, ...] = (),
 ) -> dict[str, object]:
     fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
         fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
@@ -489,7 +491,7 @@ def inference_api_payload(
     }
     apply_product_payload_fields(payload, product)
     if departure_pins:
-        payload["departurePins"] = departure_pins
+        payload["departurePins"] = departure_pins_to_json(departure_pins)
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:

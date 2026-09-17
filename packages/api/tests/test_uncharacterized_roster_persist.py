@@ -307,13 +307,13 @@ def test_exact_set_pin_persist_names_record_ids_lost_and_traded():
         pairing,
     )
     assert len(pins) == 1
-    assert pins[0]["kind"] == "exact_set"
-    assert pins[0]["shipClass"] == "warship"
-    records = {entry["recordId"]: entry for entry in pins[0]["records"]}
-    assert records["r-traded"]["disposition"] == "traded"
-    assert records["r-traded"]["counterpartyPlayerId"] == 5
-    assert records["r-lost"]["disposition"] == "lost"
-    assert "counterpartyPlayerId" not in records["r-lost"]
+    assert pins[0].kind == "exact_set"
+    assert pins[0].ship_class == "warship"
+    records = {entry.record_id: entry for entry in pins[0].records}
+    assert records["r-traded"].disposition == "traded"
+    assert records["r-traded"].counterparty_player_id == 5
+    assert records["r-lost"].disposition == "lost"
+    assert records["r-lost"].counterparty_player_id is None
 
 
 def test_spec_only_pin_persist_omits_record_id_retirement_list():
@@ -333,7 +333,7 @@ def test_spec_only_pin_persist_omits_record_id_retirement_list():
             unmatched_freighter_drop=0,
         ),
     )
-    assert pins == []
+    assert pins == ()
 
 
 def test_exact_set_from_turn_names_known_spec_record_ids(
@@ -341,7 +341,10 @@ def test_exact_set_from_turn_names_known_spec_record_ids(
     synthetic_catalog_context,
 ):
     from api.analytics.military_score_inference.departure_pin_persist import (
-        persistable_departure_pins_from_turn,
+        persistable_departure_pins,
+    )
+    from api.analytics.military_score_inference.military_sat_admission import (
+        military_sat_admission_from_turn,
     )
 
     from tests.fixtures.ship_transfer_families import _known_warship_record
@@ -353,30 +356,36 @@ def test_exact_set_from_turn_names_known_spec_record_ids(
         scores=(),
         ships=(),
     )
-    pins = persistable_departure_pins_from_turn(observation, turn, (record,))
+    admission, pairing, _idle_dock = military_sat_admission_from_turn(observation, turn, (record,))
+    assert admission.admitted is True
+    pins = persistable_departure_pins(admission.pins, pairing)
     assert len(pins) == 1
-    assert pins[0]["kind"] == "exact_set"
-    assert pins[0]["records"][0]["recordId"] == record.record_id
-    assert pins[0]["records"][0]["disposition"] == "lost"
+    assert pins[0].kind == "exact_set"
+    assert pins[0].records[0].record_id == record.record_id
+    assert pins[0].records[0].disposition == "lost"
 
 
 def test_exact_persist_round_trips_departure_pins(persistence):
     from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.military_score_inference.uncharacterized_roster_types import (
+        ExactSetDeparturePin,
+        ExactSetPinRecord,
+    )
+    from api.serialization.uncharacterized_roster import departure_pins_to_json
 
-    pins = [
-        {
-            "kind": "exact_set",
-            "shipClass": "warship",
-            "records": [
-                {"recordId": "r1", "disposition": "lost"},
-                {
-                    "recordId": "r2",
-                    "disposition": "traded",
-                    "counterpartyPlayerId": 5,
-                },
-            ],
-        }
-    ]
+    pins = (
+        ExactSetDeparturePin(
+            ship_class="warship",
+            records=(
+                ExactSetPinRecord(record_id="r1", disposition="lost"),
+                ExactSetPinRecord(
+                    record_id="r2",
+                    disposition="traded",
+                    counterparty_player_id=5,
+                ),
+            ),
+        ),
+    )
     persistence.persist_row_complete_for_scope(
         row_complete_with_summary(
             InferenceResult(
@@ -395,7 +404,7 @@ def test_exact_persist_round_trips_departure_pins(persistence):
     replayed = persistence.wire_complete_for_row(GAME_ID, 8, 111, 3)
     assert replayed is not None
     assert replayed["status"] == STATUS_EXACT
-    assert replayed["departurePins"] == pins
+    assert replayed["departurePins"] == departure_pins_to_json(pins)
 
 
 def test_spec_only_exact_persist_omits_departure_pins(persistence):
@@ -414,3 +423,85 @@ def test_spec_only_exact_persist_omits_departure_pins(persistence):
     replayed = persistence.wire_complete_for_row(GAME_ID, 8, 111, 3)
     assert replayed is not None
     assert "departurePins" not in replayed
+
+
+def test_exact_finalize_persists_admission_pins_without_readmitting(
+    sample_turn,
+    synthetic_catalog_context,
+    persistence,
+    monkeypatch,
+):
+    from api.analytics.military_score_inference.actions import ActionCatalog
+    from api.analytics.military_score_inference.departure_pin_persist import (
+        persistable_departure_pins,
+    )
+    from api.analytics.military_score_inference.policy_ladder import (
+        finalize_policy_ladder_result,
+    )
+    from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+    from api.analytics.military_score_inference.policy_ladder_tier_step import (
+        run_policy_ladder_tier_step,
+    )
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+    from api.serialization.uncharacterized_roster import departure_pins_to_json
+
+    from tests.fixtures.ship_transfer_families import _known_warship_record
+
+    def _solve(problem, **kwargs):
+        return InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={})
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        _solve,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder.leftover_0_solutions",
+        lambda solutions, *_args, **_kwargs: list(solutions),
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.build_action_catalog_from_turn",
+        lambda *_args, **_kwargs: ActionCatalog((), (), {}),
+    )
+    record, _ = _known_warship_record(synthetic_catalog_context)
+    observation = _observation(warship_delta=-1, freighter_delta=0, military_delta_2x=-40)
+    turn = replace(
+        without_player_minefields(sample_turn, observation.player_id),
+        scores=(),
+        ships=(),
+    )
+    state = PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies(None)[:1]),
+        prior_fleet_records=(record,),
+    )
+    run_policy_ladder_tier_step(state, observation, turn, time_limit_seconds=1.0)
+    assert state.sat_admission is not None
+    assert state.sat_admission.admitted is True
+    assert state.scoreboard_pairing is not None
+    expected = persistable_departure_pins(state.sat_admission.pins, state.scoreboard_pairing)
+    assert expected
+
+    def _must_not_readmit(*_args, **_kwargs):
+        raise AssertionError("exact finalize must not re-run SAT admission")
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.military_sat_admission.resolve_military_sat_admission",
+        _must_not_readmit,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.military_sat_admission.military_sat_admission_from_turn",
+        _must_not_readmit,
+    )
+    result, *_ = finalize_policy_ladder_result(state, observation, turn)
+    assert result.status == STATUS_EXACT
+    assert result.departure_pins == expected
+    persistence.persist_row_complete_for_scope(
+        row_complete_with_summary(result, summary="exact"),
+        game_id=GAME_ID,
+        perspective=8,
+        host_turn=111,
+        player_id=3,
+    )
+    replayed = persistence.wire_complete_for_row(GAME_ID, 8, 111, 3)
+    assert replayed is not None
+    assert replayed["departurePins"] == departure_pins_to_json(expected)

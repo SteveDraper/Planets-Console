@@ -1,12 +1,16 @@
-"""Codecs for uncharacterized-roster leftover, departures, and lattice signatures.
+"""Codecs for leftover, placeholder departures, lattice signatures, and exact-set pins.
 
 Do not encode an unknown-loss bound as a point ``unexplainedMilitaryDelta2x``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from api.analytics.fleet.types import FleetShipClass
 from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    ExactSetDeparturePin,
+    ExactSetPinRecord,
     LatticeSignature,
     PlaceholderBuild,
     PlaceholderDeparture,
@@ -23,7 +27,7 @@ _VALID_SHIP_CLASSES = frozenset({"warship", "freighter"})
 
 
 class UncharacterizedRosterCodecError(CoreAPIError):
-    """Malformed leftover, departure, or lattice-signature payload."""
+    """Malformed leftover, departure, lattice-signature, or exact-set pin payload."""
 
     http_error = 422
 
@@ -160,6 +164,74 @@ def lattice_signature_from_json(data: object) -> LatticeSignature:
     )
 
 
+def exact_set_pin_record_to_json(record: ExactSetPinRecord) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "recordId": record.record_id,
+        "disposition": record.disposition,
+    }
+    if record.counterparty_player_id is not None:
+        payload["counterpartyPlayerId"] = record.counterparty_player_id
+    return payload
+
+
+def exact_set_pin_record_from_json(data: object) -> ExactSetPinRecord:
+    payload = _require_object(data, "exact-set pin record")
+    disposition = payload.get("disposition")
+    if disposition not in ("lost", "traded"):
+        raise UncharacterizedRosterCodecError(
+            "exact-set pin record.disposition must be lost or traded"
+        )
+    if disposition == "traded":
+        counterparty = _require_int(
+            payload.get("counterpartyPlayerId"),
+            "exact-set pin record.counterpartyPlayerId",
+        )
+    else:
+        if "counterpartyPlayerId" in payload:
+            raise UncharacterizedRosterCodecError(
+                "lost exact-set pin record must not carry counterpartyPlayerId"
+            )
+        counterparty = None
+    return ExactSetPinRecord(
+        record_id=_require_str(payload.get("recordId"), "exact-set pin record.recordId"),
+        disposition=disposition,
+        counterparty_player_id=counterparty,
+    )
+
+
+def exact_set_departure_pin_to_json(pin: ExactSetDeparturePin) -> dict[str, object]:
+    return {
+        "kind": pin.kind,
+        "shipClass": pin.ship_class,
+        "records": [exact_set_pin_record_to_json(record) for record in pin.records],
+    }
+
+
+def exact_set_departure_pin_from_json(data: object) -> ExactSetDeparturePin:
+    payload = _require_object(data, "exact-set departure pin")
+    if payload.get("kind") != "exact_set":
+        raise UncharacterizedRosterCodecError("exact-set departure pin.kind must be exact_set")
+    raw_records = payload.get("records")
+    if not isinstance(raw_records, list) or not raw_records:
+        raise UncharacterizedRosterCodecError(
+            "exact-set departure pin.records must be a non-empty array"
+        )
+    return ExactSetDeparturePin(
+        ship_class=_require_ship_class(payload.get("shipClass")),
+        records=tuple(exact_set_pin_record_from_json(entry) for entry in raw_records),
+    )
+
+
+def departure_pins_to_json(pins: Sequence[ExactSetDeparturePin]) -> list[dict[str, object]]:
+    return [exact_set_departure_pin_to_json(pin) for pin in pins]
+
+
+def departure_pins_from_json(data: object) -> tuple[ExactSetDeparturePin, ...]:
+    if not isinstance(data, list):
+        raise UncharacterizedRosterCodecError("departurePins must be an array")
+    return tuple(exact_set_departure_pin_from_json(entry) for entry in data)
+
+
 def _require_object(data: object, label: str) -> dict[str, object]:
     if not isinstance(data, dict):
         raise UncharacterizedRosterCodecError(f"{label} must be an object")
@@ -176,6 +248,12 @@ def _optional_int(value: object, label: str) -> int | None:
     if value is None:
         return None
     return _require_int(value, label)
+
+
+def _require_str(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise UncharacterizedRosterCodecError(f"{label} must be a string")
+    return value
 
 
 def _require_ship_class(value: object) -> FleetShipClass:
