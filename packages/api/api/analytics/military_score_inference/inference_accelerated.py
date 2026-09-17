@@ -29,9 +29,12 @@ from api.analytics.military_score_inference.inference_admission import (
 )
 from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_NO_PRIOR_TURN,
+    STATUS_UNCHARACTERIZED_ROSTER,
     _serialize_solution_with_arithmetic,
+    apply_product_payload_fields,
     inference_api_payload,
     inference_result_to_api_payload,
+    product_payload_from_result,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
@@ -145,7 +148,7 @@ def build_accelerated_segment_payload(
     step_diagnostics: list[dict[str, object]],
 ) -> dict[str, object]:
     """Shape one accelerated segment solve into the diagnostics segment payload."""
-    return {
+    payload: dict[str, object] = {
         "segmentId": segment.segment_id,
         "hostTurn": segment.host_turn,
         "status": result.status,
@@ -168,6 +171,10 @@ def build_accelerated_segment_payload(
             else []
         ),
     }
+    return apply_product_payload_fields(
+        payload,
+        product_payload_from_result(result, leftover=segment.military_delta_2x),
+    )
 
 
 def accelerated_split_status(
@@ -183,7 +190,29 @@ def accelerated_split_status(
         return STATUS_INVALID_PROBLEM
     if combined_time_limited or any(status == STATUS_TIME_LIMITED for status in statuses):
         return STATUS_TIME_LIMITED
+    if any(status == STATUS_UNCHARACTERIZED_ROSTER for status in statuses):
+        return STATUS_UNCHARACTERIZED_ROSTER
     return STATUS_EXACT
+
+
+def _accelerated_split_result(
+    overall_status: str,
+    reported: InferenceResult,
+    segment_payloads: list[dict[str, object]],
+) -> InferenceResult:
+    return InferenceResult(
+        status=overall_status,
+        solutions=reported.solutions,
+        diagnostics={
+            **reported.diagnostics,
+            "accelerated_segments": segment_payloads,
+        },
+        placeholders=reported.placeholders,
+        placeholder_departures=reported.placeholder_departures,
+        leftover=reported.leftover,
+        lattice_signatures=reported.lattice_signatures,
+        departure_pins=reported.departure_pins,
+    )
 
 
 def accelerated_split_missing_reported_segment_result(
@@ -307,14 +336,7 @@ def run_accelerated_split_inference(
         )
 
     overall_status = accelerated_split_status(segment_payloads, combined_time_limited)
-    primary_result = InferenceResult(
-        status=overall_status,
-        solutions=reported_result.solutions,
-        diagnostics={
-            **reported_result.diagnostics,
-            "accelerated_segments": segment_payloads,
-        },
-    )
+    primary_result = _accelerated_split_result(overall_status, reported_result, segment_payloads)
 
     return (
         payload_with_host_turn_targets(
@@ -378,14 +400,7 @@ def build_accelerated_split_stream_row_complete(
         )
 
     overall_status = accelerated_split_status(segment_payloads, combined_time_limited)
-    result = InferenceResult(
-        status=overall_status,
-        solutions=reported.result.solutions,
-        diagnostics={
-            **reported.result.diagnostics,
-            "accelerated_segments": segment_payloads,
-        },
-    )
+    result = _accelerated_split_result(overall_status, reported.result, segment_payloads)
     api_payload = payload_with_host_turn_targets(
         inference_result_to_api_payload(
             result,

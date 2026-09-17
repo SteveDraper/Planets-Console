@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from api.analytics.military_score_inference.inference_api_payload import (
     InferenceProductPayload,
-    product_payload_fields,
+    apply_product_payload_fields,
+    product_payload_from_mapping,
 )
 
 
 @dataclass(frozen=True)
 class HostTurnFunctionalTarget:
-    """Held solutions, scoreboard deltas, and product leftover for one host turn."""
+    """Held solutions, scoreboard deltas, and product fields for one host turn."""
 
     host_turn: int
     status: str
@@ -21,8 +22,7 @@ class HostTurnFunctionalTarget:
     warship_delta: int
     freighter_delta: int
     solutions: list[dict[str, object]]
-    placeholders: list[dict[str, object]] | None = None
-    unexplained_military_delta_2x: int | None = None
+    product: InferenceProductPayload = field(default_factory=InferenceProductPayload)
 
 
 def _required_int(data: dict[str, object], *keys: str) -> int:
@@ -31,16 +31,6 @@ def _required_int(data: dict[str, object], *keys: str) -> int:
         if isinstance(value, int) and not isinstance(value, bool):
             return value
     raise ValueError(f"missing or invalid integer field (tried {keys!r})")
-
-
-def _optional_int(data: dict[str, object], *keys: str) -> int | None:
-    for key in keys:
-        if key not in data:
-            continue
-        value = data[key]
-        if isinstance(value, int) and not isinstance(value, bool):
-            return value
-    return None
 
 
 def _required_str(data: dict[str, object], *keys: str) -> str:
@@ -64,22 +54,10 @@ def _product_slots_from_dict(
     status: str,
     observation_delta: int,
 ) -> InferenceProductPayload:
-    raw_placeholders = data.get("placeholders")
-    placeholders = (
-        [entry for entry in raw_placeholders if isinstance(entry, dict)]
-        if isinstance(raw_placeholders, list)
-        else None
-    )
-    leftover = _optional_int(
+    return product_payload_from_mapping(
         data,
-        "unexplainedMilitaryDelta2x",
-        "unexplained_military_delta_2x",
-    )
-    leftover_source = observation_delta if leftover is None else leftover
-    return product_payload_fields(
-        status,
-        placeholders=placeholders,
-        leftover=leftover_source,
+        status=status,
+        leftover_fallback=observation_delta,
     )
 
 
@@ -88,12 +66,14 @@ def _with_product_slots(
     target: HostTurnFunctionalTarget,
     *,
     leftover_key: str,
+    signatures_key: str,
 ) -> dict[str, object]:
-    if target.placeholders is not None:
-        payload["placeholders"] = target.placeholders
-    if target.unexplained_military_delta_2x is not None:
-        payload[leftover_key] = target.unexplained_military_delta_2x
-    return payload
+    return apply_product_payload_fields(
+        payload,
+        target.product,
+        unexplained_key=leftover_key,
+        signatures_key=signatures_key,
+    )
 
 
 def host_turn_functional_target_from_wire_dict(
@@ -114,8 +94,7 @@ def host_turn_functional_target_from_wire_dict(
         warship_delta=_required_int(data, "warshipDelta"),
         freighter_delta=_required_int(data, "freighterDelta"),
         solutions=_required_solutions(data),
-        placeholders=product.placeholders,
-        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
+        product=product,
     )
 
 
@@ -137,8 +116,7 @@ def host_turn_functional_target_from_persistence_dict(
         warship_delta=_required_int(data, "warship_delta", "warshipDelta"),
         freighter_delta=_required_int(data, "freighter_delta", "freighterDelta"),
         solutions=_required_solutions(data),
-        placeholders=product.placeholders,
-        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
+        product=product,
     )
 
 
@@ -157,6 +135,7 @@ def host_turn_functional_target_to_wire_dict(
         },
         target,
         leftover_key="unexplainedMilitaryDelta2x",
+        signatures_key="latticeSignatures",
     )
 
 
@@ -175,6 +154,7 @@ def host_turn_functional_target_to_persistence_dict(
         },
         target,
         leftover_key="unexplained_military_delta_2x",
+        signatures_key="lattice_signatures",
     )
 
 
@@ -183,8 +163,8 @@ def functional_host_turn_target_from_segment_payload(
 ) -> HostTurnFunctionalTarget:
     """Strip developer diagnostics from one accelerated segment payload.
 
-    Product leftover and placeholders are resolved with ``product_payload_fields``.
-    Absent leftover uses the segment observation delta (``militaryDelta2x``).
+    Product fields are resolved with ``product_payload_from_mapping``.
+    Absent point leftover uses the segment observation delta (``militaryDelta2x``).
     """
     return host_turn_functional_target_from_wire_dict(segment_payload)
 

@@ -10,6 +10,7 @@ from api.analytics.military_score_inference.actions import (
     DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     ActionCatalog,
 )
+from api.analytics.military_score_inference.departure_pin_persist import persistable_departure_pins
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hopeless_classifier import (
     HopelessRowFacts,
@@ -181,10 +182,21 @@ def finalize_policy_ladder_result(
     bound = worthwhile_remainder_bound_for_turn(observation, turn)
     if bound is not None:
         diagnostics.update(worthwhile_remainder_bound_diagnostics(bound))
+    departure_pins = ()
+    if (
+        status == STATUS_EXACT
+        and state.sat_admission is not None
+        and state.scoreboard_pairing is not None
+    ):
+        departure_pins = persistable_departure_pins(
+            state.sat_admission.pins,
+            state.scoreboard_pairing,
+        )
     result = InferenceResult(
         status=status,
         solutions=tuple(merged_solutions),
         diagnostics=diagnostics,
+        departure_pins=departure_pins,
     )
     return (
         result,

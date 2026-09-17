@@ -6,7 +6,7 @@ a count-lattice idle-dock event has unknown class. Pin absence on a class
 that did not drop is not a fail. A pinned idle-dock class is unchanged
 unless a pin already fails. True-freighter unpin still admits SAT. Case-2
 emit (placeholders, leftover, lattice signatures) is
-``uncharacterized_roster``. Persist of that status is phase 4.
+``uncharacterized_roster``. Persist, stream, and export carry that status.
 Contract: design-military-score-build-inference.md §3.12.
 """
 
@@ -135,7 +135,7 @@ def resolve_military_sat_admission(
     return military_sat_admission(signal, pins, pairing)
 
 
-def _pairing_and_idle_dock_from_turn(
+def pairing_and_idle_dock_from_turn(
     observation: InferenceObservation,
     turn: TurnInfo,
 ) -> tuple[PublicScoreboardPairing, TransferBudget | None]:
@@ -155,13 +155,13 @@ def _pairing_and_idle_dock_from_turn(
     return pairing, idle_dock
 
 
-def military_sat_refusal_from_turn(
+def military_sat_admission_from_turn(
     observation: InferenceObservation,
     turn: TurnInfo,
     prior_fleet_records: tuple[FleetShipRecord, ...] = (),
-) -> InferenceResult | None:
-    """Case-2 emit when SAT is refused, or None when SAT may run."""
-    pairing, idle_dock = _pairing_and_idle_dock_from_turn(observation, turn)
+) -> tuple[MilitarySatAdmission, PublicScoreboardPairing, TransferBudget | None]:
+    """Admit or refuse SAT from one pairing/idle-dock classification and pin."""
+    pairing, idle_dock = pairing_and_idle_dock_from_turn(observation, turn)
     admission = resolve_military_sat_admission(
         observation,
         pairing=pairing,
@@ -173,8 +173,17 @@ def military_sat_refusal_from_turn(
         this_turn_ships=turn.ships,
         hulls_by_id={hull.id: hull for hull in turn.hulls},
     )
-    if admission.admitted:
-        return None
+    return admission, pairing, idle_dock
+
+
+def military_sat_refusal_from_pairing(
+    observation: InferenceObservation,
+    pairing: PublicScoreboardPairing,
+    idle_dock: TransferBudget | None,
+    turn: TurnInfo,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+) -> InferenceResult:
+    """Case-2 emit from an already-classified pairing."""
     return uncharacterized_roster_result_from_pairing(
         observation,
         pairing,
@@ -185,4 +194,26 @@ def military_sat_refusal_from_turn(
             "reason": MILITARY_SAT_REFUSED_REASON,
             "satAdmitted": False,
         },
+    )
+
+
+def military_sat_refusal_from_turn(
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+) -> InferenceResult | None:
+    """Case-2 emit when SAT is refused, or None when SAT may run."""
+    admission, pairing, idle_dock = military_sat_admission_from_turn(
+        observation,
+        turn,
+        prior_fleet_records,
+    )
+    if admission.admitted:
+        return None
+    return military_sat_refusal_from_pairing(
+        observation,
+        pairing,
+        idle_dock,
+        turn,
+        prior_fleet_records,
     )

@@ -22,6 +22,12 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
     tier_emissions_from_wire_complete,
 )
 from api.serialization.codecs import DACITE_CONFIG, dataclass_to_json
+from api.serialization.uncharacterized_roster import (
+    departure_pins_from_json,
+    departure_pins_to_json,
+    leftover_from_json,
+    leftover_to_json,
+)
 from api.transport.inference_stream import inference_complete_functional_fields
 
 INFERENCE_ROW_PERSISTENCE_VERSION = 2
@@ -32,9 +38,11 @@ class PersistedInferenceRow:
     """Terminal wire ``complete`` payload fields (without ``playerId``).
 
     Durable storage keeps functional row state: status, summary, solutions,
-    ``placeholders``, ``unexplainedMilitaryDelta2x``, ``host_turn_targets``, and a
-    compact ``tier_emissions`` ledger. Solver ``diagnostics`` (including full action
-    catalogs) are wire/live-only and must not be written to storage.
+    ``placeholders``, leftover (point ``unexplainedMilitaryDelta2x`` or tagged
+    unknown-loss leftover), ``latticeSignatures``, exact-set ``departurePins``,
+    ``host_turn_targets``, and a compact ``tier_emissions`` ledger. Solver
+    ``diagnostics`` (including full action catalogs) are wire/live-only and must
+    not be written to storage.
     """
 
     status: str
@@ -48,6 +56,9 @@ class PersistedInferenceRow:
     tier_emissions: list[dict[str, object]] | None = None
     placeholders: list[dict[str, object]] | None = None
     unexplained_military_delta_2x: int | None = None
+    leftover: dict[str, object] | None = None
+    lattice_signatures: list[dict[str, object]] | None = None
+    departure_pins: list[dict[str, object]] | None = None
     persistence_version: int | None = None
 
 
@@ -63,9 +74,18 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
         payload.pop("tier_emissions", None),
     )
     raw_placeholders = payload.pop("placeholders", None)
-    leftover = payload.pop(
+    point_leftover = payload.pop(
         "unexplainedMilitaryDelta2x",
         payload.pop("unexplained_military_delta_2x", None),
+    )
+    tagged_leftover = payload.pop("leftover", None)
+    raw_signatures = payload.pop(
+        "latticeSignatures",
+        payload.pop("lattice_signatures", None),
+    )
+    raw_departure_pins = payload.pop(
+        "departurePins",
+        payload.pop("departure_pins", None),
     )
     row = from_dict(
         data_class=PersistedInferenceRow,
@@ -80,8 +100,26 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
     if isinstance(raw_placeholders, list):
         placeholders = [entry for entry in raw_placeholders if isinstance(entry, dict)]
         row = replace(row, placeholders=placeholders)
-    if isinstance(leftover, int) and not isinstance(leftover, bool):
-        row = replace(row, unexplained_military_delta_2x=leftover)
+    leftover_wire, unexplained = _durable_leftover_fields(
+        tagged_leftover=tagged_leftover,
+        unexplained_military_delta_2x=(
+            point_leftover
+            if isinstance(point_leftover, int) and not isinstance(point_leftover, bool)
+            else None
+        ),
+    )
+    if leftover_wire is not None or unexplained is not None:
+        row = replace(
+            row,
+            leftover=leftover_wire,
+            unexplained_military_delta_2x=unexplained,
+        )
+    if isinstance(raw_signatures, list):
+        signatures = [entry for entry in raw_signatures if isinstance(entry, dict)]
+        row = replace(row, lattice_signatures=signatures)
+    departure_pins = _durable_departure_pins(raw_departure_pins)
+    if departure_pins is not None:
+        row = replace(row, departure_pins=departure_pins)
     if not isinstance(raw_targets, list):
         return row
     targets = [
@@ -102,14 +140,30 @@ def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
     payload.pop("fleet_torp_input_status", None)
     payload.pop("tier_emissions", None)
     payload.pop("unexplained_military_delta_2x", None)
+    payload.pop("lattice_signatures", None)
+    payload.pop("departure_pins", None)
     if row.fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = row.fleet_torp_input_status
     if row.tier_emissions is not None:
         payload["tierEmissions"] = row.tier_emissions
     if row.placeholders is not None:
         payload["placeholders"] = row.placeholders
-    if row.unexplained_military_delta_2x is not None:
-        payload["unexplainedMilitaryDelta2x"] = row.unexplained_military_delta_2x
+    leftover_wire, unexplained = _durable_leftover_fields(
+        tagged_leftover=row.leftover,
+        unexplained_military_delta_2x=row.unexplained_military_delta_2x,
+    )
+    payload.pop("leftover", None)
+    payload.pop("unexplainedMilitaryDelta2x", None)
+    if leftover_wire is not None:
+        payload["leftover"] = leftover_wire
+    if unexplained is not None:
+        payload["unexplainedMilitaryDelta2x"] = unexplained
+    if row.lattice_signatures is not None:
+        payload["latticeSignatures"] = row.lattice_signatures
+    payload.pop("departurePins", None)
+    departure_pins = _durable_departure_pins(row.departure_pins)
+    if departure_pins is not None:
+        payload["departurePins"] = departure_pins
     if row.host_turn_targets is not None:
         payload["host_turn_targets"] = [
             host_turn_functional_target_to_persistence_dict(target)
@@ -166,6 +220,12 @@ def persisted_inference_row_from_wire_complete(
     wire_solutions = wire_event.get("solutions")
     host_turn_targets = list(host_turn_targets_from_wire_event(wire_event))
     placeholders, unexplained = inference_complete_functional_fields(wire_event)
+    leftover_wire, unexplained = _durable_leftover_fields(
+        tagged_leftover=wire_event.get("leftover"),
+        unexplained_military_delta_2x=unexplained,
+    )
+    raw_signatures = wire_event.get("latticeSignatures")
+    raw_departure_pins = wire_event.get("departurePins")
     return PersistedInferenceRow(
         status=str(wire_event.get("status", "")),
         summary=str(wire_event.get("summary", "")),
@@ -178,6 +238,9 @@ def persisted_inference_row_from_wire_complete(
         tier_emissions=tier_emissions_from_wire_complete(wire_event),
         placeholders=placeholders,
         unexplained_military_delta_2x=unexplained,
+        leftover=leftover_wire,
+        lattice_signatures=_object_dicts(raw_signatures),
+        departure_pins=_durable_departure_pins(raw_departure_pins),
         persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
 
@@ -203,6 +266,45 @@ def wire_complete_from_persisted_row(row: PersistedInferenceRow) -> dict[str, ob
         payload["tierEmissions"] = row.tier_emissions
     if row.placeholders is not None:
         payload["placeholders"] = row.placeholders
-    if row.unexplained_military_delta_2x is not None:
-        payload["unexplainedMilitaryDelta2x"] = row.unexplained_military_delta_2x
+    leftover_wire, unexplained = _durable_leftover_fields(
+        tagged_leftover=row.leftover,
+        unexplained_military_delta_2x=row.unexplained_military_delta_2x,
+    )
+    if leftover_wire is not None:
+        payload["leftover"] = leftover_wire
+    if unexplained is not None:
+        payload["unexplainedMilitaryDelta2x"] = unexplained
+    if row.lattice_signatures is not None:
+        payload["latticeSignatures"] = row.lattice_signatures
+    departure_pins = _durable_departure_pins(row.departure_pins)
+    if departure_pins is not None:
+        payload["departurePins"] = departure_pins
     return payload
+
+
+def _durable_leftover_fields(
+    *,
+    tagged_leftover: object,
+    unexplained_military_delta_2x: int | None,
+) -> tuple[dict[str, object] | None, int | None]:
+    """Persist tagged leftover; never write a bound as a point leftover field."""
+    if isinstance(tagged_leftover, dict):
+        leftover = leftover_from_json(tagged_leftover)
+        leftover_wire = leftover_to_json(leftover)
+        if leftover.kind == "unknown_loss_bound":
+            return leftover_wire, None
+        return leftover_wire, leftover.unexplained_military_delta_2x
+    return None, unexplained_military_delta_2x
+
+
+def _durable_departure_pins(raw_departure_pins: object) -> list[dict[str, object]] | None:
+    """Canonical exact-set pin wire; omit when empty or absent."""
+    if not isinstance(raw_departure_pins, list) or not raw_departure_pins:
+        return None
+    return departure_pins_to_json(departure_pins_from_json(raw_departure_pins))
+
+
+def _object_dicts(value: object) -> list[dict[str, object]] | None:
+    if not isinstance(value, list):
+        return None
+    return [entry for entry in value if isinstance(entry, dict)]

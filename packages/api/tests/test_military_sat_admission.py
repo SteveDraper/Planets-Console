@@ -656,6 +656,9 @@ def test_tier_step_refuses_before_catalog_or_sat(sample_turn, monkeypatch):
     assert state.started_at is None
     assert sat_calls == []
     assert catalog_calls == []
+    assert state.sat_admission is not None
+    assert state.sat_admission.admitted is False
+    assert state.scoreboard_pairing is not None
 
 
 def test_finalize_returns_stashed_refuse_without_recompute(sample_turn, monkeypatch):

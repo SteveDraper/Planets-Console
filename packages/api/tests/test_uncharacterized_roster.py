@@ -37,17 +37,25 @@ from api.analytics.military_score_inference.uncharacterized_roster import (
     unknown_loss_bound_2x,
 )
 from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    ExactSetDeparturePin,
+    ExactSetPinRecord,
     LatticeSignature,
     PlaceholderBuild,
     PlaceholderDeparture,
     PointLeftover,
     UnknownLossBoundLeftover,
 )
-from api.analytics.scores.export_wire import product_fields_from_wire_complete
+from api.analytics.scores.export_wire import (
+    product_fields_from_persisted_row,
+    product_fields_from_wire_complete,
+)
 from api.concepts.hulls import UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
+from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.uncharacterized_roster import (
     PLACEHOLDER_DEPARTURE_ID,
     UncharacterizedRosterCodecError,
+    departure_pins_from_json,
+    departure_pins_to_json,
     lattice_signature_from_json,
     lattice_signature_to_json,
     leftover_from_json,
@@ -423,6 +431,52 @@ def test_lattice_signature_codec_round_trip():
         lattice_signature_from_json({**wire, "objectiveValue": 1})
 
 
+def test_exact_set_departure_pin_codec_round_trip():
+    pin = ExactSetDeparturePin(
+        ship_class="warship",
+        records=(
+            ExactSetPinRecord(record_id="r1", disposition="lost"),
+            ExactSetPinRecord(
+                record_id="r2",
+                disposition="traded",
+                counterparty_player_id=5,
+            ),
+        ),
+    )
+    wire = departure_pins_to_json((pin,))
+    assert wire == [
+        {
+            "kind": "exact_set",
+            "shipClass": "warship",
+            "records": [
+                {"recordId": "r1", "disposition": "lost"},
+                {
+                    "recordId": "r2",
+                    "disposition": "traded",
+                    "counterpartyPlayerId": 5,
+                },
+            ],
+        }
+    ]
+    assert departure_pins_from_json(wire) == (pin,)
+    with pytest.raises(UncharacterizedRosterCodecError, match="counterpartyPlayerId"):
+        departure_pins_from_json(
+            [
+                {
+                    "kind": "exact_set",
+                    "shipClass": "warship",
+                    "records": [
+                        {
+                            "recordId": "r1",
+                            "disposition": "lost",
+                            "counterpartyPlayerId": 5,
+                        }
+                    ],
+                }
+            ]
+        )
+
+
 def test_product_payload_fields_omits_point_leftover_for_roster():
     product = product_payload_fields(STATUS_UNCHARACTERIZED_ROSTER, leftover=22)
     assert product.status == STATUS_UNCHARACTERIZED_ROSTER
@@ -457,3 +511,36 @@ def test_wire_complete_reconstruction_keeps_roster_leftover_and_signatures():
     assert reconstructed.leftover == {"kind": "unknown_loss_bound", "lowerBound2x": 800}
     assert reconstructed.lattice_signatures is not None
     assert reconstructed.lattice_signatures[0]["shipClass"] == "warship"
+
+
+def test_product_fields_from_persisted_row_keeps_roster_leftover_and_signatures():
+    leftover = {"kind": "unknown_loss_bound", "lowerBound2x": 800}
+    signatures = [
+        {
+            "shipClass": "warship",
+            "build": {"id": "unknown_military_ship", "count": 1},
+            "departure": {
+                "id": PLACEHOLDER_DEPARTURE_ID,
+                "shipClass": "warship",
+                "count": 1,
+            },
+        }
+    ]
+    product = product_fields_from_persisted_row(
+        PersistedInferenceRow(
+            status=STATUS_UNCHARACTERIZED_ROSTER,
+            summary="Uncharacterized roster",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+            placeholders=[],
+            unexplained_military_delta_2x=22,
+            leftover=leftover,
+            lattice_signatures=signatures,
+        )
+    )
+    assert product.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert product.placeholders == []
+    assert product.unexplained_military_delta_2x is None
+    assert product.leftover == leftover
+    assert product.lattice_signatures == signatures

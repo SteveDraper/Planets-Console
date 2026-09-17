@@ -24,7 +24,8 @@ from api.analytics.military_score_inference.degrade_aggregate_probe import (
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.military_sat_admission import (
-    military_sat_refusal_from_turn,
+    military_sat_admission_from_turn,
+    military_sat_refusal_from_pairing,
 )
 from api.analytics.military_score_inference.military_score_window import (
     BandMilitaryScoreWindow,
@@ -257,12 +258,21 @@ def run_policy_ladder_tier_step(
         return
 
     if state.catalog is None:
-        refusal = military_sat_refusal_from_turn(
+        admission, pairing, idle_dock = military_sat_admission_from_turn(
             observation,
             turn,
             state.prior_fleet_records,
         )
-        if refusal is not None:
+        state.sat_admission = admission
+        state.scoreboard_pairing = pairing
+        if not admission.admitted:
+            refusal = military_sat_refusal_from_pairing(
+                observation,
+                pairing,
+                idle_dock,
+                turn,
+                state.prior_fleet_records,
+            )
             state.refused_result = refusal
             state.last_status = refusal.status
             state.last_diagnostics = dict(refusal.diagnostics)

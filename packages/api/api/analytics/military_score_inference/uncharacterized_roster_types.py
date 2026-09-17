@@ -1,7 +1,7 @@
-"""Domain types for uncharacterized-roster leftover, departures, and lattice signatures.
+"""Domain types for leftover, departures, lattice signatures, and exact-set pins.
 
 Codecs live in ``api.serialization.uncharacterized_roster``. This module must
-not import serialization or the case-2 emit path.
+not import serialization, case-2 emit, or pin persist conversion.
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.fleet.types import FleetShipClass
+
+DeparturePinDisposition = Literal["lost", "traded"]
 
 
 @dataclass(frozen=True)
@@ -59,3 +61,21 @@ class LatticeSignature:
     ship_class: FleetShipClass
     build: PlaceholderBuild
     departure: PlaceholderDeparture
+
+
+@dataclass(frozen=True)
+class ExactSetPinRecord:
+    """One named exact-set retirement for fleet@T."""
+
+    record_id: str
+    disposition: DeparturePinDisposition
+    counterparty_player_id: int | None = None
+
+
+@dataclass(frozen=True)
+class ExactSetDeparturePin:
+    """Exact-set persist pin: named record ids plus lost vs traded."""
+
+    ship_class: FleetShipClass
+    records: tuple[ExactSetPinRecord, ...]
+    kind: Literal["exact_set"] = "exact_set"

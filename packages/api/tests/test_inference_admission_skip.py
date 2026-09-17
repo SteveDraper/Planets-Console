@@ -421,6 +421,7 @@ def test_admit_scores_export_persists_skip_immediate_admission(sample_turn, pers
         STATUS_NO_EXACT_SOLUTION,
         STATUS_MODERATE_RESIDUAL,
         STATUS_MINE_SCORE_RESIDUAL,
+        STATUS_UNCHARACTERIZED_ROSTER,
         *sorted(INFERENCE_ADMISSION_SKIP_STATUSES),
     ],
 )
@@ -431,6 +432,7 @@ def test_persist_admits_functional_and_skip_statuses(status, persistence) -> Non
         STATUS_NO_EXACT_SOLUTION,
         STATUS_MODERATE_RESIDUAL,
         STATUS_MINE_SCORE_RESIDUAL,
+        STATUS_UNCHARACTERIZED_ROSTER,
     }:
         assert is_persistable_inference_status(status)
     else:
@@ -453,7 +455,7 @@ def test_persist_admits_functional_and_skip_statuses(status, persistence) -> Non
 
 @pytest.mark.parametrize(
     "status",
-    ["paused", "fetch_error", "pending", STATUS_UNCHARACTERIZED_ROSTER],
+    ["paused", "fetch_error", "pending"],
 )
 def test_persist_rejects_non_durable_statuses(status, persistence) -> None:
     assert not is_durable_turn_evidence_row_status(status)

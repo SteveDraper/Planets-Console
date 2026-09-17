@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.military_score_window import (
     military_window_overshoot_cap_2x,
 )
 from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    ExactSetDeparturePin,
     LatticeSignature,
     PlaceholderDeparture,
     UnknownLossLeftover,
@@ -252,3 +253,4 @@ class InferenceResult:
     placeholder_departures: tuple[PlaceholderDeparture, ...] = ()
     leftover: UnknownLossLeftover | None = None
     lattice_signatures: tuple[LatticeSignature, ...] = ()
+    departure_pins: tuple[ExactSetDeparturePin, ...] = ()

@@ -7,9 +7,8 @@ from typing import Literal
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
 from api.analytics.military_score_inference.inference_api_payload import (
-    STATUS_UNCHARACTERIZED_ROSTER,
     InferenceProductPayload,
-    product_payload_fields,
+    product_payload_from_mapping,
     serialize_solution_without_arithmetic,
     serialize_solutions_with_arithmetic,
 )
@@ -21,8 +20,10 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_STOPPED
-from api.serialization.inference_row_persistence import PersistedInferenceRow
-from api.transport.inference_stream import inference_complete_functional_fields
+from api.serialization.inference_row_persistence import (
+    PersistedInferenceRow,
+    wire_complete_from_persisted_row,
+)
 
 TerminalWireSearchStatus = Literal["complete", "stopped"]
 
@@ -122,43 +123,19 @@ def terminal_row_admission(
 def product_fields_from_wire_complete(
     wire_event: dict[str, object],
 ) -> InferenceProductPayload:
-    """Extract product status, placeholders, and leftover from a wire complete event."""
+    """Extract product fields from a wire complete event."""
     raw_status = wire_event.get("status")
     status = raw_status if isinstance(raw_status, str) and raw_status else None
-    source_placeholders, source_leftover = inference_complete_functional_fields(wire_event)
     if status is None:
         return InferenceProductPayload()
-    product = product_payload_fields(
-        status,
-        placeholders=source_placeholders,
-        leftover=source_leftover,
-    )
-    if status != STATUS_UNCHARACTERIZED_ROSTER:
-        return product
-    raw_leftover = wire_event.get("leftover")
-    raw_signatures = wire_event.get("latticeSignatures")
-    return InferenceProductPayload(
-        status=product.status,
-        placeholders=product.placeholders,
-        unexplained_military_delta_2x=None,
-        leftover=raw_leftover if isinstance(raw_leftover, dict) else None,
-        lattice_signatures=(
-            [entry for entry in raw_signatures if isinstance(entry, dict)]
-            if isinstance(raw_signatures, list)
-            else None
-        ),
-    )
+    return product_payload_from_mapping(wire_event, status=status)
 
 
 def product_fields_from_persisted_row(
     persisted_row: PersistedInferenceRow,
 ) -> InferenceProductPayload:
-    """Extract product status, placeholders, and leftover from a persisted inference row."""
-    return product_payload_fields(
-        persisted_row.status,
-        placeholders=persisted_row.placeholders,
-        leftover=persisted_row.unexplained_military_delta_2x,
-    )
+    """Extract product fields from a persisted inference row."""
+    return product_fields_from_wire_complete(wire_complete_from_persisted_row(persisted_row))
 
 
 def solutions_from_persisted_row(

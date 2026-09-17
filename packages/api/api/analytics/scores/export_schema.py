@@ -382,9 +382,11 @@ _PLACEHOLDER_ITEM_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
         "One post-unsat placeholder: unknown military ship (hull sentinel -1, typed id "
-        "unknown_military_ship) or observation-derived generic freighter (hull id 0, "
-        "typed id combo_freighter). Not a ranked solutions[] entry. Residual / "
-        "no_exact_solution rows include the collection; skip rows keep an empty array."
+        "unknown_military_ship), observation-derived generic freighter (hull id 0, "
+        "typed id combo_freighter), or placeholder departure (typed id "
+        "placeholder_departure, class-tagged, no hullId). Not a ranked solutions[] "
+        "entry. Residual / no_exact_solution / uncharacterized_roster rows include "
+        "the collection; skip rows keep an empty array."
     ),
     "additionalProperties": True,
     "properties": {
@@ -430,6 +432,7 @@ _PRODUCT_STATUS_SCHEMA: dict[str, Any] = {
         "moderate_residual",
         "mine_score_residual",
         "no_exact_solution",
+        "uncharacterized_roster",
         "viewpoint_owner",
         "dead",
         "full_alliance",
@@ -475,9 +478,9 @@ EXPORT_VALUE_SCHEMA: dict[str, Any] = {
             "type": "array",
             "description": (
                 "Post-unsat placeholder collection for residual / no_exact_solution / "
-                "skip rows. Sibling of $.solutions. Residual leftover stays on "
-                "unexplainedMilitaryDelta2x, not assigned onto these ships. Skip rows "
-                "keep an empty array."
+                "uncharacterized_roster / skip rows. Sibling of $.solutions. Residual "
+                "leftover stays on unexplainedMilitaryDelta2x; roster leftover is the "
+                "tagged leftover sibling. Skip rows keep an empty array."
             ),
             "items": _PLACEHOLDER_ITEM_SCHEMA,
         },
@@ -486,9 +489,50 @@ EXPORT_VALUE_SCHEMA: dict[str, Any] = {
             "description": (
                 "Unexplained military score leftover in host times-two units for "
                 "moderate_residual, mine_score_residual, and no_exact_solution rows. "
-                "Omitted for exact and admission-skip terminals. Sibling of "
-                "$.solutions; not assigned onto placeholders."
+                "Omitted for exact, uncharacterized_roster unknown-loss bounds, and "
+                "admission-skip terminals. Sibling of $.solutions; not assigned onto "
+                "placeholders."
             ),
+        },
+        "leftover": {
+            "type": "object",
+            "description": (
+                "Tagged unknown-loss leftover for uncharacterized_roster rows. "
+                "kind is point or unknown_loss_bound. A bound is not a point leftover "
+                "and must not be read as unexplainedMilitaryDelta2x. Sibling of "
+                "$.solutions."
+            ),
+            "additionalProperties": True,
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "description": "point or unknown_loss_bound.",
+                },
+                "lowerBound2x": {
+                    "type": "integer",
+                    "description": (
+                        "Lower bound on unexplained military in solver 2x units when "
+                        "kind is unknown_loss_bound."
+                    ),
+                },
+                "unexplainedMilitaryDelta2x": {
+                    "type": "integer",
+                    "description": ("Point leftover in solver 2x units when kind is point."),
+                },
+            },
+        },
+        "latticeSignatures": {
+            "type": "array",
+            "description": (
+                "Idle-dock class alternatives (build + placeholder departure) on "
+                "uncharacterized_roster rows. Sibling of $.solutions; not ranked "
+                "solutions and not solution stream events."
+            ),
+            "items": {
+                "type": "object",
+                "description": "One lattice signature pair.",
+                "additionalProperties": True,
+            },
         },
         "diagnostics": _DIAGNOSTICS_SCHEMA,
         "tierEmissions": {
