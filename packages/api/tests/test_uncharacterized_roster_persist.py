@@ -209,6 +209,12 @@ def test_export_exposes_roster_status_tagged_leftover_placeholders_and_signature
     signatures = queried.paths["$.latticeSignatures"].value
     assert len(signatures) == 2
     assert {entry["shipClass"] for entry in signatures} == {"warship", "freighter"}
+    assert queried.paths["$.placeholders"].kind != "none"
+    assert all(
+        "hullId" not in entry
+        for entry in queried.paths["$.placeholders"].value
+        if entry.get("id") == PLACEHOLDER_DEPARTURE_ID
+    )
 
 
 def test_uncharacterized_roster_persist_does_not_unique_fill_next_turn_sat_catalog(
@@ -216,49 +222,95 @@ def test_uncharacterized_roster_persist_does_not_unique_fill_next_turn_sat_catal
     persistence,
     synthetic_catalog_context,
 ):
+    from api.analytics.fleet.chain import ensure_fleet_baseline
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
     from api.analytics.military_score_inference.ship_build_combos import ship_build_upper_bound
     from api.analytics.military_score_inference.ship_transfer_families import (
         build_ship_transfer_catalog_fragment,
     )
-    from api.concepts.ship_build_military import ship_build_military_score_delta_2x
+    from api.analytics.scores.export_services import ScoresExportContext
 
     from tests.fixtures.ship_transfer_families import _transfer_catalog_kwargs
+    from tests.fleet_fixtures import ledger_for_player
 
     observation = _observation(warship_delta=-1, freighter_delta=0, military_delta_2x=-40)
-    result = military_sat_refusal_from_turn(
-        observation,
-        without_player_minefields(sample_turn, observation.player_id),
-        (_singleton_unknown_hull_warship(),),
-    )
+    sat_turn = without_player_minefields(sample_turn, observation.player_id)
+    result = military_sat_refusal_from_turn(observation, sat_turn)
     assert result is not None
-    wire = _persist_refusal(persistence, result, player_id=3)
-    assert wire["status"] == STATUS_UNCHARACTERIZED_ROSTER
-    assert wire["status"] != "exact"
-    assert wire["solutions"] == []
+    player_id = observation.player_id
+    host_turn = sat_turn.settings.turn
+    perspective = 8
+    wire = _persist_refusal(persistence, result, player_id=player_id, host_turn=host_turn)
+    stored = persistence.get_row(GAME_ID, perspective, host_turn, player_id)
+    assert stored is not None
+    assert stored.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert stored.status != "exact"
+    assert stored.solutions == []
+    assert wire["status"] == stored.status
+    assert wire["solutions"] == stored.solutions
+    assert stored.leftover is not None
+    assert stored.leftover["kind"] == "unknown_loss_bound"
+    assert stored.placeholders is not None
     assert all(
         "hullId" not in entry
-        for entry in wire["placeholders"]
+        for entry in stored.placeholders
         if entry.get("id") == PLACEHOLDER_DEPARTURE_ID
     )
 
-    unique_fill = _singleton_unknown_hull_warship()
-    military_2x = ship_build_military_score_delta_2x(
-        synthetic_catalog_context["hulls_by_id"][24],
-        synthetic_catalog_context["engines_by_id"][1],
-        synthetic_catalog_context["beams_by_id"][1],
-        None,
-        beam_count=2,
-        launcher_count=0,
+    ingest_turn = replace(
+        sat_turn,
+        ships=(),
+        scores=tuple(
+            replace(
+                score,
+                shipchange=observation.warship_delta,
+                freighterchange=observation.freighter_delta,
+            )
+            if score.ownerid == player_id
+            else score
+            for score in sat_turn.scores
+        ),
     )
-    next_observation = _observation(
-        warship_delta=0, freighter_delta=0, military_delta_2x=military_2x
+    inference = FleetInferenceSupport(
+        scores_services=ScoresExportContext(persistence=persistence),
     )
+    held = inference.held_inference_for_scoreboard_turn(
+        game_id=GAME_ID,
+        perspective=perspective,
+        scoreboard_turn=host_turn,
+        player_id=player_id,
+        turn=ingest_turn,
+        load_turn=lambda _turn_number: ingest_turn,
+    )
+    assert held.solutions == ()
+    assert all(
+        "hullId" not in entry
+        for entry in held.placeholders
+        if entry.get("id") == PLACEHOLDER_DEPARTURE_ID
+    )
+    snapshot = ingest_turn_inferred_acquisitions(
+        ensure_fleet_baseline(GAME_ID, perspective, ingest_turn),
+        ingest_turn,
+        inference_materialization=FleetInferenceMaterialization(
+            inference=inference,
+            load_turn=lambda _turn_number: ingest_turn,
+        ),
+    )
+    prior_fleet_records = tuple(ledger_for_player(snapshot, player_id).records)
+    assert all(not record.build_option_sets for record in prior_fleet_records)
+
+    next_observation = _observation(warship_delta=0, freighter_delta=0, military_delta_2x=0)
     fragment = build_ship_transfer_catalog_fragment(
         next_observation,
         peer_rows=(),
-        prior_fleet_records=(unique_fill,),
+        prior_fleet_records=prior_fleet_records,
         **_transfer_catalog_kwargs(synthetic_catalog_context),
     )
+    assert fragment.prior_warship_departure_cap == 0
     assert fragment.extra_warship_capacity == 0
     assert (
         ship_build_upper_bound(
