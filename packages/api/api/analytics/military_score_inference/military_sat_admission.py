@@ -3,8 +3,8 @@
 Refuse military SAT when a departure pin fails on a class that can move
 military, or when an unknown-class outgoing pairing leave is unpinned.
 Pin absence on a class that did not drop is not a fail. True-freighter
-unpin still admits SAT. Does not emit placeholders or persist
-``uncharacterized_roster`` (phase 3).
+unpin still admits SAT. Case-2 emit (placeholders, leftover, lattice
+signatures) is ``uncharacterized_roster``. Persist of that status is phase 4.
 Contract: design-military-score-build-inference.md §3.12.
 """
 
@@ -36,12 +36,17 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
 from api.analytics.military_score_inference.ship_transfer_families import (
     public_scoreboard_rows_from_scores,
 )
+from api.analytics.military_score_inference.uncharacterized_roster import (
+    STATUS_UNCHARACTERIZED_ROSTER,
+    UNCHARACTERIZED_ROSTER_SUMMARY,
+    uncharacterized_roster_result_from_turn,
+)
 from api.models.components import Hull
 from api.models.game import TurnInfo
 from api.models.ship import Ship
 
-STATUS_MILITARY_SAT_REFUSED = "military_sat_refused"
-MILITARY_SAT_REFUSED_SUMMARY = "Unpinned military departure; military SAT not entered"
+STATUS_MILITARY_SAT_REFUSED = STATUS_UNCHARACTERIZED_ROSTER
+MILITARY_SAT_REFUSED_SUMMARY = UNCHARACTERIZED_ROSTER_SUMMARY
 MILITARY_SAT_REFUSED_REASON = "unpinned_military_departure"
 
 
@@ -148,15 +153,15 @@ def resolve_military_sat_admission_from_turn(
 def military_sat_refusal_result(
     admission: MilitarySatAdmission,
 ) -> InferenceResult | None:
-    """In-memory skip when SAT is refused. None when SAT may run.
+    """Admission-only refuse shell. None when SAT may run.
 
-    Not a persistable product status. Phase 3 turns this into
-    ``uncharacterized_roster``.
+    Turn-scoped emit (placeholders, leftover, lattice signatures) is
+    ``military_sat_refusal_from_turn``. Not a persistable product status.
     """
     if admission.admitted:
         return None
     return InferenceResult(
-        status=STATUS_MILITARY_SAT_REFUSED,
+        status=STATUS_UNCHARACTERIZED_ROSTER,
         solutions=(),
         diagnostics={
             "reason": MILITARY_SAT_REFUSED_REASON,
@@ -170,11 +175,20 @@ def military_sat_refusal_from_turn(
     turn: TurnInfo,
     prior_fleet_records: tuple[FleetShipRecord, ...] = (),
 ) -> InferenceResult | None:
-    """Refuse result for a turn, or None when SAT may run."""
-    return military_sat_refusal_result(
-        resolve_military_sat_admission_from_turn(
-            observation,
-            turn,
-            prior_fleet_records,
-        )
+    """Case-2 emit when SAT is refused, or None when SAT may run."""
+    admission = resolve_military_sat_admission_from_turn(
+        observation,
+        turn,
+        prior_fleet_records,
+    )
+    if admission.admitted:
+        return None
+    return uncharacterized_roster_result_from_turn(
+        observation,
+        turn,
+        prior_fleet_records,
+        diagnostics={
+            "reason": MILITARY_SAT_REFUSED_REASON,
+            "satAdmitted": False,
+        },
     )

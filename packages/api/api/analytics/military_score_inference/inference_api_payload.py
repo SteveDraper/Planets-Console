@@ -7,10 +7,6 @@ from typing import Any
 
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.military_sat_admission import (
-    MILITARY_SAT_REFUSED_SUMMARY,
-    STATUS_MILITARY_SAT_REFUSED,
-)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -39,6 +35,10 @@ from api.analytics.military_score_inference.solver import (
 )
 from api.analytics.military_score_inference.tier_emission_ledger import (
     compact_tier_emissions_from_step_diagnostics,
+)
+from api.analytics.military_score_inference.uncharacterized_roster import (
+    STATUS_UNCHARACTERIZED_ROSTER,
+    UNCHARACTERIZED_ROSTER_SUMMARY,
 )
 from api.models.game import TurnInfo
 
@@ -95,6 +95,8 @@ class InferenceProductPayload:
     status: str | None = None
     placeholders: list[dict[str, object]] | None = None
     unexplained_military_delta_2x: int | None = None
+    leftover: dict[str, object] | None = None
+    lattice_signatures: list[dict[str, object]] | None = None
 
 
 def product_payload_fields(
@@ -102,20 +104,34 @@ def product_payload_fields(
     *,
     placeholders: list[dict[str, object]] | None = None,
     leftover: int | None = None,
+    tagged_leftover: dict[str, object] | None = None,
+    lattice_signatures: list[dict[str, object]] | None = None,
 ) -> InferenceProductPayload:
     """Return product status, placeholders, and leftover for persist, stream, and export.
 
     Residual / ``no_exact_solution`` expose leftover and ``placeholders`` (empty
     list if missing; callers pass the §3.6 collection when built). Skip rows
     expose empty ``placeholders`` and omit leftover.
+    ``uncharacterized_roster`` exposes placeholders, tagged leftover, and
+    lattice signatures; it must not encode a bound as point leftover.
     Other statuses omit leftover and omit placeholders unless the source already
     carried them.
     """
     resolved_placeholders = placeholders
     if (
-        status in FUNCTIONAL_LEFTOVER_STATUSES or status in INFERENCE_ADMISSION_SKIP_STATUSES
+        status in FUNCTIONAL_LEFTOVER_STATUSES
+        or status in INFERENCE_ADMISSION_SKIP_STATUSES
+        or status == STATUS_UNCHARACTERIZED_ROSTER
     ) and resolved_placeholders is None:
         resolved_placeholders = []
+    if status == STATUS_UNCHARACTERIZED_ROSTER:
+        return InferenceProductPayload(
+            status=status,
+            placeholders=resolved_placeholders,
+            unexplained_military_delta_2x=None,
+            leftover=tagged_leftover,
+            lattice_signatures=[] if lattice_signatures is None else lattice_signatures,
+        )
     resolved_leftover = leftover if status in FUNCTIONAL_LEFTOVER_STATUSES else None
     return InferenceProductPayload(
         status=status,
@@ -177,6 +193,8 @@ def inference_result_to_api_payload(
                 turn,
                 resolved_mask=resolved_mask,
             )
+    if result.status == STATUS_UNCHARACTERIZED_ROSTER:
+        placeholders = list(result.placeholders)
     return inference_api_payload(
         status=result.status,
         summary=format_inference_summary(
@@ -189,6 +207,8 @@ def inference_result_to_api_payload(
         catalog=catalog,
         placeholders=placeholders,
         unexplained_military_delta_2x=leftover_2x,
+        tagged_leftover=result.leftover,
+        lattice_signatures=list(result.lattice_signatures),
     )
 
 
@@ -249,8 +269,8 @@ def format_inference_summary(
         return "Build inference halted"
     if result.status == STATUS_TIME_LIMITED and not result.solutions:
         return "Inference timed out before finding a solution"
-    if result.status == STATUS_MILITARY_SAT_REFUSED:
-        return MILITARY_SAT_REFUSED_SUMMARY
+    if result.status == STATUS_UNCHARACTERIZED_ROSTER:
+        return UNCHARACTERIZED_ROSTER_SUMMARY
     if not result.solutions:
         return "No feasible build explanation found"
 
@@ -282,8 +302,8 @@ def _inference_row_is_complete(
     status: str,
     solutions: tuple[InferenceSolution, ...],
 ) -> bool:
-    if status == STATUS_MILITARY_SAT_REFUSED:
-        return False
+    if status == STATUS_UNCHARACTERIZED_ROSTER:
+        return True
     return status != STATUS_TIME_LIMITED or len(solutions) == 0
 
 
@@ -297,6 +317,8 @@ def inference_api_payload(
     catalog: ActionCatalog | None = None,
     placeholders: list[dict[str, object]] | None = None,
     unexplained_military_delta_2x: int | None = None,
+    tagged_leftover: dict[str, object] | None = None,
+    lattice_signatures: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     fleet_torp_input_status, fleet_torp_overlay_belief_set_torp_ids = (
         fleet_torp_complete_wire_fields_from_diagnostics(diagnostics)
@@ -307,7 +329,13 @@ def inference_api_payload(
         else _functional_leftover_2x(status, observation)
     )
     leftover_summary = _functional_leftover_status_summary(status, leftover_2x)
-    product = product_payload_fields(status, leftover=leftover_2x, placeholders=placeholders)
+    product = product_payload_fields(
+        status,
+        leftover=leftover_2x,
+        placeholders=placeholders,
+        tagged_leftover=tagged_leftover,
+        lattice_signatures=lattice_signatures,
+    )
     payload: dict[str, object] = {
         "status": product.status,
         "summary": leftover_summary if leftover_summary is not None else summary,
@@ -315,7 +343,7 @@ def inference_api_payload(
         # Zero-solution timeouts are terminal failures (visible error in the SPA).
         # Timeouts that already hold solutions stay incomplete so partial top-K can
         # keep streaming until a durable stop/persist path closes the row.
-        # Military SAT refusal is in-memory only until uncharacterized-roster persist.
+        # Uncharacterized roster is a closed in-memory product; persist is phase 4.
         "isComplete": _inference_row_is_complete(status, solutions),
         "solutions": (
             [
@@ -336,6 +364,10 @@ def inference_api_payload(
         payload["placeholders"] = product.placeholders
     if product.unexplained_military_delta_2x is not None:
         payload["unexplainedMilitaryDelta2x"] = product.unexplained_military_delta_2x
+    if product.leftover is not None:
+        payload["leftover"] = product.leftover
+    if product.lattice_signatures is not None:
+        payload["latticeSignatures"] = product.lattice_signatures
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:

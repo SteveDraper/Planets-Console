@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHul
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.military_sat_admission import (
     STATUS_MILITARY_SAT_REFUSED,
+    military_sat_refusal_from_turn,
 )
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -109,8 +110,14 @@ def finalize_policy_ladder_result(
 
     if catalog is None or problem is None:
         if state.last_status == STATUS_MILITARY_SAT_REFUSED:
+            refused = military_sat_refusal_from_turn(
+                observation,
+                turn,
+                state.prior_fleet_records,
+            )
             return (
-                InferenceResult(
+                refused
+                or InferenceResult(
                     status=STATUS_MILITARY_SAT_REFUSED,
                     solutions=(),
                     diagnostics=dict(state.last_diagnostics),

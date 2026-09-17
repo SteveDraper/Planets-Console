@@ -33,7 +33,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.military_sat_admission import (
-    STATUS_MILITARY_SAT_REFUSED,
+    STATUS_UNCHARACTERIZED_ROSTER,
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
@@ -453,7 +453,7 @@ def test_persist_admits_functional_and_skip_statuses(status, persistence) -> Non
 
 @pytest.mark.parametrize(
     "status",
-    ["paused", "fetch_error", "pending", STATUS_MILITARY_SAT_REFUSED],
+    ["paused", "fetch_error", "pending", STATUS_UNCHARACTERIZED_ROSTER],
 )
 def test_persist_rejects_non_durable_statuses(status, persistence) -> None:
     assert not is_durable_turn_evidence_row_status(status)

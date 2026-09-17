@@ -243,3 +243,6 @@ class InferenceResult:
     status: str
     solutions: tuple[InferenceSolution, ...]
     diagnostics: dict[str, object]
+    placeholders: tuple[dict[str, object], ...] = ()
+    leftover: dict[str, object] | None = None
+    lattice_signatures: tuple[dict[str, object], ...] = ()

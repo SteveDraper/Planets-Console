@@ -37,6 +37,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 )
 from api.analytics.military_score_inference.military_sat_admission import (
     STATUS_MILITARY_SAT_REFUSED,
+    STATUS_UNCHARACTERIZED_ROSTER,
     class_can_move_military,
     military_sat_admission,
     military_sat_refusal_result,
@@ -304,24 +305,31 @@ def test_resolve_admission_uses_pin_not_unique_fill(synthetic_catalog_context):
     assert admission.refused_class == "warship"
 
 
-def test_military_sat_refused_payload_is_incomplete_and_not_no_exact_solution():
+def test_military_sat_refused_payload_is_uncharacterized_roster_not_no_exact_solution():
     result = InferenceResult(
-        status=STATUS_MILITARY_SAT_REFUSED,
+        status=STATUS_UNCHARACTERIZED_ROSTER,
         solutions=(),
         diagnostics={"reason": "unpinned_military_departure", "satAdmitted": False},
+        leftover={"kind": "unknown_loss_bound", "lowerBound2x": 0},
+        lattice_signatures=(),
     )
     payload = inference_api_payload(
         status=result.status,
         summary=format_inference_summary(result),
         solutions=result.solutions,
         diagnostics=result.diagnostics,
+        placeholders=[],
+        tagged_leftover=result.leftover,
+        lattice_signatures=[],
     )
-    assert payload["status"] == STATUS_MILITARY_SAT_REFUSED
+    assert payload["status"] == STATUS_UNCHARACTERIZED_ROSTER
     assert payload["status"] != STATUS_NO_EXACT_SOLUTION
-    assert payload["isComplete"] is False
+    assert payload["isComplete"] is True
     assert payload["solutions"] == []
-    assert "placeholders" not in payload
-    assert "Unpinned military departure" in payload["summary"]
+    assert payload["placeholders"] == []
+    assert payload["leftover"]["kind"] == "unknown_loss_bound"
+    assert "unexplainedMilitaryDelta2x" not in payload
+    assert "Uncharacterized roster" in payload["summary"]
     assert "No feasible build explanation found" not in payload["summary"]
 
 
@@ -630,7 +638,7 @@ def test_stream_tier_job_surfaces_military_sat_refused_without_sat(sample_turn, 
     assert outcome.enqueue_continuation is False
     assert outcome.row_complete is not None
     assert outcome.row_complete.result.status == STATUS_MILITARY_SAT_REFUSED
-    assert outcome.row_complete.wire_payload.is_complete is False
+    assert outcome.row_complete.wire_payload.is_complete is True
     assert sat_calls == []
     assert catalog_calls == []
 
@@ -684,7 +692,7 @@ def test_stream_sat_refuse_does_not_continue_accelerated_segments(sample_turn, m
     assert outcome.next_ladder_state is None
     assert outcome.row_complete is not None
     assert outcome.row_complete.result.status == STATUS_MILITARY_SAT_REFUSED
-    assert outcome.row_complete.wire_payload.is_complete is False
+    assert outcome.row_complete.wire_payload.is_complete is True
     assert orchestration.segment_solves == []
     assert sat_calls == []
     assert catalog_calls == []
