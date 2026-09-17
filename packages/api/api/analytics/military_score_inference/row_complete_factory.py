@@ -39,6 +39,8 @@ def row_complete_wire_payload_from_api_payload(
     wire_solutions = payload.get("solutions")
     host_turn_targets = host_turn_functional_targets_from_wire_list(payload.get("hostTurnTargets"))
     placeholders, unexplained = inference_complete_functional_fields(payload)
+    leftover = payload.get("leftover")
+    lattice_signatures = payload.get("latticeSignatures")
     return RowCompleteWirePayload(
         status=str(payload.get("status", "")),
         summary=str(payload.get("summary", "")),
@@ -49,6 +51,12 @@ def row_complete_wire_payload_from_api_payload(
         host_turn_targets=host_turn_targets,
         placeholders=placeholders,
         unexplained_military_delta_2x=unexplained,
+        leftover=leftover if isinstance(leftover, dict) else None,
+        lattice_signatures=(
+            [entry for entry in lattice_signatures if isinstance(entry, dict)]
+            if isinstance(lattice_signatures, list)
+            else None
+        ),
     )
 
 
@@ -88,6 +96,10 @@ def build_row_complete_wire_payload(
             solutions=result.solutions,
             diagnostics=result.diagnostics,
             observation=observation,
+            placeholders=list(result.placeholders) if result.placeholders else None,
+            leftover=result.leftover,
+            placeholder_departures=result.placeholder_departures,
+            lattice_signatures=result.lattice_signatures,
         )
     return row_complete_wire_payload_from_api_payload(
         payload,
@@ -153,6 +165,8 @@ def _stopped_wire_payload_from_base(
         },
         placeholders=base.wire_payload.placeholders,
         unexplained_military_delta_2x=base.wire_payload.unexplained_military_delta_2x,
+        leftover=base.wire_payload.leftover,
+        lattice_signatures=base.wire_payload.lattice_signatures,
     )
 
 

@@ -14,11 +14,11 @@ from api.analytics.fleet.types import (
 from api.analytics.military_score_inference.count_lattice import (
     CountLatticeClassEvent,
     DeparturePin,
-    _remainder_sets_after_alibi,
     class_drops_from_observation,
     count_lattice_signal,
     departure_pin,
     record_has_known_spec,
+    remainder_sets_after_alibi,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.public_scoreboard_pairing import (
@@ -369,7 +369,7 @@ def test_class_drops_from_observation_are_scoreboard_column_losses():
 
 def test_remainder_sets_honor_injected_class_drops(synthetic_catalog_context):
     record, _ = _known_warship_record(synthetic_catalog_context)
-    remainder_sets = _remainder_sets_after_alibi(
+    remainder_sets = remainder_sets_after_alibi(
         PLAYER_ID,
         _ledger(record),
         (),

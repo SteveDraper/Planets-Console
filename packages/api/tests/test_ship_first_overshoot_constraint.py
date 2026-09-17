@@ -416,7 +416,10 @@ def test_empty_overshoot_window_is_empty_list_residual(sample_turn, monkeypatch)
     )
     turn = replace(sample_turn, minefields=(_minefield(units=20),))
     observation = _observation(
-        military_delta_2x=-40, warship_delta=0, military_partition_slack_2x=1
+        military_delta_2x=-40,
+        warship_delta=0,
+        military_partition_slack_2x=1,
+        starbases_owned=0,
     )
     result, catalog, problem, attempted, _ = solve_with_policy_ladder(
         observation,
@@ -461,7 +464,7 @@ def test_moderate_residual_still_has_no_solution_list(sample_turn, monkeypatch) 
         ),
     )
     turn = without_player_minefields(sample_turn, _VIEWPOINT_PLAYER_ID)
-    observation = _observation(military_delta_2x=-10, warship_delta=0)
+    observation = _observation(military_delta_2x=-10, warship_delta=0, starbases_owned=0)
     result, catalog, problem, attempted, _ = solve_with_policy_ladder(
         observation,
         turn,

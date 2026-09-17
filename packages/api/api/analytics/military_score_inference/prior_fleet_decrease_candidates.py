@@ -96,7 +96,7 @@ def _departure_military_2x(
     beams_by_id: dict[int, Beam],
     torpedos_by_id: dict[int, Torpedo],
 ) -> tuple[int, int] | None:
-    option_envelope = _option_set_envelope_2x(record.build_option_sets)
+    option_envelope = option_set_envelope_2x(record.build_option_sets)
     point = _known_fill_military_2x(
         record,
         hulls_by_id=hulls_by_id,
@@ -113,9 +113,10 @@ def _departure_military_2x(
     return None
 
 
-def _option_set_envelope_2x(
+def option_set_envelope_2x(
     option_sets: list[FleetBuildOptionSet],
 ) -> tuple[int, int] | None:
+    """Inclusive military 2x envelope across option sets that both publish min and max."""
     mins: list[int] = []
     maxes: list[int] = []
     for option_set in option_sets:

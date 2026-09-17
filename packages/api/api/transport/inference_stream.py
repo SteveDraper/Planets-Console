@@ -83,6 +83,8 @@ def inference_complete_event(
     tier_emissions: list[dict[str, object]] | None = None,
     placeholders: list[dict[str, object]] | None = None,
     unexplained_military_delta_2x: int | None = None,
+    leftover: dict[str, object] | None = None,
+    lattice_signatures: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "complete",
@@ -97,6 +99,10 @@ def inference_complete_event(
         payload["placeholders"] = placeholders
     if unexplained_military_delta_2x is not None:
         payload["unexplainedMilitaryDelta2x"] = unexplained_military_delta_2x
+    if leftover is not None:
+        payload["leftover"] = leftover
+    if lattice_signatures is not None:
+        payload["latticeSignatures"] = lattice_signatures
     if diagnostics is not None:
         payload["diagnostics"] = diagnostics
     if host_turn_targets is not None:

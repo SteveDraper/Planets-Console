@@ -1,4 +1,4 @@
-"""SAT admission from departure pin-fail and unknown-class outgoing leaves."""
+"""SAT admission from pin-fail, unknown-class outgoing leave, and unknown-class idle-dock."""
 
 from __future__ import annotations
 
@@ -36,14 +36,16 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.military_sat_admission import (
-    STATUS_MILITARY_SAT_REFUSED,
     class_can_move_military,
     military_sat_admission,
-    military_sat_refusal_result,
+    military_sat_refusal_from_turn,
     resolve_military_sat_admission,
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceResult
-from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
+from api.analytics.military_score_inference.policy_ladder import (
+    finalize_policy_ladder_result,
+    solve_with_policy_ladder,
+)
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     run_policy_ladder_tier_step,
@@ -58,9 +60,19 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.military_score_inference.uncharacterized_roster import (
+    STATUS_UNCHARACTERIZED_ROSTER,
+)
+from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    UnknownLossBoundLeftover,
+)
 
 from tests.fixtures.military_score_inference import _observation, without_player_minefields
-from tests.fixtures.pp_gap_transfer import federation_row, mixed_residual_receiver_row
+from tests.fixtures.pp_gap_transfer import (
+    birds_row,
+    federation_row,
+    mixed_residual_receiver_row,
+)
 from tests.fixtures.ship_transfer_families import (
     _class_only_freighter_record,
     _known_warship_record,
@@ -166,7 +178,6 @@ def test_true_freighter_cannot_move_military():
 def test_quiet_turn_with_no_signal_admits_sat():
     admission = _admission(CountLatticeSignal(events=()), pins=())
     assert admission.admitted is True
-    assert military_sat_refusal_result(admission) is None
 
 
 def test_unpinned_warship_drop_refuses_sat():
@@ -176,11 +187,6 @@ def test_unpinned_warship_drop_refuses_sat():
     )
     assert admission.admitted is False
     assert admission.refused_class == "warship"
-    refused = military_sat_refusal_result(admission)
-    assert refused is not None
-    assert refused.status == STATUS_MILITARY_SAT_REFUSED
-    assert refused.solutions == ()
-    assert refused.diagnostics["satAdmitted"] is False
 
 
 def test_pin_absence_on_warship_lattice_event_is_not_fail():
@@ -189,10 +195,21 @@ def test_pin_absence_on_warship_lattice_event_is_not_fail():
     assert admission.refused_class is None
 
 
-def test_idle_dock_only_signal_without_scoreboard_drop_admits_sat():
+def test_unknown_class_idle_dock_signal_refuses_sat():
     admission = _admission(
         CountLatticeSignal(
             events=(CountLatticeClassEvent(ship_class=None, source="idle_dock", count=1),)
+        ),
+        pins=(),
+    )
+    assert admission.admitted is False
+    assert admission.refused_class is None
+
+
+def test_pinned_idle_dock_class_without_pin_fail_admits_sat():
+    admission = _admission(
+        CountLatticeSignal(
+            events=(CountLatticeClassEvent(ship_class="warship", source="idle_dock", count=1),)
         ),
         pins=(),
     )
@@ -205,7 +222,6 @@ def test_unpinned_freighter_only_drop_admits_sat():
         (DeparturePin(kind="fail", ship_class="freighter"),),
     )
     assert admission.admitted is True
-    assert military_sat_refusal_result(admission) is None
 
 
 def test_exact_set_warship_pin_admits_sat():
@@ -304,24 +320,31 @@ def test_resolve_admission_uses_pin_not_unique_fill(synthetic_catalog_context):
     assert admission.refused_class == "warship"
 
 
-def test_military_sat_refused_payload_is_incomplete_and_not_no_exact_solution():
+def test_military_sat_refused_payload_is_uncharacterized_roster_not_no_exact_solution():
     result = InferenceResult(
-        status=STATUS_MILITARY_SAT_REFUSED,
+        status=STATUS_UNCHARACTERIZED_ROSTER,
         solutions=(),
         diagnostics={"reason": "unpinned_military_departure", "satAdmitted": False},
+        leftover=UnknownLossBoundLeftover(lower_bound_2x=0),
+        lattice_signatures=(),
     )
     payload = inference_api_payload(
         status=result.status,
         summary=format_inference_summary(result),
         solutions=result.solutions,
         diagnostics=result.diagnostics,
+        placeholders=[],
+        leftover=result.leftover,
+        lattice_signatures=result.lattice_signatures,
     )
-    assert payload["status"] == STATUS_MILITARY_SAT_REFUSED
+    assert payload["status"] == STATUS_UNCHARACTERIZED_ROSTER
     assert payload["status"] != STATUS_NO_EXACT_SOLUTION
-    assert payload["isComplete"] is False
+    assert payload["isComplete"] is True
     assert payload["solutions"] == []
-    assert "placeholders" not in payload
-    assert "Unpinned military departure" in payload["summary"]
+    assert payload["placeholders"] == []
+    assert payload["leftover"]["kind"] == "unknown_loss_bound"
+    assert "unexplainedMilitaryDelta2x" not in payload
+    assert "Uncharacterized roster" in payload["summary"]
     assert "No feasible build explanation found" not in payload["summary"]
 
 
@@ -376,7 +399,7 @@ def test_unpinned_warship_drop_does_not_build_catalog_or_run_sat(sample_turn, mo
         turn,
         prior_fleet_records=(_singleton_unknown_hull_warship(),),
     )
-    assert result.status == STATUS_MILITARY_SAT_REFUSED
+    assert result.status == STATUS_UNCHARACTERIZED_ROSTER
     assert catalog is None
     assert problem is None
     assert attempted == []
@@ -394,7 +417,7 @@ def test_rst_known_exact_set_still_enters_sat(sample_turn, monkeypatch, syntheti
         without_player_minefields(sample_turn, observation.player_id),
         prior_fleet_records=(record,),
     )
-    assert result.status != STATUS_MILITARY_SAT_REFUSED
+    assert result.status != STATUS_UNCHARACTERIZED_ROSTER
     assert catalog is not None
     assert attempted
     assert sat_calls
@@ -409,7 +432,7 @@ def test_unpinned_freighter_only_drop_still_enters_sat(sample_turn, monkeypatch)
         without_player_minefields(sample_turn, observation.player_id),
         prior_fleet_records=(_class_only_freighter_record(),),
     )
-    assert result.status != STATUS_MILITARY_SAT_REFUSED
+    assert result.status != STATUS_UNCHARACTERIZED_ROSTER
     assert catalog is not None
     assert attempted
     assert sat_calls
@@ -428,7 +451,7 @@ def test_spec_only_pin_still_enters_sat(sample_turn, monkeypatch, synthetic_cata
         without_player_minefields(sample_turn, observation.player_id),
         prior_fleet_records=records,
     )
-    assert result.status != STATUS_MILITARY_SAT_REFUSED
+    assert result.status != STATUS_UNCHARACTERIZED_ROSTER
     assert catalog is not None
     assert attempted
     assert sat_calls
@@ -504,7 +527,12 @@ def test_class_flip_receiving_warship_admits_sat(synthetic_catalog_context):
 def test_class_flip_receiving_warship_still_enters_sat(sample_turn, monkeypatch):
     sat_calls: list = []
     _patch_sat(monkeypatch, sat_calls)
-    observation = _observation(warship_delta=1, freighter_delta=-1, military_delta_2x=40)
+    observation = _observation(
+        warship_delta=1,
+        freighter_delta=-1,
+        military_delta_2x=40,
+        starbases_owned=0,
+    )
     turn = _turn_with_peer(
         sample_turn,
         observation,
@@ -521,7 +549,7 @@ def test_class_flip_receiving_warship_still_enters_sat(sample_turn, monkeypatch)
         turn,
         prior_fleet_records=(_class_only_freighter_record(),),
     )
-    assert result.status != STATUS_MILITARY_SAT_REFUSED
+    assert result.status != STATUS_UNCHARACTERIZED_ROSTER
     assert catalog is not None
     assert attempted
     assert sat_calls
@@ -563,6 +591,23 @@ def test_outgoing_unpinned_warship_gift_refuses_sat(synthetic_catalog_context):
     assert admission.refused_class == "warship"
 
 
+def test_birds_row_unknown_class_idle_dock_refuses_sat(sample_turn, synthetic_catalog_context):
+    observation = _observation_from_row(birds_row())
+    admission = _resolve(
+        observation,
+        (),
+        synthetic_catalog_context["hulls_by_id"],
+        settings=sample_turn.settings,
+    )
+    assert any(
+        event.source == "idle_dock" and event.ship_class is None
+        for event in admission.signal.events
+    )
+    assert admission.pins == ()
+    assert admission.admitted is False
+    assert admission.refused_class is None
+
+
 def test_unknown_class_outgoing_gift_refuses_sat(sample_turn, synthetic_catalog_context):
     observation = _observation_from_row(federation_row())
     peer = mixed_residual_receiver_row()
@@ -602,11 +647,97 @@ def test_tier_step_refuses_before_catalog_or_sat(sample_turn, monkeypatch):
     assert state.ladder_complete is True
     assert state.catalog is None
     assert state.problem is None
-    assert state.last_status == STATUS_MILITARY_SAT_REFUSED
+    assert state.last_status == STATUS_UNCHARACTERIZED_ROSTER
+    assert state.refused_result is not None
+    assert state.refused_result.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert state.refused_result.leftover is not None
+    assert state.refused_result.solutions == ()
     assert state.policy_steps_attempted == []
     assert state.started_at is None
     assert sat_calls == []
     assert catalog_calls == []
+
+
+def test_finalize_returns_stashed_refuse_without_recompute(sample_turn, monkeypatch):
+    sat_calls: list = []
+    catalog_calls: list = []
+    _patch_sat(monkeypatch, sat_calls)
+    _patch_catalog_must_not_build(monkeypatch, catalog_calls)
+    observation, turn = _unpinned_warship_drop_observation_turn(sample_turn)
+    state = PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies(None)),
+        prior_fleet_records=(_singleton_unknown_hull_warship(),),
+    )
+    run_policy_ladder_tier_step(
+        state,
+        observation,
+        turn,
+        time_limit_seconds=1.0,
+    )
+    stashed = state.refused_result
+    assert stashed is not None
+
+    def _must_not_recompute(*_args, **_kwargs):
+        raise AssertionError("refuse must not re-run admission or emit")
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.military_sat_admission.military_sat_refusal_from_turn",
+        _must_not_recompute,
+    )
+    result, catalog, problem, *_ = finalize_policy_ladder_result(state, observation, turn)
+    assert result is stashed
+    assert catalog is None
+    assert problem is None
+    assert sat_calls == []
+    assert catalog_calls == []
+
+
+def test_finalize_does_not_emit_hollow_uncharacterized_roster(sample_turn):
+    observation, turn = _unpinned_warship_drop_observation_turn(sample_turn)
+    state = PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies(None)),
+        last_status=STATUS_UNCHARACTERIZED_ROSTER,
+        last_diagnostics={"reason": "unpinned_military_departure", "satAdmitted": False},
+    )
+    result, *_ = finalize_policy_ladder_result(state, observation, turn)
+    assert result.status != STATUS_UNCHARACTERIZED_ROSTER
+    assert result.leftover is None
+    assert result.lattice_signatures == ()
+
+
+def test_refusal_from_turn_classifies_pairing_once(sample_turn, monkeypatch):
+    pairing_calls: list[int] = []
+    idle_dock_calls: list[int] = []
+    real_classify = classify_public_scoreboard_pairing
+    real_idle_dock = transfer_budget_for_row
+
+    def _classify(*args, **kwargs):
+        pairing_calls.append(1)
+        return real_classify(*args, **kwargs)
+
+    def _idle_dock(*args, **kwargs):
+        idle_dock_calls.append(1)
+        return real_idle_dock(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.military_sat_admission.classify_public_scoreboard_pairing",
+        _classify,
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.military_sat_admission.transfer_budget_for_row",
+        _idle_dock,
+    )
+    observation, turn = _unpinned_warship_drop_observation_turn(sample_turn)
+    result = military_sat_refusal_from_turn(
+        observation,
+        turn,
+        (_singleton_unknown_hull_warship(),),
+    )
+    assert result is not None
+    assert result.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert result.leftover is not None
+    assert pairing_calls == [1]
+    assert idle_dock_calls == [1]
 
 
 def test_stream_tier_job_surfaces_military_sat_refused_without_sat(sample_turn, monkeypatch):
@@ -629,8 +760,10 @@ def test_stream_tier_job_surfaces_military_sat_refused_without_sat(sample_turn, 
     outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
     assert outcome.enqueue_continuation is False
     assert outcome.row_complete is not None
-    assert outcome.row_complete.result.status == STATUS_MILITARY_SAT_REFUSED
-    assert outcome.row_complete.wire_payload.is_complete is False
+    assert outcome.row_complete.result.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert outcome.row_complete.result is run.ladder_state.refused_result
+    assert outcome.row_complete.result.leftover is not None
+    assert outcome.row_complete.wire_payload.is_complete is True
     assert sat_calls == []
     assert catalog_calls == []
 
@@ -683,8 +816,10 @@ def test_stream_sat_refuse_does_not_continue_accelerated_segments(sample_turn, m
     assert outcome.enqueue_continuation is False
     assert outcome.next_ladder_state is None
     assert outcome.row_complete is not None
-    assert outcome.row_complete.result.status == STATUS_MILITARY_SAT_REFUSED
-    assert outcome.row_complete.wire_payload.is_complete is False
+    assert outcome.row_complete.result.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert outcome.row_complete.result is run.ladder_state.refused_result
+    assert outcome.row_complete.result.leftover is not None
+    assert outcome.row_complete.wire_payload.is_complete is True
     assert orchestration.segment_solves == []
     assert sat_calls == []
     assert catalog_calls == []
@@ -717,7 +852,8 @@ def test_corpus_prebuilt_does_not_run_sat_when_refused(sample_turn, monkeypatch)
         turn=turn,
         prior_fleet_records=(_singleton_unknown_hull_warship(),),
     )
-    assert result.status == STATUS_MILITARY_SAT_REFUSED
+    assert result.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert result.leftover is not None
     assert catalog is None
     assert problem is None
     assert attempted == []

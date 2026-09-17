@@ -17,9 +17,6 @@ from api.analytics.military_score_inference.hopeless_classifier import (
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
-from api.analytics.military_score_inference.military_sat_admission import (
-    STATUS_MILITARY_SAT_REFUSED,
-)
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -108,13 +105,9 @@ def finalize_policy_ladder_result(
     merged_solutions = list(state.merged_solutions)
 
     if catalog is None or problem is None:
-        if state.last_status == STATUS_MILITARY_SAT_REFUSED:
+        if state.refused_result is not None:
             return (
-                InferenceResult(
-                    status=STATUS_MILITARY_SAT_REFUSED,
-                    solutions=(),
-                    diagnostics=dict(state.last_diagnostics),
-                ),
+                state.refused_result,
                 None,
                 None,
                 state.policy_steps_attempted,

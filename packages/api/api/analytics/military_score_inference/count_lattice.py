@@ -157,7 +157,7 @@ def departure_pin(
     Omit a class when D <= 0 (no departure to pin). Exact-set names
     ``record_id``s. Spec-only and fail do not. Unique-fill is not a pin.
     """
-    remainder_sets = _remainder_sets_after_alibi(
+    remainder_sets = remainder_sets_after_alibi(
         observation.player_id,
         prior_ledger,
         this_turn_ships,
@@ -188,7 +188,7 @@ def _alibi_ship_ids(this_turn_ships: Sequence[Ship], player_id: int) -> frozense
     )
 
 
-def _remainder_sets_after_alibi(
+def remainder_sets_after_alibi(
     player_id: int,
     prior_ledger: FleetAcquisitionLedger,
     this_turn_ships: Sequence[Ship],
@@ -196,6 +196,7 @@ def _remainder_sets_after_alibi(
     *,
     hulls_by_id: dict[int, Hull],
 ) -> tuple[ClassRemainderSet, ...]:
+    """Active prior rows still unalibied, grouped by class, with that class drop."""
     alibi_ids = _alibi_ship_ids(this_turn_ships, player_id)
     remainders_by_class: dict[FleetShipClass, list[FleetShipRecord]] = {
         "warship": [],

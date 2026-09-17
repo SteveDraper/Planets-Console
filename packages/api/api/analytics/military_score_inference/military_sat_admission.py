@@ -1,10 +1,12 @@
 """SAT admission for pinned vs uncharacterized departure.
 
 Refuse military SAT when a departure pin fails on a class that can move
-military, or when an unknown-class outgoing pairing leave is unpinned.
-Pin absence on a class that did not drop is not a fail. True-freighter
-unpin still admits SAT. Does not emit placeholders or persist
-``uncharacterized_roster`` (phase 3).
+military, when an unknown-class outgoing pairing leave is unpinned, or when
+a count-lattice idle-dock event has unknown class. Pin absence on a class
+that did not drop is not a fail. A pinned idle-dock class is unchanged
+unless a pin already fails. True-freighter unpin still admits SAT. Case-2
+emit (placeholders, leftover, lattice signatures) is
+``uncharacterized_roster``. Persist of that status is phase 4.
 Contract: design-military-score-build-inference.md §3.12.
 """
 
@@ -19,6 +21,7 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
 )
 from api.analytics.military_score_inference.count_lattice import (
+    CountLatticeClassEvent,
     CountLatticeSignal,
     DeparturePin,
     count_lattice_signal,
@@ -36,12 +39,13 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
 from api.analytics.military_score_inference.ship_transfer_families import (
     public_scoreboard_rows_from_scores,
 )
+from api.analytics.military_score_inference.uncharacterized_roster import (
+    uncharacterized_roster_result_from_pairing,
+)
 from api.models.components import Hull
 from api.models.game import TurnInfo
 from api.models.ship import Ship
 
-STATUS_MILITARY_SAT_REFUSED = "military_sat_refused"
-MILITARY_SAT_REFUSED_SUMMARY = "Unpinned military departure; military SAT not entered"
 MILITARY_SAT_REFUSED_REASON = "unpinned_military_departure"
 
 
@@ -65,18 +69,27 @@ def _is_unknown_class_outgoing_leave(match: PairingMatch) -> bool:
     return match.family == "gift" and match.is_unpinned_class_choice()
 
 
+def _is_unknown_class_idle_dock(event: CountLatticeClassEvent) -> bool:
+    """True when idle-dock class is unpinned and can move military."""
+    return (
+        event.source == "idle_dock"
+        and event.ship_class is None
+        and class_can_move_military(event.ship_class)
+    )
+
+
 def military_sat_admission(
     signal: CountLatticeSignal,
     pins: tuple[DeparturePin, ...],
     pairing: PublicScoreboardPairing,
 ) -> MilitarySatAdmission:
-    """Admit SAT unless a warship pin failed or an unknown-class outgoing leave is unpinned.
+    """Admit SAT unless a military-moving class is unpinned.
 
-    ``CountLatticeClassEvent`` has no direction or family; it is not this
-    iterator. Pin absence on a class that did not drop is not a fail.
-    Unique-fill and prior-fleet decrease candidates are not this gate.
-    Idle-dock PP events are not this refuse: ``departure_pin`` is scoreboard
-    class-drop only, and hidden arrivals are what SAT explains.
+    Pin fail on a class that can move military refuses. Unknown class
+    (``ship_class is None``) on an idle-dock signal or an outgoing pairing
+    leave also refuses. Pin absence on a class that did not drop is not a
+    fail. Unique-fill and prior-fleet decrease candidates are not this gate.
+    A pinned idle-dock class is unchanged unless a pin already fails.
     """
     for pin in pins:
         if pin.kind == "fail" and class_can_move_military(pin.ship_class):
@@ -86,6 +99,13 @@ def military_sat_admission(
                 pins=pins,
                 refused_class=pin.ship_class,
             )
+    if any(_is_unknown_class_idle_dock(event) for event in signal.events):
+        return MilitarySatAdmission(
+            admitted=False,
+            signal=signal,
+            pins=pins,
+            refused_class=None,
+        )
     if any(_is_unknown_class_outgoing_leave(match) for match in pairing.matches):
         return MilitarySatAdmission(
             admitted=False,
@@ -115,11 +135,11 @@ def resolve_military_sat_admission(
     return military_sat_admission(signal, pins, pairing)
 
 
-def resolve_military_sat_admission_from_turn(
+def _pairing_and_idle_dock_from_turn(
     observation: InferenceObservation,
     turn: TurnInfo,
-    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
-) -> MilitarySatAdmission:
+) -> tuple[PublicScoreboardPairing, TransferBudget | None]:
+    """Classify this row's pairing and idle-dock budget from the turn snapshot."""
     this_row = public_scoreboard_row_from_observation(observation)
     pairing = classify_public_scoreboard_pairing(
         this_row,
@@ -132,7 +152,17 @@ def resolve_military_sat_admission_from_turn(
         settings=turn.settings,
         is_after_ship_limit=observation.is_after_ship_limit,
     )
-    return resolve_military_sat_admission(
+    return pairing, idle_dock
+
+
+def military_sat_refusal_from_turn(
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+) -> InferenceResult | None:
+    """Case-2 emit when SAT is refused, or None when SAT may run."""
+    pairing, idle_dock = _pairing_and_idle_dock_from_turn(observation, turn)
+    admission = resolve_military_sat_admission(
         observation,
         pairing=pairing,
         idle_dock=idle_dock,
@@ -143,38 +173,16 @@ def resolve_military_sat_admission_from_turn(
         this_turn_ships=turn.ships,
         hulls_by_id={hull.id: hull for hull in turn.hulls},
     )
-
-
-def military_sat_refusal_result(
-    admission: MilitarySatAdmission,
-) -> InferenceResult | None:
-    """In-memory skip when SAT is refused. None when SAT may run.
-
-    Not a persistable product status. Phase 3 turns this into
-    ``uncharacterized_roster``.
-    """
     if admission.admitted:
         return None
-    return InferenceResult(
-        status=STATUS_MILITARY_SAT_REFUSED,
-        solutions=(),
+    return uncharacterized_roster_result_from_pairing(
+        observation,
+        pairing,
+        idle_dock,
+        turn,
+        prior_fleet_records,
         diagnostics={
             "reason": MILITARY_SAT_REFUSED_REASON,
             "satAdmitted": False,
         },
-    )
-
-
-def military_sat_refusal_from_turn(
-    observation: InferenceObservation,
-    turn: TurnInfo,
-    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
-) -> InferenceResult | None:
-    """Refuse result for a turn, or None when SAT may run."""
-    return military_sat_refusal_result(
-        resolve_military_sat_admission_from_turn(
-            observation,
-            turn,
-            prior_fleet_records,
-        )
     )

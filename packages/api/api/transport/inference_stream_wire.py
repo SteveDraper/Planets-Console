@@ -97,6 +97,12 @@ def inference_api_payload_to_wire_complete(
         ),
         placeholders=placeholders,
         unexplained_military_delta_2x=unexplained_military_delta_2x,
+        leftover=payload.get("leftover") if isinstance(payload.get("leftover"), dict) else None,
+        lattice_signatures=(
+            [entry for entry in payload.get("latticeSignatures", []) if isinstance(entry, dict)]
+            if isinstance(payload.get("latticeSignatures"), list)
+            else None
+        ),
     )
 
 
@@ -126,6 +132,8 @@ def row_complete_to_complete_wire_event(
         tier_emissions=_tier_emissions_for_complete_wire(diagnostics=payload.diagnostics),
         placeholders=payload.placeholders,
         unexplained_military_delta_2x=payload.unexplained_military_delta_2x,
+        leftover=payload.leftover,
+        lattice_signatures=payload.lattice_signatures,
     )
 
 

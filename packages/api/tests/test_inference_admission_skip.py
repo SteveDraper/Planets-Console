@@ -32,9 +32,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     resolve_row_stream_admission,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.military_sat_admission import (
-    STATUS_MILITARY_SAT_REFUSED,
-)
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import (
@@ -42,6 +39,9 @@ from api.analytics.military_score_inference.solver import (
     STATUS_MINE_SCORE_RESIDUAL,
     STATUS_MODERATE_RESIDUAL,
     STATUS_NO_EXACT_SOLUTION,
+)
+from api.analytics.military_score_inference.uncharacterized_roster import (
+    STATUS_UNCHARACTERIZED_ROSTER,
 )
 from api.analytics.scores.export_precedence import (
     is_durable_turn_evidence_row_status,
@@ -453,7 +453,7 @@ def test_persist_admits_functional_and_skip_statuses(status, persistence) -> Non
 
 @pytest.mark.parametrize(
     "status",
-    ["paused", "fetch_error", "pending", STATUS_MILITARY_SAT_REFUSED],
+    ["paused", "fetch_error", "pending", STATUS_UNCHARACTERIZED_ROSTER],
 )
 def test_persist_rejects_non_durable_statuses(status, persistence) -> None:
     assert not is_durable_turn_evidence_row_status(status)
