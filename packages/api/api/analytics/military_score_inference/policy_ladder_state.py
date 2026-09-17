@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.hull_collision_twins_asset import (
 )
 from api.analytics.military_score_inference.models import (
     InferenceProblem,
+    InferenceResult,
     InferenceSolution,
 )
 from api.analytics.military_score_inference.ship_first_overshoot import ShipFirstOvershootPlan
@@ -35,6 +36,7 @@ class PolicyLadderState:
     problem: InferenceProblem | None = None
     last_status: str = STATUS_NO_EXACT_SOLUTION
     last_diagnostics: dict[str, object] = field(default_factory=dict)
+    refused_result: InferenceResult | None = None
     resolved_max_solutions: int = 20
     time_limited: bool = False
     band_seeds: list[InferenceSolution] = field(default_factory=list)

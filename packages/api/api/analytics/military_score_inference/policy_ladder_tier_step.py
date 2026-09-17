@@ -263,6 +263,7 @@ def run_policy_ladder_tier_step(
             state.prior_fleet_records,
         )
         if refusal is not None:
+            state.refused_result = refusal
             state.last_status = refusal.status
             state.last_diagnostics = dict(refusal.diagnostics)
             state.ladder_complete = True

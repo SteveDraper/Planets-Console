@@ -34,15 +34,10 @@ from api.analytics.military_score_inference.prior_fleet_decrease_candidates impo
 from api.analytics.military_score_inference.public_scoreboard_pairing import (
     PublicScoreboardPairing,
     TransferBudget,
-    classify_public_scoreboard_pairing,
     public_scoreboard_row_from_observation,
-    transfer_budget_for_row,
     unique_incoming_class,
 )
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
-from api.analytics.military_score_inference.ship_transfer_families import (
-    public_scoreboard_rows_from_scores,
-)
 from api.concepts.hulls import (
     GENERIC_FREIGHTER_SENTINEL_HULL_ID,
     UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
@@ -190,26 +185,16 @@ def uncharacterized_roster_result(
     )
 
 
-def uncharacterized_roster_result_from_turn(
+def uncharacterized_roster_result_from_pairing(
     observation: InferenceObservation,
+    pairing: PublicScoreboardPairing,
+    idle_dock: TransferBudget | None,
     turn: TurnInfo,
     prior_fleet_records: tuple[FleetShipRecord, ...] = (),
     *,
     diagnostics: dict[str, object] | None = None,
 ) -> InferenceResult:
-    """Emit the case-2 product from a turn snapshot."""
-    this_row = public_scoreboard_row_from_observation(observation)
-    pairing = classify_public_scoreboard_pairing(
-        this_row,
-        public_scoreboard_rows_from_scores(turn.scores, this_player_id=observation.player_id),
-        settings=turn.settings,
-        is_after_ship_limit=observation.is_after_ship_limit,
-    )
-    idle_dock = transfer_budget_for_row(
-        this_row,
-        settings=turn.settings,
-        is_after_ship_limit=observation.is_after_ship_limit,
-    )
+    """Emit the case-2 product from an already-classified pairing."""
     product = emit_uncharacterized_roster(
         observation,
         pairing,

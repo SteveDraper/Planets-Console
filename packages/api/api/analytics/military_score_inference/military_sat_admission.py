@@ -40,16 +40,12 @@ from api.analytics.military_score_inference.ship_transfer_families import (
     public_scoreboard_rows_from_scores,
 )
 from api.analytics.military_score_inference.uncharacterized_roster import (
-    STATUS_UNCHARACTERIZED_ROSTER,
-    UNCHARACTERIZED_ROSTER_SUMMARY,
-    uncharacterized_roster_result_from_turn,
+    uncharacterized_roster_result_from_pairing,
 )
 from api.models.components import Hull
 from api.models.game import TurnInfo
 from api.models.ship import Ship
 
-STATUS_MILITARY_SAT_REFUSED = STATUS_UNCHARACTERIZED_ROSTER
-MILITARY_SAT_REFUSED_SUMMARY = UNCHARACTERIZED_ROSTER_SUMMARY
 MILITARY_SAT_REFUSED_REASON = "unpinned_military_departure"
 
 
@@ -139,11 +135,11 @@ def resolve_military_sat_admission(
     return military_sat_admission(signal, pins, pairing)
 
 
-def resolve_military_sat_admission_from_turn(
+def _pairing_and_idle_dock_from_turn(
     observation: InferenceObservation,
     turn: TurnInfo,
-    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
-) -> MilitarySatAdmission:
+) -> tuple[PublicScoreboardPairing, TransferBudget | None]:
+    """Classify this row's pairing and idle-dock budget from the turn snapshot."""
     this_row = public_scoreboard_row_from_observation(observation)
     pairing = classify_public_scoreboard_pairing(
         this_row,
@@ -156,7 +152,17 @@ def resolve_military_sat_admission_from_turn(
         settings=turn.settings,
         is_after_ship_limit=observation.is_after_ship_limit,
     )
-    return resolve_military_sat_admission(
+    return pairing, idle_dock
+
+
+def military_sat_refusal_from_turn(
+    observation: InferenceObservation,
+    turn: TurnInfo,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+) -> InferenceResult | None:
+    """Case-2 emit when SAT is refused, or None when SAT may run."""
+    pairing, idle_dock = _pairing_and_idle_dock_from_turn(observation, turn)
+    admission = resolve_military_sat_admission(
         observation,
         pairing=pairing,
         idle_dock=idle_dock,
@@ -167,43 +173,12 @@ def resolve_military_sat_admission_from_turn(
         this_turn_ships=turn.ships,
         hulls_by_id={hull.id: hull for hull in turn.hulls},
     )
-
-
-def military_sat_refusal_result(
-    admission: MilitarySatAdmission,
-) -> InferenceResult | None:
-    """Admission-only refuse shell. None when SAT may run.
-
-    Turn-scoped emit (placeholders, leftover, lattice signatures) is
-    ``military_sat_refusal_from_turn``. Not a persistable product status.
-    """
     if admission.admitted:
         return None
-    return InferenceResult(
-        status=STATUS_UNCHARACTERIZED_ROSTER,
-        solutions=(),
-        diagnostics={
-            "reason": MILITARY_SAT_REFUSED_REASON,
-            "satAdmitted": False,
-        },
-    )
-
-
-def military_sat_refusal_from_turn(
-    observation: InferenceObservation,
-    turn: TurnInfo,
-    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
-) -> InferenceResult | None:
-    """Case-2 emit when SAT is refused, or None when SAT may run."""
-    admission = resolve_military_sat_admission_from_turn(
+    return uncharacterized_roster_result_from_pairing(
         observation,
-        turn,
-        prior_fleet_records,
-    )
-    if admission.admitted:
-        return None
-    return uncharacterized_roster_result_from_turn(
-        observation,
+        pairing,
+        idle_dock,
         turn,
         prior_fleet_records,
         diagnostics={
