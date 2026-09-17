@@ -332,7 +332,7 @@ def _unsat_every_tier(monkeypatch) -> None:
 
 def test_expensive_tiers_are_not_entered_on_mine_residual_abort(sample_turn, monkeypatch) -> None:
     _unsat_every_tier(monkeypatch)
-    observation = _observation(military_delta_2x=-40, warship_delta=0)
+    observation = _observation(military_delta_2x=-40, warship_delta=0, starbases_owned=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
         without_player_minefields(sample_turn, observation.player_id),
@@ -348,7 +348,7 @@ def test_expensive_tiers_are_not_entered_on_moderate_residual_abort(
     sample_turn, monkeypatch
 ) -> None:
     _unsat_every_tier(monkeypatch)
-    observation = _observation(military_delta_2x=-10, warship_delta=0)
+    observation = _observation(military_delta_2x=-10, warship_delta=0, starbases_owned=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
         without_player_minefields(sample_turn, observation.player_id),
@@ -362,7 +362,7 @@ def test_expensive_tiers_are_not_entered_on_moderate_residual_abort(
 
 def test_positive_leftover_still_climbs_expensive_tiers(sample_turn, monkeypatch) -> None:
     _unsat_every_tier(monkeypatch)
-    observation = _observation(military_delta_2x=80, warship_delta=0)
+    observation = _observation(military_delta_2x=80, warship_delta=0, starbases_owned=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
         without_player_minefields(sample_turn, observation.player_id),
@@ -608,7 +608,7 @@ def test_cheap_exact_does_not_fire_classifier(sample_turn, monkeypatch) -> None:
         lambda solution, observation, catalog: True,
     )
     _patch_catalog_from_turn(monkeypatch, _exact_combo_catalog)
-    observation = _observation(military_delta_2x=-40, warship_delta=0)
+    observation = _observation(military_delta_2x=-40, warship_delta=0, starbases_owned=0)
     result, _, _, attempted, _ = solve_with_policy_ladder(
         observation,
         without_player_minefields(sample_turn, observation.player_id),

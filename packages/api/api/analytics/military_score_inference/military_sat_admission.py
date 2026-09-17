@@ -1,10 +1,12 @@
 """SAT admission for pinned vs uncharacterized departure.
 
 Refuse military SAT when a departure pin fails on a class that can move
-military, or when an unknown-class outgoing pairing leave is unpinned.
-Pin absence on a class that did not drop is not a fail. True-freighter
-unpin still admits SAT. Case-2 emit (placeholders, leftover, lattice
-signatures) is ``uncharacterized_roster``. Persist of that status is phase 4.
+military, when an unknown-class outgoing pairing leave is unpinned, or when
+a count-lattice idle-dock event has unknown class. Pin absence on a class
+that did not drop is not a fail. A pinned idle-dock class is unchanged
+unless a pin already fails. True-freighter unpin still admits SAT. Case-2
+emit (placeholders, leftover, lattice signatures) is
+``uncharacterized_roster``. Persist of that status is phase 4.
 Contract: design-military-score-build-inference.md §3.12.
 """
 
@@ -19,6 +21,7 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
 )
 from api.analytics.military_score_inference.count_lattice import (
+    CountLatticeClassEvent,
     CountLatticeSignal,
     DeparturePin,
     count_lattice_signal,
@@ -70,18 +73,27 @@ def _is_unknown_class_outgoing_leave(match: PairingMatch) -> bool:
     return match.family == "gift" and match.is_unpinned_class_choice()
 
 
+def _is_unknown_class_idle_dock(event: CountLatticeClassEvent) -> bool:
+    """True when idle-dock class is unpinned and can move military."""
+    return (
+        event.source == "idle_dock"
+        and event.ship_class is None
+        and class_can_move_military(event.ship_class)
+    )
+
+
 def military_sat_admission(
     signal: CountLatticeSignal,
     pins: tuple[DeparturePin, ...],
     pairing: PublicScoreboardPairing,
 ) -> MilitarySatAdmission:
-    """Admit SAT unless a warship pin failed or an unknown-class outgoing leave is unpinned.
+    """Admit SAT unless a military-moving class is unpinned.
 
-    ``CountLatticeClassEvent`` has no direction or family; it is not this
-    iterator. Pin absence on a class that did not drop is not a fail.
-    Unique-fill and prior-fleet decrease candidates are not this gate.
-    Idle-dock PP events are not this refuse: ``departure_pin`` is scoreboard
-    class-drop only, and hidden arrivals are what SAT explains.
+    Pin fail on a class that can move military refuses. Unknown class
+    (``ship_class is None``) on an idle-dock signal or an outgoing pairing
+    leave also refuses. Pin absence on a class that did not drop is not a
+    fail. Unique-fill and prior-fleet decrease candidates are not this gate.
+    A pinned idle-dock class is unchanged unless a pin already fails.
     """
     for pin in pins:
         if pin.kind == "fail" and class_can_move_military(pin.ship_class):
@@ -91,6 +103,13 @@ def military_sat_admission(
                 pins=pins,
                 refused_class=pin.ship_class,
             )
+    if any(_is_unknown_class_idle_dock(event) for event in signal.events):
+        return MilitarySatAdmission(
+            admitted=False,
+            signal=signal,
+            pins=pins,
+            refused_class=None,
+        )
     if any(_is_unknown_class_outgoing_leave(match) for match in pairing.matches):
         return MilitarySatAdmission(
             admitted=False,

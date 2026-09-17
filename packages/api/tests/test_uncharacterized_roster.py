@@ -202,45 +202,38 @@ def test_bound_from_remainder_envelopes(synthetic_catalog_context):
     assert zero_bound.leftover.kind == "unknown_loss_bound"
 
 
-def test_idle_dock_k1_net0_emits_both_lattice_signatures(sample_turn, synthetic_catalog_context):
+def test_idle_dock_k1_net0_emits_both_lattice_signatures(sample_turn):
     observation = _observation_from_row(birds_row())
-    product = _emit(
+    result = military_sat_refusal_from_turn(
         observation,
-        synthetic_catalog_context,
-        settings=sample_turn.settings,
+        without_player_minefields(sample_turn, observation.player_id),
     )
-    assert [signature.ship_class for signature in product.lattice_signatures] == [
+    assert result is not None
+    assert result.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert result.solutions == ()
+    assert result.diagnostics["satAdmitted"] is False
+    assert [entry["shipClass"] for entry in result.lattice_signatures] == [
         "warship",
         "freighter",
     ]
     payload = inference_api_payload(
-        status=STATUS_UNCHARACTERIZED_ROSTER,
-        summary="Uncharacterized roster",
-        solutions=(),
-        diagnostics={},
-        placeholders=list(product.placeholders),
-        tagged_leftover=leftover_to_json(product.leftover),
-        lattice_signatures=[
-            {
-                "shipClass": signature.ship_class,
-                "build": signature.build,
-                "departure": placeholder_departure_to_json(signature.departure),
-            }
-            for signature in product.lattice_signatures
-        ],
+        status=result.status,
+        summary=format_inference_summary(result),
+        solutions=result.solutions,
+        diagnostics=result.diagnostics,
+        placeholders=list(result.placeholders),
+        tagged_leftover=result.leftover,
+        lattice_signatures=list(result.lattice_signatures),
     )
     assert payload["solutions"] == []
     assert "objectiveValue" not in payload
     assert len(payload["latticeSignatures"]) == 2
-    for entry, signature in zip(
-        payload["latticeSignatures"], product.lattice_signatures, strict=True
-    ):
+    for entry in payload["latticeSignatures"]:
         assert "objectiveValue" not in entry
-        assert entry["shipClass"] == signature.ship_class
         assert entry["build"]["count"] == 1
         assert entry["departure"]["count"] == 1
-        assert entry["departure"]["shipClass"] == signature.ship_class
-    assert _departures(product.placeholders) == []
+        assert entry["departure"]["shipClass"] == entry["shipClass"]
+    assert _departures(result.placeholders) == []
 
 
 def test_gift_counterparty_on_placeholder_and_no_sat(sample_turn, synthetic_catalog_context):

@@ -1,4 +1,4 @@
-"""SAT admission from departure pin-fail and unknown-class outgoing leaves."""
+"""SAT admission from pin-fail, unknown-class outgoing leave, and unknown-class idle-dock."""
 
 from __future__ import annotations
 
@@ -61,7 +61,11 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_N
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
 from tests.fixtures.military_score_inference import _observation, without_player_minefields
-from tests.fixtures.pp_gap_transfer import federation_row, mixed_residual_receiver_row
+from tests.fixtures.pp_gap_transfer import (
+    birds_row,
+    federation_row,
+    mixed_residual_receiver_row,
+)
 from tests.fixtures.ship_transfer_families import (
     _class_only_freighter_record,
     _known_warship_record,
@@ -190,14 +194,31 @@ def test_pin_absence_on_warship_lattice_event_is_not_fail():
     assert admission.refused_class is None
 
 
-def test_idle_dock_only_signal_without_scoreboard_drop_admits_sat():
+def test_unknown_class_idle_dock_signal_refuses_sat():
     admission = _admission(
         CountLatticeSignal(
             events=(CountLatticeClassEvent(ship_class=None, source="idle_dock", count=1),)
         ),
         pins=(),
     )
+    assert admission.admitted is False
+    assert admission.refused_class is None
+    refused = military_sat_refusal_result(admission)
+    assert refused is not None
+    assert refused.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert refused.solutions == ()
+    assert refused.diagnostics["satAdmitted"] is False
+
+
+def test_pinned_idle_dock_class_without_pin_fail_admits_sat():
+    admission = _admission(
+        CountLatticeSignal(
+            events=(CountLatticeClassEvent(ship_class="warship", source="idle_dock", count=1),)
+        ),
+        pins=(),
+    )
     assert admission.admitted is True
+    assert military_sat_refusal_result(admission) is None
 
 
 def test_unpinned_freighter_only_drop_admits_sat():
@@ -512,7 +533,12 @@ def test_class_flip_receiving_warship_admits_sat(synthetic_catalog_context):
 def test_class_flip_receiving_warship_still_enters_sat(sample_turn, monkeypatch):
     sat_calls: list = []
     _patch_sat(monkeypatch, sat_calls)
-    observation = _observation(warship_delta=1, freighter_delta=-1, military_delta_2x=40)
+    observation = _observation(
+        warship_delta=1,
+        freighter_delta=-1,
+        military_delta_2x=40,
+        starbases_owned=0,
+    )
     turn = _turn_with_peer(
         sample_turn,
         observation,
@@ -569,6 +595,23 @@ def test_outgoing_unpinned_warship_gift_refuses_sat(synthetic_catalog_context):
     assert admission.pins == (DeparturePin(kind="fail", ship_class="warship"),)
     assert admission.admitted is False
     assert admission.refused_class == "warship"
+
+
+def test_birds_row_unknown_class_idle_dock_refuses_sat(sample_turn, synthetic_catalog_context):
+    observation = _observation_from_row(birds_row())
+    admission = _resolve(
+        observation,
+        (),
+        synthetic_catalog_context["hulls_by_id"],
+        settings=sample_turn.settings,
+    )
+    assert any(
+        event.source == "idle_dock" and event.ship_class is None
+        for event in admission.signal.events
+    )
+    assert admission.pins == ()
+    assert admission.admitted is False
+    assert admission.refused_class is None
 
 
 def test_unknown_class_outgoing_gift_refuses_sat(sample_turn, synthetic_catalog_context):
