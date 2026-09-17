@@ -71,6 +71,8 @@ def _inference_cell_display_status(inference: dict[str, object]) -> str:
         return "moderate_residual"
     if status == "mine_score_residual":
         return "mine_score_residual"
+    if status == "uncharacterized_roster":
+        return "uncharacterized_roster"
     if status in INFERENCE_SKIP_DISPLAY_STATUSES:
         return "skipped"
     if status == "exact":
@@ -87,15 +89,36 @@ def _inference_cell_display_status(inference: dict[str, object]) -> str:
     return "failure"
 
 
+def _copy_inference_product_fields(source: dict[str, object], shaped: dict[str, object]) -> None:
+    leftover_payload = source.get("leftover")
+    leftover_kind = leftover_payload.get("kind") if isinstance(leftover_payload, dict) else None
+    if leftover_kind in ("point", "unknown_loss_bound"):
+        shaped["leftover"] = leftover_payload
+    unexplained = source.get("unexplainedMilitaryDelta2x")
+    is_point_unexplained = isinstance(unexplained, int) and not isinstance(unexplained, bool)
+    if leftover_kind != "unknown_loss_bound" and is_point_unexplained:
+        shaped["unexplainedMilitaryDelta2x"] = unexplained
+    placeholders = source.get("placeholders")
+    if isinstance(placeholders, list):
+        shaped["placeholders"] = [entry for entry in placeholders if isinstance(entry, dict)]
+    signatures = source.get("latticeSignatures")
+    if isinstance(signatures, list):
+        shaped["latticeSignatures"] = [entry for entry in signatures if isinstance(entry, dict)]
+
+
 def stamp_inference_stream_display_status(
     events: Iterator[dict[str, object]],
 ) -> Iterator[dict[str, object]]:
     """Stamp BFF ``displayStatus`` on Core ``complete`` stream lines."""
     for event in events:
-        if event.get("type") == "complete":
-            yield {**event, "displayStatus": _inference_cell_display_status(event)}
-        else:
+        if event.get("type") != "complete":
             yield event
+            continue
+        stamped = {**event, "displayStatus": _inference_cell_display_status(event)}
+        leftover = stamped.get("leftover")
+        if isinstance(leftover, dict) and leftover.get("kind") == "unknown_loss_bound":
+            stamped.pop("unexplainedMilitaryDelta2x", None)
+        yield stamped
 
 
 def _shape_inference_detail(
@@ -123,12 +146,7 @@ def _shape_inference_detail(
             "solutions": inference.get("solutions", []),
             "diagnostics": inference.get("diagnostics", {}),
         }
-        leftover = inference.get("unexplainedMilitaryDelta2x")
-        if isinstance(leftover, int) and not isinstance(leftover, bool):
-            shaped["unexplainedMilitaryDelta2x"] = leftover
-        placeholders = inference.get("placeholders")
-        if isinstance(placeholders, list):
-            shaped["placeholders"] = [entry for entry in placeholders if isinstance(entry, dict)]
+        _copy_inference_product_fields(inference, shaped)
         fleet_torp_input_status = inference.get("fleetTorpInputStatus")
         if isinstance(fleet_torp_input_status, str):
             shaped["fleetTorpInputStatus"] = fleet_torp_input_status

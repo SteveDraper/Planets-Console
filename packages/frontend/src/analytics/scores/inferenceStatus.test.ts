@@ -62,6 +62,21 @@ describe('inferenceAccessibleLabel', () => {
       )
     ).toBe('1 probable build. Leftover 27.')
   })
+
+  it('describes uncharacterized roster leftover as a bound, not exact', () => {
+    expect(
+      inferenceAccessibleLabel(
+        detail({
+          displayStatus: 'uncharacterized_roster',
+          status: 'uncharacterized_roster',
+          summary: 'Uncharacterized roster',
+          leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+        })
+      )
+    ).toBe(
+      'Uncharacterized roster. Military leftover at least 400. Includes unknown lost-ship contribution.'
+    )
+  })
 })
 
 describe('canOpenInferenceDetail', () => {
@@ -94,6 +109,16 @@ describe('canOpenInferenceDetail', () => {
     expect(canOpenInferenceDetail(detail({ displayStatus: 'skipped', isComplete: true }))).toBe(
       false
     )
+    expect(
+      canOpenInferenceDetail(
+        detail({
+          displayStatus: 'uncharacterized_roster',
+          status: 'uncharacterized_roster',
+          isComplete: true,
+          leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+        })
+      )
+    ).toBe(true)
     expect(
       canOpenInferenceDetail(
         detail({

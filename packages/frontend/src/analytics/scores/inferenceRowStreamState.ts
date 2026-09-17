@@ -4,6 +4,8 @@ import type {
   InferenceStreamEvent,
   InferenceStreamSolutionPayload,
   FleetTorpInputStatus,
+  LatticeSignature,
+  UnknownLossLeftover,
 } from '../../api/inferenceStreamEventSchema'
 import { readMilitaryScoreArithmetic } from './inferenceConstraints'
 
@@ -48,6 +50,8 @@ export type RowStreamState = {
   diagnostics: Record<string, unknown>
   placeholders: Record<string, unknown>[]
   displayStatus?: InferenceDisplayStatus
+  leftover?: UnknownLossLeftover
+  latticeSignatures?: LatticeSignature[]
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
@@ -98,9 +102,13 @@ export function rowDetailFromStreamState(
     solutions: state.heldSolutions,
     diagnostics: state.diagnostics,
     placeholders: state.placeholders,
-    ...(state.unexplainedMilitaryDelta2x != null
-      ? { unexplainedMilitaryDelta2x: state.unexplainedMilitaryDelta2x }
-      : {}),
+    ...(state.leftover != null ? { leftover: state.leftover } : {}),
+    ...(state.latticeSignatures != null ? { latticeSignatures: state.latticeSignatures } : {}),
+    ...(state.leftover?.kind === 'unknown_loss_bound'
+      ? {}
+      : state.unexplainedMilitaryDelta2x != null
+        ? { unexplainedMilitaryDelta2x: state.unexplainedMilitaryDelta2x }
+        : {}),
     ...(state.fleetTorpInputStatus != null
       ? { fleetTorpInputStatus: state.fleetTorpInputStatus }
       : {}),
@@ -215,9 +223,15 @@ export function reduceRowStreamState(
       isComplete: event.isComplete,
       diagnostics: event.diagnostics ?? {},
       placeholders: event.placeholders ?? [],
-      ...(event.unexplainedMilitaryDelta2x != null
-        ? { unexplainedMilitaryDelta2x: event.unexplainedMilitaryDelta2x }
+      ...(event.leftover != null ? { leftover: event.leftover } : {}),
+      ...(event.latticeSignatures != null
+        ? { latticeSignatures: event.latticeSignatures }
         : {}),
+      ...(event.leftover?.kind === 'unknown_loss_bound'
+        ? { unexplainedMilitaryDelta2x: undefined }
+        : event.unexplainedMilitaryDelta2x != null
+          ? { unexplainedMilitaryDelta2x: event.unexplainedMilitaryDelta2x }
+          : {}),
       ...fleetTorpFieldsFromCompleteEvent(event),
       ...(event.solutions != null
         ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }

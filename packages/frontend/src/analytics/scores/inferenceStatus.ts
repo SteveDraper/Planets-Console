@@ -8,6 +8,7 @@ import {
   isCompleteShipFirstResidualList,
   shipFirstResidualAccessibleLabel,
 } from './shipFirstFamilyChrome'
+import { uncharacterizedRosterAccessibleLabel } from './uncharacterizedRosterChrome'
 
 export type InferenceDisplayStatus = ScoresInferenceRowDetail['displayStatus']
 
@@ -38,6 +39,9 @@ function baseInferenceAccessibleLabel(detail: ScoresInferenceRowDetail): string 
       return shipFirstResidualAccessibleLabel(detail)
     }
     return detail.summary || 'Build inference leftover'
+  }
+  if (detail.displayStatus === 'uncharacterized_roster') {
+    return uncharacterizedRosterAccessibleLabel(detail)
   }
   return detail.summary || 'No build inference result'
 }
@@ -72,7 +76,8 @@ export function canOpenInferenceDetail(detail: ScoresInferenceRowDetail): boolea
     (detail.displayStatus === 'failure' ||
       detail.displayStatus === 'stopped' ||
       detail.displayStatus === 'moderate_residual' ||
-      detail.displayStatus === 'mine_score_residual')
+      detail.displayStatus === 'mine_score_residual' ||
+      detail.displayStatus === 'uncharacterized_roster')
   )
 }
 

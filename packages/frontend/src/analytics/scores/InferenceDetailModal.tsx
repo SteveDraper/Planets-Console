@@ -24,6 +24,7 @@ import {
   shipFirstFamilyChipLabel,
   shipFirstListMixesFamilies,
 } from './shipFirstFamilyChrome'
+import { UncharacterizedRosterDetail } from './UncharacterizedRosterDetail'
 
 type InferenceDetailModalProps = {
   isOpen: boolean
@@ -298,6 +299,10 @@ export function InferenceDetailModal({
 
         {detail.solutions.length === 0 && detail.summary.trim().length > 0 ? (
           <p className="text-xs text-slate-300">{detail.summary}</p>
+        ) : null}
+
+        {detail.displayStatus === 'uncharacterized_roster' ? (
+          <UncharacterizedRosterDetail detail={detail} />
         ) : null}
 
         {shipFirstListMixesFamilies(detail.solutions) ? (

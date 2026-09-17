@@ -284,6 +284,63 @@ describe('ScoresTableView', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Solution 1')
   })
 
+  it('renders uncharacterized roster as a distinct non-exact cell with bound leftover', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              displayStatus: 'uncharacterized_roster',
+              status: 'uncharacterized_roster',
+              summary: 'Uncharacterized roster',
+              solutionCount: 0,
+              isComplete: true,
+              solutions: [],
+              diagnostics: {},
+              leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+              placeholders: [
+                { id: 'placeholder_departure', shipClass: 'warship', count: 1 },
+              ],
+              latticeSignatures: [
+                {
+                  shipClass: 'warship',
+                  build: {
+                    id: 'unknown_military_ship',
+                    hullId: -1,
+                    count: 1,
+                    buildSlotUsage: 1,
+                  },
+                  departure: {
+                    id: 'placeholder_departure',
+                    shipClass: 'warship',
+                    count: 1,
+                  },
+                },
+              ],
+            },
+          ],
+        })}
+      />
+    )
+
+    const cell = screen.getByLabelText(
+      'Uncharacterized roster. Military leftover at least 400. Includes unknown lost-ship contribution.'
+    )
+    expect(cell).toHaveTextContent('≥400')
+    expect(cell).not.toHaveTextContent(/^400$/)
+    expect(cell.className).toContain('text-teal-300')
+    expect(cell.className).not.toContain('text-emerald')
+    fireEvent.click(cell)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('Lattice signatures')
+    expect(dialog).toHaveTextContent('Warship lattice')
+    expect(dialog).not.toHaveTextContent('Plausibility')
+    expect(dialog).toHaveTextContent('Includes unknown lost-ship contribution')
+  })
+
   it('opens inference detail modal when success icon is clicked', () => {
     render(
       <ScoresTableView

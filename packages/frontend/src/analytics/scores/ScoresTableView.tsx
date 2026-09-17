@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ListFilter, Octagon, X, CircleDot, Hexagon } from 'lucide-react'
+import { ListFilter, Octagon, X, CircleDot, Hexagon, Diamond } from 'lucide-react'
 import type {
   AnalyticShellScope,
   ScoresInferenceRowDetail,
@@ -25,6 +25,10 @@ import {
   isIncompleteInferenceRow,
 } from './inferenceStatus'
 import { isCompleteShipFirstResidualList } from './shipFirstFamilyChrome'
+import {
+  formatUnknownLossLeftoverCell,
+  leftoverFromInferenceDetail,
+} from './uncharacterizedRosterChrome'
 import {
   BUILD_INFERENCE_COLUMN,
   isBuildInferenceColumn,
@@ -161,6 +165,26 @@ function InferenceStatusCell({
             <CircleDot className="h-4 w-4" aria-hidden />
           )}
           <span className="text-xs tabular-nums">{leftover}</span>
+        </button>
+      </InferenceCellChrome>
+    )
+  }
+
+  if (detail.displayStatus === 'uncharacterized_roster') {
+    const leftover = leftoverFromInferenceDetail(detail)
+    return (
+      <InferenceCellChrome {...chromeProps}>
+        <button
+          type="button"
+          title={label}
+          aria-label={label}
+          onClick={onOpenDetail}
+          className="inline-flex items-center gap-1 rounded p-1 text-teal-300 hover:bg-white/10"
+        >
+          <Diamond className="h-4 w-4" aria-hidden />
+          {leftover != null ? (
+            <span className="text-xs tabular-nums">{formatUnknownLossLeftoverCell(leftover)}</span>
+          ) : null}
         </button>
       </InferenceCellChrome>
     )

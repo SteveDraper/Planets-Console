@@ -36,6 +36,8 @@ import {
 import type {
   FleetTorpInputStatus,
   InferenceDisplayStatus,
+  LatticeSignature,
+  UnknownLossLeftover,
 } from './inferenceStreamEventSchema'
 import { fetchAnalyticTableNdjsonStream } from './fetchAnalyticTableNdjsonStream'
 import { readNdjsonStream } from './readNdjsonStream'
@@ -257,6 +259,8 @@ export type ScoresInferenceRowDetail = {
   solutions: ScoresInferenceSolution[]
   diagnostics: Record<string, unknown>
   placeholders?: Record<string, unknown>[]
+  leftover?: UnknownLossLeftover
+  latticeSignatures?: LatticeSignature[]
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]

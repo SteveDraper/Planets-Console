@@ -21,6 +21,7 @@ The modal is **not** a developer diagnostics surface. Equality strings, raw 2× 
 | `success` or `paused` with **N > 0** | Opens on **inference solution count indicator** click |
 | complete `mine_score_residual` with **N > 0** (**ship-first near-solution**s, #402) | Same modal on the blue count badge; list arrives on `complete` (no in-flight `solution` events). Explained-vs-observed mismatch copy covers leftover. |
 | complete empty-list `mine_score_residual` / `moderate_residual` | Existing residual detail (summary); no ranked list |
+| complete `uncharacterized_roster` | Same modal: leftover (point vs bound), **placeholder departure**s, **lattice signature**s without plausibility; `solutions[]` empty |
 | Pending with **N = 0** | Badge disabled; tooltip only |
 | Red cross (`failure`, no exact explanation) | No modal; rich `title` / tooltip from row `summary` and diagnostics |
 | Stopped (octagon) without held solutions | No modal |
@@ -184,6 +185,7 @@ Frontend tests (`InferenceDetailModal.test.tsx` and helpers):
 |-------|-------|
 | **#48** | This modal UX (icon table, plausibility header, live updates, accelerated segment UI removal) |
 | **#400** / **#414** / **#415** | Core `shipFirstFamily` + stratified hold shipped #414; modal chips + mixed-list subtitle shipped #415 |
+| **#491** | Uncharacterized roster cell + bound leftover + lattice signatures in this modal (no plausibility) |
 | **#53** | Scores **diagnostics panel** combo/tier presentation (not modal) |
 | **#88** | Relative plausibility field + solution-list pruning |
 | **#89** | Planets.nu aggregate-action icons (replace Lucide fallbacks) |

@@ -22,9 +22,53 @@ export const INFERENCE_DISPLAY_STATUSES = [
   'skipped',
   'moderate_residual',
   'mine_score_residual',
+  'uncharacterized_roster',
 ] as const
 
 export const inferenceDisplayStatusSchema = z.enum(INFERENCE_DISPLAY_STATUSES)
+
+export const PLACEHOLDER_DEPARTURE_ID = 'placeholder_departure'
+
+const shipClassSchema = z.enum(['warship', 'freighter'])
+
+export const unknownLossPointLeftoverSchema = z.object({
+  kind: z.literal('point'),
+  unexplainedMilitaryDelta2x: z.number().int(),
+})
+
+export const unknownLossBoundLeftoverSchema = z
+  .object({
+    kind: z.literal('unknown_loss_bound'),
+    lowerBound2x: z.number().int(),
+  })
+  .strict()
+
+export const unknownLossLeftoverSchema = z.discriminatedUnion('kind', [
+  unknownLossPointLeftoverSchema,
+  unknownLossBoundLeftoverSchema,
+])
+
+export const placeholderDepartureSchema = z.object({
+  id: z.literal(PLACEHOLDER_DEPARTURE_ID),
+  shipClass: shipClassSchema,
+  count: z.number().int().positive(),
+  counterpartyPlayerId: z.number().int().optional(),
+})
+
+const latticeSignatureBuildSchema = z.object({
+  id: z.string(),
+  hullId: z.number().int(),
+  count: z.number().int().positive(),
+  buildSlotUsage: z.number().int(),
+  militaryScoreDelta2xMin: z.number().int().optional(),
+  militaryScoreDelta2xMax: z.number().int().optional(),
+})
+
+export const latticeSignatureSchema = z.object({
+  shipClass: shipClassSchema,
+  build: latticeSignatureBuildSchema,
+  departure: placeholderDepartureSchema,
+})
 
 const inferenceSolutionActionSchema = z.object({
   actionId: z.string(),
@@ -83,6 +127,8 @@ export const inferenceStreamCompleteEventSchema = inferenceStreamPlayerScopeSche
   isComplete: z.boolean(),
   solutions: z.array(inferenceStreamSolutionPayloadSchema).optional(),
   placeholders: z.array(z.record(z.string(), z.unknown())).optional(),
+  leftover: unknownLossLeftoverSchema.optional(),
+  latticeSignatures: z.array(latticeSignatureSchema).optional(),
   unexplainedMilitaryDelta2x: z.number().int().optional(),
   diagnostics: z.record(z.string(), z.unknown()).optional(),
   fleetTorpInputStatus: fleetTorpInputStatusSchema.optional(),
@@ -109,6 +155,9 @@ export const inferenceStreamEventSchema = z.discriminatedUnion('type', [
 
 export type FleetTorpInputStatus = z.infer<typeof fleetTorpInputStatusSchema>
 export type InferenceDisplayStatus = z.infer<typeof inferenceDisplayStatusSchema>
+export type UnknownLossLeftover = z.infer<typeof unknownLossLeftoverSchema>
+export type PlaceholderDeparture = z.infer<typeof placeholderDepartureSchema>
+export type LatticeSignature = z.infer<typeof latticeSignatureSchema>
 
 export type InferenceStreamSolutionPayload = z.infer<typeof inferenceStreamSolutionPayloadSchema>
 export type InferenceStreamEvent = z.infer<typeof inferenceStreamEventSchema>

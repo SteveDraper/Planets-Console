@@ -466,4 +466,66 @@ describe('InferenceDetailModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalledOnce()
   })
+
+  it('lists lattice signatures and placeholder departures without plausibility', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          displayStatus: 'uncharacterized_roster',
+          status: 'uncharacterized_roster',
+          summary: 'Uncharacterized roster',
+          leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+          placeholders: [
+            { id: 'placeholder_departure', shipClass: 'warship', count: 1, counterpartyPlayerId: 3 },
+          ],
+          latticeSignatures: [
+            {
+              shipClass: 'warship',
+              build: {
+                id: 'unknown_military_ship',
+                hullId: -1,
+                count: 1,
+                buildSlotUsage: 1,
+              },
+              departure: {
+                id: 'placeholder_departure',
+                shipClass: 'warship',
+                count: 1,
+              },
+            },
+            {
+              shipClass: 'freighter',
+              build: {
+                id: 'combo_freighter',
+                hullId: 0,
+                count: 1,
+                buildSlotUsage: 1,
+              },
+              departure: {
+                id: 'placeholder_departure',
+                shipClass: 'freighter',
+                count: 1,
+              },
+            },
+          ],
+          solutions: [],
+        })}
+      />
+    )
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('Uncharacterized roster')
+    expect(dialog).toHaveTextContent('Military leftover at least 400')
+    expect(dialog).toHaveTextContent('Includes unknown lost-ship contribution')
+    expect(dialog).toHaveTextContent('1 warship departed (counterparty player 3)')
+    expect(dialog).toHaveTextContent('Warship lattice')
+    expect(dialog).toHaveTextContent('Freighter lattice')
+    expect(dialog).toHaveTextContent('Unknown military ship (1)')
+    expect(dialog).toHaveTextContent('Generic freighter (1)')
+    expect(dialog).not.toHaveTextContent('Plausibility')
+    expect(dialog).not.toHaveTextContent('Solution 1')
+  })
 })

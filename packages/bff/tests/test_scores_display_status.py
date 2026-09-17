@@ -21,6 +21,8 @@ def _core_row(
     solutions: list | None = None,
     unexplained_military_delta_2x: int | None = None,
     placeholders: list | None = None,
+    leftover: dict[str, object] | None = None,
+    lattice_signatures: list | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "status": status,
@@ -34,6 +36,10 @@ def _core_row(
         payload["unexplainedMilitaryDelta2x"] = unexplained_military_delta_2x
     if placeholders is not None:
         payload["placeholders"] = placeholders
+    if leftover is not None:
+        payload["leftover"] = leftover
+    if lattice_signatures is not None:
+        payload["latticeSignatures"] = lattice_signatures
     return payload
 
 
@@ -89,6 +95,67 @@ def test_residual_statuses_map_to_matching_display_status() -> None:
     assert moderate["placeholders"] == []
     assert mine["displayStatus"] == "mine_score_residual"
     assert mine["unexplainedMilitaryDelta2x"] == 54
+
+
+def test_uncharacterized_roster_display_status_is_not_success() -> None:
+    bound = {"kind": "unknown_loss_bound", "lowerBound2x": 800}
+    signatures = [
+        {
+            "shipClass": "warship",
+            "build": {"id": "unknown_military_ship", "hullId": -1, "count": 1, "buildSlotUsage": 1},
+            "departure": {"id": "placeholder_departure", "shipClass": "warship", "count": 1},
+        }
+    ]
+    shaped = inference_from_core(
+        _core_row(
+            status="uncharacterized_roster",
+            summary="Uncharacterized roster",
+            leftover=bound,
+            placeholders=[
+                {"id": "placeholder_departure", "shipClass": "warship", "count": 1},
+            ],
+            lattice_signatures=signatures,
+        ),
+        player_id=6,
+    )
+    assert shaped["displayStatus"] == "uncharacterized_roster"
+    assert shaped["displayStatus"] != "success"
+    assert shaped["displayStatus"] != "skipped"
+    assert shaped["displayStatus"] != "failure"
+    assert shaped["status"] == "uncharacterized_roster"
+    assert shaped["leftover"] == bound
+    assert "unexplainedMilitaryDelta2x" not in shaped
+    assert shaped["latticeSignatures"] == signatures
+    assert shaped["placeholders"][0]["id"] == "placeholder_departure"
+
+
+def test_bound_leftover_is_not_copied_as_point_leftover() -> None:
+    shaped = inference_from_core(
+        _core_row(
+            status="uncharacterized_roster",
+            leftover={"kind": "unknown_loss_bound", "lowerBound2x": 0},
+            unexplained_military_delta_2x=0,
+        ),
+        player_id=7,
+    )
+    assert shaped["displayStatus"] == "uncharacterized_roster"
+    assert shaped["leftover"] == {"kind": "unknown_loss_bound", "lowerBound2x": 0}
+    assert "unexplainedMilitaryDelta2x" not in shaped
+
+
+def test_uncharacterized_roster_point_leftover_stays_tagged() -> None:
+    leftover = {"kind": "point", "unexplainedMilitaryDelta2x": 22}
+    shaped = inference_from_core(
+        _core_row(
+            status="uncharacterized_roster",
+            leftover=leftover,
+            unexplained_military_delta_2x=22,
+        ),
+        player_id=8,
+    )
+    assert shaped["displayStatus"] == "uncharacterized_roster"
+    assert shaped["leftover"] == leftover
+    assert shaped["unexplainedMilitaryDelta2x"] == 22
 
 
 def test_mine_score_residual_with_solutions_stays_residual_display_status() -> None:
@@ -196,6 +263,16 @@ def test_stamp_inference_stream_display_status_on_complete_only() -> None:
                         "solutionCount": 2,
                         "isComplete": True,
                     },
+                    {
+                        "type": "complete",
+                        "status": "uncharacterized_roster",
+                        "summary": "Uncharacterized roster",
+                        "solutionCount": 0,
+                        "isComplete": True,
+                        "leftover": {"kind": "unknown_loss_bound", "lowerBound2x": 800},
+                        "unexplainedMilitaryDelta2x": 800,
+                        "latticeSignatures": [{"shipClass": "warship"}],
+                    },
                 ]
             )
         )
@@ -207,6 +284,10 @@ def test_stamp_inference_stream_display_status_on_complete_only() -> None:
     assert events[2]["status"] == "novel_terminal"
     assert events[3]["displayStatus"] == "mine_score_residual"
     assert events[3]["solutionCount"] == 2
+    assert events[4]["displayStatus"] == "uncharacterized_roster"
+    assert events[4]["leftover"] == {"kind": "unknown_loss_bound", "lowerBound2x": 800}
+    assert "unexplainedMilitaryDelta2x" not in events[4]
+    assert events[4]["latticeSignatures"] == [{"shipClass": "warship"}]
 
 
 def test_scores_inference_table_stream_stamps_display_status() -> None:
