@@ -7,6 +7,6 @@ FLEET_LEDGERS_KEY = "ledgers"
 # Persisted fleet turn snapshot materialization semantics. Bump conservatively when
 # materialization output would change for the same stored RST + scores inputs
 # (chain/gap-fill rules, inferred acquisition ingest, observation-inference merge,
-# fleet count collapse / merged disposition).
+# fleet count collapse / merged disposition, exact-set pin retirement).
 # Missing or stale versions on read are deleted and re-materialized on next access.
-FLEET_MATERIALIZATION_VERSION = 9
+FLEET_MATERIALIZATION_VERSION = 10

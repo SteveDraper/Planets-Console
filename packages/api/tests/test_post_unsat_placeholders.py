@@ -423,6 +423,17 @@ def test_explode_placeholder_does_not_emit_units_when_count_not_positive():
     assert explode_placeholder_to_unit_payloads({"count": -1, "hullId": -1}) == []
 
 
+def test_explode_placeholder_skips_placeholder_departure():
+    from api.serialization.uncharacterized_roster import PLACEHOLDER_DEPARTURE_ID
+
+    assert (
+        explode_placeholder_to_unit_payloads(
+            {"id": PLACEHOLDER_DEPARTURE_ID, "shipClass": "warship", "count": 2}
+        )
+        == []
+    )
+
+
 def _empty_catalog() -> ActionCatalog:
     return ActionCatalog(
         aggregate_actions=(),

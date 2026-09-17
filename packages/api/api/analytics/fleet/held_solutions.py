@@ -10,6 +10,9 @@ from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_api_payload import (
     InferenceProductPayload,
 )
+from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    ExactSetDeparturePin,
+)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.export_services import ScoresExportContext
@@ -20,6 +23,7 @@ from api.analytics.scores.host_turn_export import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.models.game import TurnInfo
+from api.serialization.uncharacterized_roster import departure_pins_from_json
 
 
 def _placeholders_from_product(
@@ -30,13 +34,22 @@ def _placeholders_from_product(
     return tuple(product.placeholders)
 
 
+def _departure_pins_from_product(
+    product: InferenceProductPayload,
+) -> tuple[ExactSetDeparturePin, ...]:
+    if not product.departure_pins:
+        return ()
+    return departure_pins_from_json(product.departure_pins)
+
+
 @dataclass(frozen=True)
 class FleetHeldInference:
-    """Resolved scores held solutions and persist placeholders for one scoreboard turn."""
+    """Resolved scores held solutions, persist placeholders, and exact-set pins."""
 
     search_status: SearchStatus
     solutions: tuple[dict[str, object], ...]
     placeholders: tuple[dict[str, object], ...] = ()
+    departure_pins: tuple[ExactSetDeparturePin, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -88,6 +101,7 @@ class FleetInferenceSupport:
                 search_status=resolved.decision.search_status,
                 solutions=tuple(payload.solutions),
                 placeholders=_placeholders_from_product(payload.product),
+                departure_pins=_departure_pins_from_product(payload.product),
             )
 
         persistence = self.scores_services.persistence
@@ -107,6 +121,7 @@ class FleetInferenceSupport:
             search_status=backfill.search_status,
             solutions=tuple(backfill.solutions),
             placeholders=_placeholders_from_product(backfill.product),
+            departure_pins=_departure_pins_from_product(backfill.product),
         )
 
     def held_inference_for_placeholder(

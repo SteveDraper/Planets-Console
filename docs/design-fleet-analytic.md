@@ -89,7 +89,7 @@ Display default: highest **inference solution rank weight** option set. Row expa
 |---------|------|
 | **`active` disposition** | Ship still in fleet accounting |
 | **`merged` disposition** | Identity absorbed into another row via **fleet count collapse** (§4.7); not strong-evidence loss |
-| **`lost` / `traded` / `unknown` disposition** | Only with **strong evidence** (future: destruction/trade in scores or reports) |
+| **`lost` / `traded` / `unknown` disposition** | Only with **strong evidence**: an exact-set **departure pin** on scores persist retires named **fleet ship record**s at fleet@T (`lost` or `traded` with counterparty). Spec-only pins do not name ids. Reports remain a follow-on. |
 | **Fleet possibly lost** | Candidate for loss after count decrease; row stays `active` |
 | **Fleet alibi** | Sighting after a destruction event proves this row was not the one lost |
 | **Fleet count discrepancy** | Player-level: implied count < active rows; no guessed row demotion |
@@ -104,7 +104,7 @@ Display default: highest **inference solution rank weight** option set. Row expa
 |--------|--------|
 | `TurnInfo.ships` | Sighting, position update, **fleet alibi** |
 | Scoreboard deltas | `+N` / `-N` warship/freighter; triggers inferred row placeholders |
-| **Scores** inference | Solution updates; **fleet build option set** refresh |
+| **Scores** inference | Solution updates; **fleet build option set** refresh; exact-set **departure pin** retirement |
 | Reports | Event type + hook only in v1 (no parser) |
 
 ### 4.2 Inferred row placeholders
@@ -171,7 +171,8 @@ When scoreboard implies fewer ships than **active** rows:
 - Mark candidate rows **fleet possibly lost** when evidence supports candidacy
 - Apply **fleet alibi** when a row has post-event sighting
 - **Do not** change disposition without strong evidence (no FIFO demotion in v1)
-- Future: scores destruction actions and report text may resolve which row was lost
+- Exact-set **departure pin**s on scores persist are that strong evidence: fleet@T sets the named **fleet ship record**s to `lost` or `traded` (pairing family / counterparty when persist named them). Spec-only pins omit ids and do not retire anyone. **Placeholder departure**s are not ingested as **fleet inferred acquisition**s (no explode, no envelope copy).
+- Combat / explosion report extras remain [#485](https://github.com/SteveDraper/Planets-Console/issues/485)
 
 ### 4.7 Active-row over-count (count collapse)
 
@@ -441,7 +442,7 @@ F0.2 registration uses a single `api/analytics/fleet.py` module (same pattern as
 | Constraint serialization | known / unknown / bounded / option sets / region round-trip |
 | Snapshot chain | T-1 -> T; turn-1 baseline; invalidation on turn replace |
 | Observation ingest | Sighting creates/updates row; id bounds |
-| Inference ingest | Placeholder rows from delta; option sets from top-K |
+| Inference ingest | Placeholder rows from delta; option sets from top-K; exact-set pin retirement (#490); placeholder departures are not inferred acquisitions |
 | Reconciliation | Exact known id vs id-bound + lock-compatible option sets; max rank weight then builtTurn; event append immutability; bounds before observation; count collapse (#259) |
 | Discrepancy | Player flag without disposition change; alibi excludes possibly-lost |
 | Exports | Ensure deps; materialize shape; scores edge registration |

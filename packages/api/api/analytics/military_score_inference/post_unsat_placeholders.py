@@ -21,6 +21,7 @@ from api.concepts.hulls import (
 from api.concepts.ship_build_military import warship_construction_envelope_2x
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
+from api.serialization.uncharacterized_roster import PLACEHOLDER_DEPARTURE_ID
 
 UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID = "unknown_military_ship"
 PLACEHOLDER_BUILD_SLOT_USAGE = 1
@@ -109,7 +110,10 @@ def explode_placeholder_to_unit_payloads(
 
     Fleet ingest uses this so a single unknown-military-ship row becomes N unit
     inferred acquisition rows. Does not invent a multi-ship fleet row.
+    Placeholder departures are not inferred acquisitions and never explode.
     """
+    if placeholder.get("id") == PLACEHOLDER_DEPARTURE_ID:
+        return []
     raw_count = placeholder.get("count", 0)
     if isinstance(raw_count, bool) or not isinstance(raw_count, int) or raw_count <= 0:
         return []
