@@ -60,6 +60,20 @@ def test_exact_keeps_source_placeholders_and_omits_leftover():
     assert product.unexplained_military_delta_2x is None
     assert product.leftover is None
     assert product.lattice_signatures is None
+    assert product.departure_pins is None
+
+
+def test_exact_keeps_departure_pins_when_source_carries_them():
+    pins = [
+        {
+            "kind": "exact_set",
+            "shipClass": "warship",
+            "records": [{"recordId": "r1", "disposition": "lost"}],
+        }
+    ]
+    product = product_payload_fields(STATUS_EXACT, leftover=22, departure_pins=pins)
+    assert product.departure_pins == pins
+    assert product.unexplained_military_delta_2x is None
 
 
 def test_roster_keeps_tagged_leftover_and_signatures():

@@ -24,6 +24,7 @@ from api.analytics.fleet.observation_option_locks import (
     observation_locks_from_record,
     resolve_option_sets_respecting_locks,
 )
+from api.analytics.fleet.pinned_departure_retire import retire_exact_set_pinned_departures
 from api.analytics.fleet.serialization import (
     append_fleet_evidence_event,
     fleet_build_option_set_from_inference_ship_build,
@@ -60,6 +61,7 @@ from api.concepts.hulls import (
     is_unknown_military_ship_sentinel_hull_id,
 )
 from api.models.game import TurnInfo
+from api.serialization.uncharacterized_roster import PLACEHOLDER_DEPARTURE_ID
 
 UNKNOWN_MILITARY_SHIP_LABEL = "Unknown military ship"
 
@@ -72,7 +74,7 @@ def refine_inferred_acquisitions_from_scores(
     *,
     inference_materialization: FleetInferenceMaterialization,
 ) -> FleetTurnSnapshot:
-    """Attach fleet build option sets from held solutions or persist placeholders."""
+    """Apply held scores: retire exact-set pins, then refine placeholder option sets."""
     for ledger in snapshot.players:
         refine_player_inferred_acquisitions_from_scores(
             ledger,
@@ -92,12 +94,25 @@ def refine_player_inferred_acquisitions_from_scores(
     perspective: int,
     inference_materialization: FleetInferenceMaterialization,
 ) -> None:
-    """Attach fleet build option sets from held solutions or persist placeholders."""
+    """Apply held scores: retire exact-set pins, then refine placeholder option sets."""
     turn_number = turn.settings.turn
-    if not _ledger_has_placeholders_for_turn(ledger, turn_number):
-        return
     inference = inference_materialization.inference
     load_turn = inference_materialization.load_turn
+    held = inference.held_inference_for_scoreboard_turn(
+        game_id=game_id,
+        perspective=perspective,
+        scoreboard_turn=turn_number,
+        player_id=ledger.player_id,
+        turn=turn,
+        load_turn=load_turn,
+    )
+    retire_exact_set_pinned_departures(
+        ledger,
+        turn_number=turn_number,
+        pins=held.departure_pins,
+    )
+    if not _ledger_has_placeholders_for_turn(ledger, turn_number):
+        return
     for built_turn in _distinct_placeholder_built_turns(ledger, turn_number):
         held = inference.held_inference_for_placeholder(
             game_id=game_id,
@@ -221,6 +236,8 @@ def _assign_persist_placeholders_to_unit_rows(
 
 
 def _placeholder_ship_class(placeholder: Mapping[str, object]) -> FleetShipClass | None:
+    if placeholder.get("id") == PLACEHOLDER_DEPARTURE_ID:
+        return None
     hull_id = placeholder.get("hullId")
     if isinstance(hull_id, int) and not isinstance(hull_id, bool):
         if is_unknown_military_ship_sentinel_hull_id(hull_id):

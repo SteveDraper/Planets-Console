@@ -103,13 +103,14 @@ COMPLETE_INFERENCE_SEARCH_STATUSES = (
 
 @dataclass(frozen=True)
 class InferenceProductPayload:
-    """Product status, placeholders, leftover, and lattice signatures."""
+    """Product status, placeholders, leftover, lattice signatures, and exact-set pins."""
 
     status: str | None = None
     placeholders: list[dict[str, object]] | None = None
     unexplained_military_delta_2x: int | None = None
     leftover: dict[str, object] | None = None
     lattice_signatures: list[dict[str, object]] | None = None
+    departure_pins: list[dict[str, object]] | None = None
 
 
 def product_payload_fields(
@@ -119,6 +120,7 @@ def product_payload_fields(
     leftover: int | None = None,
     tagged_leftover: dict[str, object] | None = None,
     lattice_signatures: list[dict[str, object]] | None = None,
+    departure_pins: list[dict[str, object]] | None = None,
 ) -> InferenceProductPayload:
     """Return product fields for persist, stream, export, and host-turn targets.
 
@@ -127,7 +129,8 @@ def product_payload_fields(
     leftover. ``uncharacterized_roster`` exposes empty ``placeholders`` when
     omitted, never a point leftover, and keeps tagged leftover and lattice
     signatures when provided. Other statuses omit leftover and omit
-    placeholders unless the source already carried them.
+    placeholders unless the source already carried them. Exact-set
+    ``departurePins`` pass through whenever the source carried them.
     """
     resolved_placeholders = placeholders
     if (
@@ -145,6 +148,7 @@ def product_payload_fields(
         ),
         leftover=tagged_leftover if is_roster else None,
         lattice_signatures=lattice_signatures if is_roster else None,
+        departure_pins=departure_pins if departure_pins else None,
     )
 
 
@@ -181,6 +185,9 @@ def product_payload_from_mapping(
     raw_signatures = data.get("latticeSignatures")
     if raw_signatures is None:
         raw_signatures = data.get("lattice_signatures")
+    raw_departure_pins = data.get("departurePins")
+    if raw_departure_pins is None:
+        raw_departure_pins = data.get("departure_pins")
     return product_payload_fields(
         status,
         placeholders=placeholders,
@@ -189,6 +196,11 @@ def product_payload_from_mapping(
         lattice_signatures=(
             [entry for entry in raw_signatures if isinstance(entry, dict)]
             if isinstance(raw_signatures, list)
+            else None
+        ),
+        departure_pins=(
+            [entry for entry in raw_departure_pins if isinstance(entry, dict)]
+            if isinstance(raw_departure_pins, list)
             else None
         ),
     )
@@ -210,6 +222,8 @@ def apply_product_payload_fields(
         payload["leftover"] = product.leftover
     if product.lattice_signatures is not None:
         payload[signatures_key] = product.lattice_signatures
+    if product.departure_pins:
+        payload["departurePins"] = product.departure_pins
     return payload
 
 
