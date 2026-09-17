@@ -7,17 +7,16 @@ fields is phase 4 -- do not encode an unknown-loss bound as a point
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from api.analytics.fleet.types import FleetShipClass
+from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    LatticeSignature,
+    PlaceholderBuild,
+    PlaceholderDeparture,
+    PointLeftover,
+    UnknownLossBoundLeftover,
+    UnknownLossLeftover,
+)
 from api.errors import CoreAPIError
-
-if TYPE_CHECKING:
-    from api.analytics.military_score_inference.uncharacterized_roster import (
-        LatticeSignature,
-        PlaceholderDeparture,
-        UnknownLossLeftover,
-    )
 
 LEFTOVER_KIND_POINT = "point"
 LEFTOVER_KIND_UNKNOWN_LOSS_BOUND = "unknown_loss_bound"
@@ -46,11 +45,6 @@ def leftover_to_json(leftover: UnknownLossLeftover) -> dict[str, object]:
 
 def leftover_from_json(data: object) -> UnknownLossLeftover:
     """Deserialize leftover. Rejects a bound encoded as a point leftover field."""
-    from api.analytics.military_score_inference.uncharacterized_roster import (
-        PointLeftover,
-        UnknownLossBoundLeftover,
-    )
-
     payload = _require_object(data, "leftover")
     kind = payload.get("kind")
     if kind == LEFTOVER_KIND_POINT:
@@ -84,8 +78,6 @@ def placeholder_departure_to_json(departure: PlaceholderDeparture) -> dict[str, 
 
 
 def placeholder_departure_from_json(data: object) -> PlaceholderDeparture:
-    from api.analytics.military_score_inference.uncharacterized_roster import PlaceholderDeparture
-
     payload = _require_object(data, "placeholder departure")
     if payload.get("id") != PLACEHOLDER_DEPARTURE_ID:
         raise UncharacterizedRosterCodecError(
@@ -108,28 +100,64 @@ def placeholder_departure_from_json(data: object) -> PlaceholderDeparture:
     )
 
 
-def lattice_signature_to_json(signature: LatticeSignature) -> dict[str, object]:
-    """Serialize one idle-dock class pair. No objectiveValue."""
+def placeholder_build_to_json(build: PlaceholderBuild) -> dict[str, object]:
+    """Serialize a lattice-signature build. Wire keys match ``placeholders[]`` builds."""
     payload: dict[str, object] = {
-        "shipClass": signature.ship_class,
-        "build": dict(signature.build),
-        "departure": placeholder_departure_to_json(signature.departure),
+        "id": build.id,
+        "hullId": build.hull_id,
+        "count": build.count,
+        "buildSlotUsage": build.build_slot_usage,
     }
+    if build.military_score_delta_2x_min is not None:
+        payload["militaryScoreDelta2xMin"] = build.military_score_delta_2x_min
+    if build.military_score_delta_2x_max is not None:
+        payload["militaryScoreDelta2xMax"] = build.military_score_delta_2x_max
     return payload
 
 
-def lattice_signature_from_json(data: object) -> LatticeSignature:
-    from api.analytics.military_score_inference.uncharacterized_roster import LatticeSignature
+def placeholder_build_from_json(data: object) -> PlaceholderBuild:
+    payload = _require_object(data, "lattice signature.build")
+    build_id = payload.get("id")
+    if not isinstance(build_id, str) or not build_id:
+        raise UncharacterizedRosterCodecError("lattice signature.build.id must be a string")
+    count = _require_int(payload.get("count"), "lattice signature.build.count")
+    if count <= 0:
+        raise UncharacterizedRosterCodecError("lattice signature.build.count must be positive")
+    return PlaceholderBuild(
+        id=build_id,
+        hull_id=_require_int(payload.get("hullId"), "lattice signature.build.hullId"),
+        count=count,
+        build_slot_usage=_require_int(
+            payload.get("buildSlotUsage"),
+            "lattice signature.build.buildSlotUsage",
+        ),
+        military_score_delta_2x_min=_optional_int(
+            payload.get("militaryScoreDelta2xMin"),
+            "lattice signature.build.militaryScoreDelta2xMin",
+        ),
+        military_score_delta_2x_max=_optional_int(
+            payload.get("militaryScoreDelta2xMax"),
+            "lattice signature.build.militaryScoreDelta2xMax",
+        ),
+    )
 
+
+def lattice_signature_to_json(signature: LatticeSignature) -> dict[str, object]:
+    """Serialize one idle-dock class pair. No objectiveValue."""
+    return {
+        "shipClass": signature.ship_class,
+        "build": placeholder_build_to_json(signature.build),
+        "departure": placeholder_departure_to_json(signature.departure),
+    }
+
+
+def lattice_signature_from_json(data: object) -> LatticeSignature:
     payload = _require_object(data, "lattice signature")
     if "objectiveValue" in payload:
         raise UncharacterizedRosterCodecError("lattice signature must not carry objectiveValue")
-    build = payload.get("build")
-    if not isinstance(build, dict):
-        raise UncharacterizedRosterCodecError("lattice signature.build must be an object")
     return LatticeSignature(
         ship_class=_require_ship_class(payload.get("shipClass")),
-        build=dict(build),
+        build=placeholder_build_from_json(payload.get("build")),
         departure=placeholder_departure_from_json(payload.get("departure")),
     )
 

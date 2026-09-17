@@ -13,6 +13,7 @@ from api.analytics.fleet.types import (
 from api.analytics.military_score_inference.inference_api_payload import (
     format_inference_summary,
     inference_api_payload,
+    product_payload_fields,
 )
 from api.analytics.military_score_inference.military_sat_admission import (
     military_sat_refusal_from_turn,
@@ -31,16 +32,24 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
 )
 from api.analytics.military_score_inference.uncharacterized_roster import (
     STATUS_UNCHARACTERIZED_ROSTER,
+    emit_uncharacterized_roster,
+    uncharacterized_roster_result,
+    unknown_loss_bound_2x,
+)
+from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    LatticeSignature,
+    PlaceholderBuild,
     PlaceholderDeparture,
     PointLeftover,
     UnknownLossBoundLeftover,
-    emit_uncharacterized_roster,
-    unknown_loss_bound_2x,
 )
+from api.analytics.scores.export_wire import product_fields_from_wire_complete
 from api.concepts.hulls import UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
 from api.serialization.uncharacterized_roster import (
     PLACEHOLDER_DEPARTURE_ID,
     UncharacterizedRosterCodecError,
+    lattice_signature_from_json,
+    lattice_signature_to_json,
     leftover_from_json,
     leftover_to_json,
     placeholder_departure_from_json,
@@ -124,6 +133,19 @@ def _departures(placeholders) -> list[dict[str, object]]:
     return [entry for entry in placeholders if entry.get("id") == PLACEHOLDER_DEPARTURE_ID]
 
 
+def _payload_from_result(result: InferenceResult) -> dict[str, object]:
+    return inference_api_payload(
+        status=result.status,
+        summary=format_inference_summary(result),
+        solutions=result.solutions,
+        diagnostics=result.diagnostics,
+        placeholders=list(result.placeholders),
+        leftover=result.leftover,
+        placeholder_departures=result.placeholder_departures,
+        lattice_signatures=result.lattice_signatures,
+    )
+
+
 def _peer_score(sample_turn, *, ownerid: int, shipchange: int, militarychange: int):
     return replace(
         sample_turn.scores[0],
@@ -151,14 +173,13 @@ def test_net_minus_one_warship_unpinned_emits_departure_and_bound(
         synthetic_catalog_context,
         records=(_singleton_unknown_hull_warship(),),
     )
-    departures = _departures(product.placeholders)
+    departures = product.placeholder_departures
     assert product.leftover.kind == "unknown_loss_bound"
     assert isinstance(product.leftover, UnknownLossBoundLeftover)
     assert len(departures) == 1
-    assert departures[0]["shipClass"] == "warship"
-    assert departures[0]["count"] == 1
-    assert "hullId" not in departures[0]
-    assert "militaryScoreDelta2xMin" not in departures[0]
+    assert departures[0].ship_class == "warship"
+    assert departures[0].count == 1
+    assert departures[0].counterparty_player_id is None
     assert product.lattice_signatures == ()
 
     result = military_sat_refusal_from_turn(
@@ -169,18 +190,16 @@ def test_net_minus_one_warship_unpinned_emits_departure_and_bound(
     assert result is not None
     assert result.status == STATUS_UNCHARACTERIZED_ROSTER
     assert result.solutions == ()
-    payload = inference_api_payload(
-        status=result.status,
-        summary=format_inference_summary(result),
-        solutions=result.solutions,
-        diagnostics=result.diagnostics,
-        placeholders=list(result.placeholders),
-        tagged_leftover=result.leftover,
-        lattice_signatures=list(result.lattice_signatures),
-    )
+    assert isinstance(result.leftover, UnknownLossBoundLeftover)
+    payload = _payload_from_result(uncharacterized_roster_result(product))
+    wire_departures = _departures(payload["placeholders"])
     assert payload["solutions"] == []
     assert payload["leftover"]["kind"] == "unknown_loss_bound"
     assert "unexplainedMilitaryDelta2x" not in payload
+    assert len(wire_departures) == 1
+    assert wire_departures[0]["shipClass"] == "warship"
+    assert "hullId" not in wire_departures[0]
+    assert "militaryScoreDelta2xMin" not in wire_departures[0]
     assert all("objectiveValue" not in entry for entry in payload["latticeSignatures"])
 
 
@@ -212,19 +231,12 @@ def test_idle_dock_k1_net0_emits_both_lattice_signatures(sample_turn):
     assert result.status == STATUS_UNCHARACTERIZED_ROSTER
     assert result.solutions == ()
     assert result.diagnostics["satAdmitted"] is False
-    assert [entry["shipClass"] for entry in result.lattice_signatures] == [
+    assert [entry.ship_class for entry in result.lattice_signatures] == [
         "warship",
         "freighter",
     ]
-    payload = inference_api_payload(
-        status=result.status,
-        summary=format_inference_summary(result),
-        solutions=result.solutions,
-        diagnostics=result.diagnostics,
-        placeholders=list(result.placeholders),
-        tagged_leftover=result.leftover,
-        lattice_signatures=list(result.lattice_signatures),
-    )
+    assert all(isinstance(entry.build, PlaceholderBuild) for entry in result.lattice_signatures)
+    payload = _payload_from_result(result)
     assert payload["solutions"] == []
     assert "objectiveValue" not in payload
     assert len(payload["latticeSignatures"]) == 2
@@ -233,6 +245,7 @@ def test_idle_dock_k1_net0_emits_both_lattice_signatures(sample_turn):
         assert entry["build"]["count"] == 1
         assert entry["departure"]["count"] == 1
         assert entry["departure"]["shipClass"] == entry["shipClass"]
+    assert result.placeholder_departures == ()
     assert _departures(result.placeholders) == []
 
 
@@ -266,10 +279,13 @@ def test_gift_counterparty_on_placeholder_and_no_sat(sample_turn, synthetic_cata
     assert result is not None
     assert result.status == STATUS_UNCHARACTERIZED_ROSTER
     assert result.solutions == ()
-    departures = _departures(result.placeholders)
+    assert len(result.placeholder_departures) == 1
+    assert result.placeholder_departures[0].count == 1
+    assert result.placeholder_departures[0].ship_class == "warship"
+    assert result.placeholder_departures[0].counterparty_player_id == 3
+    payload = _payload_from_result(result)
+    departures = _departures(payload["placeholders"])
     assert len(departures) == 1
-    assert departures[0]["count"] == 1
-    assert departures[0]["shipClass"] == "warship"
     assert departures[0]["counterpartyPlayerId"] == 3
 
 
@@ -384,3 +400,60 @@ def test_placeholder_departure_codec_round_trip():
     assert wire["id"] == PLACEHOLDER_DEPARTURE_ID
     assert "hullId" not in wire
     assert placeholder_departure_from_json(wire) == departure
+
+
+def test_lattice_signature_codec_round_trip():
+    signature = LatticeSignature(
+        ship_class="warship",
+        build=PlaceholderBuild(
+            id=UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
+            hull_id=UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
+            count=1,
+            build_slot_usage=1,
+            military_score_delta_2x_min=0,
+            military_score_delta_2x_max=40,
+        ),
+        departure=PlaceholderDeparture(ship_class="warship", count=1),
+    )
+    wire = lattice_signature_to_json(signature)
+    assert "objectiveValue" not in wire
+    assert wire["build"]["hullId"] == UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
+    assert lattice_signature_from_json(wire) == signature
+    with pytest.raises(UncharacterizedRosterCodecError, match="objectiveValue"):
+        lattice_signature_from_json({**wire, "objectiveValue": 1})
+
+
+def test_product_payload_fields_omits_point_leftover_for_roster():
+    product = product_payload_fields(STATUS_UNCHARACTERIZED_ROSTER, leftover=22)
+    assert product.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert product.placeholders == []
+    assert product.unexplained_military_delta_2x is None
+    assert product.leftover is None
+    assert product.lattice_signatures is None
+
+
+def test_wire_complete_reconstruction_keeps_roster_leftover_and_signatures():
+    reconstructed = product_fields_from_wire_complete(
+        {
+            "status": STATUS_UNCHARACTERIZED_ROSTER,
+            "leftover": {"kind": "unknown_loss_bound", "lowerBound2x": 800},
+            "latticeSignatures": [
+                {
+                    "shipClass": "warship",
+                    "build": {"id": "unknown_military_ship", "count": 1},
+                    "departure": {
+                        "id": PLACEHOLDER_DEPARTURE_ID,
+                        "shipClass": "warship",
+                        "count": 1,
+                    },
+                }
+            ],
+            "placeholders": [],
+            "unexplainedMilitaryDelta2x": 22,
+        }
+    )
+    assert reconstructed.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert reconstructed.unexplained_military_delta_2x is None
+    assert reconstructed.leftover == {"kind": "unknown_loss_bound", "lowerBound2x": 800}
+    assert reconstructed.lattice_signatures is not None
+    assert reconstructed.lattice_signatures[0]["shipClass"] == "warship"

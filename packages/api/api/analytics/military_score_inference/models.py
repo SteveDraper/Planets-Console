@@ -11,6 +11,11 @@ from api.analytics.military_score_inference.military_score_window import (
     military_window_alpha,
     military_window_overshoot_cap_2x,
 )
+from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    LatticeSignature,
+    PlaceholderDeparture,
+    UnknownLossLeftover,
+)
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.ranking_heuristics import (
@@ -244,5 +249,6 @@ class InferenceResult:
     solutions: tuple[InferenceSolution, ...]
     diagnostics: dict[str, object]
     placeholders: tuple[dict[str, object], ...] = ()
-    leftover: dict[str, object] | None = None
-    lattice_signatures: tuple[dict[str, object], ...] = ()
+    placeholder_departures: tuple[PlaceholderDeparture, ...] = ()
+    leftover: UnknownLossLeftover | None = None
+    lattice_signatures: tuple[LatticeSignature, ...] = ()

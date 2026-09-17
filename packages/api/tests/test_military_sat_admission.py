@@ -63,6 +63,9 @@ from api.analytics.military_score_inference.tier_policy import resolve_tier_poli
 from api.analytics.military_score_inference.uncharacterized_roster import (
     STATUS_UNCHARACTERIZED_ROSTER,
 )
+from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    UnknownLossBoundLeftover,
+)
 
 from tests.fixtures.military_score_inference import _observation, without_player_minefields
 from tests.fixtures.pp_gap_transfer import (
@@ -322,7 +325,7 @@ def test_military_sat_refused_payload_is_uncharacterized_roster_not_no_exact_sol
         status=STATUS_UNCHARACTERIZED_ROSTER,
         solutions=(),
         diagnostics={"reason": "unpinned_military_departure", "satAdmitted": False},
-        leftover={"kind": "unknown_loss_bound", "lowerBound2x": 0},
+        leftover=UnknownLossBoundLeftover(lower_bound_2x=0),
         lattice_signatures=(),
     )
     payload = inference_api_payload(
@@ -331,8 +334,8 @@ def test_military_sat_refused_payload_is_uncharacterized_roster_not_no_exact_sol
         solutions=result.solutions,
         diagnostics=result.diagnostics,
         placeholders=[],
-        tagged_leftover=result.leftover,
-        lattice_signatures=[],
+        leftover=result.leftover,
+        lattice_signatures=result.lattice_signatures,
     )
     assert payload["status"] == STATUS_UNCHARACTERIZED_ROSTER
     assert payload["status"] != STATUS_NO_EXACT_SOLUTION

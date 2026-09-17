@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
 
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -38,6 +37,13 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
     unique_incoming_class,
 )
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
+from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    LatticeSignature,
+    PlaceholderBuild,
+    PlaceholderDeparture,
+    UnknownLossBoundLeftover,
+    UnknownLossLeftover,
+)
 from api.concepts.hulls import (
     GENERIC_FREIGHTER_SENTINEL_HULL_ID,
     UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
@@ -46,56 +52,15 @@ from api.concepts.ship_build_military import warship_construction_envelope_2x
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
 from api.models.ship import Ship
-from api.serialization.uncharacterized_roster import (
-    lattice_signature_to_json,
-    leftover_to_json,
-    placeholder_departure_to_json,
-)
 
 STATUS_UNCHARACTERIZED_ROSTER = "uncharacterized_roster"
 UNCHARACTERIZED_ROSTER_SUMMARY = "Uncharacterized roster"
 
 
 @dataclass(frozen=True)
-class PointLeftover:
-    """Today's point leftover (not the refused-SAT warship path)."""
-
-    unexplained_military_delta_2x: int
-    kind: Literal["point"] = "point"
-
-
-@dataclass(frozen=True)
-class UnknownLossBoundLeftover:
-    """Lower bound on unexplained military when lost construction is unknown."""
-
-    lower_bound_2x: int
-    kind: Literal["unknown_loss_bound"] = "unknown_loss_bound"
-
-
-UnknownLossLeftover = PointLeftover | UnknownLossBoundLeftover
-
-
-@dataclass(frozen=True)
-class PlaceholderDeparture:
-    """Class-tagged unexplained departure. Sign lives in the type, not hull -1."""
-
-    ship_class: FleetShipClass
-    count: int
-    counterparty_player_id: int | None = None
-
-
-@dataclass(frozen=True)
-class LatticeSignature:
-    """One idle-dock class alternative: hidden build plus placeholder departure."""
-
-    ship_class: FleetShipClass
-    build: dict[str, object]
-    departure: PlaceholderDeparture
-
-
-@dataclass(frozen=True)
 class UncharacterizedRosterProduct:
     placeholders: tuple[dict[str, object], ...]
+    placeholder_departures: tuple[PlaceholderDeparture, ...]
     leftover: UnknownLossLeftover
     lattice_signatures: tuple[LatticeSignature, ...]
 
@@ -139,11 +104,6 @@ def emit_uncharacterized_roster(
         torpedos_by_id=torpedos_by_id,
         buildable_hull_ids=buildable_hull_ids,
     )
-    departures = _placeholder_departures(pairing, idle_dock, idle_class)
-    placeholders = (
-        *hidden_builds,
-        *(placeholder_departure_to_json(entry) for entry in departures),
-    )
     leftover = UnknownLossBoundLeftover(
         lower_bound_2x=unknown_loss_bound_2x(
             max(0, -observation.military_delta_2x),
@@ -161,7 +121,8 @@ def emit_uncharacterized_roster(
         )
     )
     return UncharacterizedRosterProduct(
-        placeholders=placeholders,
+        placeholders=tuple(hidden_builds),
+        placeholder_departures=_placeholder_departures(pairing, idle_dock, idle_class),
         leftover=leftover,
         lattice_signatures=signatures,
     )
@@ -178,10 +139,9 @@ def uncharacterized_roster_result(
         solutions=(),
         diagnostics=dict(diagnostics or {}),
         placeholders=product.placeholders,
-        leftover=leftover_to_json(product.leftover),
-        lattice_signatures=tuple(
-            lattice_signature_to_json(signature) for signature in product.lattice_signatures
-        ),
+        placeholder_departures=product.placeholder_departures,
+        leftover=product.leftover,
+        lattice_signatures=product.lattice_signatures,
     )
 
 
@@ -315,27 +275,25 @@ def _unknown_class_gift_counterparty(pairing: PublicScoreboardPairing) -> int | 
 def _unknown_military_build(
     count: int,
     envelope: tuple[int, int] | None,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "id": UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
-        "hullId": UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
-        "count": count,
-        "buildSlotUsage": PLACEHOLDER_BUILD_SLOT_USAGE,
-    }
-    if envelope is not None:
-        min_2x, max_2x = envelope
-        payload["militaryScoreDelta2xMin"] = min_2x
-        payload["militaryScoreDelta2xMax"] = max_2x
-    return payload
+) -> PlaceholderBuild:
+    min_2x, max_2x = (None, None) if envelope is None else envelope
+    return PlaceholderBuild(
+        id=UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
+        hull_id=UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
+        count=count,
+        build_slot_usage=PLACEHOLDER_BUILD_SLOT_USAGE,
+        military_score_delta_2x_min=min_2x,
+        military_score_delta_2x_max=max_2x,
+    )
 
 
-def _generic_freighter_build(count: int) -> dict[str, object]:
-    return {
-        "id": GENERIC_FREIGHTER_COMBO_ID,
-        "hullId": GENERIC_FREIGHTER_SENTINEL_HULL_ID,
-        "count": count,
-        "buildSlotUsage": PLACEHOLDER_BUILD_SLOT_USAGE,
-    }
+def _generic_freighter_build(count: int) -> PlaceholderBuild:
+    return PlaceholderBuild(
+        id=GENERIC_FREIGHTER_COMBO_ID,
+        hull_id=GENERIC_FREIGHTER_SENTINEL_HULL_ID,
+        count=count,
+        build_slot_usage=PLACEHOLDER_BUILD_SLOT_USAGE,
+    )
 
 
 def _unpinned_military_count(

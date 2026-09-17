@@ -97,8 +97,9 @@ def build_row_complete_wire_payload(
             diagnostics=result.diagnostics,
             observation=observation,
             placeholders=list(result.placeholders) if result.placeholders else None,
-            tagged_leftover=result.leftover,
-            lattice_signatures=list(result.lattice_signatures),
+            leftover=result.leftover,
+            placeholder_departures=result.placeholder_departures,
+            lattice_signatures=result.lattice_signatures,
         )
     return row_complete_wire_payload_from_api_payload(
         payload,

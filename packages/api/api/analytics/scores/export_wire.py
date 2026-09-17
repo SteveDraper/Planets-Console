@@ -7,6 +7,7 @@ from typing import Literal
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_solver_diagnostics
 from api.analytics.military_score_inference.inference_api_payload import (
+    STATUS_UNCHARACTERIZED_ROSTER,
     InferenceProductPayload,
     product_payload_fields,
     serialize_solution_without_arithmetic,
@@ -127,10 +128,25 @@ def product_fields_from_wire_complete(
     source_placeholders, source_leftover = inference_complete_functional_fields(wire_event)
     if status is None:
         return InferenceProductPayload()
-    return product_payload_fields(
+    product = product_payload_fields(
         status,
         placeholders=source_placeholders,
         leftover=source_leftover,
+    )
+    if status != STATUS_UNCHARACTERIZED_ROSTER:
+        return product
+    raw_leftover = wire_event.get("leftover")
+    raw_signatures = wire_event.get("latticeSignatures")
+    return InferenceProductPayload(
+        status=product.status,
+        placeholders=product.placeholders,
+        unexplained_military_delta_2x=None,
+        leftover=raw_leftover if isinstance(raw_leftover, dict) else None,
+        lattice_signatures=(
+            [entry for entry in raw_signatures if isinstance(entry, dict)]
+            if isinstance(raw_signatures, list)
+            else None
+        ),
     )
 
 
