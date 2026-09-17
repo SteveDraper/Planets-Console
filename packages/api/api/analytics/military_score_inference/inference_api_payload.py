@@ -252,6 +252,7 @@ def product_payload_from_result(
         leftover=leftover,
         tagged_leftover=tagged_leftover,
         lattice_signatures=signatures,
+        departure_pins=departure_pins_to_json(result.departure_pins),
     )
 
 
@@ -478,6 +479,7 @@ def inference_api_payload(
         placeholders=placeholders,
         tagged_leftover=leftover_wire,
         lattice_signatures=signatures_wire,
+        departure_pins=departure_pins_to_json(departure_pins),
     )
     payload: dict[str, object] = {
         "status": product.status,
@@ -504,8 +506,6 @@ def inference_api_payload(
         "diagnostics": diagnostics,
     }
     apply_product_payload_fields(payload, product)
-    if departure_pins:
-        payload["departurePins"] = departure_pins_to_json(departure_pins)
     if fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = fleet_torp_input_status
     if fleet_torp_overlay_belief_set_torp_ids is not None:

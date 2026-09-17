@@ -7,7 +7,9 @@ from api.analytics.military_score_inference.inference_api_payload import (
     FUNCTIONAL_LEFTOVER_STATUSES,
     INFERENCE_ADMISSION_SKIP_STATUSES,
     product_payload_fields,
+    product_payload_from_result,
 )
+from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_MODERATE_RESIDUAL,
@@ -15,6 +17,11 @@ from api.analytics.military_score_inference.solver import (
 from api.analytics.military_score_inference.uncharacterized_roster import (
     STATUS_UNCHARACTERIZED_ROSTER,
 )
+from api.analytics.military_score_inference.uncharacterized_roster_types import (
+    ExactSetDeparturePin,
+    ExactSetPinRecord,
+)
+from api.serialization.uncharacterized_roster import departure_pins_to_json
 
 _ROSTER_LEFTOVER = {"kind": "unknown_loss_bound", "lowerBound2x": 800}
 _ROSTER_SIGNATURES = [
@@ -74,6 +81,24 @@ def test_exact_keeps_departure_pins_when_source_carries_them():
     product = product_payload_fields(STATUS_EXACT, leftover=22, departure_pins=pins)
     assert product.departure_pins == pins
     assert product.unexplained_military_delta_2x is None
+
+
+def test_product_payload_from_result_threads_departure_pins():
+    pins = (
+        ExactSetDeparturePin(
+            ship_class="warship",
+            records=(ExactSetPinRecord(record_id="r1", disposition="lost"),),
+        ),
+    )
+    product = product_payload_from_result(
+        InferenceResult(
+            status=STATUS_EXACT,
+            solutions=(),
+            diagnostics={},
+            departure_pins=pins,
+        )
+    )
+    assert product.departure_pins == departure_pins_to_json(pins)
 
 
 def test_roster_keeps_tagged_leftover_and_signatures():

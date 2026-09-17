@@ -12,6 +12,17 @@ from api.analytics.fleet.types import (
     FleetShipRecord,
     FleetShipRecordFields,
 )
+from api.analytics.military_score_inference.accelerated_start import (
+    AcceleratedInferenceSegment,
+)
+from api.analytics.military_score_inference.host_turn_targets import (
+    HostTurnFunctionalTarget,
+    functional_host_turn_target_from_segment_payload,
+)
+from api.analytics.military_score_inference.inference_accelerated import (
+    build_accelerated_segment_payload,
+)
+from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.post_unsat_placeholders import (
     UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID,
 )
@@ -35,6 +46,7 @@ from api.serialization.uncharacterized_roster import (
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.fixtures.military_score_inference import _observation
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 
 _GAME_ID = 628580
@@ -84,6 +96,7 @@ def _persist_row(
     status: str,
     placeholders: list[dict[str, object]] | None = None,
     departure_pins: list[dict[str, object]] | None = None,
+    host_turn_targets: list[HostTurnFunctionalTarget] | None = None,
 ) -> None:
     persistence.put_row(
         _GAME_ID,
@@ -103,6 +116,7 @@ def _persist_row(
                 else None
             ),
             departure_pins=departure_pins,
+            host_turn_targets=host_turn_targets,
         ),
     )
 
@@ -158,6 +172,57 @@ def test_exact_set_two_named_records_leave_the_active_ledger():
         assert len(change_events) == 1
         assert change_events[0].source == "scores.inference"
         assert change_events[0].payload["disposition"] == "lost"
+
+
+def test_host_turn_target_named_pin_retires_fleet_row():
+    persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    pins = (
+        ExactSetDeparturePin(
+            ship_class="warship",
+            records=(ExactSetPinRecord(record_id="r1", disposition="lost"),),
+        ),
+    )
+    segment = AcceleratedInferenceSegment(
+        segment_id="reported-host-turn",
+        host_turn=_HOST_TURN - 1,
+        military_delta_2x=-40,
+        warship_delta=-1,
+        freighter_delta=0,
+        priority_point_delta=0,
+    )
+    payload = build_accelerated_segment_payload(
+        segment,
+        _observation(military_delta_2x=-40, warship_delta=-1),
+        InferenceResult(
+            status=STATUS_EXACT,
+            solutions=(),
+            diagnostics={},
+            departure_pins=pins,
+        ),
+        None,
+        policy_steps_attempted=["baseline"],
+        step_diagnostics=[],
+    )
+    assert payload["departurePins"] == departure_pins_to_json(pins)
+    target = functional_host_turn_target_from_segment_payload(payload)
+    assert target.product.departure_pins == payload["departurePins"]
+    _persist_row(
+        persistence,
+        status=STATUS_EXACT,
+        host_turn_targets=[target],
+    )
+    snapshot = _apply_fleet(
+        _turn_with_score_delta(shipchange=-1),
+        prior_records=[_known_warship(record_id="r1")],
+        persistence=persistence,
+    )
+    ledger = ledger_for_player(snapshot, _OWNER_ID)
+    by_id = {record.record_id: record for record in ledger.records}
+    assert by_id["r1"].disposition == "lost"
+    change_events = [event for event in by_id["r1"].events if event.kind == "disposition_change"]
+    assert len(change_events) == 1
+    assert change_events[0].source == "scores.inference"
+    assert change_events[0].payload["disposition"] == "lost"
 
 
 def test_gift_exact_set_retires_named_record_as_traded_with_counterparty():
