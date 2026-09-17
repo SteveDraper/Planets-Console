@@ -528,4 +528,55 @@ describe('InferenceDetailModal', () => {
     expect(dialog).not.toHaveTextContent('Plausibility')
     expect(dialog).not.toHaveTextContent('Solution 1')
   })
+
+  it('keeps roster chrome exclusive of ranked solutions even when solutions are present', () => {
+    render(
+      <InferenceDetailModal
+        isOpen
+        onClose={vi.fn()}
+        racePlayer="Federation (alice)"
+        detail={detail({
+          displayStatus: 'uncharacterized_roster',
+          status: 'uncharacterized_roster',
+          summary: 'Uncharacterized roster',
+          leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+          latticeSignatures: [
+            {
+              shipClass: 'warship',
+              build: {
+                id: 'unknown_military_ship',
+                hullId: -1,
+                count: 1,
+                buildSlotUsage: 1,
+              },
+              departure: {
+                id: 'placeholder_departure',
+                shipClass: 'warship',
+                count: 1,
+              },
+            },
+          ],
+          solutions: [
+            {
+              ...defenseSolution,
+              shipFirstFamily: 'mine_overshoot',
+            },
+            {
+              objectiveValue: 30,
+              actions: [],
+              shipFirstFamily: 'ammo_top_up',
+            },
+          ],
+        })}
+      />
+    )
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('Uncharacterized roster')
+    expect(dialog).toHaveTextContent('Military leftover at least 400')
+    expect(dialog).toHaveTextContent('Warship lattice')
+    expect(dialog).not.toHaveTextContent('Plausibility')
+    expect(dialog).not.toHaveTextContent('Solution 1')
+    expect(screen.queryByText('Mix of mine leftover and ammo top-up.')).toBeNull()
+  })
 })
