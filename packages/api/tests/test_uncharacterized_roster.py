@@ -43,8 +43,12 @@ from api.analytics.military_score_inference.uncharacterized_roster_types import 
     PointLeftover,
     UnknownLossBoundLeftover,
 )
-from api.analytics.scores.export_wire import product_fields_from_wire_complete
+from api.analytics.scores.export_wire import (
+    product_fields_from_persisted_row,
+    product_fields_from_wire_complete,
+)
 from api.concepts.hulls import UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
+from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.uncharacterized_roster import (
     PLACEHOLDER_DEPARTURE_ID,
     UncharacterizedRosterCodecError,
@@ -457,3 +461,36 @@ def test_wire_complete_reconstruction_keeps_roster_leftover_and_signatures():
     assert reconstructed.leftover == {"kind": "unknown_loss_bound", "lowerBound2x": 800}
     assert reconstructed.lattice_signatures is not None
     assert reconstructed.lattice_signatures[0]["shipClass"] == "warship"
+
+
+def test_product_fields_from_persisted_row_keeps_roster_leftover_and_signatures():
+    leftover = {"kind": "unknown_loss_bound", "lowerBound2x": 800}
+    signatures = [
+        {
+            "shipClass": "warship",
+            "build": {"id": "unknown_military_ship", "count": 1},
+            "departure": {
+                "id": PLACEHOLDER_DEPARTURE_ID,
+                "shipClass": "warship",
+                "count": 1,
+            },
+        }
+    ]
+    product = product_fields_from_persisted_row(
+        PersistedInferenceRow(
+            status=STATUS_UNCHARACTERIZED_ROSTER,
+            summary="Uncharacterized roster",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+            placeholders=[],
+            unexplained_military_delta_2x=22,
+            leftover=leftover,
+            lattice_signatures=signatures,
+        )
+    )
+    assert product.status == STATUS_UNCHARACTERIZED_ROSTER
+    assert product.placeholders == []
+    assert product.unexplained_military_delta_2x is None
+    assert product.leftover == leftover
+    assert product.lattice_signatures == signatures

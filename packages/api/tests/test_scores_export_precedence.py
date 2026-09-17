@@ -601,8 +601,7 @@ def test_functional_backfill_residual_target_exposes_leftover_slot_not_observati
         warship_delta=0,
         freighter_delta=0,
         solutions=[],
-        placeholders=product.placeholders,
-        unexplained_military_delta_2x=product.unexplained_military_delta_2x,
+        product=product,
     )
     resolved = _held_scores_for_turn_two_from_turn_three_row(
         PersistedInferenceRow(

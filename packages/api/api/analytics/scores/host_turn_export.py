@@ -14,7 +14,6 @@ from api.analytics.military_score_inference.host_turn_targets import HostTurnFun
 from api.analytics.military_score_inference.inference_api_payload import (
     COMPLETE_INFERENCE_SEARCH_STATUSES,
     InferenceProductPayload,
-    product_payload_fields,
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_STOPPED,
@@ -89,11 +88,7 @@ def _payload_from_functional_target(target: HostTurnFunctionalTarget) -> Functio
         solutions=solutions,
         solutions_held=target.solution_count,
         search_status=_search_status_from_target_status(target.status),
-        product=product_payload_fields(
-            target.status,
-            placeholders=target.placeholders,
-            leftover=target.unexplained_military_delta_2x,
-        ),
+        product=target.product,
     )
 
 

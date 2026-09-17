@@ -101,7 +101,7 @@ COMPLETE_INFERENCE_SEARCH_STATUSES = (
 
 @dataclass(frozen=True)
 class InferenceProductPayload:
-    """Product status, placeholders, and leftover for persist, stream, and export."""
+    """Product status, placeholders, leftover, and lattice signatures."""
 
     status: str | None = None
     placeholders: list[dict[str, object]] | None = None
@@ -115,17 +115,17 @@ def product_payload_fields(
     *,
     placeholders: list[dict[str, object]] | None = None,
     leftover: int | None = None,
+    tagged_leftover: dict[str, object] | None = None,
+    lattice_signatures: list[dict[str, object]] | None = None,
 ) -> InferenceProductPayload:
-    """Return product status, placeholders, and leftover for persist, stream, and export.
+    """Return product fields for persist, stream, export, and host-turn targets.
 
-    Residual / ``no_exact_solution`` expose leftover and ``placeholders`` (empty
-    list if missing; callers pass the §3.6 collection when built). Skip rows
-    expose empty ``placeholders`` and omit leftover.
-    ``uncharacterized_roster`` exposes empty ``placeholders`` when omitted and
-    never a point leftover. Tagged leftover and lattice signatures stay on the
-    case-2 domain result and are encoded at the API boundary.
-    Other statuses omit leftover and omit placeholders unless the source already
-    carried them.
+    Residual / ``no_exact_solution`` expose point leftover and ``placeholders``
+    (empty list if missing). Skip rows expose empty ``placeholders`` and omit
+    leftover. ``uncharacterized_roster`` exposes empty ``placeholders`` when
+    omitted, never a point leftover, and keeps tagged leftover and lattice
+    signatures when provided. Other statuses omit leftover and omit
+    placeholders unless the source already carried them.
     """
     resolved_placeholders = placeholders
     if (
@@ -134,11 +134,108 @@ def product_payload_fields(
         or status == STATUS_UNCHARACTERIZED_ROSTER
     ) and resolved_placeholders is None:
         resolved_placeholders = []
-    resolved_leftover = leftover if status in FUNCTIONAL_LEFTOVER_STATUSES else None
+    is_roster = status == STATUS_UNCHARACTERIZED_ROSTER
     return InferenceProductPayload(
         status=status,
         placeholders=resolved_placeholders,
-        unexplained_military_delta_2x=resolved_leftover,
+        unexplained_military_delta_2x=(
+            leftover if status in FUNCTIONAL_LEFTOVER_STATUSES else None
+        ),
+        leftover=tagged_leftover if is_roster else None,
+        lattice_signatures=lattice_signatures if is_roster else None,
+    )
+
+
+def _optional_point_leftover(data: dict[str, object], *keys: str) -> int | None:
+    for key in keys:
+        if key not in data:
+            continue
+        value = data[key]
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def product_payload_from_mapping(
+    data: dict[str, object],
+    *,
+    status: str,
+    leftover_fallback: int | None = None,
+) -> InferenceProductPayload:
+    """Decode product slots from a wire or persistence mapping, then apply policy."""
+    raw_placeholders = data.get("placeholders")
+    placeholders = (
+        [entry for entry in raw_placeholders if isinstance(entry, dict)]
+        if isinstance(raw_placeholders, list)
+        else None
+    )
+    leftover = _optional_point_leftover(
+        data,
+        "unexplainedMilitaryDelta2x",
+        "unexplained_military_delta_2x",
+    )
+    leftover_source = leftover if leftover is not None else leftover_fallback
+    tagged = data.get("leftover")
+    raw_signatures = data.get("latticeSignatures")
+    if raw_signatures is None:
+        raw_signatures = data.get("lattice_signatures")
+    return product_payload_fields(
+        status,
+        placeholders=placeholders,
+        leftover=leftover_source,
+        tagged_leftover=tagged if isinstance(tagged, dict) else None,
+        lattice_signatures=(
+            [entry for entry in raw_signatures if isinstance(entry, dict)]
+            if isinstance(raw_signatures, list)
+            else None
+        ),
+    )
+
+
+def apply_product_payload_fields(
+    payload: dict[str, object],
+    product: InferenceProductPayload,
+    *,
+    unexplained_key: str = "unexplainedMilitaryDelta2x",
+    signatures_key: str = "latticeSignatures",
+) -> dict[str, object]:
+    """Copy present product slots onto a wire or persistence dict."""
+    if product.placeholders is not None:
+        payload["placeholders"] = product.placeholders
+    if product.unexplained_military_delta_2x is not None:
+        payload[unexplained_key] = product.unexplained_military_delta_2x
+    if product.leftover is not None:
+        payload["leftover"] = product.leftover
+    if product.lattice_signatures is not None:
+        payload[signatures_key] = product.lattice_signatures
+    return payload
+
+
+def product_payload_from_result(
+    result: InferenceResult,
+    *,
+    leftover: int | None = None,
+    placeholders: list[dict[str, object]] | None = None,
+) -> InferenceProductPayload:
+    """Encode roster leftover/signatures from a solver result, then apply policy."""
+    resolved_placeholders = placeholders
+    if resolved_placeholders is None and result.placeholders:
+        resolved_placeholders = list(result.placeholders)
+    tagged_leftover: dict[str, object] | None = None
+    signatures: list[dict[str, object]] | None = None
+    if result.status == STATUS_UNCHARACTERIZED_ROSTER:
+        resolved_placeholders, tagged_leftover, signatures = _uncharacterized_roster_wire_fields(
+            result.leftover,
+            result.placeholder_departures,
+            result.lattice_signatures,
+            resolved_placeholders,
+        )
+    return product_payload_fields(
+        result.status,
+        placeholders=resolved_placeholders,
+        leftover=leftover,
+        tagged_leftover=tagged_leftover,
+        lattice_signatures=signatures,
     )
 
 
@@ -363,6 +460,8 @@ def inference_api_payload(
         status,
         leftover=leftover_2x,
         placeholders=placeholders,
+        tagged_leftover=leftover_wire,
+        lattice_signatures=signatures_wire,
     )
     payload: dict[str, object] = {
         "status": product.status,
@@ -388,14 +487,7 @@ def inference_api_payload(
         ),
         "diagnostics": diagnostics,
     }
-    if product.placeholders is not None:
-        payload["placeholders"] = product.placeholders
-    if product.unexplained_military_delta_2x is not None:
-        payload["unexplainedMilitaryDelta2x"] = product.unexplained_military_delta_2x
-    if leftover_wire is not None:
-        payload["leftover"] = leftover_wire
-    if signatures_wire is not None:
-        payload["latticeSignatures"] = signatures_wire
+    apply_product_payload_fields(payload, product)
     if departure_pins:
         payload["departurePins"] = departure_pins
     if fleet_torp_input_status is not None:
