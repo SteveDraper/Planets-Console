@@ -1,8 +1,6 @@
 import type { ScoresInferenceRowDetail } from '../../api/bff'
 import {
-  latticeSignatureSchema,
   placeholderDepartureSchema,
-  unknownLossLeftoverSchema,
   type LatticeSignature,
   type PlaceholderDeparture,
   type UnknownLossLeftover,
@@ -16,25 +14,15 @@ export const UNKNOWN_LOSS_SHIP_CONTRIBUTION_PHRASE =
 const UNKNOWN_MILITARY_SHIP_PLACEHOLDER_ID = 'unknown_military_ship'
 const GENERIC_FREIGHTER_COMBO_ID = 'combo_freighter'
 
-export function readUnknownLossLeftover(value: unknown): UnknownLossLeftover | null {
-  const parsed = unknownLossLeftoverSchema.safeParse(value)
-  return parsed.success ? parsed.data : null
-}
-
 export function readPlaceholderDeparture(value: unknown): PlaceholderDeparture | null {
   const parsed = placeholderDepartureSchema.safeParse(value)
-  return parsed.success ? parsed.data : null
-}
-
-export function readLatticeSignature(value: unknown): LatticeSignature | null {
-  const parsed = latticeSignatureSchema.safeParse(value)
   return parsed.success ? parsed.data : null
 }
 
 export function leftoverFromInferenceDetail(
   detail: ScoresInferenceRowDetail
 ): UnknownLossLeftover | null {
-  return readUnknownLossLeftover(detail.leftover)
+  return detail.leftover ?? null
 }
 
 export function placeholderDeparturesFromDetail(
@@ -51,14 +39,7 @@ export function placeholderDeparturesFromDetail(
 }
 
 export function latticeSignaturesFromDetail(detail: ScoresInferenceRowDetail): LatticeSignature[] {
-  const signatures: LatticeSignature[] = []
-  for (const entry of detail.latticeSignatures ?? []) {
-    const parsed = readLatticeSignature(entry)
-    if (parsed != null) {
-      signatures.push(parsed)
-    }
-  }
-  return signatures
+  return detail.latticeSignatures ?? []
 }
 
 /** Bound leftover is never a bare point number, including a 0 bound. */

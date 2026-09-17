@@ -7,7 +7,6 @@ import {
   formatUnknownLossLeftoverCell,
   formatUnknownLossLeftoverModal,
   leftoverFromInferenceDetail,
-  readUnknownLossLeftover,
   uncharacterizedRosterAccessibleLabel,
 } from './uncharacterizedRosterChrome'
 
@@ -50,16 +49,6 @@ describe('unknown-loss leftover formatting', () => {
     expect(formatUnknownLossLeftoverCell(point)).toBe('11')
     expect(formatUnknownLossLeftoverModal(point)).toBe('Military leftover 11.')
     expect(formatUnknownLossLeftoverModal(point)).not.toContain('at least')
-  })
-
-  it('rejects a bound leftover that carries a point leftover field', () => {
-    expect(
-      readUnknownLossLeftover({
-        kind: 'unknown_loss_bound',
-        lowerBound2x: 800,
-        unexplainedMilitaryDelta2x: 800,
-      })
-    ).toBeNull()
   })
 })
 
