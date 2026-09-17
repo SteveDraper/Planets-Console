@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from bff.analytics.scores import (
     INFERENCE_SKIP_DISPLAY_STATUSES,
+    _omit_bound_point_alias,
     inference_from_core,
     stamp_inference_stream_display_status,
 )
@@ -141,6 +142,26 @@ def test_bound_leftover_is_not_copied_as_point_leftover() -> None:
     assert shaped["displayStatus"] == "uncharacterized_roster"
     assert shaped["leftover"] == {"kind": "unknown_loss_bound", "lowerBound2x": 0}
     assert "unexplainedMilitaryDelta2x" not in shaped
+
+
+def test_omit_bound_point_alias_is_the_bound_leftover_policy() -> None:
+    bound = {
+        "leftover": {"kind": "unknown_loss_bound", "lowerBound2x": 800},
+        "unexplainedMilitaryDelta2x": 800,
+    }
+    _omit_bound_point_alias(bound)
+    assert "unexplainedMilitaryDelta2x" not in bound
+
+    point = {
+        "leftover": {"kind": "point", "unexplainedMilitaryDelta2x": 22},
+        "unexplainedMilitaryDelta2x": 22,
+    }
+    _omit_bound_point_alias(point)
+    assert point["unexplainedMilitaryDelta2x"] == 22
+
+    residual = {"unexplainedMilitaryDelta2x": 54}
+    _omit_bound_point_alias(residual)
+    assert residual["unexplainedMilitaryDelta2x"] == 54
 
 
 def test_uncharacterized_roster_point_leftover_stays_tagged() -> None:

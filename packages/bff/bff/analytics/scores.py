@@ -89,6 +89,12 @@ def _inference_cell_display_status(inference: dict[str, object]) -> str:
     return "failure"
 
 
+def _omit_bound_point_alias(payload: dict[str, object]) -> None:
+    leftover = payload.get("leftover")
+    if isinstance(leftover, dict) and leftover.get("kind") == "unknown_loss_bound":
+        payload.pop("unexplainedMilitaryDelta2x", None)
+
+
 def _copy_inference_product_fields(source: dict[str, object], shaped: dict[str, object]) -> None:
     leftover_payload = source.get("leftover")
     leftover_kind = leftover_payload.get("kind") if isinstance(leftover_payload, dict) else None
@@ -96,8 +102,9 @@ def _copy_inference_product_fields(source: dict[str, object], shaped: dict[str, 
         shaped["leftover"] = leftover_payload
     unexplained = source.get("unexplainedMilitaryDelta2x")
     is_point_unexplained = isinstance(unexplained, int) and not isinstance(unexplained, bool)
-    if leftover_kind != "unknown_loss_bound" and is_point_unexplained:
+    if is_point_unexplained:
         shaped["unexplainedMilitaryDelta2x"] = unexplained
+    _omit_bound_point_alias(shaped)
     placeholders = source.get("placeholders")
     if isinstance(placeholders, list):
         shaped["placeholders"] = [entry for entry in placeholders if isinstance(entry, dict)]
@@ -115,9 +122,7 @@ def stamp_inference_stream_display_status(
             yield event
             continue
         stamped = {**event, "displayStatus": _inference_cell_display_status(event)}
-        leftover = stamped.get("leftover")
-        if isinstance(leftover, dict) and leftover.get("kind") == "unknown_loss_bound":
-            stamped.pop("unexplainedMilitaryDelta2x", None)
+        _omit_bound_point_alias(stamped)
         yield stamped
 
 
