@@ -36,12 +36,15 @@ class InferenceStreamCompleteEvent(BaseModel):
         "skipped",
         "moderate_residual",
         "mine_score_residual",
+        "uncharacterized_roster",
     ]
     summary: str
     solutionCount: int
     isComplete: bool = True
     solutions: list[dict[str, Any]] | None = None
     placeholders: list[dict[str, Any]] | None = None
+    leftover: dict[str, Any] | None = None
+    latticeSignatures: list[dict[str, Any]] | None = None
     unexplainedMilitaryDelta2x: int | None = None
     diagnostics: dict[str, Any] | None = None
     fleetTorpInputStatus: str | None = None

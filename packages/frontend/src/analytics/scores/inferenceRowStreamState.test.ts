@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   initialRowStreamState,
+  pointUnexplainedMilitaryDelta2x,
   reduceRowStreamState,
   rowDetailFromStreamState,
 } from './inferenceRowStreamState'
@@ -315,5 +316,92 @@ describe('reduceRowStreamState', () => {
       ],
     })
     expect(rowDetailFromStreamState(8, next).displayStatus).toBe('success')
+  })
+
+  it('stamps uncharacterized roster complete with bound leftover, not a point leftover', () => {
+    const next = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'uncharacterized_roster',
+      displayStatus: 'uncharacterized_roster',
+      summary: 'Uncharacterized roster',
+      solutionCount: 0,
+      isComplete: true,
+      solutions: [],
+      leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+      unexplainedMilitaryDelta2x: 800,
+      placeholders: [{ id: 'placeholder_departure', shipClass: 'warship', count: 1 }],
+      latticeSignatures: [
+        {
+          shipClass: 'warship',
+          build: {
+            id: 'unknown_military_ship',
+            hullId: -1,
+            count: 1,
+            buildSlotUsage: 1,
+          },
+          departure: {
+            id: 'placeholder_departure',
+            shipClass: 'warship',
+            count: 1,
+          },
+        },
+      ],
+    })
+    const detail = rowDetailFromStreamState(4, next)
+    expect(detail.displayStatus).toBe('uncharacterized_roster')
+    expect(detail.leftover).toEqual({ kind: 'unknown_loss_bound', lowerBound2x: 800 })
+    expect(detail.unexplainedMilitaryDelta2x).toBeUndefined()
+    expect(detail.latticeSignatures).toHaveLength(1)
+    expect(detail.solutionCount).toBe(0)
+  })
+
+  it('clears a prior point leftover alias when a later complete is bound leftover', () => {
+    const residual = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'moderate_residual',
+      displayStatus: 'moderate_residual',
+      summary: 'Moderate military leftover (11)',
+      solutionCount: 0,
+      isComplete: true,
+      unexplainedMilitaryDelta2x: 22,
+    })
+    const bound = reduceRowStreamState(residual, {
+      type: 'complete',
+      status: 'uncharacterized_roster',
+      displayStatus: 'uncharacterized_roster',
+      summary: 'Uncharacterized roster',
+      solutionCount: 0,
+      isComplete: true,
+      leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+    })
+    expect(rowDetailFromStreamState(4, residual).unexplainedMilitaryDelta2x).toBe(22)
+    expect(rowDetailFromStreamState(4, bound).unexplainedMilitaryDelta2x).toBeUndefined()
+  })
+
+  it('omits a point leftover alias from row detail when leftover is already bound', () => {
+    const detail = rowDetailFromStreamState(4, {
+      ...initialRowStreamState(),
+      status: 'uncharacterized_roster',
+      displayStatus: 'uncharacterized_roster',
+      summary: 'Uncharacterized roster',
+      isComplete: true,
+      leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+      unexplainedMilitaryDelta2x: 800,
+    })
+    expect(detail.leftover).toEqual({ kind: 'unknown_loss_bound', lowerBound2x: 800 })
+    expect(detail.unexplainedMilitaryDelta2x).toBeUndefined()
+  })
+})
+
+describe('pointUnexplainedMilitaryDelta2x', () => {
+  it('is the only bound leftover omit branch', () => {
+    expect(
+      pointUnexplainedMilitaryDelta2x({ kind: 'unknown_loss_bound', lowerBound2x: 800 }, 800)
+    ).toBeUndefined()
+    expect(
+      pointUnexplainedMilitaryDelta2x({ kind: 'point', unexplainedMilitaryDelta2x: 22 }, 22)
+    ).toBe(22)
+    expect(pointUnexplainedMilitaryDelta2x(undefined, 54)).toBe(54)
+    expect(pointUnexplainedMilitaryDelta2x(undefined, undefined)).toBeUndefined()
   })
 })

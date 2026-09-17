@@ -4,11 +4,23 @@ import type {
   InferenceStreamEvent,
   InferenceStreamSolutionPayload,
   FleetTorpInputStatus,
+  LatticeSignature,
+  UnknownLossLeftover,
 } from '../../api/inferenceStreamEventSchema'
 import { readMilitaryScoreArithmetic } from './inferenceConstraints'
 
 function omitNull<T>(value: T | null | undefined): T | undefined {
   return value ?? undefined
+}
+
+export function pointUnexplainedMilitaryDelta2x(
+  leftover: UnknownLossLeftover | undefined,
+  unexplainedMilitaryDelta2x: number | undefined
+): number | undefined {
+  if (leftover?.kind === 'unknown_loss_bound') {
+    return undefined
+  }
+  return unexplainedMilitaryDelta2x
 }
 
 export function streamSolutionsToRowSolutions(
@@ -48,6 +60,8 @@ export type RowStreamState = {
   diagnostics: Record<string, unknown>
   placeholders: Record<string, unknown>[]
   displayStatus?: InferenceDisplayStatus
+  leftover?: UnknownLossLeftover
+  latticeSignatures?: LatticeSignature[]
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
@@ -88,6 +102,10 @@ export function rowDetailFromStreamState(
   state: RowStreamState
 ): ScoresInferenceRowDetail {
   const solutionCount = state.heldSolutions.length
+  const unexplainedMilitaryDelta2x = pointUnexplainedMilitaryDelta2x(
+    state.leftover,
+    state.unexplainedMilitaryDelta2x
+  )
   return {
     playerId,
     displayStatus: state.displayStatus ?? inFlightDisplayStatus(state),
@@ -98,9 +116,9 @@ export function rowDetailFromStreamState(
     solutions: state.heldSolutions,
     diagnostics: state.diagnostics,
     placeholders: state.placeholders,
-    ...(state.unexplainedMilitaryDelta2x != null
-      ? { unexplainedMilitaryDelta2x: state.unexplainedMilitaryDelta2x }
-      : {}),
+    ...(state.leftover != null ? { leftover: state.leftover } : {}),
+    ...(state.latticeSignatures != null ? { latticeSignatures: state.latticeSignatures } : {}),
+    ...(unexplainedMilitaryDelta2x != null ? { unexplainedMilitaryDelta2x } : {}),
     ...(state.fleetTorpInputStatus != null
       ? { fleetTorpInputStatus: state.fleetTorpInputStatus }
       : {}),
@@ -215,9 +233,14 @@ export function reduceRowStreamState(
       isComplete: event.isComplete,
       diagnostics: event.diagnostics ?? {},
       placeholders: event.placeholders ?? [],
-      ...(event.unexplainedMilitaryDelta2x != null
-        ? { unexplainedMilitaryDelta2x: event.unexplainedMilitaryDelta2x }
+      ...(event.leftover != null ? { leftover: event.leftover } : {}),
+      ...(event.latticeSignatures != null
+        ? { latticeSignatures: event.latticeSignatures }
         : {}),
+      unexplainedMilitaryDelta2x: pointUnexplainedMilitaryDelta2x(
+        event.leftover ?? state.leftover,
+        event.unexplainedMilitaryDelta2x ?? state.unexplainedMilitaryDelta2x
+      ),
       ...fleetTorpFieldsFromCompleteEvent(event),
       ...(event.solutions != null
         ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }

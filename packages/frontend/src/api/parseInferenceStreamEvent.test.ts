@@ -189,6 +189,67 @@ describe('parseInferenceStreamEvent', () => {
     })
   })
 
+  it('parses uncharacterized roster complete with bound leftover and lattice signatures', () => {
+    const event = parseInferenceStreamEvent(
+      JSON.stringify({
+        type: 'complete',
+        status: 'uncharacterized_roster',
+        displayStatus: 'uncharacterized_roster',
+        summary: 'Uncharacterized roster',
+        solutionCount: 0,
+        isComplete: true,
+        solutions: [],
+        leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+        placeholders: [{ id: 'placeholder_departure', shipClass: 'warship', count: 1 }],
+        latticeSignatures: [
+          {
+            shipClass: 'warship',
+            build: {
+              id: 'unknown_military_ship',
+              hullId: -1,
+              count: 1,
+              buildSlotUsage: 1,
+            },
+            departure: {
+              id: 'placeholder_departure',
+              shipClass: 'warship',
+              count: 1,
+            },
+          },
+        ],
+      })
+    )
+    expect(event).toMatchObject({
+      type: 'complete',
+      displayStatus: 'uncharacterized_roster',
+      leftover: { kind: 'unknown_loss_bound', lowerBound2x: 800 },
+    })
+    if (event?.type === 'complete') {
+      expect(event.latticeSignatures).toHaveLength(1)
+      expect(event.solutions).toEqual([])
+    }
+  })
+
+  it('rejects a bound leftover encoded as a point leftover', () => {
+    expect(() =>
+      parseInferenceStreamEvent(
+        JSON.stringify({
+          type: 'complete',
+          status: 'uncharacterized_roster',
+          displayStatus: 'uncharacterized_roster',
+          summary: 'Uncharacterized roster',
+          solutionCount: 0,
+          isComplete: true,
+          leftover: {
+            kind: 'unknown_loss_bound',
+            lowerBound2x: 800,
+            unexplainedMilitaryDelta2x: 800,
+          },
+        })
+      )
+    ).toThrow(/invalid shape/i)
+  })
+
   it('parses complete events with first-class fleet torp fields', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({
