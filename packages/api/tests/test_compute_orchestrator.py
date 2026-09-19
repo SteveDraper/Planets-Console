@@ -20,7 +20,7 @@ from api.compute import (
     plan_compute_dag,
 )
 from api.compute.profile import ComputeBackend
-from api.compute.wire import StepResult
+from api.compute.wire import WIRE_ORCHESTRATION_SKIP, StepResult
 
 from tests.compute_pool_test_helpers import (
     run_interpreter_materialize,
@@ -1160,6 +1160,63 @@ def test_flush_skips_prebuild_when_interpreter_remaps_to_thread(sample_turn, mon
     assert captured["backend"] == "thread"
     assert captured["job_wire"] is None
     assert captured["run_step"] is None
+
+
+def test_flush_completes_orchestration_skip_without_pool_submitter(sample_turn):
+    """Evidence-closed skip on a process-effective step never reaches the pool."""
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    submitted: list[object] = []
+
+    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
+        submitted.append(
+            {
+                "backend": step.backend,
+                "job_wire": job_wire,
+                "run_step": run_step,
+                "scope": node.scope.analytic_id,
+            }
+        )
+
+    def skip_wire(scope, **_kwargs):
+        return {
+            "runId": None,
+            "evidenceClosed": True,
+            WIRE_ORCHESTRATION_SKIP: True,
+            "scope": scope.analytic_id,
+        }
+
+    def remote_run(job):
+        return {"result": job["scope"], "via": "remote"}
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="process"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(("materialize", skip_wire),),
+        run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
+        remote_run_steps=(("materialize", remote_run),),
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((registration,)),
+        pool_submitter=pool_submitter,
+    )
+    handle = orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=_compute_scope(SHARED_ID, export_scope)),
+    )
+
+    assert submitted == []
+    assert orchestrator.metrics.pool_submissions == 0
+    assert handle.state == "complete"
+    assert handle.error is None
 
 
 def test_stale_epoch_during_persist_does_not_complete(sample_turn):

@@ -73,6 +73,7 @@ from api.analytics.scores.tier_solve_wire import (
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeScope, DependencyOutputs
 from api.compute.wire import StepResult, coerce_step_result, orchestration_plane_skip_result
+from api.errors import NotFoundError
 from api.serialization.turn import turn_info_to_json
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage import open_file_backend
@@ -128,6 +129,7 @@ def _tiny_policy_step(
 
 
 def _put_turn_tree(tmp_path: Path, sample_turn) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     storage = open_file_backend(tmp_path)
     game_id = sample_turn.game.id
     perspective = sample_turn.player.id
@@ -202,6 +204,7 @@ def _leaf_wire(
     observation,
     ladder: PolicyLadderState,
     run_id: str | None = None,
+    time_limit_seconds: float | None = None,
 ) -> dict:
     wire = {
         WIRE_STORAGE_ROOT: str(tmp_path.resolve()),
@@ -211,7 +214,9 @@ def _leaf_wire(
         "playerId": player_id,
         WIRE_LADDER_STATE: process_safe_ladder_state(ladder),
         WIRE_OBSERVATION: observation,
-        "timeLimitSeconds": stream_tier_time_limit_seconds(),
+        WIRE_TIME_LIMIT_SECONDS: (
+            stream_tier_time_limit_seconds() if time_limit_seconds is None else time_limit_seconds
+        ),
     }
     if run_id is not None:
         wire[WIRE_RUN_ID] = run_id
@@ -369,6 +374,38 @@ def test_orchestration_skip_stays_off_the_process_pool():
         run_scores_tier_solve_leaf(skip)
 
 
+def test_open_file_backend_does_not_create_missing_root(tmp_path) -> None:
+    missing = tmp_path / "absent-store"
+    assert not missing.exists()
+    storage = open_file_backend(missing)
+    assert not missing.exists()
+    with pytest.raises(NotFoundError):
+        storage.get("games/628580/1/turns/111")
+    assert not missing.exists()
+
+
+def test_leaf_missing_storage_root_fails_without_creating_directories(
+    sample_turn,
+    tmp_path,
+) -> None:
+    player_id = inference_target_player_id(sample_turn)
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    observation = build_inference_observation(score, sample_turn)
+    missing = tmp_path / "absent-store"
+    assert not missing.exists()
+    with pytest.raises(NotFoundError):
+        run_scores_tier_solve_leaf(
+            _leaf_wire(
+                tmp_path=missing,
+                sample_turn=sample_turn,
+                player_id=player_id,
+                observation=observation,
+                ladder=PolicyLadderState(policy_steps=(_tiny_policy_step(),)),
+            )
+        )
+    assert not missing.exists()
+
+
 def test_leaf_skip_matches_in_process_empty_ladder(sample_turn, tmp_path) -> None:
     player_id = inference_target_player_id(sample_turn)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
@@ -390,11 +427,11 @@ def test_leaf_skip_matches_in_process_empty_ladder(sample_turn, tmp_path) -> Non
         time_limit_seconds=stream_tier_time_limit_seconds(),
     )
     result = run_scores_tier_solve_leaf(wire)
-    snapshot = result.get(WIRE_LADDER_STATE)
+    snapshot = result[WIRE_LADDER_STATE]
+    assert isinstance(snapshot, PolicyLadderState)
     assert in_process.ladder_complete is True
-    if isinstance(snapshot, PolicyLadderState):
-        assert snapshot.last_status == in_process.last_status
-        assert snapshot.ladder_complete is True
+    assert snapshot.last_status == in_process.last_status
+    assert snapshot.ladder_complete is True
 
 
 def test_leaf_freighter_only_matches_solve_inference_problem(sample_turn, tmp_path) -> None:
@@ -425,6 +462,7 @@ def test_leaf_freighter_only_matches_solve_inference_problem(sample_turn, tmp_pa
         )
     )
     snapshot = result[WIRE_LADDER_STATE]
+    assert isinstance(snapshot, PolicyLadderState)
     assert snapshot.last_status == expected.status
     assert snapshot.last_diagnostics.get("solver_status") == "FREIGHTER_ONLY_FAST_PATH"
 
@@ -459,6 +497,7 @@ def test_leaf_small_sat_matches_solve_inference_problem(sample_turn, tmp_path) -
         )
     )
     snapshot = result[WIRE_LADDER_STATE]
+    assert isinstance(snapshot, PolicyLadderState)
     assert snapshot.last_status == expected.status
 
 
@@ -468,7 +507,13 @@ def test_continue_payload_advances_parent_ladder_without_child_rowrun(
 ) -> None:
     player_id = inference_target_player_id(sample_turn)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    observation = build_inference_observation(score, sample_turn)
+    observation = replace(
+        build_inference_observation(score, sample_turn),
+        military_delta_2x=1,
+        warship_delta=0,
+        freighter_delta=0,
+        priority_point_delta=0,
+    )
     steps = (_tiny_policy_step("a", max_seconds=0.0), _tiny_policy_step("b"))
     parent = _register_run(
         sample_turn,
@@ -486,31 +531,25 @@ def test_continue_payload_advances_parent_ladder_without_child_rowrun(
             observation=observation,
             ladder=PolicyLadderState(policy_steps=steps),
             run_id=parent.run_id,
+            time_limit_seconds=0.0,
         )
     )
     assert snapshot[WIRE_RUN_ID] == parent.run_id
     scope = _scores_scope(sample_turn, player_id)
     mapped = map_scores_tier_solve_remote_result(scope, snapshot)
+    assert mapped.outcome == "continue"
+    assert parent.ladder_state is not None
+    assert parent.ladder_state.next_step_index == 1
+    assert parent.ladder_state.ladder_complete is False
     ctx = _open_evidence_ctx(sample_turn)
-    if mapped.outcome == "continue":
-        wire = build_scores_tier_solve_job_wire(
-            scope,
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-            node_result_wire=mapped.payload,
-        )
-        assert parent.ladder_state is not None
-        assert parent.ladder_state.next_step_index == 1
-        assert parent.ladder_state.catalog is None
-        assert WIRE_LADDER_STATE not in wire
-    elif mapped.outcome == "persist":
-        ScoresPersistencePolicy().persist(ctx, scope, mapped.payload)
-        assert parent.ladder_state is not None
-        assert parent.ladder_state.ladder_complete is True
-    else:
-        assert mapped.outcome == "waiting_deps"
-        assert parent.ladder_state is not None
-        assert parent.ladder_state.ladder_complete is True
+    build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+        node_result_wire=mapped.payload,
+    )
+    assert parent.ladder_state.next_step_index == 1
+    assert parent.ladder_state.ladder_complete is False
 
 
 def test_apply_helper_accepts_step_result_or_payload_dict(sample_turn) -> None:
