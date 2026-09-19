@@ -42,6 +42,7 @@ from api.analytics.scores.tier_solve_wire import (
     WIRE_ORCHESTRATION_SKIP,
     WIRE_PERSPECTIVE,
     WIRE_PLAYER_ID,
+    WIRE_RUN_ID,
     WIRE_STORAGE_ROOT,
     WIRE_TIME_LIMIT_SECONDS,
     WIRE_TURN,
@@ -182,7 +183,7 @@ def build_scores_tier_solve_job_wire(
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
             export_scope = compute_scope_to_export_scope(scope)
             return {
-                "runId": None,
+                WIRE_RUN_ID: None,
                 WIRE_EVIDENCE_CLOSED: True,
                 WIRE_ORCHESTRATION_SKIP: True,
                 WIRE_GAME_ID: scope.game_id,
@@ -215,8 +216,10 @@ def build_scores_tier_solve_job_wire(
             dependency_outputs=dependency_outputs,
             overlay_ensure=False,
         )
+    # Apply the previous leaf snapshot before this dispatch's fleet overlay so
+    # the next job wire carries current overlay on the continued ladder.
+    apply_scores_tier_solve_step_result(run, node_result_wire)
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
-    _apply_continue_ladder_snapshot(run, node_result_wire)
     return _process_safe_tier_solve_job_wire(scope, run)
 
 
@@ -249,24 +252,18 @@ def _adopt_scheduler_row_run_for_tier_wire(
     return scheduler_run
 
 
-def apply_scores_tier_solve_step_result(run: RowRun, result: StepResult) -> None:
+def apply_scores_tier_solve_step_result(run: RowRun, result: StepResult | object) -> None:
     """Advance parent ``RowRun`` ladder state from a process-plane leaf result.
 
-    The child never holds ``RowRun``. Continue payloads carry a catalog-free
-    ``PolicyLadderState`` snapshot that replaces the parent's ladder progress.
+    The child never holds ``RowRun``. Continue and persist payloads carry a
+    catalog-free ``PolicyLadderState`` snapshot that replaces the parent's
+    ladder progress. Accepts a ``StepResult`` or the payload dict already
+    stored on ``node.result_wire``.
     """
-    payload = result.payload
+    payload = result.payload if isinstance(result, StepResult) else result
     if not isinstance(payload, dict):
         return
     snapshot = payload.get(WIRE_LADDER_STATE)
-    if isinstance(snapshot, PolicyLadderState):
-        run.ladder_state = snapshot
-
-
-def _apply_continue_ladder_snapshot(run: RowRun, node_result_wire: object | None) -> None:
-    if not isinstance(node_result_wire, dict):
-        return
-    snapshot = node_result_wire.get(WIRE_LADDER_STATE)
     if isinstance(snapshot, PolicyLadderState):
         run.ladder_state = snapshot
 
@@ -281,7 +278,7 @@ def _process_safe_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[
     observation, _turn = solve_context(run)
     ladder = run.ladder_state
     return {
-        "runId": run.run_id,
+        WIRE_RUN_ID: run.run_id,
         WIRE_GAME_ID: scope.game_id,
         WIRE_PERSPECTIVE: scope.perspective,
         WIRE_TURN: scope.turn,
@@ -428,7 +425,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     skip_result = orchestration_plane_skip_result(job_wire)
     if skip_result is not None:
         return skip_result
-    run_id = job_wire.get("runId")
+    run_id = job_wire.get(WIRE_RUN_ID)
     if run_id is None:
         raise RuntimeError(
             "scores tier_solve received open-evidence wait wire without runId; "
@@ -454,7 +451,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
 
 
 def _tier_persist_payload(run: RowRun, row_complete: RowComplete) -> dict[str, object]:
-    return {"runId": run.run_id, "rowComplete": row_complete}
+    return {WIRE_RUN_ID: run.run_id, "rowComplete": row_complete}
 
 
 class ScoresPersistencePolicy:
@@ -488,15 +485,16 @@ class ScoresPersistencePolicy:
             raise TypeError(
                 f"scores persist result wire must be dict, got {type(result_wire).__name__}"
             )
-        run_id = result_wire.get("runId")
-        if not isinstance(run_id, str):
-            attached = get_row_run_for_scope(scope)
-            run_id = attached.run_id if attached is not None else None
+        run_id = result_wire.get(WIRE_RUN_ID)
         if not isinstance(run_id, str):
             raise TypeError("scores persist result wire missing string runId")
         row_complete = result_wire.get("rowComplete")
         if not isinstance(row_complete, RowComplete):
             raise TypeError("scores persist result wire missing RowComplete payload")
+
+        attached = get_row_run(run_id)
+        if attached is not None:
+            apply_scores_tier_solve_step_result(attached, result_wire)
 
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None or export_scope.player_id is None:

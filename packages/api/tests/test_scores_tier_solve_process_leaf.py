@@ -19,10 +19,12 @@ from api.analytics.military_score_inference.inference_row_runner import (
     stream_tier_time_limit_seconds,
 )
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     run_policy_ladder_tier_step,
 )
+from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
@@ -35,6 +37,7 @@ from api.analytics.military_score_inference.tier_policy import (
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.compute_orchestration import (
+    ScoresPersistencePolicy,
     apply_scores_tier_solve_step_result,
     build_scores_tier_solve_job_wire,
 )
@@ -44,6 +47,7 @@ from api.analytics.scores.compute_plane.tier_solve_leaf import (
 )
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
+    get_row_run_for_scope,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
@@ -56,12 +60,14 @@ from api.analytics.scores.tier_solve_wire import (
     WIRE_LADDER_STATE,
     WIRE_OBSERVATION,
     WIRE_ORCHESTRATION_SKIP,
+    WIRE_RUN_ID,
     WIRE_STORAGE_ROOT,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeScope, DependencyOutputs
-from api.compute.wire import orchestration_plane_skip_result
+from api.compute.wire import StepResult, orchestration_plane_skip_result
 from api.serialization.turn import turn_info_to_json
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage import open_file_backend
 
 from tests.scores_exports_helpers import inference_target_player_id, minimal_stream_query_context
@@ -165,8 +171,9 @@ def _leaf_wire(
     player_id: int,
     observation,
     ladder: PolicyLadderState,
+    run_id: str | None = None,
 ) -> dict:
-    return {
+    wire = {
         WIRE_STORAGE_ROOT: str(tmp_path.resolve()),
         "gameId": sample_turn.game.id,
         "perspective": sample_turn.player.id,
@@ -176,6 +183,9 @@ def _leaf_wire(
         WIRE_OBSERVATION: observation,
         "timeLimitSeconds": stream_tier_time_limit_seconds(),
     }
+    if run_id is not None:
+        wire[WIRE_RUN_ID] = run_id
+    return wire
 
 
 def test_tier_solve_leaf_import_does_not_load_server_app_or_appkit():
@@ -393,12 +403,151 @@ def test_continue_payload_advances_parent_ladder_without_child_rowrun(
             player_id=player_id,
             observation=observation,
             ladder=PolicyLadderState(policy_steps=steps),
+            run_id=parent.run_id,
         )
     )
-    apply_scores_tier_solve_step_result(parent, result)
-    assert parent.ladder_state is not None
+    assert isinstance(result.payload, dict)
+    assert result.payload[WIRE_RUN_ID] == parent.run_id
+    ctx = _open_evidence_ctx(sample_turn)
+    scope = _scores_scope(sample_turn, player_id)
     if result.outcome == "continue":
+        wire = build_scores_tier_solve_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+            node_result_wire=result.payload,
+        )
+        assert parent.ladder_state is not None
         assert parent.ladder_state.next_step_index == 1
         assert parent.ladder_state.catalog is None
-    else:
+        assert wire[WIRE_LADDER_STATE].next_step_index == 1
+    elif result.outcome == "persist":
+        ScoresPersistencePolicy().persist(ctx, scope, result.payload)
+        assert parent.ladder_state is not None
         assert parent.ladder_state.ladder_complete is True
+    else:
+        apply_scores_tier_solve_step_result(parent, result)
+        assert parent.ladder_state is not None
+        assert parent.ladder_state.ladder_complete is True
+
+
+def test_apply_helper_accepts_step_result_or_payload_dict(sample_turn) -> None:
+    player_id = inference_target_player_id(sample_turn)
+    steps = (_tiny_policy_step("a"), _tiny_policy_step("b"))
+    parent = _register_run(
+        sample_turn,
+        player_id=player_id,
+        ladder=PolicyLadderState(policy_steps=steps),
+    )
+    continued = PolicyLadderState(policy_steps=steps, next_step_index=1)
+    apply_scores_tier_solve_step_result(
+        parent,
+        StepResult(outcome="continue", payload={WIRE_LADDER_STATE: continued}),
+    )
+    assert parent.ladder_state is continued
+    completed = PolicyLadderState(policy_steps=steps, ladder_complete=True)
+    apply_scores_tier_solve_step_result(parent, {WIRE_LADDER_STATE: completed})
+    assert parent.ladder_state is completed
+
+
+def test_wire_build_applies_continue_snapshot_before_next_dispatch(sample_turn) -> None:
+    player_id = inference_target_player_id(sample_turn)
+    steps = (_tiny_policy_step("a"), _tiny_policy_step("b"))
+    parent = _register_run(
+        sample_turn,
+        player_id=player_id,
+        ladder=PolicyLadderState(policy_steps=steps),
+    )
+    continued = PolicyLadderState(policy_steps=steps, next_step_index=1)
+    ctx = _open_evidence_ctx(sample_turn)
+    wire = build_scores_tier_solve_job_wire(
+        _scores_scope(sample_turn, player_id),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+        node_result_wire={
+            WIRE_RUN_ID: parent.run_id,
+            WIRE_LADDER_STATE: continued,
+        },
+    )
+    assert parent.ladder_state is continued
+    assert parent.ladder_state.next_step_index == 1
+    assert wire[WIRE_LADDER_STATE].next_step_index == 1
+    assert wire[WIRE_RUN_ID] == parent.run_id
+
+
+def test_persist_without_run_id_fails_even_when_scope_has_row_run(sample_turn) -> None:
+    player_id = inference_target_player_id(sample_turn)
+    parent = _register_run(sample_turn, player_id=player_id)
+    scope = _scores_scope(sample_turn, player_id)
+    ctx = _open_evidence_ctx(sample_turn)
+    row_complete = row_complete_with_summary(
+        InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+        summary="missing runId",
+    )
+    with pytest.raises(TypeError, match="missing string runId"):
+        ScoresPersistencePolicy().persist(ctx, scope, {"rowComplete": row_complete})
+    assert get_row_run_for_scope(scope) is parent
+
+
+def test_persist_echoed_run_id_applies_ladder_and_writes(
+    sample_turn,
+    memory_backend,
+) -> None:
+    player_id = inference_target_player_id(sample_turn)
+    parent = _register_run(
+        sample_turn,
+        player_id=player_id,
+        ladder=PolicyLadderState(policy_steps=()),
+    )
+    snapshot = PolicyLadderState(policy_steps=(), ladder_complete=True)
+    row_persistence = InferenceRowPersistenceService(memory_backend)
+    ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        export_services={
+            SCORES_ANALYTIC_ID: ScoresExportContext(persistence=row_persistence),
+        },
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+    )
+    row_complete = row_complete_with_summary(
+        InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+        summary="echoed runId persist",
+    )
+    ScoresPersistencePolicy().persist(
+        ctx,
+        _scores_scope(sample_turn, player_id),
+        {
+            WIRE_RUN_ID: parent.run_id,
+            WIRE_LADDER_STATE: snapshot,
+            "rowComplete": row_complete,
+        },
+    )
+    assert parent.ladder_state is snapshot
+    stored = row_persistence.get_row(
+        sample_turn.game.id,
+        sample_turn.player.id,
+        sample_turn.settings.turn,
+        player_id,
+    )
+    assert stored is not None
+    assert stored.summary == "echoed runId persist"
+
+
+def test_leaf_echoes_job_wire_run_id_on_result_payload(sample_turn, tmp_path) -> None:
+    player_id = inference_target_player_id(sample_turn)
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    observation = build_inference_observation(score, sample_turn)
+    result = run_scores_tier_solve_leaf(
+        _leaf_wire(
+            tmp_path=_put_turn_tree(tmp_path, sample_turn),
+            sample_turn=sample_turn,
+            player_id=player_id,
+            observation=observation,
+            ladder=PolicyLadderState(policy_steps=(_tiny_policy_step(),)),
+            run_id="echo-run",
+        )
+    )
+    assert isinstance(result.payload, dict)
+    assert result.payload[WIRE_RUN_ID] == "echo-run"
+    assert result.outcome in {"continue", "persist", "waiting_deps"}

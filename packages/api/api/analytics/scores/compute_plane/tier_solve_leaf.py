@@ -1,8 +1,9 @@
 """Storage-rebuild SAT leaf for scores ``tier_solve``.
 
 Spawn imports this module (solver + storage + codec), not ``server.app``.
-The child never looks up ``RowRun``; the parent applies ``StepResult`` payloads
-to ladder state on the orchestration plane.
+The child never looks up ``RowRun``. It echoes the job-wire ``runId`` onto
+result payloads; the parent applies those payloads to ladder state on persist
+and on the next ``tier_solve`` wire build.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from api.analytics.scores.tier_solve_wire import (
     WIRE_LADDER_STATE,
     WIRE_OBSERVATION,
     WIRE_PERSPECTIVE,
+    WIRE_RUN_ID,
     WIRE_STORAGE_ROOT,
     WIRE_TIME_LIMIT_SECONDS,
     WIRE_TURN,
@@ -69,7 +71,10 @@ def run_scores_tier_solve_leaf(job_wire: dict[str, Any]) -> StepResult:
 
     state = job_wire.get(WIRE_LADDER_STATE)
     if not isinstance(state, PolicyLadderState):
-        return StepResult(outcome="waiting_deps")
+        return StepResult(
+            outcome="waiting_deps",
+            payload=_payload_with_echoed_run_id(job_wire),
+        )
 
     observation = job_wire.get(WIRE_OBSERVATION)
     if not isinstance(observation, InferenceObservation):
@@ -85,7 +90,7 @@ def run_scores_tier_solve_leaf(job_wire: dict[str, Any]) -> StepResult:
         turn,
         time_limit_seconds=time_limit_seconds,
     )
-    return _step_result_from_ladder_state(state, observation, turn)
+    return _step_result_from_ladder_state(job_wire, state, observation, turn)
 
 
 def _load_turn_from_job_wire(job_wire: dict[str, Any]) -> TurnInfo:
@@ -108,7 +113,24 @@ def _load_turn_from_job_wire(job_wire: dict[str, Any]) -> TurnInfo:
     return turn_info_from_json(payload)
 
 
+def _payload_with_echoed_run_id(
+    job_wire: dict[str, Any],
+    extra: dict[str, object] | None = None,
+) -> dict[str, object] | None:
+    """Copy the parent ``runId`` onto the result payload when the job wire has one.
+
+    The leaf never looks up ``RowRun``; persist and parent apply identify the
+    live shell from this echoed id.
+    """
+    payload: dict[str, object] = dict(extra) if extra is not None else {}
+    run_id = job_wire.get(WIRE_RUN_ID)
+    if isinstance(run_id, str):
+        payload[WIRE_RUN_ID] = run_id
+    return payload if payload else None
+
+
 def _step_result_from_ladder_state(
+    job_wire: dict[str, Any],
     state: PolicyLadderState,
     observation: InferenceObservation,
     turn: TurnInfo,
@@ -116,7 +138,10 @@ def _step_result_from_ladder_state(
     if not state.ladder_complete:
         return StepResult(
             outcome="continue",
-            payload={WIRE_LADDER_STATE: process_safe_ladder_state(state)},
+            payload=_payload_with_echoed_run_id(
+                job_wire,
+                {WIRE_LADDER_STATE: process_safe_ladder_state(state)},
+            ),
         )
 
     result, catalog, problem, policy_steps_attempted, step_diagnostics = (
@@ -133,10 +158,13 @@ def _step_result_from_ladder_state(
         extra_diagnostics=fleet_torp_input_status_diagnostics(None),
         resolved_mask=state.resolved_mask,
     )
-    payload: dict[str, object] = {
-        WIRE_LADDER_STATE: process_safe_ladder_state(state),
-        "rowComplete": row_complete,
-    }
+    payload = _payload_with_echoed_run_id(
+        job_wire,
+        {
+            WIRE_LADDER_STATE: process_safe_ladder_state(state),
+            "rowComplete": row_complete,
+        },
+    )
     status = row_complete.wire_payload.status
     if is_durable_turn_evidence_row_status(status):
         return StepResult(outcome="persist", payload=payload)

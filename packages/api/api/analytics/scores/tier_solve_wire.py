@@ -10,6 +10,7 @@ from __future__ import annotations
 from api.compute.wire import WIRE_ORCHESTRATION_SKIP as WIRE_ORCHESTRATION_SKIP
 
 WIRE_EVIDENCE_CLOSED = "evidenceClosed"
+WIRE_RUN_ID = "runId"
 WIRE_STORAGE_ROOT = "storageRoot"
 WIRE_LADDER_STATE = "ladderState"
 WIRE_OBSERVATION = "observation"
