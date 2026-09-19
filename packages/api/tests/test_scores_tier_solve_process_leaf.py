@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import pickle
-import subprocess
-import sys
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -78,6 +76,7 @@ from api.serialization.turn import turn_info_to_json
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage import open_file_backend
 
+from tests.sat_worker_import_graph import assert_fresh_import_avoids_sat_worker_denylist
 from tests.scores_exports_helpers import inference_target_player_id, minimal_stream_query_context
 
 _PROCESS_REBUILD_KEYS = frozenset(
@@ -222,32 +221,14 @@ def _leaf_wire(
     return wire
 
 
-def test_tier_solve_leaf_import_does_not_load_server_app_or_appkit():
-    api_root = Path(__file__).resolve().parent.parent
-    script = """
-import sys
-from api.analytics.scores.compute_plane.tier_solve_leaf import run_scores_tier_solve_leaf
-blocked = [
-    name
-    for name in sys.modules
-    if name == "server.app"
-    or name.startswith("server.app.")
-    or name == "AppKit"
-    or name.startswith("AppKit.")
-]
-if blocked:
-    raise SystemExit(f"unexpected modules: {blocked}")
-if run_scores_tier_solve_leaf is None:
-    raise SystemExit("leaf import failed")
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=api_root,
-        capture_output=True,
-        text=True,
-        check=False,
+def test_tier_solve_leaf_import_does_not_load_http_or_parent_plane():
+    assert_fresh_import_avoids_sat_worker_denylist(
+        import_line=(
+            "from api.analytics.scores.compute_plane.tier_solve_leaf "
+            "import run_scores_tier_solve_leaf"
+        ),
+        exported_name="run_scores_tier_solve_leaf",
     )
-    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_resolve_scores_tier_solve_backend_defaults_to_thread(monkeypatch):

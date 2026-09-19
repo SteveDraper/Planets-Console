@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +14,12 @@ from api.compute.process_pool_executable import (
 )
 from api.compute.sat_worker_entry import spawn_targets
 from api.compute.worker_turn_cache import init_worker_turn_cache
+
+from tests.sat_worker_import_graph import (
+    SAT_WORKER_DENIED_MODULE_PREFIXES,
+    assert_fresh_import_avoids_sat_worker_denylist,
+    denied_sat_worker_modules,
+)
 
 
 def test_sat_worker_executable_name_is_stem_or_windows_exe(monkeypatch):
@@ -61,36 +65,45 @@ def test_process_pool_executable_frozen_missing_worker_raises(monkeypatch, tmp_p
         process_pool_executable()
 
 
-def test_sat_worker_entry_import_does_not_load_process_host_or_appkit():
-    api_root = Path(__file__).resolve().parent.parent
-    script = """
-import sys
-from api.compute.sat_worker_entry import spawn_targets
-blocked = [
-    name
-    for name in sys.modules
-    if name == "server.process_host"
-    or name.startswith("server.process_host.")
-    or name == "server.app"
-    or name.startswith("server.app.")
-    or name == "api.app"
-    or name.startswith("api.app.")
-    or name == "AppKit"
-    or name.startswith("AppKit.")
-]
-if blocked:
-    raise SystemExit(f"unexpected modules: {blocked}")
-if spawn_targets() is None:
-    raise SystemExit("spawn targets missing")
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=api_root,
-        capture_output=True,
-        text=True,
-        check=False,
+def test_sat_worker_denied_prefixes_cover_http_and_parent_plane():
+    prefixes = set(SAT_WORKER_DENIED_MODULE_PREFIXES)
+    assert {
+        "AppKit",
+        "api.analytics.export_context",
+        "api.analytics.scores.compute_orchestration",
+        "api.app",
+        "api.errors",
+        "bff",
+        "fastapi",
+        "server.app",
+        "server.process_host",
+        "starlette",
+        "uvicorn",
+    } <= prefixes
+    loaded = (
+        "fastapi",
+        "fastapi.routing",
+        "starlette",
+        "api.apple",
+        "api.app",
+        "bff.analytics",
+        "api.analytics.export_context",
     )
-    assert result.returncode == 0, result.stderr or result.stdout
+    assert denied_sat_worker_modules(loaded) == [
+        "fastapi",
+        "fastapi.routing",
+        "starlette",
+        "api.app",
+        "bff.analytics",
+        "api.analytics.export_context",
+    ]
+
+
+def test_sat_worker_entry_import_does_not_load_http_or_parent_plane():
+    assert_fresh_import_avoids_sat_worker_denylist(
+        import_line="from api.compute.sat_worker_entry import spawn_targets",
+        exported_name="spawn_targets",
+    )
 
 
 def test_spawn_targets_are_leaf_and_turn_cache_init():
