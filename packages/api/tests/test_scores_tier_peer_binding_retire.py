@@ -16,6 +16,7 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     register_row_run,
 )
+from api.analytics.scores.tier_solve_wire import WIRE_EVIDENCE_CLOSED, WIRE_ORCHESTRATION_SKIP
 
 from tests.scores_tier_cross_binding_test_helpers import (
     _outcome_snapshot,
@@ -54,12 +55,20 @@ def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> Non
     assert result.outcome == "waiting_deps"
 
 
-def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -> None:
-    skip = run_scores_tier_solve({"runId": None, "evidenceClosed": True})
+def test_run_scores_tier_solve_skip_sentinel_uses_orchestration_skip() -> None:
+    skip = run_scores_tier_solve(
+        {
+            "runId": None,
+            WIRE_EVIDENCE_CLOSED: True,
+            WIRE_ORCHESTRATION_SKIP: True,
+        }
+    )
     assert skip.outcome == "complete"
     assert skip.payload is None
     with pytest.raises(RuntimeError, match="open-evidence wait wire"):
         run_scores_tier_solve({"runId": None})
+    with pytest.raises(RuntimeError, match="open-evidence wait wire"):
+        run_scores_tier_solve({"runId": None, WIRE_EVIDENCE_CLOSED: True})
 
 
 def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, monkeypatch) -> None:

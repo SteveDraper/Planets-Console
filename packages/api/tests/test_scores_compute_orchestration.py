@@ -58,6 +58,7 @@ from api.analytics.scores.tier_row_run_registry import (
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
+from api.analytics.scores.tier_solve_wire import WIRE_EVIDENCE_CLOSED, WIRE_ORCHESTRATION_SKIP
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import (
     ComputeOrchestrator,
@@ -317,8 +318,8 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         ctx=ctx,
     )
     assert skip_wire["runId"] is None
-    assert skip_wire["evidenceClosed"] is True
-    assert skip_wire["orchestrationSkip"] is True
+    assert skip_wire[WIRE_EVIDENCE_CLOSED] is True
+    assert skip_wire[WIRE_ORCHESTRATION_SKIP] is True
 
 
 def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
@@ -619,7 +620,10 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
         for _ in range(3)
     ]
     assert all(
-        wire.get("runId") is None and wire.get("evidenceClosed") is True for wire in skip_wires
+        wire.get("runId") is None
+        and wire.get(WIRE_EVIDENCE_CLOSED) is True
+        and wire.get(WIRE_ORCHESTRATION_SKIP) is True
+        for wire in skip_wires
     )
     assert all(run_scores_tier_solve(wire).outcome == "complete" for wire in skip_wires)
 
@@ -734,7 +738,8 @@ def test_historical_materialize_skips_tier_when_already_persisted(
         ctx=ctx,
     )
     assert tier_wire["runId"] is None
-    assert tier_wire["evidenceClosed"] is True
+    assert tier_wire[WIRE_EVIDENCE_CLOSED] is True
+    assert tier_wire[WIRE_ORCHESTRATION_SKIP] is True
 
 
 def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(

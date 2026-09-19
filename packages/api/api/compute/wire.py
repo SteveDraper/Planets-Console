@@ -15,6 +15,10 @@ if TYPE_CHECKING:
 
 StepOutcome = Literal["continue", "persist", "complete", "park", "waiting_deps"]
 
+# Generic job-wire flag: complete on the orchestration plane, never submit to a
+# process/interpreter pool. Scores evidence-closed skip is the current emitter.
+WIRE_ORCHESTRATION_SKIP = "orchestrationSkip"
+
 # Compute plane: job payload -> serializable result payload.
 RunStepFn = Callable[[Any], Any]
 
@@ -39,7 +43,7 @@ def orchestration_plane_skip_result(job_wire: object) -> StepResult | None:
     Scores evidence-closed skip sentinels set ``orchestrationSkip`` so a process
     backend never pickles that wire into ``ProcessPoolExecutor``.
     """
-    if isinstance(job_wire, dict) and job_wire.get("orchestrationSkip") is True:
+    if isinstance(job_wire, dict) and job_wire.get(WIRE_ORCHESTRATION_SKIP) is True:
         return StepResult(outcome="complete")
     return None
 

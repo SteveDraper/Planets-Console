@@ -24,21 +24,19 @@ from api.analytics.military_score_inference.row_complete_factory import (
     row_complete_from_ladder_finalize,
 )
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
-from api.compute.wire import StepResult
+from api.analytics.scores.tier_solve_wire import (
+    WIRE_GAME_ID,
+    WIRE_LADDER_STATE,
+    WIRE_OBSERVATION,
+    WIRE_PERSPECTIVE,
+    WIRE_STORAGE_ROOT,
+    WIRE_TIME_LIMIT_SECONDS,
+    WIRE_TURN,
+)
+from api.compute.wire import WIRE_ORCHESTRATION_SKIP, StepResult
 from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_from_json
 from api.storage import open_file_backend
-
-WIRE_STORAGE_ROOT = "storageRoot"
-WIRE_LADDER_STATE = "ladderState"
-WIRE_OBSERVATION = "observation"
-WIRE_TIME_LIMIT_SECONDS = "timeLimitSeconds"
-WIRE_ORCHESTRATION_SKIP = "orchestrationSkip"
-WIRE_EVIDENCE_CLOSED = "evidenceClosed"
-WIRE_GAME_ID = "gameId"
-WIRE_PERSPECTIVE = "perspective"
-WIRE_TURN = "turn"
-WIRE_PLAYER_ID = "playerId"
 
 
 def process_safe_ladder_state(state: PolicyLadderState) -> PolicyLadderState:
@@ -59,14 +57,15 @@ def process_safe_ladder_state(state: PolicyLadderState) -> PolicyLadderState:
 def run_scores_tier_solve_leaf(job_wire: dict[str, Any]) -> StepResult:
     """Run one scores inference tier from a pickle-safe job wire.
 
-    Skip sentinels (``evidenceClosed`` / ``orchestrationSkip``) complete without
-    SAT. Open-evidence wires load the turn from ``storageRoot`` and rebuild the
+    Skip sentinels complete on the orchestration plane and must not reach this
+    leaf. Open-evidence wires load the turn from ``storageRoot`` and rebuild the
     inference problem; they do not consult the parent ``RowRun`` registry.
     """
     if job_wire.get(WIRE_ORCHESTRATION_SKIP) is True:
-        return StepResult(outcome="complete")
-    if job_wire.get("runId") is None and job_wire.get(WIRE_EVIDENCE_CLOSED) is True:
-        return StepResult(outcome="complete")
+        raise RuntimeError(
+            "scores tier_solve leaf must not receive orchestrationSkip; "
+            "skip sentinels complete on the orchestration plane"
+        )
 
     state = job_wire.get(WIRE_LADDER_STATE)
     if not isinstance(state, PolicyLadderState):

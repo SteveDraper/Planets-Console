@@ -18,19 +18,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     PriorTurnFleetTorpResolution,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.scores.compute_plane.tier_solve_leaf import (
-    WIRE_EVIDENCE_CLOSED,
-    WIRE_GAME_ID,
-    WIRE_LADDER_STATE,
-    WIRE_OBSERVATION,
-    WIRE_ORCHESTRATION_SKIP,
-    WIRE_PERSPECTIVE,
-    WIRE_PLAYER_ID,
-    WIRE_STORAGE_ROOT,
-    WIRE_TIME_LIMIT_SECONDS,
-    WIRE_TURN,
-    process_safe_ladder_state,
-)
+from api.analytics.scores.compute_plane.tier_solve_leaf import process_safe_ladder_state
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.prior_fleet_resolution import (
@@ -46,11 +34,27 @@ from api.analytics.scores.tier_row_run_registry import (
     register_row_run,
 )
 from api.analytics.scores.tier_solve_backend import resolve_scores_tier_solve_backend
+from api.analytics.scores.tier_solve_wire import (
+    WIRE_EVIDENCE_CLOSED,
+    WIRE_GAME_ID,
+    WIRE_LADDER_STATE,
+    WIRE_OBSERVATION,
+    WIRE_ORCHESTRATION_SKIP,
+    WIRE_PERSPECTIVE,
+    WIRE_PLAYER_ID,
+    WIRE_STORAGE_ROOT,
+    WIRE_TIME_LIMIT_SECONDS,
+    WIRE_TURN,
+)
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeBackend, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
-from api.compute.wire import DependencyOutputs, StepResult
+from api.compute.wire import (
+    DependencyOutputs,
+    StepResult,
+    orchestration_plane_skip_result,
+)
 from api.config import get_config
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
@@ -416,19 +420,16 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one in-process scores inference tier against the parent ``RowRun``.
 
-    Thread-backend workers share the parent registry. Process-backend workers
-    use ``run_scores_tier_solve_leaf`` instead: that leaf rebuilds the problem
-    from ``storageRoot`` and never calls ``get_row_run``.
+    Thread-backend workers share the parent registry. Skip sentinels complete
+    via ``orchestration_plane_skip_result`` (same predicate as process dispatch).
+    Process-backend workers use ``run_scores_tier_solve_leaf`` instead: that leaf
+    rebuilds the problem from ``storageRoot`` and never calls ``get_row_run``.
     """
+    skip_result = orchestration_plane_skip_result(job_wire)
+    if skip_result is not None:
+        return skip_result
     run_id = job_wire.get("runId")
     if run_id is None:
-        if (
-            job_wire.get(WIRE_EVIDENCE_CLOSED) is True
-            or job_wire.get(WIRE_ORCHESTRATION_SKIP) is True
-        ):
-            # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn
-            # evidence is already closed -- no CP-SAT.
-            return StepResult(outcome="complete")
         raise RuntimeError(
             "scores tier_solve received open-evidence wait wire without runId; "
             "wire build must attach a RowRun or emit evidenceClosed skip"

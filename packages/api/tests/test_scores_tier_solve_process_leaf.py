@@ -39,9 +39,6 @@ from api.analytics.scores.compute_orchestration import (
     build_scores_tier_solve_job_wire,
 )
 from api.analytics.scores.compute_plane.tier_solve_leaf import (
-    WIRE_LADDER_STATE,
-    WIRE_OBSERVATION,
-    WIRE_STORAGE_ROOT,
     process_safe_ladder_state,
     run_scores_tier_solve_leaf,
 )
@@ -53,6 +50,13 @@ from api.analytics.scores.tier_row_run_registry import (
 from api.analytics.scores.tier_solve_backend import (
     SCORES_TIER_SOLVE_BACKEND_ENV,
     resolve_scores_tier_solve_backend,
+)
+from api.analytics.scores.tier_solve_wire import (
+    WIRE_EVIDENCE_CLOSED,
+    WIRE_LADDER_STATE,
+    WIRE_OBSERVATION,
+    WIRE_ORCHESTRATION_SKIP,
+    WIRE_STORAGE_ROOT,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeScope, DependencyOutputs
@@ -262,13 +266,15 @@ def test_open_evidence_wire_is_process_safe_without_live_run_id(
 def test_orchestration_skip_stays_off_the_process_pool():
     skip = {
         "runId": None,
-        "evidenceClosed": True,
-        "orchestrationSkip": True,
+        WIRE_EVIDENCE_CLOSED: True,
+        WIRE_ORCHESTRATION_SKIP: True,
     }
     result = orchestration_plane_skip_result(skip)
     assert result is not None
     assert result.outcome == "complete"
     assert orchestration_plane_skip_result({"runId": "live"}) is None
+    with pytest.raises(RuntimeError, match="orchestration plane"):
+        run_scores_tier_solve_leaf(skip)
 
 
 def test_leaf_skip_matches_in_process_empty_ladder(sample_turn, tmp_path) -> None:
