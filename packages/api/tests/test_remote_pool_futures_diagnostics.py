@@ -113,6 +113,9 @@ def test_pool_registers_remote_future_on_interpreter_submit_and_clears_after_don
     pool = ComputeWorkerPool(worker_count=0)
     try:
         orch = MagicMock()
+        orch.map_remote_pool_result.side_effect = lambda scope, result_wire, step_kind=None: (
+            result_wire
+        )
         orch_id = pool.register(orch)
         pending: Future[object] = Future()
         executor = MagicMock()
@@ -141,6 +144,51 @@ def test_pool_registers_remote_future_on_interpreter_submit_and_clears_after_don
         pending.set_result(StepResult(outcome="complete", payload={"ok": True}))
         assert pool.snapshot_remote_futures() == ()
         orch.complete_pool_step.assert_called_once()
+        orch.map_remote_pool_result.assert_called_once()
+    finally:
+        pool.shutdown(wait_for_interpreters=False)
+
+
+def test_remote_future_maps_result_before_complete_pool_step():
+    """Parent mapper runs after unpickle and before complete_pool_step."""
+    pool = ComputeWorkerPool(worker_count=0)
+    try:
+        order: list[str] = []
+        mapped = StepResult(outcome="continue", payload={"ladder": True})
+
+        class _Orch:
+            def map_remote_pool_result(self, scope, result_wire, *, step_kind=None):
+                del scope
+                order.append("map")
+                assert result_wire == {"ladder": True}
+                assert step_kind == "tier_solve"
+                return mapped
+
+            def complete_pool_step(
+                self,
+                scope,
+                *,
+                result_wire=None,
+                error=None,
+                step_kind=None,
+                step_index=None,
+            ):
+                del scope, error, step_index
+                order.append("complete")
+                assert result_wire is mapped
+                assert step_kind == "tier_solve"
+
+        orch_id = pool.register(_Orch())  # type: ignore[arg-type]
+        future: Future[object] = Future()
+        future.set_result({"ladder": True})
+        pool._complete_from_future(
+            orch_id,
+            _scope(),
+            future,
+            step_kind="tier_solve",
+            step_index=1,
+        )
+        assert order == ["map", "complete"]
     finally:
         pool.shutdown(wait_for_interpreters=False)
 

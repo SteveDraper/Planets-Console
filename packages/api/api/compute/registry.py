@@ -15,7 +15,7 @@ from api.compute.profile import (
     ComputeStepSpec,
 )
 from api.compute.scope import ScopeKeySpec
-from api.compute.wire import BuildStepJobWireFn, RunStepFn
+from api.compute.wire import BuildStepJobWireFn, MapRemoteStepResultFn, RunStepFn
 from api.validation import require_non_empty_string
 
 
@@ -30,6 +30,7 @@ class AnalyticComputeRegistration:
     build_step_job_wire: Mapping[str, BuildStepJobWireFn]
     run_step: Mapping[str, RunStepFn]
     remote_run_step: Mapping[str, RunStepFn]
+    map_remote_step_result: Mapping[str, MapRemoteStepResultFn]
     resolve_step_backend: Callable[[str, ComputeBackend], ComputeBackend] | None = None
 
 
@@ -138,6 +139,11 @@ def validate_turn_analytic_compute_registration(
         analytic_id=analytic_id,
         field="remote_run_steps",
     )
+    map_remote_step_result = _mapping_from_pairs(
+        registration.map_remote_step_results,
+        analytic_id=analytic_id,
+        field="map_remote_step_results",
+    )
     resolve_step_backend = registration.resolve_step_backend
     if resolve_step_backend is not None and not callable(resolve_step_backend):
         raise RuntimeError(
@@ -163,6 +169,12 @@ def validate_turn_analytic_compute_registration(
                 f"Turn analytic {analytic_id!r} remote_run_step for step_kind "
                 f"{step_kind!r} must be callable"
             )
+        mapper = map_remote_step_result.get(step_kind)
+        if mapper is not None and not callable(mapper):
+            raise RuntimeError(
+                f"Turn analytic {analytic_id!r} map_remote_step_result for step_kind "
+                f"{step_kind!r} must be callable"
+            )
 
     unknown_builders = sorted(set(build_step_job_wire) - declared_step_kinds)
     if unknown_builders:
@@ -181,6 +193,12 @@ def validate_turn_analytic_compute_registration(
             f"Turn analytic {analytic_id!r} unknown remote_run_step step_kind(s): "
             f"{unknown_remote_runners!r}"
         )
+    unknown_mappers = sorted(set(map_remote_step_result) - declared_step_kinds)
+    if unknown_mappers:
+        raise RuntimeError(
+            f"Turn analytic {analytic_id!r} unknown map_remote_step_result step_kind(s): "
+            f"{unknown_mappers!r}"
+        )
 
     return AnalyticComputeRegistration(
         analytic_id=analytic_id,
@@ -190,6 +208,7 @@ def validate_turn_analytic_compute_registration(
         build_step_job_wire=build_step_job_wire,
         run_step=run_step,
         remote_run_step=remote_run_step,
+        map_remote_step_result=map_remote_step_result,
         resolve_step_backend=resolve_step_backend,
     )
 

@@ -25,6 +25,7 @@ from api.compute.wire import (
     BuildStepJobWireFn,
     BuildStepJobWireKwargs,
     DependencyOutputs,
+    MapRemoteStepResultFn,
     RunStepFn,
 )
 
@@ -121,6 +122,7 @@ __all__ = [
     "ComputeWorkerPool",
     "DependencyOutputs",
     "ENSURE_WAIT_TIMEOUT_SEC",
+    "MapRemoteStepResultFn",
     "NodeState",
     "OrchestrationBundle",
     "OrchestratorMetrics",

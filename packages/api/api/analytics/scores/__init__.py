@@ -20,6 +20,7 @@ from api.analytics.scores.compute_orchestration import (
     SCORES_TIER_SOLVE,
     build_scores_materialize_job_wire,
     build_scores_tier_solve_job_wire,
+    map_scores_tier_solve_remote_result,
     resolve_scores_step_backend,
     run_scores_materialize,
     run_scores_tier_solve,
@@ -166,5 +167,6 @@ REGISTRATION = TurnAnalyticRegistration(
         (SCORES_TIER_SOLVE, run_scores_tier_solve),
     ),
     remote_run_steps=((SCORES_TIER_SOLVE, run_scores_tier_solve_leaf),),
+    map_remote_step_results=((SCORES_TIER_SOLVE, map_scores_tier_solve_remote_result),),
     resolve_step_backend=resolve_scores_step_backend,
 )

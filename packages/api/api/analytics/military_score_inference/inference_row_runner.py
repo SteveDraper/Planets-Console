@@ -94,7 +94,7 @@ def _outcome_when_accelerated_segments_exhausted(run: RowRun) -> TierJobOutcome:
     )
 
 
-def _outcome_after_ladder_complete(
+def outcome_after_ladder_complete(
     run: RowRun,
     state: PolicyLadderState,
     observation: InferenceObservation,
@@ -193,7 +193,7 @@ def _run_inference_tier_job_locked(
     if not state.ladder_complete:
         return TierJobOutcome(enqueue_continuation=True)
 
-    outcome = _outcome_after_ladder_complete(run, state, observation, turn)
+    outcome = outcome_after_ladder_complete(run, state, observation, turn)
     if outcome.next_ladder_state is not None:
         run.ladder_state = outcome.next_ladder_state
     return outcome

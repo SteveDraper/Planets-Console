@@ -165,6 +165,29 @@ class OrchestratorStepExecutionMixin:
                 return remote
         return registration.run_step[step_kind]
 
+    def map_remote_pool_result(
+        self,
+        scope: ComputeScope,
+        result_wire: object,
+        *,
+        step_kind: str | None = None,
+    ) -> object:
+        """Map a pickle-safe remote leaf payload on the parent before coerce.
+
+        Runs on the pool done-callback thread, not under the orchestrator lock.
+        Scores soft-defer talks to the inference scheduler here -- the same
+        order as in-process ``run_scores_tier_solve``.
+        """
+        if step_kind is None:
+            return result_wire
+        registration = self._compute_registry.get(scope.analytic_id)
+        if registration is None:
+            return result_wire
+        mapper = registration.map_remote_step_result.get(step_kind)
+        if mapper is None:
+            return result_wire
+        return mapper(scope, result_wire)
+
     def _current_step_spec(
         self,
         node: ComputeNodeRun,

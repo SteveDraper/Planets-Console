@@ -69,6 +69,7 @@ def _compute_registration(**kwargs) -> TurnAnalyticRegistration:
         (("materialize", lambda _job: {"result": True}),),
     )
     remote_run_steps = kwargs.get("remote_run_steps", ())
+    map_remote_step_results = kwargs.get("map_remote_step_results", ())
     resolve_step_backend = kwargs.get("resolve_step_backend")
 
     def compute(_ctx) -> dict:
@@ -84,6 +85,7 @@ def _compute_registration(**kwargs) -> TurnAnalyticRegistration:
         build_step_job_wires=build_step_job_wires,
         run_steps=run_steps,
         remote_run_steps=remote_run_steps,
+        map_remote_step_results=map_remote_step_results,
         resolve_step_backend=resolve_step_backend,
     )
 
@@ -244,6 +246,12 @@ def test_validate_compute_registration_skips_when_profile_absent():
             "unknown remote_run_step",
         ),
         (
+            {
+                "map_remote_step_results": (("extra", lambda _scope, _raw: {}),),
+            },
+            "unknown map_remote_step_result",
+        ),
+        (
             {"resolve_step_backend": object()},
             "resolve_step_backend must be callable",
         ),
@@ -269,13 +277,18 @@ def test_validate_compute_registration_accepts_remote_run_step_and_resolver():
     def remote_run(_job):
         return {"result": "remote"}
 
+    def map_remote(_scope, raw):
+        return raw
+
     registration = _compute_registration(
         remote_run_steps=(("materialize", remote_run),),
+        map_remote_step_results=(("materialize", map_remote),),
         resolve_step_backend=remap,
     )
     compute_registration = validate_turn_analytic_compute_registration(registration)
     assert compute_registration is not None
     assert compute_registration.remote_run_step["materialize"] is remote_run
+    assert compute_registration.map_remote_step_result["materialize"] is map_remote
     assert compute_registration.resolve_step_backend is remap
 
 

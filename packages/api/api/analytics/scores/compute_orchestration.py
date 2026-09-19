@@ -10,7 +10,9 @@ from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
+    outcome_after_ladder_complete,
     run_inference_tier_job,
+    solve_context,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -289,7 +291,6 @@ def _thread_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[str, A
 def _process_safe_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[str, Any]:
     """Process-backend snapshot: scope + storage root + catalog-free ladder."""
     from api.analytics.military_score_inference.inference_row_runner import (
-        solve_context,
         stream_tier_time_limit_seconds,
     )
 
@@ -428,6 +429,44 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     )
 
 
+def map_scores_tier_solve_remote_result(scope: ComputeScope, raw: object) -> StepResult:
+    """Map a process-plane leaf snapshot onto the parent ``RowRun`` and ``StepResult``.
+
+    Runs on the parent after unpickle, before ``coerce_step_result``. Soft-defer
+    and fleet-torp diagnostics come from the live ``RowRun``. SAT is not re-run.
+    """
+    del scope
+    if isinstance(raw, StepResult):
+        return raw
+    payload = raw if isinstance(raw, dict) else {}
+    run_id = payload.get(WIRE_RUN_ID)
+    if not isinstance(run_id, str):
+        return _waiting_deps_without_submit()
+    run = get_row_run(run_id)
+    if run is None:
+        return _waiting_deps_without_submit()
+
+    with run.tier_lock:
+        snapshot = payload.get(WIRE_LADDER_STATE)
+        if not isinstance(snapshot, PolicyLadderState):
+            outcome: TierJobOutcome | None = TierJobOutcome()
+        else:
+            apply_scores_tier_solve_step_result(run, payload)
+            state = run.ladder_state
+            if state is None:
+                outcome = TierJobOutcome()
+            elif not state.ladder_complete:
+                outcome = None
+            else:
+                observation, turn = solve_context(run)
+                outcome = outcome_after_ladder_complete(run, state, observation, turn)
+                if outcome.next_ladder_state is not None:
+                    run.ladder_state = outcome.next_ladder_state
+    if outcome is None:
+        return StepResult(outcome="continue", payload=payload)
+    return tier_job_outcome_to_step_result(run, outcome)
+
+
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one in-process scores inference tier against the parent ``RowRun``.
 
@@ -435,6 +474,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     via ``orchestration_plane_skip_result`` (same predicate as process dispatch).
     Process-backend workers use ``run_scores_tier_solve_leaf`` instead: that leaf
     rebuilds the problem from ``storageRoot`` and never calls ``get_row_run``.
+    The parent maps the leaf snapshot through ``map_scores_tier_solve_remote_result``.
     """
     skip_result = orchestration_plane_skip_result(job_wire)
     if skip_result is not None:

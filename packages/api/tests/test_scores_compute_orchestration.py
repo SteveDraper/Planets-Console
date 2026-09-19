@@ -46,6 +46,7 @@ from api.analytics.scores.compute_orchestration import (
     SCORES_TIER_SOLVE,
     ScoresPersistencePolicy,
     build_scores_tier_solve_job_wire,
+    map_scores_tier_solve_remote_result,
     resolve_scores_step_backend,
     run_scores_tier_solve,
     tier_job_outcome_to_step_result,
@@ -144,8 +145,13 @@ def test_scores_registration_includes_tier_solve_step() -> None:
     assert (
         dict(SCORES_REGISTRATION.remote_run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve_leaf
     )
+    assert (
+        dict(SCORES_REGISTRATION.map_remote_step_results)[SCORES_TIER_SOLVE]
+        is map_scores_tier_solve_remote_result
+    )
     assert SCORES_REGISTRATION.resolve_step_backend is resolve_scores_step_backend
-    assert build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
+    compute = build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
+    assert compute.map_remote_step_result[SCORES_TIER_SOLVE] is map_scores_tier_solve_remote_result
 
 
 def test_retire_stale_run_preserves_replacement_scope_mapping(sample_turn) -> None:

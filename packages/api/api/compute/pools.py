@@ -668,8 +668,22 @@ class ComputeWorkerPool:
                 step_index=step_index,
             )
             return
-        self._complete_pool_step_if_registered(
-            orchestrator_id,
+        orchestrator = self._lookup_orchestrator(orchestrator_id)
+        if orchestrator is None:
+            return
+        try:
+            map_remote = getattr(orchestrator, "map_remote_pool_result", None)
+            if callable(map_remote):
+                result_wire = map_remote(scope, result_wire, step_kind=step_kind)
+        except BaseException as exc:
+            orchestrator.complete_pool_step(
+                scope,
+                error=exc,
+                step_kind=step_kind,
+                step_index=step_index,
+            )
+            return
+        orchestrator.complete_pool_step(
             scope,
             result_wire=result_wire,
             step_kind=step_kind,

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from api.compute.persistence import PersistencePolicy
     from api.compute.profile import AnalyticComputeProfile, ComputeBackend
     from api.compute.scope import ScopeKeySpec
-    from api.compute.wire import BuildStepJobWireFn, RunStepFn
+    from api.compute.wire import BuildStepJobWireFn, MapRemoteStepResultFn, RunStepFn
 
 TurnAnalyticHandler = Callable[[AnalyticComputeContext], dict]
 ExportCatalogLoader = Callable[[], AnalyticExportCatalog]
@@ -36,6 +36,10 @@ class TurnAnalyticRegistration:
     # keeps ``run_steps``. Occupancy may remap a declared thread step to
     # process at flush; this mapping is the remote callable for that path.
     remote_run_steps: tuple[tuple[str, RunStepFn], ...] = ()
+    # Parent-plane mappers for pickle-safe remote leaf payloads. Invoked after
+    # unpickle and before coerce_step_result; the process-pool callable remains
+    # the remote_run_steps leaf.
+    map_remote_step_results: tuple[tuple[str, MapRemoteStepResultFn], ...] = ()
     # Optional runtime remap of a declared step backend (occupancy / freeze).
     # Sampled at dispatch/flush, never at import.
     resolve_step_backend: Callable[[str, ComputeBackend], ComputeBackend] | None = None

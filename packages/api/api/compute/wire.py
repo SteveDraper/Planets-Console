@@ -21,6 +21,8 @@ WIRE_ORCHESTRATION_SKIP = "orchestrationSkip"
 
 # Compute plane: job payload -> serializable result payload.
 RunStepFn = Callable[[Any], Any]
+# Parent plane: pickle-safe remote leaf payload -> orchestrator step result.
+MapRemoteStepResultFn = Callable[[ComputeScope, object], object]
 
 
 @dataclass(frozen=True)
