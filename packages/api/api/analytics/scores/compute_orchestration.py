@@ -33,7 +33,10 @@ from api.analytics.scores.tier_row_run_registry import (
     get_tier_callbacks,
     register_row_run,
 )
-from api.analytics.scores.tier_solve_backend import resolve_scores_tier_solve_backend
+from api.analytics.scores.tier_solve_backend import (
+    SCORES_TIER_SOLVE_BACKEND_PROCESS,
+    resolve_scores_tier_solve_backend,
+)
 from api.analytics.scores.tier_solve_wire import (
     WIRE_EVIDENCE_CLOSED,
     WIRE_GAME_ID,
@@ -147,10 +150,11 @@ def build_scores_tier_solve_job_wire(
 
     Orchestration plane: skip sentinel (``runId: None``, ``evidenceClosed: True``,
     ``orchestrationSkip: True``) is allowed only when turn evidence is already
-    closed. Open-evidence wires attach a live ``RowRun`` here, then emit a
-    process-safe snapshot (scope ids, ``storageRoot``, ladder progress without
-    catalog / SAT model) so a process-pool leaf can rebuild ``InferenceProblem``
-    without looking up the parent registry.
+    closed. Open-evidence wires attach a live ``RowRun`` here. Effective backend
+    (``resolve_scores_tier_solve_backend``, sampled at this build) selects the
+    payload: ``thread`` emits the tiny identity wire (``runId`` + scope ids);
+    ``process`` emits the storage-rebuild snapshot so a process-pool leaf can
+    rebuild ``InferenceProblem`` without looking up the parent registry.
 
     Invariant: when ensure is satisfied and evidence is still open, this dispatch
     must attach a ``runId`` (tier registry or successful scheduler adopt). Parking
@@ -217,10 +221,13 @@ def build_scores_tier_solve_job_wire(
             overlay_ensure=False,
         )
     # Apply the previous leaf snapshot before this dispatch's fleet overlay so
-    # the next job wire carries current overlay on the continued ladder.
+    # the continued ladder holds current overlay (thread looks up RowRun; process
+    # copies it onto the storage-rebuild snapshot).
     apply_scores_tier_solve_step_result(run, node_result_wire)
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
-    return _process_safe_tier_solve_job_wire(scope, run)
+    if resolve_scores_tier_solve_backend() == SCORES_TIER_SOLVE_BACKEND_PROCESS:
+        return _process_safe_tier_solve_job_wire(scope, run)
+    return _thread_tier_solve_job_wire(scope, run)
 
 
 def _adopt_scheduler_row_run_for_tier_wire(
@@ -268,8 +275,19 @@ def apply_scores_tier_solve_step_result(run: RowRun, result: StepResult | object
         run.ladder_state = snapshot
 
 
+def _thread_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[str, Any]:
+    """Tiny identity wire: ``runId`` + scope ids. No storage-rebuild copies."""
+    return {
+        WIRE_RUN_ID: run.run_id,
+        WIRE_GAME_ID: scope.game_id,
+        WIRE_PERSPECTIVE: scope.perspective,
+        WIRE_TURN: scope.turn,
+        WIRE_PLAYER_ID: scope.player_id,
+    }
+
+
 def _process_safe_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[str, Any]:
-    """Scope + storage root + ladder snapshot; no live parent objects."""
+    """Process-backend snapshot: scope + storage root + catalog-free ladder."""
     from api.analytics.military_score_inference.inference_row_runner import (
         solve_context,
         stream_tier_time_limit_seconds,
@@ -278,11 +296,7 @@ def _process_safe_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[
     observation, _turn = solve_context(run)
     ladder = run.ladder_state
     return {
-        WIRE_RUN_ID: run.run_id,
-        WIRE_GAME_ID: scope.game_id,
-        WIRE_PERSPECTIVE: scope.perspective,
-        WIRE_TURN: scope.turn,
-        WIRE_PLAYER_ID: scope.player_id,
+        **_thread_tier_solve_job_wire(scope, run),
         WIRE_STORAGE_ROOT: str(Path(get_config().storage_root).resolve()),
         WIRE_LADDER_STATE: None if ladder is None else process_safe_ladder_state(ladder),
         WIRE_OBSERVATION: observation,

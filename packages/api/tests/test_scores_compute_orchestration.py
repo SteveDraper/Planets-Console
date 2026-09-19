@@ -58,7 +58,14 @@ from api.analytics.scores.tier_row_run_registry import (
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
-from api.analytics.scores.tier_solve_wire import WIRE_EVIDENCE_CLOSED, WIRE_ORCHESTRATION_SKIP
+from api.analytics.scores.tier_solve_wire import (
+    WIRE_EVIDENCE_CLOSED,
+    WIRE_LADDER_STATE,
+    WIRE_OBSERVATION,
+    WIRE_ORCHESTRATION_SKIP,
+    WIRE_STORAGE_ROOT,
+    WIRE_TIME_LIMIT_SECONDS,
+)
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import (
     ComputeOrchestrator,
@@ -320,6 +327,10 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
     assert skip_wire["runId"] is None
     assert skip_wire[WIRE_EVIDENCE_CLOSED] is True
     assert skip_wire[WIRE_ORCHESTRATION_SKIP] is True
+    assert WIRE_STORAGE_ROOT not in skip_wire
+    assert WIRE_LADDER_STATE not in skip_wire
+    assert WIRE_OBSERVATION not in skip_wire
+    assert WIRE_TIME_LIMIT_SECONDS not in skip_wire
 
 
 def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
@@ -1385,7 +1396,11 @@ def test_scores_tier_solve_selects_process_leaf_after_import(
         assert handle.state == "running", handle.error
         assert captured["backend"] == "process"
         assert captured["run_step"] is run_scores_tier_solve_leaf
-        assert captured["job_wire"] is not None
+        job_wire = captured["job_wire"]
+        assert isinstance(job_wire, dict)
+        assert WIRE_STORAGE_ROOT in job_wire
+        assert WIRE_LADDER_STATE in job_wire
+        assert WIRE_OBSERVATION in job_wire
     finally:
         set_config(cfg)
 

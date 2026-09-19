@@ -7,6 +7,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
@@ -57,11 +58,16 @@ from api.analytics.scores.tier_solve_backend import (
 )
 from api.analytics.scores.tier_solve_wire import (
     WIRE_EVIDENCE_CLOSED,
+    WIRE_GAME_ID,
     WIRE_LADDER_STATE,
     WIRE_OBSERVATION,
     WIRE_ORCHESTRATION_SKIP,
+    WIRE_PERSPECTIVE,
+    WIRE_PLAYER_ID,
     WIRE_RUN_ID,
     WIRE_STORAGE_ROOT,
+    WIRE_TIME_LIMIT_SECONDS,
+    WIRE_TURN,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeScope, DependencyOutputs
@@ -71,6 +77,24 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage import open_file_backend
 
 from tests.scores_exports_helpers import inference_target_player_id, minimal_stream_query_context
+
+_PROCESS_REBUILD_KEYS = frozenset(
+    {
+        WIRE_STORAGE_ROOT,
+        WIRE_LADDER_STATE,
+        WIRE_OBSERVATION,
+        WIRE_TIME_LIMIT_SECONDS,
+    }
+)
+_THREAD_IDENTITY_KEYS = frozenset(
+    {
+        WIRE_RUN_ID,
+        WIRE_GAME_ID,
+        WIRE_PERSPECTIVE,
+        WIRE_TURN,
+        WIRE_PLAYER_ID,
+    }
+)
 
 
 @pytest.fixture(autouse=True)
@@ -149,6 +173,11 @@ def _register_run(
         run.ladder_state = ladder
     register_row_run(run)
     return run
+
+
+def _opt_in_process_backend(monkeypatch) -> None:
+    monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
+    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
 
 
 def _open_evidence_ctx(sample_turn):
@@ -247,19 +276,45 @@ def test_resolve_scores_step_backend_remaps_only_tier_solve(monkeypatch):
     assert resolve_scores_step_backend(SCORES_MATERIALIZE, "inline") == "inline"
 
 
-def test_open_evidence_wire_is_process_safe_without_live_run_id(
+def test_open_evidence_thread_wire_is_identity_without_process_rebuild_keys(
+    sample_turn,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv(SCORES_TIER_SOLVE_BACKEND_ENV, raising=False)
+    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
+    player_id = inference_target_player_id(sample_turn)
+    run = _register_run(sample_turn, player_id=player_id)
+    ctx = _open_evidence_ctx(sample_turn)
+    with patch(
+        "api.analytics.scores.compute_orchestration._process_safe_tier_solve_job_wire"
+    ) as fat_wire:
+        wire = build_scores_tier_solve_job_wire(
+            _scores_scope(sample_turn, player_id),
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+    fat_wire.assert_not_called()
+    assert set(wire) == _THREAD_IDENTITY_KEYS
+    assert wire[WIRE_RUN_ID] == run.run_id
+    assert not _PROCESS_REBUILD_KEYS & set(wire)
+
+
+def test_open_evidence_process_wire_is_storage_rebuild_snapshot(
     sample_turn,
     tmp_path,
+    monkeypatch,
 ) -> None:
+    _opt_in_process_backend(monkeypatch)
     player_id = inference_target_player_id(sample_turn)
-    _register_run(sample_turn, player_id=player_id)
+    run = _register_run(sample_turn, player_id=player_id)
     ctx = _open_evidence_ctx(sample_turn)
     wire = build_scores_tier_solve_job_wire(
         _scores_scope(sample_turn, player_id),
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert wire["runId"] is not None
+    assert wire[WIRE_RUN_ID] == run.run_id
+    assert _PROCESS_REBUILD_KEYS <= set(wire)
     assert isinstance(wire[WIRE_STORAGE_ROOT], str)
     assert isinstance(wire[WIRE_LADDER_STATE], PolicyLadderState)
     assert wire[WIRE_LADDER_STATE].catalog is None
@@ -267,10 +322,31 @@ def test_open_evidence_wire_is_process_safe_without_live_run_id(
     assert wire[WIRE_OBSERVATION] is not None
     pickle.dumps(wire)
     leaf_wire = dict(wire)
-    leaf_wire.pop("runId")
     leaf_wire[WIRE_STORAGE_ROOT] = str(_put_turn_tree(tmp_path, sample_turn).resolve())
     result = run_scores_tier_solve_leaf(leaf_wire)
     assert result.outcome in {"continue", "persist", "waiting_deps", "complete"}
+
+
+def test_open_evidence_frozen_process_env_stays_thread_identity_wire(
+    sample_turn,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
+    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: True)
+    player_id = inference_target_player_id(sample_turn)
+    _register_run(sample_turn, player_id=player_id)
+    ctx = _open_evidence_ctx(sample_turn)
+    with patch(
+        "api.analytics.scores.compute_orchestration._process_safe_tier_solve_job_wire"
+    ) as fat_wire:
+        wire = build_scores_tier_solve_job_wire(
+            _scores_scope(sample_turn, player_id),
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+    fat_wire.assert_not_called()
+    assert set(wire) == _THREAD_IDENTITY_KEYS
+    assert not _PROCESS_REBUILD_KEYS & set(wire)
 
 
 def test_orchestration_skip_stays_off_the_process_pool():
@@ -420,7 +496,7 @@ def test_continue_payload_advances_parent_ladder_without_child_rowrun(
         assert parent.ladder_state is not None
         assert parent.ladder_state.next_step_index == 1
         assert parent.ladder_state.catalog is None
-        assert wire[WIRE_LADDER_STATE].next_step_index == 1
+        assert WIRE_LADDER_STATE not in wire
     elif result.outcome == "persist":
         ScoresPersistencePolicy().persist(ctx, scope, result.payload)
         assert parent.ladder_state is not None
@@ -450,7 +526,20 @@ def test_apply_helper_accepts_step_result_or_payload_dict(sample_turn) -> None:
     assert parent.ladder_state is completed
 
 
-def test_wire_build_applies_continue_snapshot_before_next_dispatch(sample_turn) -> None:
+@pytest.mark.parametrize("backend", ["thread", "process"])
+def test_wire_build_applies_continue_snapshot_before_next_dispatch(
+    sample_turn,
+    monkeypatch,
+    backend: str,
+) -> None:
+    if backend == "process":
+        _opt_in_process_backend(monkeypatch)
+    else:
+        monkeypatch.delenv(SCORES_TIER_SOLVE_BACKEND_ENV, raising=False)
+        monkeypatch.setattr(
+            "api.analytics.scores.tier_solve_backend.process_is_frozen",
+            lambda: False,
+        )
     player_id = inference_target_player_id(sample_turn)
     steps = (_tiny_policy_step("a"), _tiny_policy_step("b"))
     parent = _register_run(
@@ -471,8 +560,11 @@ def test_wire_build_applies_continue_snapshot_before_next_dispatch(sample_turn) 
     )
     assert parent.ladder_state is continued
     assert parent.ladder_state.next_step_index == 1
-    assert wire[WIRE_LADDER_STATE].next_step_index == 1
     assert wire[WIRE_RUN_ID] == parent.run_id
+    if backend == "process":
+        assert wire[WIRE_LADDER_STATE].next_step_index == 1
+    else:
+        assert WIRE_LADDER_STATE not in wire
 
 
 def test_persist_without_run_id_fails_even_when_scope_has_row_run(sample_turn) -> None:
