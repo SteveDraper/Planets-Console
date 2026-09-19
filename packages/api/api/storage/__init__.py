@@ -12,7 +12,13 @@ from api.storage.base import JSONValue, StorageBackend
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
 
-__all__ = ["JSONValue", "StorageBackend", "get_storage", "clear_backend_cache"]
+__all__ = [
+    "JSONValue",
+    "StorageBackend",
+    "get_storage",
+    "clear_backend_cache",
+    "open_file_backend",
+]
 
 _backend_cache: StorageBackend | None = None
 
@@ -28,6 +34,17 @@ def _load_asset(path: Path | None) -> dict:
         raise FileNotFoundError(f"Storage asset path is not a file: {path!s}")
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def open_file_backend(storage_root: Path) -> StorageBackend:
+    """Open a file backend at ``storage_root`` without touching process-global config.
+
+    Worker leaves (process-pool SAT, probes) pass a job-wire path and must not
+    import ``FileStorageBackend`` themselves.
+    """
+    root = Path(storage_root)
+    root.mkdir(parents=True, exist_ok=True)
+    return FileStorageBackend(root)
 
 
 def get_storage() -> StorageBackend:

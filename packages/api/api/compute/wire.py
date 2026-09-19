@@ -33,6 +33,17 @@ class StepResult:
     wait_recovery: PersistDependencyRecovery | None = None
 
 
+def orchestration_plane_skip_result(job_wire: object) -> StepResult | None:
+    """Return a complete outcome when the job wire asks to skip pool dispatch.
+
+    Scores evidence-closed skip sentinels set ``orchestrationSkip`` so a process
+    backend never pickles that wire into ``ProcessPoolExecutor``.
+    """
+    if isinstance(job_wire, dict) and job_wire.get("orchestrationSkip") is True:
+        return StepResult(outcome="complete")
+    return None
+
+
 def coerce_step_result(result_wire: object) -> StepResult:
     """Normalize a leaf step return value into an explicit step outcome."""
     if isinstance(result_wire, StepResult):

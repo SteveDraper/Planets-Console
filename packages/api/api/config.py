@@ -82,6 +82,13 @@ class ApiConfig:
     reproduce packaged GIL behaviour.
     """
 
+    scores_tier_solve_backend: str = "thread"
+    """Declared backend for scores ``tier_solve``: ``thread`` (default) or ``process``.
+
+    ``process`` is an occupancy / test opt-in. Frozen processes stay on ``thread``.
+    ``PLANETS_CONSOLE_SCORES_TIER_SOLVE_BACKEND`` overrides this when set.
+    """
+
     credentials_obfuscation_secret: str | None = None
     """Optional secret mixed into HKDF when wrapping account API keys at rest."""
 

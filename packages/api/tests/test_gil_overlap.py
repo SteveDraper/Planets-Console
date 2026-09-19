@@ -79,3 +79,4 @@ def test_scores_tier_solve_declares_native_release_overlap() -> None:
         spec for spec in SCORES_COMPUTE_PROFILE.steps if spec.step_kind == SCORES_TIER_SOLVE
     )
     assert step.gil_overlap == "native_release"
+    assert step.backend == "thread"

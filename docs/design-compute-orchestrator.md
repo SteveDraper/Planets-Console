@@ -252,7 +252,7 @@ Same-scope dedupe is **only** in-orchestrator singleflight on the singleton DAG.
 
 When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `stream_attached` joining `background` warm) and the node is not yet past the point where adopt is allowed (not mid expensive inline/pool execution -- same rule as the former lease “seal”), upgrade `node.priority_band` and adjust ready-queue ordering as needed. No mid-run preempt once expensive work has started.
 
-**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; when evidence is still open, wire build must attach a `RowRun` (or fail loud if ensure claimed satisfaction without an attachable row) -- not empty-complete and not a bare open-evidence wait wire. Empty-complete falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
+**Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`, `orchestrationSkip: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; when evidence is still open, wire build must attach a `RowRun` (or fail loud if ensure claimed satisfaction without an attachable row) -- not empty-complete and not a bare open-evidence wait wire. Empty-complete falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`. `orchestrationSkip` completes that sentinel on the orchestration plane so a process backend never pickles it into `ProcessPoolExecutor`.
 
 ### Terminal reuse and `force_fresh`
 
@@ -281,9 +281,9 @@ Declared per analytic on `AnalyticComputeProfile` (`ComputeStepSpec` per `step_k
 | Backend | Use | v1 default examples |
 |---------|-----|-------------------|
 | **inline** | Cheap, dependency-free work on orchestrator thread | cache probe, materialize-from-persistence, JSONPath projection |
-| **thread** | In-process; shared memory for session state | scores tier steps (CP-SAT releases GIL) |
+| **thread** | In-process; shared memory for session state | scores tier steps (CP-SAT releases GIL). Production default for scores `tier_solve`. |
 | **interpreter** | `InterpreterPoolExecutor` (Python 3.14); true multi-core without process overhead | fleet observation leg. **Packaged (`sys.frozen`) runtime remaps this to `thread`**: PyInstaller subinterpreters do not get the frozen importer, so the initializer cannot import `api` (`NotShareableError` / `BrokenInterpreterPool`; [#451](https://github.com/SteveDraper/Planets-Console/issues/451)). Unpackaged/dev can match that remap with `api.remap_interpreter_backend_to_thread: true`. Fleet observation is Python ledger/JSON bookkeeping, not SAT, so the GIL trade is acceptable for the packaged path. |
-| **process** | `ProcessPoolExecutor`; strongest isolation | prior-mining extraction (existing) |
+| **process** | `ProcessPoolExecutor`; strongest isolation | prior-mining extraction (existing). Scores `tier_solve` may declare `process` when the leaf is **storage-rebuild** (scope ids + `storageRoot` + catalog-free ladder snapshot; child rebuilds `InferenceProblem` and does not look up `RowRun`). Opt in with `api.scores_tier_solve_backend=process` or `PLANETS_CONSOLE_SCORES_TIER_SOLVE_BACKEND=process`. Frozen processes keep scores on `thread` in this phase -- packaged spawn caveats belong in later occupancy / slim-worker phases. |
 
 `ComputeStepSpec.gil_overlap` is analytic-agnostic pool admission (not a diagnostics special case):
 
@@ -306,7 +306,9 @@ Interpreter/process steps:
 - Return **`ResultWire`** with an explicit **step outcome** (`continue`, `persist`, `complete`, or `park`); see [Compute step outcome](#compute-step-outcome).
 - **Never** hold `AnalyticQueryContext`, schedulers, or gap-fill coordinators.
 
-Thread steps (scores tiers) resolve per-row adapter state (`RowRun`) by `run_id` on the job wire; ladder progress stays adapter-owned between continuations. They must not block on cross-node ensure or call `ensure_fleet_export` in the worker.
+Thread steps (scores tiers, production default) resolve per-row adapter state (`RowRun`) by `run_id` on the job wire; ladder progress stays adapter-owned between continuations. They must not block on cross-node ensure or call `ensure_fleet_export` in the worker.
+
+When scores `tier_solve` is opted into **process**, the registered `run_step` is the storage-rebuild leaf (`run_scores_tier_solve_leaf`). The job wire carries scope ids, `storageRoot` (file backend / packaged console data directory), observation, and a catalog-free `PolicyLadderState` snapshot. The child rebuilds `InferenceProblem` from storage and returns `StepResult`; the parent applies continue payloads to `RowRun` without the child holding the registry. Evidence-closed skip sentinels set `orchestrationSkip` and complete on the orchestration plane -- they are not submitted to `ProcessPoolExecutor`.
 
 ### Job wire and dependency outputs
 

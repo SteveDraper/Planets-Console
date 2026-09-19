@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -12,10 +13,24 @@ from api.analytics.military_score_inference.inference_row_runner import (
     run_inference_tier_job,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
 )
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.scores.compute_plane.tier_solve_leaf import (
+    WIRE_EVIDENCE_CLOSED,
+    WIRE_GAME_ID,
+    WIRE_LADDER_STATE,
+    WIRE_OBSERVATION,
+    WIRE_ORCHESTRATION_SKIP,
+    WIRE_PERSPECTIVE,
+    WIRE_PLAYER_ID,
+    WIRE_STORAGE_ROOT,
+    WIRE_TIME_LIMIT_SECONDS,
+    WIRE_TURN,
+    process_safe_ladder_state,
+)
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.prior_fleet_resolution import (
@@ -30,11 +45,13 @@ from api.analytics.scores.tier_row_run_registry import (
     get_tier_callbacks,
     register_row_run,
 )
+from api.analytics.scores.tier_solve_backend import resolve_scores_tier_solve_backend
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
+from api.config import get_config
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
@@ -51,7 +68,7 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
         ComputeStepSpec(step_kind=SCORES_MATERIALIZE, backend="inline"),
         ComputeStepSpec(
             step_kind=SCORES_TIER_SOLVE,
-            backend="thread",
+            backend=resolve_scores_tier_solve_backend(),
             gil_overlap="native_release",
         ),
     ),
@@ -106,13 +123,17 @@ def build_scores_tier_solve_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    node_result_wire: object | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
-    Skip sentinel (``runId: None``, ``evidenceClosed: True``) is allowed only when
-    turn evidence is already closed (persisted / durable terminal under the same
-    materialization probe fleet uses).
+    Orchestration plane: skip sentinel (``runId: None``, ``evidenceClosed: True``,
+    ``orchestrationSkip: True``) is allowed only when turn evidence is already
+    closed. Open-evidence wires attach a live ``RowRun`` here, then emit a
+    process-safe snapshot (scope ids, ``storageRoot``, ladder progress without
+    catalog / SAT model) so a process-pool leaf can rebuild ``InferenceProblem``
+    without looking up the parent registry.
 
     Invariant: when ensure is satisfied and evidence is still open, this dispatch
     must attach a ``runId`` (tier registry or successful scheduler adopt). Parking
@@ -146,11 +167,12 @@ def build_scores_tier_solve_job_wire(
             export_scope = compute_scope_to_export_scope(scope)
             return {
                 "runId": None,
-                "evidenceClosed": True,
-                "gameId": scope.game_id,
-                "perspective": scope.perspective,
-                "turn": scope.turn,
-                "playerId": scope.player_id,
+                WIRE_EVIDENCE_CLOSED: True,
+                WIRE_ORCHESTRATION_SKIP: True,
+                WIRE_GAME_ID: scope.game_id,
+                WIRE_PERSPECTIVE: scope.perspective,
+                WIRE_TURN: scope.turn,
+                WIRE_PLAYER_ID: scope.player_id,
             }
         raise RuntimeError(
             "scores tier_solve invariant broken: ensure "
@@ -178,14 +200,8 @@ def build_scores_tier_solve_job_wire(
             overlay_ensure=False,
         )
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
-
-    return {
-        "runId": run.run_id,
-        "gameId": scope.game_id,
-        "perspective": scope.perspective,
-        "turn": scope.turn,
-        "playerId": scope.player_id,
-    }
+    _apply_continue_ladder_snapshot(run, node_result_wire)
+    return _process_safe_tier_solve_job_wire(scope, run)
 
 
 def _adopt_scheduler_row_run_for_tier_wire(
@@ -215,6 +231,50 @@ def _adopt_scheduler_row_run_for_tier_wire(
         initialize_ladder=scheduler_run.ladder_state is None,
     )
     return scheduler_run
+
+
+def apply_scores_tier_solve_step_result(run: RowRun, result: StepResult) -> None:
+    """Advance parent ``RowRun`` ladder state from a process-plane leaf result.
+
+    The child never holds ``RowRun``. Continue payloads carry a catalog-free
+    ``PolicyLadderState`` snapshot that replaces the parent's ladder progress.
+    """
+    payload = result.payload
+    if not isinstance(payload, dict):
+        return
+    snapshot = payload.get(WIRE_LADDER_STATE)
+    if isinstance(snapshot, PolicyLadderState):
+        run.ladder_state = snapshot
+
+
+def _apply_continue_ladder_snapshot(run: RowRun, node_result_wire: object | None) -> None:
+    if not isinstance(node_result_wire, dict):
+        return
+    snapshot = node_result_wire.get(WIRE_LADDER_STATE)
+    if isinstance(snapshot, PolicyLadderState):
+        run.ladder_state = snapshot
+
+
+def _process_safe_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[str, Any]:
+    """Scope + storage root + ladder snapshot; no live parent objects."""
+    from api.analytics.military_score_inference.inference_row_runner import (
+        solve_context,
+        stream_tier_time_limit_seconds,
+    )
+
+    observation, _turn = solve_context(run)
+    ladder = run.ladder_state
+    return {
+        "runId": run.run_id,
+        WIRE_GAME_ID: scope.game_id,
+        WIRE_PERSPECTIVE: scope.perspective,
+        WIRE_TURN: scope.turn,
+        WIRE_PLAYER_ID: scope.player_id,
+        WIRE_STORAGE_ROOT: str(Path(get_config().storage_root).resolve()),
+        WIRE_LADDER_STATE: None if ladder is None else process_safe_ladder_state(ladder),
+        WIRE_OBSERVATION: observation,
+        WIRE_TIME_LIMIT_SECONDS: stream_tier_time_limit_seconds(),
+    }
 
 
 def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
@@ -342,10 +402,18 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
-    """Run one scores inference tier step and return an explicit orchestrator outcome."""
+    """Run one in-process scores inference tier against the parent ``RowRun``.
+
+    Thread-backend workers share the parent registry. Process-backend workers
+    use ``run_scores_tier_solve_leaf`` instead: that leaf rebuilds the problem
+    from ``storageRoot`` and never calls ``get_row_run``.
+    """
     run_id = job_wire.get("runId")
     if run_id is None:
-        if job_wire.get("evidenceClosed") is True:
+        if (
+            job_wire.get(WIRE_EVIDENCE_CLOSED) is True
+            or job_wire.get(WIRE_ORCHESTRATION_SKIP) is True
+        ):
             # Skip sentinel from ``build_scores_tier_solve_job_wire`` when turn
             # evidence is already closed -- no CP-SAT.
             return StepResult(outcome="complete")
@@ -408,6 +476,9 @@ class ScoresPersistencePolicy:
                 f"scores persist result wire must be dict, got {type(result_wire).__name__}"
             )
         run_id = result_wire.get("runId")
+        if not isinstance(run_id, str):
+            attached = get_row_run_for_scope(scope)
+            run_id = attached.run_id if attached is not None else None
         if not isinstance(run_id, str):
             raise TypeError("scores persist result wire missing string runId")
         row_complete = result_wire.get("rowComplete")

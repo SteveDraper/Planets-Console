@@ -208,6 +208,24 @@ def test_load_config_remap_interpreter_backend_to_thread_string_raises():
         )
 
 
+def test_load_config_scores_tier_solve_backend_process():
+    base = FIXTURES_DIR / "base.yaml"
+    root = load_config(
+        override_specs=["api.scores_tier_solve_backend=process"],
+        default_config_path=base,
+    )
+    assert root.api.scores_tier_solve_backend == "process"
+
+
+def test_load_config_scores_tier_solve_backend_invalid_raises():
+    base = FIXTURES_DIR / "base.yaml"
+    with pytest.raises(ValueError, match="scores_tier_solve_backend"):
+        load_config(
+            override_specs=["api.scores_tier_solve_backend=interpreter"],
+            default_config_path=base,
+        )
+
+
 def test_load_config_compute_diagnostics_start_frozen_bool():
     base = FIXTURES_DIR / "base.yaml"
     root = load_config(

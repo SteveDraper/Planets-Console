@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
-from api.compute.wire import DependencyOutputs
+from api.compute.wire import DependencyOutputs, orchestration_plane_skip_result
 
 if TYPE_CHECKING:
     from api.compute.orchestrator_state import ComputeNodeRun
@@ -262,10 +262,21 @@ class OrchestratorStepExecutionMixin:
                         ctx=ctx,
                         node_result_wire=node.result_wire,
                     )
+                    skip_result = orchestration_plane_skip_result(job_wire)
                     with self._condition:
                         if node.state != "running":
                             continue
                         node.execution_sealed = True
+                        if skip_result is not None:
+                            self._observers.notify_step_complete(
+                                node,
+                                step.step_kind,
+                                step_index=node.step_index,
+                                surface="inline",
+                                terminal_state="success",
+                            )
+                            self._after_step_success(node, skip_result)
+                            continue
                     run_step = submission.registration.run_step[step.step_kind]
                     self._pool_submitter(
                         node,

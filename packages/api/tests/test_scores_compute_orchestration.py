@@ -305,6 +305,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
     )
     assert skip_wire["runId"] is None
     assert skip_wire["evidenceClosed"] is True
+    assert skip_wire["orchestrationSkip"] is True
 
 
 def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(

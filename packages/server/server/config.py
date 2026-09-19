@@ -117,6 +117,23 @@ def _require_api_bool(api_dict: dict[str, Any], key: str, default: bool) -> bool
     return raw
 
 
+def _parse_scores_tier_solve_backend(raw: object) -> str:
+    """Return scores tier_solve backend; default thread."""
+    default = ApiConfig().scores_tier_solve_backend
+    if raw is None:
+        return default
+    if not isinstance(raw, str):
+        raise TypeError(
+            f"api.scores_tier_solve_backend must be a string, got {type(raw).__name__}: {raw!r}"
+        )
+    normalized = raw.strip().lower()
+    if normalized not in {"thread", "process"}:
+        raise ValueError(
+            f"api.scores_tier_solve_backend must be 'thread' or 'process', got {raw!r}"
+        )
+    return normalized
+
+
 def _parse_api_storage_root(raw: object) -> str:
     """Return storage_root; null or missing uses ApiConfig default."""
     default = ApiConfig().storage_root
@@ -336,6 +353,9 @@ def load_config(
         compute_diagnostics_start_frozen=raw_start_frozen,
         compute_diagnostics_timeline_capacity=raw_timeline_capacity,
         remap_interpreter_backend_to_thread=raw_remap_interpreter,
+        scores_tier_solve_backend=_parse_scores_tier_solve_backend(
+            api_dict.get("scores_tier_solve_backend")
+        ),
         credentials_obfuscation_secret=cred_secret,
         homeworld_locator=_parse_homeworld_locator_config(api_dict.get("homeworld_locator")),
     )

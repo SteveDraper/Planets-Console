@@ -23,7 +23,9 @@ from api.analytics.scores.compute_orchestration import (
     run_scores_materialize,
     run_scores_tier_solve,
 )
+from api.analytics.scores.compute_plane.tier_solve_leaf import run_scores_tier_solve_leaf
 from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
+from api.analytics.scores.tier_solve_backend import resolve_scores_tier_solve_backend
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.analytics.turn_roster import players_by_id as turn_players_by_id
 from api.models.game import TurnInfo
@@ -161,6 +163,13 @@ REGISTRATION = TurnAnalyticRegistration(
     ),
     run_steps=(
         (SCORES_MATERIALIZE, run_scores_materialize),
-        (SCORES_TIER_SOLVE, run_scores_tier_solve),
+        (
+            SCORES_TIER_SOLVE,
+            (
+                run_scores_tier_solve_leaf
+                if resolve_scores_tier_solve_backend() == "process"
+                else run_scores_tier_solve
+            ),
+        ),
     ),
 )
