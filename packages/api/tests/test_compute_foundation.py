@@ -68,6 +68,8 @@ def _compute_registration(**kwargs) -> TurnAnalyticRegistration:
         "run_steps",
         (("materialize", lambda _job: {"result": True}),),
     )
+    remote_run_steps = kwargs.get("remote_run_steps", ())
+    resolve_step_backend = kwargs.get("resolve_step_backend")
 
     def compute(_ctx) -> dict:
         return {"analyticId": analytic_id}
@@ -81,6 +83,8 @@ def _compute_registration(**kwargs) -> TurnAnalyticRegistration:
         persistence_policy=persistence_policy,
         build_step_job_wires=build_step_job_wires,
         run_steps=run_steps,
+        remote_run_steps=remote_run_steps,
+        resolve_step_backend=resolve_step_backend,
     )
 
 
@@ -235,6 +239,16 @@ def test_validate_compute_registration_skips_when_profile_absent():
         ),
         (
             {
+                "remote_run_steps": (("extra", lambda _job: {}),),
+            },
+            "unknown remote_run_step",
+        ),
+        (
+            {"resolve_step_backend": object()},
+            "resolve_step_backend must be callable",
+        ),
+        (
+            {
                 "scope_key_spec": ScopeKeySpec(axes=(), parameter_fields=()),
             },
             "must declare at least one axis",
@@ -245,6 +259,24 @@ def test_validate_compute_registration_rejects_invalid_profiles(overrides, match
     registration = _compute_registration(**overrides)
     with pytest.raises(RuntimeError, match=match):
         validate_turn_analytic_compute_registration(registration)
+
+
+def test_validate_compute_registration_accepts_remote_run_step_and_resolver():
+    def remap(step_kind: str, declared: str) -> str:
+        del step_kind
+        return declared
+
+    def remote_run(_job):
+        return {"result": "remote"}
+
+    registration = _compute_registration(
+        remote_run_steps=(("materialize", remote_run),),
+        resolve_step_backend=remap,
+    )
+    compute_registration = validate_turn_analytic_compute_registration(registration)
+    assert compute_registration is not None
+    assert compute_registration.remote_run_step["materialize"] is remote_run
+    assert compute_registration.resolve_step_backend is remap
 
 
 def test_build_compute_registry_rejects_duplicate_compute_ids():
@@ -270,6 +302,19 @@ def test_fleet_compute_profile_uses_interpreter_backend():
     assert FLEET_COMPUTE_PROFILE.steps[0].backend == "interpreter"
     assert FLEET_COMPUTE_PROFILE.steps[1].backend == "inline"
     assert FLEET_COMPUTE_PROFILE.route_table_map is True
+
+
+def test_scores_compute_profile_declares_thread_tier_solve():
+    from api.analytics.scores.compute_orchestration import (
+        SCORES_COMPUTE_PROFILE,
+        SCORES_TIER_SOLVE,
+    )
+
+    tier = next(
+        spec for spec in SCORES_COMPUTE_PROFILE.steps if spec.step_kind == SCORES_TIER_SOLVE
+    )
+    assert tier.backend == "thread"
+    assert SCORES_COMPUTE_PROFILE.route_table_map is False
 
 
 def test_fleet_materialization_leg_import_does_not_load_transport_stack():

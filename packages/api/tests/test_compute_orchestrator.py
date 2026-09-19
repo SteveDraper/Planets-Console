@@ -1075,6 +1075,93 @@ def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, back
     assert persistence.persist_calls == [(shared_scope, {"result": SHARED_ID})]
 
 
+def test_flush_remaps_declared_thread_to_process_remote_run_step(sample_turn):
+    """Occupancy remap is sampled at flush: declared thread pre-builds process wire."""
+
+    def remap(step_kind: str, declared: ComputeBackend) -> ComputeBackend:
+        if step_kind == "materialize":
+            return "process"
+        return declared
+
+    def thread_run(job):
+        return {"result": job["scope"], "via": "thread"}
+
+    def remote_run(job):
+        return {"result": job["scope"], "via": "remote"}
+
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    captured: dict[str, object] = {}
+
+    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
+        del node
+        captured["backend"] = step.backend
+        captured["job_wire"] = job_wire
+        captured["run_step"] = run_step
+
+    registration = TurnAnalyticRegistration(
+        catalog_entry=_catalog_entry(SHARED_ID),
+        compute=lambda _ctx: {"analyticId": SHARED_ID},
+        export_catalog=empty_export_catalog_for(SHARED_ID),
+        scope_key_spec=_ROW_SCOPE_KEY,
+        compute_profile=AnalyticComputeProfile(
+            steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
+        ),
+        persistence_policy=_StubPersistencePolicy(),
+        build_step_job_wires=(
+            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
+        ),
+        run_steps=(("materialize", thread_run),),
+        remote_run_steps=(("materialize", remote_run),),
+        resolve_step_backend=remap,
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((registration,)),
+        pool_submitter=pool_submitter,
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+
+    assert handle.state == "running"
+    assert captured["backend"] == "process"
+    assert captured["run_step"] is remote_run
+    assert captured["job_wire"] == {"scope": SHARED_ID}
+
+
+def test_flush_skips_prebuild_when_interpreter_remaps_to_thread(sample_turn, monkeypatch):
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    )
+    export_scope = _export_scope(sample_turn)
+    captured: dict[str, object] = {}
+
+    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
+        del node
+        captured["backend"] = step.backend
+        captured["job_wire"] = job_wire
+        captured["run_step"] = run_step
+
+    compute_registry = build_compute_registry(
+        (_pool_compute_registration(SHARED_ID, backend="interpreter"),)
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=compute_registry,
+        pool_submitter=pool_submitter,
+    )
+    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
+
+    assert handle.state == "running"
+    assert captured["backend"] == "thread"
+    assert captured["job_wire"] is None
+    assert captured["run_step"] is None
+
+
 def test_stale_epoch_during_persist_does_not_complete(sample_turn):
     """Invalidation during persist-then-complete must not stamp a hollow terminal."""
     ctx = make_fixture_query_context(

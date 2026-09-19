@@ -48,7 +48,7 @@ from api.analytics.scores.tier_row_run_registry import (
 from api.analytics.scores.tier_solve_backend import resolve_scores_tier_solve_backend
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
-from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
+from api.compute.profile import AnalyticComputeProfile, ComputeBackend, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs, StepResult
 from api.config import get_config
@@ -68,7 +68,7 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
         ComputeStepSpec(step_kind=SCORES_MATERIALIZE, backend="inline"),
         ComputeStepSpec(
             step_kind=SCORES_TIER_SOLVE,
-            backend=resolve_scores_tier_solve_backend(),
+            backend="thread",
             gil_overlap="native_release",
         ),
     ),
@@ -77,6 +77,18 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
     # fleet@(N-1) and turn scores into a gap-fill barrier.
     route_table_map=False,
 )
+
+
+def resolve_scores_step_backend(step_kind: str, declared: ComputeBackend) -> ComputeBackend:
+    """Return the effective backend for one scores compute step.
+
+    ``tier_solve`` follows occupancy / freeze policy via
+    ``resolve_scores_tier_solve_backend``. Other steps keep ``declared``.
+    Sampled at dispatch/flush, not at import.
+    """
+    if step_kind != SCORES_TIER_SOLVE:
+        return declared
+    return resolve_scores_tier_solve_backend()
 
 
 def _apply_fleet_resolution_to_row_run(

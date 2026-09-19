@@ -9,12 +9,14 @@ lifecycle.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from api.compute.backend_runtime import effective_compute_backend
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
-from api.compute.profile import ComputeStepSpec
+from api.compute.profile import ComputeBackend, ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
-from api.compute.wire import DependencyOutputs, orchestration_plane_skip_result
+from api.compute.wire import DependencyOutputs, RunStepFn, orchestration_plane_skip_result
 
 if TYPE_CHECKING:
     from api.compute.orchestrator_state import ComputeNodeRun
@@ -135,6 +137,34 @@ class OrchestratorStepExecutionMixin:
             return scope, node
         return None, None
 
+    def _effective_pool_backend(
+        self,
+        step: ComputeStepSpec,
+        registration: AnalyticComputeRegistration,
+    ) -> ComputeBackend:
+        """Return the backend the worker pool should run for this step.
+
+        Registration may remap occupancy (declared thread -> process). Frozen
+        runtime then remaps interpreter -> thread. Sampled at flush, not import.
+        """
+        declared = step.backend
+        resolver = registration.resolve_step_backend
+        if resolver is not None:
+            declared = resolver(step.step_kind, declared)
+        return effective_compute_backend(declared)
+
+    def _pool_run_step(
+        self,
+        registration: AnalyticComputeRegistration,
+        step_kind: str,
+        effective_backend: ComputeBackend,
+    ) -> RunStepFn:
+        if effective_backend in {"interpreter", "process"}:
+            remote = registration.remote_run_step.get(step_kind)
+            if remote is not None:
+                return remote
+        return registration.run_step[step_kind]
+
     def _current_step_spec(
         self,
         node: ComputeNodeRun,
@@ -254,7 +284,13 @@ class OrchestratorStepExecutionMixin:
             step = submission.step
             ctx = self._ctx_for_node(node)
             try:
-                if step.backend in {"interpreter", "process"}:
+                effective_backend = self._effective_pool_backend(step, submission.registration)
+                submit_step = (
+                    step
+                    if step.backend == effective_backend
+                    else replace(step, backend=effective_backend)
+                )
+                if effective_backend in {"interpreter", "process"}:
                     builder = submission.registration.build_step_job_wire[step.step_kind]
                     job_wire = builder(
                         node.scope,
@@ -277,10 +313,14 @@ class OrchestratorStepExecutionMixin:
                             )
                             self._after_step_success(node, skip_result)
                             continue
-                    run_step = submission.registration.run_step[step.step_kind]
+                    run_step = self._pool_run_step(
+                        submission.registration,
+                        step.step_kind,
+                        effective_backend,
+                    )
                     self._pool_submitter(
                         node,
-                        step,
+                        submit_step,
                         job_wire=job_wire,
                         run_step=run_step,
                     )
@@ -289,7 +329,7 @@ class OrchestratorStepExecutionMixin:
                         if node.state != "running":
                             continue
                         node.execution_sealed = True
-                    self._pool_submitter(node, step)
+                    self._pool_submitter(node, submit_step)
                 self._metrics.pool_submissions += 1
             except BaseException as exc:
                 with self._condition:

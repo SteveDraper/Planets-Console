@@ -19,11 +19,12 @@ SCORES_TIER_SOLVE_BACKEND_PROCESS: ComputeBackend = "process"
 
 
 def resolve_scores_tier_solve_backend() -> ComputeBackend:
-    """Return the declared scores ``tier_solve`` backend for this process.
+    """Return the effective scores ``tier_solve`` backend for this process.
 
     Frozen runtimes always stay ``thread``. Otherwise
     ``PLANETS_CONSOLE_SCORES_TIER_SOLVE_BACKEND`` overrides
-    ``api.scores_tier_solve_backend`` (default ``thread``).
+    ``api.scores_tier_solve_backend`` (default ``thread``). Sampled at
+    dispatch/flush, not when the scores profile is imported.
     """
     if process_is_frozen():
         return SCORES_TIER_SOLVE_BACKEND_THREAD

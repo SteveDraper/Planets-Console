@@ -220,6 +220,19 @@ def test_resolve_scores_tier_solve_backend_frozen_stays_thread(monkeypatch):
     assert resolve_scores_tier_solve_backend() == "thread"
 
 
+def test_resolve_scores_step_backend_remaps_only_tier_solve(monkeypatch):
+    from api.analytics.scores.compute_orchestration import (
+        SCORES_MATERIALIZE,
+        SCORES_TIER_SOLVE,
+        resolve_scores_step_backend,
+    )
+
+    monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
+    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
+    assert resolve_scores_step_backend(SCORES_TIER_SOLVE, "thread") == "process"
+    assert resolve_scores_step_backend(SCORES_MATERIALIZE, "inline") == "inline"
+
+
 def test_open_evidence_wire_is_process_safe_without_live_run_id(
     sample_turn,
     tmp_path,

@@ -46,9 +46,11 @@ from api.analytics.scores.compute_orchestration import (
     SCORES_TIER_SOLVE,
     ScoresPersistencePolicy,
     build_scores_tier_solve_job_wire,
+    resolve_scores_step_backend,
     run_scores_tier_solve,
     tier_job_outcome_to_step_result,
 )
+from api.analytics.scores.compute_plane.tier_solve_leaf import run_scores_tier_solve_leaf
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
     _retire_row_run,
@@ -124,6 +126,17 @@ def test_scores_registration_includes_tier_solve_step() -> None:
     step_kinds = tuple(step.step_kind for step in SCORES_REGISTRATION.compute_profile.steps)
     assert step_kinds == ("materialize", SCORES_TIER_SOLVE)
     assert SCORES_REGISTRATION.compute_profile.route_table_map is False
+    tier = next(
+        spec
+        for spec in SCORES_REGISTRATION.compute_profile.steps
+        if spec.step_kind == SCORES_TIER_SOLVE
+    )
+    assert tier.backend == "thread"
+    assert dict(SCORES_REGISTRATION.run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve
+    assert (
+        dict(SCORES_REGISTRATION.remote_run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve_leaf
+    )
+    assert SCORES_REGISTRATION.resolve_step_backend is resolve_scores_step_backend
     assert build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
 
 
@@ -1290,6 +1303,103 @@ def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
     assert handle.state == "running"
     assert submitted_scopes == [scope]
     assert orchestrator.nodes[scope].profile_step_index == 1
+
+
+def _flush_scores_tier_solve(sample_turn, persistence) -> tuple[object, dict[str, object]]:
+    player_id = sample_turn.scores[0].ownerid
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(
+        InferenceStreamScope(
+            game_id=628580,
+            perspective=1,
+            turn_number=sample_turn.settings.turn,
+        )
+    )
+    session = _session_for_player(sample_turn, player_id=player_id)
+    scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
+    ctx = export_chain_query_context(
+        sample_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+        seed_fleet_prerequisites_for=player_id,
+    )
+    captured: dict[str, object] = {}
+
+    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
+        del node
+        if step.step_kind != SCORES_TIER_SOLVE:
+            return
+        captured["backend"] = step.backend
+        captured["run_step"] = run_step
+        captured["job_wire"] = job_wire
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION)),
+        pool_submitter=pool_submitter,
+    )
+    handle = orchestrator.submit(
+        ComputeRequest(
+            ctx=ctx,
+            scope=_scores_scope(sample_turn, player_id),
+            step_kind=SCORES_TIER_SOLVE,
+        )
+    )
+    return handle, captured
+
+
+@pytest.mark.parametrize("opt_in", ["env", "config"])
+def test_scores_tier_solve_selects_process_leaf_after_import(
+    sample_turn,
+    persistence,
+    monkeypatch,
+    opt_in: str,
+) -> None:
+    """Env/config after scores import still remaps declared thread to process+leaf."""
+    from dataclasses import replace
+
+    from api.analytics.scores.compute_orchestration import SCORES_COMPUTE_PROFILE
+    from api.analytics.scores.tier_solve_backend import SCORES_TIER_SOLVE_BACKEND_ENV
+    from api.config import get_config, set_config
+
+    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
+    cfg = get_config()
+    if opt_in == "env":
+        monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
+    else:
+        monkeypatch.delenv(SCORES_TIER_SOLVE_BACKEND_ENV, raising=False)
+        set_config(replace(cfg, scores_tier_solve_backend="process"))
+
+    try:
+        tier = next(
+            spec for spec in SCORES_COMPUTE_PROFILE.steps if spec.step_kind == SCORES_TIER_SOLVE
+        )
+        assert tier.backend == "thread"
+        assert dict(SCORES_REGISTRATION.run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve
+
+        handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
+        assert handle.state == "running", handle.error
+        assert captured["backend"] == "process"
+        assert captured["run_step"] is run_scores_tier_solve_leaf
+        assert captured["job_wire"] is not None
+    finally:
+        set_config(cfg)
+
+
+def test_scores_tier_solve_frozen_stays_thread_after_process_env(
+    sample_turn,
+    persistence,
+    monkeypatch,
+) -> None:
+    from api.analytics.scores.tier_solve_backend import SCORES_TIER_SOLVE_BACKEND_ENV
+
+    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: True)
+    monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
+
+    handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
+    assert handle.state == "running", handle.error
+    assert captured["backend"] == "thread"
+    assert captured["run_step"] is None
+    assert captured["job_wire"] is None
 
 
 def test_stream_query_context_plans_prior_turn_fleet_dependency(

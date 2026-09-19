@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from api.analytics.registration import TurnAnalyticRegistration
@@ -11,6 +11,7 @@ from api.compute.profile import (
     VALID_COMPUTE_BACKENDS,
     VALID_GIL_OVERLAP_CLASSES,
     AnalyticComputeProfile,
+    ComputeBackend,
     ComputeStepSpec,
 )
 from api.compute.scope import ScopeKeySpec
@@ -28,6 +29,8 @@ class AnalyticComputeRegistration:
     persistence_policy: PersistencePolicy
     build_step_job_wire: Mapping[str, BuildStepJobWireFn]
     run_step: Mapping[str, RunStepFn]
+    remote_run_step: Mapping[str, RunStepFn]
+    resolve_step_backend: Callable[[str, ComputeBackend], ComputeBackend] | None = None
 
 
 def _mapping_from_pairs(
@@ -130,6 +133,17 @@ def validate_turn_analytic_compute_registration(
         analytic_id=analytic_id,
         field="run_steps",
     )
+    remote_run_step = _mapping_from_pairs(
+        registration.remote_run_steps,
+        analytic_id=analytic_id,
+        field="remote_run_steps",
+    )
+    resolve_step_backend = registration.resolve_step_backend
+    if resolve_step_backend is not None and not callable(resolve_step_backend):
+        raise RuntimeError(
+            f"Turn analytic {analytic_id!r} resolve_step_backend must be callable, "
+            f"got {type(resolve_step_backend).__name__}"
+        )
 
     for step_kind in declared_step_kinds:
         builder = build_step_job_wire.get(step_kind)
@@ -143,6 +157,12 @@ def validate_turn_analytic_compute_registration(
             raise RuntimeError(
                 f"Turn analytic {analytic_id!r} missing run_step for step_kind {step_kind!r}"
             )
+        remote_runner = remote_run_step.get(step_kind)
+        if remote_runner is not None and not callable(remote_runner):
+            raise RuntimeError(
+                f"Turn analytic {analytic_id!r} remote_run_step for step_kind "
+                f"{step_kind!r} must be callable"
+            )
 
     unknown_builders = sorted(set(build_step_job_wire) - declared_step_kinds)
     if unknown_builders:
@@ -155,6 +175,12 @@ def validate_turn_analytic_compute_registration(
         raise RuntimeError(
             f"Turn analytic {analytic_id!r} unknown run_step step_kind(s): {unknown_runners!r}"
         )
+    unknown_remote_runners = sorted(set(remote_run_step) - declared_step_kinds)
+    if unknown_remote_runners:
+        raise RuntimeError(
+            f"Turn analytic {analytic_id!r} unknown remote_run_step step_kind(s): "
+            f"{unknown_remote_runners!r}"
+        )
 
     return AnalyticComputeRegistration(
         analytic_id=analytic_id,
@@ -163,6 +189,8 @@ def validate_turn_analytic_compute_registration(
         persistence_policy=persistence_policy,
         build_step_job_wire=build_step_job_wire,
         run_step=run_step,
+        remote_run_step=remote_run_step,
+        resolve_step_backend=resolve_step_backend,
     )
 
 

@@ -11,7 +11,7 @@ from api.validation import require_non_empty_string
 
 if TYPE_CHECKING:
     from api.compute.persistence import PersistencePolicy
-    from api.compute.profile import AnalyticComputeProfile
+    from api.compute.profile import AnalyticComputeProfile, ComputeBackend
     from api.compute.scope import ScopeKeySpec
     from api.compute.wire import BuildStepJobWireFn, RunStepFn
 
@@ -32,6 +32,13 @@ class TurnAnalyticRegistration:
     persistence_policy: PersistencePolicy | None = None
     build_step_job_wires: tuple[tuple[str, BuildStepJobWireFn], ...] = ()
     run_steps: tuple[tuple[str, RunStepFn], ...] = ()
+    # Pickle-safe callables for interpreter/process submit. Thread dispatch
+    # keeps ``run_steps``. Occupancy may remap a declared thread step to
+    # process at flush; this mapping is the remote callable for that path.
+    remote_run_steps: tuple[tuple[str, RunStepFn], ...] = ()
+    # Optional runtime remap of a declared step backend (occupancy / freeze).
+    # Sampled at dispatch/flush, never at import.
+    resolve_step_backend: Callable[[str, ComputeBackend], ComputeBackend] | None = None
 
 
 def resolve_registration_export_catalog(
