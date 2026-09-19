@@ -1383,7 +1383,7 @@ def test_scores_tier_solve_selects_process_leaf_after_import(
     from api.analytics.scores.tier_solve_backend import SCORES_TIER_SOLVE_BACKEND_ENV
     from api.config import get_config, set_config
 
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
     cfg = get_config()
     if opt_in == "env":
         monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
@@ -1411,21 +1411,22 @@ def test_scores_tier_solve_selects_process_leaf_after_import(
         set_config(cfg)
 
 
-def test_scores_tier_solve_frozen_stays_thread_after_process_env(
+def test_scores_tier_solve_frozen_honors_process_env(
     sample_turn,
     persistence,
     monkeypatch,
 ) -> None:
     from api.analytics.scores.tier_solve_backend import SCORES_TIER_SOLVE_BACKEND_ENV
 
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: True)
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
 
     handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
     assert handle.state == "running", handle.error
-    assert captured["backend"] == "thread"
-    assert captured["run_step"] is None
-    assert captured["job_wire"] is None
+    assert captured["backend"] == "process"
+    assert captured["run_step"] is run_scores_tier_solve_leaf
+    assert isinstance(captured["job_wire"], dict)
+    assert WIRE_STORAGE_ROOT in captured["job_wire"]
 
 
 def test_stream_query_context_plans_prior_turn_fleet_dependency(

@@ -17,11 +17,14 @@ from bundle_console_package import (
     collect_policy,
     macos_info_plist,
     prepare_placeholder_icon,
+    pyinstaller_scripts_without,
+    sat_worker_collect_policy,
     validate_inputs,
 )
 
 policy = collect_policy(repo_root)
-validate_inputs(repo_root, policy)
+worker_policy = sat_worker_collect_policy(repo_root)
+validate_inputs(repo_root, policy, worker_policy)
 work_dir = repo_root / WORK_DIR_RELATIVE
 work_dir.mkdir(parents=True, exist_ok=True)
 icon_path = prepare_placeholder_icon(work_dir)
@@ -35,11 +38,11 @@ workspace_pathex = [
 ]
 
 a = Analysis(
-    [str(policy.entry)],
+    [str(policy.entry), str(worker_policy.entry)],
     pathex=workspace_pathex,
     binaries=analysis_binaries(),
-    datas=list(policy.datas),
-    hiddenimports=list(policy.hiddenimports),
+    datas=list(policy.datas) + list(worker_policy.datas),
+    hiddenimports=list(dict.fromkeys((*policy.hiddenimports, *worker_policy.hiddenimports))),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -49,9 +52,12 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+host_scripts = pyinstaller_scripts_without(a.scripts, worker_policy.entry.name)
+worker_scripts = pyinstaller_scripts_without(a.scripts, policy.entry.name)
+
 exe = EXE(
     pyz,
-    a.scripts,
+    host_scripts,
     [],
     exclude_binaries=True,
     name=policy.name,
@@ -67,8 +73,27 @@ exe = EXE(
     entitlements_file=None,
     icon=icon,
 )
+worker_exe = EXE(
+    pyz,
+    worker_scripts,
+    [],
+    exclude_binaries=True,
+    name=worker_policy.name,
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
+)
 coll = COLLECT(
     exe,
+    worker_exe,
     a.binaries,
     a.zipfiles,
     a.datas,

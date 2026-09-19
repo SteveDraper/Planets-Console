@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from concurrent.futures import Future
+from pathlib import Path
 
 import pytest
 from api.analytics.catalog import TurnAnalyticCatalogEntry
@@ -25,6 +27,7 @@ from api.compute import (
     dequeue_next_work_item,
     normalize_export_scope_to_compute_scope,
 )
+from api.compute.process_pool_executable import sat_worker_executable_name
 from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
@@ -626,6 +629,65 @@ def test_pool_dispatches_process_backend(sample_turn):
     assert handle.state == "complete", handle.error
     assert handle.result_wire == {"result": _FLEET_ANALYTIC_ID}
     assert pool.metrics.process_executions == 1
+
+
+def test_frozen_process_pool_uses_sat_worker_not_gui_executable(
+    sample_turn,
+    monkeypatch,
+    tmp_path,
+):
+    """Fake-frozen process dispatch must not spawn ``sys.executable`` of the GUI."""
+    gui = tmp_path / "Planets Console"
+    gui.write_bytes(b"")
+    worker = tmp_path / sat_worker_executable_name()
+    worker.write_bytes(b"")
+    monkeypatch.setattr("api.compute.process_pool_executable.process_is_frozen", lambda: True)
+    monkeypatch.setattr("api.compute.process_pool_executable.sys.executable", str(gui))
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "api.compute.process_pool_executable.multiprocessing.set_executable",
+        lambda path: captured.update(executable=path),
+    )
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            captured["executable_at_init"] = captured.get("executable")
+            del args, kwargs
+
+        def submit(self, fn, wire):
+            future: Future = Future()
+            future.set_result(fn(wire))
+            return future
+
+        def shutdown(self, wait: bool = False, cancel_futures: bool = False) -> None:
+            del wait, cancel_futures
+
+    monkeypatch.setattr("api.compute.pools.ProcessPoolExecutor", FakeExecutor)
+
+    compute_registry = build_compute_registry((_process_backend_registration(),))
+    ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+    pool = ComputeWorkerPool(worker_count=1)
+    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
+    scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
+    scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        turn=scope.turn,
+        player_id=scope.player_id,
+    )
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if handle.state == "complete":
+            break
+        time.sleep(0.01)
+    pool.shutdown()
+
+    assert handle.state == "complete", handle.error
+    assert captured["executable_at_init"] == str(worker.resolve())
+    assert captured["executable_at_init"] != str(gui)
+    assert Path(str(captured["executable_at_init"])).name == sat_worker_executable_name()
 
 
 def test_configured_worker_count_reads_environment(monkeypatch: pytest.MonkeyPatch):

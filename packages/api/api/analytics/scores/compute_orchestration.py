@@ -92,7 +92,7 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
 def resolve_scores_step_backend(step_kind: str, declared: ComputeBackend) -> ComputeBackend:
     """Return the effective backend for one scores compute step.
 
-    ``tier_solve`` follows occupancy / freeze policy via
+    ``tier_solve`` follows occupancy opt-in via
     ``resolve_scores_tier_solve_backend``. Other steps keep ``declared``.
     Sampled at dispatch/flush, not at import.
     """

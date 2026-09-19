@@ -24,4 +24,4 @@ Unsigned v1 is acceptable. No Electron/Tauri SPA window. No tray in v1. **Instal
 - First implementation may still need hidden-imports (OR-Tools SAT, uvicorn factory string) and a Windows VC++ redistributable; that is not a second bundler.
 - Research notes (not on `main`): `docs/research/console-package-freeze-stack.md`, `docs/research/console-package-process-host.md`.
 
-See also: [Choose v1 freeze and process host](https://github.com/SteveDraper/Planets-Console/issues/428), map [v1 Mac and Windows console package](https://github.com/SteveDraper/Planets-Console/issues/423).
+See also: [Choose v1 freeze and process host](https://github.com/SteveDraper/Planets-Console/issues/428), map [v1 Mac and Windows console package](https://github.com/SteveDraper/Planets-Console/issues/423), [packaged SAT worker sibling binary](0027-addendum-packaged-sat-worker.md).

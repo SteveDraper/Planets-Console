@@ -180,7 +180,6 @@ def _register_run(
 
 def _opt_in_process_backend(monkeypatch) -> None:
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
 
 
 def _open_evidence_ctx(sample_turn):
@@ -253,20 +252,18 @@ if run_scores_tier_solve_leaf is None:
 
 def test_resolve_scores_tier_solve_backend_defaults_to_thread(monkeypatch):
     monkeypatch.delenv(SCORES_TIER_SOLVE_BACKEND_ENV, raising=False)
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
     assert resolve_scores_tier_solve_backend() == "thread"
 
 
 def test_resolve_scores_tier_solve_backend_env_process(monkeypatch):
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
     assert resolve_scores_tier_solve_backend() == "process"
 
 
-def test_resolve_scores_tier_solve_backend_frozen_stays_thread(monkeypatch):
+def test_resolve_scores_tier_solve_backend_frozen_honors_process_env(monkeypatch):
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: True)
-    assert resolve_scores_tier_solve_backend() == "thread"
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
+    assert resolve_scores_tier_solve_backend() == "process"
 
 
 def test_resolve_scores_step_backend_remaps_only_tier_solve(monkeypatch):
@@ -277,7 +274,6 @@ def test_resolve_scores_step_backend_remaps_only_tier_solve(monkeypatch):
     )
 
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
     assert resolve_scores_step_backend(SCORES_TIER_SOLVE, "thread") == "process"
     assert resolve_scores_step_backend(SCORES_MATERIALIZE, "inline") == "inline"
 
@@ -287,7 +283,6 @@ def test_open_evidence_thread_wire_is_identity_without_process_rebuild_keys(
     monkeypatch,
 ) -> None:
     monkeypatch.delenv(SCORES_TIER_SOLVE_BACKEND_ENV, raising=False)
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: False)
     player_id = inference_target_player_id(sample_turn)
     run = _register_run(sample_turn, player_id=player_id)
     ctx = _open_evidence_ctx(sample_turn)
@@ -338,26 +333,21 @@ def test_open_evidence_process_wire_is_storage_rebuild_snapshot(
     assert coerce_step_result(snapshot).outcome == "persist"
 
 
-def test_open_evidence_frozen_process_env_stays_thread_identity_wire(
+def test_open_evidence_frozen_process_env_uses_storage_rebuild_wire(
     sample_turn,
     monkeypatch,
 ) -> None:
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
-    monkeypatch.setattr("api.analytics.scores.tier_solve_backend.process_is_frozen", lambda: True)
+    monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
     player_id = inference_target_player_id(sample_turn)
     _register_run(sample_turn, player_id=player_id)
     ctx = _open_evidence_ctx(sample_turn)
-    with patch(
-        "api.analytics.scores.compute_orchestration._process_safe_tier_solve_job_wire"
-    ) as fat_wire:
-        wire = build_scores_tier_solve_job_wire(
-            _scores_scope(sample_turn, player_id),
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-        )
-    fat_wire.assert_not_called()
-    assert set(wire) == _THREAD_IDENTITY_KEYS
-    assert not _PROCESS_REBUILD_KEYS & set(wire)
+    wire = build_scores_tier_solve_job_wire(
+        _scores_scope(sample_turn, player_id),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert _PROCESS_REBUILD_KEYS <= set(wire)
 
 
 def test_orchestration_skip_stays_off_the_process_pool():
@@ -581,10 +571,6 @@ def test_wire_build_applies_continue_snapshot_before_next_dispatch(
         _opt_in_process_backend(monkeypatch)
     else:
         monkeypatch.delenv(SCORES_TIER_SOLVE_BACKEND_ENV, raising=False)
-        monkeypatch.setattr(
-            "api.analytics.scores.tier_solve_backend.process_is_frozen",
-            lambda: False,
-        )
     player_id = inference_target_player_id(sample_turn)
     steps = (_tiny_policy_step("a"), _tiny_policy_step("b"))
     parent = _register_run(

@@ -85,7 +85,9 @@ class ApiConfig:
     scores_tier_solve_backend: str = "thread"
     """Declared backend for scores ``tier_solve``: ``thread`` (default) or ``process``.
 
-    ``process`` is an occupancy / test opt-in. Frozen processes stay on ``thread``.
+    ``process`` is an occupancy / test opt-in. Frozen and unpackaged processes
+    honor the same setting. A packaged process pool spawns the sibling
+    ``sat_worker`` binary, not the windowed process host.
     ``PLANETS_CONSOLE_SCORES_TIER_SOLVE_BACKEND`` overrides this when set.
     """
 
