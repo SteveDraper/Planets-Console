@@ -20,7 +20,7 @@ from api.analytics.registration import (
     TurnAnalyticRegistration,
     validate_turn_analytic_registrations,
 )
-from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
+from api.analytics.scores.registration import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.stellar_cartography import REGISTRATION as STELLAR_CARTOGRAPHY_REGISTRATION
 from api.analytics.visibility import REGISTRATION as VISIBILITY_REGISTRATION
 from api.errors import ValidationError
