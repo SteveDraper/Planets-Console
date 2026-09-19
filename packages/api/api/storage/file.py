@@ -7,7 +7,7 @@ import os
 import secrets
 from pathlib import Path
 
-from api.errors import NotFoundError, ValidationError
+from api.exceptions import NotFoundError, ValidationError
 from api.storage.base import JSONValue
 from api.storage.boundaries import (
     document_relpath,

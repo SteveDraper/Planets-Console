@@ -1,12 +1,12 @@
 """Path resolution for the logical JSON store.
 
 Paths are slash-separated; segments may be object keys or @N for array index.
-Raises NotFoundError, ValidationError from api.errors.
+Raises NotFoundError, ValidationError from api.exceptions.
 """
 
 from __future__ import annotations
 
-from api.errors import NotFoundError, ValidationError
+from api.exceptions import NotFoundError, ValidationError
 from api.storage.base import JSONValue
 
 

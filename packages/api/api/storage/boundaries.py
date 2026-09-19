@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from api.errors import ValidationError
+from api.exceptions import ValidationError
 
 # V1 patterns aligned with service store paths (ADR 0001).
 BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
