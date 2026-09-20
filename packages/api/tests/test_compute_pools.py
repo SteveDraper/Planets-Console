@@ -710,9 +710,7 @@ def test_nested_process_submit_bypasses_dag_queue_deadlock(sample_turn, monkeypa
         assert not nested_finished.is_set()
 
         process_future.set_result(run_process_materialize({"scope": "nested-sat"}))
-        assert nested_finished.wait(timeout=3.0), (
-            "nested process wait deadlocked on the DAG queue"
-        )
+        assert nested_finished.wait(timeout=3.0), "nested process wait deadlocked on the DAG queue"
         assert nested_result["value"] == {"result": "nested-sat"}
 
         deadline = time.monotonic() + 3.0
