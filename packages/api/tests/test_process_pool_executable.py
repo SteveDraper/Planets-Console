@@ -107,6 +107,8 @@ def test_sat_worker_denied_prefixes_cover_http_and_parent_plane():
         "api.analytics.export_context",
         "api.analytics.scores.compute_orchestration",
         "api.app",
+        "api.compute.turn_cache",
+        "api.compute.worker_turn_cache",
         "api.errors",
         "api.storage.file",
         "bff",

@@ -8,6 +8,7 @@ from api.compute.diagnostics import compute_diagnostics_enabled, get_compute_dia
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.pools import ComputeWorkerPool, get_compute_worker_pool
 from api.compute.registry import COMPUTE_REGISTRY
+from api.compute.turn_cache import clear_process_turn_info_cache
 
 _orchestrator_lock = threading.Lock()
 _process_orchestrator: ComputeOrchestrator | None = None
@@ -39,13 +40,13 @@ def shutdown_compute_orchestrator_for_tests() -> None:
     with _orchestrator_lock:
         orchestrator = _process_orchestrator
         _process_orchestrator = None
+    clear_process_turn_info_cache()
     if orchestrator is None:
         return
     registration_id = orchestrator.pool_registration_id
     worker_pool = orchestrator.worker_pool
     if registration_id is not None and worker_pool is not None:
         worker_pool.unregister(registration_id)
-    orchestrator.turn_cache.clear()
     get_compute_diagnostics_controller().unbind_orchestrator(orchestrator)
 
 

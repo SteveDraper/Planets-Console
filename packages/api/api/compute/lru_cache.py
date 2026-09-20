@@ -30,5 +30,9 @@ class LruCache(Generic[K, V]):
         while len(self._entries) > self._maxsize:
             self._entries.popitem(last=False)
 
+    def drop(self, key: K) -> None:
+        """Remove ``key`` if present; missing keys are a no-op."""
+        self._entries.pop(key, None)
+
     def clear(self) -> None:
         self._entries.clear()

@@ -19,6 +19,8 @@ SAT_WORKER_DENIED_MODULE_PREFIXES: tuple[str, ...] = (
     "api.app",
     "api.compute.pools",
     "api.compute.sat_session_submit",
+    "api.compute.turn_cache",
+    "api.compute.worker_turn_cache",
     "api.errors",
     "api.serialization.turn",
     "api.storage.file",
