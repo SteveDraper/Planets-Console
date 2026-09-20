@@ -53,6 +53,17 @@ def _wire_int(value: object, label: str) -> int:
         raise TypeError(f"SAT search session {label} must be an integer") from exc
 
 
+def _assignment_from_wire(raw: object) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        raise TypeError("SAT search session assignment must be a string-to-int map")
+    assignment: dict[str, int] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("SAT search session assignment must be a string-to-int map")
+        assignment[key] = value
+    return assignment
+
+
 class SatSessionCancel(Protocol):
     """Cancel flag for a SAT search session (``threading.Event`` matches)."""
 
@@ -88,16 +99,7 @@ class SatSearchCollectionResult:
         assignments_raw = payload.get(WIRE_ASSIGNMENTS)
         if not isinstance(assignments_raw, list):
             raise TypeError("SAT search session result requires assignments list")
-        assignments: list[dict[str, int]] = []
-        for item in assignments_raw:
-            if not isinstance(item, dict):
-                raise TypeError("SAT search session assignment must be a string-to-int map")
-            assignment: dict[str, int] = {}
-            for key, value in item.items():
-                if not isinstance(key, str) or not isinstance(value, int):
-                    raise TypeError("SAT search session assignment must be a string-to-int map")
-                assignment[key] = value
-            assignments.append(assignment)
+        assignments = [_assignment_from_wire(item) for item in assignments_raw]
 
         status = _wire_int(payload.get(WIRE_LAST_SOLVER_STATUS), "lastSolverStatus")
         status_name = payload.get(WIRE_LAST_SOLVER_STATUS_NAME)
@@ -334,17 +336,6 @@ def run_sat_search_session(job_wire: dict[str, Any]) -> dict[str, object]:
         cancel_event=cancel_event,
         seed_assignments=seed_assignments,
     ).as_wire()
-
-
-def _assignment_from_wire(seed: object) -> dict[str, int]:
-    if not isinstance(seed, dict):
-        raise TypeError("SAT search session seed assignment must be a string-to-int map")
-    assignment: dict[str, int] = {}
-    for key, value in seed.items():
-        if not isinstance(key, str) or not isinstance(value, int):
-            raise TypeError("SAT search session seed assignment must be a string-to-int map")
-        assignment[key] = value
-    return assignment
 
 
 def _require_named_vars(

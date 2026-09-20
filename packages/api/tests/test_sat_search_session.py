@@ -14,7 +14,12 @@ from api.compute.sat_gil_overlap import invoke_cp_sat_solve, long_enough_cp_mode
 from api.compute.sat_session import (
     WIRE_ASSIGNMENTS,
     WIRE_LAST_SOLVER_STATUS,
+    WIRE_LAST_SOLVER_STATUS_NAME,
+    WIRE_SEED_ASSIGNMENTS,
     WIRE_STOPPED_REASON,
+    WIRE_TIER_MAX_OBJECTIVE,
+    WIRE_TIME_LIMITED,
+    SatSearchCollectionResult,
     SatSessionCancel,
     SatSessionCancelFlag,
     add_assignment_no_good,
@@ -81,6 +86,19 @@ def _collect_live_assignments(
         hits.append(assignment)
         add_assignment_no_good(model, count_vars, assignment, cut_index + 1)
     return hits, last_status
+
+
+def _collection_result_wire(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        WIRE_ASSIGNMENTS: [{"x": 3, "y": 2}],
+        WIRE_LAST_SOLVER_STATUS: int(cp_model.OPTIMAL),
+        WIRE_LAST_SOLVER_STATUS_NAME: "OPTIMAL",
+        WIRE_STOPPED_REASON: "solution_cap",
+        WIRE_TIME_LIMITED: False,
+        WIRE_TIER_MAX_OBJECTIVE: 5,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def test_sat_session_import_does_not_load_http_or_parent_plane():
@@ -194,6 +212,53 @@ def test_collect_near_best_band_excludes_worse_objectives() -> None:
     assert 3 in found and 4 in found
     assert found.isdisjoint({0, 1, 2})
     assert collected.stopped_reason == "near_best_band_exhausted"
+
+
+def test_collection_result_from_wire_decodes_assignment_maps() -> None:
+    original = SatSearchCollectionResult(
+        assignments=[{"x": 3, "y": 2}, {}],
+        last_solver_status=int(cp_model.OPTIMAL),
+        last_solver_status_name="OPTIMAL",
+        stopped_reason="solution_cap",
+        time_limited=False,
+        tier_max_objective=5,
+    )
+    restored = SatSearchCollectionResult.from_wire(original.as_wire())
+    assert restored == original
+
+
+@pytest.mark.parametrize(
+    "assignments",
+    (
+        [{"x": True}],
+        [{"x": 1.0}],
+        [{"x": "1"}],
+        [{1: 2}],
+        ["not-a-map"],
+        [None],
+    ),
+)
+def test_collection_result_from_wire_rejects_invalid_assignments(
+    assignments: object,
+) -> None:
+    with pytest.raises(TypeError, match="string-to-int map"):
+        SatSearchCollectionResult.from_wire(
+            _collection_result_wire(**{WIRE_ASSIGNMENTS: assignments})
+        )
+
+
+def test_session_rejects_non_int_seed_assignment() -> None:
+    model, names = _sum_to_five_model()
+    wire = sat_search_session_wire(
+        model=model,
+        int_var_names=names,
+        max_solutions=1,
+        time_limit_seconds=1.0,
+        num_workers=1,
+    )
+    wire[WIRE_SEED_ASSIGNMENTS] = [{"x": True}]
+    with pytest.raises(TypeError, match="string-to-int map"):
+        run_sat_search_session(wire)
 
 
 def test_session_raises_without_model_proto() -> None:
