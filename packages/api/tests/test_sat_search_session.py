@@ -117,6 +117,32 @@ def test_session_round_trip_matches_invoke_cp_sat_solve() -> None:
     assert result[WIRE_STOPPED_REASON] == "max_solutions"
 
 
+def test_process_session_round_trip_matches_invoke_cp_sat_solve() -> None:
+    live, names = _sum_to_five_model()
+    named = int_vars_by_name(live)
+    solver = cp_model.CpSolver()
+    solver.parameters.num_workers = 1
+    live_status = invoke_cp_sat_solve(solver, live)
+    live_assignment = {name: int(solver.value(named[name])) for name in names}
+
+    session_model, session_names = _sum_to_five_model()
+    wire = sat_search_session_wire(
+        model=session_model,
+        int_var_names=session_names,
+        max_solutions=1,
+        time_limit_seconds=5.0,
+        num_workers=1,
+    )
+    pickle.dumps(wire)
+    context = get_context("spawn")
+    with ProcessPoolExecutor(max_workers=1, mp_context=context) as pool:
+        result = pool.submit(run_sat_search_session, wire).result(timeout=10.0)
+
+    assert result[WIRE_LAST_SOLVER_STATUS] == live_status
+    assert result[WIRE_ASSIGNMENTS] == [live_assignment]
+    assert result[WIRE_STOPPED_REASON] == "max_solutions"
+
+
 def test_session_near_best_collection_matches_live_no_good_loop() -> None:
     live, names, _objective = _distinct_pairs_model()
     expected, last_status = _collect_live_assignments(live, names, max_solutions=3)
