@@ -117,14 +117,24 @@ class SatSessionCancelFlag:
 
 
 def encode_cp_model_proto(model: cp_model.CpModel) -> bytes:
-    """Serialize a CP-SAT model to pickle-safe proto bytes."""
+    """Serialize a CP-SAT model to pickle-safe proto bytes.
+
+    ``CpModel.Proto()`` is the pybind helper ``cp_model_helper.CpModelProto``:
+    it has ``parse_text_format`` / ``copy_from`` but not ``SerializeToString``.
+    The pickle-safe wire form is ``cp_model_pb2.CpModelProto`` bytes. pb2 cannot
+    ``CopyFrom`` the helper type, so this encodes via ``text_format``.
+    """
     payload = cp_model_pb2.CpModelProto()
     text_format.Parse(str(model.Proto()), payload)
     return payload.SerializeToString()
 
 
 def cp_model_from_proto(data: bytes) -> cp_model.CpModel:
-    """Rebuild a ``CpModel`` from ``encode_cp_model_proto`` bytes."""
+    """Rebuild a ``CpModel`` from ``encode_cp_model_proto`` bytes.
+
+    Inverse of encode: parse pickle-safe ``cp_model_pb2.CpModelProto`` bytes,
+    then load into the pybind helper proto via ``parse_text_format``.
+    """
     payload = cp_model_pb2.CpModelProto()
     payload.ParseFromString(data)
     model = cp_model.CpModel()
