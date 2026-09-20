@@ -7,13 +7,19 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-# HTTP/GUI stack, parent scores orchestration, and BFF -- not solver/storage/codec.
+# HTTP/GUI stack, parent scores orchestration, turn/storage rebuild, and BFF.
 SAT_WORKER_DENIED_MODULE_PREFIXES: tuple[str, ...] = (
     "AppKit",
     "api.analytics.export_context",
+    "api.analytics.military_score_inference.policy_ladder",
+    "api.analytics.military_score_inference.policy_ladder_state",
+    "api.analytics.military_score_inference.policy_ladder_tier_step",
+    "api.analytics.military_score_inference.row_run",
     "api.analytics.scores.compute_orchestration",
     "api.app",
     "api.errors",
+    "api.serialization.turn",
+    "api.storage.file",
     "bff",
     "fastapi",
     "server.app",

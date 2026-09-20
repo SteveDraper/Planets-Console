@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -20,7 +19,6 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     PriorTurnFleetTorpResolution,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.scores.compute_plane.tier_solve_leaf import process_safe_ladder_state
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.prior_fleet_resolution import (
@@ -43,13 +41,10 @@ from api.analytics.scores.tier_solve_wire import (
     WIRE_EVIDENCE_CLOSED,
     WIRE_GAME_ID,
     WIRE_LADDER_STATE,
-    WIRE_OBSERVATION,
     WIRE_ORCHESTRATION_SKIP,
     WIRE_PERSPECTIVE,
     WIRE_PLAYER_ID,
     WIRE_RUN_ID,
-    WIRE_STORAGE_ROOT,
-    WIRE_TIME_LIMIT_SECONDS,
     WIRE_TURN,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
@@ -61,7 +56,6 @@ from api.compute.wire import (
     StepResult,
     orchestration_plane_skip_result,
 )
-from api.config import get_config
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
@@ -152,11 +146,11 @@ def build_scores_tier_solve_job_wire(
 
     Orchestration plane: skip sentinel (``runId: None``, ``evidenceClosed: True``,
     ``orchestrationSkip: True``) is allowed only when turn evidence is already
-    closed. Open-evidence wires attach a live ``RowRun`` here. Effective backend
-    (``resolve_scores_tier_solve_backend``, sampled at this build) selects the
-    payload: ``thread`` emits the tiny identity wire (``runId`` + scope ids);
-    ``process`` emits the storage-rebuild snapshot so a process-pool leaf can
-    rebuild ``InferenceProblem`` without looking up the parent registry.
+    closed. Open-evidence wires attach a live ``RowRun`` here. Production
+    ``thread`` emits the tiny identity wire (``runId`` + scope ids). Process
+    occupancy opt-in is a SAT-session worker; the parent Solve seam is not
+    wired, so open-evidence process dispatch fails loud rather than rebuilding
+    the turn and catalog in the child.
 
     Invariant: when ensure is satisfied and evidence is still open, this dispatch
     must attach a ``runId`` (tier registry or successful scheduler adopt). Parking
@@ -223,12 +217,14 @@ def build_scores_tier_solve_job_wire(
             overlay_ensure=False,
         )
     # Apply the previous leaf snapshot before this dispatch's fleet overlay so
-    # the continued ladder holds current overlay (thread looks up RowRun; process
-    # copies it onto the storage-rebuild snapshot).
+    # the continued ladder holds current overlay. Thread looks up RowRun.
     apply_scores_tier_solve_step_result(run, node_result_wire)
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
     if resolve_scores_tier_solve_backend() == SCORES_TIER_SOLVE_BACKEND_PROCESS:
-        return _process_safe_tier_solve_job_wire(scope, run)
+        raise RuntimeError(
+            "scores process SAT is a SAT-session worker; the parent Solve seam "
+            "is not wired. Production tier_solve stays on the thread backend."
+        )
     return _thread_tier_solve_job_wire(scope, run)
 
 
@@ -262,12 +258,11 @@ def _adopt_scheduler_row_run_for_tier_wire(
 
 
 def apply_scores_tier_solve_step_result(run: RowRun, result: StepResult | object) -> None:
-    """Advance parent ``RowRun`` ladder state from a process-plane leaf result.
+    """Advance parent ``RowRun`` ladder state from a result-wire snapshot.
 
-    The child never holds ``RowRun``. Continue and persist payloads carry a
-    catalog-free ``PolicyLadderState`` snapshot that replaces the parent's
-    ladder progress. Accepts a ``StepResult`` or the payload dict already
-    stored on ``node.result_wire``.
+    Continue and persist payloads may carry a catalog-free ``PolicyLadderState``
+    that replaces the parent's ladder progress. Accepts a ``StepResult`` or the
+    payload dict already stored on ``node.result_wire``.
     """
     payload = result.payload if isinstance(result, StepResult) else result
     if not isinstance(payload, dict):
@@ -278,30 +273,13 @@ def apply_scores_tier_solve_step_result(run: RowRun, result: StepResult | object
 
 
 def _thread_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[str, Any]:
-    """Tiny identity wire: ``runId`` + scope ids. No storage-rebuild copies."""
+    """Tiny identity wire: ``runId`` + scope ids. No SAT-session model payload."""
     return {
         WIRE_RUN_ID: run.run_id,
         WIRE_GAME_ID: scope.game_id,
         WIRE_PERSPECTIVE: scope.perspective,
         WIRE_TURN: scope.turn,
         WIRE_PLAYER_ID: scope.player_id,
-    }
-
-
-def _process_safe_tier_solve_job_wire(scope: ComputeScope, run: RowRun) -> dict[str, Any]:
-    """Process-backend snapshot: scope + storage root + catalog-free ladder."""
-    from api.analytics.military_score_inference.inference_row_runner import (
-        stream_tier_time_limit_seconds,
-    )
-
-    observation, _turn = solve_context(run)
-    ladder = run.ladder_state
-    return {
-        **_thread_tier_solve_job_wire(scope, run),
-        WIRE_STORAGE_ROOT: str(Path(get_config().storage_root).resolve()),
-        WIRE_LADDER_STATE: None if ladder is None else process_safe_ladder_state(ladder),
-        WIRE_OBSERVATION: observation,
-        WIRE_TIME_LIMIT_SECONDS: stream_tier_time_limit_seconds(),
     }
 
 
@@ -429,16 +407,34 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     )
 
 
+_SAT_SESSION_RESULT_KEYS = frozenset(
+    {
+        "assignments",
+        "lastSolverStatus",
+        "stoppedReason",
+    }
+)
+
+
 def map_scores_tier_solve_remote_result(scope: ComputeScope, raw: object) -> StepResult:
     """Map a process-plane leaf snapshot onto the parent ``RowRun`` and ``StepResult``.
 
     Runs on the parent after unpickle, before ``coerce_step_result``. Soft-defer
     and fleet-torp diagnostics come from the live ``RowRun``. SAT is not re-run.
+
+    A SAT-session result (``assignments`` / ``stoppedReason`` / ``lastSolverStatus``)
+    is not a ladder snapshot. Until the parent Solve seam maps those assignments
+    onto the catalog, this mapper fails loud rather than parking as ``waiting_deps``.
     """
     del scope
     if isinstance(raw, StepResult):
         return raw
     payload = raw if isinstance(raw, dict) else {}
+    if not _SAT_SESSION_RESULT_KEYS.isdisjoint(payload):
+        raise RuntimeError(
+            "scores tier_solve remote mapper received a SAT-session result; "
+            "the parent Solve seam is not wired to map assignments onto RowRun"
+        )
     run_id = payload.get(WIRE_RUN_ID)
     if not isinstance(run_id, str):
         return _waiting_deps_without_submit()
@@ -472,9 +468,9 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
 
     Thread-backend workers share the parent registry. Skip sentinels complete
     via ``orchestration_plane_skip_result`` (same predicate as process dispatch).
-    Process-backend workers use ``run_scores_tier_solve_leaf`` instead: that leaf
-    rebuilds the problem from ``storageRoot`` and never calls ``get_row_run``.
-    The parent maps the leaf snapshot through ``map_scores_tier_solve_remote_result``.
+    Process occupancy opt-in is a SAT-session worker; the parent Solve seam is
+    not wired, so process dispatch fails loud at job-wire build instead of
+    rebuilding the turn in the child.
     """
     skip_result = orchestration_plane_skip_result(job_wire)
     if skip_result is not None:

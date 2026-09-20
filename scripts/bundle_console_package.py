@@ -137,9 +137,8 @@ def collect_policy(repo_root: Path = REPO_ROOT) -> CollectPolicy:
 def sat_worker_collect_policy(repo_root: Path = REPO_ROOT) -> SatWorkerCollectPolicy:
     """Runtime-only collect policy for the sibling SAT worker executable.
 
-    Datas stay empty: the worker reads ``storageRoot`` from the job wire (file
-    backend / packaged console data directory) and must not collect that
-    directory into the freeze tree.
+    Datas stay empty: the worker receives a SAT model session wire and must not
+    collect the console data directory into the freeze tree.
     """
     from api.compute.process_pool_executable import SAT_WORKER_STEM
 

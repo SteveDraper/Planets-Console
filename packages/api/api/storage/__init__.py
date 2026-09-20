@@ -39,9 +39,9 @@ def _load_asset(path: Path | None) -> dict:
 def open_file_backend(storage_root: Path) -> StorageBackend:
     """Open a file backend at ``storage_root`` without touching process-global config.
 
-    Does not create ``storage_root``. Read-only workers (process-pool SAT leaf)
-    must fail when the tree is missing rather than mkdir. Probe writers that
-    need a fresh tree use ``open_probe_file_backend``. Callers must not import
+    Does not create ``storage_root``. Callers that need a missing tree to fail
+    (read-only probe workers) must not mkdir. Probe writers that need a fresh
+    tree use ``open_probe_file_backend``. Callers must not import
     ``FileStorageBackend`` themselves.
     """
     return FileStorageBackend(Path(storage_root))

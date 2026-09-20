@@ -603,7 +603,6 @@ class ComputeWorkerPool:
             apply_process_pool_executable()
             self._process_executor = ProcessPoolExecutor(
                 max_workers=self._worker_count,
-                initializer=init_worker_turn_cache,
             )
         return self._process_executor
 

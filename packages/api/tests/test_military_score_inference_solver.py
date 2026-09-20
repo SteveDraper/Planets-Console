@@ -546,18 +546,14 @@ def test_freighter_only_zero_military_score_uses_fast_path():
 
 
 def test_configured_sat_search_workers_defaults_to_one(monkeypatch):
-    from api.analytics.military_score_inference.near_best_structural_search import (
-        configured_sat_search_workers,
-    )
+    from api.compute.sat_gil_overlap import configured_sat_search_workers
 
     monkeypatch.delenv("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS", raising=False)
     assert configured_sat_search_workers() == 1
 
 
 def test_configured_sat_search_workers_env_override(monkeypatch):
-    from api.analytics.military_score_inference.near_best_structural_search import (
-        configured_sat_search_workers,
-    )
+    from api.compute.sat_gil_overlap import configured_sat_search_workers
 
     monkeypatch.setenv("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS", "4")
     assert configured_sat_search_workers() == 4
