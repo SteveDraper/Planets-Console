@@ -53,6 +53,14 @@ def _distinct_pairs_model() -> tuple[cp_model.CpModel, tuple[str, str], str]:
     return model, ("x", "y"), "obj"
 
 
+def _maximize_int_model() -> tuple[cp_model.CpModel, str]:
+    model = cp_model.CpModel()
+    x = model.new_int_var(0, 4, "x")
+    model.maximize(x)
+    del x
+    return model, "x"
+
+
 def _collect_live_assignments(
     model: cp_model.CpModel,
     names: tuple[str, ...],
@@ -166,6 +174,26 @@ def test_session_near_best_collection_matches_live_no_good_loop() -> None:
     assert actual == expect
     assert len(result[WIRE_ASSIGNMENTS]) == 3
     assert result[WIRE_STOPPED_REASON] == "max_solutions"
+
+
+def test_collect_near_best_band_excludes_worse_objectives() -> None:
+    model, name = _maximize_int_model()
+    named = int_vars_by_name(model)
+    collected = collect_sat_search_assignments(
+        model,
+        count_vars={name: named[name]},
+        names=(name,),
+        max_solutions=5,
+        time_limit_seconds=5.0,
+        num_workers=1,
+        objective_var=named[name],
+        near_best_threshold=1,
+    )
+    found = {item[name] for item in collected.assignments}
+    assert collected.tier_max_objective == 4
+    assert 3 in found and 4 in found
+    assert found.isdisjoint({0, 1, 2})
+    assert collected.stopped_reason == "near_best_band_exhausted"
 
 
 def test_session_raises_without_model_proto() -> None:
