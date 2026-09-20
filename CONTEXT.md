@@ -53,7 +53,7 @@ The OS-app identity of a running **console package** -- macOS Dock, Windows task
 _Avoid_: host (VGA Planets rules or Planets.nu), desktop app, native SPA window, tray-only agent, Electron, Tauri
 
 **SAT worker**:
-Sibling console executable (`sat_worker` / `sat_worker.exe`) collected next to the **process host** so packaged `ProcessPoolExecutor` does not re-exec the windowed GUI freeze. Imports solver, file storage, and the scores `tier_solve` job-wire codec only. Frozen spawn omits the process-host `__main__` so the child does not reload `process_host_entry.py`. See [ADR 0027 addendum](docs/adr/0027-addendum-packaged-sat-worker.md).
+Sibling console executable (`sat_worker` / `sat_worker.exe`) collected next to the **process host** so packaged `ProcessPoolExecutor` does not re-exec the windowed GUI freeze. Imports the SAT-session worker (model proto + search budget); does not import file storage, turn codecs, or parent scores orchestration. Frozen spawn omits the process-host `__main__` so the child does not reload `process_host_entry.py`. See [ADR 0027 addendum](docs/adr/0027-addendum-packaged-sat-worker.md).
 _Avoid_: eight `.app` copies, `ProcessPoolExecutor` of `sys.executable` in a frozen process host, long-lived SAT daemon (not the chosen plane)
 
 **Single-instance**:

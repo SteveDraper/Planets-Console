@@ -6,15 +6,14 @@ import multiprocessing.spawn as spawn_mod
 from pathlib import Path
 
 import pytest
-from api.analytics.scores.compute_plane.tier_solve_leaf import run_scores_tier_solve_leaf
 from api.compute.process_pool_executable import (
     SAT_WORKER_STEM,
     apply_process_pool_executable,
     process_pool_executable,
     sat_worker_executable_name,
 )
+from api.compute.sat_session import run_sat_search_session
 from api.compute.sat_worker_entry import spawn_targets
-from api.compute.worker_turn_cache import init_worker_turn_cache
 
 from tests.sat_worker_import_graph import (
     SAT_WORKER_DENIED_MODULE_PREFIXES,
@@ -109,6 +108,7 @@ def test_sat_worker_denied_prefixes_cover_http_and_parent_plane():
         "api.analytics.scores.compute_orchestration",
         "api.app",
         "api.errors",
+        "api.storage.file",
         "bff",
         "fastapi",
         "server.app",
@@ -142,5 +142,5 @@ def test_sat_worker_entry_import_does_not_load_http_or_parent_plane():
     )
 
 
-def test_spawn_targets_are_leaf_and_turn_cache_init():
-    assert spawn_targets() == (run_scores_tier_solve_leaf, init_worker_turn_cache)
+def test_spawn_targets_are_sat_search_session():
+    assert spawn_targets() == (run_sat_search_session,)

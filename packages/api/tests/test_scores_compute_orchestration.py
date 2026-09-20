@@ -51,7 +51,6 @@ from api.analytics.scores.compute_orchestration import (
     run_scores_tier_solve,
     tier_job_outcome_to_step_result,
 )
-from api.analytics.scores.compute_plane.tier_solve_leaf import run_scores_tier_solve_leaf
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
     _retire_row_run,
@@ -77,6 +76,7 @@ from api.compute import (
     compute_scope_to_export_scope,
 )
 from api.compute.dag import plan_compute_dag
+from api.compute.sat_session import run_sat_search_session
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -142,9 +142,7 @@ def test_scores_registration_includes_tier_solve_step() -> None:
     )
     assert tier.backend == "thread"
     assert dict(SCORES_REGISTRATION.run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve
-    assert (
-        dict(SCORES_REGISTRATION.remote_run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve_leaf
-    )
+    assert dict(SCORES_REGISTRATION.remote_run_steps)[SCORES_TIER_SOLVE] is run_sat_search_session
     assert (
         dict(SCORES_REGISTRATION.map_remote_step_results)[SCORES_TIER_SOLVE]
         is map_scores_tier_solve_remote_result
@@ -1376,7 +1374,7 @@ def test_scores_tier_solve_selects_process_leaf_after_import(
     monkeypatch,
     opt_in: str,
 ) -> None:
-    """Env/config after scores import still remaps declared thread to process+leaf."""
+    """Env/config after scores import still remaps declared thread to process."""
     from dataclasses import replace
 
     from api.analytics.scores.compute_orchestration import SCORES_COMPUTE_PROFILE
@@ -1399,14 +1397,10 @@ def test_scores_tier_solve_selects_process_leaf_after_import(
         assert dict(SCORES_REGISTRATION.run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve
 
         handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
-        assert handle.state == "running", handle.error
-        assert captured["backend"] == "process"
-        assert captured["run_step"] is run_scores_tier_solve_leaf
-        job_wire = captured["job_wire"]
-        assert isinstance(job_wire, dict)
-        assert WIRE_STORAGE_ROOT in job_wire
-        assert WIRE_LADDER_STATE in job_wire
-        assert WIRE_OBSERVATION in job_wire
+        assert handle.state == "failed", handle.error
+        assert handle.error is not None
+        assert "SAT-session" in str(handle.error)
+        assert "run_step" not in captured
     finally:
         set_config(cfg)
 
@@ -1422,11 +1416,10 @@ def test_scores_tier_solve_frozen_honors_process_env(
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
 
     handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
-    assert handle.state == "running", handle.error
-    assert captured["backend"] == "process"
-    assert captured["run_step"] is run_scores_tier_solve_leaf
-    assert isinstance(captured["job_wire"], dict)
-    assert WIRE_STORAGE_ROOT in captured["job_wire"]
+    assert handle.state == "failed", handle.error
+    assert handle.error is not None
+    assert "SAT-session" in str(handle.error)
+    assert "run_step" not in captured
 
 
 def test_stream_query_context_plans_prior_turn_fleet_dependency(
