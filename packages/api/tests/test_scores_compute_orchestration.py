@@ -46,8 +46,6 @@ from api.analytics.scores.compute_orchestration import (
     SCORES_TIER_SOLVE,
     ScoresPersistencePolicy,
     build_scores_tier_solve_job_wire,
-    map_scores_tier_solve_remote_result,
-    resolve_scores_step_backend,
     run_scores_tier_solve,
     tier_job_outcome_to_step_result,
 )
@@ -77,7 +75,6 @@ from api.compute import (
     compute_scope_to_export_scope,
 )
 from api.compute.dag import plan_compute_dag
-from api.compute.sat_session import run_sat_search_session
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -143,14 +140,14 @@ def test_scores_registration_includes_tier_solve_step() -> None:
     )
     assert tier.backend == "thread"
     assert dict(SCORES_REGISTRATION.run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve
-    assert dict(SCORES_REGISTRATION.remote_run_steps)[SCORES_TIER_SOLVE] is run_sat_search_session
-    assert (
-        dict(SCORES_REGISTRATION.map_remote_step_results)[SCORES_TIER_SOLVE]
-        is map_scores_tier_solve_remote_result
-    )
-    assert SCORES_REGISTRATION.resolve_step_backend is resolve_scores_step_backend
+    assert SCORES_REGISTRATION.remote_run_steps == ()
+    assert SCORES_REGISTRATION.map_remote_step_results == ()
+    assert SCORES_REGISTRATION.resolve_step_backend is None
     compute = build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
-    assert compute.map_remote_step_result[SCORES_TIER_SOLVE] is map_scores_tier_solve_remote_result
+    assert SCORES_TIER_SOLVE not in compute.remote_run_step
+    assert SCORES_TIER_SOLVE not in compute.map_remote_step_result
+    assert compute.resolve_step_backend is None
+    assert compute.run_step[SCORES_TIER_SOLVE] is run_scores_tier_solve
 
 
 def test_retire_stale_run_preserves_replacement_scope_mapping(sample_turn) -> None:

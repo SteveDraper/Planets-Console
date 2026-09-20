@@ -9,9 +9,7 @@ from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
-    outcome_after_ladder_complete,
     run_inference_tier_job,
-    solve_context,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -45,7 +43,7 @@ from api.analytics.scores.tier_solve_wire import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
-from api.compute.profile import AnalyticComputeProfile, ComputeBackend, ComputeStepSpec
+from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import (
     DependencyOutputs,
@@ -77,18 +75,6 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
     # fleet@(N-1) and turn scores into a gap-fill barrier.
     route_table_map=False,
 )
-
-
-def resolve_scores_step_backend(step_kind: str, declared: ComputeBackend) -> ComputeBackend:
-    """Return the effective backend for one scores compute DAG step.
-
-    ``tier_solve`` stays on the declared thread backend so ``run_scores_tier_solve``
-    keeps the policy ladder and ``RowRun`` catalog on the parent. Process SAT
-    opt-in is consumed by the parent Solve seam (one search session per pass).
-    Occupancy rematch for nested process sessions is a later phase.
-    """
-    del step_kind
-    return declared
 
 
 def _apply_fleet_resolution_to_row_run(
@@ -396,64 +382,6 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
         run,
         soft_reason=SoftTerminalReason.EMPTY_TIER_OUTCOME,
     )
-
-
-_SAT_SESSION_RESULT_KEYS = frozenset(
-    {
-        "assignments",
-        "lastSolverStatus",
-        "stoppedReason",
-    }
-)
-
-
-def map_scores_tier_solve_remote_result(scope: ComputeScope, raw: object) -> StepResult:
-    """Map a process-plane leaf snapshot onto the parent ``RowRun`` and ``StepResult``.
-
-    Runs on the parent after unpickle, before ``coerce_step_result``. Soft-defer
-    and fleet-torp diagnostics come from the live ``RowRun``. SAT is not re-run.
-
-    A SAT-session result (``assignments`` / ``stoppedReason`` / ``lastSolverStatus``)
-    is not a ladder snapshot. Process SAT maps those assignments onto the catalog
-    in the parent Solve seam, not through this remote mapper. Arrival here is a
-    contract bug: fail loud rather than parking as ``waiting_deps``.
-    """
-    del scope
-    if isinstance(raw, StepResult):
-        return raw
-    payload = raw if isinstance(raw, dict) else {}
-    if not _SAT_SESSION_RESULT_KEYS.isdisjoint(payload):
-        raise RuntimeError(
-            "scores tier_solve remote mapper received a SAT-session result; "
-            "assignments are mapped onto RowRun by the parent Solve seam, "
-            "not this remote mapper"
-        )
-    run_id = payload.get(WIRE_RUN_ID)
-    if not isinstance(run_id, str):
-        return _waiting_deps_without_submit()
-    run = get_row_run(run_id)
-    if run is None:
-        return _waiting_deps_without_submit()
-
-    with run.tier_lock:
-        snapshot = payload.get(WIRE_LADDER_STATE)
-        if not isinstance(snapshot, PolicyLadderState):
-            outcome: TierJobOutcome | None = TierJobOutcome()
-        else:
-            apply_scores_tier_solve_step_result(run, payload)
-            state = run.ladder_state
-            if state is None:
-                outcome = TierJobOutcome()
-            elif not state.ladder_complete:
-                outcome = None
-            else:
-                observation, turn = solve_context(run)
-                outcome = outcome_after_ladder_complete(run, state, observation, turn)
-                if outcome.next_ladder_state is not None:
-                    run.ladder_state = outcome.next_ladder_state
-    if outcome is None:
-        return StepResult(outcome="continue", payload=payload)
-    return tier_job_outcome_to_step_result(run, outcome)
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
