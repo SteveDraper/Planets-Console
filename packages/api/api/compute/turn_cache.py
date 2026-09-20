@@ -112,8 +112,19 @@ class TurnInfoCache:
                     perspective=perspective,
                 )
 
+    def put(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        turn: TurnInfo,
+    ) -> None:
+        """Insert or replace a cached turn after that turn document is written."""
+        with self._lock:
+            self._cache.put((game_id, perspective, turn_number), turn)
+
     def drop(self, game_id: int, perspective: int, turn_number: int) -> None:
-        """Forget a cached turn after that turn document is written."""
+        """Forget a cached turn after that turn document is written without a TurnInfo."""
         with self._lock:
             self._cache.drop((game_id, perspective, turn_number))
 

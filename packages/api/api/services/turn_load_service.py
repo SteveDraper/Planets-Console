@@ -36,6 +36,14 @@ class TurnInfoReadThroughCache(Protocol):
         load_turn: Callable[[int], TurnInfo | None],
     ) -> TurnInfo | None: ...
 
+    def put(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        turn: TurnInfo,
+    ) -> None: ...
+
     def drop(self, game_id: int, perspective: int, turn_number: int) -> None: ...
 
 
@@ -191,11 +199,16 @@ class TurnLoadService:
         perspective: int,
         turn_number: int,
         rst: dict,
+        *,
+        turn: TurnInfo | None = None,
     ) -> None:
         self._storage.put(self.turn_store_key(game_id, perspective, turn_number), rst)
         cache = self._read_through_turn_info_cache()
         if cache is not None:
-            cache.drop(game_id, perspective, turn_number)
+            if turn is not None:
+                cache.put(game_id, perspective, turn_number, turn)
+            else:
+                cache.drop(game_id, perspective, turn_number)
         if self._on_turn_stored is not None:
             self._on_turn_stored(game_id, perspective, turn_number)
 
@@ -213,7 +226,7 @@ class TurnLoadService:
             return False
         turn = self.deserialize_archive_turn_rst(game_id, archive_turn.rst)
         self._validate_archive_turn_matches_file(game_id, perspective, turn_number, turn)
-        self._store_turn_rst(game_id, perspective, turn_number, archive_turn.rst)
+        self._store_turn_rst(game_id, perspective, turn_number, archive_turn.rst, turn=turn)
         return True
 
     def list_stored_turn_perspectives(self, game_id: int, turn_number: int) -> list[int]:
@@ -395,7 +408,7 @@ class TurnLoadService:
 
         self._validate_turn_loaded_matches_request(game_id, turn_number, turn)
 
-        self._store_turn_rst(game_id, perspective, turn_number, rst)
+        self._store_turn_rst(game_id, perspective, turn_number, rst, turn=turn)
         return turn
 
     def list_stored_turn_numbers(self, game_id: int, perspective: int) -> list[int]:
