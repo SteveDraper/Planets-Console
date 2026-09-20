@@ -614,7 +614,7 @@ class ComputeWorkerPool:
         if self._process_executor is None:
             apply_process_pool_executable()
             self._process_executor = ProcessPoolExecutor(
-                max_workers=max(1, self._worker_count),
+                max_workers=self._worker_count,
             )
         return self._process_executor
 

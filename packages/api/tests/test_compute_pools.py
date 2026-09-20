@@ -632,6 +632,140 @@ def test_pool_dispatches_process_backend(sample_turn):
     assert pool.metrics.process_executions == 1
 
 
+def test_nested_process_submit_bypasses_dag_queue_deadlock(sample_turn, monkeypatch):
+    """Nested SAT must not enqueue a PoolWorkItem the blocked thread worker cannot dequeue.
+
+    ``submit_process_callable`` waits on ``Future.result``. With one DAG worker that
+    wait would deadlock if the process job were a queue item. The process executor
+    runs it independently, so a second DAG item can stay queued until the nested
+    wait returns.
+    """
+    process_future: Future[object] = Future()
+    submitted: list[tuple[object, object]] = []
+    process_submitted = threading.Event()
+    nested_finished = threading.Event()
+    nested_result: dict[str, object] = {}
+    enqueued_kinds: list[str] = []
+    step_calls = {"n": 0}
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def submit(self, fn, wire):
+            submitted.append((fn, wire))
+            process_submitted.set()
+            return process_future
+
+        def shutdown(self, wait: bool = False, cancel_futures: bool = False) -> None:
+            del wait, cancel_futures
+
+    monkeypatch.setattr("api.compute.pools.ProcessPoolExecutor", FakeExecutor)
+
+    pool = ComputeWorkerPool(worker_count=1)
+
+    class NestedSolveOrch:
+        def execute_pool_step(self, scope):
+            del scope
+            step_calls["n"] += 1
+            if step_calls["n"] == 1:
+                nested_result["value"] = pool.submit_process_callable(
+                    run_process_materialize,
+                    {"scope": "nested-sat"},
+                )
+                nested_finished.set()
+                return nested_result["value"]
+            return {"continuation": True}
+
+        def complete_pool_step(self, *args, **kwargs):
+            del args, kwargs
+
+    pool.set_on_item_enqueued(lambda item, _depth: enqueued_kinds.append(item.step_kind))
+    try:
+        orch_id = pool.register(NestedSolveOrch())  # type: ignore[arg-type]
+        scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
+        pool.enqueue_for_tests(
+            _work_item(
+                scope=scope,
+                orchestrator_id=orch_id,
+                step_kind="tier_solve",
+            )
+        )
+        assert process_submitted.wait(timeout=3.0), (
+            "thread worker did not submit nested process work"
+        )
+        assert submitted == [(run_process_materialize, {"scope": "nested-sat"})]
+        assert enqueued_kinds == []
+        assert pool.snapshot_work_queue() == ()
+
+        pool.enqueue_for_tests(
+            _work_item(
+                scope=scope,
+                orchestrator_id=orch_id,
+                step_index=1,
+                step_kind="continuation",
+            )
+        )
+        assert [item.step_kind for item in pool.snapshot_work_queue()] == ["continuation"]
+        assert not nested_finished.is_set()
+
+        process_future.set_result(run_process_materialize({"scope": "nested-sat"}))
+        assert nested_finished.wait(timeout=3.0), (
+            "nested process wait deadlocked on the DAG queue"
+        )
+        assert nested_result["value"] == {"result": "nested-sat"}
+
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if not pool.snapshot_work_queue() and step_calls["n"] == 2:
+                break
+            time.sleep(0.01)
+        assert pool.snapshot_work_queue() == ()
+        assert step_calls["n"] == 2
+        assert pool.metrics.process_executions == 1
+        assert enqueued_kinds == []
+    finally:
+        if not process_future.done():
+            process_future.set_result({"result": "aborted"})
+        pool.shutdown()
+
+
+def test_process_executor_max_workers_matches_worker_count(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            captured["max_workers"] = kwargs.get("max_workers", args[0] if args else None)
+            del args, kwargs
+
+        def submit(self, fn, wire):
+            future: Future[object] = Future()
+            future.set_result(fn(wire))
+            return future
+
+        def shutdown(self, wait: bool = False, cancel_futures: bool = False) -> None:
+            del wait, cancel_futures
+
+    monkeypatch.setattr("api.compute.pools.ProcessPoolExecutor", FakeExecutor)
+    pool = ComputeWorkerPool(worker_count=2)
+    try:
+        result = pool.submit_process_callable(run_process_materialize, {"scope": "sat"})
+        assert captured["max_workers"] == 2
+        assert result == {"result": "sat"}
+    finally:
+        pool.shutdown()
+
+
+def test_process_executor_rejects_zero_worker_count():
+    """worker_count=0 must not silently become max_workers=1."""
+    pool = ComputeWorkerPool(worker_count=0)
+    try:
+        with pytest.raises(ValueError, match="max_workers must be greater than 0"):
+            pool.submit_process_callable(run_process_materialize, {"scope": "sat"})
+    finally:
+        pool.shutdown()
+
+
 def test_frozen_process_pool_uses_sat_worker_not_gui_executable(
     sample_turn,
     monkeypatch,
