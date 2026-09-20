@@ -60,11 +60,12 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.analytics.scores.tier_solve_wire import (
     WIRE_EVIDENCE_CLOSED,
-    WIRE_LADDER_STATE,
-    WIRE_OBSERVATION,
+    WIRE_GAME_ID,
     WIRE_ORCHESTRATION_SKIP,
-    WIRE_STORAGE_ROOT,
-    WIRE_TIME_LIMIT_SECONDS,
+    WIRE_PERSPECTIVE,
+    WIRE_PLAYER_ID,
+    WIRE_RUN_ID,
+    WIRE_TURN,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import (
@@ -328,13 +329,15 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
-    assert skip_wire["runId"] is None
-    assert skip_wire[WIRE_EVIDENCE_CLOSED] is True
-    assert skip_wire[WIRE_ORCHESTRATION_SKIP] is True
-    assert WIRE_STORAGE_ROOT not in skip_wire
-    assert WIRE_LADDER_STATE not in skip_wire
-    assert WIRE_OBSERVATION not in skip_wire
-    assert WIRE_TIME_LIMIT_SECONDS not in skip_wire
+    assert skip_wire == {
+        WIRE_RUN_ID: None,
+        WIRE_EVIDENCE_CLOSED: True,
+        WIRE_ORCHESTRATION_SKIP: True,
+        WIRE_GAME_ID: scope.game_id,
+        WIRE_PERSPECTIVE: scope.perspective,
+        WIRE_TURN: scope.turn,
+        WIRE_PLAYER_ID: scope.player_id,
+    }
 
 
 def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(

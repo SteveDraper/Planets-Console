@@ -14,7 +14,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from multiprocessing import shared_memory
-from typing import Any
+from typing import Any, Protocol
 
 from google.protobuf import text_format
 from ortools.sat import cp_model_pb2
@@ -41,6 +41,14 @@ WIRE_TIER_MAX_OBJECTIVE = "tierMaxObjective"
 
 _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
 _CANCEL_POLL_SECONDS = 0.05
+
+
+class SatSessionCancel(Protocol):
+    """Cancel flag for a SAT search session (``threading.Event`` matches)."""
+
+    def is_set(self) -> bool: ...
+
+    def wait(self, timeout: float | None = None) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -71,7 +79,8 @@ class SatSessionCancelFlag:
     Raw ``multiprocessing.Event`` cannot be pickled into ``ProcessPoolExecutor``
     arguments (spawn requires inheritance). This flag is a one-byte shared
     memory cell: the parent calls ``cancel()``, the child polls ``is_set()`` and
-    ``wait()`` and invokes ``CpSolver.stop_search``.
+    ``wait()`` and invokes ``CpSolver.stop_search``. Use as a context manager so
+    the creating process unlinks the shared-memory segment.
     """
 
     def __init__(self, *, name: str | None = None) -> None:
@@ -114,6 +123,12 @@ class SatSessionCancelFlag:
         finally:
             self._memory.close()
             self._created = False
+
+    def __enter__(self) -> SatSessionCancelFlag:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
 
 def encode_cp_model_proto(model: cp_model.CpModel) -> bytes:
@@ -181,7 +196,7 @@ def sat_search_session_wire(
     objective_var_name: str | None = None,
     near_best_objective_threshold: int = 0,
     seed_assignments: Sequence[Mapping[str, int]] = (),
-    cancel_event: object | None = None,
+    cancel_event: SatSessionCancel | None = None,
     num_workers: int | None = None,
 ) -> dict[str, object]:
     """Build a pickle-safe SAT search session job wire from a live model."""
@@ -204,7 +219,7 @@ def sat_search_session_wire(
 def run_sat_search_session(job_wire: dict[str, Any]) -> dict[str, object]:
     """Run one SAT search session from a pickle-safe job wire.
 
-    Skip sentinels and storage-rebuild scores wires must not reach this leaf.
+    Skip sentinels must not reach this leaf.
     """
     if job_wire.get("orchestrationSkip") is True:
         raise RuntimeError(
@@ -293,28 +308,17 @@ def _require_named_vars(
     return {name: named_vars[name] for name in names}
 
 
-def _cancel_is_set(cancel_event: object | None) -> bool:
-    if cancel_event is None:
-        return False
-    is_set = getattr(cancel_event, "is_set", None)
-    return callable(is_set) and bool(is_set())
-
-
-def _wait_cancel_or_timeout(cancel_event: object, timeout_seconds: float) -> bool:
-    wait = getattr(cancel_event, "wait", None)
-    if callable(wait):
-        return bool(wait(timeout_seconds))
-    time.sleep(timeout_seconds)
-    return _cancel_is_set(cancel_event)
+def _cancel_is_set(cancel_event: SatSessionCancel | None) -> bool:
+    return cancel_event is not None and cancel_event.is_set()
 
 
 class _StopSearchOnCancel(cp_model.CpSolverSolutionCallback):
-    def __init__(self, cancel_event: object) -> None:
+    def __init__(self, cancel_event: SatSessionCancel) -> None:
         super().__init__()
         self._cancel_event = cancel_event
 
     def on_solution_callback(self) -> None:
-        if _cancel_is_set(self._cancel_event):
+        if self._cancel_event.is_set():
             self.StopSearch()
 
 
@@ -328,7 +332,7 @@ def collect_sat_search_assignments(
     objective_var: cp_model.IntVar | None = None,
     near_best_threshold: int = 0,
     num_workers: int | None = None,
-    cancel_event: object | None = None,
+    cancel_event: SatSessionCancel | None = None,
     seed_assignments: Sequence[Mapping[str, int]] = (),
 ) -> SatSearchCollectionResult:
     """Collect distinct assignments with forbid-previous and optional near-best banding.
@@ -351,10 +355,11 @@ def collect_sat_search_assignments(
     session_done = threading.Event()
     watcher: threading.Thread | None = None
     if cancel_event is not None:
+        session_cancel = cancel_event
 
         def _watch() -> None:
             while not session_done.is_set():
-                if _wait_cancel_or_timeout(cancel_event, _CANCEL_POLL_SECONDS):
+                if session_cancel.wait(_CANCEL_POLL_SECONDS):
                     solver.stop_search()
                     return
 

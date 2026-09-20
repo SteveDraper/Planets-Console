@@ -15,6 +15,7 @@ from api.compute.sat_session import (
     WIRE_ASSIGNMENTS,
     WIRE_LAST_SOLVER_STATUS,
     WIRE_STOPPED_REASON,
+    SatSessionCancel,
     SatSessionCancelFlag,
     add_assignment_no_good,
     collect_sat_search_assignments,
@@ -178,10 +179,9 @@ def test_in_process_session_cancel_stops_search() -> None:
 
 def test_process_session_cancel_stops_search_without_hanging_the_pool() -> None:
     context = get_context("spawn")
-    cancel = SatSessionCancelFlag()
     model = long_enough_cp_model()
     names = tuple(f"x{index}" for index in range(8))
-    try:
+    with SatSessionCancelFlag() as cancel:
         wire = sat_search_session_wire(
             model=model,
             int_var_names=names,
@@ -198,8 +198,6 @@ def test_process_session_cancel_stops_search_without_hanging_the_pool() -> None:
             result = future.result(timeout=10.0)
         assert result[WIRE_STOPPED_REASON] == "cancelled"
         assert result[WIRE_ASSIGNMENTS] == []
-    finally:
-        cancel.close()
 
 
 def test_collect_sat_search_assignments_matches_session_wire() -> None:
@@ -226,6 +224,16 @@ def test_collect_sat_search_assignments_matches_session_wire() -> None:
     assert collected.as_wire()[WIRE_ASSIGNMENTS] == wire_result[WIRE_ASSIGNMENTS]
     assert collected.stopped_reason == wire_result[WIRE_STOPPED_REASON]
     assert collected.last_solver_status == wire_result[WIRE_LAST_SOLVER_STATUS]
+
+
+def test_inference_cancel_token_matches_sat_session_cancel_protocol() -> None:
+    token = InferenceCancelToken()
+    cancel: SatSessionCancel = token
+    assert not cancel.is_set()
+    assert cancel.wait(0.0) is False
+    token.cancel()
+    assert cancel.is_set()
+    assert cancel.wait(0.0) is True
 
 
 def test_inference_cancel_token_stops_in_process_kernel() -> None:

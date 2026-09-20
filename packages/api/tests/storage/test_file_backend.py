@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from api.errors import NotFoundError, ValidationError
+from api.storage import open_file_backend
 from api.storage.file import FileStorageBackend
 
 GAME_INFO = "games/628580/info"
@@ -232,6 +233,16 @@ def test_in_document_delete_rewrites_file(backend, storage_root):
 def test_missing_document_raises_not_found(backend):
     with pytest.raises(NotFoundError):
         backend.get(GAME_INFO)
+
+
+def test_open_file_backend_does_not_create_missing_root(tmp_path) -> None:
+    missing = tmp_path / "absent-store"
+    assert not missing.exists()
+    storage = open_file_backend(missing)
+    assert not missing.exists()
+    with pytest.raises(NotFoundError):
+        storage.get(TURN)
+    assert not missing.exists()
 
 
 @pytest.mark.parametrize(

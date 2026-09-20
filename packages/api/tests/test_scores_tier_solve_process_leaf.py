@@ -39,33 +39,20 @@ from api.analytics.scores.tier_solve_wire import (
     WIRE_EVIDENCE_CLOSED,
     WIRE_GAME_ID,
     WIRE_LADDER_STATE,
-    WIRE_OBSERVATION,
     WIRE_ORCHESTRATION_SKIP,
     WIRE_PERSPECTIVE,
     WIRE_PLAYER_ID,
     WIRE_RUN_ID,
-    WIRE_STORAGE_ROOT,
-    WIRE_TIME_LIMIT_SECONDS,
     WIRE_TURN,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeScope, DependencyOutputs
 from api.compute.sat_session import SatSearchCollectionResult, run_sat_search_session
 from api.compute.wire import StepResult, coerce_step_result, orchestration_plane_skip_result
-from api.errors import NotFoundError
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.storage import open_file_backend
 
 from tests.scores_exports_helpers import inference_target_player_id, minimal_stream_query_context
 
-_PROCESS_REBUILD_KEYS = frozenset(
-    {
-        WIRE_STORAGE_ROOT,
-        WIRE_LADDER_STATE,
-        WIRE_OBSERVATION,
-        WIRE_TIME_LIMIT_SECONDS,
-    }
-)
 _THREAD_IDENTITY_KEYS = frozenset(
     {
         WIRE_RUN_ID,
@@ -189,7 +176,7 @@ def test_resolve_scores_step_backend_remaps_only_tier_solve(monkeypatch):
     assert resolve_scores_step_backend(SCORES_MATERIALIZE, "inline") == "inline"
 
 
-def test_open_evidence_thread_wire_is_identity_without_process_rebuild_keys(
+def test_open_evidence_thread_wire_is_identity(
     sample_turn,
     monkeypatch,
 ) -> None:
@@ -204,7 +191,6 @@ def test_open_evidence_thread_wire_is_identity_without_process_rebuild_keys(
     )
     assert set(wire) == _THREAD_IDENTITY_KEYS
     assert wire[WIRE_RUN_ID] == run.run_id
-    assert not _PROCESS_REBUILD_KEYS & set(wire)
 
 
 def test_open_evidence_process_wire_fails_loud_until_parent_solve_seam(
@@ -252,16 +238,6 @@ def test_orchestration_skip_stays_off_the_process_pool():
     assert orchestration_plane_skip_result({"runId": "live"}) is None
     with pytest.raises(RuntimeError, match="orchestration plane"):
         run_sat_search_session(skip)
-
-
-def test_open_file_backend_does_not_create_missing_root(tmp_path) -> None:
-    missing = tmp_path / "absent-store"
-    assert not missing.exists()
-    storage = open_file_backend(missing)
-    assert not missing.exists()
-    with pytest.raises(NotFoundError):
-        storage.get("games/628580/1/turns/111")
-    assert not missing.exists()
 
 
 def test_apply_helper_accepts_step_result_or_payload_dict(sample_turn) -> None:
