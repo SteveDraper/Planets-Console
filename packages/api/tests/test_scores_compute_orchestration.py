@@ -1371,13 +1371,13 @@ def _flush_scores_tier_solve(sample_turn, persistence) -> tuple[object, dict[str
 
 
 @pytest.mark.parametrize("opt_in", ["env", "config"])
-def test_scores_tier_solve_selects_process_leaf_after_import(
+def test_scores_tier_solve_process_opt_in_keeps_parent_ladder_after_import(
     sample_turn,
     persistence,
     monkeypatch,
     opt_in: str,
 ) -> None:
-    """Env/config after scores import still remaps declared thread to process."""
+    """Env/config after scores import still leaves the DAG step on thread."""
     from dataclasses import replace
 
     from api.analytics.scores.compute_orchestration import SCORES_COMPUTE_PROFILE
@@ -1400,15 +1400,15 @@ def test_scores_tier_solve_selects_process_leaf_after_import(
         assert dict(SCORES_REGISTRATION.run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve
 
         handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
-        assert handle.state == "failed", handle.error
-        assert handle.error is not None
-        assert "SAT-session" in str(handle.error)
-        assert "run_step" not in captured
+        assert handle.state == "running", handle.error
+        assert captured["backend"] == "thread"
+        assert captured.get("run_step") is None
+        assert captured.get("job_wire") is None
     finally:
         set_config(cfg)
 
 
-def test_scores_tier_solve_frozen_honors_process_env(
+def test_scores_tier_solve_frozen_process_env_keeps_parent_ladder(
     sample_turn,
     persistence,
     monkeypatch,
@@ -1419,10 +1419,9 @@ def test_scores_tier_solve_frozen_honors_process_env(
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
 
     handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
-    assert handle.state == "failed", handle.error
-    assert handle.error is not None
-    assert "SAT-session" in str(handle.error)
-    assert "run_step" not in captured
+    assert handle.state == "running", handle.error
+    assert captured["backend"] == "thread"
+    assert captured.get("run_step") is None
 
 
 def test_stream_query_context_plans_prior_turn_fleet_dependency(

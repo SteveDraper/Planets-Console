@@ -1,4 +1,4 @@
-"""Process-plane scores ``tier_solve``: thread identity wire, SAT-session fail-loud."""
+"""Process-plane scores ``tier_solve``: thread identity wire, SAT-session Solve seam."""
 
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ def test_resolve_scores_tier_solve_backend_frozen_honors_process_env(monkeypatch
     assert resolve_scores_tier_solve_backend() == "process"
 
 
-def test_resolve_scores_step_backend_remaps_only_tier_solve(monkeypatch):
+def test_resolve_scores_step_backend_does_not_remap_tier_solve(monkeypatch):
     from api.analytics.scores.compute_orchestration import (
         SCORES_MATERIALIZE,
         SCORES_TIER_SOLVE,
@@ -172,7 +172,7 @@ def test_resolve_scores_step_backend_remaps_only_tier_solve(monkeypatch):
     )
 
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
-    assert resolve_scores_step_backend(SCORES_TIER_SOLVE, "thread") == "process"
+    assert resolve_scores_step_backend(SCORES_TIER_SOLVE, "thread") == "thread"
     assert resolve_scores_step_backend(SCORES_MATERIALIZE, "inline") == "inline"
 
 
@@ -193,37 +193,40 @@ def test_open_evidence_thread_wire_is_identity(
     assert wire[WIRE_RUN_ID] == run.run_id
 
 
-def test_open_evidence_process_wire_fails_loud_until_parent_solve_seam(
+def test_open_evidence_process_wire_is_identity(
     sample_turn,
     monkeypatch,
 ) -> None:
     _opt_in_process_backend(monkeypatch)
     player_id = inference_target_player_id(sample_turn)
-    _register_run(sample_turn, player_id=player_id)
+    run = _register_run(sample_turn, player_id=player_id)
     ctx = _open_evidence_ctx(sample_turn)
-    with pytest.raises(RuntimeError, match=_PROCESS_UNWIRED):
-        build_scores_tier_solve_job_wire(
-            _scores_scope(sample_turn, player_id),
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-        )
+    wire = build_scores_tier_solve_job_wire(
+        _scores_scope(sample_turn, player_id),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert set(wire) == _THREAD_IDENTITY_KEYS
+    assert wire[WIRE_RUN_ID] == run.run_id
+    assert "storageRoot" not in wire
 
 
-def test_open_evidence_frozen_process_env_fails_loud_until_parent_solve_seam(
+def test_open_evidence_frozen_process_env_wire_is_identity(
     sample_turn,
     monkeypatch,
 ) -> None:
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
     player_id = inference_target_player_id(sample_turn)
-    _register_run(sample_turn, player_id=player_id)
+    run = _register_run(sample_turn, player_id=player_id)
     ctx = _open_evidence_ctx(sample_turn)
-    with pytest.raises(RuntimeError, match=_PROCESS_UNWIRED):
-        build_scores_tier_solve_job_wire(
-            _scores_scope(sample_turn, player_id),
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-        )
+    wire = build_scores_tier_solve_job_wire(
+        _scores_scope(sample_turn, player_id),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert set(wire) == _THREAD_IDENTITY_KEYS
+    assert wire[WIRE_RUN_ID] == run.run_id
 
 
 def test_orchestration_skip_stays_off_the_process_pool():
@@ -286,12 +289,6 @@ def test_wire_build_applies_continue_snapshot_before_next_dispatch(
             WIRE_LADDER_STATE: continued,
         },
     }
-    if backend == "process":
-        with pytest.raises(RuntimeError, match=_PROCESS_UNWIRED):
-            build_scores_tier_solve_job_wire(_scores_scope(sample_turn, player_id), **kwargs)
-        assert parent.ladder_state is continued
-        assert parent.ladder_state.next_step_index == 1
-        return
     wire = build_scores_tier_solve_job_wire(_scores_scope(sample_turn, player_id), **kwargs)
     assert parent.ladder_state is continued
     assert parent.ladder_state.next_step_index == 1

@@ -598,11 +598,23 @@ class ComputeWorkerPool:
             )
         return self._interpreter_executor
 
+    def submit_process_callable(self, run_step: RunStepFn, job_wire: object) -> object:
+        """Run one pickle-safe callable on the process executor and wait.
+
+        Nested SAT search sessions must not enqueue as ``PoolWorkItem``s: a
+        thread worker blocked on ``Future.result`` cannot dequeue the item it
+        is waiting for.
+        """
+        with self._condition:
+            executor = self._process_executor_locked()
+            self._metrics.process_executions += 1
+        return executor.submit(run_step, job_wire).result()
+
     def _process_executor_locked(self) -> ProcessPoolExecutor:
         if self._process_executor is None:
             apply_process_pool_executable()
             self._process_executor = ProcessPoolExecutor(
-                max_workers=self._worker_count,
+                max_workers=max(1, self._worker_count),
             )
         return self._process_executor
 

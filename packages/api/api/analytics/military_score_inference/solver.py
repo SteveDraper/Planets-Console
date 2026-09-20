@@ -603,7 +603,7 @@ def solve_inference_problem(
 
     diagnostics: dict[str, object] = {
         **build_diagnostics,
-        "solver_status": cp_model.CpSolver().status_name(search.last_solver_status),
+        "solver_status": search.last_solver_status_name,
         "solution_count": len(solutions),
         "structural_hit_count": len(search.structural_hits),
         "stopped_reason": search.stopped_reason,

@@ -116,7 +116,7 @@ def test_collect_near_best_splits_kernel_assignments(monkeypatch: pytest.MonkeyP
         return canned
 
     monkeypatch.setattr(
-        "api.analytics.military_score_inference.near_best_structural_search.collect_sat_search_assignments",
+        "api.analytics.military_score_inference.near_best_structural_search.collect_resolved_sat_search_assignments",
         _fake_collect,
     )
     outcome = collect_near_best_structural_hits(
