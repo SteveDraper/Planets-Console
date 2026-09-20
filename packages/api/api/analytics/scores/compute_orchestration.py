@@ -50,11 +50,6 @@ from api.analytics.scores.tier_solve_wire import (
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeBackend, ComputeStepSpec
-from api.compute.sat_session import (
-    WIRE_ASSIGNMENTS,
-    WIRE_LAST_SOLVER_STATUS,
-    WIRE_STOPPED_REASON,
-)
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import (
     DependencyOutputs,
@@ -414,9 +409,9 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
 
 _SAT_SESSION_RESULT_KEYS = frozenset(
     {
-        WIRE_ASSIGNMENTS,
-        WIRE_LAST_SOLVER_STATUS,
-        WIRE_STOPPED_REASON,
+        "assignments",
+        "lastSolverStatus",
+        "stoppedReason",
     }
 )
 
