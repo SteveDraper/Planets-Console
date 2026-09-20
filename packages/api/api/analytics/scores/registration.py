@@ -20,14 +20,11 @@ from api.analytics.scores.compute_orchestration import (
     SCORES_TIER_SOLVE,
     build_scores_materialize_job_wire,
     build_scores_tier_solve_job_wire,
-    map_scores_tier_solve_remote_result,
-    resolve_scores_step_backend,
     run_scores_materialize,
     run_scores_tier_solve,
 )
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.analytics.turn_roster import players_by_id as turn_players_by_id
-from api.compute.sat_session import run_sat_search_session
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
@@ -165,7 +162,6 @@ REGISTRATION = TurnAnalyticRegistration(
         (SCORES_MATERIALIZE, run_scores_materialize),
         (SCORES_TIER_SOLVE, run_scores_tier_solve),
     ),
-    remote_run_steps=((SCORES_TIER_SOLVE, run_sat_search_session),),
-    map_remote_step_results=((SCORES_TIER_SOLVE, map_scores_tier_solve_remote_result),),
-    resolve_step_backend=resolve_scores_step_backend,
+    # Nested SAT is ``submit_process_callable(run_sat_search_session)``, not a
+    # DAG ``remote_run_steps`` leaf. ``tier_solve`` stays thread / identity wire.
 )

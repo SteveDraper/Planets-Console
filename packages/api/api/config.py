@@ -83,11 +83,12 @@ class ApiConfig:
     """
 
     scores_tier_solve_backend: str = "thread"
-    """Declared backend for scores ``tier_solve``: ``thread`` (default) or ``process``.
+    """SAT search backend for scores inference: ``thread`` (default) or ``process``.
 
-    ``process`` is an occupancy / test opt-in. Frozen and unpackaged processes
-    honor the same setting. A packaged process pool spawns the sibling
-    ``sat_worker`` binary, not the windowed process host.
+    ``process`` is an occupancy / test opt-in that sends SAT search sessions
+    to the sibling ``sat_worker``. The ``tier_solve`` DAG step stays on thread.
+    Frozen and unpackaged processes honor the same setting. A packaged process
+    pool spawns the sibling ``sat_worker`` binary, not the windowed process host.
     ``PLANETS_CONSOLE_SCORES_TIER_SOLVE_BACKEND`` overrides this when set.
     """
 

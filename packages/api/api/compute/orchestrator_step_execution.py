@@ -175,8 +175,6 @@ class OrchestratorStepExecutionMixin:
         """Map a pickle-safe remote leaf payload on the parent before coerce.
 
         Runs on the pool done-callback thread, not under the orchestrator lock.
-        Scores soft-defer talks to the inference scheduler here -- the same
-        order as in-process ``run_scores_tier_solve``.
         """
         if step_kind is None:
             return result_wire

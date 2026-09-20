@@ -19,12 +19,13 @@ SCORES_TIER_SOLVE_BACKEND_PROCESS: ComputeBackend = "process"
 
 
 def resolve_scores_tier_solve_backend() -> ComputeBackend:
-    """Return the effective scores ``tier_solve`` backend for this process.
+    """Return the effective scores SAT search backend for this process.
 
     ``PLANETS_CONSOLE_SCORES_TIER_SOLVE_BACKEND`` overrides
-    ``api.scores_tier_solve_backend`` (default ``thread``). Sampled at
-    dispatch/flush, not when the scores profile is imported. Packaged spawn
-    uses the sibling SAT worker (not the process-host executable).
+    ``api.scores_tier_solve_backend`` (default ``thread``). Sampled at the
+    parent Solve seam, not when the scores profile is imported. The
+    ``tier_solve`` DAG step stays on thread. Packaged spawn uses the sibling
+    SAT worker (not the process-host executable).
     """
     raw = os.environ.get(SCORES_TIER_SOLVE_BACKEND_ENV)
     if raw is None:

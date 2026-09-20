@@ -17,6 +17,8 @@ SAT_WORKER_DENIED_MODULE_PREFIXES: tuple[str, ...] = (
     "api.analytics.military_score_inference.row_run",
     "api.analytics.scores.compute_orchestration",
     "api.app",
+    "api.compute.pools",
+    "api.compute.sat_session_submit",
     "api.errors",
     "api.serialization.turn",
     "api.storage.file",

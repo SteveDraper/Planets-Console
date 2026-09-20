@@ -1,8 +1,8 @@
 """Near-best structural search: seed no-goods and ranking-bin mapping.
 
-Prepares flattened CP-SAT count variables, runs the catalog-free SAT search
-session kernel, then splits assignments into action/combo counts and ranking
-bin indicators. Prior-tier held solutions are seeded as no-goods so search
+Prepares flattened CP-SAT count variables, runs one SAT search session (in-process
+kernel or process worker), then splits assignments into action/combo counts and
+ranking bin indicators. Prior-tier held solutions are seeded as no-goods so search
 discovers new structures instead of rediscovering held ones.
 """
 
@@ -19,10 +19,9 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
     ShipBuildCombo,
 )
-from api.compute.sat_session import (
-    add_assignment_no_good,
-    collect_sat_search_assignments,
-)
+from api.analytics.scores.tier_solve_backend import resolve_scores_tier_solve_backend
+from api.compute.sat_session import add_assignment_no_good
+from api.compute.sat_session_submit import collect_resolved_sat_search_assignments
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
@@ -43,6 +42,7 @@ class NearBestStructuralSearchOutcome:
 
     structural_hits: list[tuple[dict[str, int], dict[str, int]]]
     last_solver_status: int
+    last_solver_status_name: str
     stopped_reason: str
     time_limited: bool
     tier_max_objective: int | None
@@ -197,8 +197,8 @@ def collect_near_best_structural_hits(
     """Collect distinct merged signatures within the near-best objective band.
 
     Seeds prior-tier held solutions as no-goods, flattens action and combo count
-    vars, then runs the SAT-session kernel until the budget, cancel,
-    infeasibility, or band exhaustion stops search.
+    vars, then runs one SAT search session (in-process kernel or process worker)
+    until the budget, cancel, infeasibility, or band exhaustion stops search.
     """
     seed_no_goods_applied, seed_no_goods_skipped = seed_no_good_cuts_for_held_solutions(
         model,
@@ -211,7 +211,7 @@ def collect_near_best_structural_hits(
     count_vars = _flatten_named_maps(action_count_vars, combo_count_vars)
     action_ids = tuple(action_count_vars)
     combo_ids = tuple(combo_count_vars)
-    collected = collect_sat_search_assignments(
+    collected = collect_resolved_sat_search_assignments(
         model,
         count_vars=count_vars,
         names=tuple(count_vars),
@@ -220,6 +220,7 @@ def collect_near_best_structural_hits(
         time_limit_seconds=problem.time_limit_seconds,
         near_best_threshold=problem.near_best_objective_threshold,
         cancel_event=cancel_token,
+        backend=resolve_scores_tier_solve_backend(),
     )
     structural_hits = [
         _split_assignment(assignment, action_ids=action_ids, combo_ids=combo_ids)
@@ -233,6 +234,7 @@ def collect_near_best_structural_hits(
     return NearBestStructuralSearchOutcome(
         structural_hits=structural_hits,
         last_solver_status=collected.last_solver_status,
+        last_solver_status_name=collected.last_solver_status_name,
         stopped_reason=collected.stopped_reason,
         time_limited=collected.time_limited,
         tier_max_objective=collected.tier_max_objective,

@@ -1,8 +1,6 @@
-"""Process-plane scores ``tier_solve``: thread identity wire, SAT-session fail-loud."""
+"""Process-plane scores ``tier_solve``: thread identity wire, SAT-session Solve seam."""
 
 from __future__ import annotations
-
-from unittest.mock import patch
 
 import pytest
 from api.analytics.export_context import make_analytic_query_context
@@ -19,11 +17,13 @@ from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
 )
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.scores.compute_orchestration import (
+    SCORES_TIER_SOLVE,
     ScoresPersistencePolicy,
     apply_scores_tier_solve_step_result,
     build_scores_tier_solve_job_wire,
-    map_scores_tier_solve_remote_result,
+    run_scores_tier_solve,
 )
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
@@ -46,9 +46,10 @@ from api.analytics.scores.tier_solve_wire import (
     WIRE_TURN,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute import ComputeScope, DependencyOutputs
-from api.compute.sat_session import SatSearchCollectionResult, run_sat_search_session
-from api.compute.wire import StepResult, coerce_step_result, orchestration_plane_skip_result
+from api.compute import ComputeScope, DependencyOutputs, build_compute_registry
+from api.compute.sat_session import run_sat_search_session
+from api.compute.sat_worker_entry import spawn_targets
+from api.compute.wire import StepResult, orchestration_plane_skip_result
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 from tests.scores_exports_helpers import inference_target_player_id, minimal_stream_query_context
@@ -62,7 +63,6 @@ _THREAD_IDENTITY_KEYS = frozenset(
         WIRE_PLAYER_ID,
     }
 )
-_PROCESS_UNWIRED = "SAT-session"
 
 
 @pytest.fixture(autouse=True)
@@ -164,16 +164,24 @@ def test_resolve_scores_tier_solve_backend_frozen_honors_process_env(monkeypatch
     assert resolve_scores_tier_solve_backend() == "process"
 
 
-def test_resolve_scores_step_backend_remaps_only_tier_solve(monkeypatch):
-    from api.analytics.scores.compute_orchestration import (
-        SCORES_MATERIALIZE,
-        SCORES_TIER_SOLVE,
-        resolve_scores_step_backend,
-    )
-
+def test_scores_dag_does_not_remap_tier_solve_to_sat_session(monkeypatch):
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
-    assert resolve_scores_step_backend(SCORES_TIER_SOLVE, "thread") == "process"
-    assert resolve_scores_step_backend(SCORES_MATERIALIZE, "inline") == "inline"
+    assert SCORES_REGISTRATION.resolve_step_backend is None
+    assert SCORES_REGISTRATION.remote_run_steps == ()
+    assert SCORES_REGISTRATION.map_remote_step_results == ()
+    compute = build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
+    assert compute.resolve_step_backend is None
+    assert SCORES_TIER_SOLVE not in compute.remote_run_step
+    assert SCORES_TIER_SOLVE not in compute.map_remote_step_result
+    assert compute.run_step[SCORES_TIER_SOLVE] is run_scores_tier_solve
+    tier = next(
+        spec for spec in compute.compute_profile.steps if spec.step_kind == SCORES_TIER_SOLVE
+    )
+    assert tier.backend == "thread"
+
+
+def test_nested_sat_process_path_is_packaged_session_callable():
+    assert spawn_targets() == (run_sat_search_session,)
 
 
 def test_open_evidence_thread_wire_is_identity(
@@ -193,37 +201,40 @@ def test_open_evidence_thread_wire_is_identity(
     assert wire[WIRE_RUN_ID] == run.run_id
 
 
-def test_open_evidence_process_wire_fails_loud_until_parent_solve_seam(
+def test_open_evidence_process_wire_is_identity(
     sample_turn,
     monkeypatch,
 ) -> None:
     _opt_in_process_backend(monkeypatch)
     player_id = inference_target_player_id(sample_turn)
-    _register_run(sample_turn, player_id=player_id)
+    run = _register_run(sample_turn, player_id=player_id)
     ctx = _open_evidence_ctx(sample_turn)
-    with pytest.raises(RuntimeError, match=_PROCESS_UNWIRED):
-        build_scores_tier_solve_job_wire(
-            _scores_scope(sample_turn, player_id),
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-        )
+    wire = build_scores_tier_solve_job_wire(
+        _scores_scope(sample_turn, player_id),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert set(wire) == _THREAD_IDENTITY_KEYS
+    assert wire[WIRE_RUN_ID] == run.run_id
+    assert "storageRoot" not in wire
 
 
-def test_open_evidence_frozen_process_env_fails_loud_until_parent_solve_seam(
+def test_open_evidence_frozen_process_env_wire_is_identity(
     sample_turn,
     monkeypatch,
 ) -> None:
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
     player_id = inference_target_player_id(sample_turn)
-    _register_run(sample_turn, player_id=player_id)
+    run = _register_run(sample_turn, player_id=player_id)
     ctx = _open_evidence_ctx(sample_turn)
-    with pytest.raises(RuntimeError, match=_PROCESS_UNWIRED):
-        build_scores_tier_solve_job_wire(
-            _scores_scope(sample_turn, player_id),
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-        )
+    wire = build_scores_tier_solve_job_wire(
+        _scores_scope(sample_turn, player_id),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert set(wire) == _THREAD_IDENTITY_KEYS
+    assert wire[WIRE_RUN_ID] == run.run_id
 
 
 def test_orchestration_skip_stays_off_the_process_pool():
@@ -286,12 +297,6 @@ def test_wire_build_applies_continue_snapshot_before_next_dispatch(
             WIRE_LADDER_STATE: continued,
         },
     }
-    if backend == "process":
-        with pytest.raises(RuntimeError, match=_PROCESS_UNWIRED):
-            build_scores_tier_solve_job_wire(_scores_scope(sample_turn, player_id), **kwargs)
-        assert parent.ladder_state is continued
-        assert parent.ladder_state.next_step_index == 1
-        return
     wire = build_scores_tier_solve_job_wire(_scores_scope(sample_turn, player_id), **kwargs)
     assert parent.ladder_state is continued
     assert parent.ladder_state.next_step_index == 1
@@ -356,99 +361,3 @@ def test_persist_echoed_run_id_applies_ladder_and_writes(
     )
     assert stored is not None
     assert stored.summary == "echoed runId persist"
-
-
-def test_parent_mapper_continue_from_incomplete_leaf_snapshot(sample_turn) -> None:
-    player_id = inference_target_player_id(sample_turn)
-    steps = (_tiny_policy_step("a"), _tiny_policy_step("b"))
-    parent = _register_run(
-        sample_turn,
-        player_id=player_id,
-        ladder=PolicyLadderState(policy_steps=steps),
-    )
-    continued = PolicyLadderState(policy_steps=steps, next_step_index=1)
-    snapshot = {WIRE_RUN_ID: parent.run_id, WIRE_LADDER_STATE: continued}
-    mapped = map_scores_tier_solve_remote_result(_scores_scope(sample_turn, player_id), snapshot)
-    assert mapped.outcome == "continue"
-    assert parent.ladder_state is continued
-    assert mapped.payload[WIRE_RUN_ID] == parent.run_id
-    assert coerce_step_result(snapshot).outcome == "persist"
-
-
-def test_parent_mapper_persist_from_complete_leaf_snapshot(sample_turn) -> None:
-    player_id = inference_target_player_id(sample_turn)
-    parent = _register_run(
-        sample_turn,
-        player_id=player_id,
-        ladder=PolicyLadderState(policy_steps=()),
-    )
-    completed = PolicyLadderState(policy_steps=(), ladder_complete=True)
-    snapshot = {WIRE_RUN_ID: parent.run_id, WIRE_LADDER_STATE: completed}
-    mapped = map_scores_tier_solve_remote_result(_scores_scope(sample_turn, player_id), snapshot)
-    assert mapped.outcome == "persist"
-    assert parent.ladder_state is completed
-    assert isinstance(mapped.payload, dict)
-    assert mapped.payload[WIRE_RUN_ID] == parent.run_id
-    assert mapped.payload["rowComplete"] is not None
-
-
-def test_parent_mapper_soft_defers_missing_ladder_snapshot(sample_turn) -> None:
-    player_id = inference_target_player_id(sample_turn)
-    parent = _register_run(sample_turn, player_id=player_id)
-    snapshot = {WIRE_RUN_ID: parent.run_id}
-    mapped = map_scores_tier_solve_remote_result(_scores_scope(sample_turn, player_id), snapshot)
-    assert mapped.outcome == "waiting_deps"
-    assert mapped.wait_recovery is None
-
-
-def test_parent_mapper_fails_loud_on_sat_session_result(sample_turn) -> None:
-    player_id = inference_target_player_id(sample_turn)
-    session_result = SatSearchCollectionResult(
-        assignments=[{"x": 5, "y": 0}],
-        last_solver_status=4,
-        last_solver_status_name="OPTIMAL",
-        stopped_reason="max_solutions",
-        time_limited=False,
-        tier_max_objective=None,
-    ).as_wire()
-    with pytest.raises(RuntimeError, match=_PROCESS_UNWIRED):
-        map_scores_tier_solve_remote_result(
-            _scores_scope(sample_turn, player_id),
-            session_result,
-        )
-
-
-def test_parent_mapper_uses_parent_row_run_for_ladder_complete(sample_turn) -> None:
-    from api.analytics.military_score_inference.inference_row_runner import (
-        outcome_after_ladder_complete,
-    )
-
-    player_id = inference_target_player_id(sample_turn)
-    parent = _register_run(
-        sample_turn,
-        player_id=player_id,
-        ladder=PolicyLadderState(policy_steps=()),
-    )
-    parent.session.fleet_torp_input_status = "applied"
-    captured: dict[str, object] = {}
-
-    def spy(run, state, observation, turn):
-        captured["run"] = run
-        captured["fleet_torp"] = run.session.fleet_torp_input_status
-        return outcome_after_ladder_complete(run, state, observation, turn)
-
-    snapshot = {
-        WIRE_RUN_ID: parent.run_id,
-        WIRE_LADDER_STATE: PolicyLadderState(policy_steps=(), ladder_complete=True),
-    }
-    with patch(
-        "api.analytics.scores.compute_orchestration.outcome_after_ladder_complete",
-        spy,
-    ):
-        mapped = map_scores_tier_solve_remote_result(
-            _scores_scope(sample_turn, player_id),
-            snapshot,
-        )
-    assert captured["run"] is parent
-    assert captured["fleet_torp"] == "applied"
-    assert mapped.outcome == "persist"

@@ -9,9 +9,7 @@ from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
-    outcome_after_ladder_complete,
     run_inference_tier_job,
-    solve_context,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -33,10 +31,6 @@ from api.analytics.scores.tier_row_run_registry import (
     get_tier_callbacks,
     register_row_run,
 )
-from api.analytics.scores.tier_solve_backend import (
-    SCORES_TIER_SOLVE_BACKEND_PROCESS,
-    resolve_scores_tier_solve_backend,
-)
 from api.analytics.scores.tier_solve_wire import (
     WIRE_EVIDENCE_CLOSED,
     WIRE_GAME_ID,
@@ -49,7 +43,7 @@ from api.analytics.scores.tier_solve_wire import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
-from api.compute.profile import AnalyticComputeProfile, ComputeBackend, ComputeStepSpec
+from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import (
     DependencyOutputs,
@@ -81,18 +75,6 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
     # fleet@(N-1) and turn scores into a gap-fill barrier.
     route_table_map=False,
 )
-
-
-def resolve_scores_step_backend(step_kind: str, declared: ComputeBackend) -> ComputeBackend:
-    """Return the effective backend for one scores compute step.
-
-    ``tier_solve`` follows occupancy opt-in via
-    ``resolve_scores_tier_solve_backend``. Other steps keep ``declared``.
-    Sampled at dispatch/flush, not at import.
-    """
-    if step_kind != SCORES_TIER_SOLVE:
-        return declared
-    return resolve_scores_tier_solve_backend()
 
 
 def _apply_fleet_resolution_to_row_run(
@@ -147,10 +129,10 @@ def build_scores_tier_solve_job_wire(
     Orchestration plane: skip sentinel (``runId: None``, ``evidenceClosed: True``,
     ``orchestrationSkip: True``) is allowed only when turn evidence is already
     closed. Open-evidence wires attach a live ``RowRun`` here. Production
-    ``thread`` emits the tiny identity wire (``runId`` + scope ids). Process
-    occupancy opt-in is a SAT-session worker; the parent Solve seam is not
-    wired, so open-evidence process dispatch fails loud rather than rebuilding
-    the turn and catalog in the child.
+    ``thread`` emits the tiny identity wire (``runId`` + scope ids). Process SAT
+    opt-in still uses that identity wire: the parent ladder runs in-process and
+    submits SAT search sessions from the Solve seam. Skip sentinels stay on
+    the orchestration plane.
 
     Invariant: when ensure is satisfied and evidence is still open, this dispatch
     must attach a ``runId`` (tier registry or successful scheduler adopt). Parking
@@ -220,11 +202,6 @@ def build_scores_tier_solve_job_wire(
     # the continued ladder holds current overlay. Thread looks up RowRun.
     apply_scores_tier_solve_step_result(run, node_result_wire)
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
-    if resolve_scores_tier_solve_backend() == SCORES_TIER_SOLVE_BACKEND_PROCESS:
-        raise RuntimeError(
-            "scores process SAT is a SAT-session worker; the parent Solve seam "
-            "is not wired. Production tier_solve stays on the thread backend."
-        )
     return _thread_tier_solve_job_wire(scope, run)
 
 
@@ -407,70 +384,13 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     )
 
 
-_SAT_SESSION_RESULT_KEYS = frozenset(
-    {
-        "assignments",
-        "lastSolverStatus",
-        "stoppedReason",
-    }
-)
-
-
-def map_scores_tier_solve_remote_result(scope: ComputeScope, raw: object) -> StepResult:
-    """Map a process-plane leaf snapshot onto the parent ``RowRun`` and ``StepResult``.
-
-    Runs on the parent after unpickle, before ``coerce_step_result``. Soft-defer
-    and fleet-torp diagnostics come from the live ``RowRun``. SAT is not re-run.
-
-    A SAT-session result (``assignments`` / ``stoppedReason`` / ``lastSolverStatus``)
-    is not a ladder snapshot. Until the parent Solve seam maps those assignments
-    onto the catalog, this mapper fails loud rather than parking as ``waiting_deps``.
-    """
-    del scope
-    if isinstance(raw, StepResult):
-        return raw
-    payload = raw if isinstance(raw, dict) else {}
-    if not _SAT_SESSION_RESULT_KEYS.isdisjoint(payload):
-        raise RuntimeError(
-            "scores tier_solve remote mapper received a SAT-session result; "
-            "the parent Solve seam is not wired to map assignments onto RowRun"
-        )
-    run_id = payload.get(WIRE_RUN_ID)
-    if not isinstance(run_id, str):
-        return _waiting_deps_without_submit()
-    run = get_row_run(run_id)
-    if run is None:
-        return _waiting_deps_without_submit()
-
-    with run.tier_lock:
-        snapshot = payload.get(WIRE_LADDER_STATE)
-        if not isinstance(snapshot, PolicyLadderState):
-            outcome: TierJobOutcome | None = TierJobOutcome()
-        else:
-            apply_scores_tier_solve_step_result(run, payload)
-            state = run.ladder_state
-            if state is None:
-                outcome = TierJobOutcome()
-            elif not state.ladder_complete:
-                outcome = None
-            else:
-                observation, turn = solve_context(run)
-                outcome = outcome_after_ladder_complete(run, state, observation, turn)
-                if outcome.next_ladder_state is not None:
-                    run.ladder_state = outcome.next_ladder_state
-    if outcome is None:
-        return StepResult(outcome="continue", payload=payload)
-    return tier_job_outcome_to_step_result(run, outcome)
-
-
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
     """Run one in-process scores inference tier against the parent ``RowRun``.
 
     Thread-backend workers share the parent registry. Skip sentinels complete
     via ``orchestration_plane_skip_result`` (same predicate as process dispatch).
-    Process occupancy opt-in is a SAT-session worker; the parent Solve seam is
-    not wired, so process dispatch fails loud at job-wire build instead of
-    rebuilding the turn in the child.
+    Process SAT opt-in still runs this ladder on the parent; the Solve seam
+    submits one SAT search session per pass.
     """
     skip_result = orchestration_plane_skip_result(job_wire)
     if skip_result is not None:

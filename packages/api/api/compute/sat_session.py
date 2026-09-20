@@ -43,6 +43,27 @@ _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
 _CANCEL_POLL_SECONDS = 0.05
 
 
+def _wire_int(value: object, label: str) -> int:
+    """Coerce OR-Tools status enums and other int-like values to ``int``."""
+    if isinstance(value, bool) or value is None:
+        raise TypeError(f"SAT search session {label} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"SAT search session {label} must be an integer") from exc
+
+
+def _assignment_from_wire(raw: object) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        raise TypeError("SAT search session assignment must be a string-to-int map")
+    assignment: dict[str, int] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("SAT search session assignment must be a string-to-int map")
+        assignment[key] = value
+    return assignment
+
+
 class SatSessionCancel(Protocol):
     """Cancel flag for a SAT search session (``threading.Event`` matches)."""
 
@@ -65,12 +86,42 @@ class SatSearchCollectionResult:
     def as_wire(self) -> dict[str, object]:
         return {
             WIRE_ASSIGNMENTS: self.assignments,
-            WIRE_LAST_SOLVER_STATUS: self.last_solver_status,
+            WIRE_LAST_SOLVER_STATUS: _wire_int(self.last_solver_status, "lastSolverStatus"),
             WIRE_LAST_SOLVER_STATUS_NAME: self.last_solver_status_name,
             WIRE_STOPPED_REASON: self.stopped_reason,
             WIRE_TIME_LIMITED: self.time_limited,
             WIRE_TIER_MAX_OBJECTIVE: self.tier_max_objective,
         }
+
+    @classmethod
+    def from_wire(cls, payload: Mapping[str, object]) -> SatSearchCollectionResult:
+        """Rebuild a collection result from ``run_sat_search_session`` wire."""
+        assignments_raw = payload.get(WIRE_ASSIGNMENTS)
+        if not isinstance(assignments_raw, list):
+            raise TypeError("SAT search session result requires assignments list")
+        assignments = [_assignment_from_wire(item) for item in assignments_raw]
+
+        status = _wire_int(payload.get(WIRE_LAST_SOLVER_STATUS), "lastSolverStatus")
+        status_name = payload.get(WIRE_LAST_SOLVER_STATUS_NAME)
+        if not isinstance(status_name, str):
+            raise TypeError("SAT search session result requires lastSolverStatusName")
+        stopped = payload.get(WIRE_STOPPED_REASON)
+        if not isinstance(stopped, str):
+            raise TypeError("SAT search session result requires stoppedReason")
+        time_limited = payload.get(WIRE_TIME_LIMITED)
+        if not isinstance(time_limited, bool):
+            raise TypeError("SAT search session result requires boolean timeLimited")
+        tier_max = payload.get(WIRE_TIER_MAX_OBJECTIVE)
+        if tier_max is not None and not isinstance(tier_max, int):
+            raise TypeError("SAT search session result tierMaxObjective must be int or omitted")
+        return cls(
+            assignments=assignments,
+            last_solver_status=status,
+            last_solver_status_name=status_name,
+            stopped_reason=stopped,
+            time_limited=time_limited,
+            tier_max_objective=tier_max,
+        )
 
 
 class SatSessionCancelFlag:
@@ -287,17 +338,6 @@ def run_sat_search_session(job_wire: dict[str, Any]) -> dict[str, object]:
     ).as_wire()
 
 
-def _assignment_from_wire(seed: object) -> dict[str, int]:
-    if not isinstance(seed, dict):
-        raise TypeError("SAT search session seed assignment must be a string-to-int map")
-    assignment: dict[str, int] = {}
-    for key, value in seed.items():
-        if not isinstance(key, str) or not isinstance(value, int):
-            raise TypeError("SAT search session seed assignment must be a string-to-int map")
-        assignment[key] = value
-    return assignment
-
-
 def _require_named_vars(
     named_vars: Mapping[str, cp_model.IntVar],
     names: Sequence[str],
@@ -432,7 +472,7 @@ def collect_sat_search_assignments(
 
     return SatSearchCollectionResult(
         assignments=assignments,
-        last_solver_status=last_solver_status,
+        last_solver_status=_wire_int(last_solver_status, "lastSolverStatus"),
         last_solver_status_name=cp_model.CpSolver().status_name(last_solver_status),
         stopped_reason=stopped_reason,
         time_limited=time_limited,

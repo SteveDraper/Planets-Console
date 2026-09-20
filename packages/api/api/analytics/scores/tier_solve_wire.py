@@ -1,8 +1,8 @@
 """Job-wire key constants for scores ``tier_solve``.
 
 Orchestration-plane schema shared by the parent builder. ``orchestrationSkip`` /
-``evidenceClosed`` complete on the parent. Process SAT is a SAT-session worker;
-the parent Solve seam is not wired, so process dispatch fails loud.
+``evidenceClosed`` complete on the parent. Process SAT is a SAT-session worker
+submitted from the parent Solve seam; the DAG job wire stays the thread identity.
 """
 
 from __future__ import annotations

@@ -46,8 +46,6 @@ from api.analytics.scores.compute_orchestration import (
     SCORES_TIER_SOLVE,
     ScoresPersistencePolicy,
     build_scores_tier_solve_job_wire,
-    map_scores_tier_solve_remote_result,
-    resolve_scores_step_backend,
     run_scores_tier_solve,
     tier_job_outcome_to_step_result,
 )
@@ -77,7 +75,6 @@ from api.compute import (
     compute_scope_to_export_scope,
 )
 from api.compute.dag import plan_compute_dag
-from api.compute.sat_session import run_sat_search_session
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -143,14 +140,14 @@ def test_scores_registration_includes_tier_solve_step() -> None:
     )
     assert tier.backend == "thread"
     assert dict(SCORES_REGISTRATION.run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve
-    assert dict(SCORES_REGISTRATION.remote_run_steps)[SCORES_TIER_SOLVE] is run_sat_search_session
-    assert (
-        dict(SCORES_REGISTRATION.map_remote_step_results)[SCORES_TIER_SOLVE]
-        is map_scores_tier_solve_remote_result
-    )
-    assert SCORES_REGISTRATION.resolve_step_backend is resolve_scores_step_backend
+    assert SCORES_REGISTRATION.remote_run_steps == ()
+    assert SCORES_REGISTRATION.map_remote_step_results == ()
+    assert SCORES_REGISTRATION.resolve_step_backend is None
     compute = build_compute_registry((SCORES_REGISTRATION,))[SCORES_ANALYTIC_ID]
-    assert compute.map_remote_step_result[SCORES_TIER_SOLVE] is map_scores_tier_solve_remote_result
+    assert SCORES_TIER_SOLVE not in compute.remote_run_step
+    assert SCORES_TIER_SOLVE not in compute.map_remote_step_result
+    assert compute.resolve_step_backend is None
+    assert compute.run_step[SCORES_TIER_SOLVE] is run_scores_tier_solve
 
 
 def test_retire_stale_run_preserves_replacement_scope_mapping(sample_turn) -> None:
@@ -1371,13 +1368,13 @@ def _flush_scores_tier_solve(sample_turn, persistence) -> tuple[object, dict[str
 
 
 @pytest.mark.parametrize("opt_in", ["env", "config"])
-def test_scores_tier_solve_selects_process_leaf_after_import(
+def test_scores_tier_solve_process_opt_in_keeps_parent_ladder_after_import(
     sample_turn,
     persistence,
     monkeypatch,
     opt_in: str,
 ) -> None:
-    """Env/config after scores import still remaps declared thread to process."""
+    """Env/config after scores import still leaves the DAG step on thread."""
     from dataclasses import replace
 
     from api.analytics.scores.compute_orchestration import SCORES_COMPUTE_PROFILE
@@ -1400,15 +1397,15 @@ def test_scores_tier_solve_selects_process_leaf_after_import(
         assert dict(SCORES_REGISTRATION.run_steps)[SCORES_TIER_SOLVE] is run_scores_tier_solve
 
         handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
-        assert handle.state == "failed", handle.error
-        assert handle.error is not None
-        assert "SAT-session" in str(handle.error)
-        assert "run_step" not in captured
+        assert handle.state == "running", handle.error
+        assert captured["backend"] == "thread"
+        assert captured.get("run_step") is None
+        assert captured.get("job_wire") is None
     finally:
         set_config(cfg)
 
 
-def test_scores_tier_solve_frozen_honors_process_env(
+def test_scores_tier_solve_frozen_process_env_keeps_parent_ladder(
     sample_turn,
     persistence,
     monkeypatch,
@@ -1419,10 +1416,9 @@ def test_scores_tier_solve_frozen_honors_process_env(
     monkeypatch.setenv(SCORES_TIER_SOLVE_BACKEND_ENV, "process")
 
     handle, captured = _flush_scores_tier_solve(sample_turn, persistence)
-    assert handle.state == "failed", handle.error
-    assert handle.error is not None
-    assert "SAT-session" in str(handle.error)
-    assert "run_step" not in captured
+    assert handle.state == "running", handle.error
+    assert captured["backend"] == "thread"
+    assert captured.get("run_step") is None
 
 
 def test_stream_query_context_plans_prior_turn_fleet_dependency(
