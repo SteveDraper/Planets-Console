@@ -1,9 +1,10 @@
 """Catalog-free CP-SAT search session for process SAT workers.
 
 A session is one pickled job: a model proto plus search budget, assignment cap,
-optional near-best banding, seed no-goods, and a cancel flag. The child loops
-``Solve()`` with forbid-previous cuts and calls ``stop_search`` in-process when
-the flag is set. It does not load a turn, catalog, or ``RowRun``.
+optional near-best banding, seed no-goods, and a cancel flag. The collection
+kernel loops ``Solve()`` with forbid-previous cuts and calls ``stop_search``
+in-process when the flag is set. Parent near-best calls the same kernel on a
+live model. The child does not load a turn, catalog, or ``RowRun``.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import os
 import threading
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from multiprocessing import shared_memory
 from typing import Any
 
@@ -40,6 +42,28 @@ WIRE_TIER_MAX_OBJECTIVE = "tierMaxObjective"
 
 _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
 _CANCEL_POLL_SECONDS = 0.05
+
+
+@dataclass(frozen=True)
+class SatSearchCollectionResult:
+    """In-process result of ``collect_sat_search_assignments``."""
+
+    assignments: list[dict[str, int]]
+    last_solver_status: int
+    last_solver_status_name: str
+    stopped_reason: str
+    time_limited: bool
+    tier_max_objective: int | None
+
+    def as_wire(self) -> dict[str, object]:
+        return {
+            WIRE_ASSIGNMENTS: self.assignments,
+            WIRE_LAST_SOLVER_STATUS: self.last_solver_status,
+            WIRE_LAST_SOLVER_STATUS_NAME: self.last_solver_status_name,
+            WIRE_STOPPED_REASON: self.stopped_reason,
+            WIRE_TIME_LIMITED: self.time_limited,
+            WIRE_TIER_MAX_OBJECTIVE: self.tier_max_objective,
+        }
 
 
 class SatSessionCancelFlag:
@@ -244,10 +268,7 @@ def run_sat_search_session(job_wire: dict[str, Any]) -> dict[str, object]:
     if objective_var_name is not None:
         objective_var = _require_named_vars(named_vars, (objective_var_name,))[objective_var_name]
 
-    for seed_index, seed in enumerate(seed_assignments):
-        add_assignment_no_good(model, count_vars, seed, cut_index=-(seed_index + 1))
-
-    return _collect_session_assignments(
+    return collect_sat_search_assignments(
         model,
         count_vars=count_vars,
         names=names,
@@ -257,7 +278,8 @@ def run_sat_search_session(job_wire: dict[str, Any]) -> dict[str, object]:
         near_best_threshold=threshold_raw,
         num_workers=num_workers,
         cancel_event=cancel_event,
-    )
+        seed_assignments=seed_assignments,
+    ).as_wire()
 
 
 def _assignment_from_wire(seed: object) -> dict[str, int]:
@@ -306,18 +328,27 @@ class _StopSearchOnCancel(cp_model.CpSolverSolutionCallback):
             self.StopSearch()
 
 
-def _collect_session_assignments(
+def collect_sat_search_assignments(
     model: cp_model.CpModel,
     *,
     count_vars: Mapping[str, cp_model.IntVar],
     names: Sequence[str],
-    objective_var: cp_model.IntVar | None,
     max_solutions: int,
     time_limit_seconds: float,
-    near_best_threshold: int,
-    num_workers: int,
-    cancel_event: object | None,
-) -> dict[str, object]:
+    objective_var: cp_model.IntVar | None = None,
+    near_best_threshold: int = 0,
+    num_workers: int | None = None,
+    cancel_event: object | None = None,
+    seed_assignments: Sequence[Mapping[str, int]] = (),
+) -> SatSearchCollectionResult:
+    """Collect distinct assignments with forbid-previous and optional near-best banding.
+
+    Catalog-free kernel for process SAT workers and in-process parent near-best.
+    Seeds, remaining time, ``stop_search`` cancel watch, and banding all live here.
+    """
+    for seed_index, seed in enumerate(seed_assignments):
+        add_assignment_no_good(model, count_vars, seed, cut_index=-(seed_index + 1))
+    workers = configured_sat_search_workers() if num_workers is None else num_workers
     solver = cp_model.CpSolver()
     assignments: list[dict[str, int]] = []
     started_at = time.monotonic()
@@ -354,7 +385,7 @@ def _collect_session_assignments(
                 break
 
             solver.parameters.max_time_in_seconds = remaining_seconds
-            solver.parameters.num_workers = num_workers
+            solver.parameters.num_workers = workers
             callback = _StopSearchOnCancel(cancel_event) if cancel_event is not None else None
             last_solver_status = invoke_cp_sat_solve(solver, model, callback)
 
@@ -404,12 +435,11 @@ def _collect_session_assignments(
         if watcher is not None:
             watcher.join(timeout=1.0)
 
-    status_name = cp_model.CpSolver().status_name(last_solver_status)
-    return {
-        WIRE_ASSIGNMENTS: assignments,
-        WIRE_LAST_SOLVER_STATUS: last_solver_status,
-        WIRE_LAST_SOLVER_STATUS_NAME: status_name,
-        WIRE_STOPPED_REASON: stopped_reason,
-        WIRE_TIME_LIMITED: time_limited,
-        WIRE_TIER_MAX_OBJECTIVE: tier_max_objective,
-    }
+    return SatSearchCollectionResult(
+        assignments=assignments,
+        last_solver_status=last_solver_status,
+        last_solver_status_name=cp_model.CpSolver().status_name(last_solver_status),
+        stopped_reason=stopped_reason,
+        time_limited=time_limited,
+        tier_max_objective=tier_max_objective,
+    )

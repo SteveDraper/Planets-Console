@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 
 import pytest
+from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.compute.sat_gil_overlap import invoke_cp_sat_solve, long_enough_cp_model
 from api.compute.sat_session import (
     WIRE_ASSIGNMENTS,
@@ -16,6 +17,7 @@ from api.compute.sat_session import (
     WIRE_STOPPED_REASON,
     SatSessionCancelFlag,
     add_assignment_no_good,
+    collect_sat_search_assignments,
     int_vars_by_name,
     run_sat_search_session,
     sat_search_session_wire,
@@ -198,3 +200,55 @@ def test_process_session_cancel_stops_search_without_hanging_the_pool() -> None:
         assert result[WIRE_ASSIGNMENTS] == []
     finally:
         cancel.close()
+
+
+def test_collect_sat_search_assignments_matches_session_wire() -> None:
+    live, names = _sum_to_five_model()
+    named = int_vars_by_name(live)
+    collected = collect_sat_search_assignments(
+        live,
+        count_vars={name: named[name] for name in names},
+        names=names,
+        max_solutions=1,
+        time_limit_seconds=5.0,
+        num_workers=1,
+    )
+    session_model, session_names = _sum_to_five_model()
+    wire_result = run_sat_search_session(
+        sat_search_session_wire(
+            model=session_model,
+            int_var_names=session_names,
+            max_solutions=1,
+            time_limit_seconds=5.0,
+            num_workers=1,
+        )
+    )
+    assert collected.as_wire()[WIRE_ASSIGNMENTS] == wire_result[WIRE_ASSIGNMENTS]
+    assert collected.stopped_reason == wire_result[WIRE_STOPPED_REASON]
+    assert collected.last_solver_status == wire_result[WIRE_LAST_SOLVER_STATUS]
+
+
+def test_inference_cancel_token_stops_in_process_kernel() -> None:
+    cancel = InferenceCancelToken()
+    model = long_enough_cp_model()
+    names = tuple(f"x{index}" for index in range(8))
+    named = int_vars_by_name(model)
+
+    def _cancel_soon() -> None:
+        time.sleep(0.15)
+        cancel.cancel()
+
+    watcher = threading.Thread(target=_cancel_soon)
+    watcher.start()
+    collected = collect_sat_search_assignments(
+        model,
+        count_vars={name: named[name] for name in names},
+        names=names,
+        max_solutions=1,
+        time_limit_seconds=30.0,
+        num_workers=1,
+        cancel_event=cancel,
+    )
+    watcher.join(timeout=2.0)
+    assert collected.stopped_reason == "cancelled"
+    assert collected.assignments == []
