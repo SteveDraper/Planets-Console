@@ -7,6 +7,7 @@ from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersiste
 from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
 )
+from api.compute.turn_cache import get_process_turn_info_cache
 from api.concepts.homeworld_layout import homeworld_settings_fingerprint
 from api.models.game import GameInfo
 from api.services.credential_service import CredentialService
@@ -86,6 +87,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
         credentials,
         games,
         on_turn_stored=on_turn_stored,
+        turn_info_cache=get_process_turn_info_cache(),
     )
     load_all = LoadAllTurnsService(credentials, games, turns)
     concepts = TurnConceptService(turns)
