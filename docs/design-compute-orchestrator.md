@@ -219,7 +219,7 @@ Stream teardown unregisters observers only; **in-flight nodes keep their bundle 
 
 ### Turn cache
 
-One **TurnInfo LRU per process**, keyed by `(game_id, perspective, turn)`. Fleet `turnWire` deserialize (materialize/observation legs) and scores/storage `TurnInfo` loads (`TurnLoadService.get_turn_info` / worker storage fill) share that cache. Parent orchestrator `ctx.load_turn` splice uses the same type and key; worker heaps are separate (no cross-process shared memory). This is **not** a `StorageBackend` document cache -- storage stays `JSONValue` only. Drop a key when that turn document is written; `turn_cache.clear` on orchestrator shutdown still applies. Interpreter pools that still run fleet legs call `init_worker_turn_cache`; SAT-session children never import the cache.
+One **TurnInfo LRU per process**, keyed by `(game_id, perspective, turn)`. Fleet `turnWire` deserialize (materialize/observation legs) and scores/storage `TurnInfo` loads (`TurnLoadService.get_turn_info`) share that cache. Parent orchestrator `ctx.load_turn` splice uses the same type and key; worker heaps are separate (no cross-process shared memory). This is **not** a `StorageBackend` document cache -- storage stays `JSONValue` only. Drop a key when that turn document is written; `turn_cache.clear` on orchestrator shutdown still applies. Interpreter pools that still run fleet legs call `init_worker_turn_cache`; SAT-session children never import the cache.
 
 ### Fleet persist correlation
 
@@ -352,7 +352,7 @@ Scores `ENSURE_DEPENDENCIES` already declare `fleet@(host_turn - 1, same player)
 |-------|-----------|
 | **TurnInfo LRU** | One in-process cache keyed by `(game_id, perspective, turn)`. Fleet `turnWire` deserialize and scores/storage TurnInfo loads share it. Parent splice and workers use the same type/key; heaps stay separate. Not a storage document cache. |
 | **Job wire prefetch** | Dependency outputs and turns already loaded included in wire |
-| **Worker fill** | Same TurnInfo LRU in interpreter workers (`init_worker_turn_cache`); one process `StorageBackend` for storage fills |
+| **Worker fill** | Same TurnInfo LRU in interpreter workers (`init_worker_turn_cache`); fleet legs deserialize `turnWire` |
 | **Persistence** | Durable cache; analytic `PersistencePolicy` hooks |
 
 Defer cross-process shared mutable caches; parent and worker heaps stay separate.
