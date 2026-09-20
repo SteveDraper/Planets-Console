@@ -50,6 +50,11 @@ from api.analytics.scores.tier_solve_wire import (
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeBackend, ComputeStepSpec
+from api.compute.sat_session import (
+    WIRE_ASSIGNMENTS,
+    WIRE_LAST_SOLVER_STATUS,
+    WIRE_STOPPED_REASON,
+)
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.wire import (
     DependencyOutputs,
@@ -407,16 +412,34 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
     )
 
 
+_SAT_SESSION_RESULT_KEYS = frozenset(
+    {
+        WIRE_ASSIGNMENTS,
+        WIRE_LAST_SOLVER_STATUS,
+        WIRE_STOPPED_REASON,
+    }
+)
+
+
 def map_scores_tier_solve_remote_result(scope: ComputeScope, raw: object) -> StepResult:
     """Map a process-plane leaf snapshot onto the parent ``RowRun`` and ``StepResult``.
 
     Runs on the parent after unpickle, before ``coerce_step_result``. Soft-defer
     and fleet-torp diagnostics come from the live ``RowRun``. SAT is not re-run.
+
+    A SAT-session result (``assignments`` / ``stoppedReason`` / ``lastSolverStatus``)
+    is not a ladder snapshot. Until the parent Solve seam maps those assignments
+    onto the catalog, this mapper fails loud rather than parking as ``waiting_deps``.
     """
     del scope
     if isinstance(raw, StepResult):
         return raw
     payload = raw if isinstance(raw, dict) else {}
+    if not _SAT_SESSION_RESULT_KEYS.isdisjoint(payload):
+        raise RuntimeError(
+            "scores tier_solve remote mapper received a SAT-session result; "
+            "the parent Solve seam is not wired to map assignments onto RowRun"
+        )
     run_id = payload.get(WIRE_RUN_ID)
     if not isinstance(run_id, str):
         return _waiting_deps_without_submit()

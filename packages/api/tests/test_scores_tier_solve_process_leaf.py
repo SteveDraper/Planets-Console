@@ -50,7 +50,7 @@ from api.analytics.scores.tier_solve_wire import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeScope, DependencyOutputs
-from api.compute.sat_session import run_sat_search_session
+from api.compute.sat_session import SatSearchCollectionResult, run_sat_search_session
 from api.compute.wire import StepResult, coerce_step_result, orchestration_plane_skip_result
 from api.errors import NotFoundError
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -423,6 +423,23 @@ def test_parent_mapper_soft_defers_missing_ladder_snapshot(sample_turn) -> None:
     mapped = map_scores_tier_solve_remote_result(_scores_scope(sample_turn, player_id), snapshot)
     assert mapped.outcome == "waiting_deps"
     assert mapped.wait_recovery is None
+
+
+def test_parent_mapper_fails_loud_on_sat_session_result(sample_turn) -> None:
+    player_id = inference_target_player_id(sample_turn)
+    session_result = SatSearchCollectionResult(
+        assignments=[{"x": 5, "y": 0}],
+        last_solver_status=4,
+        last_solver_status_name="OPTIMAL",
+        stopped_reason="max_solutions",
+        time_limited=False,
+        tier_max_objective=None,
+    ).as_wire()
+    with pytest.raises(RuntimeError, match=_PROCESS_UNWIRED):
+        map_scores_tier_solve_remote_result(
+            _scores_scope(sample_turn, player_id),
+            session_result,
+        )
 
 
 def test_parent_mapper_uses_parent_row_run_for_ladder_complete(sample_turn) -> None:
