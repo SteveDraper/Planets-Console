@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import multiprocessing.spawn as spawn_mod
 import threading
 import time
 from collections import deque
@@ -643,6 +644,7 @@ def test_frozen_process_pool_uses_sat_worker_not_gui_executable(
     worker.write_bytes(b"")
     monkeypatch.setattr("api.compute.process_pool_executable.process_is_frozen", lambda: True)
     monkeypatch.setattr("api.compute.process_pool_executable.sys.executable", str(gui))
+    monkeypatch.setattr(spawn_mod, "get_preparation_data", spawn_mod.get_preparation_data)
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         "api.compute.process_pool_executable.multiprocessing.set_executable",

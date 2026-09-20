@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import multiprocessing.spawn as spawn_mod
 from pathlib import Path
 
 import pytest
@@ -31,17 +32,25 @@ def test_sat_worker_executable_name_is_stem_or_windows_exe(monkeypatch):
 
 def test_process_pool_executable_none_when_unpackaged(monkeypatch):
     monkeypatch.setattr("api.compute.process_pool_executable.process_is_frozen", lambda: False)
+    before = spawn_mod.get_preparation_data
     assert process_pool_executable() is None
     assert apply_process_pool_executable() is None
+    assert spawn_mod.get_preparation_data is before
 
 
-def test_process_pool_executable_frozen_uses_sibling_not_gui(monkeypatch, tmp_path):
+def _fake_frozen_sat_worker(monkeypatch, tmp_path) -> tuple[Path, Path]:
     gui = tmp_path / "Planets Console"
     gui.write_bytes(b"")
     worker = tmp_path / sat_worker_executable_name()
     worker.write_bytes(b"")
     monkeypatch.setattr("api.compute.process_pool_executable.process_is_frozen", lambda: True)
     monkeypatch.setattr("api.compute.process_pool_executable.sys.executable", str(gui))
+    monkeypatch.setattr(spawn_mod, "get_preparation_data", spawn_mod.get_preparation_data)
+    return gui, worker
+
+
+def test_process_pool_executable_frozen_uses_sibling_not_gui(monkeypatch, tmp_path):
+    gui, worker = _fake_frozen_sat_worker(monkeypatch, tmp_path)
     captured: dict[str, str] = {}
     monkeypatch.setattr(
         "api.compute.process_pool_executable.multiprocessing.set_executable",
@@ -54,6 +63,33 @@ def test_process_pool_executable_frozen_uses_sibling_not_gui(monkeypatch, tmp_pa
     assert captured["executable"] == path
     assert captured["executable"] != str(gui)
     assert Path(captured["executable"]).name == sat_worker_executable_name()
+
+
+def test_frozen_spawn_preparation_omits_process_host_main(monkeypatch, tmp_path):
+    """sat_worker must not run_path the windowed process_host_entry.py as __main__."""
+    _fake_frozen_sat_worker(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "api.compute.process_pool_executable.multiprocessing.set_executable",
+        lambda path: None,
+    )
+
+    def fake_prep(name: str) -> dict:
+        return {
+            "name": name,
+            "authkey": b"x",
+            "init_main_from_path": "/frozen/Frameworks/process_host_entry.py",
+            "init_main_from_name": "__main__",
+        }
+
+    monkeypatch.setattr(spawn_mod, "get_preparation_data", fake_prep)
+
+    apply_process_pool_executable()
+    data = spawn_mod.get_preparation_data("Process-1")
+
+    assert data["name"] == "Process-1"
+    assert data["authkey"] == b"x"
+    assert "init_main_from_path" not in data
+    assert "init_main_from_name" not in data
 
 
 def test_process_pool_executable_frozen_missing_worker_raises(monkeypatch, tmp_path):
