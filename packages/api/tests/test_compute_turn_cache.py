@@ -248,6 +248,51 @@ def test_orchestrator_exposes_cached_load_turn(sample_turn) -> None:
     assert load_calls == [2]
 
 
+def test_orchestrator_turn_cache_follows_process_cache_replace(sample_turn) -> None:
+    from api.compute.orchestration_bundle import OrchestrationBundle
+    from api.compute.turn_cache import (
+        get_process_turn_info_cache,
+        replace_process_turn_info_cache,
+        worker_turn_info_cache_maxsize,
+    )
+    from api.compute.worker_turn_cache import init_worker_turn_cache
+
+    stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
+    load_calls: list[int] = []
+
+    def counting_load(turn_number: int):
+        load_calls.append(turn_number)
+        return stored_turns.get(turn_number)
+
+    ctx = make_analytic_query_context(
+        stored_turns[2],
+        TurnAnalyticsOptions(),
+        load_turn=counting_load,
+        game_id=stored_turns[2].game.id,
+        perspective=stored_turns[2].player.id,
+    )
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    captured_before = orchestrator.turn_cache
+    assert captured_before is get_process_turn_info_cache()
+
+    init_worker_turn_cache()
+    try:
+        live = get_process_turn_info_cache()
+        assert live is not captured_before
+        assert orchestrator.turn_cache is live
+        assert live.maxsize == worker_turn_info_cache_maxsize()
+
+        spliced = orchestrator._ctx_for_bundle(OrchestrationBundle.from_context(ctx))
+        first = spliced.load_turn(2)
+        second = spliced.load_turn(2)
+        assert first is second
+        assert load_calls == [2]
+        assert live.underlying_load_calls == 1
+        assert captured_before.underlying_load_calls == 0
+    finally:
+        replace_process_turn_info_cache()
+
+
 def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> None:
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
     fleet_services = build_ephemeral_fleet_compute_services(
@@ -423,8 +468,32 @@ def _turn_load_wired_to_process_cache(storage):
         storage,
         credentials,
         games,
-        turn_info_cache=get_process_turn_info_cache(),
+        turn_info_cache=get_process_turn_info_cache,
     )
+
+
+def test_turn_load_service_process_cache_follows_replace(sample_turn) -> None:
+    from unittest.mock import MagicMock
+
+    from api.compute.turn_cache import (
+        get_process_turn_info_cache,
+        replace_process_turn_info_cache,
+    )
+    from api.compute.worker_turn_cache import init_worker_turn_cache
+
+    storage = MagicMock()
+    storage.get.return_value = turn_info_to_json(sample_turn)
+    turns = _turn_load_wired_to_process_cache(storage)
+    captured_before = get_process_turn_info_cache()
+    init_worker_turn_cache()
+    try:
+        live = get_process_turn_info_cache()
+        assert live is not captured_before
+        turns.get_turn_info(sample_turn.game.id, sample_turn.player.id, sample_turn.settings.turn)
+        assert live.underlying_load_calls == 1
+        assert captured_before.underlying_load_calls == 0
+    finally:
+        replace_process_turn_info_cache()
 
 
 def test_storage_then_turn_wire_fill_shares_cached_object(sample_turn) -> None:

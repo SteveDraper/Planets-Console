@@ -87,7 +87,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
         credentials,
         games,
         on_turn_stored=on_turn_stored,
-        turn_info_cache=get_process_turn_info_cache(),
+        turn_info_cache=get_process_turn_info_cache,
     )
     load_all = LoadAllTurnsService(credentials, games, turns)
     concepts = TurnConceptService(turns)
