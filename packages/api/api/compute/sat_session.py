@@ -9,7 +9,6 @@ live model. The child does not load a turn, catalog, or ``RowRun``.
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -21,7 +20,7 @@ from google.protobuf import text_format
 from ortools.sat import cp_model_pb2
 from ortools.sat.python import cp_model
 
-from api.compute.sat_gil_overlap import invoke_cp_sat_solve
+from api.compute.sat_gil_overlap import configured_sat_search_workers, invoke_cp_sat_solve
 
 WIRE_MODEL_PROTO = "modelProto"
 WIRE_INT_VAR_NAMES = "intVarNames"
@@ -115,25 +114,6 @@ class SatSessionCancelFlag:
         finally:
             self._memory.close()
             self._created = False
-
-
-def configured_sat_search_workers() -> int:
-    """Return CP-SAT ``num_workers`` for one ``Solve()`` call.
-
-    Default is **1**: multi-worker CP-SAT portfolios (LNS) routinely overshoot
-    short stream tier ``max_time_in_seconds`` budgets. Parallelism for cold
-    ensure / streams belongs on the orchestrator thread pool across per-player
-    DAG nodes, not inside one solve. Override with
-    ``MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS`` for experiments / batch jobs.
-
-    Callers must set only ``parameters.num_workers``. Also setting the deprecated
-    ``num_search_workers`` to a non-zero value makes OR-Tools return
-    ``MODEL_INVALID``.
-    """
-    raw = os.environ.get("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS")
-    if raw is not None:
-        return max(1, int(raw))
-    return 1
 
 
 def encode_cp_model_proto(model: cp_model.CpModel) -> bytes:

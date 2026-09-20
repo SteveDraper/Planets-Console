@@ -1,7 +1,8 @@
-"""Characterize whether ``CpSolver.Solve`` releases the GIL to another thread."""
+"""Shared SAT compute helpers: GIL-overlap probes and CP-SAT worker count."""
 
 from __future__ import annotations
 
+import os
 import random
 import threading
 import time
@@ -21,6 +22,25 @@ GIL_3SAT_SEED = 0
 GIL_CALIBRATION_SECONDS = 0.05
 
 _Status = TypeVar("_Status")
+
+
+def configured_sat_search_workers() -> int:
+    """Return CP-SAT ``num_workers`` for one ``Solve()`` call.
+
+    Default is **1**: multi-worker CP-SAT portfolios (LNS) routinely overshoot
+    short stream tier ``max_time_in_seconds`` budgets. Parallelism for cold
+    ensure / streams belongs on the orchestrator thread pool across per-player
+    DAG nodes, not inside one solve. Override with
+    ``MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS`` for experiments / batch jobs.
+
+    Callers must set only ``parameters.num_workers``. Also setting the deprecated
+    ``num_search_workers`` to a non-zero value makes OR-Tools return
+    ``MODEL_INVALID``.
+    """
+    raw = os.environ.get("MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS")
+    if raw is not None:
+        return max(1, int(raw))
+    return 1
 
 
 @dataclass(frozen=True)
