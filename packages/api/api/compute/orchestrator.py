@@ -134,7 +134,6 @@ class ComputeOrchestrator(
         pool_submitter: PoolSubmitter | None = None,
         worker_pool: ComputeWorkerPool | None = None,
     ) -> None:
-        self._turn_cache = get_process_turn_info_cache()
         self._compute_registry = compute_registry
         self._pool_registration_id: int | None = None
         if worker_pool is not None:
@@ -179,7 +178,8 @@ class ComputeOrchestrator(
 
     @property
     def turn_cache(self) -> TurnInfoCache:
-        return self._turn_cache
+        """Live process TurnInfo LRU used by parent splice and prefetch."""
+        return get_process_turn_info_cache()
 
     @property
     def observers(self) -> OrchestratorObservers:
@@ -431,7 +431,7 @@ class ComputeOrchestrator(
         underlying = bundle.query_context.load_turn
 
         def cached_load(turn_number: int) -> TurnInfo | None:
-            return self._turn_cache.get(
+            return self.turn_cache.get(
                 game_id,
                 perspective,
                 turn_number,

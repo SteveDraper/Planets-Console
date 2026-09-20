@@ -39,6 +39,9 @@ class TurnInfoReadThroughCache(Protocol):
     def drop(self, game_id: int, perspective: int, turn_number: int) -> None: ...
 
 
+TurnInfoCacheSource = TurnInfoReadThroughCache | Callable[[], TurnInfoReadThroughCache]
+
+
 class TurnLoadService:
     """Load ``TurnInfo`` from storage or Planets.nu upstream."""
 
@@ -49,7 +52,7 @@ class TurnLoadService:
         games: GameService,
         *,
         on_turn_stored: Callable[[int, int, int], None] | None = None,
-        turn_info_cache: TurnInfoReadThroughCache | None = None,
+        turn_info_cache: TurnInfoCacheSource | None = None,
     ) -> None:
         self._storage = storage
         self._credentials = credentials
@@ -57,6 +60,15 @@ class TurnLoadService:
         self._on_turn_stored = on_turn_stored
         self._turn_info_cache = turn_info_cache
         self._settings_defaults_by_game: dict[int, dict | None] = {}
+
+    def _read_through_turn_info_cache(self) -> TurnInfoReadThroughCache | None:
+        """Return the injected cache, resolving a zero-arg provider if given."""
+        source = self._turn_info_cache
+        if source is None:
+            return None
+        if callable(source) and not hasattr(source, "get"):
+            return source()
+        return source
 
     @staticmethod
     def _missing_settings_field_error(err: DaciteError) -> bool:
@@ -181,8 +193,9 @@ class TurnLoadService:
         rst: dict,
     ) -> None:
         self._storage.put(self.turn_store_key(game_id, perspective, turn_number), rst)
-        if self._turn_info_cache is not None:
-            self._turn_info_cache.drop(game_id, perspective, turn_number)
+        cache = self._read_through_turn_info_cache()
+        if cache is not None:
+            cache.drop(game_id, perspective, turn_number)
         if self._on_turn_stored is not None:
             self._on_turn_stored(game_id, perspective, turn_number)
 
@@ -242,7 +255,7 @@ class TurnLoadService:
         )
 
     def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:
-        cache = self._turn_info_cache
+        cache = self._read_through_turn_info_cache()
         if cache is None:
             return self._load_turn_info_from_storage(game_id, perspective, turn_number)
 
