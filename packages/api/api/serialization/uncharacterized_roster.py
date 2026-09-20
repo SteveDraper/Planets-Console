@@ -18,7 +18,7 @@ from api.analytics.military_score_inference.uncharacterized_roster_types import 
     UnknownLossBoundLeftover,
     UnknownLossLeftover,
 )
-from api.errors import CoreAPIError
+from api.exceptions import CoreAPIError
 
 LEFTOVER_KIND_POINT = "point"
 LEFTOVER_KIND_UNKNOWN_LOSS_BOUND = "unknown_loss_bound"

@@ -13,16 +13,20 @@ import struct
 import subprocess
 import sys
 import zlib
-from collections.abc import MutableMapping
+from collections.abc import MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _SERVER_SRC = REPO_ROOT / "packages" / "server"
+_API_SRC = REPO_ROOT / "packages" / "api"
 if str(_SERVER_SRC) not in sys.path:
     sys.path.insert(0, str(_SERVER_SRC))
+if str(_API_SRC) not in sys.path:
+    sys.path.insert(0, str(_API_SRC))
 
 ENTRY_RELATIVE = Path("packages") / "server" / "server" / "process_host_entry.py"
+SAT_WORKER_ENTRY_RELATIVE = Path("packages") / "api" / "api" / "compute" / "sat_worker_entry.py"
 SPA_DIST_RELATIVE = Path("packages") / "frontend" / "dist"
 ANALYTICS_ASSETS_RELATIVE = Path("assets") / "analytics"
 BUNDLE_NAME = "Planets Console"
@@ -84,6 +88,17 @@ class CollectPolicy:
     app_user_model_id: str
 
 
+@dataclass(frozen=True)
+class SatWorkerCollectPolicy:
+    """Second freeze target: slim SAT worker EXE collected next to the process host."""
+
+    entry: Path
+    datas: tuple[tuple[str, str], ...]
+    hiddenimports: tuple[str, ...]
+    excludes: tuple[str, ...]
+    name: str
+
+
 def collect_policy(repo_root: Path = REPO_ROOT) -> CollectPolicy:
     """Return the runtime-only collect policy. Does not import PyInstaller."""
     from server.package_identity import (
@@ -119,7 +134,53 @@ def collect_policy(repo_root: Path = REPO_ROOT) -> CollectPolicy:
     )
 
 
-def assert_collect_policy_runtime_only(policy: CollectPolicy) -> None:
+def sat_worker_collect_policy(repo_root: Path = REPO_ROOT) -> SatWorkerCollectPolicy:
+    """Runtime-only collect policy for the sibling SAT worker executable.
+
+    Datas stay empty: the worker reads ``storageRoot`` from the job wire (file
+    backend / packaged console data directory) and must not collect that
+    directory into the freeze tree.
+    """
+    from api.compute.process_pool_executable import SAT_WORKER_STEM
+
+    return SatWorkerCollectPolicy(
+        entry=repo_root / SAT_WORKER_ENTRY_RELATIVE,
+        datas=(),
+        hiddenimports=("ortools.sat.python.cp_model",),
+        excludes=EXCLUDES,
+        name=SAT_WORKER_STEM,
+    )
+
+
+def pyinstaller_script_source(item: object) -> str:
+    """Return the source path from one ``Analysis.scripts`` TOC entry."""
+    if isinstance(item, (tuple, list)) and len(item) >= 2:
+        return str(item[1])
+    src = getattr(item, "src_name", None) or getattr(item, "path", None)
+    if src is not None:
+        return str(src)
+    raise TypeError(f"unrecognized Analysis.scripts item: {item!r}")
+
+
+def pyinstaller_scripts_without(scripts: Sequence[object], filename: str) -> list[object]:
+    """Keep Analysis.scripts except the user entry named ``filename``.
+
+    Each EXE gets PyInstaller bootstrap hooks plus one user script. ``filename``
+    is the source basename (e.g. ``sat_worker_entry.py``).
+    """
+    kept: list[object] = []
+    dropped = 0
+    for item in scripts:
+        if Path(pyinstaller_script_source(item)).name == filename:
+            dropped += 1
+            continue
+        kept.append(item)
+    if dropped == 0:
+        raise ValueError(f"expected user script {filename!r} in Analysis.scripts")
+    return kept
+
+
+def assert_collect_policy_runtime_only(policy: CollectPolicy | SatWorkerCollectPolicy) -> None:
     """Reject datas that would ship tests, docs, scripts, or frontend sources."""
     for source, dest in policy.datas:
         combined = f"{source}::{dest}"
@@ -251,10 +312,18 @@ def ensure_macos_deployment_target(environ: MutableMapping[str, str] | None = No
         env["MACOSX_DEPLOYMENT_TARGET"] = MACOSX_DEPLOYMENT_TARGET
 
 
-def validate_inputs(repo_root: Path, policy: CollectPolicy) -> None:
+def validate_inputs(
+    repo_root: Path,
+    policy: CollectPolicy,
+    worker_policy: SatWorkerCollectPolicy | None = None,
+) -> None:
     assert_collect_policy_runtime_only(policy)
     if not policy.entry.is_file():
         raise FileNotFoundError(f"process host entry is missing: {policy.entry}")
+    worker = worker_policy if worker_policy is not None else sat_worker_collect_policy(repo_root)
+    assert_collect_policy_runtime_only(worker)
+    if not worker.entry.is_file():
+        raise FileNotFoundError(f"SAT worker entry is missing: {worker.entry}")
     spa = repo_root / SPA_DIST_RELATIVE
     if not spa.is_dir() or not (spa / "index.html").is_file():
         raise FileNotFoundError(
@@ -278,7 +347,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
     policy = collect_policy(repo_root)
-    validate_inputs(repo_root, policy)
+    worker_policy = sat_worker_collect_policy(repo_root)
+    validate_inputs(repo_root, policy, worker_policy)
     ensure_macos_deployment_target()
     try:
         import PyInstaller.__main__

@@ -42,6 +42,15 @@ from api.concepts.game_category import GameCategory
 
 from tests.fixtures.hand_seeded_prior_weights import HAND_SEEDED_STANDARD_PRIOR_PATH
 
+
+def test_prior_mining_package_exports_resolve_lazily():
+    import api.analytics.military_score_inference.prior_mining as prior_mining_pkg
+    from api.analytics.military_score_inference.prior_mining import runner as runner_mod
+
+    assert prior_mining_pkg.run_prior_miner is runner_mod.run_prior_miner
+    assert prior_mining_pkg.default_assets_dir is runner_mod.default_assets_dir
+
+
 _PREFETCH_PREPARE = (
     "api.analytics.military_score_inference.prior_mining.prefetch.GamePreparePrefetcher"
 )

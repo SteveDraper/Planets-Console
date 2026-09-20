@@ -17,6 +17,7 @@ from api.compute.gil_overlap import (
     frozen_gil_overlap_enabled,
     pool_item_may_run_under_gil_overlap,
 )
+from api.compute.process_pool_executable import apply_process_pool_executable
 from api.compute.profile import ComputeBackend, ComputeStepSpec, GilOverlapClass
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
@@ -599,6 +600,7 @@ class ComputeWorkerPool:
 
     def _process_executor_locked(self) -> ProcessPoolExecutor:
         if self._process_executor is None:
+            apply_process_pool_executable()
             self._process_executor = ProcessPoolExecutor(
                 max_workers=self._worker_count,
                 initializer=init_worker_turn_cache,

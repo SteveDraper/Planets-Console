@@ -16,6 +16,8 @@ from bundle_console_package import (
     collect_policy,
     ensure_macos_deployment_target,
     macos_info_plist,
+    pyinstaller_scripts_without,
+    sat_worker_collect_policy,
     write_placeholder_ico,
     write_placeholder_png,
 )
@@ -88,6 +90,12 @@ def test_collect_policy_does_not_add_tests_scripts_docs_or_frontend_src():
 
 
 def _spec_call_keyword(tree: ast.AST, func_name: str, keyword: str) -> str | None:
+    values = _spec_call_keywords(tree, func_name, keyword)
+    return values[0] if values else None
+
+
+def _spec_call_keywords(tree: ast.AST, func_name: str, keyword: str) -> list[str]:
+    values: list[str] = []
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Call)
@@ -96,8 +104,27 @@ def _spec_call_keyword(tree: ast.AST, func_name: str, keyword: str) -> str | Non
         ):
             for kw in node.keywords:
                 if kw.arg == keyword:
-                    return ast.unparse(kw.value)
-    return None
+                    values.append(ast.unparse(kw.value))
+    return values
+
+
+def _spec_exe_console_by_name(tree: ast.AST) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "EXE"
+        ):
+            continue
+        name = None
+        console = None
+        for kw in node.keywords:
+            if kw.arg == "name":
+                name = ast.unparse(kw.value)
+            elif kw.arg == "console":
+                console = ast.unparse(kw.value)
+        if name is not None and console is not None:
+            mapping[name] = console
+    return mapping
 
 
 def test_collect_policy_and_spec_do_not_place_console_data_directory_in_bundle():
@@ -113,10 +140,14 @@ def test_collect_policy_and_spec_do_not_place_console_data_directory_in_bundle()
             f"{source}::{dest}",
             where=f"collect policy datas {source!r} -> {dest!r}",
         )
+    worker_policy = sat_worker_collect_policy(REPO_ROOT)
+    assert worker_policy.datas == ()
+    assert_collect_policy_runtime_only(worker_policy)
     spec_text = _SPEC_PATH.read_text(encoding="utf-8")
     assert_text_excludes_console_data_directory(spec_text, where="console_package.spec")
     tree = ast.parse(spec_text)
-    assert _spec_call_keyword(tree, "Analysis", "datas") == "list(policy.datas)"
+    analysis_datas = _spec_call_keywords(tree, "Analysis", "datas")
+    assert analysis_datas == ["list(policy.datas) + list(worker_policy.datas)"]
     assert _spec_call_keyword(tree, "COLLECT", "name") == "policy.name"
     bundle_name = _spec_call_keyword(tree, "BUNDLE", "name")
     assert bundle_name in (
@@ -136,6 +167,65 @@ def test_spec_import_surface_exists():
     for name in imported:
         assert hasattr(bundler, name), f"spec imports {name!r} but it is missing"
     assert callable(analysis_binaries)
+    assert "sat_worker_collect_policy" in imported
+    assert "pyinstaller_scripts_without" in imported
+
+
+def test_sat_worker_collect_policy_is_sibling_entry_without_spa_or_data_dir():
+    from api.compute.process_pool_executable import SAT_WORKER_STEM
+
+    worker_policy = sat_worker_collect_policy(REPO_ROOT)
+    assert worker_policy.entry.is_file()
+    assert worker_policy.entry.name == "sat_worker_entry.py"
+    assert worker_policy.name == SAT_WORKER_STEM
+    assert worker_policy.datas == ()
+    assert_collect_policy_runtime_only(worker_policy)
+
+
+def test_spec_freezes_sat_worker_console_exe_next_to_process_host():
+    tree = ast.parse(_SPEC_PATH.read_text(encoding="utf-8"))
+    console_by_name = _spec_exe_console_by_name(tree)
+    assert console_by_name["policy.name"] == "False"
+    assert console_by_name["worker_policy.name"] == "True"
+    collect_call = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "COLLECT"
+        ):
+            collect_call = node
+            break
+    assert collect_call is not None
+    collect_args = [ast.unparse(arg) for arg in collect_call.args]
+    assert collect_args[:2] == ["exe", "worker_exe"]
+    analysis_scripts = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "Analysis"
+        ):
+            assert node.args
+            analysis_scripts = ast.unparse(node.args[0])
+            break
+    assert analysis_scripts is not None
+    assert "policy.entry" in analysis_scripts
+    assert "worker_policy.entry" in analysis_scripts
+
+
+def test_pyinstaller_scripts_without_keeps_bootstrap_and_one_user_entry():
+    scripts = [
+        ("pyiboot01_bootstrap", "/boot/pyiboot01_bootstrap.py", "PYSOURCE"),
+        ("process_host_entry", "/x/process_host_entry.py", "PYSOURCE"),
+        ("sat_worker_entry", "/x/sat_worker_entry.py", "PYSOURCE"),
+    ]
+    host = pyinstaller_scripts_without(scripts, "sat_worker_entry.py")
+    worker = pyinstaller_scripts_without(scripts, "process_host_entry.py")
+    assert [item[0] for item in host] == ["pyiboot01_bootstrap", "process_host_entry"]
+    assert [item[0] for item in worker] == ["pyiboot01_bootstrap", "sat_worker_entry"]
+    with pytest.raises(ValueError, match="missing_entry.py"):
+        pyinstaller_scripts_without(scripts, "missing_entry.py")
 
 
 def test_macos_plist_identity_and_full_version():

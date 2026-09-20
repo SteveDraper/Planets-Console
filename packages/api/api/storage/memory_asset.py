@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 
-from api.errors import NotFoundError, ValidationError
+from api.exceptions import NotFoundError, ValidationError
 from api.storage.base import JSONValue
 from api.storage.boundaries import is_navigable_prefix, is_registered_path, resolve_breakpoint
 from api.storage.path_utils import (
