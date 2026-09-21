@@ -1,4 +1,7 @@
-"""Bounded LRU cache backed by OrderedDict."""
+"""Bounded LRU cache backed by OrderedDict.
+
+Shared by the file-backend document cache and the process TurnInfo cache.
+"""
 
 from __future__ import annotations
 
@@ -17,11 +20,11 @@ class LruCache(Generic[K, V]):
         self._entries: OrderedDict[K, V] = OrderedDict()
 
     def get(self, key: K) -> V | None:
-        """Return cached value and mark key as recently used, or None."""
-        value = self._entries.get(key)
-        if value is not None:
-            self._entries.move_to_end(key)
-        return value
+        """Return cached value and mark key as recently used, or None if absent."""
+        if key not in self._entries:
+            return None
+        self._entries.move_to_end(key)
+        return self._entries[key]
 
     def put(self, key: K, value: V) -> None:
         """Insert or update and evict LRU entries when over capacity."""
@@ -36,3 +39,9 @@ class LruCache(Generic[K, V]):
 
     def clear(self) -> None:
         self._entries.clear()
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._entries
+
+    def __len__(self) -> int:
+        return len(self._entries)

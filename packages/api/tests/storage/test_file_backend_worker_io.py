@@ -201,9 +201,9 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
         counts.list_prefixes,
     )
     assert counts.get_keys == [FLEET_KEY]
-    assert counts.json_load_calls == 1
+    assert counts.json_load_calls == 0
     assert counts.json_dump_calls == 1
-    assert counts.open_read_calls == 1
+    assert counts.open_read_calls == 0
     assert counts.open_write_calls == 1
     assert counts.list_calls == 0
 
@@ -214,8 +214,8 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
     assert loaded is not None
     assert counts.protocol_counts() == {"get": 1, "put": 0, "list": 0, "delete": 0}
     assert counts.get_keys == [FLEET_KEY]
-    assert counts.json_load_calls == 1
-    assert counts.open_read_calls == 1
+    assert counts.json_load_calls == 0
+    assert counts.open_read_calls == 0
     assert counts.open_write_calls == 0
     assert counts.iterdir_calls == 0
 
@@ -231,9 +231,9 @@ def test_scores_persist_and_read_call_counts(tmp_path, sample_turn):
         persistence.put_row(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id, row)
 
     assert counts.protocol_counts() == {"get": 0, "put": 1, "list": 0, "delete": 0}
-    assert counts.json_load_calls == 1
+    assert counts.json_load_calls == 0
     assert counts.json_dump_calls == 1
-    assert counts.open_read_calls == 1
+    assert counts.open_read_calls == 0
     assert counts.open_write_calls == 1
     assert counts.list_calls == 0
     assert row_key.endswith(f"inference_rows/{player_id}")
@@ -247,8 +247,8 @@ def test_scores_persist_and_read_call_counts(tmp_path, sample_turn):
     assert counts.get_keys == [
         persistence.row_store_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
     ]
-    assert counts.json_load_calls == 1
-    assert counts.open_read_calls == 1
+    assert counts.json_load_calls == 0
+    assert counts.open_read_calls == 0
     assert counts.iterdir_calls == 0
 
 

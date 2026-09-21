@@ -91,8 +91,8 @@ def test_ensure_dir_raises_when_path_is_a_file(backend, storage_root):
 
 def test_get_maps_file_not_found_during_open_to_not_found(backend, storage_root):
     """Peer unlink between exists-check and open must be NotFoundError, not errno."""
-    backend.put(GAME_INFO, {"name": "A"})
-    target = storage_root / "games" / "628580" / "info.json"
+    backend.put(TURN, {"turn": 111})
+    target = storage_root / "games" / "628580" / "1" / "turns" / "111.json"
     real_open = open
 
     def racing_open(path, *args, **kwargs):
@@ -102,13 +102,13 @@ def test_get_maps_file_not_found_during_open_to_not_found(backend, storage_root)
 
     with patch("api.storage.file.open", side_effect=racing_open):
         with pytest.raises(NotFoundError, match="Document not found"):
-            backend.get(GAME_INFO)
+            backend.get(TURN)
 
 
 def test_put_nested_treats_vanished_document_as_empty(backend, storage_root):
     """Suffix put must create a new document when a peer unlinked during load."""
-    backend.put(GAME_INFO, {"keep": 1})
-    target = storage_root / "games" / "628580" / "info.json"
+    backend.put(TURN, {"keep": 1})
+    target = storage_root / "games" / "628580" / "1" / "turns" / "111.json"
     real_open = open
 
     def unlink_on_read(path, *args, **kwargs):
@@ -119,7 +119,7 @@ def test_put_nested_treats_vanished_document_as_empty(backend, storage_root):
         return real_open(path, *args, **kwargs)
 
     with patch("api.storage.file.open", side_effect=unlink_on_read):
-        backend.put(f"{GAME_INFO}/settings", {"x": 1})
+        backend.put(f"{TURN}/settings", {"x": 1})
 
     assert json.loads(target.read_text(encoding="utf-8")) == {"settings": {"x": 1}}
 
