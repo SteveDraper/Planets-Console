@@ -149,3 +149,11 @@ def test_reopen_browser_opens_bound_port():
     with patch("server.process_host.runtime.open_spa") as mock_open:
         session.reopen_browser()
     mock_open.assert_called_once_with(8122)
+
+
+def test_reopen_browser_no_browser_does_not_open_spa(monkeypatch):
+    session = ProcessHostSession(port=8122, server=None, stop_event=threading.Event())
+    monkeypatch.setattr("server.process_host.runtime.sys.argv", ["process_host", "--no-browser"])
+    with patch("server.process_host.runtime.open_spa") as mock_open:
+        session.reopen_browser()
+    mock_open.assert_not_called()

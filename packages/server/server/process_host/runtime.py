@@ -38,6 +38,15 @@ from server.process_host.support import StartFailure, configure_support_logging,
 
 _LOGGER = logging.getLogger("server.process_host")
 
+# Measurement launches pass this so the SPA does not open a second table stream.
+NO_BROWSER_FLAG = "--no-browser"
+
+
+def browser_open_requested(argv: list[str] | None = None) -> bool:
+    """Return whether this launch should open the SPA in the default browser."""
+    args = sys.argv if argv is None else argv
+    return NO_BROWSER_FLAG not in args
+
 
 def exit_without_interpreter_teardown(code: int = 0) -> None:
     """End the process without CPython ``Py_Finalize`` module GC.
@@ -75,6 +84,9 @@ class ProcessHostSession:
             self.server.should_exit = True
 
     def reopen_browser(self) -> None:
+        if not browser_open_requested():
+            _LOGGER.info("Skipping browser reopen (%s)", NO_BROWSER_FLAG)
+            return
         open_spa(self.port)
 
 
@@ -128,7 +140,10 @@ def _reopen_existing_instance(port_path: Path) -> int:
     try:
         port = read_published_port(port_path)
         wait_for_health(port, timeout_seconds=30.0)
-        open_spa(port)
+        if browser_open_requested():
+            open_spa(port)
+        else:
+            _LOGGER.info("Skipping browser reopen of existing instance (%s)", NO_BROWSER_FLAG)
         return 0
     except (SingleInstancePortError, HealthWaitError) as exc:
         raise StartFailure(
@@ -159,7 +174,10 @@ def _run_as_primary(lock: SingleInstanceLock, log_path: Path) -> int:
         raise StartFailure(
             f"{CONSOLE_PACKAGE_DISPLAY_NAME} did not become ready.\n\n{exc}\n\nLog file: {log_path}"
         ) from exc
-    open_spa(port)
+    if browser_open_requested():
+        open_spa(port)
+    else:
+        _LOGGER.info("Skipping browser open (%s)", NO_BROWSER_FLAG)
     _run_native_loop(session)
     session.request_stop()
     thread.join(timeout=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS + 1.0)
