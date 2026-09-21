@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import yaml
@@ -187,22 +188,20 @@ def default_mine_stock_dir() -> Path:
 
 STANDARD_MINE_STOCK_FILENAME = f"mine_stock_{GameCategory.STANDARD}.yaml"
 
+# lru_cache computes misses without holding its lock. Serialize default-path
+# fills so concurrent first callers share one YAML parse.
+_default_mine_stock_lock = Lock()
+
 
 @lru_cache(maxsize=8)
 def _load_mine_stock_asset_cached(resolved_path: str) -> MineStockAsset:
     return load_mine_stock_asset(Path(resolved_path))
 
 
-def load_mine_stock_for_category(
+def _load_mine_stock_from_directory(
     category: GameCategory,
-    *,
-    base_dir: Path | None = None,
+    directory: Path,
 ) -> tuple[MineStockAsset, Path, bool]:
-    """Load ``mine_stock_{category}.yaml``, falling back to standard when missing.
-
-    Same fallback shape as ``load_prior_weights_for_category``. Standard is required.
-    """
-    directory = default_mine_stock_dir() if base_dir is None else base_dir
     category_path = mine_stock_path_for_category(category, base_dir=directory)
     if category_path.is_file():
         return _load_mine_stock_asset_cached(str(category_path.resolve())), category_path, False
@@ -214,6 +213,24 @@ def load_mine_stock_for_category(
     if not standard_path.is_file():
         raise FileNotFoundError(f"missing required mine-stock asset: {standard_path}")
     return _load_mine_stock_asset_cached(str(standard_path.resolve())), standard_path, True
+
+
+def load_mine_stock_for_category(
+    category: GameCategory,
+    *,
+    base_dir: Path | None = None,
+) -> tuple[MineStockAsset, Path, bool]:
+    """Load ``mine_stock_{category}.yaml``, falling back to standard when missing.
+
+    Same fallback shape as ``load_prior_weights_for_category``. Standard is required.
+    Production assets (``base_dir is None``) are reused for the process lifetime so
+    concurrent scores ``tier_solve`` workers do not re-parse YAML under the GIL.
+    Caller-supplied ``base_dir`` (tests and mining) is not serialized by that lock.
+    """
+    if base_dir is None:
+        with _default_mine_stock_lock:
+            return _load_mine_stock_from_directory(category, default_mine_stock_dir())
+    return _load_mine_stock_from_directory(category, base_dir)
 
 
 def create_empty_mine_stock_asset(category: GameCategory) -> MineStockAsset:
