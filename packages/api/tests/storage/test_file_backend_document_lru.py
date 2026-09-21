@@ -8,6 +8,7 @@ import pytest
 from api.errors import NotFoundError
 from api.storage.document_lru import (
     FILE_DOCUMENT_LRU_MAXSIZE,
+    FileBackendDocumentLru,
     admits_breakpoint_document,
     document_lru_for_root,
 )
@@ -15,13 +16,17 @@ from api.storage.file import FileStorageBackend
 from tests.file_backend_io_accounting import (
     ANALYTICS_PREFIX,
     FLEET_KEY,
+    TURNS_PREFIX,
     FileIoCounts,
     count_file_backend_syscalls,
 )
 
 GAME_INFO = "games/628580/info"
 TURN = "games/628580/1/turns/111"
+TURN_NEXT = "games/628580/1/turns/112"
 ACCOUNT = "credentials/accounts/alice"
+ACCOUNT_BOB = "credentials/accounts/bob"
+ACCOUNTS_PREFIX = "credentials/accounts"
 FLEET = FLEET_KEY
 SCORES = f"{ANALYTICS_PREFIX}/scores"
 HOMEWORLD = f"{ANALYTICS_PREFIX}/homeworld-locator"
@@ -201,3 +206,61 @@ def test_get_returns_deep_copy_of_cached_document(backend: FileStorageBackend) -
     assert isinstance(loaded, dict)
     loaded["ledgers"] = {}
     assert backend.get(FLEET) == {"ledgers": {"p": 1}}
+
+
+def test_list_turns_includes_new_turn_after_rst_put(backend: FileStorageBackend) -> None:
+    backend.put(TURN, {"turn": 111})
+    counts = FileIoCounts()
+    with count_file_backend_syscalls(counts):
+        first = backend.list(TURNS_PREFIX)
+    assert first == ["111"]
+    assert counts.iterdir_calls == 1
+
+    backend.put(TURN_NEXT, {"turn": 112})
+    counts.reset()
+    with count_file_backend_syscalls(counts):
+        second = backend.list(TURNS_PREFIX)
+    assert second == ["111", "112"]
+    assert counts.iterdir_calls == 1
+
+
+def test_list_credentials_includes_new_account_after_put(backend: FileStorageBackend) -> None:
+    backend.put(ACCOUNT, {"api_key": "a"})
+    counts = FileIoCounts()
+    with count_file_backend_syscalls(counts):
+        first = backend.list(ACCOUNTS_PREFIX)
+    assert first == ["alice"]
+    assert counts.iterdir_calls == 1
+
+    backend.put(ACCOUNT_BOB, {"api_key": "b"})
+    counts.reset()
+    with count_file_backend_syscalls(counts):
+        second = backend.list(ACCOUNTS_PREFIX)
+    assert second == ["alice", "bob"]
+    assert counts.iterdir_calls == 1
+
+
+def test_fill_document_installs_when_epoch_is_current() -> None:
+    lru = FileBackendDocumentLru()
+    _, epoch = lru.get_document(FLEET)
+    lru.fill_document(FLEET, {"ledgers": {}}, epoch=epoch)
+    assert lru.has_document(FLEET)
+
+
+def test_fill_document_after_delete_does_not_resurrect() -> None:
+    lru = FileBackendDocumentLru()
+    _, epoch = lru.get_document(FLEET)
+    lru.remember_document(FLEET, {"ledgers": {}})
+    lru.drop_document(FLEET)
+    lru.fill_document(FLEET, {"ledgers": {"ghost": True}}, epoch=epoch)
+    assert not lru.has_document(FLEET)
+
+
+def test_fill_listing_after_child_put_does_not_install_stale_names() -> None:
+    lru = FileBackendDocumentLru()
+    lru.remember_document(FLEET, {"ledgers": {}})
+    _, epoch = lru.get_listing(ANALYTICS_PREFIX)
+    lru.remember_document(SCORES, {"rows": {}})
+    lru.fill_listing(ANALYTICS_PREFIX, ["fleet"], epoch=epoch)
+    cached, _ = lru.get_listing(ANALYTICS_PREFIX)
+    assert cached is None

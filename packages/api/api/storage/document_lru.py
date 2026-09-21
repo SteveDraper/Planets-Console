@@ -8,8 +8,10 @@ Turn RST documents (``games/{game}/{perspective}/turns/{turn}``) and credentials
 (``credentials/accounts/{id}``) are not retained. Analytic breakpoint documents,
 including ``…/turns/{turn}/analytics/{id}``, are admitted.
 
-Listings are a separate map of filesystem prefix to child names. Put/delete of a
-document drops ancestor prefix listings; listings are never patched in place.
+Listings are a separate map of filesystem prefix to child names. Successful
+put/delete of a document -- admitted or not -- drops ancestor prefix listings;
+listings are never patched in place. A miss captures a mutation epoch; fill from
+I/O installs only when that epoch is still current.
 """
 
 from __future__ import annotations
@@ -81,47 +83,56 @@ class FileBackendDocumentLru:
     ) -> None:
         self._documents: LruCache[str, JSONValue] = LruCache(document_maxsize)
         self._listings: LruCache[str, tuple[str, ...]] = LruCache(listing_maxsize)
+        self._epoch = 0
         self._lock = threading.Lock()
 
-    def get_document(self, breakpoint_path: str) -> JSONValue | None:
-        """Return the retained tree, or None on miss. Caller must copy before mutate."""
+    def get_document(self, breakpoint_path: str) -> tuple[JSONValue | None, int]:
+        """Return (retained tree or None, epoch). Fill from I/O only at this epoch."""
         if not admits_breakpoint_document(breakpoint_path):
-            return None
+            return None, 0
         with self._lock:
-            return self._documents.get(breakpoint_path)
+            return self._documents.get(breakpoint_path), self._epoch
 
     def remember_document(self, breakpoint_path: str, document: JSONValue) -> None:
-        """Write-through after a successful disk put of an admitted document."""
-        if not admits_breakpoint_document(breakpoint_path):
-            return
-        with self._lock:
-            self._documents.put(breakpoint_path, document)
-            self._drop_listing_prefixes_locked(breakpoint_path)
+        """Write-through after a successful disk put.
 
-    def fill_document(self, breakpoint_path: str, document: JSONValue) -> None:
-        """Install a disk-loaded tree only when the key is still absent."""
+        Retains the tree only when the path is admitted. Always invalidates
+        ancestor listings.
+        """
+        with self._lock:
+            if admits_breakpoint_document(breakpoint_path):
+                self._documents.put(breakpoint_path, document)
+            self._record_mutation_locked(breakpoint_path)
+
+    def fill_document(self, breakpoint_path: str, document: JSONValue, *, epoch: int) -> None:
+        """Install a disk-loaded tree only when ``epoch`` is still current."""
         if not admits_breakpoint_document(breakpoint_path):
             return
         with self._lock:
-            if breakpoint_path not in self._documents:
-                self._documents.put(breakpoint_path, document)
+            if epoch != self._epoch:
+                return
+            self._documents.put(breakpoint_path, document)
 
     def drop_document(self, breakpoint_path: str) -> None:
-        """Forget a document after a successful disk delete or prune."""
+        """Forget a document after a successful disk delete or prune.
+
+        Always invalidates ancestor listings, including when the path was not retained.
+        """
         with self._lock:
             self._documents.drop(breakpoint_path)
-            self._drop_listing_prefixes_locked(breakpoint_path)
+            self._record_mutation_locked(breakpoint_path)
 
-    def get_listing(self, prefix: str) -> tuple[str, ...] | None:
-        """Return cached filesystem child names, or None on miss."""
+    def get_listing(self, prefix: str) -> tuple[tuple[str, ...] | None, int]:
+        """Return (cached child names or None, epoch). Fill from I/O only at this epoch."""
         with self._lock:
-            return self._listings.get(prefix)
+            return self._listings.get(prefix), self._epoch
 
-    def fill_listing(self, prefix: str, names: list[str]) -> None:
-        """Install a filesystem listing only when the prefix is still absent."""
+    def fill_listing(self, prefix: str, names: list[str], *, epoch: int) -> None:
+        """Install a filesystem listing only when ``epoch`` is still current."""
         with self._lock:
-            if prefix not in self._listings:
-                self._listings.put(prefix, tuple(names))
+            if epoch != self._epoch:
+                return
+            self._listings.put(prefix, tuple(names))
 
     def has_document(self, breakpoint_path: str) -> bool:
         """Return whether ``breakpoint_path`` is currently retained (tests)."""
@@ -133,6 +144,7 @@ class FileBackendDocumentLru:
         with self._lock:
             return len(self._documents)
 
-    def _drop_listing_prefixes_locked(self, breakpoint_path: str) -> None:
+    def _record_mutation_locked(self, breakpoint_path: str) -> None:
+        self._epoch += 1
         for prefix in listing_prefixes_to_invalidate(breakpoint_path):
             self._listings.drop(prefix)

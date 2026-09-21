@@ -31,7 +31,9 @@ class FileStorageBackend:
     """Persist the logical JSON store as breakpoint JSON files under ``storage_root``.
 
     Admitted breakpoint documents (not turn RST, not credentials) are retained in
-    a process-wide LRU keyed by resolved root. ``get`` returns a deep copy.
+    a process-wide LRU keyed by resolved root. Successful put/delete invalidates
+    ancestor listings even when the document is not retained. ``get`` returns a
+    deep copy.
     """
 
     def __init__(self, storage_root: Path) -> None:
@@ -45,7 +47,7 @@ class FileStorageBackend:
         return self._root / document_relpath(breakpoint_path)
 
     def _load_document(self, breakpoint_path: str) -> JSONValue:
-        cached = self._document_lru.get_document(breakpoint_path)
+        cached, epoch = self._document_lru.get_document(breakpoint_path)
         if cached is not None:
             return cached
         file_path = self._document_file(breakpoint_path)
@@ -56,12 +58,8 @@ class FileStorageBackend:
             # Concurrent delete/prune can unlink between a peer's write and this
             # open (same race as ``_ensure_dir`` after a persistence clear).
             raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
-        self._document_lru.fill_document(breakpoint_path, loaded)
+        self._document_lru.fill_document(breakpoint_path, loaded, epoch=epoch)
         return loaded
-
-    def _remember_written_document(self, breakpoint_path: str, document: JSONValue) -> None:
-        """Retain the on-disk tree after a successful atomic write."""
-        self._document_lru.remember_document(breakpoint_path, document)
 
     @staticmethod
     def _ensure_dir(path: Path, *, attempts: int = 8) -> None:
@@ -150,7 +148,7 @@ class FileStorageBackend:
         self._prune_empty_dirs(file_path.parent)
 
     def _list_filesystem_prefix(self, prefix: str) -> list[str]:
-        cached = self._document_lru.get_listing(prefix)
+        cached, epoch = self._document_lru.get_listing(prefix)
         if cached is not None:
             return list(cached)
         dir_path = self._root if prefix == "" else self._root / prefix
@@ -169,7 +167,7 @@ class FileStorageBackend:
             elif entry.is_file() and entry.suffix == ".json":
                 names.append(entry.stem)
         names = sorted(names)
-        self._document_lru.fill_listing(prefix, names)
+        self._document_lru.fill_listing(prefix, names, epoch=epoch)
         return names
 
     def get(self, key: str) -> JSONValue:
@@ -192,7 +190,7 @@ class FileStorageBackend:
 
         if suffix is None:
             self._atomic_write(file_path, value_copy)
-            self._remember_written_document(breakpoint_path, value_copy)
+            self._document_lru.remember_document(breakpoint_path, value_copy)
             return
 
         try:
@@ -227,7 +225,7 @@ class FileStorageBackend:
             parent[segment] = value_copy
 
         self._atomic_write(file_path, document)
-        self._remember_written_document(breakpoint_path, document)
+        self._document_lru.remember_document(breakpoint_path, document)
 
     def delete(self, key: str) -> None:
         path = self._normalize(key)
@@ -255,7 +253,7 @@ class FileStorageBackend:
             del parent[segment]
 
         self._atomic_write(self._document_file(breakpoint_path), document)
-        self._remember_written_document(breakpoint_path, document)
+        self._document_lru.remember_document(breakpoint_path, document)
 
     def list(self, prefix: str) -> list[str]:
         path = self._normalize(prefix)
