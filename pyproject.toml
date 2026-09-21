@@ -1,6 +1,6 @@
 [project]
 name = "planets-console"
-version = "0.1.4"
+version = "0.1.5"
 description = "Analytic console for planets.nu game state"
 readme = "README.md"
 requires-python = ">=3.14"
