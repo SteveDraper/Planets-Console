@@ -282,7 +282,7 @@ class OrchestratorSubmissionMixin:
             compute_registry=self._compute_registry,
             force_root=force_root_for_entry_step(entry_step_kind),
         )
-        self._turn_cache.prefetch_planned_nodes(
+        self.turn_cache.prefetch_planned_nodes(
             planned_nodes,
             load_turn=bundle.query_context.load_turn,
             game_id=bundle.game_id,

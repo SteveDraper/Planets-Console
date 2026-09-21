@@ -1,6 +1,7 @@
 """Turn document reads, enumeration, and Planets.nu ensure."""
 
 from collections.abc import Callable
+from typing import Protocol
 
 from dacite.exceptions import DaciteError, MissingValueError
 
@@ -23,6 +24,29 @@ from api.storage.base import StorageBackend
 from api.transport.game_info_update import RefreshGameInfoParams
 
 
+class TurnInfoReadThroughCache(Protocol):
+    """Compute-plane TurnInfo LRU; storage stays JSONValue-only."""
+
+    def get(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        load_turn: Callable[[int], TurnInfo | None],
+    ) -> TurnInfo | None: ...
+
+    def put(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        turn: TurnInfo,
+    ) -> None: ...
+
+    def drop(self, game_id: int, perspective: int, turn_number: int) -> None: ...
+
+
 class TurnLoadService:
     """Load ``TurnInfo`` from storage or Planets.nu upstream."""
 
@@ -33,12 +57,21 @@ class TurnLoadService:
         games: GameService,
         *,
         on_turn_stored: Callable[[int, int, int], None] | None = None,
+        turn_info_cache: Callable[[], TurnInfoReadThroughCache] | None = None,
     ) -> None:
         self._storage = storage
         self._credentials = credentials
         self._games = games
         self._on_turn_stored = on_turn_stored
+        self._turn_info_cache = turn_info_cache
         self._settings_defaults_by_game: dict[int, dict | None] = {}
+
+    def _read_through_turn_info_cache(self) -> TurnInfoReadThroughCache | None:
+        """Return the live cache from the injected provider, or None."""
+        source = self._turn_info_cache
+        if source is None:
+            return None
+        return source()
 
     @staticmethod
     def _missing_settings_field_error(err: DaciteError) -> bool:
@@ -161,8 +194,16 @@ class TurnLoadService:
         perspective: int,
         turn_number: int,
         rst: dict,
+        *,
+        turn: TurnInfo | None = None,
     ) -> None:
         self._storage.put(self.turn_store_key(game_id, perspective, turn_number), rst)
+        cache = self._read_through_turn_info_cache()
+        if cache is not None:
+            if turn is not None:
+                cache.put(game_id, perspective, turn_number, turn)
+            else:
+                cache.drop(game_id, perspective, turn_number)
         if self._on_turn_stored is not None:
             self._on_turn_stored(game_id, perspective, turn_number)
 
@@ -180,7 +221,7 @@ class TurnLoadService:
             return False
         turn = self.deserialize_archive_turn_rst(game_id, archive_turn.rst)
         self._validate_archive_turn_matches_file(game_id, perspective, turn_number, turn)
-        self._store_turn_rst(game_id, perspective, turn_number, archive_turn.rst)
+        self._store_turn_rst(game_id, perspective, turn_number, archive_turn.rst, turn=turn)
         return True
 
     def list_stored_turn_perspectives(self, game_id: int, turn_number: int) -> list[int]:
@@ -209,12 +250,33 @@ class TurnLoadService:
                 stored.append(perspective)
         return sorted(stored)
 
-    def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:
+    def _load_turn_info_from_storage(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> TurnInfo:
         data = self._storage.get(self.turn_store_key(game_id, perspective, turn_number))
         return self._turn_info_from_stored_json(
             game_id,
             require_dict(data, f"turn {turn_number} of game {game_id} perspective {perspective}"),
         )
+
+    def get_turn_info(self, game_id: int, perspective: int, turn_number: int) -> TurnInfo:
+        cache = self._read_through_turn_info_cache()
+        if cache is None:
+            return self._load_turn_info_from_storage(game_id, perspective, turn_number)
+
+        def load(_turn_number: int) -> TurnInfo | None:
+            return self._load_turn_info_from_storage(game_id, perspective, turn_number)
+
+        turn = cache.get(game_id, perspective, turn_number, load_turn=load)
+        if turn is None:
+            raise RuntimeError(
+                f"TurnInfo cache fill returned None for game {game_id} "
+                f"perspective {perspective} turn {turn_number}"
+            )
+        return turn
 
     def get_planet_from_turn(
         self, game_id: int, perspective: int, turn_number: int, planet_id: int
@@ -303,15 +365,8 @@ class TurnLoadService:
         planets: PlanetsNuClient,
     ) -> TurnInfo:
         """Return turn data from storage, fetching from Planets.nu via loadturn when missing."""
-        store_key = self.turn_store_key(game_id, perspective, turn_number)
         if self.is_turn_stored(game_id, perspective, turn_number):
-            data = self._storage.get(store_key)
-            return self._turn_info_from_stored_json(
-                game_id,
-                require_dict(
-                    data, f"turn {turn_number} of game {game_id} perspective {perspective}"
-                ),
-            )
+            return self.get_turn_info(game_id, perspective, turn_number)
 
         if not params.username.strip():
             raise LoginCredentialsRequiredError(
@@ -348,7 +403,7 @@ class TurnLoadService:
 
         self._validate_turn_loaded_matches_request(game_id, turn_number, turn)
 
-        self._store_turn_rst(game_id, perspective, turn_number, rst)
+        self._store_turn_rst(game_id, perspective, turn_number, rst, turn=turn)
         return turn
 
     def list_stored_turn_numbers(self, game_id: int, perspective: int) -> list[int]:

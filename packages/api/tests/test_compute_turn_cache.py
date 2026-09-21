@@ -33,7 +33,7 @@ from api.compute import (
     ScopeKeySpec,
     build_compute_registry,
 )
-from api.compute.turn_cache import OrchestratorTurnCache
+from api.compute.turn_cache import TurnInfoCache
 from api.compute.worker_turn_cache import (
     reset_worker_deserialize_calls_for_tests,
     turn_from_materialization_job_wire,
@@ -83,7 +83,7 @@ def test_orchestrator_turn_cache_avoids_duplicate_underlying_loads(sample_turn) 
 
     game_id = sample_turn.game.id
     perspective = sample_turn.player.id
-    cache = OrchestratorTurnCache()
+    cache = TurnInfoCache()
     cache.get(game_id, perspective, 2, load_turn=counting_load)
     cache.get(game_id, perspective, 2, load_turn=counting_load)
     cache.get(game_id, perspective, 3, load_turn=counting_load)
@@ -111,7 +111,7 @@ def test_fleet_job_wire_includes_prefetched_turn_wire(sample_turn) -> None:
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
     )
-    cache = OrchestratorTurnCache()
+    cache = TurnInfoCache()
 
     def cached_load(turn_number: int):
         return cache.get(628580, 1, turn_number, load_turn=fleet_services.load_turn)
@@ -248,6 +248,51 @@ def test_orchestrator_exposes_cached_load_turn(sample_turn) -> None:
     assert load_calls == [2]
 
 
+def test_orchestrator_turn_cache_follows_process_cache_replace(sample_turn) -> None:
+    from api.compute.orchestration_bundle import OrchestrationBundle
+    from api.compute.turn_cache import (
+        get_process_turn_info_cache,
+        replace_process_turn_info_cache,
+        worker_turn_info_cache_maxsize,
+    )
+    from api.compute.worker_turn_cache import init_worker_turn_cache
+
+    stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
+    load_calls: list[int] = []
+
+    def counting_load(turn_number: int):
+        load_calls.append(turn_number)
+        return stored_turns.get(turn_number)
+
+    ctx = make_analytic_query_context(
+        stored_turns[2],
+        TurnAnalyticsOptions(),
+        load_turn=counting_load,
+        game_id=stored_turns[2].game.id,
+        perspective=stored_turns[2].player.id,
+    )
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    captured_before = orchestrator.turn_cache
+    assert captured_before is get_process_turn_info_cache()
+
+    init_worker_turn_cache()
+    try:
+        live = get_process_turn_info_cache()
+        assert live is not captured_before
+        assert orchestrator.turn_cache is live
+        assert live.maxsize == worker_turn_info_cache_maxsize()
+
+        spliced = orchestrator._ctx_for_bundle(OrchestrationBundle.from_context(ctx))
+        first = spliced.load_turn(2)
+        second = spliced.load_turn(2)
+        assert first is second
+        assert load_calls == [2]
+        assert live.underlying_load_calls == 1
+        assert captured_before.underlying_load_calls == 0
+    finally:
+        replace_process_turn_info_cache()
+
+
 def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> None:
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
     fleet_services = build_ephemeral_fleet_compute_services(
@@ -293,6 +338,9 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
 
 
 def test_worker_turn_cache_reuses_turn_wire_deserialize(sample_turn) -> None:
+    from api.compute.turn_cache import clear_process_turn_info_cache
+
+    clear_process_turn_info_cache()
     reset_worker_deserialize_calls_for_tests()
     turn = sample_turn
     job_wire = {
@@ -397,3 +445,292 @@ def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> No
     assert pool.worker_deserialize_calls_for_tests() == 1
 
     pool.shutdown()
+
+
+def _job_wire_for_turn(turn) -> dict:
+    return {
+        "gameId": turn.game.id,
+        "perspective": turn.player.id,
+        "materializeTurn": turn.settings.turn,
+        "turnWire": turn_info_to_json(turn),
+    }
+
+
+def _turn_load_wired_to_process_cache(storage):
+    from api.compute.turn_cache import get_process_turn_info_cache
+    from api.services.credential_service import CredentialService
+    from api.services.game_service import GameService
+    from api.services.turn_load_service import TurnLoadService
+
+    credentials = CredentialService(storage)
+    games = GameService(storage, credentials)
+    return TurnLoadService(
+        storage,
+        credentials,
+        games,
+        turn_info_cache=get_process_turn_info_cache,
+    )
+
+
+def test_turn_load_service_process_cache_follows_replace(sample_turn) -> None:
+    from unittest.mock import MagicMock
+
+    from api.compute.turn_cache import (
+        get_process_turn_info_cache,
+        replace_process_turn_info_cache,
+    )
+    from api.compute.worker_turn_cache import init_worker_turn_cache
+
+    storage = MagicMock()
+    storage.get.return_value = turn_info_to_json(sample_turn)
+    turns = _turn_load_wired_to_process_cache(storage)
+    captured_before = get_process_turn_info_cache()
+    init_worker_turn_cache()
+    try:
+        live = get_process_turn_info_cache()
+        assert live is not captured_before
+        turns.get_turn_info(sample_turn.game.id, sample_turn.player.id, sample_turn.settings.turn)
+        assert live.underlying_load_calls == 1
+        assert captured_before.underlying_load_calls == 0
+    finally:
+        replace_process_turn_info_cache()
+
+
+def test_storage_then_turn_wire_fill_shares_cached_object(sample_turn) -> None:
+    from api.compute.turn_cache import clear_process_turn_info_cache
+    from api.services.turn_load_service import TurnLoadService
+    from api.storage.memory_asset import MemoryAssetBackend
+
+    clear_process_turn_info_cache()
+    reset_worker_deserialize_calls_for_tests()
+    turn = sample_turn
+    storage = MemoryAssetBackend(initial={})
+    storage.put(
+        TurnLoadService.turn_store_key(turn.game.id, turn.player.id, turn.settings.turn),
+        turn_info_to_json(turn),
+    )
+    turns = _turn_load_wired_to_process_cache(storage)
+
+    first = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
+    second = turn_from_materialization_job_wire(_job_wire_for_turn(turn))
+
+    assert first is second
+    assert worker_deserialize_calls() == 1
+
+
+def test_turn_wire_then_storage_fill_does_not_reread_storage(sample_turn) -> None:
+    from api.compute.turn_cache import clear_process_turn_info_cache
+    from api.services.turn_load_service import TurnLoadService
+    from api.storage.memory_asset import MemoryAssetBackend
+
+    clear_process_turn_info_cache()
+    reset_worker_deserialize_calls_for_tests()
+    turn = sample_turn
+    storage = MemoryAssetBackend(initial={})
+    store_key = TurnLoadService.turn_store_key(turn.game.id, turn.player.id, turn.settings.turn)
+    storage.put(store_key, turn_info_to_json(turn))
+    turns = _turn_load_wired_to_process_cache(storage)
+
+    first = turn_from_materialization_job_wire(_job_wire_for_turn(turn))
+    second = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
+
+    assert first is second
+    assert worker_deserialize_calls() == 1
+    storage.delete(store_key)
+    third = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
+    assert third is first
+
+
+def test_scores_turn_load_hits_cache_on_second_get(sample_turn) -> None:
+    from unittest.mock import MagicMock
+
+    from api.compute.turn_cache import clear_process_turn_info_cache
+    from api.services.turn_load_service import TurnLoadService
+
+    clear_process_turn_info_cache()
+    storage = MagicMock()
+    storage.get.return_value = turn_info_to_json(sample_turn)
+    turns = _turn_load_wired_to_process_cache(storage)
+    game_id = sample_turn.game.id
+    perspective = sample_turn.player.id
+    turn_number = sample_turn.settings.turn
+
+    first = turns.get_turn_info(game_id, perspective, turn_number)
+    second = turns.get_turn_info(game_id, perspective, turn_number)
+
+    assert first is second
+    storage.get.assert_called_once_with(
+        TurnLoadService.turn_store_key(game_id, perspective, turn_number)
+    )
+
+
+def _turn_load_with_cache(storage, cache: TurnInfoCache, *, on_turn_stored=None):
+    from api.services.credential_service import CredentialService
+    from api.services.game_service import GameService
+    from api.services.turn_load_service import TurnLoadService
+
+    credentials = CredentialService(storage)
+    games = GameService(storage, credentials)
+    return TurnLoadService(
+        storage,
+        credentials,
+        games,
+        on_turn_stored=on_turn_stored,
+        turn_info_cache=lambda: cache,
+    )
+
+
+def test_storing_turn_document_puts_deserialized_turn(sample_turn) -> None:
+    from unittest.mock import MagicMock
+
+    from api.services.turn_load_service import TurnLoadService
+
+    cache = TurnInfoCache()
+    storage = MagicMock()
+    on_turn_stored = MagicMock()
+    turns = _turn_load_with_cache(storage, cache, on_turn_stored=on_turn_stored)
+    game_id = sample_turn.game.id
+    perspective = sample_turn.player.id
+    turn_number = sample_turn.settings.turn
+    rst = turn_info_to_json(sample_turn)
+
+    turns._store_turn_rst(game_id, perspective, turn_number, rst, turn=sample_turn)
+    loaded = turns.get_turn_info(game_id, perspective, turn_number)
+
+    assert loaded is sample_turn
+    assert cache.underlying_load_calls == 0
+    storage.get.assert_not_called()
+    storage.put.assert_called_once_with(
+        TurnLoadService.turn_store_key(game_id, perspective, turn_number),
+        rst,
+    )
+    on_turn_stored.assert_called_once_with(game_id, perspective, turn_number)
+
+
+def test_storing_turn_document_replaces_stale_cached_turn(sample_turn) -> None:
+    from unittest.mock import MagicMock
+
+    cache = TurnInfoCache()
+    storage = MagicMock()
+    storage.get.return_value = turn_info_to_json(sample_turn)
+    turns = _turn_load_with_cache(storage, cache)
+    game_id = sample_turn.game.id
+    perspective = sample_turn.player.id
+    turn_number = sample_turn.settings.turn
+    written = turn_info_from_json(turn_info_to_json(sample_turn))
+
+    stale = turns.get_turn_info(game_id, perspective, turn_number)
+    assert stale is not written
+    assert cache.underlying_load_calls == 1
+    assert storage.get.call_count == 1
+
+    turns._store_turn_rst(
+        game_id,
+        perspective,
+        turn_number,
+        turn_info_to_json(written),
+        turn=written,
+    )
+    loaded = turns.get_turn_info(game_id, perspective, turn_number)
+
+    assert loaded is written
+    assert loaded is not stale
+    assert cache.underlying_load_calls == 1
+    assert storage.get.call_count == 1
+
+
+def test_storing_turn_document_without_turn_drops_cached_turn(sample_turn) -> None:
+    from unittest.mock import MagicMock
+
+    from api.services.turn_load_service import TurnLoadService
+
+    cache = TurnInfoCache()
+    storage = MagicMock()
+    storage.get.return_value = turn_info_to_json(sample_turn)
+    on_turn_stored = MagicMock()
+    turns = _turn_load_with_cache(storage, cache, on_turn_stored=on_turn_stored)
+    game_id = sample_turn.game.id
+    perspective = sample_turn.player.id
+    turn_number = sample_turn.settings.turn
+    rst = turn_info_to_json(sample_turn)
+
+    turns.get_turn_info(game_id, perspective, turn_number)
+    turns.get_turn_info(game_id, perspective, turn_number)
+    assert cache.underlying_load_calls == 1
+    assert storage.get.call_count == 1
+
+    turns._store_turn_rst(game_id, perspective, turn_number, rst)
+    turns.get_turn_info(game_id, perspective, turn_number)
+
+    assert cache.underlying_load_calls == 2
+    assert storage.get.call_count == 2
+    storage.put.assert_called_once_with(
+        TurnLoadService.turn_store_key(game_id, perspective, turn_number),
+        rst,
+    )
+    on_turn_stored.assert_called_once_with(game_id, perspective, turn_number)
+
+
+def test_turn_info_cache_put_replaces_cached_turn(sample_turn) -> None:
+    loads: list[int] = []
+    written = turn_info_from_json(turn_info_to_json(sample_turn))
+
+    def counting_load(turn_number: int):
+        loads.append(turn_number)
+        return sample_turn
+
+    cache = TurnInfoCache()
+    cache.get(628580, 1, 5, load_turn=counting_load)
+    cache.put(628580, 1, 5, written)
+    hit = cache.get(628580, 1, 5, load_turn=counting_load)
+
+    assert hit is written
+    assert hit is not sample_turn
+    assert loads == [5]
+
+
+def test_turn_info_cache_drop_forces_reload(sample_turn) -> None:
+    loads: list[int] = []
+
+    def counting_load(turn_number: int):
+        loads.append(turn_number)
+        return sample_turn
+
+    cache = TurnInfoCache()
+    cache.get(628580, 1, 5, load_turn=counting_load)
+    cache.get(628580, 1, 5, load_turn=counting_load)
+    cache.drop(628580, 1, 5)
+    cache.get(628580, 1, 5, load_turn=counting_load)
+
+    assert loads == [5, 5]
+
+
+def test_worker_turn_cache_import_does_not_load_fastapi_or_dag() -> None:
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = """
+from api.compute.worker_turn_cache import init_worker_turn_cache
+import sys
+blocked = [
+    name
+    for name in sys.modules
+    if name == "fastapi"
+    or name.startswith("fastapi.")
+    or name == "api.compute.dag"
+    or name.startswith("api.compute.dag.")
+]
+if blocked:
+    raise SystemExit(f"unexpected modules: {blocked}")
+if init_worker_turn_cache is None:
+    raise SystemExit("init_worker_turn_cache missing")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parent.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout

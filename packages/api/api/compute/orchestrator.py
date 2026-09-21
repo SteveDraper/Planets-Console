@@ -25,7 +25,7 @@ from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
-from api.compute.turn_cache import OrchestratorTurnCache
+from api.compute.turn_cache import TurnInfoCache, get_process_turn_info_cache
 from api.models.game import TurnInfo
 
 # Re-exports for external callers; in-package compute code imports state types
@@ -134,7 +134,6 @@ class ComputeOrchestrator(
         pool_submitter: PoolSubmitter | None = None,
         worker_pool: ComputeWorkerPool | None = None,
     ) -> None:
-        self._turn_cache = OrchestratorTurnCache()
         self._compute_registry = compute_registry
         self._pool_registration_id: int | None = None
         if worker_pool is not None:
@@ -178,8 +177,9 @@ class ComputeOrchestrator(
         return self._metrics
 
     @property
-    def turn_cache(self) -> OrchestratorTurnCache:
-        return self._turn_cache
+    def turn_cache(self) -> TurnInfoCache:
+        """Live process TurnInfo LRU used by parent splice and prefetch."""
+        return get_process_turn_info_cache()
 
     @property
     def observers(self) -> OrchestratorObservers:
@@ -431,7 +431,7 @@ class ComputeOrchestrator(
         underlying = bundle.query_context.load_turn
 
         def cached_load(turn_number: int) -> TurnInfo | None:
-            return self._turn_cache.get(
+            return self.turn_cache.get(
                 game_id,
                 perspective,
                 turn_number,
