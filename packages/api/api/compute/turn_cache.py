@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from api.compute.lru_cache import LruCache
+from api.lru_cache import LruCache
 from api.models.game import TurnInfo
 
 if TYPE_CHECKING:

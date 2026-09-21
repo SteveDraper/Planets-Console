@@ -15,6 +15,7 @@ from api.storage.boundaries import (
     is_prefix_of_longer_breakpoint,
     resolve_breakpoint,
 )
+from api.storage.document_lru import document_lru_for_root
 from api.storage.path_utils import (
     deep_copy_value,
     ensure_ancestors,
@@ -27,10 +28,17 @@ from api.storage.path_utils import (
 
 
 class FileStorageBackend:
-    """Persist the logical JSON store as breakpoint JSON files under ``storage_root``."""
+    """Persist the logical JSON store as breakpoint JSON files under ``storage_root``.
+
+    Admitted breakpoint documents (not turn RST, not credentials) are retained in
+    a process-wide LRU keyed by resolved root. Successful put/delete invalidates
+    ancestor listings even when the document is not retained. ``get`` returns a
+    deep copy.
+    """
 
     def __init__(self, storage_root: Path) -> None:
         self._root = storage_root
+        self._document_lru = document_lru_for_root(storage_root)
 
     def _normalize(self, key: str) -> str:
         return (key or "").strip().strip("/") or ""
@@ -39,14 +47,19 @@ class FileStorageBackend:
         return self._root / document_relpath(breakpoint_path)
 
     def _load_document(self, breakpoint_path: str) -> JSONValue:
+        cached, epoch = self._document_lru.get_document(breakpoint_path)
+        if cached is not None:
+            return cached
         file_path = self._document_file(breakpoint_path)
         try:
             with open(file_path, encoding="utf-8") as handle:
-                return json.load(handle)
+                loaded = json.load(handle)
         except FileNotFoundError:
             # Concurrent delete/prune can unlink between a peer's write and this
             # open (same race as ``_ensure_dir`` after a persistence clear).
             raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
+        self._document_lru.fill_document(breakpoint_path, loaded, epoch=epoch)
+        return loaded
 
     @staticmethod
     def _ensure_dir(path: Path, *, attempts: int = 8) -> None:
@@ -131,9 +144,13 @@ class FileStorageBackend:
             file_path.unlink()
         except FileNotFoundError:
             raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
+        self._document_lru.drop_document(breakpoint_path)
         self._prune_empty_dirs(file_path.parent)
 
     def _list_filesystem_prefix(self, prefix: str) -> list[str]:
+        cached, epoch = self._document_lru.get_listing(prefix)
+        if cached is not None:
+            return list(cached)
         dir_path = self._root if prefix == "" else self._root / prefix
         if not dir_path.is_dir():
             raise NotFoundError(f"Path does not exist: {prefix!r}")
@@ -149,7 +166,9 @@ class FileStorageBackend:
                 names.append(entry.name)
             elif entry.is_file() and entry.suffix == ".json":
                 names.append(entry.stem)
-        return sorted(names)
+        names = sorted(names)
+        self._document_lru.fill_listing(prefix, names, epoch=epoch)
+        return names
 
     def get(self, key: str) -> JSONValue:
         path = self._normalize(key)
@@ -171,10 +190,11 @@ class FileStorageBackend:
 
         if suffix is None:
             self._atomic_write(file_path, value_copy)
+            self._document_lru.remember_document(breakpoint_path, value_copy)
             return
 
         try:
-            document = self._load_document(breakpoint_path)
+            document = deep_copy_value(self._load_document(breakpoint_path))
         except NotFoundError:
             document = {}
 
@@ -205,6 +225,7 @@ class FileStorageBackend:
             parent[segment] = value_copy
 
         self._atomic_write(file_path, document)
+        self._document_lru.remember_document(breakpoint_path, document)
 
     def delete(self, key: str) -> None:
         path = self._normalize(key)
@@ -215,7 +236,7 @@ class FileStorageBackend:
             self._delete_document(breakpoint_path)
             return
 
-        document = self._load_document(breakpoint_path)
+        document = deep_copy_value(self._load_document(breakpoint_path))
         parent, segment, is_array_index = resolve_parent_and_segment(document, suffix)
         if is_array_index:
             idx = parse_index_segment(segment)
@@ -232,6 +253,7 @@ class FileStorageBackend:
             del parent[segment]
 
         self._atomic_write(self._document_file(breakpoint_path), document)
+        self._document_lru.remember_document(breakpoint_path, document)
 
     def list(self, prefix: str) -> list[str]:
         path = self._normalize(prefix)
