@@ -219,7 +219,7 @@ Stream teardown unregisters observers only; **in-flight nodes keep their bundle 
 
 ### Turn cache
 
-One **TurnInfo LRU per process**, keyed by `(game_id, perspective, turn)`. Fleet `turnWire` deserialize (materialize/observation legs) and scores/storage `TurnInfo` loads (`TurnLoadService.get_turn_info`) share that cache. Parent orchestrator `ctx.load_turn` splice uses the same type and key; worker heaps are separate (no cross-process shared memory). This is **not** a `StorageBackend` document cache -- storage stays `JSONValue` only. Drop a key when that turn document is written; `turn_cache.clear` on orchestrator shutdown still applies. Interpreter pools that still run fleet legs call `init_worker_turn_cache`; SAT-session children never import the cache.
+One **TurnInfo LRU per process**, keyed by `(game_id, perspective, turn)`. Fleet `turnWire` deserialize (materialize/observation legs) and scores/storage `TurnInfo` loads (`TurnLoadService.get_turn_info`) share that cache. Parent orchestrator `ctx.load_turn` splice uses the same type and key; worker heaps are separate (no cross-process shared memory). This is **not** a `StorageBackend` document cache -- storage stays `JSONValue` only. Put the written `TurnInfo` after a turn document write; drop the key only when the writer has JSON and no `TurnInfo`. `turn_cache.clear` on orchestrator shutdown still applies. Interpreter pools that still run fleet legs call `init_worker_turn_cache`; SAT-session children never import the cache.
 
 ### Fleet persist correlation
 
