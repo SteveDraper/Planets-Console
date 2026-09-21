@@ -47,9 +47,6 @@ class TurnInfoReadThroughCache(Protocol):
     def drop(self, game_id: int, perspective: int, turn_number: int) -> None: ...
 
 
-TurnInfoCacheSource = TurnInfoReadThroughCache | Callable[[], TurnInfoReadThroughCache]
-
-
 class TurnLoadService:
     """Load ``TurnInfo`` from storage or Planets.nu upstream."""
 
@@ -60,7 +57,7 @@ class TurnLoadService:
         games: GameService,
         *,
         on_turn_stored: Callable[[int, int, int], None] | None = None,
-        turn_info_cache: TurnInfoCacheSource | None = None,
+        turn_info_cache: Callable[[], TurnInfoReadThroughCache] | None = None,
     ) -> None:
         self._storage = storage
         self._credentials = credentials
@@ -70,13 +67,11 @@ class TurnLoadService:
         self._settings_defaults_by_game: dict[int, dict | None] = {}
 
     def _read_through_turn_info_cache(self) -> TurnInfoReadThroughCache | None:
-        """Return the injected cache, resolving a zero-arg provider if given."""
+        """Return the live cache from the injected provider, or None."""
         source = self._turn_info_cache
         if source is None:
             return None
-        if callable(source) and not hasattr(source, "get"):
-            return source()
-        return source
+        return source()
 
     @staticmethod
     def _missing_settings_field_error(err: DaciteError) -> bool:

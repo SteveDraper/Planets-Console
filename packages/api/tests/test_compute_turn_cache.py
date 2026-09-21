@@ -576,7 +576,7 @@ def _turn_load_with_cache(storage, cache: TurnInfoCache, *, on_turn_stored=None)
         credentials,
         games,
         on_turn_stored=on_turn_stored,
-        turn_info_cache=cache,
+        turn_info_cache=lambda: cache,
     )
 
 
