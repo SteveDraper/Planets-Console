@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
+import api.analytics.military_score_inference.prior_mining.mine_stock as mine_stock_module
 import yaml
 from api.analytics.military_score_inference.prior_mining.mine_stock import (
+    STANDARD_MINE_STOCK_FILENAME,
     MineStockAccumulation,
     accumulation_mine_stock_report_section,
     create_empty_mine_stock_asset,
     extract_mine_stock_sample,
     load_mine_stock_asset,
+    load_mine_stock_for_category,
     merge_mine_stock_accumulation_into_asset,
     write_mine_stock_asset,
 )
@@ -290,3 +296,53 @@ def test_report_section_keeps_row_counts_without_full_mine_stock():
     assert section["zero_stock_count"] == 0
     assert section["infoturn_mismatches"] == 0
     assert section["row_counts"][str(RACE_ID)][str(HOST_TURN)] == 1
+
+
+@contextmanager
+def _isolated_default_mine_stock_cache(monkeypatch, tmp_path: Path):
+    """Route default-path loads through tmp so the process LRU never keys the shipped file."""
+    mine_stock_module._load_mine_stock_asset_cached.cache_clear()
+    (tmp_path / STANDARD_MINE_STOCK_FILENAME).write_text("", encoding="utf-8")
+    monkeypatch.setattr(mine_stock_module, "default_mine_stock_dir", lambda: tmp_path)
+    try:
+        yield
+    finally:
+        mine_stock_module._load_mine_stock_asset_cached.cache_clear()
+
+
+def test_load_mine_stock_for_category_reuses_default_dir(monkeypatch, tmp_path: Path):
+    loads = {"count": 0}
+
+    def wrapped_load(path: Path):
+        loads["count"] += 1
+        return create_empty_mine_stock_asset(GameCategory.STANDARD)
+
+    monkeypatch.setattr(mine_stock_module, "load_mine_stock_asset", wrapped_load)
+    with _isolated_default_mine_stock_cache(monkeypatch, tmp_path):
+        first = load_mine_stock_for_category(GameCategory.STANDARD)
+        second = load_mine_stock_for_category(GameCategory.STANDARD)
+        assert first[0] is second[0]
+        assert first[1] == second[1]
+        assert first[2] is second[2]
+        assert loads["count"] == 1
+    assert mine_stock_module._load_mine_stock_asset_cached.cache_info().currsize == 0
+
+
+def test_load_mine_stock_single_default_load_under_threads(monkeypatch, tmp_path: Path):
+    loads = {"count": 0}
+
+    def wrapped_load(path: Path):
+        loads["count"] += 1
+        # Keep the miss window open so all eight workers enter before the first store.
+        time.sleep(0.05)
+        return create_empty_mine_stock_asset(GameCategory.STANDARD)
+
+    monkeypatch.setattr(mine_stock_module, "load_mine_stock_asset", wrapped_load)
+    with _isolated_default_mine_stock_cache(monkeypatch, tmp_path):
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(
+                pool.map(lambda _: load_mine_stock_for_category(GameCategory.STANDARD), range(8))
+            )
+        assert loads["count"] == 1
+        assert all(result[0] is results[0][0] for result in results)
+    assert mine_stock_module._load_mine_stock_asset_cached.cache_info().currsize == 0

@@ -108,6 +108,23 @@ def test_runtime_second_activation_reads_port_sidecar(tmp_path, monkeypatch):
     assert opened == [8123]
 
 
+def test_runtime_second_activation_no_browser_does_not_open_spa(tmp_path, monkeypatch):
+    port_path = tmp_path / PORT_FILE_NAME
+    port_path.write_text(json.dumps({"pid": 1, "port": 8123}), encoding="utf-8")
+    opened: list[int] = []
+    monkeypatch.setattr(
+        "server.process_host.runtime.wait_for_health",
+        lambda port, timeout_seconds=30.0: None,
+    )
+    monkeypatch.setattr(
+        "server.process_host.runtime.open_spa",
+        lambda port: opened.append(port),
+    )
+    monkeypatch.setattr("server.process_host.runtime.sys.argv", ["process_host", "--no-browser"])
+    assert _reopen_existing_instance(port_path) == 0
+    assert opened == []
+
+
 def test_run_passes_sidecar_when_lock_is_held(tmp_path, monkeypatch):
     monkeypatch.setattr("server.process_host.runtime.console_data_directory", lambda: tmp_path)
     monkeypatch.setattr(

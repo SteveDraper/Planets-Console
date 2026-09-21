@@ -102,6 +102,31 @@ def test_run_as_primary_opens_spa_only_after_health_on_loopback(
     assert stub_hard_exit == [0]
 
 
+def test_run_as_primary_no_browser_skips_spa_open(tmp_path, monkeypatch, stub_hard_exit):
+    events: list[tuple[str, ...]] = []
+
+    def wait_for_health(port, **_kwargs):
+        events.append(("health", port))
+
+    def open_spa(port):
+        events.append(("open", port))
+
+    _stub_primary_server(
+        monkeypatch,
+        tmp_path,
+        wait_for_health=wait_for_health,
+        open_spa=open_spa,
+    )
+    monkeypatch.setattr("server.process_host.runtime.sys.argv", ["process_host", "--no-browser"])
+    lock = MagicMock()
+    log_path = tmp_path / "logs" / "process-host.log"
+
+    assert _run_as_primary(lock, log_path) == 0
+
+    assert events == [("health", 8123)]
+    assert stub_hard_exit == [0]
+
+
 def test_run_as_primary_does_not_open_spa_when_health_never_succeeds(
     tmp_path, monkeypatch, stub_hard_exit
 ):
