@@ -105,6 +105,7 @@ def test_compute_diagnostics_enabled_snapshot_and_freeze():
     assert "liveOccupancy" in body
     assert "concurrencyTimeline" in body
     assert "concurrencyRollup" in body
+    assert "catalogReuse" not in body
     assert body["liveOccupancy"]["configuredWorkers"] >= 0
     assert body["concurrencyRollup"]["eventCount"] == 0
     assert "bottleneckClass" not in body["concurrencyRollup"]

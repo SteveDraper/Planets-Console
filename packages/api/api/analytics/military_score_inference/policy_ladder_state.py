@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.catalog_reuse import ScoresCatalogReuse
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hopeless_classifier import HopelessRowFacts
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
@@ -37,6 +38,7 @@ class PolicyLadderState:
     seen_signatures: set[tuple[tuple[str, int], ...]] = field(default_factory=set)
     overshoot_signatures: set[tuple[tuple[str, int], ...]] = field(default_factory=set)
     catalog: ActionCatalog | None = None
+    catalog_reuse: ScoresCatalogReuse = field(default_factory=ScoresCatalogReuse)
     problem: InferenceProblem | None = None
     last_status: str = STATUS_NO_EXACT_SOLUTION
     last_diagnostics: dict[str, object] = field(default_factory=dict)
