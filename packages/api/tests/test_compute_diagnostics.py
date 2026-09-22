@@ -1380,22 +1380,7 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "liveOccupancy",
         "concurrencyTimeline",
         "concurrencyRollup",
-        "catalogReuse",
     }
-    assert set(wire["catalogReuse"]) == {
-        "processWide",
-        "priorHits",
-        "priorBuilds",
-        "transferHits",
-        "transferBuilds",
-        "comboInitialBuilds",
-        "comboExactHits",
-        "comboExtendCalls",
-        "comboRebuildCalls",
-        "comboObjectsReused",
-        "comboObjectsAllocated",
-    }
-    assert wire["catalogReuse"]["processWide"] is True
     assert wire["freezeArmed"] is False
     assert wire["inFlight"] == []
     assert wire["liveOccupancy"]["scopedReadyDepth"] == 0

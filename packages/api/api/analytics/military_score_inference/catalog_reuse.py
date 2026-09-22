@@ -135,24 +135,6 @@ def reset_catalog_reuse_totals() -> None:
         _totals = CatalogReuseTotals()
 
 
-def catalog_reuse_totals_wire() -> dict[str, int | bool]:
-    """CamelCase tally for the compute diagnostics snapshot."""
-    totals = catalog_reuse_totals()
-    return {
-        "processWide": True,
-        "priorHits": totals.prior_hits,
-        "priorBuilds": totals.prior_builds,
-        "transferHits": totals.transfer_hits,
-        "transferBuilds": totals.transfer_builds,
-        "comboInitialBuilds": totals.combo_initial_builds,
-        "comboExactHits": totals.combo_exact_hits,
-        "comboExtendCalls": totals.combo_extend_calls,
-        "comboRebuildCalls": totals.combo_rebuild_calls,
-        "comboObjectsReused": totals.combo_objects_reused,
-        "comboObjectsAllocated": totals.combo_objects_allocated,
-    }
-
-
 def _record_prior(*, hit: bool) -> None:
     with _totals_lock:
         if hit:

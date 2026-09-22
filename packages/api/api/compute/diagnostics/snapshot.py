@@ -304,9 +304,6 @@ def _optional_int(value: object) -> int | None:
 
 
 def snapshot_to_wire(snapshot: ComputeDiagnosticsSnapshot) -> dict[str, Any]:
-    from api.analytics.military_score_inference.catalog_reuse import (
-        catalog_reuse_totals_wire,
-    )
     completion_history = [
         {
             "scopeKey": record["scope_key"],
@@ -340,5 +337,4 @@ def snapshot_to_wire(snapshot: ComputeDiagnosticsSnapshot) -> dict[str, Any]:
         "liveOccupancy": snapshot.live_occupancy,
         "concurrencyTimeline": list(snapshot.concurrency_timeline),
         "concurrencyRollup": snapshot.concurrency_rollup,
-        "catalogReuse": catalog_reuse_totals_wire(),
     }

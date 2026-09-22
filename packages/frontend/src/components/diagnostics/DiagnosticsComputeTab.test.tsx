@@ -50,22 +50,6 @@ function emptyLiveOccupancy(): ComputeDiagnosticsSnapshotResponse['liveOccupancy
   }
 }
 
-function emptyCatalogReuse(): ComputeDiagnosticsSnapshotResponse['catalogReuse'] {
-  return {
-    processWide: true,
-    priorHits: 0,
-    priorBuilds: 0,
-    transferHits: 0,
-    transferBuilds: 0,
-    comboInitialBuilds: 0,
-    comboExactHits: 0,
-    comboExtendCalls: 0,
-    comboRebuildCalls: 0,
-    comboObjectsReused: 0,
-    comboObjectsAllocated: 0,
-  }
-}
-
 function emptyConcurrencyRollup(): ComputeDiagnosticsSnapshotResponse['concurrencyRollup'] {
   return {
     eventCount: 0,
@@ -111,7 +95,6 @@ function snapshotFixture(
     liveOccupancy: emptyLiveOccupancy(),
     concurrencyTimeline: [],
     concurrencyRollup: emptyConcurrencyRollup(),
-    catalogReuse: emptyCatalogReuse(),
     ...overrides,
   }
 }
