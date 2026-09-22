@@ -128,6 +128,74 @@ def _generic_freighter_combo(
     )
 
 
+def _retained_combos_by_key(
+    retained_combos: tuple[ShipBuildCombo, ...] | None,
+) -> dict[tuple[int, int, int | None, int | None, int, int], ShipBuildCombo] | None:
+    if retained_combos is None:
+        return None
+    return {
+        (
+            combo.hull_id,
+            combo.engine_id,
+            combo.beam_id,
+            combo.torp_id,
+            combo.beam_count,
+            combo.launcher_count,
+        ): combo
+        for combo in retained_combos
+        if combo.combo_id != GENERIC_FREIGHTER_COMBO_ID
+    }
+
+
+def _retained_combo_still_matches(
+    retained: ShipBuildCombo,
+    *,
+    upper_bound: int,
+    score_delta_2x: int,
+    warship_delta: int,
+    freighter_delta: int,
+    hull_beam_slots: int,
+    hull_launcher_slots: int,
+    prior_catalog: PriorWeightsCatalog,
+    hull: Hull,
+    engine: Engine,
+    beam: Beam | None,
+    torpedo: Torpedo | None,
+    beam_count: int,
+    launcher_count: int,
+) -> bool:
+    if (
+        retained.upper_bound != upper_bound
+        or retained.score_delta_2x != score_delta_2x
+        or retained.warship_delta != warship_delta
+        or retained.freighter_delta != freighter_delta
+        or retained.hull_beam_slots != hull_beam_slots
+        or retained.hull_launcher_slots != hull_launcher_slots
+    ):
+        return False
+    weight = prior_catalog.combo_probability_weight(
+        combo_id=retained.combo_id,
+        hull=hull,
+        engine=engine,
+        beam=beam,
+        torpedo=torpedo,
+        beam_count=beam_count,
+        launcher_count=launcher_count,
+    )
+    return retained.probability_weight == weight
+
+
+def _retained_generic_freighter(
+    retained_combos: tuple[ShipBuildCombo, ...] | None,
+) -> ShipBuildCombo | None:
+    if retained_combos is None:
+        return None
+    for combo in retained_combos:
+        if combo.combo_id == GENERIC_FREIGHTER_COMBO_ID:
+            return combo
+    return None
+
+
 def generate_ship_build_combos(
     observation: InferenceObservation,
     *,
@@ -147,10 +215,19 @@ def generate_ship_build_combos(
     extra_freighter_capacity: int = 0,
     reserved_incoming_warships: int = 0,
     reserved_incoming_freighters: int = 0,
+    retained_combos: tuple[ShipBuildCombo, ...] | None = None,
 ) -> tuple[ShipBuildCombo, ...]:
+    """Build ship-build combos for one eligibility space.
+
+    ``retained_combos``, when set, are objects from a narrower space with the
+    same baked bounds. A retained combo is returned as the same object when its
+    upper bound, score, and probability weight still match. The id sequence
+    matches a fresh build.
+    """
     combo_config = config or ShipBuildComboConfig()
     combos: list[ShipBuildCombo] = []
     freighter_upper_bound = 0
+    retained_by_key = _retained_combos_by_key(retained_combos)
 
     for hull_id in sorted(buildable_hull_ids):
         hull = hulls_by_id.get(hull_id)
@@ -225,11 +302,46 @@ def generate_ship_build_combos(
                                 )
                                 continue
 
+                            beam_id = beam.id if beam is not None else None
+                            torp_id = torpedo.id if torpedo is not None else None
+                            retained = (
+                                retained_by_key.get(
+                                    (
+                                        hull_id,
+                                        engine_id,
+                                        beam_id,
+                                        torp_id,
+                                        beam_count,
+                                        launcher_count,
+                                    )
+                                )
+                                if retained_by_key is not None
+                                else None
+                            )
+                            if retained is not None and _retained_combo_still_matches(
+                                retained,
+                                upper_bound=build_upper_bound,
+                                score_delta_2x=score_delta_2x,
+                                warship_delta=1 if counts_as_warship else 0,
+                                freighter_delta=1 if counts_as_freighter else 0,
+                                hull_beam_slots=hull.beams,
+                                hull_launcher_slots=hull.launchers,
+                                prior_catalog=prior_catalog,
+                                hull=hull,
+                                engine=engine,
+                                beam=beam,
+                                torpedo=torpedo,
+                                beam_count=beam_count,
+                                launcher_count=launcher_count,
+                            ):
+                                combos.append(retained)
+                                continue
+
                             combo_id = ship_build_combo_id(
                                 hull_id=hull_id,
                                 engine_id=engine_id,
-                                beam_id=beam.id if beam is not None else None,
-                                torp_id=torpedo.id if torpedo is not None else None,
+                                beam_id=beam_id,
+                                torp_id=torp_id,
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
                             )
@@ -275,12 +387,20 @@ def generate_ship_build_combos(
         freighter_weight = prior_catalog.freighter_probability_weight(
             combo_id=GENERIC_FREIGHTER_COMBO_ID,
         )
-        combos.append(
-            _generic_freighter_combo(
-                upper_bound=freighter_upper_bound,
-                probability_weight=freighter_weight,
+        retained_freighter = _retained_generic_freighter(retained_combos)
+        if (
+            retained_freighter is not None
+            and retained_freighter.upper_bound == freighter_upper_bound
+            and retained_freighter.probability_weight == freighter_weight
+        ):
+            combos.append(retained_freighter)
+        else:
+            combos.append(
+                _generic_freighter_combo(
+                    upper_bound=freighter_upper_bound,
+                    probability_weight=freighter_weight,
+                )
             )
-        )
 
     pruned = prune_combos_for_observation(
         observation,

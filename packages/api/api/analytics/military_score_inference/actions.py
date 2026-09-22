@@ -12,6 +12,10 @@ from api.analytics.military_score_inference.aggregate_catalog_build import (
     build_aggregate_actions,
     residual_count_bound,
 )
+from api.analytics.military_score_inference.catalog_reuse import (
+    ScoresCatalogReuse,
+    ShipBuildComboSpace,
+)
 from api.analytics.military_score_inference.component_eligibility import (
     player_by_id,
     turn_catalog_context_for_policy_step,
@@ -44,6 +48,7 @@ from api.analytics.military_score_inference.prior_weights_catalog import (
 )
 from api.analytics.military_score_inference.prior_weights_resolve import (
     resolve_prior_weights_catalog,
+    ship_limit_band_key,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
@@ -57,6 +62,7 @@ from api.analytics.military_score_inference.ship_build_combos import (
     generate_ship_build_combos,
 )
 from api.analytics.military_score_inference.ship_transfer_families import (
+    ShipTransferCatalogFragment,
     build_ship_transfer_catalog_fragment,
     public_scoreboard_rows_from_scores,
 )
@@ -187,6 +193,7 @@ def build_action_catalog_from_turn(
     prior_weights_base_dir: Path | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+    catalog_reuse: ScoresCatalogReuse | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step
     if resolved_policy_step is None:
@@ -202,17 +209,34 @@ def build_action_catalog_from_turn(
         catalog_context.hulls_by_id,
         catalog_context.buildable_hull_ids,
     )
-    prior_catalog = resolve_prior_weights_catalog(
-        observation,
-        turn.settings,
-        race_id=player.raceid,
-        buildable_hull_ids=catalog_context.buildable_hull_ids,
-        generic_freighter_hull_ids=generic_freighter_hull_ids,
-        eligible_engine_ids=catalog_context.eligible_engine_ids,
-        eligible_beam_ids=catalog_context.eligible_beam_ids,
-        eligible_torp_ids=catalog_context.eligible_torp_ids,
-        base_dir=prior_weights_base_dir,
-    )
+
+    def load_prior_weights() -> PriorWeightsCatalog:
+        return resolve_prior_weights_catalog(
+            observation,
+            turn.settings,
+            race_id=player.raceid,
+            buildable_hull_ids=catalog_context.buildable_hull_ids,
+            generic_freighter_hull_ids=generic_freighter_hull_ids,
+            eligible_engine_ids=catalog_context.eligible_engine_ids,
+            eligible_beam_ids=catalog_context.eligible_beam_ids,
+            eligible_torp_ids=catalog_context.eligible_torp_ids,
+            base_dir=prior_weights_base_dir,
+        )
+
+    if catalog_reuse is None:
+        prior_catalog = load_prior_weights()
+    else:
+        prior_catalog = catalog_reuse.prior_weights_catalog(
+            race_id=player.raceid,
+            buildable_hull_ids=catalog_context.buildable_hull_ids,
+            generic_freighter_hull_ids=generic_freighter_hull_ids,
+            eligible_engine_ids=catalog_context.eligible_engine_ids,
+            eligible_beam_ids=catalog_context.eligible_beam_ids,
+            eligible_torp_ids=catalog_context.eligible_torp_ids,
+            ship_limit_band=ship_limit_band_key(observation),
+            base_dir=prior_weights_base_dir,
+            build=load_prior_weights,
+        )
     return build_action_catalog(
         observation,
         hulls_by_id=catalog_context.hulls_by_id,
@@ -232,6 +256,7 @@ def build_action_catalog_from_turn(
         policy_steps=resolve_tier_policies(),
         fleet_torp_overlay=fleet_torp_overlay,
         prior_fleet_records=prior_fleet_records,
+        catalog_reuse=catalog_reuse,
     )
 
 
@@ -270,6 +295,7 @@ def build_action_catalog(
     policy_steps: tuple[InferenceTierPolicyStep, ...] | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+    catalog_reuse: ScoresCatalogReuse | None = None,
 ) -> ActionCatalog:
     resolved_policy_step = policy_step or resolve_tier_policies()[-1]
     catalog_config = config or ActionCatalogConfig()
@@ -315,16 +341,37 @@ def build_action_catalog(
         if turn is not None
         else ()
     )
-    transfer_fragment = build_ship_transfer_catalog_fragment(
-        observation,
-        peer_rows=peer_rows,
-        prior_fleet_records=prior_fleet_records,
-        hulls_by_id=hulls_by_id,
-        engines_by_id=engines_by_id,
-        beams_by_id=beams_by_id,
-        torpedos_by_id=torpedos_by_id,
-        settings=turn.settings if turn is not None else None,
-    )
+
+    def load_transfer_fragment() -> ShipTransferCatalogFragment:
+        return build_ship_transfer_catalog_fragment(
+            observation,
+            peer_rows=peer_rows,
+            prior_fleet_records=prior_fleet_records,
+            hulls_by_id=hulls_by_id,
+            engines_by_id=engines_by_id,
+            beams_by_id=beams_by_id,
+            torpedos_by_id=torpedos_by_id,
+            settings=turn.settings if turn is not None else None,
+        )
+
+    if catalog_reuse is None:
+        transfer_fragment = load_transfer_fragment()
+    else:
+        transfer_fragment = catalog_reuse.ship_transfer_fragment(
+            prior_fleet_records=prior_fleet_records,
+            observation_key=(
+                observation.player_id,
+                observation.warship_delta,
+                observation.freighter_delta,
+                observation.military_delta_2x,
+                observation.starbases_owned,
+                observation.priority_point_delta,
+                observation.planet_delta,
+                observation.starbase_delta,
+                observation.is_after_ship_limit,
+            ),
+            build=load_transfer_fragment,
+        )
     kept_actions.extend(transfer_fragment.actions)
     idle_dock = False
     if turn is not None:
@@ -371,25 +418,57 @@ def build_action_catalog(
         admitted_torp_ids=admitted_torp_ids,
     )
 
-    ship_build_combos = generate_ship_build_combos(
-        observation,
-        hulls_by_id=hulls_by_id,
-        engines_by_id=engines_by_id,
-        beams_by_id=beams_by_id,
-        torpedos_by_id=torpedos_by_id,
-        buildable_hull_ids=buildable_hull_ids,
-        eligible_engine_ids=eligible_engine_ids,
-        eligible_beam_ids=eligible_beam_ids,
-        eligible_torp_ids=eligible_torp_ids,
-        config=catalog_config.ship_build_combo_config,
-        prior_catalog=prior_catalog,
-        beam_slot_counts=resolved_policy_step.beam_slot_counts,
-        launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
-        extra_warship_capacity=transfer_fragment.extra_warship_capacity,
-        extra_freighter_capacity=transfer_fragment.extra_freighter_capacity,
-        reserved_incoming_warships=transfer_fragment.reserved_incoming_warships,
-        reserved_incoming_freighters=transfer_fragment.reserved_incoming_freighters,
-    )
+    combo_config = catalog_config.ship_build_combo_config or ShipBuildComboConfig()
+
+    def generate_combos(
+        retained: tuple[ShipBuildCombo, ...] | None,
+    ) -> tuple[ShipBuildCombo, ...]:
+        return generate_ship_build_combos(
+            observation,
+            hulls_by_id=hulls_by_id,
+            engines_by_id=engines_by_id,
+            beams_by_id=beams_by_id,
+            torpedos_by_id=torpedos_by_id,
+            buildable_hull_ids=buildable_hull_ids,
+            eligible_engine_ids=eligible_engine_ids,
+            eligible_beam_ids=eligible_beam_ids,
+            eligible_torp_ids=eligible_torp_ids,
+            config=combo_config,
+            prior_catalog=prior_catalog,
+            beam_slot_counts=resolved_policy_step.beam_slot_counts,
+            launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
+            extra_warship_capacity=transfer_fragment.extra_warship_capacity,
+            extra_freighter_capacity=transfer_fragment.extra_freighter_capacity,
+            reserved_incoming_warships=transfer_fragment.reserved_incoming_warships,
+            reserved_incoming_freighters=transfer_fragment.reserved_incoming_freighters,
+            retained_combos=retained,
+        )
+
+    if catalog_reuse is None:
+        ship_build_combos = generate_combos(None)
+    else:
+        ship_build_combos = catalog_reuse.ship_build_combos(
+            ShipBuildComboSpace(
+                buildable_hull_ids=buildable_hull_ids,
+                eligible_engine_ids=eligible_engine_ids,
+                eligible_beam_ids=eligible_beam_ids,
+                eligible_torp_ids=eligible_torp_ids,
+                beam_slot_counts=resolved_policy_step.beam_slot_counts,
+                launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
+                extra_warship_capacity=transfer_fragment.extra_warship_capacity,
+                extra_freighter_capacity=transfer_fragment.extra_freighter_capacity,
+                reserved_incoming_warships=transfer_fragment.reserved_incoming_warships,
+                reserved_incoming_freighters=transfer_fragment.reserved_incoming_freighters,
+                warship_delta=observation.warship_delta,
+                freighter_delta=observation.freighter_delta,
+                starbases_owned=observation.starbases_owned,
+                military_delta_2x=observation.military_delta_2x,
+                max_aggregate_residual_when_ship_builds=(
+                    combo_config.max_aggregate_residual_when_ship_builds
+                ),
+            ),
+            generate_combos,
+        )
 
     return ActionCatalog(
         aggregate_actions=tuple(kept_actions),

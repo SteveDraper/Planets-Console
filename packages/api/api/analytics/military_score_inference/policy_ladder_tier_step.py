@@ -252,6 +252,10 @@ def run_policy_ladder_tier_step(
     (``state.started_at``), so SPA rows that sat in ``waiting_deps`` do not
     instantly ``time_limited``, and multi-tier climbs do not get a fresh full
     limit on every step.
+
+    Ship-build combos, prior-weight tables, and the ship-transfer fragment come
+    from ``state.catalog_reuse`` when this rung's inputs match or only widen.
+    Each rung still receives its own action catalog.
     """
     if state.ladder_complete or state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True
@@ -419,6 +423,7 @@ def run_policy_ladder_tier_step(
         resolved_mask=state.resolved_mask,
         fleet_torp_overlay=state.fleet_torp_overlay,
         prior_fleet_records=state.prior_fleet_records,
+        catalog_reuse=state.catalog_reuse,
     )
     state.catalog = catalog
     current_combo_ids = frozenset(combo.combo_id for combo in catalog.ship_build_combos)

@@ -270,6 +270,10 @@ export interface components {
             concurrencyRollup: {
                 [key: string]: unknown;
             };
+            /** Catalogreuse */
+            catalogReuse: {
+                [key: string]: unknown;
+            };
         };
         /** HTTPValidationError */
         HTTPValidationError: {

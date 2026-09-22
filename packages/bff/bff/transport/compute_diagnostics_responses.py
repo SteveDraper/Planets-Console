@@ -30,6 +30,7 @@ class ComputeDiagnosticsSnapshotResponse(BaseModel):
     live_occupancy: dict = Field(alias="liveOccupancy")
     concurrency_timeline: list[dict] = Field(alias="concurrencyTimeline")
     concurrency_rollup: dict = Field(alias="concurrencyRollup")
+    catalog_reuse: dict = Field(alias="catalogReuse")
 
 
 class ComputeDiagnosticsFreezeStatusResponse(BaseModel):

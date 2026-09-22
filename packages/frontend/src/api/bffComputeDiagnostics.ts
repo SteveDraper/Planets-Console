@@ -71,6 +71,21 @@ export type ComputeDiagnosticsConcurrencyRollup = {
   configuredWorkers: number | null
 }
 
+export type CatalogReuseTotals = {
+  /** Process-wide tally, not limited to the snapshot shell. */
+  processWide: boolean
+  priorHits: number
+  priorBuilds: number
+  transferHits: number
+  transferBuilds: number
+  comboInitialBuilds: number
+  comboExactHits: number
+  comboExtendCalls: number
+  comboRebuildCalls: number
+  comboObjectsReused: number
+  comboObjectsAllocated: number
+}
+
 export type ComputeDiagnosticsSnapshotResponse = {
   shell: AnalyticShellScope
   freezeArmed: boolean
@@ -89,6 +104,7 @@ export type ComputeDiagnosticsSnapshotResponse = {
   liveOccupancy: ComputeDiagnosticsLiveOccupancy
   concurrencyTimeline: Record<string, unknown>[]
   concurrencyRollup: ComputeDiagnosticsConcurrencyRollup
+  catalogReuse: CatalogReuseTotals
 }
 
 function normalizeShell(shell: {
