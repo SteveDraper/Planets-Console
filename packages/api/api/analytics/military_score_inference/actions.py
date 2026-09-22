@@ -359,17 +359,7 @@ def build_action_catalog(
     else:
         transfer_fragment = catalog_reuse.ship_transfer_fragment(
             prior_fleet_records=prior_fleet_records,
-            observation_key=(
-                observation.player_id,
-                observation.warship_delta,
-                observation.freighter_delta,
-                observation.military_delta_2x,
-                observation.starbases_owned,
-                observation.priority_point_delta,
-                observation.planet_delta,
-                observation.starbase_delta,
-                observation.is_after_ship_limit,
-            ),
+            observation=observation,
             build=load_transfer_fragment,
         )
     kept_actions.extend(transfer_fragment.actions)

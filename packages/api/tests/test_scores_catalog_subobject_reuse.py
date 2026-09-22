@@ -211,6 +211,7 @@ def test_narrow_after_wide_matches_fresh_build(sample_turn) -> None:
 
 
 def test_changed_observation_bounds_do_not_reuse_combos(sample_turn) -> None:
+    reset_catalog_reuse_totals()
     turn = _turn_with_buildable_hulls(sample_turn)
     filters = _filters(hull_ids=(_ARMED_HULL_ID,))
     observation = _observation_for(turn)
@@ -220,10 +221,13 @@ def test_changed_observation_bounds_do_not_reuse_combos(sample_turn) -> None:
     first = _build(observation, turn, step, reuse=reuse)
     second = _build(shifted, turn, step, reuse=reuse)
     fresh = _build(shifted, turn, step, reuse=None)
+    totals = catalog_reuse_totals()
 
     assert second.ship_build_combos == fresh.ship_build_combos
     first_object_ids = {id(combo) for combo in first.ship_build_combos}
     assert all(id(combo) not in first_object_ids for combo in second.ship_build_combos)
+    assert totals.transfer_builds == 2
+    assert totals.transfer_hits == 0
 
 
 def test_catalog_reuse_totals_distinguish_rebuild_from_reuse(sample_turn) -> None:

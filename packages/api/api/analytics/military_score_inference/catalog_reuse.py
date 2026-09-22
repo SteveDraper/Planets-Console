@@ -16,7 +16,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from api.analytics.fleet.types import FleetShipRecord
-from api.analytics.military_score_inference.models import ShipBuildCombo
+from api.analytics.military_score_inference.models import (
+    InferenceObservation,
+    ShipBuildCombo,
+)
 from api.analytics.military_score_inference.prior_weights_asset import ShipLimitBand
 from api.analytics.military_score_inference.prior_weights_catalog import PriorWeightsCatalog
 from api.analytics.military_score_inference.ship_transfer_families import (
@@ -228,15 +231,15 @@ class ScoresCatalogReuse:
         self,
         *,
         prior_fleet_records: tuple[FleetShipRecord, ...],
-        observation_key: tuple[object, ...],
+        observation: InferenceObservation,
         build: Callable[[], ShipTransferCatalogFragment],
     ) -> ShipTransferCatalogFragment:
         """Return the fragment for this row's fleet records and observation.
 
-        Peer scoreboard rows come from the ladder's turn. The store is not
-        shared across turns.
+        Component catalogs, settings, and peer rows are not in the key: the
+        store lives for one ladder (one player, one turn).
         """
-        key = (prior_fleet_records, observation_key)
+        key = (prior_fleet_records, observation)
         if key == self._transfer_key and self._transfer is not None:
             _record_transfer(hit=True)
             return self._transfer
