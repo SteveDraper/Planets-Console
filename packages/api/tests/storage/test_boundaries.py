@@ -60,6 +60,18 @@ def test_resolve_breakpoint_turn_scoped_fleet_snapshot():
     assert suffix is None
 
 
+def test_resolve_breakpoint_turn_scoped_fleet_player_ledger():
+    bp, suffix = resolve_breakpoint("games/628580/1/turns/111/analytics/fleet/8")
+    assert bp == "games/628580/1/turns/111/analytics/fleet/8"
+    assert suffix is None
+
+
+def test_resolve_breakpoint_fleet_evidence_mark():
+    bp, suffix = resolve_breakpoint("games/628580/1/analytics/fleet-evidence/8")
+    assert bp == "games/628580/1/analytics/fleet-evidence/8"
+    assert suffix is None
+
+
 def test_resolve_breakpoint_unregistered_raises():
     with pytest.raises(ValidationError, match="Unregistered"):
         resolve_breakpoint("unknown/path")

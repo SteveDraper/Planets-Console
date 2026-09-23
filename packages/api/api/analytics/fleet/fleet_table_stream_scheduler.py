@@ -401,7 +401,13 @@ def _persisted_ledger_from_result_wire_or_storage(
             scope.turn,
             scope.player_id,
         )
-        if persisted is not None and persisted.provenance.is_final:
+        if persisted is not None and services.persistence.ledger_is_ensure_final(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+            persisted,
+        ):
             return persisted
     return None
 

@@ -96,7 +96,7 @@ Still **out of scope** for v1 of this ADR. Per-player provenance enables a futur
 ## Considered options
 
 - **Provenance flags on monolithic snapshot only (per-player map inside one file, no ensure gate change)** -- smaller diff but compute path still materializes all players together; ensure probe unchanged at root; does not enable per-player streams or invalidation.
-- **Separate breakpoint per player** (`.../analytics/fleet/{playerId}` files) -- finer storage isolation but new breakpoint registration and more list/delete work; deferred; in-document `ledgers/{playerId}` sufficient for v1.
+- **Separate breakpoint per player** (`.../analytics/fleet/{playerId}` files) -- adopted by [#531](https://github.com/SteveDraper/Planets-Console/issues/531). See the amendment below. In-document `ledgers/{playerId}` was the v1 layout.
 - **Re-refine on every cache hit without provenance** -- fixes some stale refinement without storage model change; does not fix ensure lying about closure or per-player partial state.
 - **Keep monolithic persistence; rely on export ensure orchestration only** -- does not fix fleet table compute bypassing ensure; 628580-class holes remain on direct compute path.
 
@@ -110,4 +110,36 @@ Still **out of scope** for v1 of this ADR. Per-player provenance enables a futur
 - **#161** coordinator provides singleflight and forward unwind; **#179** narrows scope to per-player materialization and ensure paths.
 - **Table-stream session framework** (scores + fleet multiplex connect): [ADR 0004 addendum](0004-addendum-table-stream-session-framework.md) ([#175](https://github.com/SteveDraper/Planets-Console/issues/175)).
 
-See also: [ADR 0002](0002-analytic-persistence.md), [design-fleet-analytic.md](../design-fleet-analytic.md), [design-analytic-exports.md](../design-analytic-exports.md), **CONTEXT.md** (**Fleet ledger persistence**, **Fleet materialization provenance**, **Analytic export ensure provenance**).
+See also: [ADR 0002](0002-analytic-persistence.md), [design-fleet-analytic.md](../design-fleet-analytic.md), [design-analytic-exports.md](../design-analytic-exports.md), **CONTEXT.md** (**Fleet ledger persistence**, **Fleet materialization provenance**, **Fleet evidence generation**, **Analytic export ensure provenance**).
+
+## Amendment: per-player files and evidence generation ([#531](https://github.com/SteveDraper/Planets-Console/issues/531))
+
+Scores-evidence invalidation was deleting or rewriting the shared turn document for every admitted solution. That walked `turns/` and rewrote every player in the file.
+
+### Layout
+
+One ledger file per player:
+
+```text
+games/{gameId}/{perspective}/turns/{turn}/analytics/fleet/{playerId}
+```
+
+`put_ledger` and a clear of that player replace or unlink only that file. A legacy shared `.../analytics/fleet` document is split into these files on read, then removed.
+
+### Fleet evidence generation
+
+One mark document per `(game, perspective, player)`:
+
+```text
+games/{gameId}/{perspective}/analytics/fleet-evidence/{playerId}
+```
+
+It stores a monotonic `evidenceGeneration` and `appliesFromTurn`. Each ledger records the generation it was written under.
+
+A ledger at turn T is ensure-final only when the file exists, provenance is `(true, true)`, the materialization version is current, and either T is before `appliesFromTurn` or the ledger generation equals the mark. A generation mismatch is the same recalc signal as a missing ledger. The file stays readable.
+
+`appliesFromTurn` keeps turns before the invalidated host turn final, so a scores persist at H+1 does not rebuild fleet@H. It does not move forward across a gap of turns that have not been rewritten. After a final `put_ledger` of the bound turn, the bound advances by one. That write does not clear the generation. A crash before the advance leaves the new ledger matching the generation and later turns unmatched.
+
+Held-solution admission bumps the in-memory player epoch only. It does not write the mark or open ledger files. The durable generation advances when scores evidence is persisted (row persist or hull-mask clear).
+
+Turn-document replace still deletes ledger files at turns `>= T`. That path may list stored turns. Scores invalidation of player P does not.

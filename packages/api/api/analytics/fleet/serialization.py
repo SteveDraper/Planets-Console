@@ -18,6 +18,7 @@ from api.analytics.fleet.types import (
     FleetBuildOptionSet,
     FleetCountDiscrepancy,
     FleetEvidenceEvent,
+    FleetEvidenceMark,
     FleetFieldBounded,
     FleetFieldConstraint,
     FleetFieldKnown,
@@ -677,6 +678,7 @@ def persisted_fleet_ledger_from_json(data: dict[str, Any]) -> PersistedFleetLedg
         ledger=fleet_acquisition_ledger_from_json(ledger_wire),
         provenance=fleet_materialization_provenance_from_json(provenance_wire),
         materialization_version=fleet_materialization_version_from_json(data),
+        evidence_generation=fleet_evidence_generation_from_json(data),
     )
 
 
@@ -685,7 +687,64 @@ def persisted_fleet_ledger_to_json(persisted: PersistedFleetLedger) -> dict[str,
         "ledger": fleet_acquisition_ledger_to_json(persisted.ledger),
         "provenance": fleet_materialization_provenance_to_json(persisted.provenance),
         "materializationVersion": persisted.materialization_version,
+        "evidenceGeneration": persisted.evidence_generation,
     }
+
+
+def fleet_evidence_generation_from_json(data: dict[str, Any]) -> int:
+    """Return stored evidence generation, or 0 when the ledger predates the mark."""
+    raw = data.get("evidenceGeneration", 0)
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        return 0
+    return raw
+
+
+def fleet_evidence_mark_from_json(data: dict[str, Any]) -> FleetEvidenceMark:
+    generation = data.get("evidenceGeneration", 0)
+    if not isinstance(generation, int) or isinstance(generation, bool):
+        raise ValidationError("fleet evidence mark evidenceGeneration must be an int")
+    applies_raw = data.get("appliesFromTurn")
+    applies_from_turn: int | None
+    if applies_raw is None:
+        applies_from_turn = None
+    elif isinstance(applies_raw, int) and not isinstance(applies_raw, bool):
+        applies_from_turn = applies_raw
+    else:
+        raise ValidationError("fleet evidence mark appliesFromTurn must be an int")
+    return FleetEvidenceMark(
+        evidence_generation=generation,
+        applies_from_turn=applies_from_turn,
+    )
+
+
+def fleet_evidence_mark_to_json(mark: FleetEvidenceMark) -> dict[str, Any]:
+    payload: dict[str, Any] = {"evidenceGeneration": mark.evidence_generation}
+    if mark.applies_from_turn is not None:
+        payload["appliesFromTurn"] = mark.applies_from_turn
+    return payload
+
+
+def fleet_ledger_is_ensure_final(
+    persisted: PersistedFleetLedger,
+    *,
+    turn_number: int,
+    mark: FleetEvidenceMark,
+) -> bool:
+    """Return whether a stored ledger may satisfy ensure for this turn.
+
+    Provenance and materialization version are necessary. A ledger at or after
+    the mark's ``appliesFromTurn`` is final only when its evidence generation
+    equals the mark. Earlier turns stay final: a later host turn's evidence
+    bump must not rebuild them or re-invalidate a ledger the scores cascade
+    just closed.
+    """
+    if not persisted.provenance.is_final:
+        return False
+    if not is_current_fleet_materialization_version(persisted.materialization_version):
+        return False
+    if mark.applies_from_turn is not None and turn_number < mark.applies_from_turn:
+        return True
+    return persisted.evidence_generation == mark.evidence_generation
 
 
 def upgrade_legacy_fleet_turn_document(data: dict[str, Any]) -> dict[str, Any]:

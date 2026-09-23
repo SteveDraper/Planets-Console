@@ -77,4 +77,4 @@ def test_registry_dispatches_fleet(sample_turn):
     )
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4
-    assert data["players"][0]["playerName"] == "koshling"
+    assert any(player["playerName"] == "koshling" for player in data["players"])

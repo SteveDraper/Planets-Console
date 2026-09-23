@@ -193,6 +193,19 @@ class FleetMaterializationProvenance:
         return self.turn_evidence_at_n and self.prior_ledger_at_n_minus_1
 
 
+@dataclass(frozen=True)
+class FleetEvidenceMark:
+    """Durable scores-evidence generation for one player.
+
+    ``applies_from_turn`` is the earliest host turn whose fleet ledgers must
+    carry ``evidence_generation``. Turns before that stay ensure-final without
+    a matching generation. ``None`` means no durable bump has narrowed the range.
+    """
+
+    evidence_generation: int = 0
+    applies_from_turn: int | None = None
+
+
 @dataclass
 class PersistedFleetLedger:
     """One player's fleet acquisition ledger at a turn, plus cache metadata."""
@@ -202,6 +215,7 @@ class PersistedFleetLedger:
         default_factory=FleetMaterializationProvenance,
     )
     materialization_version: int = 0
+    evidence_generation: int = 0
 
 
 @dataclass

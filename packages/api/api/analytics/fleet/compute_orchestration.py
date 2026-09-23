@@ -139,6 +139,13 @@ def build_fleet_materialization_leg_job_wire(
                 prior_scope.turn,
                 player_id,
             ),
+            is_ensure_final=lambda persisted: services.persistence.ledger_is_ensure_final(
+                scope.game_id,
+                scope.perspective,
+                prior_scope.turn,
+                player_id,
+                persisted,
+            ),
         )
 
     if prior_persisted is None:
@@ -153,9 +160,22 @@ def build_fleet_materialization_leg_job_wire(
         baseline_ledger_wire = fleet_acquisition_ledger_to_json(prior_persisted.ledger)
 
     turn_context = FleetTurnContext.from_turn(turn)
+    provenance_prior = prior_persisted
+    if (
+        prior_persisted is not None
+        and prior_scope is not None
+        and not services.persistence.ledger_is_ensure_final(
+            scope.game_id,
+            scope.perspective,
+            prior_scope.turn,
+            player_id,
+            prior_persisted,
+        )
+    ):
+        provenance_prior = None
     provenance = resolve_fleet_materialization_provenance(
         materialize_turn=scope.turn,
-        prior_persisted=prior_persisted,
+        prior_persisted=provenance_prior,
         turn_context=turn_context,
         player_id=player_id,
         game_id=scope.game_id,
@@ -240,7 +260,13 @@ class FleetPersistencePolicy:
             scope.turn,
             scope.player_id,
         )
-        if persisted is None or not persisted.provenance.is_final:
+        if persisted is None or not services.persistence.ledger_is_ensure_final(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+            persisted,
+        ):
             return None
         return {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)}
 
@@ -346,7 +372,14 @@ class FleetPersistencePolicy:
                     prior_scope.turn,
                     scope.player_id,
                 )
-                prior_persisted = prior_ledger
+                if prior_ledger is not None and services.persistence.ledger_is_ensure_final(
+                    scope.game_id,
+                    scope.perspective,
+                    prior_scope.turn,
+                    scope.player_id,
+                    prior_ledger,
+                ):
+                    prior_persisted = prior_ledger
             provenance = resolve_fleet_materialization_provenance(
                 materialize_turn=scope.turn,
                 prior_persisted=prior_persisted,
@@ -434,6 +467,7 @@ class FleetPersistencePolicy:
             scope.perspective,
             scope.turn,
             scope.player_id,
+            durable=True,
         )
 
     def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:

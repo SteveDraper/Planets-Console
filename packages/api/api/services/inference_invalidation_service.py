@@ -60,35 +60,31 @@ class InferenceInvalidationService:
         perspective: int,
         host_turn: int,
         player_id: int,
+        *,
+        durable: bool = False,
     ) -> set[int]:
-        """Drop fleet ledgers >= host_turn and wake same-turn fleet after scores evidence changes.
+        """Wake fleet after scores evidence changes, without rewriting ledger files.
 
-        Always wakes ``fleet@host_turn`` for this player, even when no ledger was
-        cleared. A prior fleet persist may have refused with open scores evidence (no
-        ``put_ledger``); without this wake, scores re-close would never rematerialize
-        that failed/empty scope. Open fleet table streams reschedule in place;
-        otherwise ``force_fresh`` submit replaces a hollow terminal on the DAG.
+        Held admission (``durable=False``) bumps the in-memory epoch so in-flight
+        fleet work for this player aborts. A persisted scores row (``durable=True``)
+        also bumps the player's evidence mark. Existing ledger files stay readable
+        and are not ensure-final when the mark moves.
+
+        Always wakes ``fleet@host_turn`` for this player. A prior fleet persist may
+        have refused with open scores evidence (no ``put_ledger``); without this
+        wake, scores re-close would never rematerialize that scope. Open fleet
+        table streams reschedule in place; otherwise ``force_fresh`` submit
+        replaces a terminal that is no longer ensure-final.
         """
         if self._fleet_persistence is None:
             return set()
-        cleared_turns = self._fleet_persistence.invalidate_player_ledgers_from_turn(
+        turns_to_reschedule = self._fleet_persistence.invalidate_player_ledgers_from_turn(
             game_id,
             perspective,
             host_turn,
             player_id,
+            durable=durable,
         )
-        if host_turn not in cleared_turns:
-            # No ledger deleted -- still bump player epoch so in-flight fleet@N can
-            # discard before writing, and turn-scoped epoch so scores@(N+1) sees
-            # evidence change at N. Then wake the open stream / force_fresh path.
-            self._fleet_persistence.bump_player_and_turn_invalidations(
-                game_id,
-                perspective,
-                player_id,
-                (host_turn,),
-            )
-        turns_to_reschedule = set(cleared_turns)
-        turns_to_reschedule.add(host_turn)
         for fleet_turn in sorted(turns_to_reschedule):
             stream_woke = reschedule_fleet_table_player(
                 FleetTableStreamScope(
@@ -116,7 +112,7 @@ class InferenceInvalidationService:
         if self._fleet_persistence is None:
             self._persistence.on_row_persisted = None
             return
-        self._persistence.on_row_persisted = self.on_inference_evidence_updated
+        self._persistence.on_row_persisted = self.on_scores_row_persisted
 
     def wire_scores_invalidation_to_fleet_persistence(self) -> None:
         """Register per-player scores row invalidation on fleet ledger persist callbacks."""
@@ -124,6 +120,22 @@ class InferenceInvalidationService:
             return
         self._fleet_persistence.on_snapshot_persisted = None
         self._fleet_persistence.on_ledger_persisted = self.on_fleet_ledger_persisted
+
+    def on_scores_row_persisted(
+        self,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
+    ) -> None:
+        """Durable scores evidence: bump the fleet evidence mark and wake fleet."""
+        self.on_inference_evidence_updated(
+            game_id,
+            perspective,
+            host_turn,
+            player_id,
+            durable=True,
+        )
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:
         """Drop one player's scores@N inference row when fleet@(N-1) is persisted.
@@ -181,6 +193,7 @@ class InferenceInvalidationService:
             perspective,
             host_turn,
             player_id,
+            durable=True,
         )
         reschedule_inference_row(
             self._scope(game_id, perspective, host_turn),

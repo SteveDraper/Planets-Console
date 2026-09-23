@@ -131,9 +131,21 @@ def resolve_prior_fleet_for_scores(
             prior_fleet_scope.player_id,
         )
 
+    def prior_is_ensure_final(persisted: PersistedFleetLedger) -> bool:
+        if fleet_services is None:
+            return persisted.provenance.is_final
+        return fleet_services.persistence.ledger_is_ensure_final(
+            game_id,
+            perspective,
+            prior_fleet_scope.turn,
+            prior_fleet_scope.player_id,
+            persisted,
+        )
+
     prior_persisted = resolve_fleet_prior_persisted(
         from_dependency_outputs=prior_from_deps,
         load_from_disk=load_prior_from_disk,
+        is_ensure_final=prior_is_ensure_final,
     )
     if prior_persisted is not None and prior_turn is not None:
         return _resolution_from_persisted_fleet(

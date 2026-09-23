@@ -195,15 +195,17 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
     with count_file_backend_syscalls(counts):
         FleetPersistencePolicy().persist(ctx, scope, result.payload)
 
-    assert counts.protocol_counts() == {"get": 1, "put": 1, "list": 0, "delete": 0}, (
+    ledger_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
+    mark_key = persistence.evidence_mark_key(GAME_ID, PERSPECTIVE, player_id)
+    assert counts.protocol_counts() == {"get": 3, "put": 1, "list": 0, "delete": 0}, (
         counts.protocol_counts(),
         counts.get_keys,
         counts.list_prefixes,
     )
-    assert counts.get_keys == [FLEET_KEY]
+    assert counts.get_keys == [ledger_key, FLEET_KEY, mark_key]
     assert counts.json_load_calls == 0
     assert counts.json_dump_calls == 1
-    assert counts.open_read_calls == 0
+    assert counts.open_read_calls == 2
     assert counts.open_write_calls == 1
     assert counts.list_calls == 0
 
@@ -213,7 +215,7 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
 
     assert loaded is not None
     assert counts.protocol_counts() == {"get": 1, "put": 0, "list": 0, "delete": 0}
-    assert counts.get_keys == [FLEET_KEY]
+    assert counts.get_keys == [ledger_key]
     assert counts.json_load_calls == 0
     assert counts.open_read_calls == 0
     assert counts.open_write_calls == 0
@@ -301,6 +303,8 @@ def test_job_wire_build_skips_disk_when_dependency_outputs_has_final_prior(tmp_p
         ),
     )
     persistence.put_ledger(GAME_ID, PERSPECTIVE, prior_turn, player_id, persisted)
+    stored = persistence.get_ledger(GAME_ID, PERSPECTIVE, prior_turn, player_id)
+    assert stored is not None
     counts.reset()
 
     prior_scope = ComputeScope(
@@ -320,7 +324,7 @@ def test_job_wire_build_skips_disk_when_dependency_outputs_has_final_prior(tmp_p
     outputs = DependencyOutputs()
     outputs.put(
         prior_scope,
-        {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)},
+        {"persistedLedgerWire": persisted_fleet_ledger_to_json(stored)},
     )
     ctx = _fleet_ctx(sample_turn, persistence)
 
@@ -361,6 +365,8 @@ def test_scores_resolve_prior_skips_disk_when_dependency_outputs_has_final_prior
         ),
     )
     persistence.put_ledger(GAME_ID, PERSPECTIVE, prior_turn, player_id, persisted)
+    stored = persistence.get_ledger(GAME_ID, PERSPECTIVE, prior_turn, player_id)
+    assert stored is not None
     counts.reset()
 
     prior_scope = ComputeScope(
@@ -373,7 +379,7 @@ def test_scores_resolve_prior_skips_disk_when_dependency_outputs_has_final_prior
     outputs = DependencyOutputs()
     outputs.put(
         prior_scope,
-        {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)},
+        {"persistedLedgerWire": persisted_fleet_ledger_to_json(stored)},
     )
     ctx = _fleet_ctx(sample_turn, persistence)
 

@@ -259,11 +259,18 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
     assert controller_for_scope(scope) is not None
 
     target_player_id, other_player_id = player_ids
-    invalidation.on_inference_evidence_updated(628580, 1, turn_number, target_player_id)
+    invalidation.on_inference_evidence_updated(
+        628580,
+        1,
+        turn_number,
+        target_player_id,
+        durable=True,
+    )
 
     _wait_until(lambda: target_player_id in _run_ids_for_players(scheduler, player_ids))
     assert other_player_id not in _run_ids_for_players(scheduler, (other_player_id,))
-    assert fleet_persistence.get_ledger(628580, 1, turn_number, target_player_id) is None
+    assert fleet_persistence.get_ledger(628580, 1, turn_number, target_player_id) is not None
+    assert not fleet_persistence.has_final_ledger(628580, 1, turn_number, target_player_id)
 
     rescheduled_run = scheduler._runs[_run_ids_for_players(scheduler, player_ids)[target_player_id]]
     rescheduled_run.session.event_queue.put(
@@ -419,12 +426,19 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
     before = _run_ids_for_players(scheduler, player_ids)
     assert before == {}
 
-    invalidation.on_inference_evidence_updated(628580, 1, turn_number, target_player_id)
+    invalidation.on_inference_evidence_updated(
+        628580,
+        1,
+        turn_number,
+        target_player_id,
+        durable=True,
+    )
 
     _wait_until(lambda: target_player_id in _run_ids_for_players(scheduler, player_ids))
     after = _run_ids_for_players(scheduler, player_ids)
     assert other_player_id not in after
-    assert fleet_persistence.get_ledger(628580, 1, turn_number, target_player_id) is None
+    assert fleet_persistence.get_ledger(628580, 1, turn_number, target_player_id) is not None
+    assert not fleet_persistence.has_final_ledger(628580, 1, turn_number, target_player_id)
 
     _end_open_fleet_table_stream(_stream_scope(sample_turn), scheduler)
     thread.join(timeout=2.0)
@@ -568,12 +582,19 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
     )
     assert binding.orchestrator.nodes[fleet_scope].state == "complete"
 
-    invalidation.on_inference_evidence_updated(628580, 1, turn_number, player_id)
-    assert fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is None
+    invalidation.on_inference_evidence_updated(
+        628580,
+        1,
+        turn_number,
+        player_id,
+        durable=True,
+    )
+    assert fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is not None
+    assert not fleet_persistence.has_final_ledger(628580, 1, turn_number, player_id)
 
     # Rematerialize must replace the stale complete DAG node (force_fresh), not attach.
     _wait_until(
-        lambda: fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is not None,
+        lambda: fleet_persistence.has_final_ledger(628580, 1, turn_number, player_id),
         timeout_seconds=5.0,
     )
     rematerialized = fleet_persistence.get_ledger(628580, 1, turn_number, player_id)

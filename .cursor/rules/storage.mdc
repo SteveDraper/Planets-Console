@@ -70,7 +70,7 @@ The file backend persists **documents** at **breakpoints** from a code registry 
 - Unregistered paths → `ValidationError` (fail fast)
 - Document writes: temp file + atomic `replace`; document delete: remove file + prune empty parent dirs
 
-**V1 patterns:** `games/*/info`, `games/*/*/turns/*`, `credentials/accounts/*`
+**V1 patterns:** `games/*/info`, `games/*/*/turns/*`, `games/*/*/turns/*/analytics/fleet/*`, `games/*/*/analytics/fleet-evidence/*`, `credentials/accounts/*`
 
 ## Adding a New Implementation
 

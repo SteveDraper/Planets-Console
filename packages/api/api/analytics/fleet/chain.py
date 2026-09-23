@@ -353,11 +353,6 @@ def _snapshot_is_provenance_final_for_all_roster_players(
     return True
 
 
-def _is_fleet_ledger_cache_hit(persisted: PersistedFleetLedger) -> bool:
-    """Return whether a cached per-player ledger may short-circuit gap-fill."""
-    return persisted.provenance.is_final
-
-
 def _is_fleet_snapshot_cache_hit(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
@@ -446,7 +441,13 @@ def _materialize_fleet_ledger_chain_for_player(
     turn_number = turn.settings.turn
 
     existing = persistence.get_ledger(game_id, perspective, turn_number, player_id)
-    if existing is not None and _is_fleet_ledger_cache_hit(existing):
+    if existing is not None and persistence.ledger_is_ensure_final(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+        existing,
+    ):
         return existing
 
     loaded_turns: dict[int, TurnInfo | None] = {}
@@ -681,7 +682,13 @@ def _resolve_leaf_prior_for_player(
         )
     prior_turn = turn_number - 1
     prior = persistence.get_ledger(game_id, perspective, prior_turn, player_id)
-    if prior is None or not prior.provenance.is_final:
+    if prior is None or not persistence.ledger_is_ensure_final(
+        game_id,
+        perspective,
+        prior_turn,
+        player_id,
+        prior,
+    ):
         raise ConflictError(
             f"fleet leaf materialize for game {game_id} perspective {perspective} "
             f"player {player_id} turn {turn_number} requires a final prior ledger "
@@ -715,7 +722,13 @@ def get_or_materialize_fleet_ledger_for_player(
 
     turn_number = turn.settings.turn
     cached = persistence.get_ledger(game_id, perspective, turn_number, player_id)
-    if cached is not None and _is_fleet_ledger_cache_hit(cached):
+    if cached is not None and persistence.ledger_is_ensure_final(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+        cached,
+    ):
         return cached
 
     prior_persisted, prior_ledger = _resolve_leaf_prior_for_player(

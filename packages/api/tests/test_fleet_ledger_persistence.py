@@ -102,13 +102,16 @@ def test_put_ledger_loads_document_once(memory_backend, sample_ledger):
     persisted = PersistedFleetLedger(ledger=sample_ledger)
 
     persistence.put_ledger(628580, 1, 111, 8, persisted)
-    assert counts.get_calls == 1
+    # Player file miss, legacy shared-document miss, evidence-mark miss, then one put.
+    assert counts.get_calls == 3
     assert counts.put_calls == 1
+    assert counts.list_calls == 0
 
     counts.reset()
     persistence.put_ledger(628580, 1, 111, 8, persisted)
     assert counts.get_calls == 1
     assert counts.put_calls == 1
+    assert counts.list_calls == 0
 
 
 def test_put_snapshot_stamps_non_final_provenance_per_ledger(persistence, sample_ledger):
@@ -172,11 +175,14 @@ def test_legacy_monolithic_document_migrates_on_has_snapshot(
 
     assert persistence.has_snapshot(628580, 1, 111) is True
 
-    stored = memory_backend.get(persistence.document_key(628580, 1, 111))
+    stored = memory_backend.get(persistence.ledger_key(628580, 1, 111, 8))
     assert isinstance(stored, dict)
     assert "players" not in stored
-    assert FLEET_LEDGERS_KEY in stored
-    assert "8" in stored[FLEET_LEDGERS_KEY]
+    assert stored["ledger"]["playerId"] == 8
+    parent = memory_backend.get(persistence.document_key(628580, 1, 111))
+    assert isinstance(parent, dict)
+    assert "players" not in parent
+    assert FLEET_LEDGERS_KEY not in parent
 
 
 def test_legacy_monolithic_document_migrates_on_read(persistence, memory_backend, sample_ledger):
@@ -198,11 +204,14 @@ def test_legacy_monolithic_document_migrates_on_read(persistence, memory_backend
     assert loaded.ledger == sample_ledger
     assert loaded.provenance.is_final is False
 
-    stored = memory_backend.get(persistence.document_key(628580, 1, 111))
+    stored = memory_backend.get(persistence.ledger_key(628580, 1, 111, 8))
     assert isinstance(stored, dict)
     assert "players" not in stored
-    assert FLEET_LEDGERS_KEY in stored
-    assert "8" in stored[FLEET_LEDGERS_KEY]
+    assert stored["ledger"]["playerId"] == 8
+    parent = memory_backend.get(persistence.document_key(628580, 1, 111))
+    assert isinstance(parent, dict)
+    assert "players" not in parent
+    assert FLEET_LEDGERS_KEY not in parent
 
 
 def test_upgrade_legacy_fleet_turn_document_maps_players_to_ledgers(sample_ledger):
@@ -385,12 +394,91 @@ def test_put_ledger_notifies_on_final_ledger_version_bump(
     persistence.put_ledger(628580, 1, 111, 8, final)
     assert callbacks == [(111, 8)]
 
-    document = memory_backend.get(persistence.document_key(628580, 1, 111))
+    player_key = persistence.ledger_key(628580, 1, 111, 8)
+    document = memory_backend.get(player_key)
     assert isinstance(document, dict)
-    ledger_wire = document[FLEET_LEDGERS_KEY]["8"]
-    assert isinstance(ledger_wire, dict)
-    ledger_wire["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
-    memory_backend.put(persistence.document_key(628580, 1, 111), document)
+    document["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
+    memory_backend.put(player_key, document)
 
     persistence.put_ledger(628580, 1, 111, 8, final)
     assert callbacks == [(111, 8), (111, 8)]
+
+
+def test_durable_invalidation_bumps_mark_without_ledger_io(memory_backend, sample_ledger):
+    counts = FileIoCounts()
+    persistence = FleetSnapshotPersistenceService(CountingStorageBackend(memory_backend, counts))
+    final = PersistedFleetLedger(ledger=sample_ledger, provenance=_final_provenance())
+    other = FleetAcquisitionLedger(player_id=3, player_name="other")
+    persistence.put_ledger(628580, 1, 110, 8, final)
+    persistence.put_ledger(628580, 1, 111, 8, final)
+    persistence.put_ledger(
+        628580,
+        1,
+        111,
+        3,
+        PersistedFleetLedger(ledger=other, provenance=_final_provenance()),
+    )
+    counts.reset()
+
+    woken = persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8, durable=True)
+
+    assert woken == {111}
+    assert counts.list_calls == 0
+    assert counts.get_calls == 0
+    assert counts.put_calls == 1
+    assert counts.delete_calls == 0
+    mark = memory_backend.get(persistence.evidence_mark_key(628580, 1, 8))
+    assert mark == {"evidenceGeneration": 1, "appliesFromTurn": 111}
+    assert persistence.get_ledger(628580, 1, 111, 8) is not None
+    assert persistence.has_final_ledger(628580, 1, 111, 8) is False
+    assert persistence.has_final_ledger(628580, 1, 110, 8) is True
+    assert persistence.has_final_ledger(628580, 1, 111, 3) is True
+    other_wire = memory_backend.get(persistence.ledger_key(628580, 1, 111, 3))
+    assert other_wire["evidenceGeneration"] == 0
+
+
+def test_held_invalidation_bumps_memory_epoch_without_storage_io(memory_backend, sample_ledger):
+    counts = FileIoCounts()
+    persistence = FleetSnapshotPersistenceService(CountingStorageBackend(memory_backend, counts))
+    final = PersistedFleetLedger(ledger=sample_ledger, provenance=_final_provenance())
+    persistence.put_ledger(628580, 1, 111, 8, final)
+    counts.reset()
+
+    woken = persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8, durable=False)
+
+    assert woken == {111}
+    assert counts.get_calls == 0
+    assert counts.put_calls == 0
+    assert counts.list_calls == 0
+    assert counts.delete_calls == 0
+    assert persistence.player_invalidation_generation(628580, 1, 8) == 1
+    assert persistence.has_final_ledger(628580, 1, 111, 8) is True
+
+
+def test_refined_put_ledger_stamps_current_generation_only_for_that_player(
+    memory_backend,
+    sample_ledger,
+):
+    persistence = FleetSnapshotPersistenceService(memory_backend)
+    final = PersistedFleetLedger(ledger=sample_ledger, provenance=_final_provenance())
+    other = FleetAcquisitionLedger(player_id=3, player_name="other")
+    persistence.put_ledger(628580, 1, 111, 8, final)
+    persistence.put_ledger(
+        628580,
+        1,
+        111,
+        3,
+        PersistedFleetLedger(ledger=other, provenance=_final_provenance()),
+    )
+    persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8, durable=True)
+    previous = memory_backend.get(persistence.ledger_key(628580, 1, 111, 8))
+
+    persistence.put_ledger(628580, 1, 111, 8, final)
+
+    rewritten = memory_backend.get(persistence.ledger_key(628580, 1, 111, 8))
+    untouched = memory_backend.get(persistence.ledger_key(628580, 1, 111, 3))
+    assert previous["evidenceGeneration"] == 0
+    assert rewritten["evidenceGeneration"] == 1
+    assert untouched["evidenceGeneration"] == 0
+    assert persistence.has_final_ledger(628580, 1, 111, 8) is True
+    assert persistence.get_ledger(628580, 1, 111, 3) is not None
