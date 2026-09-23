@@ -74,11 +74,11 @@ Gap-fill coordinator ([#161](https://github.com/SteveDraper/Planets-Console/issu
 
 | Event | Invalidation |
 |-------|----------------|
-| Scores inference row persist / held-solution update for player P at host *H* | Drop `ledgers/P` at fleet turns `>= H` (same perspective) |
-| Turn document replace at *T* | Drop all fleet ledgers at turns `>= T` |
-| Hull mask / recompute (scores) | Existing per-player scores hooks; fleet follows scores row clears for P |
+| Held-solution admission for player P | Bump the in-memory invalidation epoch for P only. Do not write the durable **fleet evidence generation** mark or open/delete ledger files. |
+| Durable scores evidence for player P at host *H* (row persist or hull-mask clear) | Bump P's evidence mark from host *H* (`evidenceGeneration` / `appliesFromTurn`). Leave ledger files in place; mismatched generation is not ensure-final but stays readable. |
+| Turn document replace at *T* | Delete fleet ledger files at turns `>= T` (same perspective). |
 
-**Invalidation generation:** A monotonic counter per `(gameId, perspective, playerId)` -- the same grain as the gap-fill coordinator ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)). The counter bumps when that player's fleet ledgers are dropped: per-player scores invalidation for P, stale `materializationVersion` prune on read, or turn document replace clearing P's stored ledgers. Gap-fill coordinators record the generation at chain start and abort multi-turn materialization when the counter advances for that player, then retry from a fresh anchor. Per-player scores invalidation bumps only P; turn document replace bumps every player who had ledgers cleared at affected turns. Invalidation does not block on in-flight gap-fill work.
+**Invalidation generation:** A monotonic in-memory counter per `(gameId, perspective, playerId)` -- the same grain as the gap-fill coordinator ([#179](https://github.com/SteveDraper/Planets-Console/issues/179)). The counter bumps on scores invalidation for P (held admission or durable evidence), stale `materializationVersion` prune on read, or turn document replace clearing P's stored ledgers. Gap-fill coordinators record the generation at chain start and abort multi-turn materialization when the counter advances for that player, then retry from a fresh anchor. Per-player scores invalidation bumps only P; turn document replace bumps every player who had ledgers cleared at affected turns. Durable scores evidence bumps the **fleet evidence generation** mark and does not drop ledger files; only turn replace deletes them. Invalidation does not block on in-flight gap-fill work.
 
 ### 6. Fleet table NDJSON stream (scores-shaped)
 
