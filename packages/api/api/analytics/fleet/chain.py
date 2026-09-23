@@ -6,7 +6,7 @@ import copy
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterator
 
 from api.analytics.fleet.compute_plane.turn_delta import (
@@ -157,25 +157,6 @@ class _GapFillCoherence:
             raise _FleetSnapshotInvalidated()
 
 
-def fleet_snapshot_in_roster_order(
-    snapshot: FleetTurnSnapshot,
-    turn: TurnInfo,
-) -> FleetTurnSnapshot:
-    """Return ``snapshot`` with players in turn-roster order.
-
-    Ledger files list in player-id order. Table and map wires follow the turn roster.
-    """
-    rank = {player.id: index for index, player in enumerate(iter_turn_players(turn))}
-    fallback = len(rank)
-    ordered = sorted(
-        snapshot.players,
-        key=lambda ledger: (rank.get(ledger.player_id, fallback), ledger.player_id),
-    )
-    if ordered == snapshot.players:
-        return snapshot
-    return replace(snapshot, players=ordered)
-
-
 def ensure_fleet_baseline(
     game_id: int,
     perspective: int,
@@ -271,39 +252,9 @@ def _find_chain_anchor_for_player(
     """Nearest readable prior ledger (final or not).
 
     Display/initial-wire may show a non-final file. Multi-turn materialize must
-    not use this: drive from ``_find_gap_start_turn_for_player`` and an
-    ensure-final prior instead.
+    not use this: drive from ``_find_player_gap_fill_anchor`` instead.
     """
     for prior_turn_number in range(turn_number - 1, min_anchor_turn - 1, -1):
-        prior_ledger = persistence.get_ledger(
-            game_id,
-            perspective,
-            prior_turn_number,
-            player_id,
-        )
-        if prior_ledger is not None:
-            return prior_turn_number, prior_ledger
-    return 0, None
-
-
-def _find_ensure_final_prior_for_player(
-    persistence: FleetSnapshotPersistenceService,
-    game_id: int,
-    perspective: int,
-    player_id: int,
-    before_turn: int,
-    *,
-    min_anchor_turn: int = 1,
-) -> tuple[int, PersistedFleetLedger | None]:
-    """Nearest ensure-final ledger strictly before ``before_turn``."""
-    for prior_turn_number in range(before_turn - 1, min_anchor_turn - 1, -1):
-        if not persistence.has_final_ledger(
-            game_id,
-            perspective,
-            prior_turn_number,
-            player_id,
-        ):
-            continue
         prior_ledger = persistence.get_ledger(
             game_id,
             perspective,
@@ -369,22 +320,40 @@ def _find_gap_start_turn(
     return target_turn + 1
 
 
-def _find_gap_start_turn_for_player(
+def _find_player_gap_fill_anchor(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
     perspective: int,
     player_id: int,
     target_turn: int,
     load_turn: Callable[[int], TurnInfo | None],
-) -> int:
-    """Return the first turn in ``floor..target_turn`` lacking ensure-final ledger for P."""
+) -> tuple[int, int, PersistedFleetLedger | None]:
+    """Return gap start and last ensure-final prior from one forward walk.
+
+    Walks ``floor..target_turn``. Skips turns with no stored RST (they are not
+    anchors). For each stored turn, loads the ledger once. The first turn that
+    is not ensure-final is the gap start; the prior is the last ensure-final
+    ledger accepted before that gap.
+    """
     chain_floor = _chain_floor(load_turn, target_turn)
+    prior_turn = 0
+    prior_persisted: PersistedFleetLedger | None = None
     for turn_number in range(chain_floor, target_turn + 1):
         if load_turn(turn_number) is None:
             continue
-        if not persistence.has_final_ledger(game_id, perspective, turn_number, player_id):
-            return turn_number
-    return target_turn + 1
+        persisted = persistence.get_ledger(game_id, perspective, turn_number, player_id)
+        if persisted is not None and persistence.ledger_is_ensure_final(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            persisted,
+        ):
+            prior_turn = turn_number
+            prior_persisted = persisted
+            continue
+        return turn_number, prior_turn, prior_persisted
+    return target_turn + 1, prior_turn, prior_persisted
 
 
 def _snapshot_has_all_roster_players(snapshot: FleetTurnSnapshot, turn: TurnInfo) -> bool:
@@ -552,21 +521,13 @@ def _materialize_fleet_ledger_chain_for_player(
 
     # Rewrite from the first non-ensure-final turn. A generation-stale file may
     # still be readable with provenance (true, true); it must not anchor the chain.
-    gap_start = _find_gap_start_turn_for_player(
+    gap_start, anchor_turn, anchor_persisted = _find_player_gap_fill_anchor(
         persistence,
         game_id,
         perspective,
         player_id,
         turn_number,
         cached_load,
-    )
-    anchor_turn, anchor_persisted = _find_ensure_final_prior_for_player(
-        persistence,
-        game_id,
-        perspective,
-        player_id,
-        gap_start,
-        min_anchor_turn=chain_floor,
     )
     first_stored_rst = _first_stored_rst_turn(
         cached_load,

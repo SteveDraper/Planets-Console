@@ -35,7 +35,9 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
+from api.analytics.turn_roster import iter_turn_players
 from api.exceptions import ValidationError
+from api.models.game import TurnInfo
 
 
 def _require_object_list(raw: object, *, field_name: str) -> list[dict[str, Any]]:
@@ -630,10 +632,25 @@ def fleet_acquisition_ledger_from_json(data: dict[str, Any]) -> FleetAcquisition
     )
 
 
+def _fleet_ledgers_in_roster_order(
+    ledgers: list[FleetAcquisitionLedger],
+    turn: TurnInfo,
+) -> list[FleetAcquisitionLedger]:
+    """Order ledgers by turn roster (perspective first), not player-id storage order."""
+    rank = {player.id: index for index, player in enumerate(iter_turn_players(turn))}
+    fallback = len(rank)
+    return sorted(
+        ledgers,
+        key=lambda ledger: (rank.get(ledger.player_id, fallback), ledger.player_id),
+    )
+
+
 def _fleet_turn_snapshot_players_to_json(
     snapshot: FleetTurnSnapshot,
+    turn: TurnInfo,
 ) -> list[dict[str, Any]]:
-    return [fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players]
+    ordered = _fleet_ledgers_in_roster_order(snapshot.players, turn)
+    return [fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in ordered]
 
 
 def is_legacy_fleet_turn_document(data: dict[str, Any]) -> bool:
@@ -820,11 +837,17 @@ def _fleet_turn_snapshot_from_ledgers_document(data: dict[str, Any]) -> FleetTur
     )
 
 
-def fleet_turn_snapshot_to_compute_wire(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
-    """Turn-analytic compute response shape (analytic id + per-player ledgers)."""
+def fleet_turn_snapshot_to_compute_wire(
+    snapshot: FleetTurnSnapshot,
+    turn: TurnInfo,
+) -> dict[str, Any]:
+    """Turn-analytic compute response shape (analytic id + per-player ledgers).
+
+    Players follow turn-roster order. Callers need not pre-sort the snapshot.
+    """
     return {
         "analyticId": snapshot.analytic_id,
-        "players": _fleet_turn_snapshot_players_to_json(snapshot),
+        "players": _fleet_turn_snapshot_players_to_json(snapshot, turn),
     }
 
 
