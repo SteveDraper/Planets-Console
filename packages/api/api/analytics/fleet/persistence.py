@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 
 from api.analytics.fleet.constants import (
     ANALYTIC_ID,
@@ -37,6 +38,21 @@ OnLedgerPersistedCallback = Callable[[FleetLedgerPersistedEvent], None]
 DeferredNotification = Callable[[], None]
 
 _ABSENT_EVIDENCE_MARK = FleetEvidenceMark()
+
+
+@dataclass(frozen=True)
+class PutLedgerResult:
+    """Ledger file written by ``put_ledger``, plus an optional deferred notify.
+
+    ``stored`` is the stamped object on disk (materialization version and
+    ``evidence_generation``). Callers that publish ``persistedLedgerWire`` must
+    serialize ``stored``, not the pre-stamp input. When
+    ``defer_ledger_persisted_notification`` is true, invoke
+    ``deferred_notification`` after the orchestrator marks the node complete.
+    """
+
+    stored: PersistedFleetLedger
+    deferred_notification: DeferredNotification | None = None
 
 
 class FleetSnapshotPersistenceService:
@@ -130,7 +146,7 @@ class FleetSnapshotPersistenceService:
         persisted: PersistedFleetLedger,
         *,
         defer_ledger_persisted_notification: bool = False,
-    ) -> DeferredNotification | None:
+    ) -> PutLedgerResult:
         if persisted.ledger.player_id != player_id:
             raise ValidationError(
                 "persisted fleet ledger player_id "
@@ -177,10 +193,10 @@ class FleetSnapshotPersistenceService:
             persisted=to_store,
         )
         if defer_ledger_persisted_notification:
-            return notification
+            return PutLedgerResult(stored=to_store, deferred_notification=notification)
         if notification is not None:
             notification()
-        return None
+        return PutLedgerResult(stored=to_store)
 
     def has_ledger(
         self,

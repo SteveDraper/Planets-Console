@@ -312,8 +312,7 @@ class FleetPersistencePolicy:
             ),
             materialization_version=persisted.materialization_version,
         )
-        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(persisted)
-        return services.persistence.put_ledger(
+        put_result = services.persistence.put_ledger(
             scope.game_id,
             scope.perspective,
             scope.turn,
@@ -321,6 +320,9 @@ class FleetPersistencePolicy:
             persisted,
             defer_ledger_persisted_notification=True,
         )
+        # Publish what put_ledger stamped (evidence generation + materialization version).
+        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
+        return put_result.deferred_notification
 
     def _persist_finalization(
         self,
@@ -436,16 +438,15 @@ class FleetPersistencePolicy:
             perspective=scope.perspective,
         )
 
-        # Stamp current materialization version and publish onto result_wire so
-        # stream listeners and DependencyOutputs match what put_ledger stores.
+        # Stamp current materialization version; put_ledger also stamps evidence
+        # generation. Publish the stored ledger so stream listeners and
+        # DependencyOutputs match the file.
         persisted = PersistedFleetLedger(
             ledger=persisted.ledger,
             provenance=persisted.provenance,
             materialization_version=FLEET_MATERIALIZATION_VERSION,
         )
-        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(persisted)
-
-        return services.persistence.put_ledger(
+        put_result = services.persistence.put_ledger(
             scope.game_id,
             scope.perspective,
             scope.turn,
@@ -453,6 +454,8 @@ class FleetPersistencePolicy:
             persisted,
             defer_ledger_persisted_notification=True,
         )
+        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
+        return put_result.deferred_notification
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
         from api.analytics.fleet.compute_services import resolve_fleet_services

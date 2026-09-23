@@ -369,7 +369,7 @@ def test_put_ledger_can_defer_final_transition_notification(persistence, sample_
         8,
         PersistedFleetLedger(ledger=sample_ledger, provenance=_final_provenance()),
         defer_ledger_persisted_notification=True,
-    )
+    ).deferred_notification
 
     assert callbacks == []
     assert notification is not None
@@ -473,12 +473,13 @@ def test_refined_put_ledger_stamps_current_generation_only_for_that_player(
     persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8, durable=True)
     previous = memory_backend.get(persistence.ledger_key(628580, 1, 111, 8))
 
-    persistence.put_ledger(628580, 1, 111, 8, final)
+    put_result = persistence.put_ledger(628580, 1, 111, 8, final)
 
     rewritten = memory_backend.get(persistence.ledger_key(628580, 1, 111, 8))
     untouched = memory_backend.get(persistence.ledger_key(628580, 1, 111, 3))
     assert previous["evidenceGeneration"] == 0
     assert rewritten["evidenceGeneration"] == 1
+    assert put_result.stored.evidence_generation == 1
     assert untouched["evidenceGeneration"] == 0
     assert persistence.has_final_ledger(628580, 1, 111, 8) is True
     assert persistence.get_ledger(628580, 1, 111, 3) is not None
