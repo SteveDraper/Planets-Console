@@ -88,8 +88,11 @@ def resolve_prior_fleet_for_scores(
 ) -> PriorTurnFleetTorpResolution:
     """Resolve prior-turn fleet torp overlay for scores wire build and ensure admit.
 
-    Prefers a final DepOutputs / disk ledger via ``resolve_fleet_prior_persisted``,
-    then falls back to ``resolve_prior_turn_fleet_torp_overlay``.
+    Prefers an ensure-final DepOutputs / disk ledger via
+    ``resolve_fleet_prior_persisted``. Applies that ledger only when it passes
+    ``prior_is_ensure_final``; otherwise falls back to
+    ``resolve_prior_turn_fleet_torp_overlay``. A readable non-final prior is
+    never applied as the scores overlay.
     """
     if turn_number == WILDCARD or not isinstance(turn_number, int):
         return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
@@ -132,8 +135,10 @@ def resolve_prior_fleet_for_scores(
         )
 
     def prior_is_ensure_final(persisted: PersistedFleetLedger) -> bool:
+        # Without fleet services the evidence mark cannot be read; provenance
+        # alone is not ensure-final for scores overlay admission.
         if fleet_services is None:
-            return persisted.provenance.is_final
+            return False
         return fleet_services.persistence.ledger_is_ensure_final(
             game_id,
             perspective,
@@ -147,7 +152,13 @@ def resolve_prior_fleet_for_scores(
         load_from_disk=load_prior_from_disk,
         is_ensure_final=prior_is_ensure_final,
     )
-    if prior_persisted is not None and prior_turn is not None:
+    # ``resolve_fleet_prior_persisted`` may still return a non-final ledger for
+    # fleet job-wire baseline use; scores applies only ensure-final priors.
+    if (
+        prior_persisted is not None
+        and prior_is_ensure_final(prior_persisted)
+        and prior_turn is not None
+    ):
         return _resolution_from_persisted_fleet(
             prior_persisted,
             prior_export_scope,
