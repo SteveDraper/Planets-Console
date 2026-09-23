@@ -37,7 +37,7 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
     orchestrator first. This handler reads that snapshot or fails if it is
     missing. Direct callers that skip ensure use ``get_fleet``.
     """
-    from api.analytics.fleet.chain import require_fleet_snapshot
+    from api.analytics.fleet.chain import fleet_snapshot_in_roster_order, require_fleet_snapshot
     from api.analytics.fleet.compute_services import resolve_fleet_compute_services
     from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 
@@ -48,12 +48,17 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
         services.perspective,
         ctx.turn,
     )
-    return fleet_turn_snapshot_to_compute_wire(snapshot)
+    return fleet_turn_snapshot_to_compute_wire(
+        fleet_snapshot_in_roster_order(snapshot, ctx.turn),
+    )
 
 
 def materialize_fleet(ctx: AnalyticComputeContext) -> dict:
     """Gap-fill the roster snapshot, then shape the same table/map wire as REST."""
-    from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
+    from api.analytics.fleet.chain import (
+        fleet_snapshot_in_roster_order,
+        get_or_materialize_fleet_snapshot,
+    )
     from api.analytics.fleet.compute_services import resolve_fleet_compute_services
     from api.analytics.fleet.serialization import fleet_turn_snapshot_to_compute_wire
 
@@ -67,7 +72,9 @@ def materialize_fleet(ctx: AnalyticComputeContext) -> dict:
         inference_materialization=services.inference_materialization,
         query_context=ctx.exports,
     )
-    return fleet_turn_snapshot_to_compute_wire(snapshot)
+    return fleet_turn_snapshot_to_compute_wire(
+        fleet_snapshot_in_roster_order(snapshot, ctx.turn),
+    )
 
 
 def get_fleet(turn: TurnInfo) -> dict:

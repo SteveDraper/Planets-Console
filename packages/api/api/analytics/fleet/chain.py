@@ -6,7 +6,7 @@ import copy
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Iterator
 
 from api.analytics.fleet.compute_plane.turn_delta import (
@@ -155,6 +155,25 @@ class _GapFillCoherence:
             != self.generation
         ):
             raise _FleetSnapshotInvalidated()
+
+
+def fleet_snapshot_in_roster_order(
+    snapshot: FleetTurnSnapshot,
+    turn: TurnInfo,
+) -> FleetTurnSnapshot:
+    """Return ``snapshot`` with players in turn-roster order.
+
+    Ledger files list in player-id order. Table and map wires follow the turn roster.
+    """
+    rank = {player.id: index for index, player in enumerate(iter_turn_players(turn))}
+    fallback = len(rank)
+    ordered = sorted(
+        snapshot.players,
+        key=lambda ledger: (rank.get(ledger.player_id, fallback), ledger.player_id),
+    )
+    if ordered == snapshot.players:
+        return snapshot
+    return replace(snapshot, players=ordered)
 
 
 def ensure_fleet_baseline(
