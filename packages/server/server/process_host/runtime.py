@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import faulthandler
 import logging
 import os
+import signal
 import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 import uvicorn
 from api import config as api_config
@@ -40,6 +43,10 @@ _LOGGER = logging.getLogger("server.process_host")
 
 # Measurement launches pass this so the SPA does not open a second table stream.
 NO_BROWSER_FLAG = "--no-browser"
+# When set to a file path, SIGUSR1 appends an all-thread Python traceback there.
+TRACE_DUMP_ENV = "PLANETS_CONSOLE_TRACE_DUMP"
+# faulthandler writes this fd from the signal handler, so it stays open for the process.
+_trace_dump_file: TextIO | None = None
 
 
 def browser_open_requested(argv: list[str] | None = None) -> bool:
@@ -178,6 +185,7 @@ def _run_as_primary(lock: SingleInstanceLock, log_path: Path) -> int:
         open_spa(port)
     else:
         _LOGGER.info("Skipping browser open (%s)", NO_BROWSER_FLAG)
+    _arm_sigusr1_trace_dump()
     _run_native_loop(session)
     session.request_stop()
     thread.join(timeout=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS + 1.0)
@@ -211,6 +219,24 @@ def _build_uvicorn_server(port: int) -> uvicorn.Server:
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
     )
     return uvicorn.Server(config)
+
+
+def _arm_sigusr1_trace_dump() -> None:
+    """Arm an all-thread traceback dump on SIGUSR1 when ``TRACE_DUMP_ENV`` is a path.
+
+    Unset leaves the process host unchanged. The file stays open so the signal
+    handler can write it without taking the GIL.
+    """
+    global _trace_dump_file
+    path = os.environ.get(TRACE_DUMP_ENV)
+    if not path:
+        return
+    if not hasattr(signal, "SIGUSR1"):
+        _LOGGER.warning("%s is set but SIGUSR1 is unavailable on this platform", TRACE_DUMP_ENV)
+        return
+    _trace_dump_file = open(path, "a", encoding="utf-8")
+    faulthandler.register(signal.SIGUSR1, file=_trace_dump_file, all_threads=True)
+    _LOGGER.info("SIGUSR1 traceback dump armed at %s", path)
 
 
 def _run_native_loop(session: ProcessHostSession) -> None:
