@@ -249,7 +249,42 @@ def _find_chain_anchor_for_player(
     *,
     min_anchor_turn: int = 1,
 ) -> tuple[int, PersistedFleetLedger | None]:
+    """Nearest readable prior ledger (final or not).
+
+    Display/initial-wire may show a non-final file. Multi-turn materialize must
+    not use this: drive from ``_find_gap_start_turn_for_player`` and an
+    ensure-final prior instead.
+    """
     for prior_turn_number in range(turn_number - 1, min_anchor_turn - 1, -1):
+        prior_ledger = persistence.get_ledger(
+            game_id,
+            perspective,
+            prior_turn_number,
+            player_id,
+        )
+        if prior_ledger is not None:
+            return prior_turn_number, prior_ledger
+    return 0, None
+
+
+def _find_ensure_final_prior_for_player(
+    persistence: FleetSnapshotPersistenceService,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+    before_turn: int,
+    *,
+    min_anchor_turn: int = 1,
+) -> tuple[int, PersistedFleetLedger | None]:
+    """Nearest ensure-final ledger strictly before ``before_turn``."""
+    for prior_turn_number in range(before_turn - 1, min_anchor_turn - 1, -1):
+        if not persistence.has_final_ledger(
+            game_id,
+            perspective,
+            prior_turn_number,
+            player_id,
+        ):
+            continue
         prior_ledger = persistence.get_ledger(
             game_id,
             perspective,
@@ -496,12 +531,22 @@ def _materialize_fleet_ledger_chain_for_player(
                 f"for game {game_id} perspective {perspective}"
             )
 
-    anchor_turn, anchor_persisted = _find_chain_anchor_for_player(
+    # Rewrite from the first non-ensure-final turn. A generation-stale file may
+    # still be readable with provenance (true, true); it must not anchor the chain.
+    gap_start = _find_gap_start_turn_for_player(
         persistence,
         game_id,
         perspective,
         player_id,
         turn_number,
+        cached_load,
+    )
+    anchor_turn, anchor_persisted = _find_ensure_final_prior_for_player(
+        persistence,
+        game_id,
+        perspective,
+        player_id,
+        gap_start,
         min_anchor_turn=chain_floor,
     )
     first_stored_rst = _first_stored_rst_turn(
@@ -510,7 +555,7 @@ def _materialize_fleet_ledger_chain_for_player(
         min_turn=chain_floor,
     )
     skip_missing_prefix_rst = False
-    start_turn = anchor_turn + 1 if anchor_turn >= chain_floor else chain_floor
+    start_turn = gap_start if anchor_turn >= chain_floor else chain_floor
     current_ledger = anchor_persisted.ledger if anchor_persisted is not None else None
     current_persisted = anchor_persisted
 

@@ -187,7 +187,20 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
     prior.players[0].records.append(
         FleetShipRecord(record_id="gap-rec", disposition="active"),
     )
-    persistence.put_snapshot(628580, 1, 110, prior)
+    for ledger in prior.players:
+        persistence.put_ledger(
+            628580,
+            1,
+            110,
+            ledger.player_id,
+            PersistedFleetLedger(
+                ledger=ledger,
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
@@ -834,7 +847,20 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     prior.players[0].records.append(
         FleetShipRecord(record_id="gap-rec", disposition="active"),
     )
-    persistence.put_snapshot(628580, 1, 110, prior)
+    for ledger in prior.players:
+        persistence.put_ledger(
+            628580,
+            1,
+            110,
+            ledger.player_id,
+            PersistedFleetLedger(
+                ledger=ledger,
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
@@ -900,7 +926,7 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
 
     turn_110 = load_turn(110)
     assert turn_110 is not None
-    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
@@ -1177,6 +1203,66 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
     )
 
     assert result == winner
+
+
+def test_chain_rewrites_generation_stale_anchor_through_later_turns(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Durable bump at T must not leave T+1 ensure-final from a stale T prior.
+
+    After #531, generation-mismatched ledgers stay on disk. Multi-turn gap-fill
+    must rebuild from the last ensure-final prior through every non-final turn,
+    not anchor on a readable stale file with provenance (true, true).
+    """
+    turn_110 = load_turn(110)
+    turn_111 = load_turn(111)
+    turn_112 = load_turn(112)
+    assert turn_110 is not None and turn_111 is not None and turn_112 is not None
+    player_id = turn_111.scores[0].ownerid
+
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_111)
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_112)
+
+    persistence.invalidate_player_ledgers_from_turn(
+        628580,
+        1,
+        111,
+        player_id,
+        durable=True,
+    )
+
+    assert persistence.has_final_ledger(628580, 1, 110, player_id) is True
+    assert persistence.get_ledger(628580, 1, 111, player_id) is not None
+    assert persistence.get_ledger(628580, 1, 112, player_id) is not None
+    assert persistence.has_final_ledger(628580, 1, 111, player_id) is False
+    assert persistence.has_final_ledger(628580, 1, 112, player_id) is False
+    assert persistence.get_ledger(628580, 1, 111, player_id).evidence_generation == 0
+    assert persistence.get_ledger(628580, 1, 112, player_id).evidence_generation == 0
+
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+
+    get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_112,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+    # Stale T and T+1 both rewritten from the pre-T ensure-final prior.
+    assert persistence.has_final_ledger(628580, 1, 111, player_id) is True
+    assert persistence.has_final_ledger(628580, 1, 112, player_id) is True
+    assert persistence.get_ledger(628580, 1, 111, player_id).evidence_generation == 1
+    assert persistence.get_ledger(628580, 1, 112, player_id).evidence_generation == 1
 
 
 def test_get_or_materialize_fleet_ledger_for_player_raises_on_epoch_abort(
