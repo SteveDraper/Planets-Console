@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import signal
 import subprocess
 import threading
 from types import SimpleNamespace
@@ -15,6 +16,8 @@ from bff import config as bff_config
 from server.package_identity import CONSOLE_PACKAGE_DISPLAY_NAME
 from server.process_host.loopback import HealthWaitError
 from server.process_host.runtime import (
+    TRACE_DUMP_ENV,
+    _arm_sigusr1_trace_dump,
     _configure_packaged_server,
     _run,
     _run_as_primary,
@@ -152,6 +155,74 @@ def test_run_as_primary_does_not_open_spa_when_health_never_succeeds(
     lock.release.assert_not_called()
     assert str(log_path) in str(caught.value)
     assert "http://127.0.0.1:8123/health" in str(caught.value)
+
+
+def test_trace_dump_unset_does_not_register(monkeypatch):
+    monkeypatch.delenv(TRACE_DUMP_ENV, raising=False)
+    registered: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        "server.process_host.runtime.faulthandler.register",
+        lambda *args, **kwargs: registered.append((args, kwargs)),
+    )
+
+    _arm_sigusr1_trace_dump()
+
+    assert registered == []
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="SIGUSR1 is Unix-only")
+def test_trace_dump_registers_sigusr1_all_threads(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "python-tracebacks.txt"
+    monkeypatch.setenv(TRACE_DUMP_ENV, str(path))
+    registered: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        "server.process_host.runtime.faulthandler.register",
+        lambda *args, **kwargs: registered.append((args, kwargs)),
+    )
+
+    with caplog.at_level(logging.INFO, logger="server.process_host"):
+        _arm_sigusr1_trace_dump()
+
+    assert len(registered) == 1
+    args, kwargs = registered[0]
+    assert args == (signal.SIGUSR1,)
+    assert kwargs["all_threads"] is True
+    dump_file = kwargs["file"]
+    assert dump_file.name == str(path)
+    assert dump_file.mode == "a"
+    assert not dump_file.closed
+    assert str(path) in caplog.text
+    dump_file.close()
+
+
+def test_run_as_primary_arms_trace_dump_before_native_loop(tmp_path, monkeypatch, stub_hard_exit):
+    events: list[str] = []
+
+    def wait_for_health(port, **_kwargs):
+        return None
+
+    _stub_primary_server(
+        monkeypatch,
+        tmp_path,
+        wait_for_health=wait_for_health,
+        open_spa=lambda port: None,
+    )
+    monkeypatch.setattr("server.process_host.runtime.sys.argv", ["process_host", "--no-browser"])
+    monkeypatch.setattr(
+        "server.process_host.runtime._arm_sigusr1_trace_dump",
+        lambda: events.append("arm"),
+    )
+    monkeypatch.setattr(
+        "server.process_host.runtime._run_native_loop",
+        lambda session: events.append("native"),
+    )
+    lock = MagicMock()
+    log_path = tmp_path / "logs" / "process-host.log"
+
+    assert _run_as_primary(lock, log_path) == 0
+
+    assert events == ["arm", "native"]
+    assert stub_hard_exit == [0]
 
 
 def test_exit_without_interpreter_teardown_calls_os_exit(monkeypatch):
