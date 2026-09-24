@@ -150,11 +150,6 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
     observed = run_fleet_observation_leg(job_wire)
     assert observed.payload["persistedLedgerWire"]["ledger"]["records"] == []
 
-    result_wire = {
-        "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
-        "materializeTurn": turn_number,
-        "fleetPersistLeg": "finalization",
-    }
     compute_scope = ComputeScope(
         analytic_id=_FLEET,
         game_id=GAME_ID,
@@ -162,7 +157,60 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         turn=turn_number,
         player_id=player_id,
     )
-    FleetPersistencePolicy().persist(ctx, compute_scope, result_wire)
+    ledger_persisted_events: list[tuple[int, int]] = []
+    fleet_services.persistence.on_ledger_persisted = lambda event: ledger_persisted_events.append(
+        (event.fleet_turn, event.player_id)
+    )
+    mark_before_observation = fleet_services.persistence.evidence_mark(
+        GAME_ID,
+        perspective(turn),
+        player_id,
+    )
+
+    observation_wire = {
+        "persistedLedgerWire": observed.payload["persistedLedgerWire"],
+        "materializeTurn": turn_number,
+        "fleetPersistLeg": "observation",
+    }
+    observation_deferred = FleetPersistencePolicy().persist(ctx, compute_scope, observation_wire)
+    assert observation_deferred is None
+    assert ledger_persisted_events == []
+    assert fleet_services.persistence.has_final_ledger(
+        GAME_ID,
+        perspective(turn),
+        turn_number,
+        player_id,
+    ) is False
+    after_observation = fleet_services.persistence.get_ledger(
+        GAME_ID,
+        perspective(turn),
+        turn_number,
+        player_id,
+    )
+    assert after_observation is not None
+    assert after_observation.ledger.records == []
+    assert after_observation.provenance.turn_evidence_at_n is False
+    assert after_observation.provenance.prior_ledger_at_n_minus_1 is False
+    assert after_observation.provenance.eliminated_at_turn is False
+    assert after_observation.provenance.is_final is False
+    assert fleet_services.persistence.evidence_mark(
+        GAME_ID,
+        perspective(turn),
+        player_id,
+    ) == mark_before_observation
+
+    finalization_wire = {
+        "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
+        "materializeTurn": turn_number,
+        "fleetPersistLeg": "finalization",
+    }
+    finalization_deferred = FleetPersistencePolicy().persist(
+        ctx, compute_scope, finalization_wire
+    )
+    assert finalization_deferred is not None
+    assert ledger_persisted_events == []
+    finalization_deferred()
+    assert ledger_persisted_events == [(turn_number, player_id)]
     assert fleet_services.persistence.has_final_ledger(
         GAME_ID,
         perspective(turn),

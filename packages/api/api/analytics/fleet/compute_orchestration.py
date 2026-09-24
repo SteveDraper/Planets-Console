@@ -341,12 +341,8 @@ class FleetPersistencePolicy:
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet observation persist requires concrete turn")
 
-        turn = ctx.load_turn(scope.turn)
-        if turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id):
-            return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
-
-        # Observation must never claim turn evidence closed -- only finalization
-        # after scores refine may set turnEvidenceAtN and satisfy has_final_ledger.
+        # Observation must never claim ensure-final -- neither turnEvidenceAtN nor
+        # eliminatedAtTurn. Only finalization may set those and satisfy has_final_ledger.
         persisted = PersistedFleetLedger(
             ledger=persisted.ledger,
             provenance=FleetMaterializationProvenance(
