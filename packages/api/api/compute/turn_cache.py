@@ -1,12 +1,13 @@
 """Process-local read-through LRU for ``TurnInfo``.
 
-One cache per process, keyed by ``(game_id, perspective, turn)``. Fleet
-``turnWire`` deserialize and scores/storage ``TurnInfo`` loads share it.
-Parent orchestrator splice uses this type and key; worker heaps stay
-separate. This is not a ``StorageBackend`` document cache.
+One cache per process, keyed by ``(game_id, perspective, turn)``. Scores and
+storage ``TurnInfo`` loads share it. Fleet observation and materialization
+``turnWire`` is a scoreboard slice hydrated in the leg; that slice is not
+stored under this key. Parent orchestrator splice uses this type and key;
+worker heaps stay separate. This is not a ``StorageBackend`` document cache.
 
 Module imports stay interpreter-safe (no DAG, FastAPI, or file storage) so
-fleet interpreter workers can initialize this cache.
+interpreter workers can initialize this cache.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class TurnInfoCache:
     """Read-through LRU for ``TurnInfo``, keyed by shell + turn.
 
     Callers supply a fill ``load_turn`` on miss; hits never invoke it.
-    Fill functions may deserialize ``turnWire`` or a storage document.
+    Fill functions load a stored turn. The fleet scoreboard slice is not a fill.
     """
 
     maxsize: int = _DEFAULT_MAXSIZE
@@ -166,7 +167,7 @@ _process_cache: TurnInfoCache | None = None
 
 
 def get_process_turn_info_cache() -> TurnInfoCache:
-    """Return this process's TurnInfo LRU (parent splice and worker fills)."""
+    """Return this process's TurnInfo LRU (parent splice and worker heaps)."""
     global _process_cache
     with _process_cache_lock:
         if _process_cache is None:
