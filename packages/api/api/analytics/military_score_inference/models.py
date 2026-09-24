@@ -19,10 +19,55 @@ from api.analytics.military_score_inference.uncharacterized_roster_types import 
 )
 
 if TYPE_CHECKING:
+    from ortools.sat.python import cp_model
+
     from api.analytics.military_score_inference.ranking_heuristics import (
         InferenceRankingHeuristics,
         TierOverflowBand,
     )
+
+
+@dataclass(frozen=True)
+class EffortSolveClip:
+    """Stream Solve clip: deterministic-time allowance; wall only for hang fuse."""
+
+    max_deterministic_time: float
+    hang_fuse_remaining: float | None = None
+
+    def is_exhausted(self) -> bool:
+        return self.max_deterministic_time <= 0
+
+    def apply_to_solver(self, solver: cp_model.CpSolver) -> None:
+        solver.parameters.max_deterministic_time = max(0.0, self.max_deterministic_time)
+        if self.hang_fuse_remaining is not None:
+            solver.parameters.max_time_in_seconds = max(0.0, self.hang_fuse_remaining)
+
+
+@dataclass(frozen=True)
+class WallSolveClip:
+    """Batch (or probe) Solve clip: wall-clock case / slice limit."""
+
+    max_time_in_seconds: float
+
+    def is_exhausted(self) -> bool:
+        return self.max_time_in_seconds <= 0
+
+    def apply_to_solver(self, solver: cp_model.CpSolver) -> None:
+        solver.parameters.max_time_in_seconds = max(0.0, self.max_time_in_seconds)
+
+
+SolveClip = EffortSolveClip | WallSolveClip
+
+
+def effective_solve_clip(
+    *,
+    solve_clip: SolveClip | None,
+    time_limit_seconds: float,
+) -> SolveClip:
+    """Return the clip to use; default is a batch wall clip from ``time_limit_seconds``."""
+    if solve_clip is not None:
+        return solve_clip
+    return WallSolveClip(max_time_in_seconds=time_limit_seconds)
 
 
 def _default_ranking_heuristics() -> InferenceRankingHeuristics:
@@ -186,10 +231,8 @@ class InferenceProblem:
     )
     max_solutions: int = 20
     time_limit_seconds: float = 20.0
-    # When set, the stream Solve clip is max_deterministic_time (not wall seconds).
-    search_effort_limit: float | None = None
-    # Remaining hang-fuse wall for this Solve. Not the search allowance.
-    hang_fuse_remaining: float | None = None
+    # Typed Solve clip. When unset, the search loop uses WallSolveClip(time_limit_seconds).
+    solve_clip: EffortSolveClip | WallSolveClip | None = None
     enforce_priority_point_constraint: bool = False
     enforce_idle_dock_pp_equality: bool = False
     prior_warship_departure_cap: int = 0

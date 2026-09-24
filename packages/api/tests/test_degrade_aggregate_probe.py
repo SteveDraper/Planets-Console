@@ -601,6 +601,7 @@ def test_probe_stops_after_budget_grants_one_solve() -> None:
 
 def test_probe_caps_inner_solve_to_remaining_seconds(monkeypatch) -> None:
     from api.analytics.military_score_inference import degrade_aggregate_probe as probe_mod
+    from api.analytics.military_score_inference.models import WallSolveClip
 
     helds, turn, observation, catalog = _beam_degrade_fixture()
     short_cap = 0.05
@@ -608,7 +609,9 @@ def test_probe_caps_inner_solve_to_remaining_seconds(monkeypatch) -> None:
     original = probe_mod._solve_degrade_for_aggregate
 
     def _spy(*args, **kwargs):
-        recorded_caps.append(float(kwargs["max_time_in_seconds"]))
+        clip = kwargs["solve_clip"]
+        assert isinstance(clip, WallSolveClip)
+        recorded_caps.append(float(clip.max_time_in_seconds))
         return original(*args, **kwargs)
 
     monkeypatch.setattr(probe_mod, "_solve_degrade_for_aggregate", _spy)
@@ -623,6 +626,47 @@ def test_probe_caps_inner_solve_to_remaining_seconds(monkeypatch) -> None:
     )
     assert recorded_caps == [short_cap]
     assert short_cap < PROBE_SOLVE_MAX_SECONDS
+    assert len(rewrites) <= 1
+
+
+def test_probe_asks_effort_budget_for_deterministic_clip(monkeypatch) -> None:
+    from api.analytics.military_score_inference import degrade_aggregate_probe as probe_mod
+    from api.analytics.military_score_inference.models import EffortSolveClip
+    from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+    from api.analytics.military_score_inference.policy_ladder_tier_budget import TierStepRun
+
+    helds, turn, observation, catalog = _beam_degrade_fixture()
+    recorded: list[object] = []
+    original = probe_mod._solve_degrade_for_aggregate
+
+    def _spy(*args, **kwargs):
+        clip = kwargs["solve_clip"]
+        recorded.append(clip)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(probe_mod, "_solve_degrade_for_aggregate", _spy)
+    run = TierStepRun.for_effort(
+        PolicyLadderState(policy_steps=()),
+        cancel_token=None,
+        allowance=5.0,
+        reserved_for_later=0.0,
+        spendable=5.0,
+        row_effort_allowance=5.0,
+        hang_fuse_seconds=50.0,
+    )
+    rewrites = probe_degrade_aggregate_rewrites(
+        helds,
+        turn=turn,
+        observation=observation,
+        catalog=catalog,
+        search_budget=run,
+        should_stop=lambda: len(recorded) >= 1,
+    )
+    assert recorded
+    clip = recorded[0]
+    assert isinstance(clip, EffortSolveClip)
+    assert clip.max_deterministic_time == PROBE_SOLVE_MAX_SECONDS
+    assert clip.hang_fuse_remaining == 50.0
     assert len(rewrites) <= 1
 
 

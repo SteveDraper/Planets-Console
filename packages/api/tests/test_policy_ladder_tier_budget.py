@@ -9,6 +9,7 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
     InferenceSolutionShipBuild,
+    WallSolveClip,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
@@ -112,12 +113,12 @@ def test_continues_share_one_row_budget_from_first_dispatch() -> None:
     """Soft-global remaining is shared from first dispatch; tier slice is separate."""
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
     started = ensure_ladder_clock_started(state, now=time.monotonic() - 15.0)
-    run = TierStepRun(
+    run = TierStepRun.for_wall(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
         budget_started_at=started,
-        tier_allowance_seconds=20.0,
+        allowance_seconds=20.0,
         tier_started_at=time.monotonic(),
     )
     # ~5s left on soft-global steering clock -- not a fresh 20s.
@@ -131,12 +132,12 @@ def test_soft_global_exhaustion_does_not_abort_funded_tier() -> None:
     """Absolute mins may overshoot soft global; only tier allowance stops the slice."""
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
     started = ensure_ladder_clock_started(state, now=time.monotonic() - 21.0)
-    run = TierStepRun(
+    run = TierStepRun.for_wall(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
         budget_started_at=started,
-        tier_allowance_seconds=3.0,
+        allowance_seconds=3.0,
         tier_started_at=time.monotonic(),
     )
     assert run.global_remaining_seconds() <= 0
@@ -150,12 +151,12 @@ def test_stale_pre_deferred_started_at_does_not_abort_funded_tier() -> None:
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
     state.started_at = time.monotonic() - 45.0
     assert remaining_time(state.started_at, 20.0) <= 0
-    run = TierStepRun(
+    run = TierStepRun.for_wall(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
         budget_started_at=state.started_at,
-        tier_allowance_seconds=3.0,
+        allowance_seconds=3.0,
         tier_started_at=time.monotonic(),
     )
     assert run.global_remaining_seconds() <= 0
@@ -173,12 +174,12 @@ def test_waiting_deps_before_first_dispatch_does_not_burn_shared_budget() -> Non
     # Long wait with no stamp -- budget must still be full at first dispatch.
     time.sleep(0.01)
     started = ensure_ladder_clock_started(state)
-    run = TierStepRun(
+    run = TierStepRun.for_wall(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
         budget_started_at=started,
-        tier_allowance_seconds=20.0,
+        allowance_seconds=20.0,
         tier_started_at=time.monotonic(),
     )
     assert run.peek_stop() is None
@@ -190,12 +191,12 @@ def test_tier_allowance_stop_does_not_complete_ladder() -> None:
 
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:2]))
     started = ensure_ladder_clock_started(state)
-    run = TierStepRun(
+    run = TierStepRun.for_wall(
         state,
         time_limit_seconds=20.0,
         cancel_token=None,
         budget_started_at=started,
-        tier_allowance_seconds=0.0,
+        allowance_seconds=0.0,
         tier_started_at=time.monotonic(),
     )
     stop = run.peek_stop()
@@ -216,12 +217,12 @@ def test_peek_stop_cancel_does_not_mutate_until_commit() -> None:
     token.cancel()
     state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
     started = ensure_ladder_clock_started(state)
-    run = TierStepRun(
+    run = TierStepRun.for_wall(
         state,
         time_limit_seconds=20.0,
         cancel_token=token,
         budget_started_at=started,
-        tier_allowance_seconds=20.0,
+        allowance_seconds=20.0,
         tier_started_at=time.monotonic(),
     )
     assert run.peek_stop() is TierStopKind.CANCEL
@@ -333,13 +334,15 @@ class _SeedProgressionBudget:
     def should_stop(self) -> bool:
         return self._index >= len(self._grants)
 
-    def remaining_seconds(self) -> float:
+    def next_solve_clip(self):
         if self._index >= len(self._grants):
-            return 0.0
+            return None
         remaining = self._grants[self._index]
         self._index += 1
         self.sampled.append(remaining)
-        return remaining
+        if remaining <= 0:
+            return None
+        return WallSolveClip(max_time_in_seconds=remaining)
 
 
 def _empty_catalog_result() -> InferenceResult:
@@ -351,7 +354,8 @@ def test_seed_progression_samples_remaining_per_sub_solve(monkeypatch) -> None:
     recorded_limits: list[float] = []
 
     def fake_solve_catalog(*_args, **kwargs):
-        recorded_limits.append(float(kwargs["time_limit_seconds"]))
+        clip = kwargs["solve_clip"]
+        recorded_limits.append(float(clip.max_time_in_seconds))
         return _empty_catalog_result(), MagicMock()
 
     monkeypatch.setattr(
@@ -369,7 +373,7 @@ def test_seed_progression_samples_remaining_per_sub_solve(monkeypatch) -> None:
         MagicMock(),
         seed,
         max_solutions=5,
-        remaining_seconds=budget.remaining_seconds,
+        next_solve_clip=budget.next_solve_clip,
         should_stop=budget.should_stop,
     )
     assert result is None
@@ -383,7 +387,8 @@ def test_seed_progression_stops_when_remaining_exhausted(monkeypatch) -> None:
     recorded_limits: list[float] = []
 
     def fake_solve_catalog(*_args, **kwargs):
-        recorded_limits.append(float(kwargs["time_limit_seconds"]))
+        clip = kwargs["solve_clip"]
+        recorded_limits.append(float(clip.max_time_in_seconds))
         return _empty_catalog_result(), MagicMock()
 
     monkeypatch.setattr(
@@ -401,7 +406,7 @@ def test_seed_progression_stops_when_remaining_exhausted(monkeypatch) -> None:
         MagicMock(),
         seed,
         max_solutions=5,
-        remaining_seconds=budget.remaining_seconds,
+        next_solve_clip=budget.next_solve_clip,
         should_stop=budget.should_stop,
     )
     assert result is None
@@ -432,7 +437,7 @@ def test_seed_progression_skips_all_solves_when_should_stop(monkeypatch) -> None
         MagicMock(),
         seed,
         max_solutions=5,
-        remaining_seconds=lambda: 5.0,
+        next_solve_clip=lambda: WallSolveClip(max_time_in_seconds=5.0),
         should_stop=lambda: True,
     )
     assert result is None
@@ -478,16 +483,15 @@ def test_effort_exhaustion_records_time_limited() -> None:
     from api.analytics.military_score_inference.policy_ladder_tier_budget import TierStopKind
 
     state = PolicyLadderState(policy_steps=())
-    run = TierStepRun(
+    run = TierStepRun.for_effort(
         state,
-        None,
-        None,
-        budget_started_at=0.0,
-        tier_allowance_seconds=5.0,
-        tier_started_at=time.monotonic(),
-        budget_kind="effort",
+        cancel_token=None,
+        allowance=5.0,
+        reserved_for_later=0.0,
+        spendable=5.0,
         row_effort_allowance=5.0,
         hang_fuse_seconds=900.0,
+        budget_started_at=0.0,
     )
     run.charge_search(deterministic_time=5.0, wall_seconds=0.2)
     assert run.peek_stop() is TierStopKind.TIER_TIME
@@ -501,16 +505,15 @@ def test_hang_fuse_does_not_mark_time_limited() -> None:
     from api.analytics.military_score_inference.search_effort import InferenceSearchHangFuse
 
     state = PolicyLadderState(policy_steps=())
-    run = TierStepRun(
+    run = TierStepRun.for_effort(
         state,
-        None,
-        None,
-        budget_started_at=0.0,
-        tier_allowance_seconds=20.0,
-        tier_started_at=time.monotonic(),
-        budget_kind="effort",
+        cancel_token=None,
+        allowance=20.0,
+        reserved_for_later=0.0,
+        spendable=20.0,
         row_effort_allowance=20.0,
         hang_fuse_seconds=1.0,
+        budget_started_at=0.0,
     )
     run.charge_search(deterministic_time=0.1, wall_seconds=1.0)
     assert run.peek_stop() is TierStopKind.HANG_FUSE
@@ -531,16 +534,15 @@ def test_wall_stretch_without_deterministic_time_keeps_later_effort() -> None:
         _minimal_policy_step("later", min_effort=1.0, max_effort=5.0),
     )
     state = PolicyLadderState(policy_steps=steps)
-    run = TierStepRun(
+    run = TierStepRun.for_effort(
         state,
-        None,
-        None,
-        budget_started_at=0.0,
-        tier_allowance_seconds=8.0,
-        tier_started_at=time.monotonic(),
-        budget_kind="effort",
+        cancel_token=None,
+        allowance=8.0,
+        reserved_for_later=0.0,
+        spendable=8.0,
         row_effort_allowance=20.0,
         hang_fuse_seconds=900.0,
+        budget_started_at=0.0,
     )
     run.charge_search(deterministic_time=0.0, wall_seconds=30.0)
     assert run.peek_stop() is None
@@ -550,3 +552,69 @@ def test_wall_stretch_without_deterministic_time_keeps_later_effort() -> None:
         global_remaining_effort=remaining_effort(20.0, state.search_effort_spent),
     )
     assert later_allowance == 5.0
+
+
+def test_effort_budget_next_solve_clip_is_deterministic_time() -> None:
+    from api.analytics.military_score_inference.models import EffortSolveClip
+
+    state = PolicyLadderState(policy_steps=())
+    run = TierStepRun.for_effort(
+        state,
+        cancel_token=None,
+        allowance=5.0,
+        reserved_for_later=1.0,
+        spendable=4.0,
+        row_effort_allowance=20.0,
+        hang_fuse_seconds=900.0,
+    )
+    clip = run.next_solve_clip()
+    assert isinstance(clip, EffortSolveClip)
+    assert clip.max_deterministic_time == 5.0
+    assert clip.hang_fuse_remaining == 900.0
+    try:
+        run.remaining_seconds()
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("remaining_seconds must not return effort")
+
+
+def test_wall_budget_next_solve_clip_is_wall_seconds() -> None:
+    state = PolicyLadderState(policy_steps=())
+    started = ensure_ladder_clock_started(state)
+    run = TierStepRun.for_wall(
+        state,
+        time_limit_seconds=20.0,
+        cancel_token=None,
+        budget_started_at=started,
+        allowance_seconds=3.0,
+        tier_started_at=time.monotonic(),
+    )
+    clip = run.next_solve_clip(max_slice=0.25)
+    assert isinstance(clip, WallSolveClip)
+    assert 0.0 < clip.max_time_in_seconds <= 0.25
+
+
+def test_effort_probe_clip_does_not_feed_wall_seconds() -> None:
+    """Degrade probe asks the budget; stream clips are max_deterministic_time."""
+    from ortools.sat.python import cp_model
+
+    from api.analytics.military_score_inference.models import EffortSolveClip
+
+    state = PolicyLadderState(policy_steps=())
+    run = TierStepRun.for_effort(
+        state,
+        cancel_token=None,
+        allowance=2.0,
+        reserved_for_later=0.0,
+        spendable=2.0,
+        row_effort_allowance=2.0,
+        hang_fuse_seconds=100.0,
+    )
+    clip = run.next_solve_clip(max_slice=0.25)
+    assert isinstance(clip, EffortSolveClip)
+    assert clip.max_deterministic_time == 0.25
+    solver = cp_model.CpSolver()
+    clip.apply_to_solver(solver)
+    assert solver.parameters.max_deterministic_time == 0.25
+    assert solver.parameters.max_time_in_seconds == 100.0
