@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from api.compute.backend_runtime import effective_compute_backend
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
@@ -244,7 +245,11 @@ class OrchestratorStepExecutionMixin:
         self,
         pending: tuple[PendingPoolSubmission, ...],
     ) -> None:
-        """Build job wires, seal, and submit pool work without the orchestrator lock."""
+        """Build job wires for interpreter and process steps, seal, and submit pool work.
+
+        A declared ``interpreter`` step remapped to ``thread`` skips the prebuild.
+        ``execute_pool_step`` builds that wire once on the worker thread.
+        """
         if not pending:
             return
         if self._pool_submitter is None:
@@ -254,7 +259,7 @@ class OrchestratorStepExecutionMixin:
             step = submission.step
             ctx = self._ctx_for_node(node)
             try:
-                if step.backend in {"interpreter", "process"}:
+                if effective_compute_backend(step.backend) in {"interpreter", "process"}:
                     builder = submission.registration.build_step_job_wire[step.step_kind]
                     job_wire = builder(
                         node.scope,

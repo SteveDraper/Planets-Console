@@ -12,6 +12,10 @@ from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.fleet.compute_orchestration import build_fleet_materialization_leg_job_wire
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.registration import REGISTRATION as FLEET_REGISTRATION
+from api.analytics.fleet.scoreboard_slice import (
+    fleet_scoreboard_slice_to_json,
+    turn_from_fleet_scoreboard_slice,
+)
 from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
@@ -34,11 +38,6 @@ from api.compute import (
     build_compute_registry,
 )
 from api.compute.turn_cache import TurnInfoCache
-from api.compute.worker_turn_cache import (
-    reset_worker_deserialize_calls_for_tests,
-    turn_from_materialization_job_wire,
-    worker_deserialize_calls,
-)
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
 
 from tests.fixtures.export_framework.harness import build_stored_turn_chain
@@ -126,15 +125,49 @@ def test_fleet_job_wire_includes_prefetched_turn_wire(sample_turn) -> None:
         player_id=player_id,
     )
 
-    job_wire = build_fleet_materialization_leg_job_wire(
-        scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=cached_ctx,
-    )
+    import copy
+    import dataclasses
+
+    from api.models.game import GameSettings, TurnInfo
+    from api.models.player import Player, Score
+    from api.serialization import codecs
+
+    watched = (TurnInfo, GameSettings, Player, Score)
+    real_asdict = dataclasses.asdict
+    real_deepcopy = copy.deepcopy
+
+    def guarded_asdict(obj):
+        if isinstance(obj, watched):
+            raise AssertionError(f"asdict {type(obj).__name__}")
+        return real_asdict(obj)
+
+    def guarded_deepcopy(obj, *args, **kwargs):
+        if isinstance(obj, watched):
+            raise AssertionError(f"deepcopy {type(obj).__name__}")
+        return real_deepcopy(obj, *args, **kwargs)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(dataclasses, "asdict", guarded_asdict)
+    monkeypatch.setattr(codecs, "asdict", guarded_asdict)
+    monkeypatch.setattr(copy, "deepcopy", guarded_deepcopy)
+    try:
+        job_wire = build_fleet_materialization_leg_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=cached_ctx,
+        )
+    finally:
+        monkeypatch.undo()
 
     assert "turnWire" in job_wire
     assert job_wire["materializeTurn"] == 2
-    assert turn_info_from_json(job_wire["turnWire"]).settings.turn == 2
+    turn_wire = job_wire["turnWire"]
+    assert set(turn_wire) == {"settings", "player", "players", "scores"}
+    assert "planets" not in turn_wire
+    assert "ships" not in turn_wire
+    assert "hulls" not in turn_wire
+    assert "messages" not in turn_wire
+    assert turn_wire["settings"]["turn"] == 2
 
 
 def test_fleet_job_wire_prefetches_prior_ledger_from_persistence(sample_turn) -> None:
@@ -337,30 +370,42 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
     assert {1, 2}.issubset(set(load_calls))
 
 
-def test_worker_turn_cache_reuses_turn_wire_deserialize(sample_turn) -> None:
-    from api.compute.turn_cache import clear_process_turn_info_cache
+def test_scoreboard_slice_does_not_fill_process_turn_cache(sample_turn) -> None:
+    from api.compute.turn_cache import clear_process_turn_info_cache, get_process_turn_info_cache
 
     clear_process_turn_info_cache()
-    reset_worker_deserialize_calls_for_tests()
     turn = sample_turn
+    cache = get_process_turn_info_cache()
+    slice_wire = fleet_scoreboard_slice_to_json(turn)
     job_wire = {
         "gameId": turn.game.id,
         "perspective": turn.player.id,
         "materializeTurn": turn.settings.turn,
-        "turnWire": turn_info_to_json(turn),
+        "turnWire": slice_wire,
     }
 
-    first = turn_from_materialization_job_wire(job_wire)
-    second = turn_from_materialization_job_wire(job_wire)
+    first = turn_from_fleet_scoreboard_slice(job_wire["turnWire"])
+    second = turn_from_fleet_scoreboard_slice(job_wire["turnWire"])
 
-    assert first.settings.turn == second.settings.turn
-    assert worker_deserialize_calls() == 1
+    assert first.settings.turn == second.settings.turn == turn.settings.turn
+    assert first is not second
+    assert cache.underlying_load_calls == 0
+    assert (
+        cache.get(
+            turn.game.id,
+            turn.player.id,
+            turn.settings.turn,
+            load_turn=lambda _turn_number: None,
+        )
+        is None
+    )
 
 
-def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> None:
+def test_pool_fleet_leg_does_not_cache_scoreboard_slice(sample_turn) -> None:
     from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
     from api.analytics.fleet.held_solutions import FleetInferenceSupport
     from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.compute.worker_turn_cache import reset_worker_deserialize_calls_for_tests
     from api.serialization.inference_row_persistence import PersistedInferenceRow
     from api.services.inference_row_persistence_service import InferenceRowPersistenceService
     from api.storage.memory_asset import MemoryAssetBackend
@@ -442,17 +487,17 @@ def test_pool_fleet_leg_deserializes_turn_wire_once_in_worker(sample_turn) -> No
     assert isinstance(handle.result_wire, dict)
     assert "persistedLedgerWire" in handle.result_wire
     assert pool.metrics.interpreter_executions == 1
-    assert pool.worker_deserialize_calls_for_tests() == 1
+    assert pool.worker_deserialize_calls_for_tests() == 0
 
     pool.shutdown()
 
 
-def _job_wire_for_turn(turn) -> dict:
+def _scoreboard_slice_job_wire(turn) -> dict:
     return {
         "gameId": turn.game.id,
         "perspective": turn.player.id,
         "materializeTurn": turn.settings.turn,
-        "turnWire": turn_info_to_json(turn),
+        "turnWire": fleet_scoreboard_slice_to_json(turn),
     }
 
 
@@ -496,13 +541,12 @@ def test_turn_load_service_process_cache_follows_replace(sample_turn) -> None:
         replace_process_turn_info_cache()
 
 
-def test_storage_then_turn_wire_fill_shares_cached_object(sample_turn) -> None:
+def test_scoreboard_slice_does_not_replace_cached_rst(sample_turn) -> None:
     from api.compute.turn_cache import clear_process_turn_info_cache
     from api.services.turn_load_service import TurnLoadService
     from api.storage.memory_asset import MemoryAssetBackend
 
     clear_process_turn_info_cache()
-    reset_worker_deserialize_calls_for_tests()
     turn = sample_turn
     storage = MemoryAssetBackend(initial={})
     storage.put(
@@ -511,34 +555,37 @@ def test_storage_then_turn_wire_fill_shares_cached_object(sample_turn) -> None:
     )
     turns = _turn_load_wired_to_process_cache(storage)
 
-    first = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
-    second = turn_from_materialization_job_wire(_job_wire_for_turn(turn))
+    stored = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
+    hydrated = turn_from_fleet_scoreboard_slice(_scoreboard_slice_job_wire(turn)["turnWire"])
+    again = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
 
-    assert first is second
-    assert worker_deserialize_calls() == 1
+    assert stored is again
+    assert hydrated is not stored
+    assert again.planets == turn.planets
+    assert again.ships == turn.ships
 
 
-def test_turn_wire_then_storage_fill_does_not_reread_storage(sample_turn) -> None:
+def test_scoreboard_slice_before_storage_load_still_reads_rst(sample_turn) -> None:
     from api.compute.turn_cache import clear_process_turn_info_cache
     from api.services.turn_load_service import TurnLoadService
     from api.storage.memory_asset import MemoryAssetBackend
 
     clear_process_turn_info_cache()
-    reset_worker_deserialize_calls_for_tests()
     turn = sample_turn
     storage = MemoryAssetBackend(initial={})
     store_key = TurnLoadService.turn_store_key(turn.game.id, turn.player.id, turn.settings.turn)
     storage.put(store_key, turn_info_to_json(turn))
     turns = _turn_load_wired_to_process_cache(storage)
 
-    first = turn_from_materialization_job_wire(_job_wire_for_turn(turn))
-    second = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
+    hydrated = turn_from_fleet_scoreboard_slice(_scoreboard_slice_job_wire(turn)["turnWire"])
+    stored = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
 
-    assert first is second
-    assert worker_deserialize_calls() == 1
+    assert hydrated is not stored
+    assert stored.planets == turn.planets
+    assert stored.ships == turn.ships
     storage.delete(store_key)
-    third = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
-    assert third is first
+    cached = turns.get_turn_info(turn.game.id, turn.player.id, turn.settings.turn)
+    assert cached is stored
 
 
 def test_scores_turn_load_hits_cache_on_second_get(sample_turn) -> None:

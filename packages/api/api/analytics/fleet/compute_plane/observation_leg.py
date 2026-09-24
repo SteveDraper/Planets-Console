@@ -13,6 +13,7 @@ from api.analytics.fleet.compute_plane.turn_delta import (
     advance_ledger_to_turn,
     apply_fleet_turn_delta_for_player,
 )
+from api.analytics.fleet.scoreboard_slice import turn_from_fleet_scoreboard_slice
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_from_json,
     fleet_materialization_provenance_from_json,
@@ -22,7 +23,6 @@ from api.analytics.fleet.serialization import (
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import FleetAcquisitionLedger, PersistedFleetLedger
 from api.compute.wire import StepResult
-from api.compute.worker_turn_cache import turn_from_materialization_job_wire
 
 FLEET_PERSIST_LEG_OBSERVATION = "observation"
 FLEET_PERSIST_LEG_FINALIZATION = "finalization"
@@ -30,7 +30,7 @@ FLEET_PERSIST_LEG_FINALIZATION = "finalization"
 
 def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
     """Materialize one fleet turn observation leg from a serializable job wire."""
-    turn = turn_from_materialization_job_wire(job_wire)
+    turn = turn_from_fleet_scoreboard_slice(job_wire["turnWire"])
     prior_ledger_wire = job_wire.get("priorLedgerWire")
     prior_persisted = (
         persisted_fleet_ledger_from_json(prior_ledger_wire)

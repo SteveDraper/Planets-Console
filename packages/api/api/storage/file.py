@@ -272,8 +272,13 @@ class FileStorageBackend:
 
         # Intermediate prefixes between breakpoints (e.g. …/turns/N/analytics)
         # must list sibling analytic documents on disk, not a missing key inside
-        # the shorter turn RST document.
-        if suffix is not None and is_prefix_of_longer_breakpoint(path):
+        # the shorter turn RST document. An exact breakpoint that is also the
+        # directory of a longer one (legacy …/analytics/fleet.json vs
+        # …/fleet/{playerId}.json) lists that directory when the shared file
+        # is absent.
+        if is_prefix_of_longer_breakpoint(path) and (
+            suffix is not None or not self._document_file(breakpoint_path).is_file()
+        ):
             return self._list_filesystem_prefix(path)
 
         try:

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.prior_selection import resolve_fleet_prior_persisted
+from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
     persisted_fleet_ledger_from_json,
@@ -24,7 +25,6 @@ from api.compute.scope import (
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
-from api.serialization.turn import turn_info_to_json
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -189,7 +189,7 @@ def build_fleet_materialization_leg_job_wire(
         "perspective": scope.perspective,
         "playerId": player_id,
         "materializeTurn": scope.turn,
-        "turnWire": turn_info_to_json(turn),
+        "turnWire": fleet_scoreboard_slice_to_json(turn),
         "priorLedgerWire": (
             persisted_fleet_ledger_to_json(prior_persisted) if prior_persisted is not None else None
         ),
