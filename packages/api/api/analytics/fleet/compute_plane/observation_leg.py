@@ -21,15 +21,40 @@ from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.turn_context import FleetTurnContext
-from api.analytics.fleet.types import FleetAcquisitionLedger, PersistedFleetLedger
+from api.analytics.fleet.types import (
+    FleetAcquisitionLedger,
+    FleetMaterializationProvenance,
+    PersistedFleetLedger,
+)
 from api.compute.wire import StepResult
 
 FLEET_PERSIST_LEG_OBSERVATION = "observation"
 FLEET_PERSIST_LEG_FINALIZATION = "finalization"
 
 
+def _eliminated_observation_result(job_wire: dict[str, Any]) -> StepResult:
+    """Empty non-final ledger from the eliminated flag. Does not read priors."""
+    player_id = int(job_wire["playerId"])
+    persisted = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=player_id),
+        provenance=FleetMaterializationProvenance(),
+    )
+    return StepResult(
+        outcome="persist",
+        persist_then_continue=True,
+        payload={
+            "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
+            "materializeTurn": int(job_wire["materializeTurn"]),
+            "fleetPersistLeg": FLEET_PERSIST_LEG_OBSERVATION,
+        },
+    )
+
+
 def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
     """Materialize one fleet turn observation leg from a serializable job wire."""
+    if job_wire.get("eliminatedAtTurn") is True:
+        return _eliminated_observation_result(job_wire)
+
     turn = turn_from_fleet_scoreboard_slice(job_wire["turnWire"])
     prior_ledger_wire = job_wire.get("priorLedgerWire")
     prior_persisted = (

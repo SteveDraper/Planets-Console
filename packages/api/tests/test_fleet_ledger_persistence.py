@@ -228,6 +228,7 @@ def test_upgrade_legacy_fleet_turn_document_maps_players_to_ledgers(sample_ledge
     assert upgraded[FLEET_LEDGERS_KEY]["8"]["provenance"] == {
         "turnEvidenceAtN": False,
         "priorLedgerAtNMinus1": False,
+        "eliminatedAtTurn": False,
     }
 
 

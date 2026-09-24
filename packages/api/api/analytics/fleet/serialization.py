@@ -663,15 +663,21 @@ def fleet_materialization_provenance_from_json(
 ) -> FleetMaterializationProvenance:
     turn_evidence_at_n = data.get("turnEvidenceAtN", False)
     prior_ledger_at_n_minus_1 = data.get("priorLedgerAtNMinus1", False)
+    eliminated_at_turn = data.get("eliminatedAtTurn", False)
     if not isinstance(turn_evidence_at_n, bool):
         raise ValidationError("fleet materialization provenance turnEvidenceAtN must be a bool")
     if not isinstance(prior_ledger_at_n_minus_1, bool):
         raise ValidationError(
             "fleet materialization provenance priorLedgerAtNMinus1 must be a bool",
         )
+    if not isinstance(eliminated_at_turn, bool):
+        raise ValidationError(
+            "fleet materialization provenance eliminatedAtTurn must be a bool",
+        )
     return FleetMaterializationProvenance(
         turn_evidence_at_n=turn_evidence_at_n,
         prior_ledger_at_n_minus_1=prior_ledger_at_n_minus_1,
+        eliminated_at_turn=eliminated_at_turn,
     )
 
 
@@ -681,6 +687,7 @@ def fleet_materialization_provenance_to_json(
     return {
         "turnEvidenceAtN": provenance.turn_evidence_at_n,
         "priorLedgerAtNMinus1": provenance.prior_ledger_at_n_minus_1,
+        "eliminatedAtTurn": provenance.eliminated_at_turn,
     }
 
 

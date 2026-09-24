@@ -88,7 +88,7 @@ def walk_dependency_tree(
         if not force_root and not _dependency_needs_processing(ctx, analytic_id, scope, catalog):
             return result
 
-        for dependency in catalog.ensure_dependencies:
+        for dependency in catalog.applicable_ensure_dependencies(ctx, scope):
             for dependency_scope in dependency_scopes_for(ctx, scope, dependency):
                 turn_floor = ensure_dependency_turn_floor(ctx, scope)
                 if dependency_scope.turn < turn_floor:
