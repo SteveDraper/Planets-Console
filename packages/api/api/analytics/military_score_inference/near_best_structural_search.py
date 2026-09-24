@@ -31,6 +31,20 @@ if TYPE_CHECKING:
 _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
 
 
+def _solve_clip_exhausted_after_status(
+    solver_status: int,
+    *,
+    has_structural_hits: bool,
+) -> bool:
+    """True when OR-Tools stopped on the Solve clip with at least one hit.
+
+    ``UNKNOWN`` plus structural hits means the clip (wall or effort) ended the
+    search. Same predicate for ``EffortSolveClip`` and ``WallSolveClip`` -- do
+    not also require the spent counter to reach the numeric limit.
+    """
+    return solver_status == cp_model.UNKNOWN and has_structural_hits
+
+
 class SupportsMergedComboCatalog(Protocol):
     """Merged score-equivalent combo view used by CP-SAT count variables."""
 
@@ -343,10 +357,13 @@ def collect_near_best_structural_hits(
         if last_solver_status not in _SUCCESS_STATUSES:
             if hang_fuse_hit:
                 break
-            if last_solver_status == cp_model.UNKNOWN and structural_hits and effort_clip is None:
+            if _solve_clip_exhausted_after_status(
+                last_solver_status,
+                has_structural_hits=bool(structural_hits),
+            ):
                 time_limited = True
                 stopped_reason = "time_budget"
-            elif effort_clip is not None and time_limited:
+            elif time_limited:
                 stopped_reason = "time_budget"
             elif near_best_band_applied and structural_hits:
                 stopped_reason = "near_best_band_exhausted"

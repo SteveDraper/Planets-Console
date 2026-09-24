@@ -414,6 +414,63 @@ def test_top_k_surfaces_time_limited_status(monkeypatch):
     assert result.diagnostics["stopped_reason"] == "time_budget"
 
 
+def test_effort_clip_unknown_with_hits_is_time_limited_when_spent_short_of_limit(
+    monkeypatch,
+):
+    """Effort path: UNKNOWN + hits is time_limited even if det time < clip.
+
+    OR-Tools can stop on ``max_deterministic_time`` while ``deterministic_time()``
+    reports a value short of the clip. Wall and effort share one UNKNOWN+hits
+    exhaustion predicate; do not require ``spent + 1e-9 >= limit``.
+    """
+    from api.analytics.military_score_inference import solver as inference_solver
+    from api.analytics.military_score_inference.models import EffortSolveClip
+
+    preferred_build = CandidateAction(
+        id="build_preferred",
+        label="Build preferred hull",
+        score_delta_2x=400,
+        upper_bound=1,
+    )
+    alternate_build = CandidateAction(
+        id="build_alternate",
+        label="Build alternate hull",
+        score_delta_2x=400,
+        upper_bound=1,
+    )
+    effort_limit = 100.0
+    solve_calls = {"count": 0}
+    original_solve = inference_solver.cp_model.CpSolver.solve
+
+    def solve_once_then_unknown(self, model):
+        solve_calls["count"] += 1
+        if solve_calls["count"] == 1:
+            return original_solve(self, model)
+        return inference_solver.cp_model.UNKNOWN
+
+    monkeypatch.setattr(
+        inference_solver.cp_model.CpSolver,
+        "solve",
+        solve_once_then_unknown,
+    )
+
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=_observation(military_delta_2x=400),
+            aggregate_actions=(preferred_build, alternate_build),
+            max_solutions=5,
+            time_limit_seconds=1.0,
+            solve_clip=EffortSolveClip(max_deterministic_time=effort_limit),
+        )
+    )
+
+    assert float(result.diagnostics["deterministicTime"]) + 1e-9 < effort_limit
+    assert result.status == STATUS_TIME_LIMITED
+    assert len(result.solutions) == 1
+    assert result.diagnostics["time_limited"] is True
+    assert result.diagnostics["stopped_reason"] == "time_budget"
+
+
 def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100():
     action = _planet_defense_posts_action()
     planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
