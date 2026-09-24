@@ -527,6 +527,45 @@ def test_hang_fuse_does_not_mark_time_limited() -> None:
     assert not state.ladder_complete
 
 
+def test_charge_effort_uses_solve_wall_seconds_then_fails_closed() -> None:
+    """Row fuse clock is Solve-only wall; hangFuseHit raises after charge."""
+    from api.analytics.military_score_inference.policy_ladder_tier_step import (
+        _charge_effort_budget,
+    )
+    from api.analytics.military_score_inference.search_effort import InferenceSearchHangFuse
+
+    state = PolicyLadderState(policy_steps=())
+    run = TierStepRun.for_effort(
+        state,
+        cancel_token=None,
+        allowance=20.0,
+        reserved_for_later=0.0,
+        spendable=20.0,
+        row_effort_allowance=20.0,
+        hang_fuse_seconds=10.0,
+        budget_started_at=0.0,
+    )
+    result = InferenceResult(
+        status=STATUS_NO_EXACT_SOLUTION,
+        solutions=(),
+        diagnostics={
+            "deterministicTime": 0.2,
+            "solveWallSeconds": 1.25,
+            "wall_time_seconds": 50.0,
+            "hangFuseHit": True,
+        },
+    )
+    try:
+        _charge_effort_budget(run, result)
+    except InferenceSearchHangFuse:
+        pass
+    else:
+        raise AssertionError("hang fuse must fail closed after charge")
+    assert state.search_wall_seconds == 1.25
+    assert state.search_effort_spent == 0.2
+    assert not state.time_limited
+
+
 def test_wall_stretch_without_deterministic_time_keeps_later_effort() -> None:
     """Solve wall that does not spend deterministic time leaves later harvest funded."""
     steps = (

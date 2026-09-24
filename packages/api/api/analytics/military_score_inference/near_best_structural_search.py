@@ -67,6 +67,8 @@ class NearBestStructuralSearchOutcome:
     top_solution_bucket_counts: dict[str, tuple[int, ...]]
     hang_fuse_hit: bool = False
     deterministic_time: float = 0.0
+    # Sum of ``invoke_cp_sat_solve`` wall only -- hang-fuse / row charge clock.
+    solve_wall_seconds: float = 0.0
 
 
 def configured_sat_search_workers() -> int:
@@ -411,6 +413,13 @@ def collect_near_best_structural_hits(
             stopped_reason = "max_solutions"
             break
 
+    if hang_fuse_hit:
+        # Fuse fails closed: earlier hits in this search must not be admitted.
+        structural_hits = []
+        top_solution_bucket_counts = {}
+        time_limited = False
+        stopped_reason = "hang_fuse"
+
     return NearBestStructuralSearchOutcome(
         structural_hits=structural_hits,
         last_solver_status=last_solver_status,
@@ -418,6 +427,7 @@ def collect_near_best_structural_hits(
         time_limited=time_limited,
         hang_fuse_hit=hang_fuse_hit,
         deterministic_time=effort_spent,
+        solve_wall_seconds=solve_wall_seconds,
         tier_max_objective=tier_max_objective,
         near_best_threshold=near_best_threshold,
         seed_no_goods_applied=seed_no_goods_applied,

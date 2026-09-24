@@ -152,13 +152,13 @@ def _diagnostic_float(diagnostics: dict[str, object], key: str) -> float:
 
 
 def _charge_effort_budget(run: TierStepRun | None, result: InferenceResult) -> None:
-    """Spend deterministic time from one Solve. Hang fuse fails closed."""
+    """Spend det time and Solve-only wall. Hang fuse fails closed after charge."""
     if run is None or not run.is_effort_budget:
         return
     diagnostics = result.diagnostics
     run.charge_search(
         deterministic_time=_diagnostic_float(diagnostics, "deterministicTime"),
-        wall_seconds=_diagnostic_float(diagnostics, "wall_time_seconds"),
+        wall_seconds=_diagnostic_float(diagnostics, "solveWallSeconds"),
     )
     if diagnostics.get("hangFuseHit") or run.hang_fuse_exceeded():
         raise InferenceSearchHangFuse("inference search hang fuse exceeded; row will not persist")

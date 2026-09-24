@@ -1,5 +1,7 @@
 """Tests for the military score inference CP-SAT solver."""
 
+import pytest
+
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -469,6 +471,129 @@ def test_effort_clip_unknown_with_hits_is_time_limited_when_spent_short_of_limit
     assert len(result.solutions) == 1
     assert result.diagnostics["time_limited"] is True
     assert result.diagnostics["stopped_reason"] == "time_budget"
+
+
+def test_hang_fuse_with_prior_hits_skips_on_solution_and_is_not_time_limited(
+    monkeypatch,
+):
+    """Fuse after structural hits: no admission, not exact, not time_limited."""
+    from api.analytics.military_score_inference.models import EffortSolveClip
+    from api.analytics.military_score_inference.near_best_structural_search import (
+        NearBestStructuralSearchOutcome,
+    )
+    from ortools.sat.python import cp_model
+
+    preferred_build = CandidateAction(
+        id="build_preferred",
+        label="Build preferred hull",
+        score_delta_2x=400,
+        upper_bound=1,
+    )
+    admitted: list[object] = []
+
+    def fake_collect(*_args, **_kwargs):
+        # Simulate hits found before the fuse tripped; admission must still skip.
+        return NearBestStructuralSearchOutcome(
+            structural_hits=[({"build_preferred": 1}, {})],
+            last_solver_status=cp_model.OPTIMAL,
+            stopped_reason="hang_fuse",
+            time_limited=False,
+            hang_fuse_hit=True,
+            deterministic_time=0.25,
+            solve_wall_seconds=3.5,
+            tier_max_objective=0,
+            near_best_threshold=0,
+            seed_no_goods_applied=0,
+            seed_no_goods_skipped=0,
+            top_solution_bucket_counts={"build_preferred": (1,)},
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.solver.collect_near_best_structural_hits",
+        fake_collect,
+    )
+
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=_observation(military_delta_2x=400),
+            aggregate_actions=(preferred_build,),
+            max_solutions=5,
+            time_limit_seconds=1.0,
+            solve_clip=EffortSolveClip(
+                max_deterministic_time=100.0,
+                hang_fuse_remaining=1.0,
+            ),
+        ),
+        on_solution=admitted.append,
+    )
+
+    assert admitted == []
+    assert result.solutions == ()
+    assert result.status == STATUS_NO_EXACT_SOLUTION
+    assert result.diagnostics.get("time_limited") is not True
+    assert result.diagnostics["hangFuseHit"] is True
+    assert result.diagnostics["stopped_reason"] == "hang_fuse"
+    assert float(result.diagnostics["solveWallSeconds"]) == 3.5
+
+
+def test_hang_fuse_clears_structural_hits_and_reports_solve_only_wall(monkeypatch):
+    """Within one search: a hit then fuse wall clears hits; clock is Solve wall."""
+    from api.analytics.military_score_inference import near_best_structural_search as nbs
+    from api.analytics.military_score_inference.models import EffortSolveClip
+
+    preferred_build = CandidateAction(
+        id="build_preferred",
+        label="Build preferred hull",
+        score_delta_2x=400,
+        upper_bound=1,
+    )
+    alternate_build = CandidateAction(
+        id="build_alternate",
+        label="Build alternate hull",
+        score_delta_2x=400,
+        upper_bound=1,
+    )
+    clock = {"t": 100.0}
+    solve_calls = {"count": 0}
+    original_invoke = nbs.invoke_cp_sat_solve
+
+    def fake_monotonic() -> float:
+        return clock["t"]
+
+    def invoke_then_advance(solver, model, callback=None):
+        solve_calls["count"] += 1
+        if solve_calls["count"] == 1:
+            status = original_invoke(solver, model, callback)
+            clock["t"] += 0.05
+            return status
+        clock["t"] += 2.0
+        return nbs.cp_model.UNKNOWN
+
+    monkeypatch.setattr(nbs.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(nbs, "invoke_cp_sat_solve", invoke_then_advance)
+
+    problem = InferenceProblem(
+        observation=_observation(military_delta_2x=400),
+        aggregate_actions=(preferred_build, alternate_build),
+        max_solutions=5,
+        time_limit_seconds=1.0,
+        solve_clip=EffortSolveClip(
+            max_deterministic_time=100.0,
+            hang_fuse_remaining=1.0,
+        ),
+    )
+    result = solve_inference_problem(problem)
+
+    assert solve_calls["count"] >= 2
+    assert result.diagnostics["hangFuseHit"] is True
+    assert result.diagnostics.get("time_limited") is not True
+    assert result.status == STATUS_NO_EXACT_SOLUTION
+    assert result.solutions == ()
+    assert float(result.diagnostics["solveWallSeconds"]) == pytest.approx(2.05)
+    # Collect wall includes Python between solves; fuse charge must use Solve-only.
+    assert float(result.diagnostics["wall_time_seconds"]) >= float(
+        result.diagnostics["solveWallSeconds"]
+    )
 
 
 def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100():
