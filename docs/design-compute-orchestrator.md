@@ -219,7 +219,7 @@ Stream teardown unregisters observers only; **in-flight nodes keep their bundle 
 
 ### Turn cache
 
-One **TurnInfo LRU per process**, keyed by `(game_id, perspective, turn)`. Fleet `turnWire` deserialize (materialize/observation legs) and scores/storage `TurnInfo` loads (`TurnLoadService.get_turn_info`) share that cache. Parent orchestrator `ctx.load_turn` splice uses the same type and key; worker heaps are separate (no cross-process shared memory). This is **not** a `StorageBackend` document cache -- storage stays `JSONValue` only. The file backend may keep a distinct bounded LRU of admitted breakpoint JSON (`packages/api/api/storage/document_lru.py`); that cache does not hold `TurnInfo` and does not admit turn RST. Put the written `TurnInfo` after a turn document write; drop the key only when the writer has JSON and no `TurnInfo`. `turn_cache.clear` on orchestrator shutdown still applies. Interpreter pools that still run fleet legs call `init_worker_turn_cache`; SAT-session children never import the cache.
+One **TurnInfo LRU per process**, keyed by `(game_id, perspective, turn)`. Scores and storage `TurnInfo` loads (`TurnLoadService.get_turn_info`) share that cache. Fleet observation and materialization `turnWire` is a scoreboard slice hydrated locally in the leg; that slice is not stored under the full-turn key. Parent orchestrator `ctx.load_turn` splice uses the same type and key; worker heaps are separate (no cross-process shared memory). This is **not** a `StorageBackend` document cache -- storage stays `JSONValue` only. The file backend may keep a distinct bounded LRU of admitted breakpoint JSON (`packages/api/api/storage/document_lru.py`); that cache does not hold `TurnInfo` and does not admit turn RST. Put the written `TurnInfo` after a turn document write; drop the key only when the writer has JSON and no `TurnInfo`. `turn_cache.clear` on orchestrator shutdown still applies. Interpreter pools call `init_worker_turn_cache`; SAT-session children never import the cache.
 
 ### Fleet persist correlation
 
@@ -348,9 +348,9 @@ Scores `ENSURE_DEPENDENCIES` already declare `fleet@(host_turn - 1, same player)
 
 | Layer | Mechanism |
 |-------|-----------|
-| **TurnInfo LRU** | One in-process cache keyed by `(game_id, perspective, turn)`. Fleet `turnWire` deserialize and scores/storage TurnInfo loads share it. Parent splice and workers use the same type/key; heaps stay separate. Distinct from the file-backend JSON-document LRU. |
+| **TurnInfo LRU** | One in-process cache keyed by `(game_id, perspective, turn)`. Scores and storage TurnInfo loads share it. Fleet observation `turnWire` is a local scoreboard slice and is not installed under that key. Parent splice and workers use the same type/key; heaps stay separate. Distinct from the file-backend JSON-document LRU. |
 | **Job wire prefetch** | Dependency outputs and turns already loaded included in wire |
-| **Worker fill** | Same TurnInfo LRU in interpreter workers (`init_worker_turn_cache`); fleet legs deserialize `turnWire` |
+| **Worker fill** | Same TurnInfo LRU in interpreter workers (`init_worker_turn_cache`). Fleet legs do not fill it from `turnWire`. |
 | **Persistence** | Durable cache; analytic `PersistencePolicy` hooks |
 
 Defer cross-process shared mutable caches; parent and worker heaps stay separate.
@@ -543,7 +543,7 @@ Tracked under [#190](https://github.com/SteveDraper/Planets-Console/issues/190):
 | Scores migration | [#200](https://github.com/SteveDraper/Planets-Console/issues/200) | Tier steps; orchestrator primitives; delete `InferenceRowScheduler` worker pool; fleet overlay + `has_final_ledger` fix |
 | Export ensure migration | [#204](https://github.com/SteveDraper/Planets-Console/issues/204) | Ensure = orchestrator DAG `submit(root)` + orchestration-plane wait; **`FleetGapFillCoordinator`** + nested sync ensure retired; fleet→scores notify per final persist with own-DAG elision; #109 stays separate |
 | Turn cache | [#201](https://github.com/SteveDraper/Planets-Console/issues/201) | Orchestrator LRU + prefetch into job wire |
-| Shared TurnInfo LRU | [#511](https://github.com/SteveDraper/Planets-Console/issues/511) | One process TurnInfo LRU; fleet `turnWire` + scores/storage fills; not a storage document cache |
+| Shared TurnInfo LRU | [#511](https://github.com/SteveDraper/Planets-Console/issues/511) | One process TurnInfo LRU; scores/storage fills; fleet scoreboard slice stays off that key |
 | Singleton orchestrator | [#209](https://github.com/SteveDraper/Planets-Console/issues/209) | Process-wide orchestrator; retire per-ctx bindings + scope lease; observer registry |
 | Process-scoped export services | [#239](https://github.com/SteveDraper/Planets-Console/issues/239) | Retire per-node sticky `export_services` bags |
 | Origin-set prune | [#240](https://github.com/SteveDraper/Planets-Console/issues/240) | Interest tracking; cancel when no origins remain |
