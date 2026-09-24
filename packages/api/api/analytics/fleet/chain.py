@@ -409,7 +409,7 @@ def _materialize_and_persist_player_turn(
     materialize_turn: int,
     player_id: int,
     prior_persisted: PersistedFleetLedger | None,
-    prior_ledger: FleetAcquisitionLedger,
+    prior_ledger: FleetAcquisitionLedger | None,
     turn_info: TurnInfo,
     turn_context: FleetTurnContext,
     game_id: int,
@@ -424,6 +424,12 @@ def _materialize_and_persist_player_turn(
         )
         coherence.put_ledger(materialize_turn, persisted)
         return persisted
+
+    if prior_ledger is None:
+        raise ConflictError(
+            f"fleet snapshot chain for game {game_id} perspective {perspective} "
+            f"player {player_id} turn {materialize_turn} has no ledger to advance from"
+        )
 
     ledger = advance_ledger_to_turn(prior_ledger, turn_info)
     ledger = apply_fleet_turn_delta_for_player(
@@ -569,27 +575,29 @@ def _materialize_fleet_ledger_chain_for_player(
         skip_missing_prefix_rst = True
         start_turn = first_stored_rst
         first_rst_turn = require_turn(start_turn)
-        current_ledger = advance_ledger_to_turn(
-            ensure_fleet_baseline_for_player(
-                game_id,
-                perspective,
-                first_rst_turn,
-                player_id,
-            ),
-            first_rst_turn,
-        )
         current_persisted = None
+        if not fleet_player_eliminated_at_turn(first_rst_turn, player_id):
+            current_ledger = advance_ledger_to_turn(
+                ensure_fleet_baseline_for_player(
+                    game_id,
+                    perspective,
+                    first_rst_turn,
+                    player_id,
+                ),
+                first_rst_turn,
+            )
     elif anchor_turn == 0:
         baseline_turn = require_turn(chain_floor)
-        if fleet_player_eliminated_at_turn(baseline_turn, player_id):
-            baseline_ledger = FleetAcquisitionLedger(player_id=player_id)
-        else:
-            baseline_ledger = ensure_fleet_baseline_for_player(
+        baseline_ledger = (
+            None
+            if fleet_player_eliminated_at_turn(baseline_turn, player_id)
+            else ensure_fleet_baseline_for_player(
                 game_id,
                 perspective,
                 baseline_turn,
                 player_id,
             )
+        )
         current_persisted = _materialize_and_persist_player_turn(
             coherence,
             materialize_turn=chain_floor,
@@ -610,31 +618,17 @@ def _materialize_fleet_ledger_chain_for_player(
 
     for materialize_turn in range(start_turn, turn_number + 1):
         turn_info = require_turn(materialize_turn)
-        if fleet_player_eliminated_at_turn(turn_info, player_id):
-            current_persisted = _materialize_and_persist_player_turn(
-                coherence,
-                materialize_turn=materialize_turn,
-                player_id=player_id,
-                prior_persisted=None,
-                prior_ledger=FleetAcquisitionLedger(player_id=player_id),
-                turn_info=turn_info,
-                turn_context=cached_turn_context_for(materialize_turn, turn_info),
-                game_id=game_id,
-                perspective=perspective,
-                load_turn=cached_load,
-                inference_materialization=resolved_inference_materialization,
+        eliminated = fleet_player_eliminated_at_turn(turn_info, player_id)
+        if not eliminated:
+            require_prior_rst(
+                materialize_turn,
+                allow_missing_prior_rst=skip_missing_prefix_rst and materialize_turn == start_turn,
             )
-            emit_leg_progress(current_persisted, materialize_turn)
-            continue
-        require_prior_rst(
-            materialize_turn,
-            allow_missing_prior_rst=skip_missing_prefix_rst and materialize_turn == start_turn,
-        )
-        if current_ledger is None:
-            raise ConflictError(
-                f"fleet snapshot chain for game {game_id} perspective {perspective} "
-                f"player {player_id} turn {turn_number} has no ledger to advance from"
-            )
+            if current_ledger is None:
+                raise ConflictError(
+                    f"fleet snapshot chain for game {game_id} perspective {perspective} "
+                    f"player {player_id} turn {turn_number} has no ledger to advance from"
+                )
         current_persisted = _materialize_and_persist_player_turn(
             coherence,
             materialize_turn=materialize_turn,
@@ -790,7 +784,7 @@ def get_or_materialize_fleet_ledger_for_player(
 
     if fleet_player_eliminated_at_turn(turn, player_id):
         prior_persisted = None
-        prior_ledger = FleetAcquisitionLedger(player_id=player_id)
+        prior_ledger = None
     else:
         prior_persisted, prior_ledger = _resolve_leaf_prior_for_player(
             persistence,

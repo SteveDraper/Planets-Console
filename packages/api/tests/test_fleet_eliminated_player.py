@@ -324,3 +324,112 @@ def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):
         )
     assert raised.value.recovery is not None
     assert raised.value.recovery.step_kind == "tier_solve"
+
+
+def _prefix_chain_turn(sample_turn, player_id: int, *, eliminated: bool):
+    """First stored RST above the accelerated floor -- skip-missing-prefix path."""
+    from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
+
+    first_stored = 5
+    turn = _stamp_player(
+        sample_turn,
+        player_id,
+        status=3 if eliminated else 1,
+        statusturn=first_stored if eliminated else 1,
+        turn_number=first_stored,
+        username="dead" if eliminated else None,
+    )
+    chain_floor = accelerated_ensure_floor(turn.settings, first_stored)
+    assert first_stored > chain_floor
+    return turn, first_stored
+
+
+def test_eliminated_missing_prefix_skips_baseline(sample_turn, memory_backend):
+    from api.analytics.fleet.chain import (
+        _GapFillCoherence,
+        _materialize_fleet_ledger_chain_for_player,
+    )
+    from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+
+    player_id = first_player_id(sample_turn)
+    turn, _first_stored = _prefix_chain_turn(sample_turn, player_id, eliminated=True)
+    stored = {turn.settings.turn: turn}
+    fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
+    perspective_id = perspective(turn)
+    coherence = _GapFillCoherence(
+        fleet_persistence,
+        GAME_ID,
+        perspective_id,
+        player_id,
+        fleet_persistence.player_invalidation_generation(GAME_ID, perspective_id, player_id),
+    )
+    with patch(
+        "api.analytics.fleet.chain.ensure_fleet_baseline_for_player",
+        side_effect=AssertionError("eliminated prefix must not load a baseline"),
+    ):
+        persisted = _materialize_fleet_ledger_chain_for_player(
+            fleet_persistence,
+            GAME_ID,
+            perspective_id,
+            player_id,
+            turn,
+            load_turn=stored.get,
+            inference_materialization=None,
+            coherence=coherence,
+            turn_context_cache={},
+        )
+    assert persisted.ledger.records == []
+    assert persisted.provenance.eliminated_at_turn is True
+    assert persisted.provenance.is_final is True
+    assert fleet_persistence.has_final_ledger(
+        GAME_ID, perspective_id, turn.settings.turn, player_id
+    )
+
+
+def test_living_missing_prefix_loads_baseline(sample_turn, memory_backend):
+    from api.analytics.fleet.chain import (
+        _GapFillCoherence,
+        _materialize_fleet_ledger_chain_for_player,
+        ensure_fleet_baseline_for_player,
+    )
+    from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+
+    player_id = first_player_id(sample_turn)
+    turn, _first_stored = _prefix_chain_turn(sample_turn, player_id, eliminated=False)
+    stored = {turn.settings.turn: turn}
+    fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
+    perspective_id = perspective(turn)
+    coherence = _GapFillCoherence(
+        fleet_persistence,
+        GAME_ID,
+        perspective_id,
+        player_id,
+        fleet_persistence.player_invalidation_generation(GAME_ID, perspective_id, player_id),
+    )
+    baseline_calls: list[tuple[object, ...]] = []
+    real_baseline = ensure_fleet_baseline_for_player
+
+    def tracking_baseline(*args, **kwargs):
+        baseline_calls.append(args)
+        return real_baseline(*args, **kwargs)
+
+    with patch(
+        "api.analytics.fleet.chain.ensure_fleet_baseline_for_player",
+        side_effect=tracking_baseline,
+    ):
+        persisted = _materialize_fleet_ledger_chain_for_player(
+            fleet_persistence,
+            GAME_ID,
+            perspective_id,
+            player_id,
+            turn,
+            load_turn=stored.get,
+            inference_materialization=None,
+            coherence=coherence,
+            turn_context_cache={},
+        )
+    assert len(baseline_calls) == 1
+    assert persisted.provenance.eliminated_at_turn is False
+    assert fleet_persistence.get_ledger(
+        GAME_ID, perspective_id, turn.settings.turn, player_id
+    ) is not None
