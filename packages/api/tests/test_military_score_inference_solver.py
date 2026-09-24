@@ -1,7 +1,6 @@
 """Tests for the military score inference CP-SAT solver."""
 
 import pytest
-
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,

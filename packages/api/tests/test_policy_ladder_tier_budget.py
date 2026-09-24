@@ -636,9 +636,8 @@ def test_wall_budget_next_solve_clip_is_wall_seconds() -> None:
 
 def test_effort_probe_clip_does_not_feed_wall_seconds() -> None:
     """Degrade probe asks the budget; stream clips are max_deterministic_time."""
-    from ortools.sat.python import cp_model
-
     from api.analytics.military_score_inference.models import EffortSolveClip
+    from ortools.sat.python import cp_model
 
     state = PolicyLadderState(policy_steps=())
     run = TierStepRun.for_effort(
