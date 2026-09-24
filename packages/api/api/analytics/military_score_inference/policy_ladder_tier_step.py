@@ -118,11 +118,7 @@ def _solve_catalog(
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
 ) -> tuple[InferenceResult, InferenceProblem]:
-    wall_seconds = (
-        solve_clip.max_time_in_seconds
-        if isinstance(solve_clip, WallSolveClip)
-        else 0.0
-    )
+    wall_seconds = solve_clip.max_time_in_seconds if isinstance(solve_clip, WallSolveClip) else 0.0
     problem = build_inference_problem(
         observation,
         catalog,
