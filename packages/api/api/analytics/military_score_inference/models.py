@@ -186,6 +186,10 @@ class InferenceProblem:
     )
     max_solutions: int = 20
     time_limit_seconds: float = 20.0
+    # When set, the stream Solve clip is max_deterministic_time (not wall seconds).
+    search_effort_limit: float | None = None
+    # Remaining hang-fuse wall for this Solve. Not the search allowance.
+    hang_fuse_remaining: float | None = None
     enforce_priority_point_constraint: bool = False
     enforce_idle_dock_pp_equality: bool = False
     prior_warship_departure_cap: int = 0

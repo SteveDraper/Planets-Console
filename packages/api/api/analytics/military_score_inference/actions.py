@@ -143,6 +143,8 @@ def build_inference_problem(
     race_id: int | None = None,
     max_solutions: int | None = None,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
+    search_effort_limit: float | None = None,
+    hang_fuse_remaining: float | None = None,
     military_score_window: MilitaryScoreWindow | None = None,
     fixed_combo_counts: dict[str, int] | None = None,
     combo_count_neighborhood: int = 0,
@@ -165,6 +167,8 @@ def build_inference_problem(
         probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
         max_solutions=20 if max_solutions is None else max_solutions,
         time_limit_seconds=time_limit_seconds,
+        search_effort_limit=search_effort_limit,
+        hang_fuse_remaining=hang_fuse_remaining,
         military_score_window=military_score_window
         if military_score_window is not None
         else ExactMilitaryScoreWindow(),

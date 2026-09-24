@@ -608,6 +608,8 @@ def solve_inference_problem(
         "structural_hit_count": len(search.structural_hits),
         "stopped_reason": search.stopped_reason,
         "wall_time_seconds": time.monotonic() - started_at,
+        "deterministicTime": search.deterministic_time,
+        "hangFuseHit": search.hang_fuse_hit,
         "policy_step_id": problem.policy_step_id,
         "policy_step_index": problem.policy_step_index,
         "military_score_alpha": problem.military_score_alpha,
@@ -619,7 +621,9 @@ def solve_inference_problem(
     if seed_no_good_solutions:
         diagnostics["seedNoGoodCount"] = search.seed_no_goods_applied
         diagnostics["seedNoGoodSkippedCount"] = search.seed_no_goods_skipped
-    if search.time_limited:
+    if search.hang_fuse_hit:
+        diagnostics["hangFuseHit"] = True
+    elif search.time_limited:
         diagnostics["time_limited"] = True
     if search.top_solution_bucket_counts:
         diagnostics["rankingBinIndicatorsByActionId"] = search.top_solution_bucket_counts

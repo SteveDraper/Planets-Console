@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from api.analytics.military_score_inference.actions import DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
@@ -23,15 +21,13 @@ from api.analytics.military_score_inference.row_complete_factory import (
     row_complete_with_summary,
 )
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.search_effort import stream_row_search_effort
 from api.models.game import TurnInfo
 
 
-def stream_tier_time_limit_seconds() -> float:
-    """Per-tier CP-SAT budget for SPA streaming (one policy step per scheduler job)."""
-    raw = os.environ.get("MILITARY_SCORE_INFERENCE_STREAM_TIER_TIME_LIMIT_SECONDS")
-    if raw is not None:
-        return float(raw)
-    return DEFAULT_INFERENCE_TIME_LIMIT_SECONDS
+def stream_row_search_effort_allowance() -> float:
+    """Row inference search effort allowance for one stream ladder."""
+    return stream_row_search_effort()
 
 
 @dataclass(frozen=True)
@@ -181,7 +177,8 @@ def _run_inference_tier_job_locked(
         state,
         observation,
         turn,
-        time_limit_seconds=stream_tier_time_limit_seconds(),
+        time_limit_seconds=None,
+        search_effort_allowance=stream_row_search_effort_allowance(),
         cancel_token=session.cancel_token,
         on_admitted=on_admitted,
     )

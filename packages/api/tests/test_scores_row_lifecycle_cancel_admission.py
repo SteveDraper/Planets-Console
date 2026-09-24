@@ -65,6 +65,7 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
             time_limit_seconds=None,
             cancel_token=None,
             on_admitted=None,
+            **_budget,
         ) -> None:
             tier_step_started.set()
             tier_step_gate.wait(timeout=2.0)
@@ -397,6 +398,7 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
             time_limit_seconds=None,
             cancel_token=None,
             on_admitted=None,
+            **_budget,
         ) -> None:
             state.policy_steps_attempted.append(state.policy_steps[state.next_step_index].id)
             state.next_step_index += 1

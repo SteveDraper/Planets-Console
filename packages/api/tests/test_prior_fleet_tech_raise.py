@@ -251,6 +251,7 @@ def test_ladder_does_not_skip_early_step_when_prior_fleet_pending(
         cancel_token=None,
         on_solution=None,
         seed_no_good_solutions=(),
+        **_budget,
     ):
         del race_id, max_solutions, time_limit_seconds, military_score_window
         del fixed_combo_counts, combo_count_neighborhood, cancel_token, on_solution

@@ -22,7 +22,7 @@ from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     run_inference_tier_job,
-    stream_tier_time_limit_seconds,
+    stream_row_search_effort_allowance,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     HeldSolutionsUpdated,
@@ -191,6 +191,7 @@ def test_run_inference_tier_job_does_not_emit_on_admission_for_accel_window_segm
         cancel_token=None,
         on_solution=None,
         seed_no_good_solutions=(),
+        **_budget,
     ):
         del race_id, max_solutions, time_limit_seconds, military_score_window
         del fixed_combo_counts, combo_count_neighborhood, cancel_token, seed_no_good_solutions
@@ -269,6 +270,7 @@ def test_run_inference_tier_job_emits_on_admission_for_reported_host_turn_segmen
         cancel_token=None,
         on_solution=None,
         seed_no_good_solutions=(),
+        **_budget,
     ):
         del race_id, max_solutions, time_limit_seconds, military_score_window
         del fixed_combo_counts, combo_count_neighborhood, cancel_token, seed_no_good_solutions
@@ -395,9 +397,12 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
         time_limit_seconds=None,
         cancel_token=None,
         on_admitted=None,
+        search_effort_allowance=None,
+        hang_fuse_seconds=None,
     ) -> None:
-        del state, observation, turn, cancel_token, on_admitted
-        captured.append(time_limit_seconds)
+        del state, observation, turn, time_limit_seconds, cancel_token, on_admitted
+        del hang_fuse_seconds
+        captured.append(search_effort_allowance)
         run.ladder_state.ladder_complete = True
 
     monkeypatch.setattr(
@@ -412,7 +417,7 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
     )
     run_inference_tier_job(run, callbacks)
 
-    assert captured == [stream_tier_time_limit_seconds()]
+    assert captured == [stream_row_search_effort_allowance()]
 
 
 def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_turn) -> None:

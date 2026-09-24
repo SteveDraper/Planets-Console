@@ -14,8 +14,9 @@ from api.analytics.military_score_inference.policy_ladder_state import PolicyLad
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
     TierStepRun,
     ensure_ladder_clock_started,
+    remaining_effort,
     remaining_time,
-    tier_step_allowance_seconds,
+    tier_step_allowance,
 )
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     _solve_seed_progression,
@@ -32,8 +33,8 @@ from api.analytics.military_score_inference.tier_policy import (
 def _minimal_policy_step(
     step_id: str,
     *,
-    min_seconds: float = 0.0,
-    max_seconds: float | None = None,
+    min_effort: float = 0.0,
+    max_effort: float | None = None,
 ) -> InferenceTierPolicyStep:
     return InferenceTierPolicyStep(
         id=step_id,
@@ -47,22 +48,22 @@ def _minimal_policy_step(
         launcher_slot_counts="none",
         aggregate_allowlist={},
         alpha=50,
-        min_seconds=min_seconds,
-        max_seconds=max_seconds,
+        min_effort=min_effort,
+        max_effort=max_effort,
     )
 
 
 def test_tier_step_allowance_reserves_later_mins() -> None:
     steps = resolve_tier_policies()
-    allowance, reserved, spendable = tier_step_allowance_seconds(
+    allowance, reserved, spendable = tier_step_allowance(
         steps,
         0,
-        global_remaining_seconds=20.0,
+        global_remaining_effort=20.0,
     )
-    later_mins = sum(step.min_seconds for step in steps[1:])
+    later_mins = sum(step.min_effort for step in steps[1:])
     assert reserved == later_mins
     assert spendable == 20.0 - later_mins
-    early_max = steps[0].max_seconds
+    early_max = steps[0].max_effort
     assert early_max is not None
     assert allowance == min(spendable, early_max)
 
@@ -71,30 +72,30 @@ def test_tier_step_allowance_absolute_min_when_spendable_starved() -> None:
     steps = resolve_tier_policies()
     torp_index = next(i for i, step in enumerate(steps) if step.id == "admit_ship_torpedoes")
     step = steps[torp_index]
-    allowance, reserved, spendable = tier_step_allowance_seconds(
+    allowance, reserved, spendable = tier_step_allowance(
         steps,
         torp_index,
-        global_remaining_seconds=2.0,
+        global_remaining_effort=2.0,
     )
     assert spendable == max(0.0, 2.0 - reserved)
-    assert spendable < step.min_seconds
-    assert allowance == step.min_seconds
-    assert allowance <= (step.max_seconds or allowance)
+    assert spendable < step.min_effort
+    assert allowance == step.min_effort
+    assert allowance <= (step.max_effort or allowance)
 
 
 def test_tier_step_allowance_steered_cap_when_spendable_ample() -> None:
     steps = resolve_tier_policies()
     torp_index = next(i for i, step in enumerate(steps) if step.id == "admit_ship_torpedoes")
     step = steps[torp_index]
-    allowance, reserved, spendable = tier_step_allowance_seconds(
+    allowance, reserved, spendable = tier_step_allowance(
         steps,
         torp_index,
-        global_remaining_seconds=20.0,
+        global_remaining_effort=20.0,
     )
     assert spendable == max(0.0, 20.0 - reserved)
-    assert spendable >= step.min_seconds
-    assert step.max_seconds is not None
-    assert allowance == min(spendable, step.max_seconds)
+    assert spendable >= step.min_effort
+    assert step.max_effort is not None
+    assert allowance == min(spendable, step.max_effort)
 
 
 def test_ensure_ladder_clock_defers_until_first_stamp() -> None:
@@ -235,26 +236,26 @@ def test_peek_stop_cancel_does_not_mutate_until_commit() -> None:
 def test_later_absolute_min_allowance_survives_soft_global_overshoot() -> None:
     """After an absolute-min overshoot, a later min>0 step still gets its floor."""
     steps = (
-        _minimal_policy_step("early", max_seconds=8.0),
-        _minimal_policy_step("admit_ship_torpedoes", min_seconds=3.0, max_seconds=8.0),
-        _minimal_policy_step("modest_planet_defense", min_seconds=1.0, max_seconds=5.0),
+        _minimal_policy_step("early", max_effort=8.0),
+        _minimal_policy_step("admit_ship_torpedoes", min_effort=3.0, max_effort=8.0),
+        _minimal_policy_step("modest_planet_defense", min_effort=1.0, max_effort=5.0),
     )
     # Soft-global almost gone; first min step overshoots remainder.
-    torp_allowance, _, torp_spendable = tier_step_allowance_seconds(
+    torp_allowance, _, torp_spendable = tier_step_allowance(
         steps,
         1,
-        global_remaining_seconds=1.5,
+        global_remaining_effort=1.5,
     )
-    assert torp_spendable < steps[1].min_seconds
-    assert torp_allowance == steps[1].min_seconds
+    assert torp_spendable < steps[1].min_effort
+    assert torp_allowance == steps[1].min_effort
     # After that overshoot, soft-global remaining is non-positive; later min still floors.
-    later_allowance, _, later_spendable = tier_step_allowance_seconds(
+    later_allowance, _, later_spendable = tier_step_allowance(
         steps,
         2,
-        global_remaining_seconds=-1.5,
+        global_remaining_effort=-1.5,
     )
     assert later_spendable == 0.0
-    assert later_allowance == steps[2].min_seconds
+    assert later_allowance == steps[2].min_effort
 
 
 def test_batch_ladder_dispatches_later_absolute_mins_after_soft_global_exhaust(
@@ -266,9 +267,9 @@ def test_batch_ladder_dispatches_later_absolute_mins_after_soft_global_exhaust(
     from api.analytics.military_score_inference.policy_ladder import solve_with_policy_ladder
 
     steps = (
-        _minimal_policy_step("early", max_seconds=8.0),
-        _minimal_policy_step("admit_ship_torpedoes", min_seconds=3.0, max_seconds=8.0),
-        _minimal_policy_step("modest_planet_defense", min_seconds=1.0, max_seconds=5.0),
+        _minimal_policy_step("early", max_effort=8.0),
+        _minimal_policy_step("admit_ship_torpedoes", min_effort=3.0, max_effort=8.0),
+        _minimal_policy_step("modest_planet_defense", min_effort=1.0, max_effort=5.0),
     )
     dispatched: list[tuple[str, float]] = []
 
@@ -289,10 +290,10 @@ def test_batch_ladder_dispatches_later_absolute_mins_after_soft_global_exhaust(
         step_index = state.next_step_index
         step = state.policy_steps[step_index]
         global_remaining = remaining_time(state.started_at, time_limit_seconds)
-        allowance, _, _ = tier_step_allowance_seconds(
+        allowance, _, _ = tier_step_allowance(
             state.policy_steps,
             step_index,
-            global_remaining_seconds=global_remaining,
+            global_remaining_effort=global_remaining,
         )
         dispatched.append((step.id, allowance))
         state.next_step_index = step_index + 1
@@ -437,3 +438,115 @@ def test_seed_progression_skips_all_solves_when_should_stop(monkeypatch) -> None
     assert result is None
     assert problem is None
     assert calls == 0
+
+
+def test_delay_between_continues_does_not_reduce_remaining_effort() -> None:
+    """Queue / exclusive-drain delay is not inference search effort."""
+    state = PolicyLadderState(policy_steps=())
+    state.search_effort_spent = 4.0
+    before = remaining_effort(74.972, state.search_effort_spent)
+    time.sleep(0.05)
+    assert remaining_effort(74.972, state.search_effort_spent) == before
+
+
+def test_zero_min_and_zero_remaining_effort_skips() -> None:
+    steps = (
+        _minimal_policy_step("early", min_effort=0.0, max_effort=8.0),
+        _minimal_policy_step("later", min_effort=0.0, max_effort=5.0),
+    )
+    allowance, _, spendable = tier_step_allowance(
+        steps,
+        1,
+        global_remaining_effort=0.0,
+    )
+    assert spendable == 0.0
+    assert allowance == 0.0
+
+
+def test_positive_min_runs_when_remaining_effort_is_below_min() -> None:
+    steps = (_minimal_policy_step("funded", min_effort=9.891, max_effort=28.153),)
+    allowance, _, spendable = tier_step_allowance(
+        steps,
+        0,
+        global_remaining_effort=1.0,
+    )
+    assert spendable < 9.891
+    assert allowance == 9.891
+
+
+def test_effort_exhaustion_records_time_limited() -> None:
+    from api.analytics.military_score_inference.policy_ladder_tier_budget import TierStopKind
+
+    state = PolicyLadderState(policy_steps=())
+    run = TierStepRun(
+        state,
+        None,
+        None,
+        budget_started_at=0.0,
+        tier_allowance_seconds=5.0,
+        tier_started_at=time.monotonic(),
+        budget_kind="effort",
+        row_effort_allowance=5.0,
+        hang_fuse_seconds=900.0,
+    )
+    run.charge_search(deterministic_time=5.0, wall_seconds=0.2)
+    assert run.peek_stop() is TierStopKind.TIER_TIME
+    run.commit_stop(TierStopKind.TIER_TIME)
+    assert state.time_limited
+    assert not state.ladder_complete
+
+
+def test_hang_fuse_does_not_mark_time_limited() -> None:
+    from api.analytics.military_score_inference.policy_ladder_tier_budget import TierStopKind
+    from api.analytics.military_score_inference.search_effort import InferenceSearchHangFuse
+
+    state = PolicyLadderState(policy_steps=())
+    run = TierStepRun(
+        state,
+        None,
+        None,
+        budget_started_at=0.0,
+        tier_allowance_seconds=20.0,
+        tier_started_at=time.monotonic(),
+        budget_kind="effort",
+        row_effort_allowance=20.0,
+        hang_fuse_seconds=1.0,
+    )
+    run.charge_search(deterministic_time=0.1, wall_seconds=1.0)
+    assert run.peek_stop() is TierStopKind.HANG_FUSE
+    try:
+        run.commit_stop(TierStopKind.HANG_FUSE)
+    except InferenceSearchHangFuse:
+        pass
+    else:
+        raise AssertionError("hang fuse must fail the step closed")
+    assert not state.time_limited
+    assert not state.ladder_complete
+
+
+def test_wall_stretch_without_deterministic_time_keeps_later_effort() -> None:
+    """Solve wall that does not spend deterministic time leaves later harvest funded."""
+    steps = (
+        _minimal_policy_step("early", min_effort=0.0, max_effort=8.0),
+        _minimal_policy_step("later", min_effort=1.0, max_effort=5.0),
+    )
+    state = PolicyLadderState(policy_steps=steps)
+    run = TierStepRun(
+        state,
+        None,
+        None,
+        budget_started_at=0.0,
+        tier_allowance_seconds=8.0,
+        tier_started_at=time.monotonic(),
+        budget_kind="effort",
+        row_effort_allowance=20.0,
+        hang_fuse_seconds=900.0,
+    )
+    run.charge_search(deterministic_time=0.0, wall_seconds=30.0)
+    assert run.peek_stop() is None
+    later_allowance, _, _ = tier_step_allowance(
+        steps,
+        1,
+        global_remaining_effort=remaining_effort(20.0, state.search_effort_spent),
+    )
+    assert later_allowance == 5.0

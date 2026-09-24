@@ -48,13 +48,15 @@ class NearBestStructuralSearchOutcome:
     seed_no_goods_applied: int
     seed_no_goods_skipped: int
     top_solution_bucket_counts: dict[str, tuple[int, ...]]
+    hang_fuse_hit: bool = False
+    deterministic_time: float = 0.0
 
 
 def configured_sat_search_workers() -> int:
     """Return CP-SAT ``num_workers`` for one ``Solve()`` call.
 
     Default is **1**: multi-worker CP-SAT portfolios (LNS) routinely overshoot
-    short stream tier ``max_time_in_seconds`` budgets. Parallelism for cold
+    short stream tier search-effort budgets. Parallelism for cold
     ensure / streams belongs on the orchestrator thread pool across per-player
     DAG nodes, not inside one solve. Override with
     ``MILITARY_SCORE_INFERENCE_NUM_SEARCH_WORKERS`` for experiments / batch jobs.
@@ -258,6 +260,10 @@ def collect_near_best_structural_hits(
     last_solver_status = cp_model.UNKNOWN
     stopped_reason = "exhausted"
     time_limited = False
+    hang_fuse_hit = False
+    use_effort = problem.search_effort_limit is not None
+    effort_spent = 0.0
+    solve_wall_seconds = 0.0
     top_solution_bucket_counts: dict[str, tuple[int, ...]] = {}
     near_best_threshold = problem.near_best_objective_threshold
     tier_max_objective: int | None = None
@@ -269,27 +275,69 @@ def collect_near_best_structural_hits(
             stopped_reason = "cancelled"
             break
 
-        elapsed_seconds = time.monotonic() - started_at
-        remaining_seconds = problem.time_limit_seconds - elapsed_seconds
-        if remaining_seconds <= 0:
-            time_limited = True
-            stopped_reason = "time_budget"
-            break
-
-        solver.parameters.max_time_in_seconds = remaining_seconds
+        if use_effort:
+            effort_limit = problem.search_effort_limit or 0.0
+            remaining_effort = effort_limit - effort_spent
+            if remaining_effort <= 0:
+                time_limited = True
+                stopped_reason = "time_budget"
+                break
+            solver.parameters.max_deterministic_time = remaining_effort
+            fuse_left = problem.hang_fuse_remaining
+            if fuse_left is not None:
+                if fuse_left <= 0:
+                    hang_fuse_hit = True
+                    stopped_reason = "hang_fuse"
+                    break
+                # Fuse only. The search allowance is max_deterministic_time.
+                solver.parameters.max_time_in_seconds = fuse_left
+        else:
+            elapsed_seconds = time.monotonic() - started_at
+            remaining_seconds = problem.time_limit_seconds - elapsed_seconds
+            if remaining_seconds <= 0:
+                time_limited = True
+                stopped_reason = "time_budget"
+                break
+            solver.parameters.max_time_in_seconds = remaining_seconds
         # Set only ``num_workers``. Setting both ``num_workers`` and the deprecated
         # ``num_search_workers`` to non-zero values makes OR-Tools return
         # MODEL_INVALID on this model (empty search; fleet warships stay "?").
         solver.parameters.num_workers = configured_sat_search_workers()
         callback = _StopSearchOnCancel(cancel_token) if cancel_token is not None else None
+        try:
+            det_before = float(solver.deterministic_time)
+        except RuntimeError:
+            det_before = 0.0
+        wall_before = time.monotonic()
         last_solver_status = invoke_cp_sat_solve(solver, model, callback)
+        wall_delta = time.monotonic() - wall_before
+        det_delta = max(0.0, float(solver.deterministic_time) - det_before)
+        effort_spent += det_delta
+        solve_wall_seconds += wall_delta
 
         if cancel_token is not None and cancel_token.is_cancelled():
             stopped_reason = "cancelled"
             break
-        if last_solver_status not in _SUCCESS_STATUSES:
-            if last_solver_status == cp_model.UNKNOWN and structural_hits:
+        if use_effort and problem.hang_fuse_remaining is not None:
+            if solve_wall_seconds >= problem.hang_fuse_remaining and effort_spent + 1e-9 < (
+                problem.search_effort_limit or 0.0
+            ):
+                hang_fuse_hit = True
+                time_limited = False
+                stopped_reason = "hang_fuse"
+                break
+        if use_effort and problem.search_effort_limit is not None:
+            if effort_spent + 1e-9 >= problem.search_effort_limit:
                 time_limited = True
+                stopped_reason = "time_budget"
+
+        if last_solver_status not in _SUCCESS_STATUSES:
+            if hang_fuse_hit:
+                break
+            if last_solver_status == cp_model.UNKNOWN and structural_hits and not use_effort:
+                time_limited = True
+                stopped_reason = "time_budget"
+            elif use_effort and time_limited:
                 stopped_reason = "time_budget"
             elif near_best_band_applied and structural_hits:
                 stopped_reason = "near_best_band_exhausted"
@@ -299,7 +347,7 @@ def collect_near_best_structural_hits(
                 stopped_reason = "infeasible"
             break
 
-        if last_solver_status == cp_model.FEASIBLE:
+        if last_solver_status == cp_model.FEASIBLE and not use_effort:
             elapsed_seconds = time.monotonic() - started_at
             if elapsed_seconds >= problem.time_limit_seconds:
                 time_limited = True
@@ -342,6 +390,8 @@ def collect_near_best_structural_hits(
         last_solver_status=last_solver_status,
         stopped_reason=stopped_reason,
         time_limited=time_limited,
+        hang_fuse_hit=hang_fuse_hit,
+        deterministic_time=effort_spent,
         tier_max_objective=tier_max_objective,
         near_best_threshold=near_best_threshold,
         seed_no_goods_applied=seed_no_goods_applied,

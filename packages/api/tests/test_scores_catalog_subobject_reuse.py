@@ -329,6 +329,7 @@ def test_ladder_rungs_share_the_row_combo_tuple(sample_turn, monkeypatch) -> Non
         cancel_token=None,
         on_solution=None,
         seed_no_good_solutions=(),
+        **_budget,
     ):
         del race_id, max_solutions, time_limit_seconds, military_score_window
         del fixed_combo_counts, combo_count_neighborhood, cancel_token, on_solution

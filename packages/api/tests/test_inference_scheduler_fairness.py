@@ -70,6 +70,7 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, mon
         time_limit_seconds=None,
         cancel_token=None,
         on_admitted=None,
+        **_budget,
     ) -> None:
         player_id = observation.player_id
         step_index = state.next_step_index
@@ -137,6 +138,7 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
         time_limit_seconds=None,
         cancel_token=None,
         on_admitted=None,
+        **_budget,
     ) -> None:
         player_id = observation.player_id
         step_index = state.next_step_index

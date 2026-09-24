@@ -25,9 +25,9 @@ _COMPACT_TIER_EMISSION_KEYS = (
     "timeLimited",
     "lastStatus",
     "skipped",
-    "tierAllowanceSeconds",
-    "reservedForLaterSeconds",
-    "spendableSeconds",
+    "tierAllowanceEffort",
+    "reservedForLaterEffort",
+    "spendableEffort",
 )
 
 
@@ -64,9 +64,9 @@ def tier_emission_fields(
     last_status: str,
     skipped: bool = False,
     ladder_early_stop_reason: str | None = None,
-    tier_allowance_seconds: float | None = None,
-    reserved_for_later_seconds: float | None = None,
-    spendable_seconds: float | None = None,
+    tier_allowance_effort: float | None = None,
+    reserved_for_later_effort: float | None = None,
+    spendable_effort: float | None = None,
 ) -> dict[str, object]:
     """Build emission fields merged into one ``policy_step_attempts`` entry."""
     ranked = sorted(
@@ -86,12 +86,12 @@ def tier_emission_fields(
     }
     if ladder_early_stop_reason is not None:
         fields["ladderEarlyStopReason"] = ladder_early_stop_reason
-    if tier_allowance_seconds is not None:
-        fields["tierAllowanceSeconds"] = round(tier_allowance_seconds, 3)
-    if reserved_for_later_seconds is not None:
-        fields["reservedForLaterSeconds"] = round(reserved_for_later_seconds, 3)
-    if spendable_seconds is not None:
-        fields["spendableSeconds"] = round(spendable_seconds, 3)
+    if tier_allowance_effort is not None:
+        fields["tierAllowanceEffort"] = round(tier_allowance_effort, 3)
+    if reserved_for_later_effort is not None:
+        fields["reservedForLaterEffort"] = round(reserved_for_later_effort, 3)
+    if spendable_effort is not None:
+        fields["spendableEffort"] = round(spendable_effort, 3)
     return fields
 
 
