@@ -143,12 +143,16 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
     assert job_wire["priorLedgerWire"] is None
     assert job_wire["baselineLedgerWire"] is None
     assert job_wire["eliminatedAtTurn"] is True
-    assert job_wire["provenanceWire"]["turnEvidenceAtN"] is False
-    assert job_wire["provenanceWire"]["priorLedgerAtNMinus1"] is False
-    assert job_wire["provenanceWire"]["eliminatedAtTurn"] is True
+    assert "emptyLedgerWire" not in job_wire
+    assert "provenanceWire" not in job_wire
+    assert "turnWire" not in job_wire
 
     observed = run_fleet_observation_leg(job_wire)
     assert observed.payload["persistedLedgerWire"]["ledger"]["records"] == []
+    observed_provenance = observed.payload["persistedLedgerWire"]["provenance"]
+    assert observed_provenance["turnEvidenceAtN"] is False
+    assert observed_provenance["priorLedgerAtNMinus1"] is False
+    assert observed_provenance["eliminatedAtTurn"] is False
 
     compute_scope = ComputeScope(
         analytic_id=_FLEET,

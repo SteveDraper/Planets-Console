@@ -21,7 +21,11 @@ from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.turn_context import FleetTurnContext
-from api.analytics.fleet.types import FleetAcquisitionLedger, PersistedFleetLedger
+from api.analytics.fleet.types import (
+    FleetAcquisitionLedger,
+    FleetMaterializationProvenance,
+    PersistedFleetLedger,
+)
 from api.compute.wire import StepResult
 
 FLEET_PERSIST_LEG_OBSERVATION = "observation"
@@ -29,16 +33,12 @@ FLEET_PERSIST_LEG_FINALIZATION = "finalization"
 
 
 def _eliminated_observation_result(job_wire: dict[str, Any]) -> StepResult:
-    """Empty ledger. Does not read a prior ledger or a baseline seed."""
-    empty_wire = job_wire.get("emptyLedgerWire")
-    if not isinstance(empty_wire, dict):
-        raise TypeError("eliminated fleet observation requires emptyLedgerWire object")
-    provenance_wire = job_wire.get("provenanceWire")
-    if not isinstance(provenance_wire, dict):
-        raise TypeError("eliminated fleet observation requires provenanceWire object")
-    ledger = fleet_acquisition_ledger_from_json(empty_wire)
-    provenance = fleet_materialization_provenance_from_json(provenance_wire)
-    persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)
+    """Empty non-final ledger from the eliminated flag. Does not read priors."""
+    player_id = int(job_wire["playerId"])
+    persisted = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(player_id=player_id),
+        provenance=FleetMaterializationProvenance(),
+    )
     return StepResult(
         outcome="persist",
         persist_then_continue=True,
