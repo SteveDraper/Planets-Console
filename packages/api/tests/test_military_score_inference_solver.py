@@ -472,6 +472,56 @@ def test_effort_clip_unknown_with_hits_is_time_limited_when_spent_short_of_limit
     assert result.diagnostics["stopped_reason"] == "time_budget"
 
 
+def test_repeated_solves_each_spend_their_own_deterministic_time(monkeypatch):
+    """Later Solve() calls report their own time, not a running total.
+
+    A delta against the previous reading charges those calls nothing, so the
+    tier clip never shrinks. Sum the reading from each call.
+    """
+    from api.analytics.military_score_inference import near_best_structural_search as nbs
+    from api.analytics.military_score_inference.models import EffortSolveClip
+
+    preferred_build = CandidateAction(
+        id="build_preferred",
+        label="Build preferred hull",
+        score_delta_2x=400,
+        upper_bound=1,
+    )
+    alternate_build = CandidateAction(
+        id="build_alternate",
+        label="Build alternate hull",
+        score_delta_2x=400,
+        upper_bound=1,
+    )
+    original_invoke = nbs.invoke_cp_sat_solve
+    calls = {"count": 0, "one_solve": None}
+
+    def invoke_keep_same_reading(solver, model, callback=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            status = original_invoke(solver, model, callback)
+            calls["one_solve"] = float(solver.deterministic_time)
+            return status
+        return nbs.cp_model.FEASIBLE
+
+    monkeypatch.setattr(nbs, "invoke_cp_sat_solve", invoke_keep_same_reading)
+
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=_observation(military_delta_2x=400),
+            aggregate_actions=(preferred_build, alternate_build),
+            max_solutions=3,
+            time_limit_seconds=1.0,
+            solve_clip=EffortSolveClip(max_deterministic_time=100.0),
+        )
+    )
+
+    one_solve = calls["one_solve"]
+    assert calls["count"] == 3
+    assert one_solve is not None and one_solve > 0
+    assert float(result.diagnostics["deterministicTime"]) == pytest.approx(3 * one_solve)
+
+
 def test_hang_fuse_with_prior_hits_skips_on_solution_and_is_not_time_limited(
     monkeypatch,
 ):

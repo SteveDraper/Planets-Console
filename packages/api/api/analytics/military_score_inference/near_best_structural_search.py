@@ -299,15 +299,15 @@ def collect_near_best_structural_hits(
         # MODEL_INVALID on this model (empty search; fleet warships stay "?").
         solver.parameters.num_workers = configured_sat_search_workers()
         callback = _StopSearchOnCancel(cancel_token) if cancel_token is not None else None
-        try:
-            det_before = float(solver.deterministic_time)
-        except RuntimeError:
-            det_before = 0.0
         wall_before = time.monotonic()
         last_solver_status = invoke_cp_sat_solve(solver, model, callback)
         wall_delta = time.monotonic() - wall_before
-        det_delta = max(0.0, float(solver.deterministic_time) - det_before)
-        effort_spent += det_delta
+        # Each Solve() reports only its own deterministic time.
+        try:
+            solve_effort = max(0.0, float(solver.deterministic_time))
+        except RuntimeError:
+            solve_effort = 0.0
+        effort_spent += solve_effort
         solve_wall_seconds += wall_delta
 
         if cancel_token is not None and cancel_token.is_cancelled():
