@@ -261,6 +261,18 @@ class TierStepRun:
             )
         return WallSolveClip(max_time_in_seconds=capped)
 
+    def solve_clip_or_exhausted(self) -> SolveClip:
+        """Clip for one Solve, or a zero clip when the tier allowance is already spent."""
+        clip = self.next_solve_clip()
+        if clip is not None:
+            return clip
+        if isinstance(self._budget, _EffortBudget):
+            return EffortSolveClip(
+                max_deterministic_time=0.0,
+                hang_fuse_remaining=self.hang_fuse_remaining(),
+            )
+        return WallSolveClip(max_time_in_seconds=0.0)
+
     def charge_search(self, *, deterministic_time: float, wall_seconds: float) -> None:
         """Spend effort and search wall. Inter-continue delay is not passed here."""
         budget = self._budget

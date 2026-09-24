@@ -16,11 +16,9 @@ from typing import TYPE_CHECKING, Protocol
 from ortools.sat.python import cp_model
 
 from api.analytics.military_score_inference.models import (
-    EffortSolveClip,
     InferenceProblem,
     InferenceSolution,
     ShipBuildCombo,
-    WallSolveClip,
     effective_solve_clip,
 )
 from api.compute.sat_gil_overlap import invoke_cp_sat_solve
@@ -29,20 +27,6 @@ if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 
 _SUCCESS_STATUSES = (cp_model.OPTIMAL, cp_model.FEASIBLE)
-
-
-def _solve_clip_exhausted_after_status(
-    solver_status: int,
-    *,
-    has_structural_hits: bool,
-) -> bool:
-    """True when OR-Tools stopped on the Solve clip with at least one hit.
-
-    ``UNKNOWN`` plus structural hits means the clip (wall or effort) ended the
-    search. Same predicate for ``EffortSolveClip`` and ``WallSolveClip`` -- do
-    not also require the spent counter to reach the numeric limit.
-    """
-    return solver_status == cp_model.UNKNOWN and has_structural_hits
 
 
 class SupportsMergedComboCatalog(Protocol):
@@ -284,7 +268,6 @@ def collect_near_best_structural_hits(
         solve_clip=problem.solve_clip,
         time_limit_seconds=problem.time_limit_seconds,
     )
-    effort_clip = base_clip if isinstance(base_clip, EffortSolveClip) else None
     effort_spent = 0.0
     solve_wall_seconds = 0.0
     top_solution_bucket_counts: dict[str, tuple[int, ...]] = {}
@@ -298,32 +281,19 @@ def collect_near_best_structural_hits(
             stopped_reason = "cancelled"
             break
 
-        if effort_clip is not None:
-            remaining_effort = effort_clip.max_deterministic_time - effort_spent
-            if remaining_effort <= 0:
+        advance = base_clip.next_solve(
+            effort_spent=effort_spent,
+            elapsed_seconds=time.monotonic() - started_at,
+        )
+        if advance.clip is None:
+            if advance.hang_fuse:
+                hang_fuse_hit = True
+                stopped_reason = "hang_fuse"
+            else:
                 time_limited = True
                 stopped_reason = "time_budget"
-                break
-            fuse_left = effort_clip.hang_fuse_remaining
-            if fuse_left is not None:
-                if fuse_left <= 0:
-                    hang_fuse_hit = True
-                    stopped_reason = "hang_fuse"
-                    break
-            EffortSolveClip(
-                max_deterministic_time=remaining_effort,
-                hang_fuse_remaining=fuse_left,
-            ).apply_to_solver(solver)
-        elif isinstance(base_clip, WallSolveClip):
-            elapsed_seconds = time.monotonic() - started_at
-            remaining_seconds = base_clip.max_time_in_seconds - elapsed_seconds
-            if remaining_seconds <= 0:
-                time_limited = True
-                stopped_reason = "time_budget"
-                break
-            WallSolveClip(max_time_in_seconds=remaining_seconds).apply_to_solver(solver)
-        else:
-            raise RuntimeError("solve clip must be EffortSolveClip or WallSolveClip")
+            break
+        advance.clip.apply_to_solver(solver)
         # Set only ``num_workers``. Setting both ``num_workers`` and the deprecated
         # ``num_search_workers`` to non-zero values makes OR-Tools return
         # MODEL_INVALID on this model (empty search; fleet warships stay "?").
@@ -343,43 +313,30 @@ def collect_near_best_structural_hits(
         if cancel_token is not None and cancel_token.is_cancelled():
             stopped_reason = "cancelled"
             break
-        if effort_clip is not None and effort_clip.hang_fuse_remaining is not None:
-            if solve_wall_seconds >= effort_clip.hang_fuse_remaining and effort_spent + 1e-9 < (
-                effort_clip.max_deterministic_time
-            ):
-                hang_fuse_hit = True
-                time_limited = False
-                stopped_reason = "hang_fuse"
-                break
-        if effort_clip is not None:
-            if effort_spent + 1e-9 >= effort_clip.max_deterministic_time:
-                time_limited = True
-                stopped_reason = "time_budget"
+        decision = base_clip.after_solve(
+            solver_status=last_solver_status,
+            effort_spent=effort_spent,
+            solve_wall_seconds=solve_wall_seconds,
+            elapsed_seconds=time.monotonic() - started_at,
+            has_structural_hits=bool(structural_hits),
+        )
+        if decision.hang_fuse:
+            hang_fuse_hit = True
+            time_limited = False
+            stopped_reason = "hang_fuse"
+            break
+        if decision.time_limited:
+            time_limited = True
+            stopped_reason = "time_budget"
 
         if last_solver_status not in _SUCCESS_STATUSES:
-            if hang_fuse_hit:
-                break
-            if _solve_clip_exhausted_after_status(
-                last_solver_status,
-                has_structural_hits=bool(structural_hits),
-            ):
-                time_limited = True
-                stopped_reason = "time_budget"
-            elif time_limited:
+            if time_limited:
                 stopped_reason = "time_budget"
             elif near_best_band_applied and structural_hits:
                 stopped_reason = "near_best_band_exhausted"
-            elif not structural_hits:
-                stopped_reason = "infeasible"
             else:
                 stopped_reason = "infeasible"
             break
-
-        if last_solver_status == cp_model.FEASIBLE and isinstance(base_clip, WallSolveClip):
-            elapsed_seconds = time.monotonic() - started_at
-            if elapsed_seconds >= base_clip.max_time_in_seconds:
-                time_limited = True
-                stopped_reason = "time_budget"
 
         action_counts = _read_action_counts(problem, action_count_vars, solver)
         combo_counts = _read_combo_counts(merged_combo_catalog, combo_count_vars, solver)

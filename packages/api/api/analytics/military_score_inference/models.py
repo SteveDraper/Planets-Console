@@ -26,6 +26,35 @@ if TYPE_CHECKING:
         TierOverflowBand,
     )
 
+# Spent deterministic time may land just short of the clip and still count as exhaustion.
+_DETERMINISTIC_TIME_SLACK = 1e-9
+
+
+@dataclass(frozen=True)
+class NextSolveClip:
+    """Clip for the next ``Solve()``, or a stop when nothing remains to apply."""
+
+    clip: SolveClip | None
+    time_limited: bool = False
+    hang_fuse: bool = False
+
+
+@dataclass(frozen=True)
+class SolveClipDecision:
+    """Clip-owned reading of one ``Solve()`` status.
+
+    Band exhaustion, infeasibility, and cancel stay with the search loop.
+    """
+
+    time_limited: bool = False
+    hang_fuse: bool = False
+
+
+def _cp_solver_status():
+    from ortools.sat.python import cp_model
+
+    return cp_model
+
 
 @dataclass(frozen=True)
 class EffortSolveClip:
@@ -37,10 +66,61 @@ class EffortSolveClip:
     def is_exhausted(self) -> bool:
         return self.max_deterministic_time <= 0
 
+    def problem_time_limit_seconds(self) -> float:
+        """Problem wall field. Effort is not stored there."""
+        return 0.0
+
     def apply_to_solver(self, solver: cp_model.CpSolver) -> None:
         solver.parameters.max_deterministic_time = max(0.0, self.max_deterministic_time)
         if self.hang_fuse_remaining is not None:
             solver.parameters.max_time_in_seconds = max(0.0, self.hang_fuse_remaining)
+
+    def next_solve(self, *, effort_spent: float, elapsed_seconds: float) -> NextSolveClip:
+        """Remaining effort clip, or a stop when effort or the fuse is already gone.
+
+        ``elapsed_seconds`` is unused. The fuse checked here is the clip's own
+        remaining wall, not search time accumulated inside the loop.
+        """
+        del elapsed_seconds
+        remaining_effort = self.max_deterministic_time - effort_spent
+        if remaining_effort <= 0:
+            return NextSolveClip(clip=None, time_limited=True)
+        if self.hang_fuse_remaining is not None and self.hang_fuse_remaining <= 0:
+            return NextSolveClip(clip=None, hang_fuse=True)
+        return NextSolveClip(
+            clip=EffortSolveClip(
+                max_deterministic_time=remaining_effort,
+                hang_fuse_remaining=self.hang_fuse_remaining,
+            )
+        )
+
+    def after_solve(
+        self,
+        *,
+        solver_status: int,
+        effort_spent: float,
+        solve_wall_seconds: float,
+        elapsed_seconds: float,
+        has_structural_hits: bool,
+    ) -> SolveClipDecision:
+        """Read effort exhaustion, hang fuse, or UNKNOWN-with-hits.
+
+        A fuse hit wins over effort exhaustion. UNKNOWN plus hits is exhaustion
+        even when ``deterministic_time()`` is short of this clip. Numeric
+        exhaustion on a successful status does not by itself end the search;
+        the loop records that hit and stops on the next ``next_solve``.
+        """
+        del elapsed_seconds
+        cp_model = _cp_solver_status()
+        if self.hang_fuse_remaining is not None and (
+            solve_wall_seconds >= self.hang_fuse_remaining
+            and effort_spent + _DETERMINISTIC_TIME_SLACK < self.max_deterministic_time
+        ):
+            return SolveClipDecision(hang_fuse=True)
+        time_limited = effort_spent + _DETERMINISTIC_TIME_SLACK >= self.max_deterministic_time
+        if solver_status == cp_model.UNKNOWN and has_structural_hits:
+            return SolveClipDecision(time_limited=True)
+        return SolveClipDecision(time_limited=time_limited)
 
 
 @dataclass(frozen=True)
@@ -52,8 +132,42 @@ class WallSolveClip:
     def is_exhausted(self) -> bool:
         return self.max_time_in_seconds <= 0
 
+    def problem_time_limit_seconds(self) -> float:
+        return self.max_time_in_seconds
+
     def apply_to_solver(self, solver: cp_model.CpSolver) -> None:
         solver.parameters.max_time_in_seconds = max(0.0, self.max_time_in_seconds)
+
+    def next_solve(self, *, effort_spent: float, elapsed_seconds: float) -> NextSolveClip:
+        """Remaining wall clip, or a stop when the slice clock is spent."""
+        del effort_spent
+        remaining_seconds = self.max_time_in_seconds - elapsed_seconds
+        if remaining_seconds <= 0:
+            return NextSolveClip(clip=None, time_limited=True)
+        return NextSolveClip(clip=WallSolveClip(max_time_in_seconds=remaining_seconds))
+
+    def after_solve(
+        self,
+        *,
+        solver_status: int,
+        effort_spent: float,
+        solve_wall_seconds: float,
+        elapsed_seconds: float,
+        has_structural_hits: bool,
+    ) -> SolveClipDecision:
+        """Read wall exhaustion on FEASIBLE, or UNKNOWN-with-hits.
+
+        FEASIBLE at the wall limit marks the row time-limited and still keeps
+        the hit. The next ``next_solve`` is what leaves the loop.
+        """
+        del effort_spent, solve_wall_seconds
+        cp_model = _cp_solver_status()
+        if solver_status == cp_model.UNKNOWN and has_structural_hits:
+            return SolveClipDecision(time_limited=True)
+        time_limited = (
+            solver_status == cp_model.FEASIBLE and elapsed_seconds >= self.max_time_in_seconds
+        )
+        return SolveClipDecision(time_limited=time_limited)
 
 
 SolveClip = EffortSolveClip | WallSolveClip

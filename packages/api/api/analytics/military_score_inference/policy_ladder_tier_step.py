@@ -44,11 +44,9 @@ from api.analytics.military_score_inference.policy_ladder_admission import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
-    EffortSolveClip,
     SolveClip,
     TierStepRun,
     TierStopKind,
-    WallSolveClip,
     ensure_ladder_clock_started,
     remaining_effort,
     remaining_time,
@@ -118,13 +116,12 @@ def _solve_catalog(
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
 ) -> tuple[InferenceResult, InferenceProblem]:
-    wall_seconds = solve_clip.max_time_in_seconds if isinstance(solve_clip, WallSolveClip) else 0.0
     problem = build_inference_problem(
         observation,
         catalog,
         race_id=race_id,
         max_solutions=max_solutions,
-        time_limit_seconds=wall_seconds if isinstance(solve_clip, WallSolveClip) else 0.0,
+        time_limit_seconds=solve_clip.problem_time_limit_seconds(),
         solve_clip=solve_clip,
         military_score_window=military_score_window,
         fixed_combo_counts=fixed_combo_counts,
@@ -160,22 +157,8 @@ def _charge_effort_budget(run: TierStepRun | None, result: InferenceResult) -> N
         raise InferenceSearchHangFuse("inference search hang fuse exceeded; row will not persist")
 
 
-def _solve_clip_or_none(run: TierStepRun) -> SolveClip | None:
-    return run.next_solve_clip()
-
-
 def _solve_budget_kwargs(run: TierStepRun) -> dict[str, object]:
-    clip = _solve_clip_or_none(run)
-    if clip is None:
-        # Exhausted clip: still build a zero clip so the solver path can stop cleanly.
-        if run.is_effort_budget:
-            clip = EffortSolveClip(
-                max_deterministic_time=0.0,
-                hang_fuse_remaining=run.hang_fuse_remaining(),
-            )
-        else:
-            clip = WallSolveClip(max_time_in_seconds=0.0)
-    return {"solve_clip": clip, "budget_run": run}
+    return {"solve_clip": run.solve_clip_or_exhausted(), "budget_run": run}
 
 
 def _solve_seed_progression(
@@ -679,23 +662,13 @@ def run_policy_ladder_tier_step(
                 and run.remaining_allowance() > 0
             ):
                 return _solve_overshoot_catalog(overlay)
-            clip = run.next_solve_clip()
-            if clip is None:
-                if run.is_effort_budget:
-                    clip = EffortSolveClip(
-                        max_deterministic_time=0.0,
-                        hang_fuse_remaining=run.hang_fuse_remaining(),
-                    )
-                else:
-                    clip = WallSolveClip(max_time_in_seconds=0.0)
+            clip = run.solve_clip_or_exhausted()
             state.problem = build_inference_problem(
                 observation,
                 catalog,
                 race_id=player_race_id,
                 max_solutions=catalog_solve_max,
-                time_limit_seconds=(
-                    clip.max_time_in_seconds if isinstance(clip, WallSolveClip) else 0.0
-                ),
+                time_limit_seconds=clip.problem_time_limit_seconds(),
                 solve_clip=clip,
                 military_score_window=overlay.overshoot_window(),
             )

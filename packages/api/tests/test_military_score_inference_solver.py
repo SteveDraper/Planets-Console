@@ -595,6 +595,69 @@ def test_hang_fuse_clears_structural_hits_and_reports_solve_only_wall(monkeypatc
     )
 
 
+def test_solve_clip_owns_remaining_allowance_and_stop() -> None:
+    """Effort and wall clips share one next-solve / after-solve policy."""
+    from api.analytics.military_score_inference.models import EffortSolveClip, WallSolveClip
+    from ortools.sat.python import cp_model
+
+    effort = EffortSolveClip(max_deterministic_time=10.0, hang_fuse_remaining=2.0)
+    advanced = effort.next_solve(effort_spent=4.0, elapsed_seconds=99.0)
+    assert advanced.clip == EffortSolveClip(max_deterministic_time=6.0, hang_fuse_remaining=2.0)
+    assert effort.next_solve(effort_spent=10.0, elapsed_seconds=0.0).time_limited
+    assert effort.next_solve(effort_spent=10.0, elapsed_seconds=0.0).clip is None
+    fused = EffortSolveClip(max_deterministic_time=10.0, hang_fuse_remaining=0.0)
+    assert fused.next_solve(effort_spent=1.0, elapsed_seconds=0.0).hang_fuse
+
+    short = effort.after_solve(
+        solver_status=cp_model.UNKNOWN,
+        effort_spent=1.0,
+        solve_wall_seconds=0.1,
+        elapsed_seconds=0.1,
+        has_structural_hits=True,
+    )
+    assert short.time_limited
+    assert not short.hang_fuse
+    fuse_hit = effort.after_solve(
+        solver_status=cp_model.UNKNOWN,
+        effort_spent=1.0,
+        solve_wall_seconds=2.0,
+        elapsed_seconds=2.0,
+        has_structural_hits=True,
+    )
+    assert fuse_hit.hang_fuse
+    assert not fuse_hit.time_limited
+    kept = effort.after_solve(
+        solver_status=cp_model.FEASIBLE,
+        effort_spent=10.0,
+        solve_wall_seconds=0.2,
+        elapsed_seconds=0.2,
+        has_structural_hits=False,
+    )
+    assert kept.time_limited
+    assert not kept.hang_fuse
+
+    wall = WallSolveClip(max_time_in_seconds=5.0)
+    assert wall.problem_time_limit_seconds() == 5.0
+    assert effort.problem_time_limit_seconds() == 0.0
+    assert wall.next_solve(effort_spent=0.0, elapsed_seconds=5.0).time_limited
+    wall_hit = wall.after_solve(
+        solver_status=cp_model.FEASIBLE,
+        effort_spent=0.0,
+        solve_wall_seconds=1.0,
+        elapsed_seconds=5.0,
+        has_structural_hits=True,
+    )
+    assert wall_hit.time_limited
+    unknown_hit = wall.after_solve(
+        solver_status=cp_model.UNKNOWN,
+        effort_spent=0.0,
+        solve_wall_seconds=0.2,
+        elapsed_seconds=0.2,
+        has_structural_hits=True,
+    )
+    assert unknown_hit.time_limited
+
+
 def test_bucketed_defense_posts_use_different_marginal_penalties_for_10_and_100():
     action = _planet_defense_posts_action()
     planet_defense_buckets = probability_buckets_for_test_action("planet_defense_posts_added_total")
