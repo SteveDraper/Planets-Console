@@ -28,8 +28,33 @@ FLEET_PERSIST_LEG_OBSERVATION = "observation"
 FLEET_PERSIST_LEG_FINALIZATION = "finalization"
 
 
+def _eliminated_observation_result(job_wire: dict[str, Any]) -> StepResult:
+    """Empty ledger. Does not read a prior ledger or a baseline seed."""
+    empty_wire = job_wire.get("emptyLedgerWire")
+    if not isinstance(empty_wire, dict):
+        raise TypeError("eliminated fleet observation requires emptyLedgerWire object")
+    provenance_wire = job_wire.get("provenanceWire")
+    if not isinstance(provenance_wire, dict):
+        raise TypeError("eliminated fleet observation requires provenanceWire object")
+    ledger = fleet_acquisition_ledger_from_json(empty_wire)
+    provenance = fleet_materialization_provenance_from_json(provenance_wire)
+    persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)
+    return StepResult(
+        outcome="persist",
+        persist_then_continue=True,
+        payload={
+            "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
+            "materializeTurn": int(job_wire["materializeTurn"]),
+            "fleetPersistLeg": FLEET_PERSIST_LEG_OBSERVATION,
+        },
+    )
+
+
 def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
     """Materialize one fleet turn observation leg from a serializable job wire."""
+    if job_wire.get("eliminatedAtTurn") is True:
+        return _eliminated_observation_result(job_wire)
+
     turn = turn_from_fleet_scoreboard_slice(job_wire["turnWire"])
     prior_ledger_wire = job_wire.get("priorLedgerWire")
     prior_persisted = (

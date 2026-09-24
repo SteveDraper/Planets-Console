@@ -15,6 +15,7 @@ from api.analytics.fleet.chain import (
 from api.analytics.fleet.composition_export import build_fleet_composition_branch
 from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.fleet.export_scope import ledgers_for_scope
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
@@ -34,6 +35,19 @@ PATH_PREFIX_SCOPE_RULES = (
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
     EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
 )
+
+
+def fleet_ensure_dependencies_for(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> tuple[EnsureDependency, ...]:
+    """Prior-turn fleet does not apply once the player is eliminated on this turn."""
+    if not isinstance(scope.player_id, int):
+        return ENSURE_DEPENDENCIES
+    turn = ctx.load_turn(scope.turn)
+    if turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id):
+        return ()
+    return ENSURE_DEPENDENCIES
 
 
 def _fleet_snapshot_for_scope(
@@ -97,7 +111,7 @@ def is_fleet_export_observation_satisfied(ctx: AnalyticQueryContext, scope: Expo
 
 
 def is_fleet_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    """Probe/ensure hook: final only when per-player provenance is (true, true)."""
+    """Probe/ensure hook: final when provenance is (true, true) or the player is eliminated."""
     if scope.player_id is None:
         return True
 
@@ -204,6 +218,7 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     value_schema=EXPORT_VALUE_SCHEMA,
     path_prefix_scope_rules=PATH_PREFIX_SCOPE_RULES,
     ensure_dependencies=ENSURE_DEPENDENCIES,
+    ensure_dependencies_for=fleet_ensure_dependencies_for,
     ensure_export=ensure_fleet_export,
     materialize_export_tree=materialize_fleet_export_tree,
     is_persisted=is_fleet_export_persisted,

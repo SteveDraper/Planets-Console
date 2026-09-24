@@ -183,13 +183,22 @@ class FleetAcquisitionLedger:
 
 @dataclass(frozen=True)
 class FleetMaterializationProvenance:
-    """Per-player closure flags for fleet@N materialization legs."""
+    """Per-player closure flags for fleet@N materialization legs.
+
+    ``turn_evidence_at_n`` and ``prior_ledger_at_n_minus_1`` mean those inputs
+    arrived. ``eliminated_at_turn`` is a separate finality rule: the player is
+    eliminated on this turn, so the ledger is empty and does not claim a prior
+    ledger or closed scores evidence.
+    """
 
     turn_evidence_at_n: bool = False
     prior_ledger_at_n_minus_1: bool = False
+    eliminated_at_turn: bool = False
 
     @property
     def is_final(self) -> bool:
+        if self.eliminated_at_turn:
+            return True
         return self.turn_evidence_at_n and self.prior_ledger_at_n_minus_1
 
 

@@ -71,7 +71,8 @@ class FleetSnapshotPersistenceService:
     The mark is one small document per ``(game, perspective, player)``. A durable
     scores-evidence update bumps its generation and does not open ledger files.
     A ledger at turn T is ensure-final only when it exists, provenance is
-    ``(true, true)``, the materialization version is current, and either T is
+    ``(true, true)`` or ``eliminatedAtTurn`` (empty ledger for a player
+    eliminated on T), the materialization version is current, and either T is
     before the mark's ``appliesFromTurn`` or the ledger's generation equals the
     mark. Held-solution admission bumps the in-memory epoch only.
 

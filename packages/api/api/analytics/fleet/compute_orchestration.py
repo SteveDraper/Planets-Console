@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.prior_selection import resolve_fleet_prior_persisted
 from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import (
@@ -119,6 +120,9 @@ def build_fleet_materialization_leg_job_wire(
         raise ValueError(f"stored turn {export_scope.turn} is required for fleet materialization")
 
     player_id = scope.player_id
+    if fleet_player_eliminated_at_turn(turn, player_id):
+        return _eliminated_fleet_job_wire(scope, turn, player_id=player_id)
+
     services = resolve_fleet_services(ctx)
     prior_scope = _fleet_prior_scope(scope, settings=turn.settings)
     prior_persisted: PersistedFleetLedger | None = None
@@ -198,6 +202,41 @@ def build_fleet_materialization_leg_job_wire(
             "turnEvidenceAtN": provenance.turn_evidence_at_n,
             "priorLedgerAtNMinus1": provenance.prior_ledger_at_n_minus_1,
         },
+    }
+
+
+def _eliminated_fleet_job_wire(
+    scope: ComputeScope,
+    turn: object,
+    *,
+    player_id: int,
+) -> dict[str, Any]:
+    """Job wire for an eliminated player: empty ledger, no prior or baseline."""
+    from api.analytics.fleet.eliminated_player import (
+        eliminated_empty_fleet_ledger,
+        eliminated_fleet_provenance,
+    )
+    from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
+    from api.analytics.fleet.serialization import (
+        fleet_acquisition_ledger_to_json,
+        fleet_materialization_provenance_to_json,
+    )
+    from api.models.game import TurnInfo
+
+    if not isinstance(turn, TurnInfo):
+        raise TypeError("eliminated fleet job wire requires TurnInfo")
+    empty_ledger = eliminated_empty_fleet_ledger(turn, player_id)
+    return {
+        "gameId": scope.game_id,
+        "perspective": scope.perspective,
+        "playerId": player_id,
+        "materializeTurn": scope.turn,
+        "turnWire": fleet_scoreboard_slice_to_json(turn),
+        "priorLedgerWire": None,
+        "baselineLedgerWire": None,
+        "eliminatedAtTurn": True,
+        "emptyLedgerWire": fleet_acquisition_ledger_to_json(empty_ledger),
+        "provenanceWire": fleet_materialization_provenance_to_json(eliminated_fleet_provenance()),
     }
 
 
@@ -302,6 +341,10 @@ class FleetPersistencePolicy:
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet observation persist requires concrete turn")
 
+        turn = ctx.load_turn(scope.turn)
+        if turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id):
+            return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
+
         # Observation must never claim turn evidence closed -- only finalization
         # after scores refine may set turnEvidenceAtN and satisfy has_final_ledger.
         persisted = PersistedFleetLedger(
@@ -354,6 +397,9 @@ class FleetPersistencePolicy:
         turn = ctx.load_turn(scope.turn)
         if turn is None:
             raise ValueError(f"stored turn {scope.turn} is required for fleet persist")
+
+        if fleet_player_eliminated_at_turn(turn, scope.player_id):
+            return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
 
         if services.inference_materialization is not None:
             # Phase 2: scores inference may mutate the ledger and provenance.
@@ -444,6 +490,44 @@ class FleetPersistencePolicy:
         persisted = PersistedFleetLedger(
             ledger=persisted.ledger,
             provenance=persisted.provenance,
+            materialization_version=FLEET_MATERIALIZATION_VERSION,
+        )
+        put_result = services.persistence.put_ledger(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+            persisted,
+            defer_ledger_persisted_notification=True,
+        )
+        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
+        return put_result.deferred_notification
+
+    def _persist_eliminated_empty(
+        self,
+        ctx: AnalyticQueryContext,
+        scope: ComputeScope,
+        result_wire: dict[str, object],
+        turn: object,
+    ) -> Callable[[], None] | None:
+        """Write an empty final ledger. Does not wait on scores or a prior fleet."""
+        from api.analytics.fleet.compute_services import resolve_fleet_services
+        from api.analytics.fleet.eliminated_player import (
+            eliminated_empty_fleet_ledger,
+            eliminated_fleet_provenance,
+        )
+        from api.models.game import TurnInfo
+
+        if not isinstance(turn, TurnInfo):
+            raise TypeError("eliminated fleet persist requires TurnInfo")
+        if not isinstance(scope.player_id, int):
+            raise ValueError("eliminated fleet persist requires concrete player_id")
+        if not isinstance(scope.turn, int):
+            raise ValueError("eliminated fleet persist requires concrete turn")
+        services = resolve_fleet_services(ctx)
+        persisted = PersistedFleetLedger(
+            ledger=eliminated_empty_fleet_ledger(turn, scope.player_id),
+            provenance=eliminated_fleet_provenance(),
             materialization_version=FLEET_MATERIALIZATION_VERSION,
         )
         put_result = services.persistence.put_ledger(

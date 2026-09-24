@@ -92,7 +92,7 @@ def plan_compute_dag(
             scope_key_spec=compute_registration.scope_key_spec,
         )
         dependency_scopes: list[ComputeScope] = []
-        for dependency in catalog.ensure_dependencies:
+        for dependency in catalog.applicable_ensure_dependencies(ctx, pending_scope):
             turn_floor = ensure_dependency_turn_floor(ctx, pending_scope)
             for dependency_export_scope in dependency_scopes_for(ctx, pending_scope, dependency):
                 if dependency_export_scope.turn < turn_floor:
