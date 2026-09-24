@@ -221,6 +221,20 @@ def test_list_turn_analytics_prefix_lists_analytic_documents(backend, storage_ro
     assert "analytics" not in backend.list(TURN)
 
 
+def test_list_per_player_fleet_files_when_shared_document_absent(backend, storage_root):
+    backend.put(TURN, {"turn": 111})
+    backend.put(f"{TURN}/analytics/fleet/8", {"ledger": {"playerId": 8}})
+    backend.put(f"{TURN}/analytics/fleet/9", {"ledger": {"playerId": 9}})
+    backend.put(
+        "games/628580/1/analytics/fleet-evidence/8",
+        {"generation": 1},
+    )
+
+    assert backend.list(f"{TURN}/analytics/fleet") == ["8", "9"]
+    assert backend.list("games/628580/1/analytics/fleet-evidence") == ["8"]
+    assert not (storage_root / f"{TURN}/analytics/fleet.json").exists()
+
+
 def test_in_document_delete_rewrites_file(backend, storage_root):
     backend.put(GAME_INFO, {"keep": 1, "drop": 2})
     backend.delete(f"{GAME_INFO}/drop")

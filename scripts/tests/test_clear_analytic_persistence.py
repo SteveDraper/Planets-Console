@@ -15,6 +15,8 @@ from api.analytics.fleet.types import (
 )
 from api.errors import NotFoundError
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.storage.base import StorageBackend
+from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
 from clear_analytic_persistence import (
     clear_analytic_persistence,
@@ -24,7 +26,7 @@ from clear_analytic_persistence import (
 
 
 def _put_fleet_ledger(
-    storage: MemoryAssetBackend,
+    storage: StorageBackend,
     *,
     game_id: int,
     perspective: int,
@@ -259,3 +261,29 @@ def test_analytics_filter_homeworld_turn_docs(storage: MemoryAssetBackend) -> No
     assert storage.get("games/628580/11/turns/2/analytics/fleet/8")["ledger"]["playerId"] == 8
     with pytest.raises(NotFoundError):
         storage.get("games/628580/11/turns/2/analytics/homeworld-locator")
+
+
+def test_file_backend_clear_removes_per_player_fleet_files(tmp_path) -> None:
+    storage = FileStorageBackend(tmp_path)
+    storage.put("games/628580/info", {"name": "test"})
+    _put_fleet_ledger(storage, game_id=628580, perspective=1, turn=27, player_id=8)
+    _put_fleet_ledger(storage, game_id=628580, perspective=1, turn=27, player_id=9)
+    storage.put("games/628580/1/analytics/fleet-evidence/8", {"generation": 1})
+    storage.put("games/628580/1/turns/27/analytics/scores", {"inference_rows": {}})
+
+    result = clear_analytic_persistence(
+        storage,
+        game_id=628580,
+        perspective=1,
+        player_id=None,
+        analytic_ids=frozenset({"fleet", "scores"}),
+    )
+
+    assert "games/628580/1/turns/27/analytics/fleet/8" in result.deleted_documents
+    assert "games/628580/1/turns/27/analytics/fleet/9" in result.deleted_documents
+    assert "games/628580/1/analytics/fleet-evidence/8" in result.deleted_documents
+    assert "games/628580/1/turns/27/analytics/scores" in result.deleted_documents
+    with pytest.raises(NotFoundError):
+        storage.get("games/628580/1/turns/27/analytics/fleet/8")
+    with pytest.raises(NotFoundError):
+        storage.get("games/628580/1/analytics/fleet-evidence/8")
