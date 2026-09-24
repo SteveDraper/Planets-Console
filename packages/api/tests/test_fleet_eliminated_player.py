@@ -179,12 +179,15 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
     observation_deferred = FleetPersistencePolicy().persist(ctx, compute_scope, observation_wire)
     assert observation_deferred is None
     assert ledger_persisted_events == []
-    assert fleet_services.persistence.has_final_ledger(
-        GAME_ID,
-        perspective(turn),
-        turn_number,
-        player_id,
-    ) is False
+    assert (
+        fleet_services.persistence.has_final_ledger(
+            GAME_ID,
+            perspective(turn),
+            turn_number,
+            player_id,
+        )
+        is False
+    )
     after_observation = fleet_services.persistence.get_ledger(
         GAME_ID,
         perspective(turn),
@@ -197,20 +200,21 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
     assert after_observation.provenance.prior_ledger_at_n_minus_1 is False
     assert after_observation.provenance.eliminated_at_turn is False
     assert after_observation.provenance.is_final is False
-    assert fleet_services.persistence.evidence_mark(
-        GAME_ID,
-        perspective(turn),
-        player_id,
-    ) == mark_before_observation
+    assert (
+        fleet_services.persistence.evidence_mark(
+            GAME_ID,
+            perspective(turn),
+            player_id,
+        )
+        == mark_before_observation
+    )
 
     finalization_wire = {
         "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
         "materializeTurn": turn_number,
         "fleetPersistLeg": "finalization",
     }
-    finalization_deferred = FleetPersistencePolicy().persist(
-        ctx, compute_scope, finalization_wire
-    )
+    finalization_deferred = FleetPersistencePolicy().persist(ctx, compute_scope, finalization_wire)
     assert finalization_deferred is not None
     assert ledger_persisted_events == []
     finalization_deferred()
@@ -430,6 +434,7 @@ def test_living_missing_prefix_loads_baseline(sample_turn, memory_backend):
         )
     assert len(baseline_calls) == 1
     assert persisted.provenance.eliminated_at_turn is False
-    assert fleet_persistence.get_ledger(
-        GAME_ID, perspective_id, turn.settings.turn, player_id
-    ) is not None
+    assert (
+        fleet_persistence.get_ledger(GAME_ID, perspective_id, turn.settings.turn, player_id)
+        is not None
+    )
