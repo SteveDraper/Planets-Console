@@ -755,15 +755,19 @@ Metadata on persisted analytic output that records which upstream ensure legs we
 _Avoid_: persisted equals final, snapshot file as ensure gate
 
 **Fleet ledger persistence**:
-Per-**Player** persisted **fleet acquisition ledger** at one `(game_id, perspective, turn)` scope. Stored at in-document key `ledgers/{playerId}` under `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. Carries **fleet materialization provenance** and per-ledger `materializationVersion`. Independent invalidation per player when that player's scores inference evidence changes. See [ADR 0004](docs/adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
+Per-**Player** persisted **fleet acquisition ledger** at one `(game_id, perspective, turn)` scope. One file per player at `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet/{playerId}`. Carries **fleet materialization provenance**, `materializationVersion`, and the **fleet evidence generation** it was written under. See [ADR 0004](docs/adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
 _Avoid_: monolithic all-players fleet blob as ensure-final, perspective-wide invalidation for one player's scores update
 
+**Fleet evidence generation**:
+Monotonic integer on one mark document per `(game, perspective, player)`. A ledger is ensure-final only when its stored generation matches the mark, or its turn is before the mark's `appliesFromTurn`, and provenance is `(true, true)` with a current materialization version. Durable scores evidence bumps the mark and leaves ledger files in place. Held solutions bump only the in-memory invalidation epoch.
+_Avoid_: staleFromTurn watermark alone, deleting a ledger to force recalc, treating a generation mismatch as absence for display
+
 **Fleet materialization provenance**:
-Per-player pair at `fleet@N`: `turnEvidenceAtN` (turn-*N* RST ingest + `scores@N` ensure-satisfied for that player) and `priorLedgerAtNMinus1` (`fleet@(N-1)` for that player is provenance-final, or turn-1 baseline). Both `true` --> persisted ledger is ensure-final. Either `false` --> probe/ensure continues the dependency walk for that `player_id`. Set honestly at write time. See [ADR 0004](docs/adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
+Per-player pair at `fleet@N`: `turnEvidenceAtN` (turn-*N* RST ingest + `scores@N` ensure-satisfied for that player) and `priorLedgerAtNMinus1` (`fleet@(N-1)` for that player is ensure-final, or turn-1 baseline). Both `true`, a current materialization version, and a matching **fleet evidence generation** --> persisted ledger is ensure-final. Otherwise probe/ensure continues the dependency walk for that `player_id`. Set honestly at write time. See [ADR 0004](docs/adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
 _Avoid_: inferring finality from cache hit, global provenance for all players
 
 **Fleet turn snapshot**:
-Legacy name for the turn-scoped fleet persistence document at `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. **Current model (ADR 0004):** the document holds per-player **fleet ledger persistence** entries, not one undifferentiated all-players snapshot. Materialize each player by chaining from that player's prior ledger plus turn-*T* evidence. Shared global id-bound inputs are read from RST per turn, not stored as a cross-player ledger. Turn document replace at *T* invalidates all players' ledgers at turns `>= T`; scores row updates invalidate per player from the affected host turn.
+Legacy name for the turn-scoped fleet persistence document at `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. **Current model (ADR 0004):** the document holds per-player **fleet ledger persistence** entries, not one undifferentiated all-players snapshot. Materialize each player by chaining from that player's prior ledger plus turn-*T* evidence. Shared global id-bound inputs are read from RST per turn, not stored as a cross-player ledger. Turn document replace at *T* deletes ledger files at turns `>= T`. Durable scores evidence bumps that player's **fleet evidence generation** from the host turn forward and leaves the files in place.
 _Avoid_: perspective-wide single ledger file as ensure-final, recompute 1..T on every GET
 
 **Fleet ensure baseline**:

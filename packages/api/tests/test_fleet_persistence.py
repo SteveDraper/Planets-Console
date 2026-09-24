@@ -84,6 +84,9 @@ def test_fleet_snapshot_round_trip(persistence, sample_turn):
     snapshot = ensure_fleet_baseline(628580, 1, sample_turn)
     persistence.put_snapshot(628580, 1, 111, snapshot)
     loaded = persistence.get_snapshot(628580, 1, 111)
+    assert loaded is not None
+    loaded.players.sort(key=lambda player: player.player_id)
+    snapshot.players.sort(key=lambda player: player.player_id)
     assert loaded == snapshot
 
 
@@ -160,8 +163,9 @@ def test_turn_one_baseline_seeds_from_turn_one_sightings(persistence, load_turn,
     )
     assert snapshot.turn == 1
     assert len(snapshot.players) == 4
-    assert len(snapshot.players[0].records) == 1
-    assert snapshot.players[0].records[0].fields.ship_id == FleetFieldKnown(value=99)
+    owner = next(player for player in snapshot.players if player.player_id == 8)
+    assert len(owner.records) == 1
+    assert owner.records[0].fields.ship_id == FleetFieldKnown(value=99)
     assert persistence.get_snapshot(628580, 1, 1) == snapshot
 
 
@@ -179,10 +183,24 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
     turn_110 = load_turn(110)
     assert turn_110 is not None
     prior = ensure_fleet_baseline(628580, 1, turn_110)
+    seeded_player_id = prior.players[0].player_id
     prior.players[0].records.append(
         FleetShipRecord(record_id="gap-rec", disposition="active"),
     )
-    persistence.put_snapshot(628580, 1, 110, prior)
+    for ledger in prior.players:
+        persistence.put_ledger(
+            628580,
+            1,
+            110,
+            ledger.player_id,
+            PersistedFleetLedger(
+                ledger=ledger,
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
@@ -195,12 +213,16 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
     )
 
     assert snapshot.turn == 112
-    assert len(snapshot.players[0].records) == 6
-    assert snapshot.players[0].records[0].record_id == "gap-rec"
+    seeded = next(player for player in snapshot.players if player.player_id == seeded_player_id)
+    assert len(seeded.records) == 6
+    assert seeded.records[0].record_id == "gap-rec"
     intermediate = persistence.get_snapshot(628580, 1, 111)
     assert intermediate is not None
     assert intermediate.turn == 111
-    assert len(intermediate.players[0].records) == 6
+    seeded_intermediate = next(
+        player for player in intermediate.players if player.player_id == seeded_player_id
+    )
+    assert len(seeded_intermediate.records) == 6
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
 
 
@@ -266,7 +288,8 @@ def test_seed_chain_implicit_turn_one_baseline_without_persisting_turn_one(
 
     assert snapshot.turn == 111
     assert len(snapshot.players) == 4
-    assert len(snapshot.players[0].records) == 5
+    seeded = next(player for player in snapshot.players if player.player_id == 8)
+    assert len(seeded.records) == 5
     assert persistence.get_snapshot(628580, 1, 1) is None
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -373,14 +396,20 @@ def test_invalidate_player_ledgers_from_turn_drops_only_target_player(persistenc
         )
     assert persistence.player_invalidation_generation(628580, 1, 8) == 0
     assert persistence.player_invalidation_generation(628580, 1, 3) == 0
-    cleared = persistence.invalidate_player_ledgers_from_turn(628580, 1, 111, 8)
+    cleared = persistence.invalidate_player_ledgers_from_turn(
+        628580,
+        1,
+        111,
+        8,
+        durable=True,
+    )
     assert cleared == {111, 112}
     assert persistence.player_invalidation_generation(628580, 1, 8) == 1
     assert persistence.player_invalidation_generation(628580, 1, 3) == 0
     assert persistence.get_ledger(628580, 1, 110, 8) is not None
     assert persistence.get_ledger(628580, 1, 110, 3) is not None
-    assert persistence.get_ledger(628580, 1, 111, 8) is None
-    assert persistence.get_ledger(628580, 1, 112, 8) is None
+    assert persistence.get_ledger(628580, 1, 111, 8) is not None
+    assert persistence.get_ledger(628580, 1, 112, 8) is not None
     assert persistence.get_ledger(628580, 1, 111, 3) is not None
     assert persistence.get_ledger(628580, 1, 112, 3) is not None
 
@@ -475,20 +504,24 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
     fleet_persistence, inference_persistence, _, _ = _wired_fleet_inference_services(memory_backend)
     player_8 = FleetAcquisitionLedger(player_id=8)
     player_3 = FleetAcquisitionLedger(player_id=3)
+    final = FleetMaterializationProvenance(
+        turn_evidence_at_n=True,
+        prior_ledger_at_n_minus_1=True,
+    )
     for turn_number in (111, 112):
         fleet_persistence.put_ledger(
             628580,
             1,
             turn_number,
             8,
-            PersistedFleetLedger(ledger=player_8),
+            PersistedFleetLedger(ledger=player_8, provenance=final),
         )
         fleet_persistence.put_ledger(
             628580,
             1,
             turn_number,
             3,
-            PersistedFleetLedger(ledger=player_3),
+            PersistedFleetLedger(ledger=player_3, provenance=final),
         )
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
@@ -505,10 +538,14 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
             solutions=[],
         ),
     )
-    assert fleet_persistence.get_ledger(628580, 1, 111, 8) is None
-    assert fleet_persistence.get_ledger(628580, 1, 112, 8) is None
+    assert fleet_persistence.get_ledger(628580, 1, 111, 8) is not None
+    assert fleet_persistence.get_ledger(628580, 1, 112, 8) is not None
+    assert fleet_persistence.has_final_ledger(628580, 1, 111, 8) is False
+    assert fleet_persistence.has_final_ledger(628580, 1, 112, 8) is False
     assert fleet_persistence.get_ledger(628580, 1, 111, 3) is not None
     assert fleet_persistence.get_ledger(628580, 1, 112, 3) is not None
+    assert fleet_persistence.has_final_ledger(628580, 1, 111, 3) is True
+    assert fleet_persistence.has_final_ledger(628580, 1, 112, 3) is True
 
 
 def test_turn_store_invalidates_fleet_snapshots(memory_backend):
@@ -733,7 +770,8 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
             ],
         ),
     )
-    assert fleet_persistence.get_ledger(628580, 1, 111, 8) is None
+    assert fleet_persistence.get_ledger(628580, 1, 111, 8) is not None
+    assert not fleet_persistence.has_final_ledger(628580, 1, 111, 8)
     other_player_ids = [
         player_id
         for player_id in fleet_persistence.list_ledger_player_ids(628580, 1, 111)
@@ -796,7 +834,8 @@ def test_held_solutions_scheduler_callback_invalidates_cached_fleet_snapshot(
     assert scheduler._on_held_solutions_updated is not None
     scheduler._on_held_solutions_updated(scheduled.session)
 
-    assert fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is None
+    assert fleet_persistence.get_ledger(628580, 1, turn_number, player_id) is not None
+    assert not fleet_persistence.has_final_ledger(628580, 1, turn_number, player_id)
 
 
 def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memory_backend):
@@ -808,7 +847,20 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     prior.players[0].records.append(
         FleetShipRecord(record_id="gap-rec", disposition="active"),
     )
-    persistence.put_snapshot(628580, 1, 110, prior)
+    for ledger in prior.players:
+        persistence.put_ledger(
+            628580,
+            1,
+            110,
+            ledger.player_id,
+            PersistedFleetLedger(
+                ledger=ledger,
+                provenance=FleetMaterializationProvenance(
+                    turn_evidence_at_n=True,
+                    prior_ledger_at_n_minus_1=True,
+                ),
+            ),
+        )
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
@@ -864,8 +916,9 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     )
     assert snapshot.turn == 112
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
-    assert len(snapshot.players[0].records) == 6
-    assert snapshot.players[0].records[0].record_id == "gap-rec"
+    seeded = next(player for player in snapshot.players if player.player_id == 8)
+    assert len(seeded.records) == 6
+    assert seeded.records[0].record_id == "gap-rec"
 
 
 def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persistence, load_turn):
@@ -873,7 +926,7 @@ def test_gap_fill_does_not_persist_torn_tail_after_mid_chain_invalidation(persis
 
     turn_110 = load_turn(110)
     assert turn_110 is not None
-    persistence.put_snapshot(628580, 1, 110, ensure_fleet_baseline(628580, 1, turn_110))
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
 
     turn_112 = load_turn(112)
     assert turn_112 is not None
@@ -1150,6 +1203,66 @@ def test_gap_fill_returns_cached_snapshot_when_peer_finished_during_retries(pers
     )
 
     assert result == winner
+
+
+def test_chain_rewrites_generation_stale_anchor_through_later_turns(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Durable bump at T must not leave T+1 ensure-final from a stale T prior.
+
+    After #531, generation-mismatched ledgers stay on disk. Multi-turn gap-fill
+    must rebuild from the last ensure-final prior through every non-final turn,
+    not anchor on a readable stale file with provenance (true, true).
+    """
+    turn_110 = load_turn(110)
+    turn_111 = load_turn(111)
+    turn_112 = load_turn(112)
+    assert turn_110 is not None and turn_111 is not None and turn_112 is not None
+    player_id = turn_111.scores[0].ownerid
+
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_110)
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_111)
+    _put_provenance_final_snapshot(persistence, 628580, 1, turn_112)
+
+    persistence.invalidate_player_ledgers_from_turn(
+        628580,
+        1,
+        111,
+        player_id,
+        durable=True,
+    )
+
+    assert persistence.has_final_ledger(628580, 1, 110, player_id) is True
+    assert persistence.get_ledger(628580, 1, 111, player_id) is not None
+    assert persistence.get_ledger(628580, 1, 112, player_id) is not None
+    assert persistence.has_final_ledger(628580, 1, 111, player_id) is False
+    assert persistence.has_final_ledger(628580, 1, 112, player_id) is False
+    assert persistence.get_ledger(628580, 1, 111, player_id).evidence_generation == 0
+    assert persistence.get_ledger(628580, 1, 112, player_id).evidence_generation == 0
+
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+    _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+
+    get_or_materialize_fleet_snapshot(
+        persistence,
+        628580,
+        1,
+        turn_112,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+    # Stale T and T+1 both rewritten from the pre-T ensure-final prior.
+    assert persistence.has_final_ledger(628580, 1, 111, player_id) is True
+    assert persistence.has_final_ledger(628580, 1, 112, player_id) is True
+    assert persistence.get_ledger(628580, 1, 111, player_id).evidence_generation == 1
+    assert persistence.get_ledger(628580, 1, 112, player_id).evidence_generation == 1
 
 
 def test_get_or_materialize_fleet_ledger_for_player_raises_on_epoch_abort(

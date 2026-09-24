@@ -18,6 +18,7 @@ from api.analytics.fleet.types import (
     FleetBuildOptionSet,
     FleetCountDiscrepancy,
     FleetEvidenceEvent,
+    FleetEvidenceMark,
     FleetFieldBounded,
     FleetFieldConstraint,
     FleetFieldKnown,
@@ -34,7 +35,9 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
+from api.analytics.turn_roster import iter_turn_players
 from api.exceptions import ValidationError
+from api.models.game import TurnInfo
 
 
 def _require_object_list(raw: object, *, field_name: str) -> list[dict[str, Any]]:
@@ -629,10 +632,25 @@ def fleet_acquisition_ledger_from_json(data: dict[str, Any]) -> FleetAcquisition
     )
 
 
+def _fleet_ledgers_in_roster_order(
+    ledgers: list[FleetAcquisitionLedger],
+    turn: TurnInfo,
+) -> list[FleetAcquisitionLedger]:
+    """Order ledgers by turn roster (perspective first), not player-id storage order."""
+    rank = {player.id: index for index, player in enumerate(iter_turn_players(turn))}
+    fallback = len(rank)
+    return sorted(
+        ledgers,
+        key=lambda ledger: (rank.get(ledger.player_id, fallback), ledger.player_id),
+    )
+
+
 def _fleet_turn_snapshot_players_to_json(
     snapshot: FleetTurnSnapshot,
+    turn: TurnInfo,
 ) -> list[dict[str, Any]]:
-    return [fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players]
+    ordered = _fleet_ledgers_in_roster_order(snapshot.players, turn)
+    return [fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in ordered]
 
 
 def is_legacy_fleet_turn_document(data: dict[str, Any]) -> bool:
@@ -677,6 +695,7 @@ def persisted_fleet_ledger_from_json(data: dict[str, Any]) -> PersistedFleetLedg
         ledger=fleet_acquisition_ledger_from_json(ledger_wire),
         provenance=fleet_materialization_provenance_from_json(provenance_wire),
         materialization_version=fleet_materialization_version_from_json(data),
+        evidence_generation=fleet_evidence_generation_from_json(data),
     )
 
 
@@ -685,7 +704,64 @@ def persisted_fleet_ledger_to_json(persisted: PersistedFleetLedger) -> dict[str,
         "ledger": fleet_acquisition_ledger_to_json(persisted.ledger),
         "provenance": fleet_materialization_provenance_to_json(persisted.provenance),
         "materializationVersion": persisted.materialization_version,
+        "evidenceGeneration": persisted.evidence_generation,
     }
+
+
+def fleet_evidence_generation_from_json(data: dict[str, Any]) -> int:
+    """Return stored evidence generation, or 0 when the ledger predates the mark."""
+    raw = data.get("evidenceGeneration", 0)
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        return 0
+    return raw
+
+
+def fleet_evidence_mark_from_json(data: dict[str, Any]) -> FleetEvidenceMark:
+    generation = data.get("evidenceGeneration", 0)
+    if not isinstance(generation, int) or isinstance(generation, bool):
+        raise ValidationError("fleet evidence mark evidenceGeneration must be an int")
+    applies_raw = data.get("appliesFromTurn")
+    applies_from_turn: int | None
+    if applies_raw is None:
+        applies_from_turn = None
+    elif isinstance(applies_raw, int) and not isinstance(applies_raw, bool):
+        applies_from_turn = applies_raw
+    else:
+        raise ValidationError("fleet evidence mark appliesFromTurn must be an int")
+    return FleetEvidenceMark(
+        evidence_generation=generation,
+        applies_from_turn=applies_from_turn,
+    )
+
+
+def fleet_evidence_mark_to_json(mark: FleetEvidenceMark) -> dict[str, Any]:
+    payload: dict[str, Any] = {"evidenceGeneration": mark.evidence_generation}
+    if mark.applies_from_turn is not None:
+        payload["appliesFromTurn"] = mark.applies_from_turn
+    return payload
+
+
+def fleet_ledger_is_ensure_final(
+    persisted: PersistedFleetLedger,
+    *,
+    turn_number: int,
+    mark: FleetEvidenceMark,
+) -> bool:
+    """Return whether a stored ledger may satisfy ensure for this turn.
+
+    Provenance and materialization version are necessary. A ledger at or after
+    the mark's ``appliesFromTurn`` is final only when its evidence generation
+    equals the mark. Earlier turns stay final: a later host turn's evidence
+    bump must not rebuild them or re-invalidate a ledger the scores cascade
+    just closed.
+    """
+    if not persisted.provenance.is_final:
+        return False
+    if not is_current_fleet_materialization_version(persisted.materialization_version):
+        return False
+    if mark.applies_from_turn is not None and turn_number < mark.applies_from_turn:
+        return True
+    return persisted.evidence_generation == mark.evidence_generation
 
 
 def upgrade_legacy_fleet_turn_document(data: dict[str, Any]) -> dict[str, Any]:
@@ -761,11 +837,17 @@ def _fleet_turn_snapshot_from_ledgers_document(data: dict[str, Any]) -> FleetTur
     )
 
 
-def fleet_turn_snapshot_to_compute_wire(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
-    """Turn-analytic compute response shape (analytic id + per-player ledgers)."""
+def fleet_turn_snapshot_to_compute_wire(
+    snapshot: FleetTurnSnapshot,
+    turn: TurnInfo,
+) -> dict[str, Any]:
+    """Turn-analytic compute response shape (analytic id + per-player ledgers).
+
+    Players follow turn-roster order. Callers need not pre-sort the snapshot.
+    """
     return {
         "analyticId": snapshot.analytic_id,
-        "players": _fleet_turn_snapshot_players_to_json(snapshot),
+        "players": _fleet_turn_snapshot_players_to_json(snapshot, turn),
     }
 
 

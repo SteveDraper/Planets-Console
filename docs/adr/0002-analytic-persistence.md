@@ -48,11 +48,11 @@ Hull catalog mask overrides remain game-global at `games/{gameId}/analytics/scor
 
 ## Fleet ledger persistence (ADR 0004)
 
-Logical path: `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet` with in-document keys `ledgers/{playerId}`.
+Logical path: `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet/{playerId}` (one file per player). A legacy shared `.../analytics/fleet` document is split on read.
 
-- **Provenance:** each ledger stores **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1)`; both `true` before ensure treats the scope as final.
-- **Migration:** legacy monolithic snapshot shape (all players at document root) upgraded on read to per-ledger keys.
-- **Invalidation:** scores inference row persist for player P at host *H* clears P's fleet ledgers at turns `>= H`; turn `put` at *T* clears all players at turns `>= T`.
+- **Provenance:** each ledger stores **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1)`. Ensure also requires the current materialization version and a matching **fleet evidence generation** (or a turn before the mark's `appliesFromTurn`).
+- **Migration:** legacy monolithic snapshot shape, then the shared per-turn document, are split on read into per-player files.
+- **Invalidation:** a durable scores evidence update for player P at host *H* bumps P's evidence mark and does not rewrite ledger files. Held admission bumps the in-memory epoch only. Turn `put` at *T* deletes ledger files at turns `>= T`.
 - **Stream:** fleet table NDJSON stream (F7.5) delivers per-player ledger updates; see [design-fleet-analytic.md](../design-fleet-analytic.md) section 15.
 
 Supersedes monolithic fleet snapshot semantics for new writes. See [ADR 0004](0004-fleet-per-player-persistence-and-ensure-provenance.md).

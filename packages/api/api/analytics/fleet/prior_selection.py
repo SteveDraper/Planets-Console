@@ -11,6 +11,7 @@ def select_fleet_prior_persisted(
     *,
     from_dependency_outputs: PersistedFleetLedger | None,
     load_from_disk: Callable[[], PersistedFleetLedger | None],
+    is_ensure_final: Callable[[PersistedFleetLedger], bool],
 ) -> PersistedFleetLedger | None:
     """Choose the prior ledger for fleet@N / scores@N+1 job-wire assembly.
 
@@ -19,12 +20,14 @@ def select_fleet_prior_persisted(
     not override a final disk ledger -- that orphans refined recordIds and is
     the Cyborg turn-5 identity-loss fingerprint.
 
-    ``load_from_disk`` runs only when DepOutputs is missing or not final.
+    ``load_from_disk`` runs only when DepOutputs is missing or not ensure-final.
+    Callers must pass ``is_ensure_final`` (generation + provenance +
+    materialization version); provenance flags alone are not sufficient.
     """
-    if from_dependency_outputs is not None and from_dependency_outputs.provenance.is_final:
+    if from_dependency_outputs is not None and is_ensure_final(from_dependency_outputs):
         return from_dependency_outputs
     from_disk = load_from_disk()
-    if from_disk is not None and from_disk.provenance.is_final:
+    if from_disk is not None and is_ensure_final(from_disk):
         return from_disk
     if from_dependency_outputs is not None:
         return from_dependency_outputs
@@ -35,9 +38,11 @@ def resolve_fleet_prior_persisted(
     *,
     from_dependency_outputs: PersistedFleetLedger | None,
     load_from_disk: Callable[[], PersistedFleetLedger | None],
+    is_ensure_final: Callable[[PersistedFleetLedger], bool],
 ) -> PersistedFleetLedger | None:
     """Select a prior ledger, reading disk only when DepOutputs is not already final."""
     return select_fleet_prior_persisted(
         from_dependency_outputs=from_dependency_outputs,
         load_from_disk=load_from_disk,
+        is_ensure_final=is_ensure_final,
     )

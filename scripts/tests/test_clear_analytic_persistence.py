@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from api.analytics.fleet.constants import FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -122,12 +122,13 @@ def test_clear_perspective_all_players_removes_turn_docs(storage: MemoryAssetBac
         player_id=None,
     )
 
-    assert "games/628580/11/turns/3/analytics/fleet" in result.deleted_documents
+    assert "games/628580/11/turns/3/analytics/fleet/8" in result.deleted_documents
+    assert "games/628580/11/turns/3/analytics/fleet/9" in result.deleted_documents
     assert "games/628580/11/turns/3/analytics/scores" in result.deleted_documents
     with pytest.raises(NotFoundError):
-        storage.get("games/628580/11/turns/3/analytics/fleet")
+        storage.get("games/628580/11/turns/3/analytics/fleet/8")
     # Other perspective untouched.
-    assert storage.get("games/628580/1/turns/3/analytics/fleet")[FLEET_LEDGERS_KEY]
+    assert storage.get("games/628580/1/turns/3/analytics/fleet/8")["ledger"]["playerId"] == 8
 
 
 def test_clear_one_player_keeps_other_player_entries(storage: MemoryAssetBackend) -> None:
@@ -145,7 +146,7 @@ def test_clear_one_player_keeps_other_player_entries(storage: MemoryAssetBackend
         player_id=8,
     )
 
-    assert any(key.endswith("/ledgers/8") for key in result.deleted_player_entries)
+    assert any(key.endswith("/fleet/8") for key in result.deleted_player_entries)
     assert any(key.endswith("/inference_rows/8") for key in result.deleted_player_entries)
     fleet = FleetSnapshotPersistenceService(storage)
     assert fleet.get_ledger(628580, 11, 4, 8) is None
@@ -192,7 +193,7 @@ def test_full_wildcard_clears_game_global_non_player(storage: MemoryAssetBackend
     assert "games/628580/analytics/homeworld-locator" in result.deleted_documents
     assert "games/628580/11/analytics/homeworld-locator" in result.deleted_documents
     with pytest.raises(NotFoundError):
-        storage.get("games/628580/11/turns/1/analytics/fleet")
+        storage.get("games/628580/11/turns/1/analytics/fleet/8")
 
 
 def test_dry_run_does_not_mutate(storage: MemoryAssetBackend) -> None:
@@ -204,8 +205,8 @@ def test_dry_run_does_not_mutate(storage: MemoryAssetBackend) -> None:
         player_id=None,
         dry_run=True,
     )
-    assert result.deleted_documents
-    assert storage.get("games/628580/11/turns/5/analytics/fleet")[FLEET_LEDGERS_KEY]
+    assert "games/628580/11/turns/5/analytics/fleet/8" in result.deleted_documents
+    assert storage.get("games/628580/11/turns/5/analytics/fleet/8")["ledger"]["playerId"] == 8
 
 
 def test_analytics_filter_clears_only_listed_ids(storage: MemoryAssetBackend) -> None:
@@ -230,8 +231,8 @@ def test_analytics_filter_clears_only_listed_ids(storage: MemoryAssetBackend) ->
     assert "games/628580/analytics/homeworld-locator" in result.deleted_documents
     assert "games/628580/11/analytics/homeworld-locator" in result.deleted_documents
     assert "games/628580/11/turns/1/analytics/homeworld-locator" in result.deleted_documents
-    assert "games/628580/11/turns/1/analytics/fleet" not in result.deleted_documents
-    assert storage.get("games/628580/11/turns/1/analytics/fleet")[FLEET_LEDGERS_KEY]
+    assert "games/628580/11/turns/1/analytics/fleet/8" not in result.deleted_documents
+    assert storage.get("games/628580/11/turns/1/analytics/fleet/8")["ledger"]["playerId"] == 8
     assert (
         storage.get(InferenceRowPersistenceService.row_store_key(628580, 11, 1, 8))["playerId"] == 8
     )
@@ -254,7 +255,7 @@ def test_analytics_filter_homeworld_turn_docs(storage: MemoryAssetBackend) -> No
     )
 
     assert "games/628580/11/turns/2/analytics/homeworld-locator" in result.deleted_documents
-    assert "games/628580/11/turns/2/analytics/fleet" not in result.deleted_documents
-    assert storage.get("games/628580/11/turns/2/analytics/fleet")[FLEET_LEDGERS_KEY]
+    assert "games/628580/11/turns/2/analytics/fleet/8" not in result.deleted_documents
+    assert storage.get("games/628580/11/turns/2/analytics/fleet/8")["ledger"]["playerId"] == 8
     with pytest.raises(NotFoundError):
         storage.get("games/628580/11/turns/2/analytics/homeworld-locator")

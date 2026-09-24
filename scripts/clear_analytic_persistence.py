@@ -35,6 +35,7 @@ sys.path.insert(0, _api_root_str)
 
 import typer  # noqa: E402
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID  # noqa: E402
+from api.analytics.fleet.constants import FLEET_EVIDENCE_MARK_SEGMENT  # noqa: E402
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService  # noqa: E402
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID  # noqa: E402
 from api.errors import NotFoundError  # noqa: E402
@@ -173,6 +174,50 @@ def _delete_player_entry(
     result.deleted_player_entries.append(key)
 
 
+def _clear_fleet_turn(
+    storage: StorageBackend,
+    *,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    dry_run: bool,
+    result: ClearAnalyticPersistenceResult,
+) -> None:
+    """Delete per-player fleet ledger files at one turn, plus a legacy shared document."""
+    fleet = FleetSnapshotPersistenceService(storage)
+    prefix = fleet.document_key(game_id, perspective, turn_number)
+    for segment in _list_segments(storage, prefix):
+        if not segment.isdigit():
+            continue
+        _delete_document(
+            storage,
+            fleet.ledger_key(game_id, perspective, turn_number, int(segment)),
+            dry_run=dry_run,
+            result=result,
+        )
+    _delete_document(storage, prefix, dry_run=dry_run, result=result)
+
+
+def _clear_fleet_evidence_marks(
+    storage: StorageBackend,
+    *,
+    game_id: int,
+    perspective: int,
+    dry_run: bool,
+    result: ClearAnalyticPersistenceResult,
+) -> None:
+    prefix = f"games/{game_id}/{perspective}/analytics/{FLEET_EVIDENCE_MARK_SEGMENT}"
+    for segment in _list_segments(storage, prefix):
+        if not segment.isdigit():
+            continue
+        _delete_document(
+            storage,
+            f"{prefix}/{segment}",
+            dry_run=dry_run,
+            result=result,
+        )
+
+
 def _clear_turn_analytics_for_all_players(
     storage: StorageBackend,
     *,
@@ -187,6 +232,16 @@ def _clear_turn_analytics_for_all_players(
         analytics_prefix = f"{turns_prefix}/{turn_number}/analytics"
         for analytic_id in sorted(_list_segments(storage, analytics_prefix)):
             if not _includes_analytic(analytic_ids, analytic_id):
+                continue
+            if analytic_id == FLEET_ANALYTIC_ID:
+                _clear_fleet_turn(
+                    storage,
+                    game_id=game_id,
+                    perspective=perspective,
+                    turn_number=turn_number,
+                    dry_run=dry_run,
+                    result=result,
+                )
                 continue
             _delete_document(
                 storage,
@@ -260,8 +315,7 @@ def _clear_fleet_player_ledgers(
         perspective=perspective,
         analytic_id=FLEET_ANALYTIC_ID,
     ):
-        document_key = fleet.document_key(game_id, perspective, turn_number)
-        entry_key = f"{document_key}/ledgers/{player_id}"
+        entry_key = fleet.ledger_key(game_id, perspective, turn_number, player_id)
         if fleet.get_ledger(game_id, perspective, turn_number, player_id) is None:
             continue
         if dry_run:
@@ -269,6 +323,8 @@ def _clear_fleet_player_ledgers(
             continue
         fleet.delete_ledger(game_id, perspective, turn_number, player_id)
         result.deleted_player_entries.append(entry_key)
+    if not dry_run:
+        fleet.delete_evidence_mark(game_id, perspective, player_id)
 
 
 def _clear_perspective_analytics(
@@ -393,6 +449,14 @@ def clear_analytic_persistence(
                 dry_run=dry_run,
                 result=result,
             )
+            if clear_fleet:
+                _clear_fleet_evidence_marks(
+                    storage,
+                    game_id=game_id,
+                    perspective=perspective_id,
+                    dry_run=dry_run,
+                    result=result,
+                )
             _clear_perspective_analytics(
                 storage,
                 game_id=game_id,

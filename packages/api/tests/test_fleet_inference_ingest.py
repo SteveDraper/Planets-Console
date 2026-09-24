@@ -976,7 +976,7 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
         ),
     )
 
-    wire = fleet_turn_snapshot_to_compute_wire(snapshot)
+    wire = fleet_turn_snapshot_to_compute_wire(snapshot, turn)
     record_wire = wire["players"][0]["records"][0]
     assert "buildOptionSets" in record_wire
     assert len(record_wire["buildOptionSets"]) == 2
@@ -1106,7 +1106,7 @@ def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
     assert record.build_option_sets[0].hull_id == 0
     assert record.build_option_sets[0].engine_id is None
 
-    wire = fleet_turn_snapshot_to_compute_wire(snapshot)
+    wire = fleet_turn_snapshot_to_compute_wire(snapshot, turn)
     option_set = wire["players"][0]["records"][0]["buildOptionSets"][0]
     assert option_set["label"] == "Freighter"
     assert option_set["hullId"] == 0

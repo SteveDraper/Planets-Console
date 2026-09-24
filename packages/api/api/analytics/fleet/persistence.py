@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 
 from api.analytics.fleet.constants import (
     ANALYTIC_ID,
+    FLEET_EVIDENCE_MARK_SEGMENT,
     FLEET_LEDGERS_KEY,
     FLEET_MATERIALIZATION_VERSION,
 )
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.fleet.serialization import (
+    fleet_evidence_mark_from_json,
+    fleet_evidence_mark_to_json,
+    fleet_ledger_is_ensure_final,
     fleet_materialization_version_from_json,
-    fleet_turn_snapshot_from_json,
-    fleet_turn_snapshot_to_json,
     is_current_fleet_materialization_version,
     is_legacy_fleet_turn_document,
     persisted_fleet_ledger_from_json,
@@ -22,6 +25,8 @@ from api.analytics.fleet.serialization import (
     upgrade_legacy_fleet_turn_document,
 )
 from api.analytics.fleet.types import (
+    FleetEvidenceMark,
+    FleetMaterializationProvenance,
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
@@ -32,42 +37,51 @@ OnSnapshotPersistedCallback = Callable[[int, int, int], None]
 OnLedgerPersistedCallback = Callable[[FleetLedgerPersistedEvent], None]
 DeferredNotification = Callable[[], None]
 
+_ABSENT_EVIDENCE_MARK = FleetEvidenceMark()
+
+
+@dataclass(frozen=True)
+class PutLedgerResult:
+    """Ledger file written by ``put_ledger``, plus an optional deferred notify.
+
+    ``stored`` is the stamped object on disk (materialization version and
+    ``evidence_generation``). Callers that publish ``persistedLedgerWire`` must
+    serialize ``stored``, not the pre-stamp input. When
+    ``defer_ledger_persisted_notification`` is true, invoke
+    ``deferred_notification`` after the orchestrator marks the node complete.
+    """
+
+    stored: PersistedFleetLedger
+    deferred_notification: DeferredNotification | None = None
+
 
 class FleetSnapshotPersistenceService:
-    """Persist fleet acquisition ledgers at turn-scoped analytic breakpoints.
+    """Persist one fleet acquisition ledger file per player per turn.
 
-    Logical document path:
-    ``games/{gameId}/{perspective}/turns/{turn}/analytics/fleet``
+    Ledger path:
+    ``games/{gameId}/{perspective}/turns/{turn}/analytics/fleet/{playerId}``
 
-    In-document keys: ``ledgers/{playerId}`` -- each entry is one
-    **fleet acquisition ledger** plus **fleet materialization provenance** and
-    ``materializationVersion``.
+    Each file is that player's ledger, provenance, materialization version, and
+    the evidence generation it was written under. Other players in the turn are
+    not read or rewritten.
 
-    Scores-invalidation coupling (F2.x): when scores inference evidence updates
-    for player P at host turn *H*, ``InferenceInvalidationService`` drops P's
-    ledgers at fleet turns ``>= H`` via ``invalidate_player_ledgers_from_turn``.
-    Turn document replace at *T* clears all players via
-    ``invalidate_for_turn_write``. Scores pair-aware invalidation (turn *T* and
-    *T-1*) is independent of fleet invalidation; both scores hooks run from
-    ``on_turn_stored`` today.
+    Evidence mark path:
+    ``games/{gameId}/{perspective}/analytics/fleet-evidence/{playerId}``
 
-    **Invalidation generation:** Each ``(game_id, perspective, player_id)`` scope has a
-    monotonic counter bumped when that player's fleet ledgers are invalidated.
-    Gap-fill coordinators record the generation at chain start and abort (then retry
-    from a fresh anchor) when the counter advances during multi-turn materialization.
-    Per-player scores invalidation bumps only the target player; turn document replace
-    bumps every player who had ledgers dropped at affected turns. Invalidation does not
-    block on gap-fill; concurrent invalidation callbacks only bump counters and delete
-    stored snapshots. ``put_snapshot`` does not bump invalidation generation; per-player
-    counters advance only on read-time stale pruning, legacy document delete, and
-    explicit invalidation methods (``invalidate_for_turn_write``,
-    ``invalidate_player_ledgers_from_turn``).
+    The mark is one small document per ``(game, perspective, player)``. A durable
+    scores-evidence update bumps its generation and does not open ledger files.
+    A ledger at turn T is ensure-final only when it exists, provenance is
+    ``(true, true)``, the materialization version is current, and either T is
+    before the mark's ``appliesFromTurn`` or the ledger's generation equals the
+    mark. Held-solution admission bumps the in-memory epoch only.
 
-    **Materialization version:** Each persisted ledger entry carries
-    ``materializationVersion`` (see ``FLEET_MATERIALIZATION_VERSION``). On read,
-    mismatched or missing versions are deleted and treated as cache misses for that
-    player so deploys that change materialization semantics re-chain without a turn
-    reload.
+    A legacy shared turn document at ``.../analytics/fleet`` is split into
+    per-player files on read, then removed.
+
+    **Invalidation generation:** Each ``(game_id, perspective, player_id)`` scope
+    has an in-memory counter bumped when that player's fleet work must abort.
+    Gap-fill coordinators record it at chain start. Turn-scoped counters let
+    ``scores@N`` track ``fleet@(N-1)`` only. ``put_ledger`` does not bump them.
     """
 
     def __init__(
@@ -84,11 +98,30 @@ class FleetSnapshotPersistenceService:
         self._invalidation_generation: dict[tuple[int, int, int], int] = {}
         # Turn-scoped: scores@N epoch tracks fleet@(N-1) only.
         self._turn_invalidation_generation: dict[tuple[int, int, int, int], int] = {}
+        self._evidence_marks: dict[tuple[int, int, int], FleetEvidenceMark] = {}
+        self._known_ledger_turns: dict[tuple[int, int, int], set[int]] = {}
+        self._legacy_absent: set[tuple[int, int, int]] = set()
         self._generation_lock = threading.Lock()
 
     @staticmethod
     def document_key(game_id: int, perspective: int, turn_number: int) -> str:
+        """Legacy shared turn document, split into per-player files on read."""
         return f"games/{game_id}/{perspective}/turns/{turn_number}/analytics/{ANALYTIC_ID}"
+
+    @staticmethod
+    def ledger_key(
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+    ) -> str:
+        return (
+            f"games/{game_id}/{perspective}/turns/{turn_number}/analytics/{ANALYTIC_ID}/{player_id}"
+        )
+
+    @staticmethod
+    def evidence_mark_key(game_id: int, perspective: int, player_id: int) -> str:
+        return f"games/{game_id}/{perspective}/analytics/{FLEET_EVIDENCE_MARK_SEGMENT}/{player_id}"
 
     def get_ledger(
         self,
@@ -97,23 +130,12 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         player_id: int,
     ) -> PersistedFleetLedger | None:
-        document = self._load_document(game_id, perspective, turn_number)
-        if document is None:
+        persisted = self._read_player_ledger(game_id, perspective, turn_number, player_id)
+        if persisted is not None:
+            return persisted
+        if not self._migrate_legacy_turn_document(game_id, perspective, turn_number):
             return None
-        ledger_wire = self._ledger_wire_from_document(document, player_id)
-        if ledger_wire is None:
-            return None
-        persisted = persisted_fleet_ledger_from_json(ledger_wire)
-        if not is_current_fleet_materialization_version(persisted.materialization_version):
-            self._delete_ledger_entry(game_id, perspective, turn_number, player_id)
-            self.bump_player_and_turn_invalidations(
-                game_id,
-                perspective,
-                player_id,
-                (turn_number,),
-            )
-            return None
-        return persisted
+        return self._read_player_ledger(game_id, perspective, turn_number, player_id)
 
     def put_ledger(
         self,
@@ -124,35 +146,57 @@ class FleetSnapshotPersistenceService:
         persisted: PersistedFleetLedger,
         *,
         defer_ledger_persisted_notification: bool = False,
-    ) -> DeferredNotification | None:
+    ) -> PutLedgerResult:
         if persisted.ledger.player_id != player_id:
             raise ValidationError(
                 "persisted fleet ledger player_id "
                 f"{persisted.ledger.player_id} does not match key player_id {player_id}",
             )
+        prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
+        if prior is None and self._migrate_legacy_turn_document(
+            game_id,
+            perspective,
+            turn_number,
+        ):
+            prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
+        mark = self.evidence_mark(game_id, perspective, player_id)
         to_store = PersistedFleetLedger(
             ledger=persisted.ledger,
             provenance=persisted.provenance,
             materialization_version=FLEET_MATERIALIZATION_VERSION,
+            evidence_generation=mark.evidence_generation,
         )
-        document = self._load_or_create_document(game_id, perspective, turn_number)
-        prior = self._prior_from_loaded_document(document, player_id)
-        ledgers = self._ledgers_object(document)
-        ledgers[str(player_id)] = persisted_fleet_ledger_to_json(to_store)
-        self._write_document(game_id, perspective, turn_number, document)
+        prior_was_ensure_final = prior is not None and self.ledger_is_ensure_final(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            prior,
+        )
+        self._write_player_ledger(game_id, perspective, turn_number, player_id, to_store)
+        self._remember_ledger_turn(game_id, perspective, player_id, turn_number)
+        if to_store.provenance.is_final:
+            self._advance_evidence_mark_after_boundary_write(
+                game_id,
+                perspective,
+                player_id,
+                turn_number,
+                to_store.evidence_generation,
+            )
         notification = self._ledger_persisted_notification_if_needed(
             game_id,
             perspective,
             turn_number,
             player_id,
             prior=prior,
+            prior_was_ensure_final=prior_was_ensure_final,
             persisted=to_store,
         )
         if defer_ledger_persisted_notification:
-            return notification
+            return PutLedgerResult(stored=to_store, deferred_notification=notification)
         if notification is not None:
             notification()
-        return None
+        return PutLedgerResult(stored=to_store)
 
     def has_ledger(
         self,
@@ -163,12 +207,24 @@ class FleetSnapshotPersistenceService:
     ) -> bool:
         """Return whether a usable fleet ledger is stored for this player scope.
 
-        Delegates to ``get_ledger`` -- not a cheap key-exists probe. A call may
-        upgrade legacy monolithic documents to the ``ledgers/`` layout, delete
-        stale ledger entries, write storage, and bump invalidation generation
-        when stale data is removed.
+        Delegates to ``get_ledger``. A call may split a legacy shared document,
+        delete a stale-version file, and bump the in-memory invalidation epoch.
         """
         return self.get_ledger(game_id, perspective, turn_number, player_id) is not None
+
+    def ledger_is_ensure_final(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        persisted: PersistedFleetLedger,
+    ) -> bool:
+        return fleet_ledger_is_ensure_final(
+            persisted,
+            turn_number=turn_number,
+            mark=self.evidence_mark(game_id, perspective, player_id),
+        )
 
     def has_final_ledger(
         self,
@@ -178,7 +234,15 @@ class FleetSnapshotPersistenceService:
         player_id: int,
     ) -> bool:
         persisted = self.get_ledger(game_id, perspective, turn_number, player_id)
-        return persisted is not None and persisted.provenance.is_final
+        if persisted is None:
+            return False
+        return self.ledger_is_ensure_final(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            persisted,
+        )
 
     def delete_ledger(
         self,
@@ -187,7 +251,8 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         player_id: int,
     ) -> None:
-        self._delete_ledger_entry(game_id, perspective, turn_number, player_id)
+        self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
+        self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
 
     def list_ledger_player_ids(
         self,
@@ -195,16 +260,8 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         turn_number: int,
     ) -> list[int]:
-        document = self._load_document(game_id, perspective, turn_number)
-        if document is None:
-            return []
-        ledgers = self._ledgers_object(document)
-        player_ids: list[int] = []
-        for player_key in ledgers:
-            if not player_key.isdigit():
-                continue
-            player_ids.append(int(player_key))
-        return sorted(player_ids)
+        self._migrate_legacy_turn_document(game_id, perspective, turn_number)
+        return self._list_player_ids(game_id, perspective, turn_number)
 
     def get_snapshot(
         self,
@@ -212,17 +269,22 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         turn_number: int,
     ) -> FleetTurnSnapshot | None:
-        document = self._load_document(game_id, perspective, turn_number)
-        if document is None:
+        player_ids = self.list_ledger_player_ids(game_id, perspective, turn_number)
+        players = []
+        for player_id in player_ids:
+            persisted = self.get_ledger(game_id, perspective, turn_number, player_id)
+            if persisted is not None:
+                players.append(persisted.ledger)
+        if not players:
             return None
-        if not self._prune_stale_ledgers(game_id, perspective, turn_number, document):
-            return None
-        if not self._ledgers_object(document):
-            self.delete_snapshot(game_id, perspective, turn_number)
-            return None
-        snapshot = fleet_turn_snapshot_from_json(document)
-        snapshot.materialization_version = FLEET_MATERIALIZATION_VERSION
-        return snapshot
+        return FleetTurnSnapshot(
+            analytic_id=ANALYTIC_ID,
+            game_id=game_id,
+            perspective=perspective,
+            turn=turn_number,
+            materialization_version=FLEET_MATERIALIZATION_VERSION,
+            players=players,
+        )
 
     def has_snapshot(
         self,
@@ -230,14 +292,7 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         turn_number: int,
     ) -> bool:
-        """Return whether a usable fleet turn snapshot is stored for this scope.
-
-        Delegates to ``get_snapshot`` -- not a cheap key-exists probe. A call may
-        validate wire shape, upgrade legacy monolithic documents to the
-        ``ledgers/`` layout, prune stale per-player ledger entries, delete the
-        turn document when nothing usable remains, write storage, and bump
-        invalidation generation when stale data is removed.
-        """
+        """Return whether any usable fleet ledger is stored for this turn."""
         return self.get_snapshot(game_id, perspective, turn_number) is not None
 
     def put_snapshot(
@@ -261,44 +316,171 @@ class FleetSnapshotPersistenceService:
             raise ValidationError(
                 f"fleet snapshot turn {snapshot.turn} does not match key turn_number {turn_number}"
             )
-        self._write_document(
-            game_id,
-            perspective,
-            turn_number,
-            fleet_turn_snapshot_to_json(snapshot),
-        )
+        for player_ledger in snapshot.players:
+            self.put_ledger(
+                game_id,
+                perspective,
+                turn_number,
+                player_ledger.player_id,
+                PersistedFleetLedger(
+                    ledger=player_ledger,
+                    provenance=FleetMaterializationProvenance(),
+                    materialization_version=FLEET_MATERIALIZATION_VERSION,
+                ),
+            )
         self._notify_snapshot_persisted_legacy(game_id, perspective, turn_number)
 
-    def _prior_from_loaded_document(
+    def delete_snapshot(
         self,
-        document: dict[str, object],
-        player_id: int,
-    ) -> PersistedFleetLedger | None:
-        ledger_wire = self._ledger_wire_from_document(document, player_id)
-        if ledger_wire is None:
-            return None
-        return persisted_fleet_ledger_from_json(ledger_wire)
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> None:
+        for player_id in self._list_player_ids(game_id, perspective, turn_number):
+            self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
+            self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
+        self._delete_legacy_document(game_id, perspective, turn_number)
 
-    def _notify_ledger_persisted_if_needed(
+    def evidence_mark(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+    ) -> FleetEvidenceMark:
+        key = (game_id, perspective, player_id)
+        with self._generation_lock:
+            cached = self._evidence_marks.get(key)
+            if cached is not None:
+                return cached
+            loaded = self._read_evidence_mark(game_id, perspective, player_id)
+            raced = self._evidence_marks.get(key)
+            if raced is not None:
+                return raced
+            self._evidence_marks[key] = loaded
+            return loaded
+
+    def player_invalidation_generation(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+    ) -> int:
+        """Return the player-scoped epoch used by fleet compute and gap-fill."""
+        with self._generation_lock:
+            return self._invalidation_generation.get((game_id, perspective, player_id), 0)
+
+    def turn_invalidation_generation(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        turn: int,
+    ) -> int:
+        """Return the turn-scoped epoch that scores@N reads for prior fleet@(N-1)."""
+        with self._generation_lock:
+            return self._turn_invalidation_generation.get(
+                (game_id, perspective, player_id, turn),
+                0,
+            )
+
+    def invalidate_for_turn_write(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> set[int]:
+        """Drop fleet ledger files at turns >= turn_number for one perspective."""
+
+        cleared: set[int] = set()
+        cleared_player_ids: set[int] = set()
+        for stored_turn in self._iter_stored_turns_from(game_id, perspective, turn_number):
+            player_ids = self._player_ids_for_turn_replace(game_id, perspective, stored_turn)
+            if not player_ids:
+                continue
+            self.delete_snapshot(game_id, perspective, stored_turn)
+            cleared.add(stored_turn)
+            cleared_player_ids.update(player_ids)
+        for cleared_player_id in cleared_player_ids:
+            self.bump_player_and_turn_invalidations(
+                game_id,
+                perspective,
+                cleared_player_id,
+                cleared,
+            )
+        return cleared
+
+    def invalidate_player_ledgers_from_turn(
         self,
         game_id: int,
         perspective: int,
         turn_number: int,
         player_id: int,
         *,
-        prior: PersistedFleetLedger | None,
-        persisted: PersistedFleetLedger,
-    ) -> None:
-        notification = self._ledger_persisted_notification_if_needed(
+        durable: bool = False,
+    ) -> set[int]:
+        """Mark player P's fleet ledgers stale from ``turn_number`` without file walks.
+
+        Always bumps the in-memory epoch so in-flight fleet work for P aborts.
+        When ``durable`` is true, also bumps P's evidence mark. Ledger files stay
+        in place. The returned turns are the host turn plus turns this process
+        has already read or written at or after ``turn_number``, for stream wake.
+        """
+        if durable:
+            self._bump_durable_evidence_mark(
+                game_id,
+                perspective,
+                player_id,
+                turn_number,
+            )
+        turns = self._known_turns_from(game_id, perspective, player_id, turn_number)
+        self.bump_player_and_turn_invalidations(
             game_id,
             perspective,
-            turn_number,
             player_id,
-            prior=prior,
-            persisted=persisted,
+            turns,
         )
-        if notification is not None:
-            notification()
+        return turns
+
+    def bump_player_and_turn_invalidations(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        turns: Iterable[int],
+    ) -> None:
+        """Bump player epoch once and each turn epoch under a single lock."""
+        with self._generation_lock:
+            player_key = (game_id, perspective, player_id)
+            self._invalidation_generation[player_key] = (
+                self._invalidation_generation.get(player_key, 0) + 1
+            )
+            for turn in turns:
+                turn_key = (game_id, perspective, player_id, turn)
+                self._turn_invalidation_generation[turn_key] = (
+                    self._turn_invalidation_generation.get(turn_key, 0) + 1
+                )
+
+    def delete_evidence_mark(self, game_id: int, perspective: int, player_id: int) -> bool:
+        """Remove one player's evidence mark. Return whether a file was deleted."""
+        deleted = self._delete_if_present(
+            self.evidence_mark_key(game_id, perspective, player_id),
+        )
+        with self._generation_lock:
+            self._evidence_marks.pop((game_id, perspective, player_id), None)
+        return deleted
+
+    def delete_evidence_marks(self, game_id: int, perspective: int) -> list[str]:
+        """Remove every evidence mark for one perspective. Return deleted keys."""
+        prefix = f"games/{game_id}/{perspective}/analytics/{FLEET_EVIDENCE_MARK_SEGMENT}"
+        deleted: list[str] = []
+        for segment in self._list_segments(prefix):
+            if not segment.isdigit():
+                continue
+            player_id = int(segment)
+            key = self.evidence_mark_key(game_id, perspective, player_id)
+            if self.delete_evidence_mark(game_id, perspective, player_id):
+                deleted.append(key)
+        return deleted
 
     def _ledger_persisted_notification_if_needed(
         self,
@@ -308,6 +490,7 @@ class FleetSnapshotPersistenceService:
         player_id: int,
         *,
         prior: PersistedFleetLedger | None,
+        prior_was_ensure_final: bool,
         persisted: PersistedFleetLedger,
     ) -> DeferredNotification | None:
         callback = self._on_ledger_persisted
@@ -315,23 +498,21 @@ class FleetSnapshotPersistenceService:
             return None
         if not persisted.provenance.is_final:
             return None
-        if prior is None or not prior.provenance.is_final:
-            return lambda: self._dispatch_ledger_persisted(
-                game_id,
-                perspective,
-                turn_number,
-                player_id,
-                persisted=persisted,
-            )
-        if prior.materialization_version != persisted.materialization_version:
-            return lambda: self._dispatch_ledger_persisted(
-                game_id,
-                perspective,
-                turn_number,
-                player_id,
-                persisted=persisted,
-            )
-        return None
+        generation_changed = (
+            prior is not None and prior.evidence_generation != persisted.evidence_generation
+        )
+        version_changed = (
+            prior is not None and prior.materialization_version != persisted.materialization_version
+        )
+        if prior_was_ensure_final and not generation_changed and not version_changed:
+            return None
+        return lambda: self._dispatch_ledger_persisted(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            persisted=persisted,
+        )
 
     def _dispatch_ledger_persisted(
         self,
@@ -383,154 +564,153 @@ class FleetSnapshotPersistenceService:
     def on_ledger_persisted(self, callback: OnLedgerPersistedCallback | None) -> None:
         self._on_ledger_persisted = callback
 
-    def delete_snapshot(
+    def _bump_durable_evidence_mark(
         self,
         game_id: int,
         perspective: int,
+        player_id: int,
+        host_turn: int,
+    ) -> FleetEvidenceMark:
+        """Advance the mark. Do not move ``appliesFromTurn`` forward over a gap."""
+        with self._generation_lock:
+            current = self._evidence_marks.get((game_id, perspective, player_id))
+            if current is None:
+                current = self._read_evidence_mark(game_id, perspective, player_id)
+            applies_from = current.applies_from_turn
+            if applies_from is None or host_turn < applies_from:
+                applies_from = host_turn
+            updated = FleetEvidenceMark(
+                evidence_generation=current.evidence_generation + 1,
+                applies_from_turn=applies_from,
+            )
+            self._write_evidence_mark(game_id, perspective, player_id, updated)
+            self._evidence_marks[(game_id, perspective, player_id)] = updated
+            return updated
+
+    def _advance_evidence_mark_after_boundary_write(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
         turn_number: int,
+        evidence_generation: int,
     ) -> None:
-        try:
-            self._storage.delete(self.document_key(game_id, perspective, turn_number))
-        except NotFoundError:
-            pass
+        """After a final ledger at the bound, the next turn is the new bound.
 
-    def player_invalidation_generation(
+        The generation is unchanged. A crash before this write leaves the bound
+        on the turn just stored; that ledger still matches the generation, and
+        later turns do not.
+        """
+        with self._generation_lock:
+            key = (game_id, perspective, player_id)
+            current = self._evidence_marks.get(key)
+            if current is None:
+                current = self._read_evidence_mark(game_id, perspective, player_id)
+            if current.applies_from_turn != turn_number:
+                return
+            if current.evidence_generation != evidence_generation:
+                return
+            updated = FleetEvidenceMark(
+                evidence_generation=current.evidence_generation,
+                applies_from_turn=turn_number + 1,
+            )
+            self._write_evidence_mark(game_id, perspective, player_id, updated)
+            self._evidence_marks[key] = updated
+
+    def _read_evidence_mark(
         self,
         game_id: int,
         perspective: int,
         player_id: int,
-    ) -> int:
-        """Return the player-scoped epoch used by fleet compute and gap-fill."""
-        with self._generation_lock:
-            return self._invalidation_generation.get((game_id, perspective, player_id), 0)
+    ) -> FleetEvidenceMark:
+        data = self._read_json_object(self.evidence_mark_key(game_id, perspective, player_id))
+        if data is None:
+            return _ABSENT_EVIDENCE_MARK
+        return fleet_evidence_mark_from_json(data)
 
-    def turn_invalidation_generation(
+    def _write_evidence_mark(
         self,
         game_id: int,
         perspective: int,
         player_id: int,
-        turn: int,
-    ) -> int:
-        """Return the turn-scoped epoch that scores@N reads for prior fleet@(N-1)."""
-        with self._generation_lock:
-            return self._turn_invalidation_generation.get(
-                (game_id, perspective, player_id, turn),
-                0,
-            )
+        mark: FleetEvidenceMark,
+    ) -> None:
+        self._storage.put(
+            self.evidence_mark_key(game_id, perspective, player_id),
+            fleet_evidence_mark_to_json(mark),
+        )
 
-    def invalidate_for_turn_write(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-    ) -> set[int]:
-        """Drop fleet snapshots at turns >= turn_number for one perspective."""
-
-        cleared: set[int] = set()
-        cleared_player_ids: set[int] = set()
-        for stored_turn in self._iter_stored_turns_from(game_id, perspective, turn_number):
-            # Turn replace deletes whole documents; raw read avoids legacy upgrade side effects.
-            document = self._read_document_raw(game_id, perspective, stored_turn)
-            if document is None:
-                continue
-            player_ids = self._player_ids_in_document(document)
-            if not player_ids:
-                continue
-            self.delete_snapshot(game_id, perspective, stored_turn)
-            cleared.add(stored_turn)
-            cleared_player_ids.update(player_ids)
-        for cleared_player_id in cleared_player_ids:
-            self.bump_player_and_turn_invalidations(
-                game_id,
-                perspective,
-                cleared_player_id,
-                cleared,
-            )
-        return cleared
-
-    def invalidate_player_ledgers_from_turn(
+    def _read_player_ledger(
         self,
         game_id: int,
         perspective: int,
         turn_number: int,
         player_id: int,
-    ) -> set[int]:
-        """Drop one player's fleet ledgers at turns >= turn_number for one perspective."""
-
-        def invalidate_turn(stored_turn: int) -> bool:
-            # Per-player delete may upgrade legacy layout before removing one ledger entry.
-            document = self._load_document(game_id, perspective, stored_turn)
-            if document is None:
-                return False
-            ledgers = self._ledgers_object(document)
-            if str(player_id) not in ledgers:
-                return False
-            self._delete_ledger_entry(game_id, perspective, stored_turn, player_id)
-            return True
-
-        cleared: set[int] = set()
-        for stored_turn in self._iter_stored_turns_from(game_id, perspective, turn_number):
-            if invalidate_turn(stored_turn):
-                cleared.add(stored_turn)
-        if cleared:
+    ) -> PersistedFleetLedger | None:
+        data = self._read_json_object(
+            self.ledger_key(game_id, perspective, turn_number, player_id),
+        )
+        if data is None:
+            return None
+        persisted = persisted_fleet_ledger_from_json(data)
+        if not is_current_fleet_materialization_version(persisted.materialization_version):
+            self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
+            self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
             self.bump_player_and_turn_invalidations(
                 game_id,
                 perspective,
                 player_id,
-                cleared,
+                (turn_number,),
             )
-        return cleared
+            return None
+        self._remember_ledger_turn(game_id, perspective, player_id, turn_number)
+        return persisted
 
-    def bump_player_and_turn_invalidations(
+    def _write_player_ledger(
         self,
         game_id: int,
         perspective: int,
+        turn_number: int,
         player_id: int,
-        turns: Iterable[int],
+        persisted: PersistedFleetLedger,
     ) -> None:
-        """Bump player epoch once and each turn epoch under a single lock."""
-        with self._generation_lock:
-            player_key = (game_id, perspective, player_id)
-            self._invalidation_generation[player_key] = (
-                self._invalidation_generation.get(player_key, 0) + 1
-            )
-            for turn in turns:
-                turn_key = (game_id, perspective, player_id, turn)
-                self._turn_invalidation_generation[turn_key] = (
-                    self._turn_invalidation_generation.get(turn_key, 0) + 1
-                )
+        self._storage.put(
+            self.ledger_key(game_id, perspective, turn_number, player_id),
+            persisted_fleet_ledger_to_json(persisted),
+        )
 
-    def _read_document_raw(
+    def _unlink_player_ledger(
         self,
         game_id: int,
         perspective: int,
         turn_number: int,
-    ) -> dict[str, object] | None:
-        try:
-            data = self._storage.get(self.document_key(game_id, perspective, turn_number))
-        except NotFoundError:
-            return None
-        if data is None:
-            return None
-        if not isinstance(data, dict):
-            raise ValidationError("stored fleet turn snapshot must be a JSON object")
-        return data
+        player_id: int,
+    ) -> None:
+        self._delete_if_present(self.ledger_key(game_id, perspective, turn_number, player_id))
 
-    def _load_document(
+    def _migrate_legacy_turn_document(
         self,
         game_id: int,
         perspective: int,
         turn_number: int,
-    ) -> dict[str, object] | None:
-        data = self._read_document_raw(game_id, perspective, turn_number)
+    ) -> bool:
+        key = (game_id, perspective, turn_number)
+        if key in self._legacy_absent:
+            return False
+        data = self._read_json_object(self.document_key(game_id, perspective, turn_number))
         if data is None:
-            return None
+            self._legacy_absent.add(key)
+            return False
+        if not is_legacy_fleet_turn_document(data) and FLEET_LEDGERS_KEY not in data:
+            self._legacy_absent.add(key)
+            return False
         if is_legacy_fleet_turn_document(data):
             if not is_current_fleet_materialization_version(
                 fleet_materialization_version_from_json(data),
             ):
                 player_ids = self._player_ids_in_document(data)
-                self.delete_snapshot(game_id, perspective, turn_number)
+                self._delete_legacy_document(game_id, perspective, turn_number)
+                self._legacy_absent.add(key)
                 for document_player_id in player_ids:
                     self.bump_player_and_turn_invalidations(
                         game_id,
@@ -538,99 +718,34 @@ class FleetSnapshotPersistenceService:
                         document_player_id,
                         (turn_number,),
                     )
-                return None
-            upgraded = upgrade_legacy_fleet_turn_document(data)
-            self._write_document(game_id, perspective, turn_number, upgraded)
-            return upgraded
-        return data
-
-    def _load_or_create_document(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-    ) -> dict[str, object]:
-        document = self._load_document(game_id, perspective, turn_number)
-        if document is not None:
-            return document
-        return {
-            "analyticId": ANALYTIC_ID,
-            "gameId": game_id,
-            "perspective": perspective,
-            "turn": turn_number,
-            FLEET_LEDGERS_KEY: {},
-        }
-
-    def _write_document(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-        document: dict[str, object],
-    ) -> None:
-        self._storage.put(self.document_key(game_id, perspective, turn_number), document)
-
-    @staticmethod
-    def _ledgers_object(document: dict[str, object]) -> dict[str, object]:
-        ledgers = document.setdefault(FLEET_LEDGERS_KEY, {})
-        if not isinstance(ledgers, dict):
-            raise ValidationError("fleet turn snapshot ledgers must be an object")
-        return ledgers
-
-    def _ledger_wire_from_document(
-        self,
-        document: dict[str, object],
-        player_id: int,
-    ) -> dict[str, object] | None:
-        ledgers = self._ledgers_object(document)
-        ledger_wire = ledgers.get(str(player_id))
-        if ledger_wire is None:
-            return None
-        if not isinstance(ledger_wire, dict):
-            raise ValidationError("persisted fleet ledger must be an object")
-        return ledger_wire
-
-    def _delete_ledger_entry(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-        player_id: int,
-    ) -> None:
-        document = self._read_document_raw(game_id, perspective, turn_number)
-        if document is None:
-            return
-        ledgers = self._ledgers_object(document)
-        ledgers.pop(str(player_id), None)
-        if ledgers:
-            self._write_document(game_id, perspective, turn_number, document)
-            return
-        self.delete_snapshot(game_id, perspective, turn_number)
-
-    def _prune_stale_ledgers(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-        document: dict[str, object],
-    ) -> bool:
-        ledgers = self._ledgers_object(document)
+                return False
+            data = upgrade_legacy_fleet_turn_document(data)
+        ledgers = data.get(FLEET_LEDGERS_KEY, {})
+        wires: list[tuple[int, dict[str, object]]] = []
         stale_player_ids: list[int] = []
-        for player_key, ledger_wire in list(ledgers.items()):
-            if not player_key.isdigit() or not isinstance(ledger_wire, dict):
-                continue
-            version = fleet_materialization_version_from_json(ledger_wire)
-            if is_current_fleet_materialization_version(version):
-                continue
-            stale_player_ids.append(int(player_key))
-        if not stale_player_ids:
-            return True
-        for player_id in stale_player_ids:
-            ledgers.pop(str(player_id), None)
-        if ledgers:
-            self._write_document(game_id, perspective, turn_number, document)
-        else:
-            self.delete_snapshot(game_id, perspective, turn_number)
+        if isinstance(ledgers, dict):
+            for player_key, ledger_wire in ledgers.items():
+                if not player_key.isdigit() or not isinstance(ledger_wire, dict):
+                    continue
+                player_id = int(player_key)
+                if not is_current_fleet_materialization_version(
+                    fleet_materialization_version_from_json(ledger_wire),
+                ):
+                    stale_player_ids.append(player_id)
+                    continue
+                wire = dict(ledger_wire)
+                wire.setdefault("evidenceGeneration", 0)
+                wires.append((player_id, wire))
+        # Delete the shared document before writing player files so an in-memory
+        # tree does not store those files inside the legacy object.
+        self._delete_legacy_document(game_id, perspective, turn_number)
+        self._legacy_absent.add(key)
+        for player_id, wire in wires:
+            self._storage.put(
+                self.ledger_key(game_id, perspective, turn_number, player_id),
+                wire,
+            )
+            self._remember_ledger_turn(game_id, perspective, player_id, turn_number)
         for stale_player_id in stale_player_ids:
             self.bump_player_and_turn_invalidations(
                 game_id,
@@ -638,7 +753,103 @@ class FleetSnapshotPersistenceService:
                 stale_player_id,
                 (turn_number,),
             )
-        return False
+        return bool(wires)
+
+    def _delete_legacy_document(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> None:
+        self._delete_if_present(self.document_key(game_id, perspective, turn_number))
+        self._legacy_absent.add((game_id, perspective, turn_number))
+
+    def _player_ids_for_turn_replace(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> list[int]:
+        player_ids = self._list_player_ids(game_id, perspective, turn_number)
+        if player_ids:
+            return player_ids
+        data = self._read_json_object(self.document_key(game_id, perspective, turn_number))
+        if data is None:
+            return []
+        return self._player_ids_in_document(data)
+
+    def _list_player_ids(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+    ) -> list[int]:
+        prefix = self.document_key(game_id, perspective, turn_number)
+        player_ids: list[int] = []
+        for segment in self._list_segments(prefix):
+            if segment.isdigit():
+                player_ids.append(int(segment))
+        return sorted(player_ids)
+
+    def _list_segments(self, prefix: str) -> list[str]:
+        try:
+            return self._storage.list(prefix)
+        except NotFoundError, ValidationError:
+            return []
+
+    def _read_json_object(self, key: str) -> dict[str, object] | None:
+        try:
+            data = self._storage.get(key)
+        except NotFoundError:
+            return None
+        if data is None:
+            return None
+        if not isinstance(data, dict):
+            raise ValidationError(f"stored fleet document at {key} must be a JSON object")
+        return data
+
+    def _delete_if_present(self, key: str) -> bool:
+        try:
+            self._storage.delete(key)
+        except NotFoundError:
+            return False
+        return True
+
+    def _remember_ledger_turn(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        turn_number: int,
+    ) -> None:
+        with self._generation_lock:
+            turns = self._known_ledger_turns.setdefault((game_id, perspective, player_id), set())
+            turns.add(turn_number)
+
+    def _forget_ledger_turn(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        turn_number: int,
+    ) -> None:
+        with self._generation_lock:
+            turns = self._known_ledger_turns.get((game_id, perspective, player_id))
+            if turns is not None:
+                turns.discard(turn_number)
+
+    def _known_turns_from(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        turn_number: int,
+    ) -> set[int]:
+        with self._generation_lock:
+            known = self._known_ledger_turns.get((game_id, perspective, player_id), set())
+            turns = {stored for stored in known if stored >= turn_number}
+        turns.add(turn_number)
+        return turns
 
     @staticmethod
     def _player_ids_in_document(document: dict[str, object]) -> list[int]:
@@ -664,7 +875,7 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         turn_number: int,
     ) -> Iterator[int]:
-        """Yield stored fleet turn numbers at or after ``turn_number``."""
+        """Yield stored turn numbers at or after ``turn_number``."""
 
         for stored_turn in self._stored_turn_numbers(game_id, perspective):
             if stored_turn >= turn_number:
@@ -672,12 +883,8 @@ class FleetSnapshotPersistenceService:
 
     def _stored_turn_numbers(self, game_id: int, perspective: int) -> list[int]:
         turns_prefix = f"games/{game_id}/{perspective}/turns"
-        try:
-            segments = self._storage.list(turns_prefix)
-        except NotFoundError, ValidationError:
-            return []
         turn_numbers: list[int] = []
-        for segment in segments:
+        for segment in self._list_segments(turns_prefix):
             if segment.isdigit():
                 turn_numbers.append(int(segment))
         return sorted(turn_numbers)

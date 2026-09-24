@@ -4,6 +4,9 @@ ANALYTIC_ID = "fleet"
 
 FLEET_LEDGERS_KEY = "ledgers"
 
+# Perspective-scoped breakpoint segment for one player's fleet evidence mark.
+FLEET_EVIDENCE_MARK_SEGMENT = "fleet-evidence"
+
 # Persisted fleet turn snapshot materialization semantics. Bump conservatively when
 # materialization output would change for the same stored RST + scores inputs
 # (chain/gap-fill rules, inferred acquisition ingest, observation-inference merge,

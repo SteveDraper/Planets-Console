@@ -48,7 +48,7 @@ def compute_fleet(ctx: AnalyticComputeContext) -> dict:
         services.perspective,
         ctx.turn,
     )
-    return fleet_turn_snapshot_to_compute_wire(snapshot)
+    return fleet_turn_snapshot_to_compute_wire(snapshot, ctx.turn)
 
 
 def materialize_fleet(ctx: AnalyticComputeContext) -> dict:
@@ -67,7 +67,7 @@ def materialize_fleet(ctx: AnalyticComputeContext) -> dict:
         inference_materialization=services.inference_materialization,
         query_context=ctx.exports,
     )
-    return fleet_turn_snapshot_to_compute_wire(snapshot)
+    return fleet_turn_snapshot_to_compute_wire(snapshot, ctx.turn)
 
 
 def get_fleet(turn: TurnInfo) -> dict:

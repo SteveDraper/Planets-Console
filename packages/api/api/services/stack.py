@@ -70,6 +70,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
             session.perspective,
             session.turn_number,
             session.player_id,
+            durable=False,
         )
 
     inference_scheduler = create_inference_row_scheduler(

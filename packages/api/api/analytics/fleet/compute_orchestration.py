@@ -139,6 +139,13 @@ def build_fleet_materialization_leg_job_wire(
                 prior_scope.turn,
                 player_id,
             ),
+            is_ensure_final=lambda persisted: services.persistence.ledger_is_ensure_final(
+                scope.game_id,
+                scope.perspective,
+                prior_scope.turn,
+                player_id,
+                persisted,
+            ),
         )
 
     if prior_persisted is None:
@@ -153,9 +160,22 @@ def build_fleet_materialization_leg_job_wire(
         baseline_ledger_wire = fleet_acquisition_ledger_to_json(prior_persisted.ledger)
 
     turn_context = FleetTurnContext.from_turn(turn)
+    provenance_prior = prior_persisted
+    if (
+        prior_persisted is not None
+        and prior_scope is not None
+        and not services.persistence.ledger_is_ensure_final(
+            scope.game_id,
+            scope.perspective,
+            prior_scope.turn,
+            player_id,
+            prior_persisted,
+        )
+    ):
+        provenance_prior = None
     provenance = resolve_fleet_materialization_provenance(
         materialize_turn=scope.turn,
-        prior_persisted=prior_persisted,
+        prior_persisted=provenance_prior,
         turn_context=turn_context,
         player_id=player_id,
         game_id=scope.game_id,
@@ -240,7 +260,13 @@ class FleetPersistencePolicy:
             scope.turn,
             scope.player_id,
         )
-        if persisted is None or not persisted.provenance.is_final:
+        if persisted is None or not services.persistence.ledger_is_ensure_final(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+            persisted,
+        ):
             return None
         return {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)}
 
@@ -286,8 +312,7 @@ class FleetPersistencePolicy:
             ),
             materialization_version=persisted.materialization_version,
         )
-        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(persisted)
-        return services.persistence.put_ledger(
+        put_result = services.persistence.put_ledger(
             scope.game_id,
             scope.perspective,
             scope.turn,
@@ -295,6 +320,9 @@ class FleetPersistencePolicy:
             persisted,
             defer_ledger_persisted_notification=True,
         )
+        # Publish what put_ledger stamped (evidence generation + materialization version).
+        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
+        return put_result.deferred_notification
 
     def _persist_finalization(
         self,
@@ -346,7 +374,14 @@ class FleetPersistencePolicy:
                     prior_scope.turn,
                     scope.player_id,
                 )
-                prior_persisted = prior_ledger
+                if prior_ledger is not None and services.persistence.ledger_is_ensure_final(
+                    scope.game_id,
+                    scope.perspective,
+                    prior_scope.turn,
+                    scope.player_id,
+                    prior_ledger,
+                ):
+                    prior_persisted = prior_ledger
             provenance = resolve_fleet_materialization_provenance(
                 materialize_turn=scope.turn,
                 prior_persisted=prior_persisted,
@@ -403,16 +438,15 @@ class FleetPersistencePolicy:
             perspective=scope.perspective,
         )
 
-        # Stamp current materialization version and publish onto result_wire so
-        # stream listeners and DependencyOutputs match what put_ledger stores.
+        # Stamp current materialization version; put_ledger also stamps evidence
+        # generation. Publish the stored ledger so stream listeners and
+        # DependencyOutputs match the file.
         persisted = PersistedFleetLedger(
             ledger=persisted.ledger,
             provenance=persisted.provenance,
             materialization_version=FLEET_MATERIALIZATION_VERSION,
         )
-        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(persisted)
-
-        return services.persistence.put_ledger(
+        put_result = services.persistence.put_ledger(
             scope.game_id,
             scope.perspective,
             scope.turn,
@@ -420,6 +454,8 @@ class FleetPersistencePolicy:
             persisted,
             defer_ledger_persisted_notification=True,
         )
+        result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
+        return put_result.deferred_notification
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
         from api.analytics.fleet.compute_services import resolve_fleet_services
@@ -434,6 +470,7 @@ class FleetPersistencePolicy:
             scope.perspective,
             scope.turn,
             scope.player_id,
+            durable=True,
         )
 
     def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:

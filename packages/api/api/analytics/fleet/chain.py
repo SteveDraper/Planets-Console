@@ -249,6 +249,11 @@ def _find_chain_anchor_for_player(
     *,
     min_anchor_turn: int = 1,
 ) -> tuple[int, PersistedFleetLedger | None]:
+    """Nearest readable prior ledger (final or not).
+
+    Display/initial-wire may show a non-final file. Multi-turn materialize must
+    not use this: drive from ``_find_player_gap_fill_anchor`` instead.
+    """
     for prior_turn_number in range(turn_number - 1, min_anchor_turn - 1, -1):
         prior_ledger = persistence.get_ledger(
             game_id,
@@ -315,22 +320,40 @@ def _find_gap_start_turn(
     return target_turn + 1
 
 
-def _find_gap_start_turn_for_player(
+def _find_player_gap_fill_anchor(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
     perspective: int,
     player_id: int,
     target_turn: int,
     load_turn: Callable[[int], TurnInfo | None],
-) -> int:
-    """Return the first turn in ``floor..target_turn`` lacking ensure-final ledger for P."""
+) -> tuple[int, int, PersistedFleetLedger | None]:
+    """Return gap start and last ensure-final prior from one forward walk.
+
+    Walks ``floor..target_turn``. Skips turns with no stored RST (they are not
+    anchors). For each stored turn, loads the ledger once. The first turn that
+    is not ensure-final is the gap start; the prior is the last ensure-final
+    ledger accepted before that gap.
+    """
     chain_floor = _chain_floor(load_turn, target_turn)
+    prior_turn = 0
+    prior_persisted: PersistedFleetLedger | None = None
     for turn_number in range(chain_floor, target_turn + 1):
         if load_turn(turn_number) is None:
             continue
-        if not persistence.has_final_ledger(game_id, perspective, turn_number, player_id):
-            return turn_number
-    return target_turn + 1
+        persisted = persistence.get_ledger(game_id, perspective, turn_number, player_id)
+        if persisted is not None and persistence.ledger_is_ensure_final(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            persisted,
+        ):
+            prior_turn = turn_number
+            prior_persisted = persisted
+            continue
+        return turn_number, prior_turn, prior_persisted
+    return target_turn + 1, prior_turn, prior_persisted
 
 
 def _snapshot_has_all_roster_players(snapshot: FleetTurnSnapshot, turn: TurnInfo) -> bool:
@@ -351,11 +374,6 @@ def _snapshot_is_provenance_final_for_all_roster_players(
         if not persistence.has_final_ledger(game_id, perspective, turn_number, player_id):
             return False
     return True
-
-
-def _is_fleet_ledger_cache_hit(persisted: PersistedFleetLedger) -> bool:
-    """Return whether a cached per-player ledger may short-circuit gap-fill."""
-    return persisted.provenance.is_final
 
 
 def _is_fleet_snapshot_cache_hit(
@@ -446,7 +464,13 @@ def _materialize_fleet_ledger_chain_for_player(
     turn_number = turn.settings.turn
 
     existing = persistence.get_ledger(game_id, perspective, turn_number, player_id)
-    if existing is not None and _is_fleet_ledger_cache_hit(existing):
+    if existing is not None and persistence.ledger_is_ensure_final(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+        existing,
+    ):
         return existing
 
     loaded_turns: dict[int, TurnInfo | None] = {}
@@ -495,13 +519,15 @@ def _materialize_fleet_ledger_chain_for_player(
                 f"for game {game_id} perspective {perspective}"
             )
 
-    anchor_turn, anchor_persisted = _find_chain_anchor_for_player(
+    # Rewrite from the first non-ensure-final turn. A generation-stale file may
+    # still be readable with provenance (true, true); it must not anchor the chain.
+    gap_start, anchor_turn, anchor_persisted = _find_player_gap_fill_anchor(
         persistence,
         game_id,
         perspective,
         player_id,
         turn_number,
-        min_anchor_turn=chain_floor,
+        cached_load,
     )
     first_stored_rst = _first_stored_rst_turn(
         cached_load,
@@ -509,7 +535,7 @@ def _materialize_fleet_ledger_chain_for_player(
         min_turn=chain_floor,
     )
     skip_missing_prefix_rst = False
-    start_turn = anchor_turn + 1 if anchor_turn >= chain_floor else chain_floor
+    start_turn = gap_start if anchor_turn >= chain_floor else chain_floor
     current_ledger = anchor_persisted.ledger if anchor_persisted is not None else None
     current_persisted = anchor_persisted
 
@@ -681,7 +707,13 @@ def _resolve_leaf_prior_for_player(
         )
     prior_turn = turn_number - 1
     prior = persistence.get_ledger(game_id, perspective, prior_turn, player_id)
-    if prior is None or not prior.provenance.is_final:
+    if prior is None or not persistence.ledger_is_ensure_final(
+        game_id,
+        perspective,
+        prior_turn,
+        player_id,
+        prior,
+    ):
         raise ConflictError(
             f"fleet leaf materialize for game {game_id} perspective {perspective} "
             f"player {player_id} turn {turn_number} requires a final prior ledger "
@@ -715,7 +747,13 @@ def get_or_materialize_fleet_ledger_for_player(
 
     turn_number = turn.settings.turn
     cached = persistence.get_ledger(game_id, perspective, turn_number, player_id)
-    if cached is not None and _is_fleet_ledger_cache_hit(cached):
+    if cached is not None and persistence.ledger_is_ensure_final(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+        cached,
+    ):
         return cached
 
     prior_persisted, prior_ledger = _resolve_leaf_prior_for_player(

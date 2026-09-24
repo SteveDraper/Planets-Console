@@ -211,23 +211,23 @@ When observation-inference match (#120) leaves more **active** rows in a ship cl
 
 ## 5. Persistence
 
-**Fleet ledger persistence** (per **Player**) at turn scope. Logical document:
+**Fleet ledger persistence** (per **Player**) at turn scope. One file per player:
 
-`games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`
+`games/{gameId}/{perspective}/turns/{turn}/analytics/fleet/{playerId}`
 
-In-document keys: `ledgers/{playerId}` -- each entry is one **fleet acquisition ledger** plus **fleet materialization provenance** and `materializationVersion`. See [ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
+Each file is that player's **fleet acquisition ledger**, **fleet materialization provenance**, `materializationVersion`, and **fleet evidence generation**. See [ADR 0004](adr/0004-fleet-per-player-persistence-and-ensure-provenance.md).
 
 | Rule | Detail |
 |------|--------|
 | **Grain** | One ledger per `player_id` per turn; not one monolithic all-players blob for ensure semantics |
 | **Chain** | Materialize turn `T` for player P from P's ledger at `T-1` + evidence on turn `T` for P only |
 | **Baseline** | Turn 1: empty ledger or sightings-only seed per **Player** |
-| **Provenance** | Per ledger: `(turnEvidenceAtN, priorLedgerAtNMinus1)`. Both `true` --> persisted ledger is **final** for ensure/probe. Either `false` --> scope needs further ensure work |
+| **Provenance** | Per ledger: `(turnEvidenceAtN, priorLedgerAtNMinus1)`. Both `true`, plus current materialization version and a matching **fleet evidence generation** (or a turn before the mark's `appliesFromTurn`) --> persisted ledger is **final** for ensure/probe. Otherwise the scope needs further ensure work. A non-final file stays readable |
 | **Events** | Copied forward per player; new events appended; corrections add events at `T` without erasing `T-1` |
-| **Invalidation** | Turn document replace at `T`: drop all fleet ledgers at turns `>= T` at that **perspective**. Scores inference evidence update for player P at host *H*: drop P's ledgers at fleet turns `>= H` |
-| **Materialization version** | Per ledger entry. Bump conservatively when materialization semantics change. Stale version --> treat as cache miss for that player |
-| **Invalidation generation** | Per `(gameId, perspective)` counter bumped on fleet invalidation; gap-fill aborts mid-chain when generation advances (see section 5.1) |
-| **Migration** | Legacy monolithic snapshot (all players at document root) upgraded on read to `ledgers/{playerId}` keys |
+| **Invalidation** | Turn document replace at `T`: delete fleet ledger files at turns `>= T` at that **perspective**. Durable scores evidence for player P at host *H*: bump P's evidence mark only. Held-solution admission bumps the in-memory epoch only and does not touch ledger files |
+| **Materialization version** | Per ledger file. Bump conservatively when materialization semantics change. Stale version --> delete that player's file and treat as a cache miss |
+| **Invalidation generation** | In-memory per `(gameId, perspective, playerId)` counter bumped on fleet invalidation; gap-fill aborts mid-chain when it advances (see section 5.1). Durable **fleet evidence generation** is a separate per-player mark |
+| **Migration** | Legacy monolithic snapshot, then the shared turn document, split on read into `fleet/{playerId}` files |
 | **Shared turn context** | Global id-bound inputs from RST scoreboard totals are read once per turn; not stored as a cross-player mutable ledger |
 
 ### 5.1 Gap-fill scope, concurrency, and `ConflictError`

@@ -242,6 +242,125 @@ def test_persist_writes_refined_option_sets_onto_result_wire(sample_turn):
     assert persisted_fleet_ledger_to_json(stored) == result_wire["persistedLedgerWire"]
 
 
+def test_persist_publishes_non_zero_evidence_generation_on_result_wire(sample_turn):
+    """In-run persistedLedgerWire must carry the generation put_ledger stamped (#531)."""
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0)
+    turn, player_id = _turn_with_warship_delta(sample_turn, shipchange=2, turn_number=20)
+    game_perspective = perspective(turn)
+    schedule_row_with_ladder(
+        scheduler,
+        turn,
+        player_id,
+        merged_solutions=[
+            inference_solution(
+                objective_value=90,
+                ship_builds=(
+                    ship_build_domain(
+                        combo_id="combo-a",
+                        label="Cruiser A",
+                        hull_id=13,
+                        engine_id=9,
+                    ),
+                    ship_build_domain(
+                        combo_id="combo-a",
+                        label="Cruiser A",
+                        hull_id=13,
+                        engine_id=9,
+                        count=1,
+                    ),
+                ),
+            ),
+        ],
+    )
+    inference = _inference_support(scheduler)
+    _close_scores_turn_evidence(
+        inference,
+        turn,
+        player_id,
+        game_perspective=game_perspective,
+        solutions=[
+            {
+                "objectiveValue": 90,
+                "actions": [],
+                "shipBuilds": [
+                    ship_build_wire(
+                        combo_id="combo-a",
+                        label="Cruiser A",
+                        hull_id=13,
+                        engine_id=9,
+                    ),
+                    ship_build_wire(
+                        combo_id="combo-a",
+                        label="Cruiser A",
+                        hull_id=13,
+                        engine_id=9,
+                        count=1,
+                    ),
+                ],
+            }
+        ],
+    )
+    fleet_services = build_ephemeral_fleet_compute_services(
+        turn,
+        game_id=628580,
+        perspective=game_perspective,
+        stored_turns={turn.settings.turn: turn},
+        inference=inference,
+    )
+    # Durable scores invalidation bumps the mark without rewriting ledger files.
+    fleet_services.persistence.invalidate_player_ledgers_from_turn(
+        628580,
+        game_perspective,
+        turn.settings.turn,
+        player_id,
+        durable=True,
+    )
+    mark = fleet_services.persistence.evidence_mark(628580, game_perspective, player_id)
+    assert mark.evidence_generation > 0
+
+    ctx = make_analytic_query_context(
+        turn,
+        TurnAnalyticsOptions(),
+        load_turn=fleet_services.load_turn,
+        export_services={
+            _FLEET_ANALYTIC_ID: fleet_services,
+            SCORES_ANALYTIC_ID: ScoresExportContext(),
+        },
+        game_id=fleet_services.game_id,
+        perspective=fleet_services.perspective,
+    )
+    phase1 = _phase1_persisted_with_placeholders(
+        turn, player_id=player_id, game_perspective=game_perspective
+    )
+    result_wire = {
+        "persistedLedgerWire": persisted_fleet_ledger_to_json(phase1),
+        "materializeTurn": turn.settings.turn,
+    }
+    scope = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=game_perspective,
+        turn=turn.settings.turn,
+        player_id=player_id,
+    )
+
+    notification = FleetPersistencePolicy().persist(ctx, scope, result_wire)
+    if notification is not None:
+        notification()
+
+    published = result_wire["persistedLedgerWire"]
+    assert isinstance(published, dict)
+    assert published["evidenceGeneration"] == mark.evidence_generation
+
+    stored = fleet_services.persistence.get_ledger(
+        628580, game_perspective, turn.settings.turn, player_id
+    )
+    assert stored is not None
+    assert stored.evidence_generation == mark.evidence_generation
+    assert persisted_fleet_ledger_to_json(stored) == published
+
+
 def test_next_leg_prior_from_dependency_outputs_keeps_refined_option_sets(sample_turn):
     """Same-run chaining: prior DependencyOutputs wire must carry option sets (#220)."""
     reset_inference_row_scheduler_for_tests()
