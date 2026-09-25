@@ -284,6 +284,7 @@ def collect_near_best_structural_hits(
         advance = base_clip.next_solve(
             effort_spent=effort_spent,
             elapsed_seconds=time.monotonic() - started_at,
+            solve_wall_seconds=solve_wall_seconds,
         )
         if advance.clip is None:
             if advance.hang_fuse:

@@ -651,12 +651,26 @@ def test_solve_clip_owns_remaining_allowance_and_stop() -> None:
     from ortools.sat.python import cp_model
 
     effort = EffortSolveClip(max_deterministic_time=10.0, hang_fuse_remaining=2.0)
-    advanced = effort.next_solve(effort_spent=4.0, elapsed_seconds=99.0)
+    # Inter-solve Python time does not spend the fuse; Solve-only wall does.
+    advanced = effort.next_solve(
+        effort_spent=4.0, elapsed_seconds=99.0, solve_wall_seconds=0.0
+    )
     assert advanced.clip == EffortSolveClip(max_deterministic_time=6.0, hang_fuse_remaining=2.0)
+    reduced_fuse = effort.next_solve(
+        effort_spent=4.0, elapsed_seconds=99.0, solve_wall_seconds=0.75
+    )
+    assert reduced_fuse.clip == EffortSolveClip(
+        max_deterministic_time=6.0, hang_fuse_remaining=1.25
+    )
     assert effort.next_solve(effort_spent=10.0, elapsed_seconds=0.0).time_limited
     assert effort.next_solve(effort_spent=10.0, elapsed_seconds=0.0).clip is None
     fused = EffortSolveClip(max_deterministic_time=10.0, hang_fuse_remaining=0.0)
     assert fused.next_solve(effort_spent=1.0, elapsed_seconds=0.0).hang_fuse
+    fuse_spent = effort.next_solve(
+        effort_spent=4.0, elapsed_seconds=0.0, solve_wall_seconds=2.0
+    )
+    assert fuse_spent.hang_fuse
+    assert fuse_spent.clip is None
 
     short = effort.after_solve(
         solver_status=cp_model.UNKNOWN,
@@ -676,6 +690,16 @@ def test_solve_clip_owns_remaining_allowance_and_stop() -> None:
     )
     assert fuse_hit.hang_fuse
     assert not fuse_hit.time_limited
+    # Fuse wins when the same Solve also exhausts the effort clip.
+    fuse_and_effort = effort.after_solve(
+        solver_status=cp_model.UNKNOWN,
+        effort_spent=10.0,
+        solve_wall_seconds=2.0,
+        elapsed_seconds=2.0,
+        has_structural_hits=True,
+    )
+    assert fuse_and_effort.hang_fuse
+    assert not fuse_and_effort.time_limited
     kept = effort.after_solve(
         solver_status=cp_model.FEASIBLE,
         effort_spent=10.0,
@@ -690,6 +714,10 @@ def test_solve_clip_owns_remaining_allowance_and_stop() -> None:
     assert wall.problem_time_limit_seconds() == 5.0
     assert effort.problem_time_limit_seconds() == 0.0
     assert wall.next_solve(effort_spent=0.0, elapsed_seconds=5.0).time_limited
+    # Wall clip ignores effort and Solve-only wall; only elapsed_seconds matters.
+    assert not wall.next_solve(
+        effort_spent=99.0, elapsed_seconds=1.0, solve_wall_seconds=99.0
+    ).time_limited
     wall_hit = wall.after_solve(
         solver_status=cp_model.FEASIBLE,
         effort_spent=0.0,

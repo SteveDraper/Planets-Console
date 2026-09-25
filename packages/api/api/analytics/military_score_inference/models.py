@@ -75,22 +75,31 @@ class EffortSolveClip:
         if self.hang_fuse_remaining is not None:
             solver.parameters.max_time_in_seconds = max(0.0, self.hang_fuse_remaining)
 
-    def next_solve(self, *, effort_spent: float, elapsed_seconds: float) -> NextSolveClip:
+    def next_solve(
+        self,
+        *,
+        effort_spent: float,
+        elapsed_seconds: float,
+        solve_wall_seconds: float = 0.0,
+    ) -> NextSolveClip:
         """Remaining effort clip, or a stop when effort or the fuse is already gone.
 
-        ``elapsed_seconds`` is unused. The fuse checked here is the clip's own
-        remaining wall, not search time accumulated inside the loop.
+        ``elapsed_seconds`` is unused. Fuse remainder is this clip's hang fuse
+        minus Solve-only wall already spent (not inter-solve Python time).
         """
         del elapsed_seconds
+        remaining_fuse: float | None = None
+        if self.hang_fuse_remaining is not None:
+            remaining_fuse = self.hang_fuse_remaining - solve_wall_seconds
+            if remaining_fuse <= 0:
+                return NextSolveClip(clip=None, hang_fuse=True)
         remaining_effort = self.max_deterministic_time - effort_spent
         if remaining_effort <= 0:
             return NextSolveClip(clip=None, time_limited=True)
-        if self.hang_fuse_remaining is not None and self.hang_fuse_remaining <= 0:
-            return NextSolveClip(clip=None, hang_fuse=True)
         return NextSolveClip(
             clip=EffortSolveClip(
                 max_deterministic_time=remaining_effort,
-                hang_fuse_remaining=self.hang_fuse_remaining,
+                hang_fuse_remaining=remaining_fuse,
             )
         )
 
@@ -105,16 +114,17 @@ class EffortSolveClip:
     ) -> SolveClipDecision:
         """Read effort exhaustion, hang fuse, or UNKNOWN-with-hits.
 
-        A fuse hit wins over effort exhaustion. UNKNOWN plus hits is exhaustion
-        even when ``deterministic_time()`` is short of this clip. Numeric
-        exhaustion on a successful status does not by itself end the search;
-        the loop records that hit and stops on the next ``next_solve``.
+        A fuse hit wins over effort exhaustion (including when both trip).
+        UNKNOWN plus hits is exhaustion even when ``deterministic_time()`` is
+        short of this clip and the fuse has not hit. Numeric exhaustion on a
+        successful status does not by itself end the search; the loop records
+        that hit and stops on the next ``next_solve``.
         """
         del elapsed_seconds
         cp_model = _cp_solver_status()
-        if self.hang_fuse_remaining is not None and (
-            solve_wall_seconds >= self.hang_fuse_remaining
-            and effort_spent + _DETERMINISTIC_TIME_SLACK < self.max_deterministic_time
+        if (
+            self.hang_fuse_remaining is not None
+            and solve_wall_seconds >= self.hang_fuse_remaining
         ):
             return SolveClipDecision(hang_fuse=True)
         time_limited = effort_spent + _DETERMINISTIC_TIME_SLACK >= self.max_deterministic_time
@@ -138,9 +148,15 @@ class WallSolveClip:
     def apply_to_solver(self, solver: cp_model.CpSolver) -> None:
         solver.parameters.max_time_in_seconds = max(0.0, self.max_time_in_seconds)
 
-    def next_solve(self, *, effort_spent: float, elapsed_seconds: float) -> NextSolveClip:
+    def next_solve(
+        self,
+        *,
+        effort_spent: float,
+        elapsed_seconds: float,
+        solve_wall_seconds: float = 0.0,
+    ) -> NextSolveClip:
         """Remaining wall clip, or a stop when the slice clock is spent."""
-        del effort_spent
+        del effort_spent, solve_wall_seconds
         remaining_seconds = self.max_time_in_seconds - elapsed_seconds
         if remaining_seconds <= 0:
             return NextSolveClip(clip=None, time_limited=True)
