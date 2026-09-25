@@ -652,9 +652,7 @@ def test_solve_clip_owns_remaining_allowance_and_stop() -> None:
 
     effort = EffortSolveClip(max_deterministic_time=10.0, hang_fuse_remaining=2.0)
     # Inter-solve Python time does not spend the fuse; Solve-only wall does.
-    advanced = effort.next_solve(
-        effort_spent=4.0, elapsed_seconds=99.0, solve_wall_seconds=0.0
-    )
+    advanced = effort.next_solve(effort_spent=4.0, elapsed_seconds=99.0, solve_wall_seconds=0.0)
     assert advanced.clip == EffortSolveClip(max_deterministic_time=6.0, hang_fuse_remaining=2.0)
     reduced_fuse = effort.next_solve(
         effort_spent=4.0, elapsed_seconds=99.0, solve_wall_seconds=0.75
@@ -666,9 +664,7 @@ def test_solve_clip_owns_remaining_allowance_and_stop() -> None:
     assert effort.next_solve(effort_spent=10.0, elapsed_seconds=0.0).clip is None
     fused = EffortSolveClip(max_deterministic_time=10.0, hang_fuse_remaining=0.0)
     assert fused.next_solve(effort_spent=1.0, elapsed_seconds=0.0).hang_fuse
-    fuse_spent = effort.next_solve(
-        effort_spent=4.0, elapsed_seconds=0.0, solve_wall_seconds=2.0
-    )
+    fuse_spent = effort.next_solve(effort_spent=4.0, elapsed_seconds=0.0, solve_wall_seconds=2.0)
     assert fuse_spent.hang_fuse
     assert fuse_spent.clip is None
 

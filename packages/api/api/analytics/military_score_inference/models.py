@@ -122,10 +122,7 @@ class EffortSolveClip:
         """
         del elapsed_seconds
         cp_model = _cp_solver_status()
-        if (
-            self.hang_fuse_remaining is not None
-            and solve_wall_seconds >= self.hang_fuse_remaining
-        ):
+        if self.hang_fuse_remaining is not None and solve_wall_seconds >= self.hang_fuse_remaining:
             return SolveClipDecision(hang_fuse=True)
         time_limited = effort_spent + _DETERMINISTIC_TIME_SLACK >= self.max_deterministic_time
         if solver_status == cp_model.UNKNOWN and has_structural_hits:
