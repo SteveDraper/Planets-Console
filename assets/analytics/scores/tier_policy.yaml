@@ -16,8 +16,10 @@
 # Per-step minEffort / maxEffort: reserved soft-global inference search effort
 # (see design §8.5.3 and ADR 0032). maxEffort is the p90 deterministic time
 # that tier spent under the old wall budgets, 8 workers, game 683364 turn 27
-# (2026-09-25). Skipped finishes are excluded. A p90 of zero stays zero.
-# minEffort keeps the previous min/max ratio on the two tiers that have a floor.
+# (2026-09-25). Skipped finishes are excluded. A measured p90 of zero is
+# replaced by 0.466, the measured p90 of the other maxSeconds-5 tier
+# (modest_planet_defense). minEffort keeps the previous min/max ratio on the
+# two tiers that have a floor.
 fleetInferenceTuning:
   torpMisalignmentLogPenalty: 200
   optionSetMassThreshold: 0.25
@@ -188,7 +190,7 @@ steps:
     allowShipOnlyExactEarlyStop: false
     hullCollisionTwinWiden: true
     minEffort: 0
-    maxEffort: 0
+    maxEffort: 0.466
 
   - id: widen_hulls
     filters:
@@ -275,7 +277,7 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
     minEffort: 0
-    maxEffort: 0
+    maxEffort: 0.466
 
   - id: admit_starbase_defense_posts
     filters:
