@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import threading
 import time
 from enum import Enum
 
@@ -31,6 +34,20 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
 )
 from api.analytics.military_score_inference.tier_policy import InferenceTierPolicyStep
 from api.models.game import TurnInfo
+
+_EFFORT_LOG_ENV = "MILITARY_SCORE_INFERENCE_EFFORT_LOG"
+_effort_log_lock = threading.Lock()
+
+
+def _append_effort_log(record: dict[str, object]) -> None:
+    """Append one tier-step effort line when the measurement log is configured."""
+    path = os.environ.get(_EFFORT_LOG_ENV)
+    if not path:
+        return
+    line = json.dumps(record, separators=(",", ":")) + "\n"
+    with _effort_log_lock:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line)
 
 
 class TierStepFinishMode(Enum):
@@ -125,6 +142,7 @@ def finish_tier_step(
     new_exact_before_step: int | None = None,
 ) -> None:
     """Append tier diagnostics, then advance / early-stop per ``finish_mode``."""
+    duration_ms = (time.monotonic() - step_started_at) * 1000.0
     state.step_diagnostics.append(
         _policy_step_diagnostics(
             policy_step=policy_step,
@@ -135,7 +153,7 @@ def finish_tier_step(
             seed_count=seed_count,
             band_residual_2x=band_residual_2x,
             emission_fields=tier_emission_fields(
-                duration_ms=(time.monotonic() - step_started_at) * 1000.0,
+                duration_ms=duration_ms,
                 held_count_before=held_count_before,
                 held_count_after=len(state.merged_solutions),
                 newly_admitted=newly_admitted,
@@ -149,6 +167,21 @@ def finish_tier_step(
             collision_widen=collision_widen,
             prior_fleet_tech_raise=prior_fleet_tech_raise,
         )
+    )
+    _append_effort_log(
+        {
+            "playerId": observation.player_id,
+            "turn": observation.turn,
+            "stepIndex": policy_step_index,
+            "stepId": policy_step.id,
+            "durationMs": round(duration_ms, 3),
+            "tierAllowanceEffort": tier_allowance_effort,
+            "spendableEffort": spendable_effort,
+            "searchEffortSpent": round(state.search_effort_spent, 6),
+            "skipped": skipped,
+            "timeLimited": state.time_limited,
+            "finishMode": finish_mode.value,
+        }
     )
     if finish_mode is TierStepFinishMode.DIAGNOSTICS_ONLY:
         return

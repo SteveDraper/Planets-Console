@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from unittest.mock import MagicMock
 
@@ -656,3 +657,15 @@ def test_effort_probe_clip_does_not_feed_wall_seconds() -> None:
     clip.apply_to_solver(solver)
     assert solver.parameters.max_deterministic_time == 0.25
     assert solver.parameters.max_time_in_seconds == 100.0
+
+
+def test_effort_log_appends_one_json_line_when_configured(tmp_path, monkeypatch) -> None:
+    from api.analytics.military_score_inference.policy_ladder_tier_finish import (
+        _append_effort_log,
+    )
+
+    path = tmp_path / "effort-steps.jsonl"
+    monkeypatch.setenv("MILITARY_SCORE_INFERENCE_EFFORT_LOG", str(path))
+    _append_effort_log({"stepIndex": 6, "searchEffortSpent": 1.25, "durationMs": 40.0})
+    line = json.loads(path.read_text(encoding="utf-8"))
+    assert line == {"stepIndex": 6, "searchEffortSpent": 1.25, "durationMs": 40.0}
