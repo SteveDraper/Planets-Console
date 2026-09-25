@@ -95,10 +95,10 @@ def test_policy_loader_validates_final_alpha_zero():
     torps = next(step for step in steps if step.id == "admit_ship_torpedoes")
     assert torps.run_degrade_aggregate_probe is True
     assert sum(1 for step in steps if step.run_degrade_aggregate_probe) == 1
-    assert torps.min_effort == 9.891
-    assert torps.max_effort == 28.153
+    assert torps.min_effort == 0.351
+    assert torps.max_effort == 1.0
     full = next(step for step in steps if step.id == "full_components")
-    assert full.max_effort == 17.399
+    assert full.max_effort == 0.0
 
 
 def test_policy_loader_reads_aggregate_probability_bins():

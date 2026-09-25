@@ -14,10 +14,10 @@
 # Order: ship bands first, then high-prior aggregates (belief torps, modest planet
 # defense), then full-catalog ship polish (capped), then heavier aggregates / escape.
 # Per-step minEffort / maxEffort: reserved soft-global inference search effort
-# (see design §8.5.3 and ADR 0032). Products of exhausted-slice deterministic
-# time on the dev host, 2026-09-24, num_workers=1 (not 1 wall second = 1 effort):
-# 1s -> 2.981, 3s -> 9.891, 5s -> 17.399, 8s -> 28.153. Ratio was not stable
-# across those lengths, so each length uses its own sample.
+# (see design §8.5.3 and ADR 0032). maxEffort is the p90 deterministic time
+# that tier spent under the old wall budgets, 8 workers, game 683364 turn 27
+# (2026-09-25). Skipped finishes are excluded. A p90 of zero stays zero.
+# minEffort keeps the previous min/max ratio on the two tiers that have a floor.
 fleetInferenceTuning:
   torpMisalignmentLogPenalty: 200
   optionSetMassThreshold: 0.25
@@ -139,7 +139,7 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: false
     minEffort: 0
-    maxEffort: 28.153
+    maxEffort: 0.339
 
   - id: widen_launchers
     filters:
@@ -161,7 +161,7 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: false
     minEffort: 0
-    maxEffort: 28.153
+    maxEffort: 0.847
 
   # After widen_launchers so twin combos that need launcher tech >5 (e.g. Gamma on
   # Resolute) are expressible. Hull admission is runtime-conditional via twin asset
@@ -188,7 +188,7 @@ steps:
     allowShipOnlyExactEarlyStop: false
     hullCollisionTwinWiden: true
     minEffort: 0
-    maxEffort: 17.399
+    maxEffort: 0
 
   - id: widen_hulls
     filters:
@@ -209,7 +209,7 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: false
     minEffort: 0
-    maxEffort: 28.153
+    maxEffort: 0.576
 
   # High-prior belief torps before full-catalog ship polish. Open full beam/launcher
   # eligibility (``all``) so activetorps / activebeams intersection applies.
@@ -231,8 +231,8 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: false
     runDegradeAggregateProbe: true
-    minEffort: 9.891
-    maxEffort: 28.153
+    minEffort: 0.351
+    maxEffort: 1.000
 
   - id: modest_planet_defense
     filters:
@@ -252,8 +252,8 @@ steps:
     alpha: 50
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: false
-    minEffort: 2.981
-    maxEffort: 17.399
+    minEffort: 0.080
+    maxEffort: 0.466
 
   # Full-catalog ship polish retread; retain prior aggregates (monotonic allowlist).
   - id: full_components
@@ -275,7 +275,7 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
     minEffort: 0
-    maxEffort: 17.399
+    maxEffort: 0
 
   - id: admit_starbase_defense_posts
     filters:
@@ -300,7 +300,7 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
     minEffort: 0
-    maxEffort: 28.153
+    maxEffort: 0.026
 
   - id: torp_escape_tier
     filters:
@@ -325,7 +325,7 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
     minEffort: 0
-    maxEffort: 28.153
+    maxEffort: 0.119
 
   - id: full_catalog_exact
     filters:
@@ -350,4 +350,4 @@ steps:
     maxSeeds: 5
     allowShipOnlyExactEarlyStop: true
     minEffort: 0
-    maxEffort: 28.153
+    maxEffort: 0.238

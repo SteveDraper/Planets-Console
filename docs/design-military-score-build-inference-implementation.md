@@ -609,16 +609,16 @@ Tunable constants in YAML; high-prior aggregates run before noisy full-catalog s
 
 | Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` | Early-stop? | Effort envelope |
 |------|------------------|---------------------------------------|---------|-------------|-----------------|
-| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no | max 28.153 |
-| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no | max 28.153 |
-| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | no | max 17.399 |
-| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | no | max 28.153 |
-| 4 `admit_ship_torpedoes` | Full components + partial slots | belief `ship_torps_per_type` ≤40 | 30 | no | min 9.891 / max 28.153 |
-| 5 `modest_planet_defense` | Same | + planet defense ≤16 | 50 | no | min 2.981 / max 17.399 |
-| 6 `full_components` | Full catalog polish (retain prior aggregates) | torps + PD | 50 | yes | max 17.399 |
+| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no | max 0.339 |
+| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no | max 0.847 |
+| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | no | max 0 |
+| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | no | max 0.576 |
+| 4 `admit_ship_torpedoes` | Full components + partial slots | belief `ship_torps_per_type` ≤40 | 30 | no | min 0.351 / max 1.000 |
+| 5 `modest_planet_defense` | Same | + planet defense ≤16 | 50 | no | min 0.080 / max 0.466 |
+| 6 `full_components` | Full catalog polish (retain prior aggregates) | torps + PD | 50 | yes | max 0 |
 | … | Heavier SB defense / torp escape / full catalog | cumulative widen | … | yes | … |
 
-**Per-tier effort envelopes (reserved soft global):** each stream row keeps one soft-global **inference search effort** allowance (default 74.972, the deterministic time a 20s wall slice spent on the calibration host) that **steers** target slices. See [ADR 0032](adr/0032-inference-search-effort.md). Step `i` receives
+**Per-tier effort envelopes (reserved soft global):** each stream row keeps one soft-global **inference search effort** allowance (default 4.097, the p90 deterministic time one ladder spent under the old 20s wall clock at 8 workers) that **steers** target slices. See [ADR 0032](adr/0032-inference-search-effort.md). Step `i` receives
 
 - `reserved = sum(minEffort_j for j > i)`
 - `spendable = max(0, global_remaining_effort - reserved)`

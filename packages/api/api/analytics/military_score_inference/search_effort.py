@@ -1,26 +1,16 @@
 """Stream-ladder inference search effort and the hang fuse.
 
-Calibration on the dev host, 2026-09-24, ``num_workers=1``. Each sample is a
-weighted-permutation CP-SAT search that returned FEASIBLE because it ran out
-the wall cap (not an early stop). Deterministic time per wall second was not
-stable across slice lengths, so each length is its own product:
-
-- 1s wall -> 2.981060 deterministic time
-- 3s wall -> 9.891221
-- 5s wall -> 17.398859
-- 8s wall -> 28.152574
-- 20s wall -> 74.972095
-
-YAML ``minEffort`` / ``maxEffort`` and the row allowance use those products
-rounded to 3 decimal places. Zero stays zero.
+Row allowance is the p90 deterministic time one ladder spent under the old
+20s wall clock, 8 workers, game 683364 turn 27 (2026-09-25). Per-tier caps
+live in the YAML and use the same run. Zero stays zero.
 """
 
 from __future__ import annotations
 
 import os
 
-# Soft-global row allowance: the effort a 20s wall slice spent on this host.
-DEFAULT_STREAM_ROW_SEARCH_EFFORT = 74.972
+# Soft-global row allowance: p90 deterministic time of one wall-budgeted ladder.
+DEFAULT_STREAM_ROW_SEARCH_EFFORT = 4.097
 
 # Wall bound for a search that will not return. Not the search allowance.
 INFERENCE_SEARCH_HANG_FUSE_SECONDS = 900.0
