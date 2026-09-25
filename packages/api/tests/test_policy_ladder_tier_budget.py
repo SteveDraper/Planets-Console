@@ -77,9 +77,9 @@ def test_tier_step_allowance_absolute_min_when_spendable_starved() -> None:
     allowance, reserved, spendable = tier_step_allowance(
         steps,
         torp_index,
-        global_remaining_effort=2.0,
+        global_remaining_effort=0.2,
     )
-    assert spendable == max(0.0, 2.0 - reserved)
+    assert spendable == max(0.0, 0.2 - reserved)
     assert spendable < step.min_effort
     assert allowance == step.min_effort
     assert allowance <= (step.max_effort or allowance)
