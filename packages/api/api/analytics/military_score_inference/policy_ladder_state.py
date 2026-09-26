@@ -58,6 +58,10 @@ class PolicyLadderState:
     # Wall-clock anchor for batch whole-ladder budgets. Deferred until the first
     # dispatched tier so waiting_deps / queue delay does not burn SPA tier budgets.
     started_at: float | None = None
+    # Deterministic time charged to this row. Queue wait does not increase it.
+    search_effort_spent: float = 0.0
+    # Solve wall charged to the hang fuse. Gaps between continues are not included.
+    search_wall_seconds: float = 0.0
     resolved_mask: ResolvedHullCatalogMask | None = None
     fleet_torp_overlay: FleetTorpOverlay | None = None
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None

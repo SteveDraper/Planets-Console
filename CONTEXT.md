@@ -983,8 +983,16 @@ One count/PP lattice explanation (class-tagged hidden build + **placeholder depa
 _Avoid_: stuffing placeholders into `solutions[]`, SAT-ranked objectiveValue, XOR-only one class row as a ranked solution
 
 **Inference search tier**:
-One staged step in **military score build inference** catalog construction and solving. The ladder has no fixed length; each tier declares how much of the action inventory is in play for that attempt. Later tiers are strict supersets of earlier ones on every dimension they control (permitted actions, per-action caps, ship-build component eligibility, constraint strictness). The solver walks the list until time runs out or a tier adds no new distinct exact explanation signatures to **inference merged top-K** (the ladder continues when K is full; see K-best retention there).
+One staged step in **military score build inference** catalog construction and solving. The ladder has no fixed length; each tier declares how much of the action inventory is in play for that attempt. Later tiers are strict supersets of earlier ones on every dimension they control (permitted actions, per-action caps, ship-build component eligibility, constraint strictness). The solver walks the list until **inference search effort** runs out or a tier adds no new distinct exact explanation signatures to **inference merged top-K** (the ladder continues when K is full; see K-best retention there).
 _Avoid_: ship build tier (too narrow; implies only hull combos), phase
+
+**Inference search effort**:
+The machine-independent work allowance for one **military score build inference** row. It is spent only while the solver is searching. Queue wait, exclusive drain, and catalog construction do not spend it. Two hosts that spend the same effort on the same row hold the same explanations; the slower host may take more wall time to do so. See [ADR 0032](docs/adr/0032-inference-search-effort.md).
+_Avoid_: wall-clock budget, tier seconds, soft-global seconds
+
+**Inference search hang fuse**:
+A wall-clock bound that stops a search which will not return. It does not decide how much **inference search effort** two hosts perform. A normal slow or drained run does not hit it. See [ADR 0032](docs/adr/0032-inference-search-effort.md).
+_Avoid_: time limit (as the search allowance), soft-global budget
 
 **Fine-grained slack action**:
 An aggregate inference action with a small per-unit military-score increment that can pad an explanation without changing the main build story -- e.g. planet or starbase defense posts and ship torpedo loads. Deferred to higher **inference search tiers** so lower tiers prioritize ship-build explanations. Large-increment loads (starbase fighters, ship fighters) and race-specific exceptions (e.g. Evil Empire free starbase fighters) are not fine-grained slack actions unless a tier policy explicitly treats them as such.

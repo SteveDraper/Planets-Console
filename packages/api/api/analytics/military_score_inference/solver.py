@@ -591,15 +591,19 @@ def solve_inference_problem(
         cancel_token=cancel_token,
     )
 
-    solutions = expand_structural_hits_to_top_k(
-        problem,
-        search.structural_hits,
-        merged_combo_catalog,
-        max_solutions=problem.max_solutions,
-    )
-    if on_solution is not None:
-        for solution in solutions:
-            on_solution(solution)
+    # Hang fuse: drop solutions before admission. Charge path raises after this.
+    if search.hang_fuse_hit:
+        solutions: list[InferenceSolution] = []
+    else:
+        solutions = expand_structural_hits_to_top_k(
+            problem,
+            search.structural_hits,
+            merged_combo_catalog,
+            max_solutions=problem.max_solutions,
+        )
+        if on_solution is not None:
+            for solution in solutions:
+                on_solution(solution)
 
     diagnostics: dict[str, object] = {
         **build_diagnostics,
@@ -608,6 +612,9 @@ def solve_inference_problem(
         "structural_hit_count": len(search.structural_hits),
         "stopped_reason": search.stopped_reason,
         "wall_time_seconds": time.monotonic() - started_at,
+        "deterministicTime": search.deterministic_time,
+        "solveWallSeconds": search.solve_wall_seconds,
+        "hangFuseHit": search.hang_fuse_hit,
         "policy_step_id": problem.policy_step_id,
         "policy_step_index": problem.policy_step_index,
         "military_score_alpha": problem.military_score_alpha,
@@ -619,7 +626,9 @@ def solve_inference_problem(
     if seed_no_good_solutions:
         diagnostics["seedNoGoodCount"] = search.seed_no_goods_applied
         diagnostics["seedNoGoodSkippedCount"] = search.seed_no_goods_skipped
-    if search.time_limited:
+    if search.hang_fuse_hit:
+        diagnostics["hangFuseHit"] = True
+    elif search.time_limited:
         diagnostics["time_limited"] = True
     if search.top_solution_bucket_counts:
         diagnostics["rankingBinIndicatorsByActionId"] = search.top_solution_bucket_counts
@@ -629,6 +638,9 @@ def solve_inference_problem(
 
     if search.stopped_reason == "cancelled":
         status = STATUS_STOPPED
+    elif search.hang_fuse_hit:
+        # Not exact / not time_limited; charge raises InferenceSearchHangFuse next.
+        status = STATUS_NO_EXACT_SOLUTION
     elif not solutions:
         status = STATUS_TIME_LIMITED if search.time_limited else STATUS_NO_EXACT_SOLUTION
     else:

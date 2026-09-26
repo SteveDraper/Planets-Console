@@ -230,11 +230,10 @@ def solve_with_policy_ladder(
 ]:
     """Walk the YAML inference search tier ladder with band seed carry-forward.
 
-    Soft-global wall time **steers** per-step allowances (via
-    ``tier_step_allowance_seconds`` inside each tier step). It must not hard-stop
-    the batch loop: later steps with ``min_seconds > 0`` still dispatch their
-    absolute floor even when soft-global remainder is already <= 0. Steps with
-    ``min_seconds == 0`` and zero spendable skip inside the tier step.
+    Batch ``time_limit_seconds`` remains a per-case wall cap. Stream callers
+    pass inference search effort instead; later steps with ``min_effort > 0``
+    still receive their absolute floor when remaining effort is already <= 0.
+    Steps with ``min_effort == 0`` and zero spendable skip inside the tier step.
     """
     resolved_max_solutions = max_solutions if max_solutions is not None else 20
     resolved_hopeless = hopeless_context

@@ -32,7 +32,10 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionAction,
     InferenceSolutionShipBuild,
     ShipBuildCombo,
+    SolveClip,
+    WallSolveClip,
 )
+from api.analytics.military_score_inference.policy_ladder_tier_budget import TierStepRun
 from api.analytics.military_score_inference.ship_build_combos import ship_build_combo_id
 from api.analytics.military_score_inference.solver import solution_rank_objective
 from api.concepts.ship_build_military import ship_construction_score_delta_2x
@@ -269,14 +272,14 @@ def _solve_degrade_for_aggregate(
     *,
     ammo_score_2x: int,
     max_count: int,
-    max_time_in_seconds: float = PROBE_SOLVE_MAX_SECONDS,
+    solve_clip: SolveClip,
 ) -> tuple[int, dict[tuple[int, AxisName], int | None]] | None:
     """Return (aggregate_count, axis→variant_id|None) or None when infeasible."""
     if ammo_score_2x <= 0 or max_count <= 0 or not axes:
         return None
     if not any(axis.variants for axis in axes):
         return None
-    if max_time_in_seconds <= 0:
+    if solve_clip.is_exhausted():
         return None
 
     model = cp_model.CpModel()
@@ -312,7 +315,7 @@ def _solve_degrade_for_aggregate(
     model.add(sum(gap_terms) == count_var * ammo_score_2x)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = max_time_in_seconds
+    solve_clip.apply_to_solver(solver)
     status = solver.solve(model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
@@ -336,6 +339,7 @@ def probe_degrade_aggregate_rewrites(
     catalog: ActionCatalog,
     max_solutions: int = 20,
     should_stop: Callable[[], bool] | None = None,
+    search_budget: TierStepRun | None = None,
     remaining_seconds: Callable[[], float] | None = None,
 ) -> list[InferenceSolution]:
     """Generate catalog-resolved C' + torp-ammo rewrites from ship-only held exacts.
@@ -343,9 +347,12 @@ def probe_degrade_aggregate_rewrites(
     Only emits solutions that resolve to catalog combo ids and satisfy hard
     equalities against ``observation``.
 
-    Optional ``should_stop`` / ``remaining_seconds`` bind the held×torp CP-SAT
-    loop to an outer tier wall (cancel + remaining). Each inner solve is capped
-    at ``min(PROBE_SOLVE_MAX_SECONDS, remaining)``.
+    Optional ``should_stop`` / ``search_budget`` bind the held×torp CP-SAT loop to
+    an outer tier clip. Each inner solve asks the budget for a Solve clip capped
+    at ``PROBE_SOLVE_MAX_SECONDS`` (effort clip on stream, wall clip on batch).
+
+    ``remaining_seconds`` is a wall-only fallback for tests that do not pass a
+    ``TierStepRun``; it must not be used to smuggle effort.
     """
     combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
     if not combos_by_id:
@@ -378,13 +385,15 @@ def probe_degrade_aggregate_rewrites(
     def _abort() -> bool:
         return should_stop is not None and should_stop()
 
-    def _solve_time_cap() -> float | None:
+    def _next_solve_clip() -> SolveClip | None:
+        if search_budget is not None:
+            return search_budget.next_solve_clip(max_slice=PROBE_SOLVE_MAX_SECONDS)
         if remaining_seconds is None:
-            return PROBE_SOLVE_MAX_SECONDS
+            return WallSolveClip(max_time_in_seconds=PROBE_SOLVE_MAX_SECONDS)
         remaining = remaining_seconds()
         if remaining <= 0:
             return None
-        return min(PROBE_SOLVE_MAX_SECONDS, remaining)
+        return WallSolveClip(max_time_in_seconds=min(PROBE_SOLVE_MAX_SECONDS, remaining))
 
     problem = build_inference_problem(observation, catalog)
     out: list[InferenceSolution] = []
@@ -416,14 +425,14 @@ def probe_degrade_aggregate_rewrites(
         for action in torp_actions:
             if _abort():
                 return out
-            solve_time = _solve_time_cap()
-            if solve_time is None:
+            clip = _next_solve_clip()
+            if clip is None:
                 return out
             solved = _solve_degrade_for_aggregate(
                 axes,
                 ammo_score_2x=action.score_delta_2x,
                 max_count=action.upper_bound,
-                max_time_in_seconds=solve_time,
+                solve_clip=clip,
             )
             if solved is None:
                 continue

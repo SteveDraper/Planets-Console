@@ -1,0 +1,7 @@
+# Stream ladder allowance is inference search effort
+
+**Inference search effort** (OR-Tools `max_deterministic_time`, `num_workers` 1) is the stream **inference search tier** allowance for both the soft-global row steer and each inner `Solve()` clip. Wall clock is only the **inference search hang fuse**. Queue wait, exclusive drain, and catalog build do not spend the allowance. The existing steer shape stays: later minimums are reserved, the current step's minimum may overshoot, and a zero minimum with nothing spendable skips. Effort exhaustion still records `time_limited`. A fuse hit fails the step closed and does not persist a thinner ledger. Batch and corpus per-case wall limits stay. Same game, turn, and perspective must agree on scores row status, solution count, and fleet unknown-warship count; the slower host may take more wall time.
+
+**Considered:** raise the 20s wall budget (still machine-dependent, and queue time still spends it); `max_number_of_conflicts` (ignores propagation and presolve); run every `Solve()` to completion (expensive tiers exist because those calls do not finish); copy `minSeconds` across as if one wall second were one effort unit (does not reproduce the fast host's harvest).
+
+Glossary: **inference search effort**, **inference search hang fuse**, **inference search tier** in [CONTEXT.md](../../CONTEXT.md). Ticket: [#481](https://github.com/SteveDraper/Planets-Console/issues/481). Diagnosis: [#458](https://github.com/SteveDraper/Planets-Console/issues/458).

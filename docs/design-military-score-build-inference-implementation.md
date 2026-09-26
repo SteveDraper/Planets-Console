@@ -607,25 +607,27 @@ Static YAML steps widen by **strict superset on `techLevels` lists** or by switc
 
 Tunable constants in YAML; high-prior aggregates run before noisy full-catalog ship polish:
 
-| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` | Early-stop? | Time envelope |
-|------|------------------|---------------------------------------|---------|-------------|---------------|
-| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no | max 8s |
-| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no | max 8s |
-| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | no | max 5s |
-| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | no | max 8s |
-| 4 `admit_ship_torpedoes` | Full components + partial slots | belief `ship_torps_per_type` ≤40 | 30 | no | min 3s / max 8s |
-| 5 `modest_planet_defense` | Same | + planet defense ≤16 | 50 | no | min 1s / max 5s |
-| 6 `full_components` | Full catalog polish (retain prior aggregates) | torps + PD | 50 | yes | max 5s |
+| Step | Ship-build scope | Aggregate allowlist (cumulative caps) | `alpha` | Early-stop? | Effort envelope |
+|------|------------------|---------------------------------------|---------|-------------|-----------------|
+| 0 `early_game_bands` | Hulls tech 1--6, engines all, beams/launchers tech 1--5 | none | 50 | no | max 0.339 |
+| 1 `widen_launchers` | Widen launchers to tech 1--8 | none | 50 | no | max 0.847 |
+| 2 `collision_hull_widen` | Same as step 1 + runtime twin high-tech hulls (#226) | none | 50 | no | max 0.466 |
+| 3 `widen_hulls` | Widen hulls (`filters.hulls.all`) | none | 50 | no | max 0.576 |
+| 4 `admit_ship_torpedoes` | Full components + partial slots | belief `ship_torps_per_type` ≤40 | 30 | no | min 0.351 / max 1.000 |
+| 5 `modest_planet_defense` | Same | + planet defense ≤16 | 50 | no | min 0.080 / max 0.466 |
+| 6 `full_components` | Full catalog polish (retain prior aggregates) | torps + PD | 50 | yes | max 0.466 |
 | … | Heavier SB defense / torp escape / full catalog | cumulative widen | … | yes | … |
 
-**Per-tier time envelopes (reserved soft global):** each row keeps one soft-global wall budget (stream default ~20s) that **steers** target slices. Step `i` receives
+**Per-tier effort envelopes (reserved soft global):** each stream row keeps one soft-global **inference search effort** allowance (default 4.097, the p90 deterministic time one ladder spent under the old 20s wall clock at 8 workers) that **steers** target slices. Per-tier `maxEffort` is that tier's p90 deterministic time on the same sample, with skipped finishes excluded. `collision_hull_widen` and `full_components` measured zero; both use 0.466, the p90 of the other former `maxSeconds: 5` tier (`modest_planet_defense`). See [ADR 0032](adr/0032-inference-search-effort.md). Step `i` receives
 
-- `reserved = sum(minSeconds_j for j > i)`
-- `spendable = max(0, global_remaining - reserved)`
-- `steered = min(spendable, maxSeconds_i)` (omit `maxSeconds` ⇒ uncapped within spendable)
-- `allowance = max(minSeconds_i, steered)`
+- `reserved = sum(minEffort_j for j > i)`
+- `spendable = max(0, global_remaining_effort - reserved)`
+- `steered = min(spendable, maxEffort_i)` (omit `maxEffort` ⇒ uncapped within spendable)
+- `allowance = max(minEffort_i, steered)`
 
-`minSeconds` is an **absolute floor**: a tier always gets at least its min even when soft-global remainder / spendable is insufficient (intentional overshoot). Soft global and later-step reservations steer how much *above* min early steps take; exhausting a tier's allowance stops **that step** and continues the ladder. Soft-global exhaustion alone does not abort an in-flight funded tier, complete the row (batch or stream), or deny later steps with `minSeconds > 0` -- those still receive their absolute floor. Steps with `minSeconds == 0` and zero spendable skip.
+`minEffort` is an **absolute floor**: a tier always gets at least its min even when soft-global remainder / spendable is insufficient (intentional overshoot). Soft global and later-step reservations steer how much *above* min early steps take; exhausting a tier's allowance stops **that step** and continues the ladder. Soft-global exhaustion alone does not abort an in-flight funded tier, complete the row, or deny later steps with `minEffort > 0` -- those still receive their absolute floor. Steps with `minEffort == 0` and zero spendable skip.
+
+Effort is OR-Tools `max_deterministic_time` with `num_workers` 1. It is spent only while `Solve()` runs. Queue wait, exclusive drain, and catalog build do not spend it. Wall clock is only the **inference search hang fuse** (900s per row). A fuse hit fails the step closed and does not persist a partial scores or fleet result. Effort exhaustion still records `time_limited`. Batch and corpus per-case wall limits are unchanged.
 
 #### 8.5.3a Homogeneous per-axis degrade → aggregate probe
 

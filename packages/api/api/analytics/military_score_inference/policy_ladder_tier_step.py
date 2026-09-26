@@ -44,11 +44,13 @@ from api.analytics.military_score_inference.policy_ladder_admission import (
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.policy_ladder_tier_budget import (
+    SolveClip,
     TierStepRun,
     TierStopKind,
     ensure_ladder_clock_started,
+    remaining_effort,
     remaining_time,
-    tier_step_allowance_seconds,
+    tier_step_allowance,
 )
 from api.analytics.military_score_inference.policy_ladder_tier_finish import (
     TierStepFinishMode,
@@ -62,6 +64,10 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
 )
 from api.analytics.military_score_inference.score_arithmetic import (
     catalog_explained_military_delta_2x,
+)
+from api.analytics.military_score_inference.search_effort import (
+    INFERENCE_SEARCH_HANG_FUSE_SECONDS,
+    InferenceSearchHangFuse,
 )
 from api.analytics.military_score_inference.ship_first_family import (
     admit_ship_first_ranked_solution,
@@ -101,33 +107,58 @@ def _solve_catalog(
     *,
     race_id: int | None = None,
     max_solutions: int,
-    time_limit_seconds: float,
+    solve_clip: SolveClip,
     military_score_window: MilitaryScoreWindow | None = None,
     fixed_combo_counts: dict[str, int] | None = None,
     combo_count_neighborhood: int = 0,
     cancel_token: InferenceCancelToken | None = None,
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
+    budget_run: TierStepRun | None = None,
 ) -> tuple[InferenceResult, InferenceProblem]:
     problem = build_inference_problem(
         observation,
         catalog,
         race_id=race_id,
         max_solutions=max_solutions,
-        time_limit_seconds=time_limit_seconds,
+        time_limit_seconds=solve_clip.problem_time_limit_seconds(),
+        solve_clip=solve_clip,
         military_score_window=military_score_window,
         fixed_combo_counts=fixed_combo_counts,
         combo_count_neighborhood=combo_count_neighborhood,
     )
-    return (
-        solve_inference_problem(
-            problem,
-            cancel_token=cancel_token,
-            on_solution=on_solution,
-            seed_no_good_solutions=seed_no_good_solutions,
-        ),
+    result = solve_inference_problem(
         problem,
+        cancel_token=cancel_token,
+        on_solution=on_solution,
+        seed_no_good_solutions=seed_no_good_solutions,
     )
+    _charge_effort_budget(budget_run, result)
+    return result, problem
+
+
+def _diagnostic_float(diagnostics: dict[str, object], key: str) -> float:
+    value = diagnostics.get(key, 0.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value)
+
+
+def _charge_effort_budget(run: TierStepRun | None, result: InferenceResult) -> None:
+    """Spend det time and Solve-only wall. Hang fuse fails closed after charge."""
+    if run is None or not run.is_effort_budget:
+        return
+    diagnostics = result.diagnostics
+    run.charge_search(
+        deterministic_time=_diagnostic_float(diagnostics, "deterministicTime"),
+        wall_seconds=_diagnostic_float(diagnostics, "solveWallSeconds"),
+    )
+    if diagnostics.get("hangFuseHit") or run.hang_fuse_exceeded():
+        raise InferenceSearchHangFuse("inference search hang fuse exceeded; row will not persist")
+
+
+def _solve_budget_kwargs(run: TierStepRun) -> dict[str, object]:
+    return {"solve_clip": run.solve_clip_or_exhausted(), "budget_run": run}
 
 
 def _solve_seed_progression(
@@ -137,15 +168,16 @@ def _solve_seed_progression(
     *,
     race_id: int | None = None,
     max_solutions: int,
-    remaining_seconds: Callable[[], float],
+    next_solve_clip: Callable[[], SolveClip | None],
     should_stop: Callable[[], bool] | None = None,
     cancel_token: InferenceCancelToken | None = None,
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
+    budget_run: TierStepRun | None = None,
 ) -> tuple[InferenceResult | None, InferenceProblem | None]:
-    """Run neighborhood then unfixed catalog solves under one shared wall.
+    """Run neighborhood then unfixed catalog solves under one shared clip.
 
-    Each sub-solve samples ``remaining_seconds()`` at call time so successive
+    Each sub-solve samples ``next_solve_clip()`` at call time so successive
     passes cannot each claim the full tier allowance independently.
     """
     fixed_counts = _combo_counts_from_solution(seed)
@@ -157,37 +189,38 @@ def _solve_seed_progression(
             return True
         return cancel_token is not None and cancel_token.is_cancelled()
 
-    def _solve_cap() -> float | None:
+    def _solve_cap() -> SolveClip | None:
         if _abort():
             return None
-        limit = remaining_seconds()
-        if limit <= 0:
+        clip = next_solve_clip()
+        if clip is None or clip.is_exhausted():
             return None
-        return limit
+        return clip
 
     for neighborhood in (0, 1):
-        limit = _solve_cap()
-        if limit is None:
+        clip = _solve_cap()
+        if clip is None:
             return None, None
         result, problem = _solve_catalog(
             observation,
             catalog,
             race_id=race_id,
             max_solutions=max_solutions,
-            time_limit_seconds=limit,
+            solve_clip=clip,
             fixed_combo_counts=fixed_counts,
             combo_count_neighborhood=neighborhood,
             cancel_token=cancel_token,
             on_solution=on_solution,
             seed_no_good_solutions=seed_no_good_solutions,
+            budget_run=budget_run,
         )
         if result.status == STATUS_STOPPED:
             return result, problem
         if result.solutions:
             return result, problem
 
-    limit = _solve_cap()
-    if limit is None:
+    clip = _solve_cap()
+    if clip is None:
         return None, None
 
     result, problem = _solve_catalog(
@@ -195,9 +228,10 @@ def _solve_seed_progression(
         catalog,
         race_id=race_id,
         max_solutions=max_solutions,
-        time_limit_seconds=limit,
+        solve_clip=clip,
         cancel_token=cancel_token,
         on_solution=on_solution,
+        budget_run=budget_run,
         seed_no_good_solutions=seed_no_good_solutions,
     )
     if result.solutions or result.status == STATUS_STOPPED:
@@ -245,13 +279,17 @@ def run_policy_ladder_tier_step(
     time_limit_seconds: float | None,
     cancel_token: InferenceCancelToken | None = None,
     on_admitted: Callable[[InferenceSolution], None] | None = None,
+    search_effort_allowance: float | None = None,
+    hang_fuse_seconds: float | None = None,
 ) -> None:
     """Run one inference search tier step; mutates ``state`` in place.
 
-    The wall budget is shared across continues and anchored at first dispatch
-    (``state.started_at``), so SPA rows that sat in ``waiting_deps`` do not
-    instantly ``time_limited``, and multi-tier climbs do not get a fresh full
-    limit on every step.
+    Stream callers pass ``search_effort_allowance``. Remaining effort is the
+    allowance minus deterministic time already spent, so queue wait between
+    continues does not shrink it. Wall clock is only ``hang_fuse_seconds``.
+
+    Batch callers pass ``time_limit_seconds`` and leave the effort allowance
+    unset. That path still clips each Solve on remaining case wall time.
 
     Ship-build combos, prior-weight tables, and the ship-transfer fragment come
     from ``state.catalog_reuse`` when this rung's inputs match or only widen.
@@ -283,26 +321,46 @@ def run_policy_ladder_tier_step(
             state.ladder_complete = True
             return
 
-    ladder_started_at = ensure_ladder_clock_started(state)
     step_index = state.next_step_index
     policy_step = state.policy_steps[step_index]
-    global_remaining = remaining_time(ladder_started_at, time_limit_seconds)
-    allowance, reserved, spendable = tier_step_allowance_seconds(
-        state.policy_steps,
-        step_index,
-        global_remaining_seconds=global_remaining,
-    )
+    if search_effort_allowance is not None:
+        fuse_seconds = (
+            INFERENCE_SEARCH_HANG_FUSE_SECONDS if hang_fuse_seconds is None else hang_fuse_seconds
+        )
+        global_remaining = remaining_effort(search_effort_allowance, state.search_effort_spent)
+        allowance, reserved, spendable = tier_step_allowance(
+            state.policy_steps,
+            step_index,
+            global_remaining_effort=global_remaining,
+        )
+        run = TierStepRun.for_effort(
+            state,
+            cancel_token=cancel_token,
+            allowance=allowance,
+            reserved_for_later=reserved,
+            spendable=spendable,
+            row_effort_allowance=search_effort_allowance,
+            hang_fuse_seconds=fuse_seconds,
+            budget_started_at=state.search_wall_seconds,
+        )
+    else:
+        budget_started_at = ensure_ladder_clock_started(state)
+        global_remaining = remaining_time(budget_started_at, time_limit_seconds)
+        allowance = global_remaining
+        reserved = 0.0
+        spendable = max(0.0, global_remaining)
+        tier_started_at = time.monotonic()
+        run = TierStepRun.for_wall(
+            state,
+            time_limit_seconds=time_limit_seconds,
+            cancel_token=cancel_token,
+            budget_started_at=budget_started_at,
+            allowance_seconds=allowance,
+            tier_started_at=tier_started_at,
+            reserved_for_later=reserved,
+            spendable=spendable,
+        )
     tier_started_at = time.monotonic()
-    run = TierStepRun(
-        state,
-        time_limit_seconds,
-        cancel_token,
-        budget_started_at=ladder_started_at,
-        tier_allowance_seconds=allowance,
-        tier_started_at=tier_started_at,
-        reserved_for_later_seconds=reserved,
-        spendable_seconds=spendable,
-    )
     entry_stop = run.peek_stop()
     if entry_stop is not None:
         # Zero tier allowance (min=0 and nothing spendable), or cancel before work.
@@ -326,9 +384,9 @@ def run_policy_ladder_tier_step(
                 if entry_stop is TierStopKind.TIER_TIME
                 else TierStepFinishMode.DIAGNOSTICS_ONLY
             ),
-            tier_allowance_seconds=allowance,
-            reserved_for_later_seconds=reserved,
-            spendable_seconds=spendable,
+            tier_allowance_effort=allowance,
+            reserved_for_later_effort=reserved,
+            spendable_effort=spendable,
         )
         return
 
@@ -337,9 +395,9 @@ def run_policy_ladder_tier_step(
     held_count_before = len(state.merged_solutions)
     newly_admitted: list[InferenceSolution] = []
     budget_kwargs = {
-        "tier_allowance_seconds": allowance,
-        "reserved_for_later_seconds": reserved,
-        "spendable_seconds": spendable,
+        "tier_allowance_effort": allowance,
+        "reserved_for_later_effort": reserved,
+        "spendable_effort": spendable,
     }
 
     def track_admitted(solution: InferenceSolution) -> None:
@@ -463,7 +521,7 @@ def run_policy_ladder_tier_step(
             catalog=catalog,
             max_solutions=catalog_solve_max,
             should_stop=budget_exhausted,
-            remaining_seconds=run.remaining_seconds,
+            search_budget=run,
         ):
             if budget_exhausted():
                 break
@@ -553,11 +611,12 @@ def run_policy_ladder_tier_step(
             seed,
             race_id=player_race_id,
             max_solutions=catalog_solve_max,
-            remaining_seconds=run.remaining_seconds,
+            next_solve_clip=run.next_solve_clip,
             should_stop=budget_exhausted,
             cancel_token=cancel_token,
             on_solution=admit_solution,
             seed_no_good_solutions=held_no_goods,
+            budget_run=run,
         )
         if seed_result is None or seed_problem is None:
             continue
@@ -585,7 +644,7 @@ def run_policy_ladder_tier_step(
             catalog,
             race_id=player_race_id,
             max_solutions=catalog_solve_max,
-            time_limit_seconds=run.remaining_seconds(),
+            **_solve_budget_kwargs(run),
             military_score_window=plan.overshoot_window(),
             cancel_token=cancel_token,
             on_solution=admit_overshoot,
@@ -600,15 +659,17 @@ def run_policy_ladder_tier_step(
             if (
                 overlay.should_solve_overshoot
                 and not budget_exhausted()
-                and run.remaining_seconds() > 0
+                and run.remaining_allowance() > 0
             ):
                 return _solve_overshoot_catalog(overlay)
+            clip = run.solve_clip_or_exhausted()
             state.problem = build_inference_problem(
                 observation,
                 catalog,
                 race_id=player_race_id,
                 max_solutions=catalog_solve_max,
-                time_limit_seconds=run.remaining_seconds(),
+                time_limit_seconds=clip.problem_time_limit_seconds(),
+                solve_clip=clip,
                 military_score_window=overlay.overshoot_window(),
             )
             return False
@@ -618,7 +679,7 @@ def run_policy_ladder_tier_step(
             catalog,
             race_id=player_race_id,
             max_solutions=catalog_solve_max,
-            time_limit_seconds=run.remaining_seconds(),
+            **_solve_budget_kwargs(run),
             military_score_window=ExactMilitaryScoreWindow(),
             cancel_token=cancel_token,
             on_solution=admit_solution,
@@ -633,21 +694,21 @@ def run_policy_ladder_tier_step(
                 overlay.should_solve_overshoot
                 and not held_exact
                 and not budget_exhausted()
-                and run.remaining_seconds() > 0
+                and run.remaining_allowance() > 0
             ):
                 return _solve_overshoot_catalog(overlay)
             return False
 
         if exact_result.solutions or policy_step.alpha <= 0:
             return False
-        if budget_exhausted() or run.remaining_seconds() <= 0:
+        if budget_exhausted() or run.remaining_allowance() <= 0:
             return False
         band_result, band_problem = _solve_catalog(
             observation,
             catalog,
             race_id=player_race_id,
             max_solutions=policy_step.max_seeds,
-            time_limit_seconds=run.remaining_seconds(),
+            **_solve_budget_kwargs(run),
             military_score_window=BandMilitaryScoreWindow(alpha=policy_step.alpha),
             cancel_token=cancel_token,
             seed_no_good_solutions=tuple(state.merged_solutions),

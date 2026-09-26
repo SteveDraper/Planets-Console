@@ -37,10 +37,12 @@ from api.analytics.military_score_inference.military_score_window import (
 from api.analytics.military_score_inference.models import (
     DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
     CandidateAction,
+    EffortSolveClip,
     InferenceObservation,
     InferenceProblem,
     ProbabilityBucket,
     ShipBuildCombo,
+    WallSolveClip,
 )
 from api.analytics.military_score_inference.prior_weights_catalog import (
     PriorWeightsCatalog,
@@ -143,6 +145,7 @@ def build_inference_problem(
     race_id: int | None = None,
     max_solutions: int | None = None,
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
+    solve_clip: EffortSolveClip | WallSolveClip | None = None,
     military_score_window: MilitaryScoreWindow | None = None,
     fixed_combo_counts: dict[str, int] | None = None,
     combo_count_neighborhood: int = 0,
@@ -165,6 +168,7 @@ def build_inference_problem(
         probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
         max_solutions=20 if max_solutions is None else max_solutions,
         time_limit_seconds=time_limit_seconds,
+        solve_clip=solve_clip,
         military_score_window=military_score_window
         if military_score_window is not None
         else ExactMilitaryScoreWindow(),

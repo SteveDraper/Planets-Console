@@ -113,9 +113,9 @@ class InferenceTierPolicyStep:
     # ranking objectives in [Z* - T, max_objective] (sliding ceiling). Always on;
     # omit the YAML key to inherit solverThresholds / DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD.
     near_best_objective_threshold: int = DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD
-    # Reserved soft-global envelopes (seconds). min defaults 0; max None = uncapped.
-    min_seconds: float = 0.0
-    max_seconds: float | None = None
+    # Reserved soft-global envelopes (inference search effort). min defaults 0; max None = uncapped.
+    min_effort: float = 0.0
+    max_effort: float | None = None
 
     def constraint_snapshot(self) -> dict[str, object]:
         snapshot: dict[str, object] = {
@@ -129,11 +129,11 @@ class InferenceTierPolicyStep:
             "allowShipOnlyExactEarlyStop": self.allow_ship_only_exact_early_stop,
             "hullCollisionTwinWiden": self.hull_collision_twin_widen,
             "runDegradeAggregateProbe": self.run_degrade_aggregate_probe,
-            "minSeconds": self.min_seconds,
+            "minEffort": self.min_effort,
             "nearBestObjectiveThreshold": self.near_best_objective_threshold,
         }
-        if self.max_seconds is not None:
-            snapshot["maxSeconds"] = self.max_seconds
+        if self.max_effort is not None:
+            snapshot["maxEffort"] = self.max_effort
         return snapshot
 
 
@@ -335,19 +335,19 @@ def _parse_optional_positive_int(
     return raw
 
 
-def _parse_min_seconds(raw: object, *, step_id: str) -> float:
+def _parse_min_effort(raw: object, *, step_id: str) -> float:
     if raw is None:
         return 0.0
     if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
-        raise ValueError(f"step {step_id}: minSeconds must be a non-negative number")
+        raise ValueError(f"step {step_id}: minEffort must be a non-negative number")
     return float(raw)
 
 
-def _parse_max_seconds(raw: object, *, step_id: str) -> float | None:
+def _parse_max_effort(raw: object, *, step_id: str) -> float | None:
     if raw is None:
         return None
     if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
-        raise ValueError(f"step {step_id}: maxSeconds must be a non-negative number")
+        raise ValueError(f"step {step_id}: maxEffort must be a non-negative number")
     return float(raw)
 
 
@@ -369,11 +369,11 @@ def _parse_policy_step(
     if not isinstance(max_seeds, int) or max_seeds < 0:
         raise ValueError(f"step {step_id}: maxSeeds must be a non-negative integer")
 
-    min_seconds = _parse_min_seconds(raw.get("minSeconds"), step_id=step_id)
-    max_seconds = _parse_max_seconds(raw.get("maxSeconds"), step_id=step_id)
-    if max_seconds is not None and max_seconds < min_seconds:
+    min_effort = _parse_min_effort(raw.get("minEffort"), step_id=step_id)
+    max_effort = _parse_max_effort(raw.get("maxEffort"), step_id=step_id)
+    if max_effort is not None and max_effort < min_effort:
         raise ValueError(
-            f"step {step_id}: maxSeconds ({max_seconds}) must be >= minSeconds ({min_seconds})"
+            f"step {step_id}: maxEffort ({max_effort}) must be >= minEffort ({min_effort})"
         )
 
     if "nearBestObjectiveThreshold" in raw:
@@ -416,8 +416,8 @@ def _parse_policy_step(
             step_id=step_id,
         ),
         near_best_objective_threshold=near_best_objective_threshold,
-        min_seconds=min_seconds,
-        max_seconds=max_seconds,
+        min_effort=min_effort,
+        max_effort=max_effort,
     )
 
 
