@@ -22,6 +22,7 @@ from api.analytics.registration import (
 )
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.stellar_cartography import REGISTRATION as STELLAR_CARTOGRAPHY_REGISTRATION
+from api.analytics.team_information import REGISTRATION as TEAM_INFORMATION_REGISTRATION
 from api.analytics.visibility import REGISTRATION as VISIBILITY_REGISTRATION
 from api.errors import ValidationError
 from api.models.game import TurnInfo
@@ -35,6 +36,7 @@ _IMPORTED_REGISTRATIONS: tuple[TurnAnalyticRegistration, ...] = (
     VISIBILITY_REGISTRATION,
     HOMEWORLD_LOCATOR_REGISTRATION,
     MINEFIELDS_REGISTRATION,
+    TEAM_INFORMATION_REGISTRATION,
 )
 
 validate_turn_analytic_registrations(_IMPORTED_REGISTRATIONS)

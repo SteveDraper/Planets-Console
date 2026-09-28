@@ -15,6 +15,7 @@ from . import (
     minefields,
     scores,
     stellar_cartography,
+    team_information,
     visibility,
 )
 
@@ -27,6 +28,7 @@ _BFF_DESCRIPTORS_BY_ID: dict[str, AnalyticDescriptor] = {
     visibility.DESCRIPTOR.id: visibility.DESCRIPTOR,
     homeworld_locator.DESCRIPTOR.id: homeworld_locator.DESCRIPTOR,
     minefields.DESCRIPTOR.id: minefields.DESCRIPTOR,
+    team_information.DESCRIPTOR.id: team_information.DESCRIPTOR,
 }
 
 

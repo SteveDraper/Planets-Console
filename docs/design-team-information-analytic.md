@@ -1,0 +1,102 @@
+# Team information map analytic
+
+Map-only **turn analytic** (`analytic_id` `team-information`) that paints **team territory**: the map colored by the **league team** of the owner of the nearest planet. Phase 1: [issue 546](https://github.com/SteveDraper/Planets-Console/issues/546). Phase 2: [issue 547](https://github.com/SteveDraper/Planets-Console/issues/547). Glossary: **Team information analytic**, **League team**, **Team territory**, **Team territory site set**, **Sphere map** in [CONTEXT.md](../CONTEXT.md).
+
+Related: [Adding a turn analytic](design-adding-a-turn-analytic.md), [Analytics structure](design-analytics-structure.md), [ADR 0008](adr/0008-shared-map-region-overlays.md) (shared `regionOverlays`).
+
+## Product
+
+| Requirement | Decision |
+|-------------|----------|
+| Registration | Selectable, `supports_table=false`, `supports_map=true`, display name `Team information` |
+| Sites | Shell-turn planets. Unowned means `ownerid == 0`. **League team** is `Player.leagueteamid` on that owner (`0` means no league team) |
+| Distance | Euclidean light-years. On a **sphere map** (`GameSettings.sphere`), toroidal distance on the rectangle `[0, mapwidth] x [0, mapheight]` (origin at `(0, 0)`), both axes. `mapshape` does not change the period. `Game.maptype` is a hosting category and is ignored |
+| Site sets | Both **team territory site set**s are computed on every map response. Checkbox **Owned planets only** (default off, global localStorage) chooses which set is painted. Toggling does not refetch |
+| Holes | Cells whose winning site is unowned are omitted from the all-planets set. Cells whose winning owner has `leagueteamid == 0` are omitted from both sets. Owned-planets-only fills the rectangle when every owner has a league team |
+| Paint | Shared **map region overlay** boundary polygons (line edges only). One overlay per disjoint component of a league team's union. Semi-transparent fill so planet dots stay readable |
+| Color | Stable palette keyed by `leagueteamid`, shared by both site sets. Independent of **player color** |
+| Legend | Sidebar lists each league team that appears: swatch, team id, roster usernames. Turn data has no league-team name |
+| Exports | Empty catalog. No orchestrator profile. No map query params |
+
+Example sphere game: [686674](https://planets.nu) Bundy Sector (`sphere: true`, `mapshape` rectangular, 2278 by 2278). Help: planets.nu Sphere is a flattened torus; leaving one edge re-enters the opposite edge, and the wrap rectangle is used even when the planet disk is round.
+
+## Geometry
+
+Core owns the partition. The SPA blits.
+
+1. Sites are `turn.planets` with coordinates. Drop `ownerid == 0` only for the owned-planets set.
+2. Distance from point `P` to site `S`:
+   - `sphere` false: `hypot(Sx - Px, Sy - Py)`.
+   - `sphere` true: `dx = min(d, W - d)` where `d = abs(Sx - Px) mod W` and `W = mapwidth`; same for `y` with `mapheight`; then `hypot(dx, dy)`.
+3. Build the Voronoi partition of the site set on the map rectangle. On a sphere map, replicate each site across the eight neighboring periods (3 by 3 tiling) and clip the diagram back to the fundamental rectangle. Split any polygon that crosses a seam so every emitted ring lies inside the rectangle.
+4. The winning site at a point is the nearest site. An exact distance tie uses the lower planet id.
+5. A cell is painted only when its winning site has an owner with `leagueteamid > 0`. Union painted cells that share a league team id. Disjoint components stay separate overlays with the same color and team id.
+6. Clip every ring to `[0, mapwidth] x [0, mapheight]`.
+
+## Wire
+
+Core `compute` returns a JSON object:
+
+- `analyticId`: `team-information`
+- `sphere`: bool from settings
+- `teams`: `{ leagueTeamId, fillColor, playerIds }[]` for every league team that owns at least one planet on the turn (even if a site set paints nothing for them)
+- `regionOverlays`: both partitions
+
+Each overlay is a shared boundary **map region overlay**:
+
+| Field | Value |
+|-------|--------|
+| `kind` | `team-territory` (all planets) or `team-territory-owned-only` |
+| `id` | `team-territory:{leagueTeamId}:{component}` or `team-territory-owned-only:{leagueTeamId}:{component}` |
+| `fillColor` | palette hex for that `leagueteamid` |
+| `fillOpacity` | `0.35` |
+| `geometry` | `{ type: "boundary", vertices: [{x, y}, ...], edges: [{type: "line"}, ...] }` closed, clockwise or counterclockwise, no arcs |
+| `leagueTeamId` | int domain fact. No English strings |
+
+Palette (index `leagueteamid % 12`): `#38bdf8 #f472b6 #a78bfa #34d399 #fbbf24 #fb7185 #22d3ee #a3e635 #f97316 #818cf8 #2dd4bf #e879f9`.
+
+BFF map handler passes the Core object through. The table route stays a validation error.
+
+## Frontend
+
+- Register the map merger so `regionOverlays` from this analytic join the combined map.
+- Persist **Owned planets only** in localStorage (global, same sticky scope as other analytic display toggles). Default off.
+- Paint exactly one kind: `team-territory` when the checkbox is off, `team-territory-owned-only` when it is on. Filter in a team-information-owned function. Do not run these kinds through Visibility kind preferences.
+- Sidebar: generic enable control plus the checkbox and the legend. Legend rows come from `teams` on the map payload (swatch, id, usernames resolved from the turn roster). Grey the tile in tabular **view mode** via `supports_table=false`.
+- No edge-mirror strip. Opposite edges of one team share a color, which is the wrap cue.
+
+## Layers
+
+- **Core** (`api/analytics/team_information.py`): partition and wire. Toroidal distance and Voronoi live next to the analytic unless a second caller needs them; then extract to `api/concepts/`.
+- **BFF** (`bff/analytics/team_information.py`): passthrough `get_map`. Empty export catalog on the Core registration.
+- **SPA** (`src/analytics/team-information/`): merge, preference store, sidebar legend and checkbox, kind filter.
+
+Reuse the turn-analytic catalog, `empty_export_catalog_for`, shared boundary `regionOverlays`, and the map fetch/merge registry. Do not add a query parameter to the shared map route. Do not import another analytic for the partition.
+
+## Tests
+
+**Phase 1 (Core)** -- write the failing geometry tests first:
+
+- Sphere: a site at `x = 1` is nearer to `x = mapwidth - 1` than a site at the middle of the same row. The painted component crosses the seam as two rings inside the rectangle (or one ring per side) with the edge site's league team.
+- Non-sphere: the same pair uses planar distance, so the far side of the seam is not claimed by the edge site.
+- All-planets set: an unowned planet's cell is absent. Owned-planets-only assigns that area to the nearest owned league team.
+- `leagueteamid == 0`: that owner's cells are absent from both kinds.
+- Two adjacent planets on one league team union into one component when they share a border.
+- Exact tie: lower planet id wins.
+
+**Phase 2 (BFF and SPA)** -- do not repeat the geometry cases:
+
+- Registry metadata: map yes, table no, selectable, catalog order.
+- BFF map returns the Core shape; table route is a validation error.
+- Merger keeps both kinds. The preference filter emits only the selected kind.
+- Legend lists team id and member usernames from `teams`.
+- Browser: enable the analytic, confirm the tint, toggle **Owned planets only** and confirm holes close without a refetch, and confirm the tile is grey in tabular mode. On a sphere game, confirm color continues across an edge.
+
+## Phases
+
+1. **Core geometry** ([#546](https://github.com/SteveDraper/Planets-Console/issues/546)). Module, catalog entry, registration, empty exports, geometry tests above. No SPA.
+2. **Map and sidebar** ([#547](https://github.com/SteveDraper/Planets-Console/issues/547)). BFF descriptor, frontend merge, checkbox, legend, kind filter, registry tests, quick-reference row in [design-analytics-structure.md](design-analytics-structure.md), browser check. Starts after phase 1 has merged.
+
+## Out of scope
+
+Hover and context menu, edge-mirror margin, league-team names, in-game `teamid` coloring, tabular tile, export queries, per-team color pickers, client-side distance.

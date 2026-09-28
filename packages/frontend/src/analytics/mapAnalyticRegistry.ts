@@ -13,6 +13,7 @@ import {
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
   MINEFIELDS_ANALYTIC_ID,
   STELLAR_CARTOGRAPHY_ANALYTIC_ID,
+  TEAM_INFORMATION_ANALYTIC_ID,
   VISIBILITY_ANALYTIC_ID,
 } from './mapAnalyticIds'
 import { stellarCartographyMapAnalytic } from './stellar-cartography/mapAnalytic'
@@ -117,6 +118,7 @@ const mapAnalyticRegistry: Record<string, MapAnalyticRegistration> = {
   [VISIBILITY_ANALYTIC_ID]: visibilityMapAnalytic,
   [HOMEWORLD_LOCATOR_ANALYTIC_ID]: homeworldLocatorMapAnalytic,
   [MINEFIELDS_ANALYTIC_ID]: minefieldsMapAnalytic,
+  [TEAM_INFORMATION_ANALYTIC_ID]: defaultMapAnalyticRegistration,
 }
 
 /** Canonical map analytic ids with explicit registry entries. */
@@ -128,6 +130,7 @@ export const REGISTERED_MAP_ANALYTIC_IDS = [
   VISIBILITY_ANALYTIC_ID,
   HOMEWORLD_LOCATOR_ANALYTIC_ID,
   MINEFIELDS_ANALYTIC_ID,
+  TEAM_INFORMATION_ANALYTIC_ID,
 ] as const satisfies readonly string[]
 
 export type RegisteredMapAnalyticId = (typeof REGISTERED_MAP_ANALYTIC_IDS)[number]
