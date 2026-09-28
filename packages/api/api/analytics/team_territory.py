@@ -1,7 +1,9 @@
 """Nearest-planet partition of the map rectangle.
 
-Sphere maps place a 3 by 3 copy of each site and clip the diagram back to
-``[0, width] x [0, height]``. An exact distance tie belongs to the lower planet id.
+The rectangle has size ``mapwidth`` by ``mapheight`` and is centered on the
+classical Nu origin ``(2000, 2000)``. Sphere maps place a 3 by 3 copy of each
+site and clip the diagram back to that rectangle. An exact distance tie belongs
+to the lower planet id.
 """
 
 from __future__ import annotations
@@ -11,9 +13,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import shapely
+from shapely.affinity import translate
 from shapely.geometry import MultiPoint, Polygon, box
 from shapely.geometry.polygon import orient
 
+from api.concepts.homeworld_layout import DEFAULT_MAP_CENTER_XY
 from api.errors import CoreAPIError
 
 Point = tuple[float, float]
@@ -33,25 +37,64 @@ class TerritorySite:
     league_team_id: int
 
 
-def _image_meets_rectangle(x: float, y: float, i: int, j: int, width: float, height: float) -> bool:
+@dataclass(frozen=True)
+class MapRectangle:
+    """Axis-aligned fundamental domain, ``width`` by ``height`` from ``left, bottom``."""
+
+    left: float
+    bottom: float
+    width: float
+    height: float
+
+    @property
+    def right(self) -> float:
+        return self.left + self.width
+
+    @property
+    def top(self) -> float:
+        return self.bottom + self.height
+
+
+def nu_map_rectangle(width: int, height: int) -> MapRectangle:
+    """Map rectangle centered on the classical Nu origin."""
+    center_x, center_y = DEFAULT_MAP_CENTER_XY
+    return MapRectangle(
+        left=center_x - width / 2.0,
+        bottom=center_y - height / 2.0,
+        width=float(width),
+        height=float(height),
+    )
+
+
+def _image_meets_rectangle(
+    x: float,
+    y: float,
+    i: int,
+    j: int,
+    rectangle: MapRectangle,
+) -> bool:
     """True when this torus image can be nearest for some point of the rectangle.
 
     The image's period cell is the set of points closer to it than to any other
     image of the same planet. Images whose period cell misses the rectangle never
     win a point there.
     """
-    left = x + i * width - width / 2.0
-    right = x + i * width + width / 2.0
-    bottom = y + j * height - height / 2.0
-    top = y + j * height + height / 2.0
-    return right >= 0.0 and left <= width and top >= 0.0 and bottom <= height
+    left = x + i * rectangle.width - rectangle.width / 2.0
+    right = x + i * rectangle.width + rectangle.width / 2.0
+    bottom = y + j * rectangle.height - rectangle.height / 2.0
+    top = y + j * rectangle.height + rectangle.height / 2.0
+    return (
+        right >= rectangle.left
+        and left <= rectangle.right
+        and top >= rectangle.bottom
+        and bottom <= rectangle.top
+    )
 
 
 def _replicated_sites(
     sites: Sequence[TerritorySite],
     *,
-    width: float,
-    height: float,
+    rectangle: MapRectangle,
     sphere: bool,
 ) -> list[TerritorySite]:
     if not sphere:
@@ -60,13 +103,13 @@ def _replicated_sites(
     for site in sites:
         for i in (-1, 0, 1):
             for j in (-1, 0, 1):
-                if not _image_meets_rectangle(site.x, site.y, i, j, width, height):
+                if not _image_meets_rectangle(site.x, site.y, i, j, rectangle):
                     continue
                 replicas.append(
                     TerritorySite(
                         planet_id=site.planet_id,
-                        x=site.x + i * width,
-                        y=site.y + j * height,
+                        x=site.x + i * rectangle.width,
+                        y=site.y + j * rectangle.height,
                         league_team_id=site.league_team_id,
                     )
                 )
@@ -208,30 +251,68 @@ def _ring_sort_key(ring: Sequence[Point]) -> tuple[float, float, tuple[Point, ..
     return (min(vertex[0] for vertex in ring), min(vertex[1] for vertex in ring), tuple(ring))
 
 
-def territory_components(
+# Shared borders sit on the order of 0 LY. Unowned gaps are tens of LY wide.
+TOUCH_GAP_LY = 1.0
+
+
+def _period_shifts(rectangle: MapRectangle, *, sphere: bool) -> list[Point]:
+    """Translations under which a clipped region is the same territory."""
+    if not sphere:
+        return [(0.0, 0.0)]
+    return [(i * rectangle.width, j * rectangle.height) for i in (-1, 0, 1) for j in (-1, 0, 1)]
+
+
+def _touching_teams(
+    regions: dict[int, list[Polygon]],
+    *,
+    rectangle: MapRectangle,
+    sphere: bool,
+) -> dict[int, set[int]]:
+    """League teams whose painted regions meet, including across a float gap.
+
+    On a sphere the rectangle edges are seams, so a border lying on an edge is
+    found by comparing against the periodic images of the other region.
+    """
+    geoms = {team_id: shapely.union_all(polygons) for team_id, polygons in regions.items()}
+    shifts = _period_shifts(rectangle, sphere=sphere)
+    team_ids = sorted(geoms)
+    neighbors: dict[int, set[int]] = {team_id: set() for team_id in team_ids}
+    for index, left_id in enumerate(team_ids):
+        for right_id in team_ids[index + 1 :]:
+            if any(
+                geoms[left_id].distance(translate(geoms[right_id], xoff=dx, yoff=dy))
+                <= TOUCH_GAP_LY
+                for dx, dy in shifts
+            ):
+                neighbors[left_id].add(right_id)
+                neighbors[right_id].add(left_id)
+    return neighbors
+
+
+def territory_partition(
     sites: Sequence[TerritorySite],
     *,
     width: int,
     height: int,
     sphere: bool,
-) -> list[tuple[int, list[Point]]]:
-    """Painted components as ``(league_team_id, ring)``.
+) -> tuple[list[tuple[int, list[Point]]], dict[int, set[int]]]:
+    """Painted components and which league teams share a border.
 
-    Cells whose site has ``league_team_id <= 0`` are omitted. Same-team cells
-    that share a border become one ring. A hole in that union is cut into the
-    same ring so the hole is not filled.
+    Components are ``(league_team_id, ring)``. Cells whose site has
+    ``league_team_id <= 0`` are omitted. Same-team cells that share a border
+    become one ring. A hole in that union is cut into the same ring so the hole
+    is not filled.
     """
     if width <= 0 or height <= 0 or not sites:
-        return []
-    width_f = float(width)
-    height_f = float(height)
-    replicas = _replicated_sites(sites, width=width_f, height=height_f, sphere=sphere)
+        return [], {}
+    rectangle = nu_map_rectangle(width, height)
+    replicas = _replicated_sites(sites, rectangle=rectangle, sphere=sphere)
     regions = _team_regions(
         _coincident_winners(replicas),
-        rectangle=box(0.0, 0.0, width_f, height_f),
+        rectangle=box(rectangle.left, rectangle.bottom, rectangle.right, rectangle.top),
     )
     components: list[tuple[int, list[Point]]] = []
     for team_id in sorted(regions):
         rings = sorted((_single_ring(polygon) for polygon in regions[team_id]), key=_ring_sort_key)
         components.extend((team_id, ring) for ring in rings)
-    return components
+    return components, _touching_teams(regions, rectangle=rectangle, sphere=sphere)

@@ -2,9 +2,18 @@ import { useId } from 'react'
 import { useStore } from '@xyflow/react'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { buildMapRegionOverlayPaneShapes } from '../../lib/mapRegionOverlay'
+import {
+  FILL_PATTERN_PERIOD_PX,
+  fillPatternPhase,
+} from '../../lib/mapRegionFillPattern'
+import { FillPatternMarks } from '../../lib/mapRegionFillPatternMarks'
 import { safeZoomScale } from './geometry'
 import { mapPaneZClass } from './mapPaneZOrder'
 import { useOverlayPaneSize } from './useOverlayPaneSize'
+
+function hatchPatternId(prefix: string, key: string): string {
+  return `${prefix}-hatch-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
 
 /**
  * Blit hybrid map region overlays.
@@ -30,6 +39,8 @@ export function MapRegionOverlayPane({
 
   const [tx, ty, rawScale] = transform
   const scale = safeZoomScale(rawScale)
+  const patternPhaseX = fillPatternPhase(tx)
+  const patternPhaseY = fillPatternPhase(ty)
   const { groups } = buildMapRegionOverlayPaneShapes(regionOverlays, {
     width,
     height,
@@ -79,6 +90,34 @@ export function MapRegionOverlayPane({
               </mask>
             )
           })}
+          {groups.map((group) => {
+            if (
+              group.fillPattern == null ||
+              group.fillPattern === 'solid' ||
+              group.boundaryPath == null
+            ) {
+              return null
+            }
+            const patternId = hatchPatternId(idPrefix, group.key)
+            return (
+              <pattern
+                key={patternId}
+                id={patternId}
+                width={FILL_PATTERN_PERIOD_PX}
+                height={FILL_PATTERN_PERIOD_PX}
+                patternUnits="userSpaceOnUse"
+                patternTransform={`translate(${patternPhaseX} ${patternPhaseY})`}
+              >
+                <rect
+                  width={FILL_PATTERN_PERIOD_PX}
+                  height={FILL_PATTERN_PERIOD_PX}
+                  fill={group.fillColor}
+                  fillOpacity={group.fillOpacity}
+                />
+                <FillPatternMarks pattern={group.fillPattern} />
+              </pattern>
+            )
+          })}
         </defs>
         {groups.map((group) => {
           const maskId = `${idPrefix}-disks-${group.key}`
@@ -100,8 +139,20 @@ export function MapRegionOverlayPane({
                 ) : (
                   <path
                     d={group.boundaryPath}
-                    fill={group.fillOpacity > 0 ? group.fillColor : 'none'}
-                    fillOpacity={group.fillOpacity > 0 ? group.fillOpacity : undefined}
+                    fill={
+                      group.fillPattern != null && group.fillPattern !== 'solid'
+                        ? `url(#${hatchPatternId(idPrefix, group.key)})`
+                        : group.fillOpacity > 0
+                          ? group.fillColor
+                          : 'none'
+                    }
+                    fillOpacity={
+                      group.fillPattern != null && group.fillPattern !== 'solid'
+                        ? 1
+                        : group.fillOpacity > 0
+                          ? group.fillOpacity
+                          : undefined
+                    }
                     stroke={group.strokeColor ?? group.fillColor}
                     strokeOpacity={group.strokeColor != null ? 0.85 : group.fillOpacity}
                     strokeWidth={group.strokeWidth ?? 1}

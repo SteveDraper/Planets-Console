@@ -10,11 +10,11 @@ Related: [Adding a turn analytic](design-adding-a-turn-analytic.md), [Analytics 
 |-------------|----------|
 | Registration | Selectable, `supports_table=false`, `supports_map=true`, display name `Team information` |
 | Sites | Shell-turn planets. Unowned means `ownerid == 0`. **League team** is `Player.leagueteamid` on that owner (`0` means no league team) |
-| Distance | Euclidean light-years. On a **sphere map** (`GameSettings.sphere`), toroidal distance on the rectangle `[0, mapwidth] x [0, mapheight]` (origin at `(0, 0)`), both axes. `mapshape` does not change the period. `Game.maptype` is a hosting category and is ignored |
+| Distance | Euclidean light-years. On a **sphere map** (`GameSettings.sphere`), toroidal distance on the rectangle of size `mapwidth` by `mapheight` centered on `(2000, 2000)`, both axes. `mapshape` does not change the period. `Game.maptype` is a hosting category and is ignored |
 | Site sets | Both **team territory site set**s are computed on every map response. Checkbox **Owned planets only** (default off, global localStorage) chooses which set is painted. Toggling does not refetch |
 | Holes | Cells whose winning site is unowned are omitted from the all-planets set. Cells whose winning owner has `leagueteamid == 0` are omitted from both sets. Owned-planets-only fills the rectangle when every owner has a league team |
 | Paint | Shared **map region overlay** boundary polygons (line edges only). One overlay per disjoint component of a league team's union. Semi-transparent fill so planet dots stay readable |
-| Color | Stable palette keyed by `leagueteamid`, shared by both site sets. Independent of **player color** |
+| Color | Each league team on the turn gets a distinct hue. Teams that share a border are placed as far apart on the wheel as the team count allows. A shared border whose hues are still within 60 degrees uses a different hatch (`solid`, `forward`, `back`, `horizontal`, `vertical`, `dots`). Both site sets share that style. Independent of **player color** |
 | Legend | Sidebar lists each league team that appears: swatch, team id, roster usernames. Turn data has no league-team name |
 | Exports | Empty catalog. No orchestrator profile. No map query params |
 
@@ -31,7 +31,7 @@ Core owns the partition. The SPA blits.
 3. Build the Voronoi partition of the site set on the map rectangle. On a sphere map, replicate each site across the eight neighboring periods (3 by 3 tiling) and clip the diagram back to the fundamental rectangle. Split any polygon that crosses a seam so every emitted ring lies inside the rectangle.
 4. The winning site at a point is the nearest site. An exact distance tie uses the lower planet id.
 5. A cell is painted only when its winning site has an owner with `leagueteamid > 0`. Union painted cells that share a league team id. Disjoint components stay separate overlays with the same color and team id.
-6. Clip every ring to `[0, mapwidth] x [0, mapheight]`.
+6. Clip every ring to the map rectangle: `[2000 - mapwidth / 2, 2000 + mapwidth / 2] x [2000 - mapheight / 2, 2000 + mapheight / 2]`.
 
 ## Wire
 
@@ -39,7 +39,7 @@ Core `compute` returns a JSON object:
 
 - `analyticId`: `team-information`
 - `sphere`: bool from settings
-- `teams`: `{ leagueTeamId, fillColor, playerIds }[]` for every league team that owns at least one planet on the turn (even if a site set paints nothing for them)
+- `teams`: `{ leagueTeamId, fillColor, fillPattern, playerIds }[]` for every league team that owns at least one planet on the turn (even if a site set paints nothing for them)
 - `regionOverlays`: both partitions
 
 Each overlay is a shared boundary **map region overlay**:
@@ -48,12 +48,13 @@ Each overlay is a shared boundary **map region overlay**:
 |-------|--------|
 | `kind` | `team-territory` (all planets) or `team-territory-owned-only` |
 | `id` | `team-territory:{leagueTeamId}:{component}` or `team-territory-owned-only:{leagueTeamId}:{component}` |
-| `fillColor` | palette hex for that `leagueteamid` |
+| `fillColor` | distinct hue for that team on this turn |
+| `fillPattern` | `solid`, `forward`, `back`, `horizontal`, `vertical`, or `dots` |
 | `fillOpacity` | `0.35` |
 | `geometry` | `{ type: "boundary", vertices: [{x, y}, ...], edges: [{type: "line"}, ...] }` closed, clockwise or counterclockwise, no arcs |
 | `leagueTeamId` | int domain fact. No English strings |
 
-Palette (index `leagueteamid % 12`): `#38bdf8 #f472b6 #a78bfa #34d399 #fbbf24 #fb7185 #22d3ee #a3e635 #f97316 #818cf8 #2dd4bf #e879f9`.
+`fillPattern` is the same on the team row and on every overlay for that team. The SPA draws the hatch in screen pixels so it stays readable when zoomed out. Hatch strokes are white at 0.35 opacity so the team color stays dominant, and the legend swatch uses the same marks.
 
 BFF map handler passes the Core object through. The table route stays a validation error.
 

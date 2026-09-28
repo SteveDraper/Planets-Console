@@ -90,6 +90,17 @@ def test_registry_metadata_keeps_minefields_selectable_map_only():
     }
 
 
+def test_registry_metadata_keeps_team_information_selectable_map_only():
+    team_information = next(a for a in ANALYTICS_LIST if a["id"] == "team-information")
+    assert team_information == {
+        "id": "team-information",
+        "name": "Team information",
+        "supportsTable": False,
+        "supportsMap": True,
+        "type": "selectable",
+    }
+
+
 def test_fleet_table_dispatch_forwards_to_core():
     calls = []
 
@@ -287,6 +298,53 @@ def test_minefields_table_dispatch_raises_validation_error():
     scope = TurnScope(628580, 1, 111)
     with pytest.raises(BFFValidationError, match="does not support table"):
         get_table_response("minefields", scope, lambda *a, **k: {}, NOOP_DIAGNOSTICS)
+
+
+def test_team_information_map_dispatch_passes_core_shape_through():
+    core = {
+        "analyticId": "team-information",
+        "sphere": True,
+        "teams": [{"leagueTeamId": 4, "fillColor": "#38bdf8", "playerIds": [1, 2]}],
+        "regionOverlays": [
+            {"kind": "team-territory", "id": "team-territory:4:0"},
+            {"kind": "team-territory-owned-only", "id": "team-territory-owned-only:4:0"},
+        ],
+    }
+    calls = []
+
+    def load_core(game_id, perspective, turn, analytic_id, **kwargs):
+        calls.append((game_id, perspective, turn, analytic_id, kwargs))
+        return core
+
+    data = get_map_response(
+        "team-information",
+        TurnScope(628580, 1, 111),
+        ConnectionsMapQuery(
+            warp_speed=9,
+            gravitonic_movement=False,
+            flare_mode=FlareConnectionMode.OFF,
+            flare_depth=1,
+            include_illustrative_routes=False,
+        ),
+        load_core,
+        NOOP_DIAGNOSTICS,
+    )
+    assert data is core
+    assert calls == [
+        (
+            628580,
+            1,
+            111,
+            "team-information",
+            {"diagnostics": NOOP_DIAGNOSTICS},
+        )
+    ]
+
+
+def test_team_information_table_dispatch_raises_validation_error():
+    scope = TurnScope(628580, 1, 111)
+    with pytest.raises(BFFValidationError, match="does not support table"):
+        get_table_response("team-information", scope, lambda *a, **k: {}, NOOP_DIAGNOSTICS)
 
 
 def test_scores_table_dispatch_shapes_core_rows():

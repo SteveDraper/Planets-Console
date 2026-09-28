@@ -109,11 +109,27 @@ export type MapRegionPossibleOwner = {
  */
 export type OwnershipWinningStrength = 'weak' | 'strong' | 'asserted'
 
+export const MAP_REGION_FILL_PATTERNS = [
+  'solid',
+  'forward',
+  'back',
+  'horizontal',
+  'vertical',
+  'dots',
+] as const
+
+export type MapRegionFillPattern = (typeof MAP_REGION_FILL_PATTERNS)[number]
+
 export type MapRegionOverlay = {
   kind: string
   id: string
   fillColor: string
   fillOpacity: number
+  /**
+   * Hatch laid over the fill. ``solid`` and omission paint a flat fill.
+   * Screen-spaced so the pattern stays readable when the map is zoomed out.
+   */
+  fillPattern?: MapRegionFillPattern
   geometry: MapRegionOverlayGeometry
   isPinned?: boolean
   status?: string

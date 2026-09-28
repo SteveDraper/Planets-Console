@@ -280,4 +280,11 @@ describe('normalizeMapRegionOverlay', () => {
       validCoverage,
     ])
   })
+
+  it('keeps a known fill pattern and rejects an unknown one', () => {
+    expect(normalizeMapRegionOverlay({ ...validBoundary, fillPattern: 'forward' })).toMatchObject({
+      fillPattern: 'forward',
+    })
+    expect(normalizeMapRegionOverlay({ ...validBoundary, fillPattern: 'plaid' })).toBeNull()
+  })
 })

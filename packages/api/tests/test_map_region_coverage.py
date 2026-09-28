@@ -2,6 +2,7 @@
 
 import math
 
+import pytest
 from api.concepts.map_region_coverage import (
     CoverageOrigin,
     MapRegionBoundaryArcEdge,
@@ -177,7 +178,27 @@ def test_wire_round_trip_shape():
     assert "status" not in wire
     assert "candidateCount" not in wire
     assert "playerLabel" not in wire
+    assert "fillPattern" not in wire
     assert "hoverSummary" not in wire
+
+
+@pytest.mark.parametrize("fill_pattern", ["solid", "forward"])
+def test_boundary_wire_emits_fill_pattern_when_set(fill_pattern: str):
+    overlay = boundary_to_overlay(
+        kind="team-territory",
+        overlay_id="team-territory:1:0",
+        fill_color="#2563eb",
+        fill_opacity=0.35,
+        vertices=(
+            MapRegionOverlayVertex(x=0.0, y=0.0),
+            MapRegionOverlayVertex(x=10.0, y=0.0),
+            MapRegionOverlayVertex(x=0.0, y=10.0),
+        ),
+        edges=(MapRegionBoundaryLineEdge(),) * 3,
+        fill_pattern=fill_pattern,
+    )
+    assert overlay.fill_pattern == fill_pattern
+    assert map_region_overlay_to_wire(overlay)["fillPattern"] == fill_pattern
 
 
 def test_boundary_wire_round_trip_with_annotations():
@@ -219,6 +240,7 @@ def test_boundary_wire_round_trip_with_annotations():
     assert wire["status"] == "ok"
     assert wire["candidateCount"] == 1
     assert wire["playerLabel"] == "koshling (The Lizard Alliance)"
+    assert "fillPattern" not in wire
     assert "hoverSummary" not in wire
 
 

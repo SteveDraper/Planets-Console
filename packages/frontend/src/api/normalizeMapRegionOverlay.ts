@@ -2,19 +2,21 @@
  * Normalize map region overlay wire JSON (syntactic parsing before UI merge).
  */
 
-import type {
-  MapRegionBoundaryArcEdge,
-  MapRegionBoundaryEdge,
-  MapRegionBoundaryGeometry,
-  MapRegionBoundaryLineEdge,
-  MapRegionCoverageGeometry,
-  MapRegionCoverageRleRun,
-  MapRegionOverlay,
-  MapRegionOverlayDisk,
-  MapRegionOverlayGeometry,
-  MapRegionOverlayPatch,
-  MapRegionOverlayVertex,
-  MapRegionPossibleOwner,
+import {
+  MAP_REGION_FILL_PATTERNS,
+  type MapRegionBoundaryArcEdge,
+  type MapRegionBoundaryEdge,
+  type MapRegionBoundaryGeometry,
+  type MapRegionBoundaryLineEdge,
+  type MapRegionCoverageGeometry,
+  type MapRegionCoverageRleRun,
+  type MapRegionFillPattern,
+  type MapRegionOverlay,
+  type MapRegionOverlayDisk,
+  type MapRegionOverlayGeometry,
+  type MapRegionOverlayPatch,
+  type MapRegionOverlayVertex,
+  type MapRegionPossibleOwner,
 } from './mapRegionOverlayTypes'
 import { parseJsonFiniteNumber, parseJsonInteger } from './normalizeMapWireParsing'
 
@@ -174,6 +176,13 @@ function normalizeLegacyCoverage(raw: Record<string, unknown>): MapRegionOverlay
   return normalizeCoverageGeometry(raw)
 }
 
+const FILL_PATTERN_VALUES: ReadonlySet<string> = new Set(MAP_REGION_FILL_PATTERNS)
+
+function normalizeFillPattern(raw: unknown): MapRegionFillPattern | null {
+  if (typeof raw !== 'string' || !FILL_PATTERN_VALUES.has(raw)) return null
+  return raw as MapRegionFillPattern
+}
+
 function normalizeOptionalBoolean(raw: unknown): boolean | undefined {
   if (raw === undefined) return undefined
   if (typeof raw !== 'boolean') return undefined
@@ -218,6 +227,11 @@ export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null
   if (geometry == null) return null
 
   const overlay: MapRegionOverlay = { kind, id, fillColor, fillOpacity, geometry }
+  const fillPattern = normalizeFillPattern(o.fillPattern ?? o.fill_pattern)
+  if ((o.fillPattern !== undefined || o.fill_pattern !== undefined) && fillPattern == null) {
+    return null
+  }
+  if (fillPattern != null) overlay.fillPattern = fillPattern
   const isPinned = normalizeOptionalBoolean(o.isPinned ?? o.is_pinned)
   if (isPinned !== undefined) overlay.isPinned = isPinned
   // Reject non-boolean isPinned when the key is present

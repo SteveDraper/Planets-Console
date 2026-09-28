@@ -28,6 +28,7 @@ const SELECTABLE_TURN_ANALYTIC_IDS = [
   'visibility',
   'homeworld-locator',
   'minefields',
+  'team-information',
 ] as const
 
 const UNREGISTERED_SELECTABLE: AnalyticItem = {

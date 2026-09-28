@@ -479,7 +479,7 @@ Which planets compete as nearest-planet sites for **team territory**. **All plan
 _Avoid_: a second analytic, recomputing the partition in the SPA
 
 **Sphere map**:
-A game with `GameSettings.sphere` true. The rectangle `[0, mapwidth] x [0, mapheight]` is a torus: distance wraps on both axes, including when `mapshape` is round. Planets.nu calls this setup Sphere.
+A game with `GameSettings.sphere` true. The map rectangle of size `mapwidth` by `mapheight`, centered on `(2000, 2000)`, is a torus: distance wraps on both axes, including when `mapshape` is round. Planets.nu calls this setup Sphere.
 _Avoid_: `Game.maptype` (hosting category), treating `mapshape` as the wrap flag, black-hole ergosphere
 
 **Stellar Cartography**:

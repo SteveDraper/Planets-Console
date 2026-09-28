@@ -214,6 +214,23 @@ export function deriveTurnEnsureEnabled(
   return analyticScope != null && (loginTrimmed !== '' || storageOnlyLoad)
 }
 
+/** TanStack Query key for the shell turn-ensure query; readers of its cache must use the same key. */
+export function turnEnsureQueryKey(
+  analyticScope: AnalyticShellScope | null,
+  loginName: string | null,
+  credentialsRevision: number
+) {
+  return [
+    'bff',
+    'turnData',
+    analyticScope?.gameId ?? '',
+    analyticScope?.turn ?? 0,
+    analyticScope?.perspective ?? 0,
+    loginName?.trim() ?? '',
+    credentialsRevision,
+  ] as const
+}
+
 export function deriveTurnBlockedNoLogin(
   analyticScope: AnalyticShellScope | null,
   loginName: string | null,
