@@ -549,7 +549,7 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
 
 
 def test_turn_store_invalidates_fleet_snapshots(memory_backend):
-    _, turns, _, _, _, _ = build_service_stack(memory_backend)
+    _, turns, _, _, _, _, _ = build_service_stack(memory_backend)
     persistence = FleetSnapshotPersistenceService(memory_backend)
     persistence.put_snapshot(
         628580,
@@ -615,7 +615,7 @@ def test_turn_analytic_service_fleet_miss_submits_batch_ensure(
         "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
         fail_chain,
     )
-    _, _, _, _, analytics, _ = build_service_stack(memory_backend)
+    _, _, _, _, analytics, _, _ = build_service_stack(memory_backend)
     with pytest.raises(ValidationError, match="fleet roster snapshot is not durable"):
         analytics.get_turn_analytics(628580, 1, 111, "fleet")
     assert captured == [("fleet", 4)]
@@ -638,7 +638,7 @@ def test_turn_analytic_service_fleet_cache_hit_skips_snapshot_chain(
         "api.analytics.fleet.chain._materialize_fleet_snapshot_chain",
         fail_chain,
     )
-    _, _, _, _, analytics, _ = build_service_stack(memory_backend)
+    _, _, _, _, analytics, _, _ = build_service_stack(memory_backend)
     data = analytics.get_turn_analytics(628580, 1, 111, "fleet")
     assert data["analyticId"] == "fleet"
     assert len(data["players"]) == 4

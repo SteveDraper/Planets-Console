@@ -34,7 +34,7 @@ def _is_transient_request_error(exc: httpx.HTTPError) -> bool:
 
 
 class PlanetsNuClient:
-    """Thin wrapper around api.planets.nu for login, loadinfo, and loadturn."""
+    """Thin wrapper around api.planets.nu for login, loadinfo, loadturn, and loadprofile."""
 
     def __init__(
         self,
@@ -152,6 +152,23 @@ class PlanetsNuClient:
         except httpx.HTTPError as exc:
             logger.warning("Planets.nu loadinfo HTTP error: %s", _safe_httpx_error_summary(exc))
             raise UpstreamPlanetsError("Planets.nu load game info request failed.") from exc
+
+    def load_profile(self, username: str) -> dict[str, Any]:
+        """GET /account/loadprofile. Public profile; no API key."""
+        url = f"{self._base_url}/account/loadprofile"
+        try:
+            response = self._request_with_retry(
+                "loadprofile",
+                lambda client: client.get(url, params={"username": username}),
+            )
+            return self._json_from_response(
+                response,
+                invalid_json_message="Planets.nu loadprofile returned invalid JSON.",
+                unexpected_payload_message="Planets.nu loadprofile returned an unexpected payload.",
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("Planets.nu loadprofile HTTP error: %s", _safe_httpx_error_summary(exc))
+            raise UpstreamPlanetsError("Planets.nu load profile request failed.") from exc
 
     def load_turn(
         self,

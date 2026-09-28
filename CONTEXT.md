@@ -467,8 +467,12 @@ A map-only **turn analytic** (`analytic_id` `team-information`) that paints **te
 _Avoid_: in-game team coloring (`Player.teamid`), a tabular roster tile, tinting planet markers only
 
 **League team**:
-The competitive organization identified by `Player.leagueteamid`. `0` means that **Player** has no league team. Turn data carries the id and member usernames, not a team name.
+The competitive organization identified by `Player.leagueteamid`. `0` means that **Player** has no league team. The turn carries the id. The name is the Planets.nu player-group name for that same id (`playergroups.groupid`), not a turn field.
 _Avoid_: in-game team (`Player.teamid`, `GameSettings.teamsize`), race, alliance, diplomacy circle
+
+**League team directory**:
+The shared map from a **league team** id to that team's Planets.nu group name. An id with no resolved name stays unnamed. The same id names the team in every game.
+_Avoid_: team-information analytic payload, in-game team roster
 
 **Team territory**:
 The region of the map closer to a planet owned by that **league team** than to any other site in the active **team territory site set**. Distance is Euclidean light-years, or toroidal on the map rectangle when the game is a **sphere map**.

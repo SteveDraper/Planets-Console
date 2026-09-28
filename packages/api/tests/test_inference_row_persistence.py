@@ -357,7 +357,7 @@ def test_mask_change_deletes_persisted_row(memory_backend):
 
 
 def test_recompute_clears_host_turn_document(memory_backend):
-    _, _, _, _, analytics, _ = build_service_stack(memory_backend)
+    _, _, _, _, analytics, _, _ = build_service_stack(memory_backend)
     persistence = InferenceRowPersistenceService(memory_backend)
     persistence.put_row(
         628580,
@@ -377,7 +377,7 @@ def test_recompute_clears_host_turn_document(memory_backend):
 
 
 def test_turn_store_invalidates_inference_persistence(memory_backend):
-    _, turns, _, _, _, _ = build_service_stack(memory_backend)
+    _, turns, _, _, _, _, _ = build_service_stack(memory_backend)
     persistence = InferenceRowPersistenceService(memory_backend)
     persistence.put_row(
         628580,

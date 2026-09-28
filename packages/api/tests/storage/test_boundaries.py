@@ -30,6 +30,12 @@ def test_resolve_breakpoint_turn():
     assert suffix is None
 
 
+def test_resolve_breakpoint_league_team():
+    bp, suffix = resolve_breakpoint("league-teams/76")
+    assert bp == "league-teams/76"
+    assert suffix is None
+
+
 def test_resolve_breakpoint_credentials():
     bp, suffix = resolve_breakpoint("credentials/accounts/alice/api_key")
     assert bp == "credentials/accounts/alice"
