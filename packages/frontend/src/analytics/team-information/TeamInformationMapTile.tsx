@@ -1,13 +1,19 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AnalyticShellScope } from '../../api/bff'
 import { cn } from '../../lib/utils'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useShellStore } from '../../stores/shell'
+import { useTeamInformationHighlightStore } from '../../stores/teamInformationHighlight'
 import { useTeamInformationPreferencesStore } from '../../stores/teamInformationPreferences'
 import { tileClassName } from '../tileChrome'
-import { teamInformationLegendRows } from './teamLegend'
+import {
+  teamInformationLegendHoverTitle,
+  teamInformationLegendRows,
+  teamInformationLegendText,
+} from './teamLegend'
 import { teamInformationMapQuerySpec } from './mapAnalytic'
+import { useLeagueTeamNames } from './useLeagueTeamNames'
 import { useTurnRosterUsernames } from './useTurnRosterUsernames'
 import { FillPatternMarks } from '../../lib/mapRegionFillPatternMarks'
 
@@ -50,22 +56,35 @@ export function TeamInformationMapTile({
 }: TeamInformationMapTileProps) {
   const ownedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.ownedPlanetsOnly)
   const setOwnedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.setOwnedPlanetsOnly)
+  const setHoveredLeagueTeamId = useTeamInformationHighlightStore(
+    (s) => s.setHoveredLeagueTeamId
+  )
   const perspectives = useShellStore((s) => s.gameInfoContext?.perspectives)
   const turnUsernames = useTurnRosterUsernames(analyticScope)
 
   const fetchEnabled = supportsMode && enabled && turnDataReady
   const mapQuery = useQuery(teamInformationMapQuerySpec(analyticScope, fetchEnabled))
+  const gameId = analyticScope?.gameId ?? null
+  const namesByLeagueTeamId = useLeagueTeamNames(gameId, supportsMode && enabled)
 
   const legendRows = useMemo(
     () =>
       teamInformationLegendRows(
         mapQuery.data?.teamInformationTeams ?? [],
-        rosterUsernames(perspectives ?? [], turnUsernames)
+        rosterUsernames(perspectives ?? [], turnUsernames),
+        namesByLeagueTeamId
       ),
-    [mapQuery.data?.teamInformationTeams, perspectives, turnUsernames]
+    [mapQuery.data?.teamInformationTeams, namesByLeagueTeamId, perspectives, turnUsernames]
   )
 
   const showLegend = supportsMode && enabled && legendRows.length > 0
+
+  useEffect(() => {
+    if (showLegend) return
+    setHoveredLeagueTeamId(null)
+  }, [setHoveredLeagueTeamId, showLegend])
+
+  useEffect(() => () => setHoveredLeagueTeamId(null), [setHoveredLeagueTeamId])
 
   return (
     <div
@@ -107,7 +126,13 @@ export function TeamInformationMapTile({
       {showLegend ? (
         <ul aria-label="League teams" className="flex flex-col gap-1 border-t border-[#52575d]/40 px-2 py-2">
           {legendRows.map((row) => (
-            <li key={row.leagueTeamId} className="flex min-w-0 items-start gap-2">
+            <li
+              key={row.leagueTeamId}
+              className="flex min-w-0 items-start gap-2"
+              title={teamInformationLegendHoverTitle(row.usernames)}
+              onMouseEnter={() => setHoveredLeagueTeamId(row.leagueTeamId)}
+              onMouseLeave={() => setHoveredLeagueTeamId(null)}
+            >
               <span
                 aria-hidden
                 data-fill-pattern={row.fillPattern}
@@ -120,11 +145,13 @@ export function TeamInformationMapTile({
                   </svg>
                 )}
               </span>
-              <span className="min-w-0 text-xs text-slate-300">
-                <span className="font-mono">{row.leagueTeamId}</span>
-                {row.usernames.length > 0 ? (
-                  <span className="text-slate-400"> {row.usernames.join(', ')}</span>
-                ) : null}
+              <span
+                className={cn(
+                  'min-w-0 text-xs text-slate-300',
+                  row.name == null && 'font-mono'
+                )}
+              >
+                {teamInformationLegendText(row)}
               </span>
             </li>
           ))}

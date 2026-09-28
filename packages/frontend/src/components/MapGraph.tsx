@@ -27,6 +27,7 @@ import { nodeTypes, toFlowNodes } from './map-graph/nodes'
 import { edgeTypes, toEdges } from './map-graph/edges'
 import { StellarCartographyOverlayPane } from './map-graph/StellarCartographyOverlayPane'
 import { MapRegionOverlayPane } from './map-graph/MapRegionOverlayPane'
+import { TeamTerritoryHighlightOutline } from './map-graph/TeamTerritoryHighlightOutline'
 import { MinefieldMapPane } from './map-graph/MinefieldMapPane'
 import { MapAttentionOrchestrator } from './map-graph/MapAttentionOrchestrator'
 import { HomeworldMarkersOverlay } from './map-graph/HomeworldMarkersOverlay'
@@ -37,18 +38,25 @@ import { useFleetHeadingTrails } from '../analytics/fleet/useFleetHeadingTrails'
 import { useFleetLocationRingStacks } from '../analytics/fleet/useFleetLocationRingStacks'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
-import { FLEET_ANALYTIC_ID, MINEFIELDS_ANALYTIC_ID } from '../analytics/mapAnalyticIds'
+import {
+  FLEET_ANALYTIC_ID,
+  MINEFIELDS_ANALYTIC_ID,
+  TEAM_INFORMATION_ANALYTIC_ID,
+} from '../analytics/mapAnalyticIds'
 import { buildHomeworldRegionOverlaysForPaint } from '../analytics/homeworld-locator/homeworldRegionPaint'
 import {
   useEffectiveHomeworldSectorIndexes,
   useHomeworldRegionSelectionMaterialize,
 } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
+import { isTeamTerritoryKind } from '../analytics/team-information/kinds'
 import { mapRegionOverlaysForPaint } from '../analytics/team-information/teamTerritoryPaint'
+import { useLeagueTeamNames } from '../analytics/team-information/useLeagueTeamNames'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { homeworldOverlaysReadyForMaterialize } from '../lib/homeworldRegionSelection'
 import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
+import { useTeamInformationHighlightStore } from '../stores/teamInformationHighlight'
 import { useTeamInformationPreferencesStore } from '../stores/teamInformationPreferences'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
@@ -72,6 +80,7 @@ import { RegionMapInteractionContributor } from '../map-interaction/contributors
 import { CartographyMapInteractionContributor } from '../map-interaction/contributors/CartographyMapInteractionContributor'
 import { WormholeMapInteractionContributor } from '../map-interaction/contributors/WormholeMapInteractionContributor'
 import { MinefieldMapInteractionContributor } from '../map-interaction/contributors/MinefieldMapInteractionContributor'
+import { TeamTerritoryMapInteractionContributor } from '../map-interaction/contributors/TeamTerritoryMapInteractionContributor'
 
 type MapGraphProps = {
   data: CombinedMapData
@@ -242,6 +251,12 @@ function MapGraphFlow({
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
   const minefieldsEnabled = enabledAnalyticIds.includes(MINEFIELDS_ANALYTIC_ID)
+  const teamInformationEnabled = enabledAnalyticIds.includes(TEAM_INFORMATION_ANALYTIC_ID)
+  const hoveredLeagueTeamId = useTeamInformationHighlightStore((s) => s.hoveredLeagueTeamId)
+  const teamNamesByLeagueTeamId = useLeagueTeamNames(
+    analyticScope.gameId,
+    teamInformationEnabled
+  )
   const fleetStacks = useFleetLocationRingStacks(analyticScope, fleetEnabled)
   const fleetHeadingTrails = useFleetHeadingTrails(
     analyticScope,
@@ -296,6 +311,13 @@ function MapGraphFlow({
       showEnvelopeOverlays,
     ]
   )
+  const highlightedTeamOverlays = useMemo(() => {
+    if (!teamInformationEnabled || hoveredLeagueTeamId == null) return []
+    return regionOverlays.filter(
+      (overlay) =>
+        isTeamTerritoryKind(overlay.kind) && overlay.leagueTeamId === hoveredLeagueTeamId
+    )
+  }, [hoveredLeagueTeamId, regionOverlays, teamInformationEnabled])
 
   return (
     <FleetLocationRingStacksProvider stacks={fleetStacks}>
@@ -335,6 +357,7 @@ function MapGraphFlow({
         />
       ) : null}
       <MapRegionOverlayPane regionOverlays={regionOverlays} />
+      <TeamTerritoryHighlightOutline regionOverlays={highlightedTeamOverlays} />
       <MinefieldMapPane minefields={data.minefields} shellTurn={analyticScope.turn} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
@@ -366,6 +389,11 @@ function MapGraphFlow({
           enabled={minefieldsEnabled}
         />
         <RegionMapInteractionContributor regionOverlays={regionOverlays} />
+        <TeamTerritoryMapInteractionContributor
+          regionOverlays={regionOverlays}
+          namesByLeagueTeamId={teamNamesByLeagueTeamId}
+          enabled={teamInformationEnabled}
+        />
         <CartographyMapInteractionContributor cartography={cartography} />
         <WormholeMapInteractionContributor
           cartography={cartography}

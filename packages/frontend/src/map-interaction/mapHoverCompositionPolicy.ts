@@ -45,6 +45,11 @@ export const MAP_HOVER_COMPOSITION_POLICY: readonly MapHoverPolicyEdge[] = [
     to: { kind: 'descriptive', role: 'planet' },
   },
   {
+    from: { kind: 'descriptive', role: 'team-territory' },
+    relation: 'yieldsTo',
+    to: { kind: 'descriptive', role: 'planet' },
+  },
+  {
     from: { kind: 'descriptive', role: 'fleet' },
     relation: 'mergesWith',
     to: { kind: 'descriptive', role: 'planet' },
@@ -56,6 +61,16 @@ export const MAP_HOVER_COMPOSITION_POLICY: readonly MapHoverPolicyEdge[] = [
   },
   {
     from: { kind: 'descriptive', role: 'region' },
+    relation: 'mergesWith',
+    to: { kind: 'descriptive', role: 'cartography' },
+  },
+  {
+    from: { kind: 'descriptive', role: 'team-territory' },
+    relation: 'mergesWith',
+    to: { kind: 'descriptive', role: 'region' },
+  },
+  {
+    from: { kind: 'descriptive', role: 'team-territory' },
     relation: 'mergesWith',
     to: { kind: 'descriptive', role: 'cartography' },
   },
@@ -79,11 +94,16 @@ export const MAP_HOVER_COMPOSITION_POLICY: readonly MapHoverPolicyEdge[] = [
     relation: 'mergesWith',
     to: { kind: 'descriptive', role: 'cartography' },
   },
+  {
+    from: { kind: 'descriptive', role: 'minefield' },
+    relation: 'mergesWith',
+    to: { kind: 'descriptive', role: 'team-territory' },
+  },
 ]
 
 /** Section order inside a merged descriptive host (cursor host by role order). */
 export const DESCRIPTIVE_SECTION_ROLE_ORDER: readonly MapInteractionContributorRole[] =
-  ['planet', 'fleet', 'minefield', 'region', 'cartography']
+  ['planet', 'fleet', 'minefield', 'region', 'team-territory', 'cartography']
 export type ComposedDescriptiveSection = {
   contributionId: string
   role: MapInteractionContributorRole

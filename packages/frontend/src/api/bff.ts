@@ -402,6 +402,19 @@ export async function fetchViewpointEligibility(
   return r.json()
 }
 
+export type LeagueTeamsResponse = components['schemas']['LeagueTeamsResponse']
+
+/** League team id and name pairs for one game. Separate from turn-analytic map compute. */
+export async function fetchLeagueTeams(gameId: string): Promise<LeagueTeamsResponse> {
+  const path = `/bff/games/${encodeURIComponent(gameId)}/league-teams`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, undefined, endpointLabel)
+  if (!r.ok) {
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
+  }
+  return r.json()
+}
+
 export type LoadAllTurnsRequestBody = components['schemas']['LoadAllTurnsRequest']
 
 export type LoadAllTurnsStatusResponse = components['schemas']['LoadAllTurnsStatusResponse']

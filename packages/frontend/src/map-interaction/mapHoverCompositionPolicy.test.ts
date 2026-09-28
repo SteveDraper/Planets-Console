@@ -175,6 +175,56 @@ describe('composeMapHoverContributions', () => {
     ])
   })
 
+  it('team territory merges with region and cartography and yields to a planet', () => {
+    const withCellFacts = composeMapHoverContributions([
+      contribution({
+        id: 'region:1',
+        role: 'region',
+        kind: 'descriptive',
+        title: 'Region',
+      }),
+      contribution({
+        id: 'team-territory',
+        role: 'team-territory',
+        kind: 'descriptive',
+        title: 'Team information',
+      }),
+      contribution({
+        id: 'cartography:1',
+        role: 'cartography',
+        kind: 'descriptive',
+        title: 'Stellar Cartography',
+      }),
+    ])
+    expect(withCellFacts.suppressedIds).toEqual([])
+    expect(withCellFacts.descriptiveHosts).toHaveLength(1)
+    expect(withCellFacts.descriptiveHosts[0]!.sections.map((section) => section.role)).toEqual([
+      'region',
+      'team-territory',
+      'cartography',
+    ])
+
+    const onPlanet = composeMapHoverContributions([
+      contribution({
+        id: 'planet:1',
+        role: 'planet',
+        kind: 'descriptive',
+        title: 'Planet',
+        placement: { mode: 'anchor', flowX: 1, flowY: 2 },
+      }),
+      contribution({
+        id: 'team-territory',
+        role: 'team-territory',
+        kind: 'descriptive',
+        title: 'Team information',
+      }),
+    ])
+    expect(onPlanet.suppressedIds).toEqual(['team-territory'])
+    expect(onPlanet.descriptiveHosts[0]!.sections.map((section) => section.role)).toEqual([
+      'planet',
+    ])
+  })
+
   it('cartography descriptive and wormhole map-element show simultaneously', () => {
     const result = composeMapHoverContributions([
       contribution({

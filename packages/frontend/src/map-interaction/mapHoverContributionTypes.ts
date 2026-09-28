@@ -19,6 +19,7 @@ export type MapInteractionContributorRole =
   | 'fleet'
   | 'minefield'
   | 'region'
+  | 'team-territory'
   | 'cartography'
   | 'wormhole'
 
