@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+from api.analytics import team_territory
 from api.analytics.catalog import catalog_entry
 from api.analytics.team_information import ANALYTIC_ID, REGISTRATION, get_team_information
+from api.analytics.team_territory import TerritoryRingError, TerritorySite, territory_components
 from api.models.player import Player
 
 from tests.homeworld_locator_test_helpers import _planet, load_sample_turn
@@ -284,3 +287,66 @@ def test_surrounded_team_is_a_hole_in_one_component() -> None:
     assert _contains(ring, 2, 50)
     assert not _contains(ring, 50, 50)
     assert _teams_at(payload, KIND_ALL, 50, 50) == {8}
+
+
+def test_two_holes_on_one_row_are_both_cut_into_one_component() -> None:
+    width, height = 100, 100
+    frame = [
+        (planet_id, x, y, 1, 3)
+        for planet_id, (x, y) in enumerate(
+            [
+                (10, 10),
+                (50, 10),
+                (90, 10),
+                (10, 50),
+                (50, 50),
+                (90, 50),
+                (10, 90),
+                (50, 90),
+                (90, 90),
+            ],
+            start=1,
+        )
+    ]
+    turn = _territory_turn(
+        [*frame, (10, 30, 50, 2, 8), (11, 70, 50, 2, 8)],
+        sphere=False,
+        width=width,
+        height=height,
+    )
+    payload = get_team_information(turn)
+    _assert_boundary_wire(payload, width=width, height=height)
+    frame_overlays = [
+        overlay
+        for overlay in payload["regionOverlays"]
+        if overlay["kind"] == KIND_ALL and overlay["leagueTeamId"] == 3
+    ]
+    assert len(frame_overlays) == 1
+    ring = _rings(frame_overlays[0])
+    assert _contains(ring, 50, 50)
+    assert not _contains(ring, 30, 50)
+    assert not _contains(ring, 70, 50)
+    assert _teams_at(payload, KIND_ALL, 30, 50) == {8}
+    assert _teams_at(payload, KIND_ALL, 70, 50) == {8}
+
+
+def _surrounded_sites() -> list[TerritorySite]:
+    return [
+        TerritorySite(planet_id=1, x=10, y=10, league_team_id=3),
+        TerritorySite(planet_id=2, x=10, y=90, league_team_id=3),
+        TerritorySite(planet_id=3, x=90, y=10, league_team_id=3),
+        TerritorySite(planet_id=4, x=90, y=90, league_team_id=3),
+        TerritorySite(planet_id=5, x=50, y=50, league_team_id=8),
+    ]
+
+
+def test_hole_cut_that_fills_the_hole_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(team_territory, "_splice_hole", lambda ring, hole: ring)
+    with pytest.raises(TerritoryRingError):
+        territory_components(_surrounded_sites(), width=100, height=100, sphere=False)
+
+
+def test_hole_cut_without_a_boundary_edge_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(team_territory, "_splice_hole", lambda ring, hole: None)
+    with pytest.raises(TerritoryRingError):
+        territory_components(_surrounded_sites(), width=100, height=100, sphere=False)

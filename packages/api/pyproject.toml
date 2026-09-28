@@ -10,6 +10,7 @@ dependencies = [
     "ortools>=9.15.6755",
     "pyyaml>=6.0.2",
     "cryptography>=49.0.0,<50",
+    "shapely>=2.1",
 ]
 
 [project.optional-dependencies]
