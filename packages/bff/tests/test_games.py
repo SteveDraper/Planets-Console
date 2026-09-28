@@ -7,6 +7,8 @@ from unittest.mock import patch
 import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
+from api.errors import UpstreamPlanetsError
+from api.planets_nu import PlanetsNuClient
 from api.services.game_service import clear_sector_title_cache
 from api.storage import clear_backend_cache, get_storage
 from bff.app import app
@@ -169,6 +171,43 @@ def test_get_stored_game_info():
     response = client.get("/games/628580/info")
     assert response.status_code == 200
     assert response.json()["game"]["id"] == 628580
+
+
+def test_bff_league_teams_returns_core_body():
+    """GET /games/{id}/league-teams returns the Core directory body unchanged."""
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        payload = json.load(handle)
+    payload["players"][0]["username"] = "alpha"
+    payload["players"][0]["leagueteamid"] = 76
+    payload["players"][1]["username"] = "broken"
+    payload["players"][1]["leagueteamid"] = 88
+    payload["players"][2]["leagueteamid"] = 0
+    storage.put("games/628580/info", payload)
+    storage.put(
+        "league-teams/76",
+        {"id": 76, "name": "Die Schattenfalken (The Shadowhawks)"},
+    )
+
+    def _fail(self, username: str) -> dict:
+        raise UpstreamPlanetsError("Planets.nu load profile request failed.")
+
+    with patch.object(PlanetsNuClient, "load_profile", _fail):
+        from api.app import app as api_app
+
+        core = TestClient(api_app, raise_server_exceptions=False)
+        bff_response = client.get("/games/628580/league-teams")
+        core_response = core.get("/v1/games/628580/league-teams")
+
+    assert bff_response.status_code == 200
+    assert core_response.status_code == 200
+    assert bff_response.json() == core_response.json()
+    assert bff_response.json() == {
+        "teams": [
+            {"id": 76, "name": "Die Schattenfalken (The Shadowhawks)"},
+            {"id": 88, "name": None},
+        ]
+    }
 
 
 def _put_sample_game_info(*, status: int | None = None) -> None:

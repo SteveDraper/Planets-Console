@@ -10,10 +10,11 @@ Core services only -- no direct storage access in this router.
 optional ``sectorName`` from in-process memo or ``games/{id}/info`` (empty list when the
 ``games`` prefix is absent).
 
-**POST /games/{game_id}/info** refreshes game info from Planets.nu. **POST .../turns/ensure**
-loads a turn when missing. **GET .../viewpoint-eligibility** returns the Core allowed
-**perspective** set for a login (username query required). Warp-well and Stellar Cartography
-routes use shared Core handlers.
+**GET /games/{game_id}/league-teams** forwards the Core league team directory. Profile fetches
+stay in Core. **POST /games/{game_id}/info** refreshes game info from Planets.nu.
+**POST .../turns/ensure** loads a turn when missing. **GET .../viewpoint-eligibility** returns the
+Core allowed **perspective** set for a login (username query required). Warp-well and Stellar
+Cartography routes use shared Core handlers.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from api.transport.concept_warp_well import (
     WarpWellTypeParam,
 )
 from api.transport.game_info_update import GameInfoUpdateRequest
+from api.transport.league_teams import LeagueTeamsResponse
 from api.transport.load_all_turns import stream_load_all_turns
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import APIRouter, Depends, Path, Query
@@ -147,6 +149,30 @@ def get_stored_game_info(
         "get_stored_game_info",
         "total",
         lambda: core.get_stored_game_info(game_id),
+    )
+    return finish_response(result, root)
+
+
+@router.get("/{game_id}/league-teams", response_model=LeagueTeamsResponse)
+def get_league_teams(
+    game_id: int,
+    include: IncludeDiagnostics = False,
+    *,
+    core: CoreClientDep,
+) -> object:
+    """League team names for this game. Forwards to Core, which owns the profile fetch."""
+    root = optional_request_root(
+        include,
+        "GET",
+        f"/games/{game_id}/league-teams",
+        gameId=game_id,
+        handler="get_league_teams",
+    )
+    result = with_timed_child(
+        root,
+        "get_league_teams",
+        "total",
+        lambda: core.league_teams_for_game(game_id),
     )
     return finish_response(result, root)
 

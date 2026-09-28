@@ -83,6 +83,27 @@ def test_load_turn_omits_turn_from_form_when_none() -> None:
     )
 
 
+def test_load_profile_gets_public_profile_without_api_key() -> None:
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"playergroups": []}
+    mock_response.raise_for_status = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_client.get.return_value = mock_response
+
+    with patch("api.planets_nu.httpx.Client", return_value=mock_client):
+        client = PlanetsNuClient("https://api.planets.nu")
+        body = client.load_profile("arlowat")
+
+    assert body == {"playergroups": []}
+    mock_client.get.assert_called_once_with(
+        "https://api.planets.nu/account/loadprofile",
+        params={"username": "arlowat"},
+    )
+    assert "apikey" not in mock_client.get.call_args.kwargs["params"]
+
+
 def test_load_all_gets_zip_bytes() -> None:
     mock_client = MagicMock()
     mock_response = MagicMock()

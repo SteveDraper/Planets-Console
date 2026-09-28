@@ -14,6 +14,7 @@ from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
@@ -30,6 +31,7 @@ class ServiceStack(NamedTuple):
     concepts: TurnConceptService
     analytics: TurnAnalyticService
     credentials: CredentialService
+    league_teams: LeagueTeamDirectoryService
 
 
 def build_service_stack(storage: StorageBackend) -> ServiceStack:
@@ -63,6 +65,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
         credentials,
         on_game_info_refreshed=on_game_info_refreshed,
     )
+    league_teams = LeagueTeamDirectoryService(storage, games)
 
     def on_held_solutions_updated(session) -> None:
         inference_invalidation.on_inference_evidence_updated(
@@ -108,6 +111,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
         concepts=concepts,
         analytics=analytics,
         credentials=credentials,
+        league_teams=league_teams,
     )
 
 

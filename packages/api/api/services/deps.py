@@ -4,6 +4,7 @@ from fastapi import Depends
 
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
+from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import ServiceStack, build_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
@@ -28,6 +29,12 @@ def get_game_service(
     stack: ServiceStack = Depends(get_service_stack),
 ) -> GameService:
     return stack.games
+
+
+def get_league_team_directory_service(
+    stack: ServiceStack = Depends(get_service_stack),
+) -> LeagueTeamDirectoryService:
+    return stack.league_teams
 
 
 def get_turn_load_service(

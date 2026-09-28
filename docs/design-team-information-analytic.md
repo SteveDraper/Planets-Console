@@ -74,6 +74,17 @@ BFF map handler passes the Core object through. The table route stays a validati
 
 Reuse the turn-analytic catalog, `empty_export_catalog_for`, shared boundary `regionOverlays`, and the map fetch/merge registry. Do not add a query parameter to the shared map route. Do not import another analytic for the partition.
 
+## League team directory
+
+Legend names come from the **league team directory**, not from this analytic ([#549](https://github.com/SteveDraper/Planets-Console/issues/549)). Drawing them is [#550](https://github.com/SteveDraper/Planets-Console/issues/550).
+
+Stored GameInfo players already carry `username` and `leagueteamid`. `leagueteamid == 0` is omitted. Each distinct id is resolved once: one public `GET /account/loadprofile` for any member of that id, then the `playergroups` row whose `groupid` equals the id, and `_group.name`. The `{id, name}` pair is cached by league team id, across games. A cached id is not fetched again. An unknown id, a profile with no matching row, or an upstream failure for that id returns `name: null` and leaves the other ids intact. Failures are not cached.
+
+- Core `GET /api/v1/games/{game_id}/league-teams`
+- BFF `GET /bff/games/{game_id}/league-teams` forwards to Core and returns the same body: `{ "teams": [{ "id", "name" }] }`
+
+`api/analytics/team_information.py` does not import the directory service.
+
 ## Tests
 
 **Phase 1 (Core)** -- write the failing geometry tests first:

@@ -90,6 +90,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/league-teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get League Teams
+         * @description League team names for this game. Forwards to Core, which owns the profile fetch.
+         */
+        get: operations["get_league_teams_games__game_id__league_teams_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/turns/load-all-status": {
         parameters: {
             query?: never;
@@ -268,6 +288,24 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * LeagueTeamName
+         * @description One league team id and its Planets.nu group name, when resolved.
+         */
+        LeagueTeamName: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string | null;
+        };
+        /**
+         * LeagueTeamsResponse
+         * @description Distinct league teams on a game's stored players. ``name`` is null when unresolved.
+         */
+        LeagueTeamsResponse: {
+            /** Teams */
+            teams: components["schemas"]["LeagueTeamName"][];
         };
         /**
          * LoadAllStreamCompleteEvent
@@ -611,6 +649,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BffGameInfoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_league_teams_games__game_id__league_teams_get: {
+        parameters: {
+            query?: {
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeagueTeamsResponse"];
                 };
             };
             /** @description Validation Error */

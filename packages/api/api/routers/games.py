@@ -9,11 +9,13 @@ from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.deps import (
     get_game_service,
+    get_league_team_directory_service,
     get_load_all_turns_service,
     get_turn_analytic_service,
     get_turn_load_service,
 )
 from api.services.game_service import GameService
+from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_load_service import TurnLoadService
@@ -33,6 +35,7 @@ from api.transport.game_info_update import GameInfoUpdateRequest, RefreshGameInf
 from api.transport.homeworld_assertions import HomeworldAssertionRequest
 from api.transport.inference_hull_catalog import InferenceHullCatalogMaskUpdateRequest
 from api.transport.inference_stream import stream_inference_ndjson
+from api.transport.league_teams import LeagueTeamsResponse
 from api.transport.load_all_turns import (
     LoadAllTurnsRequest,
     LoadAllTurnsStatusResponse,
@@ -64,6 +67,16 @@ def post_game_info(
 ) -> GameInfo:
     """Apply an update operation (e.g. refresh from Planets.nu) and return stored game info."""
     return svc.update_game_info(game_id, body, planets)
+
+
+@router.get("/{game_id}/league-teams", response_model=LeagueTeamsResponse)
+def get_league_teams(
+    game_id: int,
+    directory: LeagueTeamDirectoryService = Depends(get_league_team_directory_service),
+    planets: PlanetsNuClient = Depends(get_planets_client),
+) -> LeagueTeamsResponse:
+    """League team ids on this game's stored players, with cached Planets.nu group names."""
+    return directory.teams_for_game(game_id, planets)
 
 
 @router.get("/{game_id}/turns/load-all-status", response_model=LoadAllTurnsStatusResponse)

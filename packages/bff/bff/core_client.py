@@ -18,6 +18,7 @@ from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
+from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import get_process_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
@@ -39,6 +40,7 @@ from api.transport.homeworld_assertions import (
     HomeworldAssertionAction,
     HomeworldAssertionAxis,
 )
+from api.transport.league_teams import LeagueTeamsResponse
 from api.transport.load_all_turns import LoadAllStreamItem
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import HTTPException
@@ -66,6 +68,7 @@ class CoreClient:
         turn_concept_service: TurnConceptService,
         turn_analytic_service: TurnAnalyticService,
         credential_service: CredentialService,
+        league_team_directory_service: LeagueTeamDirectoryService,
         planets_client_factory: Callable[[], PlanetsNuClient] | None = None,
     ) -> None:
         self._games = game_service
@@ -74,6 +77,7 @@ class CoreClient:
         self._concepts = turn_concept_service
         self._analytics = turn_analytic_service
         self._credentials = credential_service
+        self._league_teams = league_team_directory_service
         self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
 
     def _invoke(self, fn: Callable[[], T]) -> T:
@@ -114,6 +118,11 @@ class CoreClient:
 
     def get_stored_game_info(self, game_id: int) -> GameInfo:
         return self._invoke(lambda: self._games.get_game_info(game_id))
+
+    def league_teams_for_game(self, game_id: int) -> LeagueTeamsResponse:
+        """Forward the league team directory read. Planets.nu is called inside Core."""
+        planets = self._planets_client_factory()
+        return self._invoke(lambda: self._league_teams.teams_for_game(game_id, planets))
 
     def viewpoint_eligibility(self, game_id: int, username: str) -> ViewpointEligibilityResponse:
         def work() -> ViewpointEligibilityResponse:
@@ -477,6 +486,7 @@ def _build_core_client() -> CoreClient:
         turn_concept_service=stack.concepts,
         turn_analytic_service=stack.analytics,
         credential_service=stack.credentials,
+        league_team_directory_service=stack.league_teams,
     )
 
 
