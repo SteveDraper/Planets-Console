@@ -27,6 +27,7 @@ import {
   deriveTurnView,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
+  turnEnsureQueryKey,
   type ShellViewpointRow,
 } from './shellContext'
 import { useEligiblePerspectives } from './useEligiblePerspectives'
@@ -127,15 +128,7 @@ export function useShellContext({ reportShellError }: UseShellContextOptions): S
     isError: turnEnsureIsError,
     error: turnEnsureError,
   } = useQuery({
-    queryKey: [
-      'bff',
-      'turnData',
-      analyticScopeForEnsure?.gameId ?? '',
-      analyticScopeForEnsure?.turn ?? 0,
-      analyticScopeForEnsure?.perspective ?? 0,
-      loginTrimmed,
-      credentialsRevision,
-    ] as const,
+    queryKey: turnEnsureQueryKey(analyticScopeForEnsure, loginName, credentialsRevision),
     queryFn: () => {
       const { name } = useSessionStore.getState()
       const user = name?.trim() ?? ''

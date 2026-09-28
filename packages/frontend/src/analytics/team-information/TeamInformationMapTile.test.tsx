@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { MapDataResponse } from '../../api/bff'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
+import { turnEnsureQueryKey } from '../../shell/shellContext'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
 import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
@@ -101,7 +102,7 @@ describe('TeamInformationMapTile', () => {
       />,
       (client) => {
         client.setQueryData(
-          ['bff', 'turnData', '628580', 5, 1, 'alice', 0],
+          turnEnsureQueryKey(sampleScope, 'alice', 0),
           {
             ready: true,
             turnUsernamesByPlayerId: new Map([

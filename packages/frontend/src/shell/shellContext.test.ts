@@ -12,6 +12,7 @@ import {
   deriveTurnView,
   isViewpointChangeAllowed,
   shouldClearInProgressPerspectiveOverride,
+  turnEnsureQueryKey,
   type ShellContextInputs,
 } from './shellContext'
 import { perspectiveRow } from '../lib/perspectiveRowTestFixtures'
@@ -541,6 +542,22 @@ describe('turn ensure gating', () => {
     expect(deriveTurnDataReady(true, true)).toBe(true)
     expect(deriveTurnDataReady(false, true)).toBe(false)
     expect(deriveTurnDataReady(true, false)).toBe(false)
+  })
+
+  it('turnEnsureQueryKey includes scope, trimmed login, and credentials revision', () => {
+    expect(turnEnsureQueryKey(scope, '  Alice ', 3)).toEqual([
+      'bff',
+      'turnData',
+      '628580',
+      5,
+      1,
+      'Alice',
+      3,
+    ])
+  })
+
+  it('turnEnsureQueryKey falls back when scope and login are missing', () => {
+    expect(turnEnsureQueryKey(null, null, 0)).toEqual(['bff', 'turnData', '', 0, 0, '', 0])
   })
 })
 
