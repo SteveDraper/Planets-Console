@@ -15,7 +15,7 @@ Related: [Adding a turn analytic](design-adding-a-turn-analytic.md), [Analytics 
 | Holes | Cells whose winning site is unowned are omitted from the all-planets set. Cells whose winning owner has `leagueteamid == 0` are omitted from both sets. Owned-planets-only fills the rectangle when every owner has a league team |
 | Paint | Shared **map region overlay** boundary polygons (line edges only). One overlay per disjoint component of a league team's union. Semi-transparent fill so planet dots stay readable |
 | Color | Each league team on the turn gets a distinct hue. Teams that share a border are placed as far apart on the wheel as the team count allows. A shared border whose hues are still within 60 degrees uses a different hatch (`solid`, `forward`, `back`, `horizontal`, `vertical`, `dots`). Both site sets share that style. Independent of **player color** |
-| Legend | Sidebar lists each league team that appears: swatch and league team name ([#549](https://github.com/SteveDraper/Planets-Console/issues/549), [#550](https://github.com/SteveDraper/Planets-Console/issues/550)). The numeric id shows only when the name is unresolved. Member usernames stay on the legend row for a later hover and are not drawn |
+| Legend | Sidebar lists each league team that appears: swatch, team id, roster usernames. Turn data has no league-team name |
 | Exports | Empty catalog. No orchestrator profile. No map query params |
 
 Example sphere game: [686674](https://planets.nu) Bundy Sector (`sphere: true`, `mapshape` rectangular, 2278 by 2278). Help: planets.nu Sphere is a flattened torus; leaving one edge re-enters the opposite edge, and the wrap rectangle is used even when the planet disk is round.
@@ -90,7 +90,7 @@ Reuse the turn-analytic catalog, `empty_export_catalog_for`, shared boundary `re
 - Registry metadata: map yes, table no, selectable, catalog order.
 - BFF map returns the Core shape; table route is a validation error.
 - Merger keeps both kinds. The preference filter emits only the selected kind.
-- Legend lists the league team name when the directory has one, otherwise the id. Member usernames stay on the row and are not drawn.
+- Legend lists team id and member usernames from `teams`.
 - Browser: enable the analytic, confirm the tint, toggle **Owned planets only** and confirm holes close without a refetch, and confirm the tile is grey in tabular mode. On a sphere game, confirm color continues across an edge.
 
 ## Phases
@@ -100,4 +100,4 @@ Reuse the turn-analytic catalog, `empty_export_catalog_for`, shared boundary `re
 
 ## Out of scope
 
-Hover and context menu for member usernames, edge-mirror margin, in-game `teamid` coloring, tabular tile, export queries, per-team color pickers, client-side distance. League team names are [#549](https://github.com/SteveDraper/Planets-Console/issues/549) and [#550](https://github.com/SteveDraper/Planets-Console/issues/550).
+Hover and context menu, edge-mirror margin, league-team names, in-game `teamid` coloring, tabular tile, export queries, per-team color pickers, client-side distance.
