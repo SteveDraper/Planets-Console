@@ -104,10 +104,10 @@ def _boundary_overlay(
         fill_opacity=FILL_OPACITY,
         vertices=[MapRegionOverlayVertex(x=x, y=y) for x, y in ring],
         edges=[MapRegionBoundaryLineEdge() for _ in ring],
+        fill_pattern=style.fill_pattern,
     )
     wire = map_region_overlay_to_wire(overlay)
     wire["leagueTeamId"] = league_team_id
-    wire["fillPattern"] = style.fill_pattern
     return wire
 
 

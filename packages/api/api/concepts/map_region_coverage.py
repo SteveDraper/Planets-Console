@@ -242,6 +242,8 @@ class MapRegionOverlay:
     possible_owners: tuple[MapRegionPossibleOwner, ...] | None = None
     # Max-strength class for projected possible_owners (weak|strong|asserted).
     ownership_winning_strength: str | None = None
+    # Fill hatch id (``solid`` or a hatch name); absent means a plain fill.
+    fill_pattern: str | None = None
 
 
 def default_effective_range(base_range: float, density: float) -> float:
@@ -531,6 +533,8 @@ def map_region_overlay_to_wire(overlay: MapRegionOverlay) -> dict:
         "fillOpacity": overlay.fill_opacity,
         "geometry": _geometry_to_wire(overlay.geometry),
     }
+    if overlay.fill_pattern is not None:
+        wire["fillPattern"] = overlay.fill_pattern
     if overlay.is_pinned is not None:
         wire["isPinned"] = overlay.is_pinned
     if overlay.status is not None:
@@ -592,6 +596,7 @@ def boundary_to_overlay(
     player_label: str | None = None,
     possible_owners: Sequence[MapRegionPossibleOwner] | None = None,
     ownership_winning_strength: str | None = None,
+    fill_pattern: str | None = None,
 ) -> MapRegionOverlay:
     """Wrap a closed boundary path (and optional envelope disks) for the wire.
 
@@ -622,6 +627,7 @@ def boundary_to_overlay(
         player_label=player_label,
         possible_owners=None if possible_owners is None else tuple(possible_owners),
         ownership_winning_strength=ownership_winning_strength,
+        fill_pattern=fill_pattern,
     )
 
 
