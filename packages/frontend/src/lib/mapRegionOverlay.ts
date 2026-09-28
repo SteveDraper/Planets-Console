@@ -9,6 +9,7 @@
 
 import type {
   MapRegionBoundaryArcEdge,
+  MapRegionFillPattern,
   MapRegionOverlay,
   MapRegionOverlayDisk,
   MapRegionOverlayPatch,
@@ -56,6 +57,8 @@ export type MapRegionOverlayPaneGroup = {
   key: string
   fillColor: string
   fillOpacity: number
+  /** Hatch over the fill. Omitted or ``solid`` is a flat fill. */
+  fillPattern?: MapRegionFillPattern
   /** Optional path stroke (defaults to fillColor when omitted). */
   strokeColor?: string
   strokeWidth?: number
@@ -337,6 +340,7 @@ function buildBoundaryGroup(
     key: overlay.id,
     fillColor: overlay.fillColor,
     fillOpacity: paint?.fillOpacity ?? overlay.fillOpacity,
+    fillPattern: overlay.fillPattern,
     strokeColor: boundaryStrokes != null ? undefined : paint?.strokeColor,
     strokeWidth: boundaryStrokes != null ? undefined : paint?.strokeWidth,
     boundaryStrokes:

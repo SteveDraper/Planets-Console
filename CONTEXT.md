@@ -467,7 +467,7 @@ A map-only **turn analytic** (`analytic_id` `team-information`) that paints **te
 _Avoid_: in-game team coloring (`Player.teamid`), a tabular roster tile, tinting planet markers only
 
 **League team**:
-The competitive organization identified by `Player.leagueteamid`. `0` means that **Player** has no league team. Turn data carries the id and member usernames, not a team name.
+The competitive organization identified by `Player.leagueteamid`. `0` means that **Player** has no league team. The turn carries the id. The name is the Planets.nu player-group name for that same id (`playergroups.groupid`), not a turn field.
 _Avoid_: in-game team (`Player.teamid`, `GameSettings.teamsize`), race, alliance, diplomacy circle
 
 **Team territory**:
@@ -479,7 +479,7 @@ Which planets compete as nearest-planet sites for **team territory**. **All plan
 _Avoid_: a second analytic, recomputing the partition in the SPA
 
 **Sphere map**:
-A game with `GameSettings.sphere` true. The rectangle `[0, mapwidth] x [0, mapheight]` is a torus: distance wraps on both axes, including when `mapshape` is round. Planets.nu calls this setup Sphere.
+A game with `GameSettings.sphere` true. The map rectangle of size `mapwidth` by `mapheight`, centered on `(2000, 2000)`, is a torus: distance wraps on both axes, including when `mapshape` is round. Planets.nu calls this setup Sphere.
 _Avoid_: `Game.maptype` (hosting category), treating `mapshape` as the wrap flag, black-hole ergosphere
 
 **Stellar Cartography**:

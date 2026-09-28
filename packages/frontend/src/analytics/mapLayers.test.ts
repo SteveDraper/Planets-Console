@@ -345,6 +345,55 @@ describe('combineMapData', () => {
     })
   })
 
+  it('merges both team-territory kinds from the team information analytic', () => {
+    const teamInformation: MapDataResponse = {
+      analyticId: 'team-information',
+      nodes: [],
+      edges: [],
+      regionOverlays: [
+        {
+          kind: 'team-territory',
+          id: 'team-territory:4:0',
+          fillColor: '#38bdf8',
+          fillOpacity: 0.35,
+          geometry: {
+            type: 'boundary',
+            vertices: [
+              { x: 0, y: 0 },
+              { x: 10, y: 0 },
+              { x: 0, y: 10 },
+            ],
+            edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }],
+          },
+        },
+        {
+          kind: 'team-territory-owned-only',
+          id: 'team-territory-owned-only:4:0',
+          fillColor: '#38bdf8',
+          fillOpacity: 0.35,
+          geometry: {
+            type: 'boundary',
+            vertices: [
+              { x: 1, y: 1 },
+              { x: 8, y: 1 },
+              { x: 1, y: 8 },
+            ],
+            edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }],
+          },
+        },
+      ],
+    }
+
+    const combined = combineMapData(['team-information'], [teamInformation], {
+      liveConnectionsParams: null,
+    })
+
+    expect(combined.regionOverlays.map((overlay) => overlay.kind)).toEqual([
+      'team-territory',
+      'team-territory-owned-only',
+    ])
+  })
+
   it('records unknown-target wormhole entrances when no edge is emitted', () => {
     const sc: MapDataResponse = {
       analyticId: 'stellar-cartography',

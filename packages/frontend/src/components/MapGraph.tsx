@@ -43,11 +43,13 @@ import {
   useEffectiveHomeworldSectorIndexes,
   useHomeworldRegionSelectionMaterialize,
 } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
+import { mapRegionOverlaysForPaint } from '../analytics/team-information/teamTerritoryPaint'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { homeworldOverlaysReadyForMaterialize } from '../lib/homeworldRegionSelection'
 import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
+import { useTeamInformationPreferencesStore } from '../stores/teamInformationPreferences'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
 import { useWormholeLineRevealStore } from '../stores/wormholeLineReveal'
@@ -235,6 +237,7 @@ function MapGraphFlow({
   )
   const edges = useMemo(() => toEdges(displayMapEdges), [displayMapEdges])
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
+  const ownedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.ownedPlanetsOnly)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
@@ -278,16 +281,16 @@ function MapGraphFlow({
   // Visibility prefs → region selection + envelope toggle.
   const regionOverlays = useMemo(
     () =>
-      buildHomeworldRegionOverlaysForPaint({
-        overlays: applyVisibilityRegionPreferences(
-          data.regionOverlays,
-          visibilityKinds
-        ),
-        effectiveSelectedSectorIndexes: selectedSectorIndexes,
-        showEnvelopeOverlays,
-      }),
+      mapRegionOverlaysForPaint(data.regionOverlays, ownedPlanetsOnly, (nonTeam) =>
+        buildHomeworldRegionOverlaysForPaint({
+          overlays: applyVisibilityRegionPreferences(nonTeam, visibilityKinds),
+          effectiveSelectedSectorIndexes: selectedSectorIndexes,
+          showEnvelopeOverlays,
+        })
+      ),
     [
       data.regionOverlays,
+      ownedPlanetsOnly,
       visibilityKinds,
       selectedSectorIndexes,
       showEnvelopeOverlays,

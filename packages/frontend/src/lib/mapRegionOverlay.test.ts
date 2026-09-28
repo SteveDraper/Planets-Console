@@ -327,6 +327,28 @@ describe('buildMapRegionOverlayPaneShapes', () => {
     expect(shapes.groups[0]!.patches).toEqual([])
     expect(shapes.groups[0]!.patchMaskRects).toEqual([])
   })
+
+  it('keeps a team fill pattern on the boundary group', () => {
+    const overlay: MapRegionOverlay = {
+      kind: 'team-territory',
+      id: 'team-territory:149:0',
+      fillColor: '#e11d48',
+      fillOpacity: 0.35,
+      fillPattern: 'back',
+      geometry: {
+        type: 'boundary',
+        vertices: [
+          { x: 0, y: 0 },
+          { x: 10, y: 0 },
+          { x: 0, y: 10 },
+        ],
+        edges: [{ type: 'line' }, { type: 'line' }, { type: 'line' }],
+      },
+    }
+    const group = buildMapRegionOverlayPaneShapes([overlay], viewport).groups[0]!
+    expect(group.fillPattern).toBe('back')
+    expect(group.fillColor).toBe('#e11d48')
+  })
 })
 
 describe('parseCssColorToRgb', () => {

@@ -5,6 +5,7 @@
 
 import type { HomeworldMapMarker } from '../analytics/homeworld-locator/wireSchema'
 import type { KnownMinefield } from '../analytics/minefields/wireSchema'
+import type { TeamInformationTeam } from '../analytics/team-information/wireSchema'
 import type { components } from './schema-games'
 import type { MapRegionOverlay } from './mapRegionOverlayTypes'
 
@@ -193,6 +194,8 @@ export type MapDataResponse = {
   homeworldMarkers?: HomeworldMapMarkerWire[]
   /** Known minefields for the Minefields analytic pane. */
   minefields?: KnownMinefield[]
+  /** League teams from the team-information map payload (sidebar legend). */
+  teamInformationTeams?: TeamInformationTeam[]
   /** Homeworld locator: baseline used a turn later than 1. */
   baselineDegraded?: boolean
   /** Homeworld locator: turn number used when baseline is degraded. */
