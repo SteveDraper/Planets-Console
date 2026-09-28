@@ -47,7 +47,8 @@ export function teamInformationLegendHoverTitle(
 
 /**
  * Legend rows from the map ``teams`` payload.
- * ``name`` comes from the league team directory. Usernames stay on the row for a later hover.
+ * ``name`` comes from the league team directory. ``usernames`` feed the legend hover text
+ * (``teamInformationLegendHoverTitle``) and are not drawn as row text.
  */
 export function teamInformationLegendRows(
   teams: readonly TeamInformationTeam[],
