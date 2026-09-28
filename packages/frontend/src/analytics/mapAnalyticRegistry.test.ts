@@ -25,7 +25,6 @@ import {
 import { visibilityMapAnalytic } from './visibility/mapAnalytic'
 import { homeworldLocatorMapAnalytic } from './homeworld-locator/mapAnalytic'
 import { minefieldsMapAnalytic } from './minefields/mapAnalytic'
-import { teamInformationMapAnalytic } from './team-information/mapAnalytic'
 import {
   defaultConnectionsParams,
   sampleScope,
@@ -68,7 +67,7 @@ describe('map analytic registry', () => {
     )
     expect(mapAnalyticRegistrationFor(MINEFIELDS_ANALYTIC_ID)).toBe(minefieldsMapAnalytic)
     expect(mapAnalyticRegistrationFor(TEAM_INFORMATION_ANALYTIC_ID)).toBe(
-      teamInformationMapAnalytic
+      defaultMapAnalyticRegistration
     )
   })
 
@@ -175,11 +174,11 @@ describe('map analytic registry', () => {
     expect(spec.enabled).toBe(true)
   })
 
-  it('wires team information to the default query spec and territory merger', () => {
+  it('wires team information to the default query spec and prefix merger', () => {
     const registration = mapAnalyticRegistrationFor(TEAM_INFORMATION_ANALYTIC_ID)
-    expect(registration).toBe(teamInformationMapAnalytic)
+    expect(registration).toBe(defaultMapAnalyticRegistration)
     expect(registration.buildQuerySpec).toBeUndefined()
-    expect(registration.mergeLayer).not.toBe(defaultMapLayerMerger)
+    expect(registration.mergeLayer).toBe(defaultMapLayerMerger)
 
     const spec = mapAnalyticQuerySpecFor(TEAM_INFORMATION_ANALYTIC_ID, queryContext)
     expect(spec.queryKey).toEqual([

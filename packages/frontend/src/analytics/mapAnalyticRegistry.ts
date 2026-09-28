@@ -20,7 +20,6 @@ import { stellarCartographyMapAnalytic } from './stellar-cartography/mapAnalytic
 import { fleetMapAnalytic } from './fleet/mapAnalytic'
 import { homeworldLocatorMapAnalytic } from './homeworld-locator/mapAnalytic'
 import { minefieldsMapAnalytic } from './minefields/mapAnalytic'
-import { teamInformationMapAnalytic } from './team-information/mapAnalytic'
 import { visibilityMapAnalytic } from './visibility/mapAnalytic'
 import type { CombineMapDataOptionsBase } from './mapLayers'
 
@@ -119,7 +118,7 @@ const mapAnalyticRegistry: Record<string, MapAnalyticRegistration> = {
   [VISIBILITY_ANALYTIC_ID]: visibilityMapAnalytic,
   [HOMEWORLD_LOCATOR_ANALYTIC_ID]: homeworldLocatorMapAnalytic,
   [MINEFIELDS_ANALYTIC_ID]: minefieldsMapAnalytic,
-  [TEAM_INFORMATION_ANALYTIC_ID]: teamInformationMapAnalytic,
+  [TEAM_INFORMATION_ANALYTIC_ID]: defaultMapAnalyticRegistration,
 }
 
 /** Canonical map analytic ids with explicit registry entries. */
