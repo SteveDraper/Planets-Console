@@ -60,6 +60,11 @@ export const MAP_HOVER_COMPOSITION_POLICY: readonly MapHoverPolicyEdge[] = [
     to: { kind: 'descriptive', role: 'region' },
   },
   {
+    from: { kind: 'descriptive', role: 'fleet' },
+    relation: 'mergesWith',
+    to: { kind: 'descriptive', role: 'team-territory' },
+  },
+  {
     from: { kind: 'descriptive', role: 'region' },
     relation: 'mergesWith',
     to: { kind: 'descriptive', role: 'cartography' },

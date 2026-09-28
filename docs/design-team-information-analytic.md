@@ -64,7 +64,7 @@ BFF map handler passes the Core object through. The table route stays a validati
 - Persist **Owned planets only** in localStorage (global, same sticky scope as other analytic display toggles). Default off.
 - Paint exactly one kind: `team-territory` when the checkbox is off, `team-territory-owned-only` when it is on. Filter in a team-information-owned function. Do not run these kinds through Visibility kind preferences.
 - Sidebar: generic enable control plus the checkbox and the legend. Legend rows come from `teams` on the map payload (swatch, directory name or the numeric id when that name is null). Usernames are resolved from the turn roster onto the row, shown as hover text, and are not drawn in the row. Hovering a row sets the outlined league team. Names load from `GET /bff/games/{game_id}/league-teams` with TanStack Query for the open game, separate from the map query. Grey the tile in tabular **view mode** via `supports_table=false`.
-- Cell hover: a **map interaction contributor** (role `team-territory`) hit-tests the painted site set and contributes the team label. It `yieldsTo` planet hover and `mergesWith` region and cartography. It is registered only while the analytic is enabled.
+- Cell hover: a **map interaction contributor** (role `team-territory`) hit-tests the painted site set and contributes the team label. It `yieldsTo` planet hover and `mergesWith` fleet, region, and cartography (off a planet, the fleet card anchored at the ship hosts the team section). It is registered only while the analytic is enabled.
 - No edge-mirror strip. Opposite edges of one team share a color, which is the wrap cue.
 
 ## Layers

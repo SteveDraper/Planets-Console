@@ -312,6 +312,36 @@ describe('composeMapHoverContributions', () => {
     ])
   })
 
+  it('fleet mergesWith team territory into one host anchored at the fleet (fleet then team-territory)', () => {
+    const result = composeMapHoverContributions([
+      contribution({
+        id: 'fleet:1',
+        role: 'fleet',
+        kind: 'descriptive',
+        title: 'Fleet',
+        placement: { mode: 'anchor', flowX: 5, flowY: 6 },
+      }),
+      contribution({
+        id: 'team-territory',
+        role: 'team-territory',
+        kind: 'descriptive',
+        title: 'Team information',
+      }),
+    ])
+
+    expect(result.suppressedIds).toEqual([])
+    expect(result.descriptiveHosts).toHaveLength(1)
+    expect(result.descriptiveHosts[0]!.placement).toEqual({
+      mode: 'anchor',
+      flowX: 5,
+      flowY: 6,
+    })
+    expect(result.descriptiveHosts[0]!.sections.map((s) => s.role)).toEqual([
+      'fleet',
+      'team-territory',
+    ])
+  })
+
   it('fleet+region merge pulls cartography into the same anchored host', () => {
     const result = composeMapHoverContributions([
       contribution({
