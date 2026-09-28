@@ -10,6 +10,12 @@ from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.team_territory import TerritorySite, territory_components
+from api.concepts.map_region_coverage import (
+    MapRegionBoundaryLineEdge,
+    MapRegionOverlayVertex,
+    boundary_to_overlay,
+    map_region_overlay_to_wire,
+)
 from api.models.game import TurnInfo
 
 ANALYTIC_ID = "team-information"
@@ -104,18 +110,17 @@ def _boundary_overlay(
     component: int,
     ring: list[tuple[float, float]],
 ) -> dict:
-    return {
-        "kind": kind,
-        "id": f"{kind}:{league_team_id}:{component}",
-        "fillColor": _fill_color(league_team_id),
-        "fillOpacity": FILL_OPACITY,
-        "geometry": {
-            "type": "boundary",
-            "vertices": [{"x": x, "y": y} for x, y in ring],
-            "edges": [{"type": "line"} for _ in ring],
-        },
-        "leagueTeamId": league_team_id,
-    }
+    overlay = boundary_to_overlay(
+        kind=kind,
+        overlay_id=f"{kind}:{league_team_id}:{component}",
+        fill_color=_fill_color(league_team_id),
+        fill_opacity=FILL_OPACITY,
+        vertices=[MapRegionOverlayVertex(x=x, y=y) for x, y in ring],
+        edges=[MapRegionBoundaryLineEdge() for _ in ring],
+    )
+    wire = map_region_overlay_to_wire(overlay)
+    wire["leagueTeamId"] = league_team_id
+    return wire
 
 
 def _region_overlays(turn: TurnInfo, league_team_by_player: dict[int, int]) -> list[dict]:
