@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import shapely
+from shapely.affinity import translate
 from shapely.geometry import MultiPoint, Polygon, box
 from shapely.geometry.polygon import orient
 
@@ -254,14 +255,35 @@ def _ring_sort_key(ring: Sequence[Point]) -> tuple[float, float, tuple[Point, ..
 TOUCH_GAP_LY = 1.0
 
 
-def _touching_teams(regions: dict[int, list[Polygon]]) -> dict[int, set[int]]:
-    """League teams whose painted regions meet, including across a float gap."""
+def _period_shifts(rectangle: MapRectangle, *, sphere: bool) -> list[Point]:
+    """Translations under which a clipped region is the same territory."""
+    if not sphere:
+        return [(0.0, 0.0)]
+    return [(i * rectangle.width, j * rectangle.height) for i in (-1, 0, 1) for j in (-1, 0, 1)]
+
+
+def _touching_teams(
+    regions: dict[int, list[Polygon]],
+    *,
+    rectangle: MapRectangle,
+    sphere: bool,
+) -> dict[int, set[int]]:
+    """League teams whose painted regions meet, including across a float gap.
+
+    On a sphere the rectangle edges are seams, so a border lying on an edge is
+    found by comparing against the periodic images of the other region.
+    """
     geoms = {team_id: shapely.union_all(polygons) for team_id, polygons in regions.items()}
+    shifts = _period_shifts(rectangle, sphere=sphere)
     team_ids = sorted(geoms)
     neighbors: dict[int, set[int]] = {team_id: set() for team_id in team_ids}
     for index, left_id in enumerate(team_ids):
         for right_id in team_ids[index + 1 :]:
-            if geoms[left_id].distance(geoms[right_id]) <= TOUCH_GAP_LY:
+            if any(
+                geoms[left_id].distance(translate(geoms[right_id], xoff=dx, yoff=dy))
+                <= TOUCH_GAP_LY
+                for dx, dy in shifts
+            ):
                 neighbors[left_id].add(right_id)
                 neighbors[right_id].add(left_id)
     return neighbors
@@ -273,29 +295,17 @@ def territory_partition(
     width: int,
     height: int,
     sphere: bool,
-    origin: tuple[float, float] | None = None,
 ) -> tuple[list[tuple[int, list[Point]]], dict[int, set[int]]]:
     """Painted components and which league teams share a border.
 
     Components are ``(league_team_id, ring)``. Cells whose site has
     ``league_team_id <= 0`` are omitted. Same-team cells that share a border
     become one ring. A hole in that union is cut into the same ring so the hole
-    is not filled. ``origin`` is the rectangle's lower-left corner; the default
-    centers the rectangle on the Nu origin.
+    is not filled.
     """
     if width <= 0 or height <= 0 or not sites:
         return [], {}
-    width_f = float(width)
-    height_f = float(height)
-    if origin is None:
-        rectangle = nu_map_rectangle(width, height)
-    else:
-        rectangle = MapRectangle(
-            left=origin[0],
-            bottom=origin[1],
-            width=width_f,
-            height=height_f,
-        )
+    rectangle = nu_map_rectangle(width, height)
     replicas = _replicated_sites(sites, rectangle=rectangle, sphere=sphere)
     regions = _team_regions(
         _coincident_winners(replicas),
@@ -305,23 +315,4 @@ def territory_partition(
     for team_id in sorted(regions):
         rings = sorted((_single_ring(polygon) for polygon in regions[team_id]), key=_ring_sort_key)
         components.extend((team_id, ring) for ring in rings)
-    return components, _touching_teams(regions)
-
-
-def territory_components(
-    sites: Sequence[TerritorySite],
-    *,
-    width: int,
-    height: int,
-    sphere: bool,
-    origin: tuple[float, float] | None = None,
-) -> list[tuple[int, list[Point]]]:
-    """Painted components as ``(league_team_id, ring)``."""
-    components, _neighbors = territory_partition(
-        sites,
-        width=width,
-        height=height,
-        sphere=sphere,
-        origin=origin,
-    )
-    return components
+    return components, _touching_teams(regions, rectangle=rectangle, sphere=sphere)

@@ -13,7 +13,7 @@ from api.analytics.team_territory import (
     TerritoryRingError,
     TerritorySite,
     nu_map_rectangle,
-    territory_components,
+    territory_partition,
 )
 from api.models.player import Player
 
@@ -381,14 +381,97 @@ def test_two_holes_on_one_row_are_both_cut_into_one_component() -> None:
     assert _teams_at(payload, KIND_ALL, 70, 50, width=width, height=height) == {8}
 
 
-def _surrounded_sites() -> list[TerritorySite]:
+def _nu_sites(
+    sites: list[tuple[int, float, float, int]],
+    *,
+    width: int,
+    height: int,
+) -> list[TerritorySite]:
+    """sites are (planet_id, x, y, league_team_id) in rectangle-local coordinates."""
+    rectangle = nu_map_rectangle(width, height)
     return [
-        TerritorySite(planet_id=1, x=10, y=10, league_team_id=3),
-        TerritorySite(planet_id=2, x=10, y=90, league_team_id=3),
-        TerritorySite(planet_id=3, x=90, y=10, league_team_id=3),
-        TerritorySite(planet_id=4, x=90, y=90, league_team_id=3),
-        TerritorySite(planet_id=5, x=50, y=50, league_team_id=8),
+        TerritorySite(
+            planet_id=planet_id,
+            x=x + rectangle.left,
+            y=y + rectangle.bottom,
+            league_team_id=league_team_id,
+        )
+        for planet_id, x, y, league_team_id in sites
     ]
+
+
+def _surrounded_sites() -> list[TerritorySite]:
+    return _nu_sites(
+        [
+            (1, 10, 10, 3),
+            (2, 10, 90, 3),
+            (3, 90, 10, 3),
+            (4, 90, 90, 3),
+            (5, 50, 50, 8),
+        ],
+        width=100,
+        height=100,
+    )
+
+
+def _neighbors(
+    sites: list[tuple[int, float, float, int]],
+    *,
+    width: int,
+    height: int,
+    sphere: bool,
+) -> dict[int, set[int]]:
+    _components, neighbors = territory_partition(
+        _nu_sites(sites, width=width, height=height),
+        width=width,
+        height=height,
+        sphere=sphere,
+    )
+    return neighbors
+
+
+# Three strips across the long axis. Teams 1 and 3 share only the rectangle cut.
+_LEFT_RIGHT_STRIPS = [(1, 10, 20, 1), (2, 50, 20, 2), (3, 90, 20, 3)]
+_TOP_BOTTOM_STRIPS = [(1, 20, 10, 1), (2, 20, 50, 2), (3, 20, 90, 3)]
+
+
+def test_sphere_border_on_left_right_cut_is_a_neighbor() -> None:
+    assert _neighbors(_LEFT_RIGHT_STRIPS, width=100, height=40, sphere=True) == {
+        1: {2, 3},
+        2: {1, 3},
+        3: {1, 2},
+    }
+
+
+def test_sphere_border_on_top_bottom_cut_is_a_neighbor() -> None:
+    assert _neighbors(_TOP_BOTTOM_STRIPS, width=40, height=100, sphere=True) == {
+        1: {2, 3},
+        2: {1, 3},
+        3: {1, 2},
+    }
+
+
+@pytest.mark.parametrize(
+    ("sites", "width", "height"),
+    [(_LEFT_RIGHT_STRIPS, 100, 40), (_TOP_BOTTOM_STRIPS, 40, 100)],
+)
+def test_non_sphere_opposite_edges_are_not_neighbors(
+    sites: list[tuple[int, float, float, int]], width: int, height: int
+) -> None:
+    assert _neighbors(sites, width=width, height=height, sphere=False) == {
+        1: {2},
+        2: {1, 3},
+        3: {2},
+    }
+
+
+def test_sphere_border_crossing_the_cut_is_a_neighbor() -> None:
+    # The wrap bisector of planets 1 and 3 crosses x = width at a slant, leaving
+    # a sliver of team 1 beside team 3 inside the rectangle.
+    sites = [(1, 10, 10, 1), (2, 50, 20, 2), (3, 90, 30, 3)]
+    neighbors = _neighbors(sites, width=100, height=40, sphere=True)
+    assert 3 in neighbors[1]
+    assert 1 in neighbors[3]
 
 
 def test_painted_ring_covers_the_nu_center() -> None:
@@ -419,22 +502,10 @@ def test_painted_ring_covers_the_nu_center() -> None:
 def test_hole_cut_that_fills_the_hole_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(team_territory, "_splice_hole", lambda ring, hole: ring)
     with pytest.raises(TerritoryRingError):
-        territory_components(
-            _surrounded_sites(),
-            width=100,
-            height=100,
-            sphere=False,
-            origin=(0.0, 0.0),
-        )
+        territory_partition(_surrounded_sites(), width=100, height=100, sphere=False)
 
 
 def test_hole_cut_without_a_boundary_edge_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(team_territory, "_splice_hole", lambda ring, hole: None)
     with pytest.raises(TerritoryRingError):
-        territory_components(
-            _surrounded_sites(),
-            width=100,
-            height=100,
-            sphere=False,
-            origin=(0.0, 0.0),
-        )
+        territory_partition(_surrounded_sites(), width=100, height=100, sphere=False)
