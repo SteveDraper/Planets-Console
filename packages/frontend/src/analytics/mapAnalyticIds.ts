@@ -19,5 +19,8 @@ export const HOMEWORLD_LOCATOR_ANALYTIC_ID = 'homeworld-locator'
 /** Canonical id for the Minefields map overlay analytic. */
 export const MINEFIELDS_ANALYTIC_ID = 'minefields'
 
+/** Canonical id for the Team information map overlay analytic. */
+export const TEAM_INFORMATION_ANALYTIC_ID = 'team-information'
+
 /** Prefix for merged Stellar Cartography node and edge ids on the combined map. */
 export const STELLAR_CARTOGRAPHY_NODE_ID_PREFIX = `${STELLAR_CARTOGRAPHY_ANALYTIC_ID}:`
