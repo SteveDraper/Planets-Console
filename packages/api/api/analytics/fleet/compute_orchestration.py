@@ -48,7 +48,6 @@ FLEET_COMPUTE_PROFILE = AnalyticComputeProfile(
         ComputeStepSpec(
             step_kind=FLEET_OBSERVATION_LEG,
             backend="interpreter",
-            gil_overlap="exclusive",
         ),
         ComputeStepSpec(step_kind=FLEET_FINALIZATION_LEG, backend="inline"),
     ),

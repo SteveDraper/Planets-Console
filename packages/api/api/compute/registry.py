@@ -9,7 +9,6 @@ from api.analytics.registration import TurnAnalyticRegistration
 from api.compute.persistence import PersistencePolicy
 from api.compute.profile import (
     VALID_COMPUTE_BACKENDS,
-    VALID_GIL_OVERLAP_CLASSES,
     AnalyticComputeProfile,
     ComputeStepSpec,
 )
@@ -71,12 +70,6 @@ def _validate_compute_step_spec(step: ComputeStepSpec, *, analytic_id: str) -> N
             f"Turn analytic {analytic_id!r} compute step {step.step_kind!r} has unknown "
             f"backend {step.backend!r}; expected one of "
             f"{sorted(VALID_COMPUTE_BACKENDS)!r}"
-        )
-    if step.gil_overlap not in VALID_GIL_OVERLAP_CLASSES:
-        raise RuntimeError(
-            f"Turn analytic {analytic_id!r} compute step {step.step_kind!r} has unknown "
-            f"gil_overlap {step.gil_overlap!r}; expected one of "
-            f"{sorted(VALID_GIL_OVERLAP_CLASSES)!r}"
         )
 
 

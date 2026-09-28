@@ -52,7 +52,6 @@ SCORES_COMPUTE_PROFILE = AnalyticComputeProfile(
         ComputeStepSpec(
             step_kind=SCORES_TIER_SOLVE,
             backend="thread",
-            gil_overlap="native_release",
         ),
     ),
     # REST table is a TurnInfo projection. Inference ensure/stream is a
