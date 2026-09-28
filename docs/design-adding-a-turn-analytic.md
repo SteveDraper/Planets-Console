@@ -367,3 +367,4 @@ Use this before opening a PR:
 | base-map | Always-on map layer | `api/analytics/base_map.py`, `bff/analytics/base_map.py` |
 | Connections | Map overlay + query params + frontend controls | [design-connections-analytic.md](design-connections-analytic.md) |
 | Minefields | Map-only known-field pane + sidebar prefs | [design-minefields-analytic.md](design-minefields-analytic.md) |
+| Team information | Map-only nearest-planet territory | [design-team-information-analytic.md](design-team-information-analytic.md) |

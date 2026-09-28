@@ -462,6 +462,26 @@ _Avoid_: cartography overlay circles, Visibility region kinds, painter's-algorit
 One **descriptive** **map hover contribution** (role `minefield`) listing every enabled-type **known minefield** whose pre-decay disk contains the pointer -- same many-rows idea as a **fleet location ring** tooltip listing every ship in the stack. Click / context menu out of scope.
 _Avoid_: picking only the smallest field, one contribution per overlapping field, analytic-private mouse capture
 
+**Team information analytic**:
+A map-only **turn analytic** (`analytic_id` `team-information`) that paints **team territory** for each **league team** on the shell turn. Selectable in the sidebar; greyed in tabular **view mode**. Spec: [design-team-information-analytic.md](docs/design-team-information-analytic.md).
+_Avoid_: in-game team coloring (`Player.teamid`), a tabular roster tile, tinting planet markers only
+
+**League team**:
+The competitive organization identified by `Player.leagueteamid`. `0` means that **Player** has no league team. Turn data carries the id and member usernames, not a team name.
+_Avoid_: in-game team (`Player.teamid`, `GameSettings.teamsize`), race, alliance, diplomacy circle
+
+**Team territory**:
+The region of the map closer to a planet owned by that **league team** than to any other site in the active **team territory site set**. Distance is Euclidean light-years, or toroidal on the map rectangle when the game is a **sphere map**.
+_Avoid_: a fixed-radius ownership disk, **player color** as the territory key
+
+**Team territory site set**:
+Which planets compete as nearest-planet sites for **team territory**. **All planets** leaves cells nearest an unowned planet (`ownerid == 0`) unpainted. **Owned planets only** drops unowned planets, so those cells join the nearest owned planet. Cells whose owner has no **league team** stay unpainted in both sets.
+_Avoid_: a second analytic, recomputing the partition in the SPA
+
+**Sphere map**:
+A game with `GameSettings.sphere` true. The rectangle `[0, mapwidth] x [0, mapheight]` is a torus: distance wraps on both axes, including when `mapshape` is round. Planets.nu calls this setup Sphere.
+_Avoid_: `Game.maptype` (hosting category), treating `mapshape` as the wrap flag, black-hole ergosphere
+
 **Stellar Cartography**:
 NuHost optional map geography (star clusters, nebulae, wormholes, black holes, debris disks, and related ion-storm behavior). Exposed in the console as one map-only **turn analytic** with per-element layer toggles.
 _Avoid_: SC (in user-facing copy), space hazards (too broad)

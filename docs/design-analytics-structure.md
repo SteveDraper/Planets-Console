@@ -8,6 +8,7 @@ Related docs:
 - [Compute orchestrator](design-compute-orchestrator.md) -- unified Core compute scheduling (ADR 0005)
 - [Analytic exports](design-analytic-exports.md) -- cross-analytic queries, JSONPath, materializers
 - [Connections analytic](design-connections-analytic.md) -- reference for a map analytic with query params
+- [Team information analytic](design-team-information-analytic.md) -- map-only nearest-planet league-team territory
 - [Frontend/backend state](design-frontend-and-backend-state.md) -- shell context and turn ensure gating
 
 ## Layer responsibilities
