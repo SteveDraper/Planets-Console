@@ -191,7 +191,7 @@ def test_multiplex_cancel_finish_seals_canceled_and_silences_late_terminals():
         assert (
             transition_stream_resolution(
                 "cancel-run",
-                RowStreamResolutionTrigger.DURABLE_COMPLETE,
+                RowStreamResolutionTrigger.DURABLE_FAILURE,
             )
             is RowStreamDelivery.SILENCE
         )

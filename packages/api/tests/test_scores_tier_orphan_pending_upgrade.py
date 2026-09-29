@@ -710,3 +710,15 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
     assert completes[0].get("isComplete") is True
     assert completes[0].get("playerId") == ui_session.player_id
     assert stream_drain.is_closed(ui_session.run_id)
+
+    scheduler._runs[solved_run.run_id] = scope
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": solved_run.run_id, "rowComplete": row_complete},
+        ),
+    )
+    assert not [
+        event for event in controller.drain_pending_wire_events() if event.get("type") == "complete"
+    ], "a second durable complete after the cancel upgrade must stay silent"

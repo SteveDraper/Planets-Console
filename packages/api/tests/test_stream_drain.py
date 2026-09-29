@@ -90,11 +90,25 @@ def test_drain_fsm_route_matrix() -> None:
         assert (
             transition_stream_resolution(
                 "cancel-seal",
-                RowStreamResolutionTrigger.DURABLE_COMPLETE,
+                RowStreamResolutionTrigger.DURABLE_FAILURE,
             )
             is RowStreamDelivery.SILENCE
         )
         assert route_terminal(RowStreamDelivery.SILENCE, "cancel-seal") is TerminalRoute.SILENCE
+        # Durable complete after cancel seal upgrades once through pending
+        delivery_after_cancel = transition_stream_resolution(
+            "cancel-seal",
+            RowStreamResolutionTrigger.DURABLE_COMPLETE,
+        )
+        assert delivery_after_cancel is RowStreamDelivery.UPGRADE
+        assert route_terminal(delivery_after_cancel, "cancel-seal") is TerminalRoute.PENDING
+        assert (
+            transition_stream_resolution(
+                "cancel-seal",
+                RowStreamResolutionTrigger.DURABLE_COMPLETE,
+            )
+            is RowStreamDelivery.SILENCE
+        )
         # Force_fresh reopen while soft
         transition_stream_resolution("d", RowStreamResolutionTrigger.SOFT_PROVISIONAL)
         stream_drain.close("d")
