@@ -57,6 +57,20 @@ def without_player_minefields(turn: TurnInfo, player_id: int) -> TurnInfo:
     )
 
 
+def with_score_owners_in_roster(turn: TurnInfo) -> TurnInfo:
+    """Add a roster entry for every score owner the trimmed sample roster lacks."""
+    roster_ids = {player.id for player in turn.players}
+    missing_owner_ids = sorted({score.ownerid for score in turn.scores} - roster_ids)
+    template = turn.players[0]
+    return replace(
+        turn,
+        players=(
+            *turn.players,
+            *(replace(template, id=owner_id) for owner_id in missing_owner_ids),
+        ),
+    )
+
+
 @pytest.fixture
 def sample_turn():
     with open(ASSETS_DIR / "turn_sample.json") as handle:

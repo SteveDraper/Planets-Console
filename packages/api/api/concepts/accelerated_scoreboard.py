@@ -122,29 +122,42 @@ def is_non_accelerated_opening_reveal(turn_number: int, settings: GameSettings) 
     return accelerated_turn_count(settings) == 0 and turn_number == 2
 
 
-def _score_uses_opening_reveal(score: Score, turn: TurnInfo) -> bool:
-    """Whether this row's turn 2 deltas should drop the homeworld baseline.
+HORWASP_STARTING_SNAPSHOT = ScoreboardSnapshot(
+    militaryscore=0,
+    capitalships=HOMEBASE_STARTING_CAPITAL_SHIPS,
+    freighters=HOMEBASE_STARTING_FREIGHTERS,
+    starbases=0,
+    planets=HOMEBASE_STARTING_PLANETS,
+)
 
-    Horwasps do not start with that starbase, so their change columns stay as reported.
+
+def _opening_reveal_baseline(score: Score, turn: TurnInfo) -> ScoreboardSnapshot:
+    """Homeworld baseline the score owner starts with.
+
+    Horwasps start with the homeworld and starting freighter but no starbase and
+    no planet defense posts.
     """
-    if not is_non_accelerated_opening_reveal(turn.settings.turn, turn.settings):
-        return False
     for player in turn.players:
         if player.id == score.ownerid:
-            return not is_horwasp(player.raceid)
-    return True
+            if is_horwasp(player.raceid):
+                return HORWASP_STARTING_SNAPSHOT
+            return starting_scoreboard_snapshot(turn.settings)
+    raise ValueError(
+        f"Score owner {score.ownerid} is not in turn {turn.settings.turn} players; "
+        "cannot choose the opening-reveal baseline"
+    )
 
 
 def reported_scoreboard_deltas(score: Score, turn: TurnInfo) -> ReportedScoreboardDeltas:
     """Build deltas this score row reports for its host turn.
 
-    On the non-accelerated opening reveal the totals minus the homeworld baseline;
-    otherwise the row's change columns.
+    On the non-accelerated opening reveal the totals minus the owner's homeworld
+    baseline; otherwise the row's change columns.
     """
-    if _score_uses_opening_reveal(score, turn):
-        baseline = starting_scoreboard_snapshot(turn.settings)
+    if is_non_accelerated_opening_reveal(turn.settings.turn, turn.settings):
+        baseline = _opening_reveal_baseline(score, turn)
         return ReportedScoreboardDeltas(
-            military_delta_2x=cumulative_military_delta_2x(score, turn.settings),
+            military_delta_2x=2 * (score.militaryscore - baseline.militaryscore),
             warship_delta=score.capitalships - baseline.capitalships,
             freighter_delta=score.freighters - baseline.freighters,
             priority_point_delta=score.prioritypoints - baseline.prioritypoints,

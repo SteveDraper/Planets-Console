@@ -5,6 +5,7 @@ Accelerated games keep reported change columns on the first reliable row.
 
 from dataclasses import replace
 
+import pytest
 from api.analytics.fleet.scoreboard_placeholder_targets import (
     ScoreboardPlaceholderTarget,
     scoreboard_placeholder_targets,
@@ -22,6 +23,9 @@ from api.concepts.accelerated_scoreboard import (
     reported_scoreboard_deltas,
     starting_scoreboard_snapshot,
 )
+from api.concepts.races import HORWASP_RACE_ID
+
+from tests.fixtures.military_score_inference import with_score_owners_in_roster
 
 
 def _score(template, **fields):
@@ -40,16 +44,43 @@ def _score(template, **fields):
 
 
 def _turn(sample_turn, *, turn_number: int, acceleratedturns: int, scores):
-    return replace(
-        sample_turn,
-        settings=replace(
-            sample_turn.settings,
-            turn=turn_number,
-            acceleratedturns=acceleratedturns,
-            homeworldhasstarbase=True,
-        ),
-        scores=tuple(scores),
+    return with_score_owners_in_roster(
+        replace(
+            sample_turn,
+            settings=replace(
+                sample_turn.settings,
+                turn=turn_number,
+                acceleratedturns=acceleratedturns,
+                homeworldhasstarbase=True,
+            ),
+            scores=tuple(scores),
+        )
     )
+
+
+def _horwasp(template, *, freighters: int):
+    """Homeworld plus ``freighters`` freighters, each showing up from 0."""
+    return _score(
+        template,
+        ownerid=52,
+        turn=2,
+        militaryscore=0,
+        militarychange=0,
+        capitalships=0,
+        shipchange=0,
+        freighters=freighters,
+        freighterchange=freighters,
+        starbases=0,
+        starbasechange=0,
+        planets=1,
+        planetchange=1,
+    )
+
+
+def _horwasp_turn(sample_turn, score):
+    player = replace(sample_turn.players[0], id=score.ownerid, raceid=HORWASP_RACE_ID)
+    turn = _turn(sample_turn, turn_number=2, acceleratedturns=0, scores=[score])
+    return replace(turn, players=(player,))
 
 
 def _forger(template, *, turn_number: int):
@@ -185,33 +216,56 @@ def test_non_accelerated_turn2_without_homeworld_starbase_keeps_the_homeworld(sa
     assert deltas.freighter_delta == 0
 
 
-def test_horwasp_turn2_keeps_reported_change_columns(sample_turn):
+def test_horwasp_turn2_subtracts_the_starbaseless_baseline(sample_turn):
     template = sample_turn.scores[0]
-    horwasp = _score(
-        template,
-        ownerid=52,
-        turn=2,
-        militaryscore=0,
-        militarychange=0,
-        capitalships=0,
-        shipchange=0,
-        freighters=1,
-        freighterchange=1,
-        starbases=0,
-        starbasechange=0,
-        planets=1,
-        planetchange=1,
-    )
-    player = replace(sample_turn.players[0], id=52, raceid=12)
-    turn = _turn(sample_turn, turn_number=2, acceleratedturns=0, scores=[horwasp])
-    turn = replace(turn, players=(player,))
+    horwasp = _horwasp(template, freighters=1)
+    turn = _horwasp_turn(sample_turn, horwasp)
 
     observation = build_inference_observation(horwasp, turn)
 
-    assert observation.scoreboard_delta_source == "reported_change_fields"
+    assert observation.scoreboard_delta_source == OPENING_BASELINE_DELTA_SOURCE
     assert observation.military_delta_2x == 0
-    assert observation.freighter_delta == 1
+    assert observation.warship_delta == 0
+    assert observation.freighter_delta == 0
+    assert observation.planet_delta == 0
     assert observation.starbase_delta == 0
+    assert scoreboard_placeholder_targets(horwasp, turn) is None
+
+
+def test_horwasp_turn2_extra_freighter_is_one_freighter(sample_turn):
+    template = sample_turn.scores[0]
+    horwasp = _horwasp(template, freighters=2)
+    turn = _horwasp_turn(sample_turn, horwasp)
+
+    deltas = reported_scoreboard_deltas(horwasp, turn)
+
+    assert deltas.delta_source == OPENING_BASELINE_DELTA_SOURCE
+    assert deltas.military_delta_2x == 0
+    assert deltas.freighter_delta == 1
+    assert deltas.starbase_delta == 0
+    assert deltas.planet_delta == 0
+
+
+def test_turn2_score_owner_missing_from_roster_raises(sample_turn):
+    template = sample_turn.scores[0]
+    forger = _forger(template, turn_number=2)
+    turn = _turn(sample_turn, turn_number=2, acceleratedturns=0, scores=[forger])
+    turn = replace(turn, players=())
+
+    with pytest.raises(ValueError, match="51"):
+        reported_scoreboard_deltas(forger, turn)
+
+
+def test_later_turn_does_not_need_the_score_owner_in_roster(sample_turn):
+    template = sample_turn.scores[0]
+    forger = _forger(template, turn_number=4)
+    turn = _turn(sample_turn, turn_number=4, acceleratedturns=0, scores=[forger])
+    turn = replace(turn, players=())
+
+    deltas = reported_scoreboard_deltas(forger, turn)
+
+    assert deltas.delta_source == "reported_change_fields"
+    assert deltas.freighter_delta == forger.freighterchange
 
 
 def test_non_accelerated_later_turn_keeps_change_columns(sample_turn):

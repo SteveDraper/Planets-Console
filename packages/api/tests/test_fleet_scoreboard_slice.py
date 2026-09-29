@@ -18,6 +18,8 @@ from api.analytics.fleet.serialization import (
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord
 
+from tests.fixtures.military_score_inference import with_score_owners_in_roster
+
 
 def _observation_signature(ledger: FleetAcquisitionLedger) -> tuple:
     return (
@@ -107,9 +109,11 @@ def test_scoreboard_slice_matches_full_turn_on_normal_and_first_reliable(sample_
         replace(score, turn=2) if score.turn == sample_turn.settings.turn else score
         for score in sample_turn.scores
     ]
-    opening_reveal = replace(
-        sample_turn,
-        settings=replace(sample_turn.settings, turn=2, acceleratedturns=0),
-        scores=opening_scores,
+    opening_reveal = with_score_owners_in_roster(
+        replace(
+            sample_turn,
+            settings=replace(sample_turn.settings, turn=2, acceleratedturns=0),
+            scores=opening_scores,
+        )
     )
     _assert_slice_matches_full_turn(opening_reveal)
