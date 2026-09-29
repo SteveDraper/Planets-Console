@@ -78,7 +78,7 @@ class InferenceStreamTeardownMixin:
             )
 
     def cancel_run(self: InferenceRowScheduler, run_id: str) -> None:
-        """Cancel one row run and abort its orchestrator scope.
+        """Cancel one row run and abort its orchestrator scope when no sibling remains.
 
         Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
         only drops stream ownership without cancelling solve work, cancel applies
@@ -87,6 +87,12 @@ class InferenceStreamTeardownMixin:
         CANCELED) then aborts in-flight orchestrator nodes so a later
         ``force_fresh`` submit cannot attach to a still-running node with a
         missing RowRun.
+
+        A duplicate schedule force_fresh-attaches to the survivor's running node
+        and caches that same execution generation, then ``cancel_run`` drops the
+        duplicate. Aborting that generation fails the shared DAG node the survivor
+        still needs. Skip abort while another live run still maps to the scope.
+        The last remaining cancel still aborts.
         """
         abort_scope: ComputeScope | None = None
         abort_generation: int | None = None
@@ -99,7 +105,11 @@ class InferenceStreamTeardownMixin:
             # Lifecycle CANCEL (admission + seal + token) before dropping
             # scheduler maps so late persist still DENYs.
             self._remove_run_locked(run_id, op=RowLifecycleOp.CANCEL)
-            abort_scope = root_scope
+            sibling_still_owns_scope = root_scope is not None and any(
+                scope == root_scope for scope in self._runs.values()
+            )
+            if not sibling_still_owns_scope:
+                abort_scope = root_scope
         # Abort outside the scheduler lock: ``abort_scope`` drains node-complete
         # listeners that may deliver stream events (controller ``stream_lock``) or
         # call ``owns_table_stream`` (needs this lock). Holding ``_lock`` here ABBA /

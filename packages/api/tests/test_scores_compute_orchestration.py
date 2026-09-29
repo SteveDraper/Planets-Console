@@ -610,6 +610,111 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
     assert all(run_scores_tier_solve(wire).outcome == "complete" for wire in skip_wires)
 
 
+def test_missing_full_alliance_row_restores_skip_instead_of_tier_solve_invariant(
+    sample_turn,
+    persistence,
+) -> None:
+    """A mutual full-alliance skip with no disk row must not fail tier_solve.
+
+    Ensure-ephemeral still satisfies admit after the stored row is deleted.
+    Fleet's materialization probe ignores that ephemeral, so a force-fresh
+    tier_solve used to raise ``no attachable RowRun`` and fail fleet. Rewrite
+    the ``full_alliance`` row and emit the evidence-closed skip.
+    """
+    from dataclasses import replace
+
+    from api.analytics.export_types import ExportScope
+    from api.analytics.military_score_inference.inference_api_payload import (
+        STATUS_FULL_ALLIANCE,
+    )
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.exports import (
+        admit_scores_export_work,
+        is_scores_export_ensure_satisfied,
+        is_scores_export_turn_evidence_closed,
+    )
+    from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
+    from api.models.player import Relation
+
+    from tests.scores_exports_helpers import (
+        GAME_ID,
+        inference_target_player_id,
+        perspective,
+        scores_query_context,
+    )
+
+    reset_inference_row_scheduler_for_tests()
+    reset_tier_row_run_registry_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
+    turn_2 = replace(
+        sample_turn,
+        settings=replace(sample_turn.settings, turn=2),
+        game=replace(sample_turn.game, turn=2),
+    )
+    player_id = inference_target_player_id(turn_2)
+    viewpoint = turn_2.player.id
+    turn_2 = replace(
+        turn_2,
+        relations=[
+            Relation(
+                id=1,
+                playerid=viewpoint,
+                playertoid=player_id,
+                relationto=4,
+                relationfrom=4,
+                conflictlevel=0,
+                color="",
+            )
+        ],
+    )
+    ctx = scores_query_context(
+        turn_2,
+        persistence=persistence,
+        scheduler=scheduler,
+        stored_turns={2: turn_2},
+    )
+    export_scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(turn_2),
+        turn=2,
+        player_id=player_id,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=GAME_ID,
+        perspective=perspective(turn_2),
+        turn=2,
+        player_id=player_id,
+    )
+
+    assert admit_scores_export_work(ctx, export_scope, overlay_ensure=False) is True
+    stored = persistence.get_row(GAME_ID, perspective(turn_2), 2, player_id)
+    assert stored is not None
+    assert stored.status == STATUS_FULL_ALLIANCE
+
+    persistence.delete_row(GAME_ID, perspective(turn_2), 2, player_id)
+    assert persistence.get_row(GAME_ID, perspective(turn_2), 2, player_id) is None
+    assert is_scores_export_ensure_satisfied(ctx, export_scope) is True
+    assert is_scores_export_turn_evidence_closed(ctx, export_scope) is False
+
+    skip_wire = build_scores_tier_solve_job_wire(
+        scope,
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert skip_wire["runId"] is None
+    assert skip_wire["evidenceClosed"] is True
+    assert run_scores_tier_solve(skip_wire).outcome == "complete"
+    restored = persistence.get_row(GAME_ID, perspective(turn_2), 2, player_id)
+    assert restored is not None
+    assert restored.status == STATUS_FULL_ALLIANCE
+    assert is_scores_export_turn_evidence_closed(ctx, export_scope) is True
+    assert get_row_run_for_scope(scope) is None
+
+
 def test_historical_materialize_schedules_row_run_for_tier_solve(
     sample_turn,
     persistence,

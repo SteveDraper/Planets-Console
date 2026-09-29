@@ -296,6 +296,11 @@ def admit_scores_export_work(
         snapshot,
         resolution_context=resolution_context,
     ):
+        # In-memory skip admissions satisfy ensure without a disk row. Fleet's
+        # materialization probe does not see that ephemeral, so rewrite the row
+        # when a deliberate skip (full alliance and the other admission skips)
+        # has lost its stored terminal.
+        persist_missing_admission_skip(ctx, scope)
         return True
 
     mutated = _ensure_admit_inference_row(
@@ -340,32 +345,19 @@ def _ensure_admit_inference_row(
     *,
     overlay_ensure: bool = False,
 ) -> bool:
-    """Admit cheap terminals via ephemeral events, else schedule a RowRun for CP-SAT."""
+    """Persist an admission skip, else schedule a RowRun for CP-SAT."""
     player_id = scope.player_id
     if player_id is None:
         return False
 
-    immediate = immediate_row_inference_events(
-        turn,
-        player_id,
-        perspective=scope.perspective,
-        load_scoreboard_turn=ctx.load_turn,
-    )
-    if immediate is not None:
-        admission = ImmediateRowAdmission(events=immediate)
-        ctx.record_ensure_ephemeral(ANALYTIC_ID, scope, admission)
-        # Disk evidence so the materialization probe (fleet provenance /
-        # ScoresPersistencePolicy.is_satisfied) agrees with ensure -- ephemeral
-        # alone cannot close turnEvidenceAtN.
-        _persist_immediate_row_admission(services, scope, admission)
-        _wake_deferred_scores_after_evidence_close(ctx, scope)
+    if persist_missing_admission_skip(ctx, scope):
         return True
 
     inputs = _scores_row_ensure_inputs(services, scope, turn)
     if inputs is None:
         return False
     score = inputs.score
-    # immediate_row_inference_events admits missing scoreboard rows above.
+    # Admission skips, including a missing scoreboard row, returned above.
     assert score is not None
     if services.scheduler.row_run_for_player(inputs.stream_scope, inputs.player_id) is not None:
         return False
@@ -422,6 +414,56 @@ def _wake_deferred_scores_after_evidence_close(
         ctx=ctx,
         reason=ScoresWakeReason.EVIDENCE_CLOSED,
     )
+
+
+def persist_missing_admission_skip(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> bool:
+    """Write an admission-skip row when inference storage does not have one.
+
+    Full alliance, viewpoint owner, dead, Horwasp, and no-prior-turn skips never
+    schedule a ``RowRun``. An in-memory ``ImmediateRowAdmission`` satisfies ensure
+    admit, but fleet's materialization probe ignores that ephemeral and still
+    sees open turn evidence. Rewriting the skip row closes evidence so
+    ``tier_solve`` can skip and fleet finalization can persist.
+
+    Returns True when this scope is an admission skip.
+    """
+    if scope.player_id is None or scope.turn <= 1:
+        return False
+
+    services = resolve_scores_services(ctx)
+    turn = ctx.load_turn(scope.turn)
+    if turn is None or not is_build_inference_available(turn):
+        return False
+
+    immediate = immediate_row_inference_events(
+        turn,
+        scope.player_id,
+        perspective=scope.perspective,
+        load_scoreboard_turn=ctx.load_turn,
+    )
+    if immediate is None:
+        return False
+
+    admission = ImmediateRowAdmission(events=immediate)
+    ctx.record_ensure_ephemeral(ANALYTIC_ID, scope, admission)
+    if services.persistence is not None and (
+        services.persistence.get_row(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+        )
+        is not None
+    ):
+        return True
+
+    _persist_immediate_row_admission(services, scope, admission)
+    ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
+    _wake_deferred_scores_after_evidence_close(ctx, scope)
+    return True
 
 
 def _persist_immediate_row_admission(

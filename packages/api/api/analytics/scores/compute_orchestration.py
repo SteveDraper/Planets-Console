@@ -111,7 +111,9 @@ def build_scores_tier_solve_job_wire(
 
     Skip sentinel (``runId: None``, ``evidenceClosed: True``) is allowed only when
     turn evidence is already closed (persisted / durable terminal under the same
-    materialization probe fleet uses).
+    materialization probe fleet uses). Admission skips (full alliance, viewpoint
+    owner, dead, Horwasp, no prior turn) close that evidence by persisting the
+    skip row when it is missing; they do not need a ``RowRun``.
 
     Invariant: when ensure is satisfied and evidence is still open, this dispatch
     must attach a ``runId`` (tier registry or successful scheduler adopt). Parking
@@ -141,8 +143,11 @@ def build_scores_tier_solve_job_wire(
     if run is None:
         run = _adopt_scheduler_row_run_for_tier_wire(ctx, export_scope)
     if run is None:
+        if not ScoresPersistencePolicy().is_satisfied(ctx, scope):
+            from api.analytics.scores.exports import persist_missing_admission_skip
+
+            persist_missing_admission_skip(ctx, export_scope)
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
-            export_scope = compute_scope_to_export_scope(scope)
             return {
                 "runId": None,
                 "evidenceClosed": True,
