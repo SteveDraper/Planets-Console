@@ -5,6 +5,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from collections.abc import Callable
 
 from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.multiplex import iter_multiplexed_stream_events
@@ -216,38 +217,104 @@ def test_pending_terminal_is_not_followed_by_queued_progress():
             {
                 "type": "complete",
                 "playerId": 25,
+                "runId": "run-a",
                 "isComplete": True,
                 "summary": "exact",
             }
         ]
-        wake = threading.Event()
-        flags = {"active": True}
-        seen: list[dict[str, object]] = []
-
-        def consume() -> None:
-            for event in iter_multiplexed_stream_events(
-                rows,
-                tag_player_id=True,
-                is_stream_active=lambda: flags["active"],
-                row_provider=lambda: rows,
-                pending_events_provider=lambda: [pending_holder.pop()] if pending_holder else [],
-                wake_event=wake,
-                event_to_wire_events=lambda row, event: iter((event,)),
-                tag_event=lambda event, player_id: {**event, "playerId": player_id},
-                multiplex_wait_seconds=0.02,
-            ):
-                seen.append(event)
-                if event.get("type") == "complete":
-                    flags["active"] = False
-                    wake.set()
-
-        thread = threading.Thread(target=consume, daemon=True)
-        thread.start()
-        wake.set()
-        thread.join(timeout=2.0)
+        seen = _consume_until(
+            rows,
+            pending_holder,
+            stop_when=lambda event: event.get("type") == "complete",
+        )
 
         assert [event.get("type") for event in seen] == ["complete"]
         assert stream_drain.is_closed("run-a")
-        assert not thread.is_alive()
     finally:
         reset_stream_resolution_registry_for_tests()
+
+
+def test_pending_terminal_for_replaced_run_leaves_newer_run_open():
+    """A pending complete from run A must not seal run B, the newer row for that player."""
+    reset_stream_resolution_registry_for_tests()
+    try:
+        newer = _Session("run-b")
+        newer.event_queue.put({"type": "progress", "policyStepId": "full_components"})
+        rows = (_Row(25, newer),)
+        pending_holder = [
+            {
+                "type": "complete",
+                "playerId": 25,
+                "runId": "run-a",
+                "isComplete": True,
+                "summary": "exact",
+            }
+        ]
+        seen = _consume_until(
+            rows,
+            pending_holder,
+            stop_when=lambda event: event.get("type") == "progress",
+        )
+
+        assert [event.get("type") for event in seen] == ["complete", "progress"]
+        assert not stream_drain.is_closed("run-b")
+    finally:
+        reset_stream_resolution_registry_for_tests()
+
+
+def test_pending_terminal_without_run_id_closes_no_row():
+    """A pending terminal that names no run must not seal the player's live row."""
+    reset_stream_resolution_registry_for_tests()
+    try:
+        session = _Session("run-a")
+        session.event_queue.put({"type": "progress", "policyStepId": "full_components"})
+        rows = (_Row(25, session),)
+        pending_holder: list[dict[str, object]] = [
+            {"type": "complete", "playerId": 25, "isComplete": True, "summary": "cached"}
+        ]
+        seen = _consume_until(
+            rows,
+            pending_holder,
+            stop_when=lambda event: event.get("type") == "progress",
+        )
+
+        assert [event.get("type") for event in seen] == ["complete", "progress"]
+        assert not stream_drain.is_closed("run-a")
+    finally:
+        reset_stream_resolution_registry_for_tests()
+
+
+def _consume_until(
+    rows: tuple[_Row, ...],
+    pending_holder: list[dict[str, object]],
+    *,
+    stop_when: Callable[[dict[str, object]], bool],
+) -> list[dict[str, object]]:
+    """Drain one pending batch then row queues until ``stop_when`` matches."""
+    wake = threading.Event()
+    flags = {"active": True}
+    seen: list[dict[str, object]] = []
+
+    def consume() -> None:
+        for event in iter_multiplexed_stream_events(
+            rows,
+            tag_player_id=True,
+            is_stream_active=lambda: flags["active"],
+            row_provider=lambda: rows,
+            pending_events_provider=lambda: [pending_holder.pop()] if pending_holder else [],
+            wake_event=wake,
+            event_to_wire_events=lambda row, event: iter((event,)),
+            tag_event=lambda event, player_id: {**event, "playerId": player_id},
+            multiplex_wait_seconds=0.02,
+        ):
+            seen.append(event)
+            if stop_when(event):
+                flags["active"] = False
+                wake.set()
+
+    thread = threading.Thread(target=consume, daemon=True)
+    thread.start()
+    wake.set()
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    return seen

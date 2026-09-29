@@ -462,6 +462,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
     assert any(event.get("type") == "complete" for event in pending), (
         f"expected admission complete on pending wire, got pending={pending!r} queued={queued!r}"
     )
+    assert all(event.get("runId") == session.run_id for event in pending)
     assert stream_drain.is_closed(session.run_id)
     assert get_row_run(run.run_id) is None
 
@@ -518,6 +519,7 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
     assert any(event.get("type") in {"complete", "error"} for event in pending), (
         f"expected pending-wire terminal after drain close, got {pending!r}"
     )
+    assert all(event.get("runId") == session.run_id for event in pending)
 
 
 def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monkeypatch) -> None:
@@ -709,6 +711,7 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
     assert completes, f"cancelled open row never got the durable complete (pending={pending!r})"
     assert completes[0].get("isComplete") is True
     assert completes[0].get("playerId") == ui_session.player_id
+    assert completes[0].get("runId") == ui_session.run_id
     assert stream_drain.is_closed(ui_session.run_id)
 
     scheduler._runs[solved_run.run_id] = scope

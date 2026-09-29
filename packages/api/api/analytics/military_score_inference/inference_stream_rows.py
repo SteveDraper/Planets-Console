@@ -127,10 +127,17 @@ def tag_inference_stream_event(
     event: dict[str, object],
     *,
     player_id: int,
+    run_id: str | None = None,
 ) -> dict[str, object]:
+    """Tag a row wire event with its player and, for run-emitted pending wire, its run.
+
+    Multiplex closes only the run named by ``runId`` when a pending terminal is yielded.
+    """
     if event.get("type") == "globalPause":
         return event
-    return {**event, "playerId": player_id}
+    if run_id is None:
+        return {**event, "playerId": player_id}
+    return {**event, "playerId": player_id, "runId": run_id}
 
 
 def immediate_row_inference_events(
