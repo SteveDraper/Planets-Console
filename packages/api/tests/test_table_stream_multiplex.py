@@ -198,3 +198,56 @@ def test_multiplex_cancel_finish_seals_canceled_and_silences_late_terminals():
         assert not thread.is_alive()
     finally:
         reset_stream_resolution_registry_for_tests()
+
+
+def test_pending_terminal_is_not_followed_by_queued_progress():
+    """A pending complete must finish the row before a queued progress is applied.
+
+    The client treats progress after a finished row as a new search. Reading that
+    leftover progress after the durable complete puts the badge back to searching
+    with no further compute.
+    """
+    reset_stream_resolution_registry_for_tests()
+    try:
+        session = _Session("run-a")
+        session.event_queue.put({"type": "progress", "policyStepId": "full_components"})
+        rows = (_Row(25, session),)
+        pending_holder = [
+            {
+                "type": "complete",
+                "playerId": 25,
+                "isComplete": True,
+                "summary": "exact",
+            }
+        ]
+        wake = threading.Event()
+        flags = {"active": True}
+        seen: list[dict[str, object]] = []
+
+        def consume() -> None:
+            for event in iter_multiplexed_stream_events(
+                rows,
+                tag_player_id=True,
+                is_stream_active=lambda: flags["active"],
+                row_provider=lambda: rows,
+                pending_events_provider=lambda: [pending_holder.pop()] if pending_holder else [],
+                wake_event=wake,
+                event_to_wire_events=lambda row, event: iter((event,)),
+                tag_event=lambda event, player_id: {**event, "playerId": player_id},
+                multiplex_wait_seconds=0.02,
+            ):
+                seen.append(event)
+                if event.get("type") == "complete":
+                    flags["active"] = False
+                    wake.set()
+
+        thread = threading.Thread(target=consume, daemon=True)
+        thread.start()
+        wake.set()
+        thread.join(timeout=2.0)
+
+        assert [event.get("type") for event in seen] == ["complete"]
+        assert stream_drain.is_closed("run-a")
+        assert not thread.is_alive()
+    finally:
+        reset_stream_resolution_registry_for_tests()

@@ -135,10 +135,62 @@ class InferenceStreamResolutionMixin:
     ) -> bool:
         with self._lock:
             delivery = self._transition_stream_resolution_locked(session.run_id, trigger)
-        self._emit_stream_terminal(session, event, delivery)
+        if delivery is RowStreamDelivery.SILENCE and isinstance(event, RowComplete):
+            # CANCELED silences the durable complete, and a connected table does not
+            # reconnect while the stream stays open. Push the stored row anyway so
+            # the searching badge clears without a refresh.
+            surfaced = self._surface_silenced_durable_complete(session, event)
+        else:
+            self._emit_stream_terminal(session, event, delivery)
+            surfaced = delivery is not RowStreamDelivery.SILENCE
         if finalize:
             self._finalize_row_run(session)
-        return delivery is not RowStreamDelivery.SILENCE
+        return surfaced
+
+    def _surface_silenced_durable_complete(
+        self: InferenceRowScheduler,
+        session: InferenceRowStreamSession,
+        event: RowComplete,
+    ) -> bool:
+        """Send a silenced durable complete to the open table row.
+
+        The resolution FSM drops the event when this run is already ``CANCELED``
+        or hard-terminal. The connected multiplex then keeps a searching row
+        until the tab reconnects and admission replays the stored complete.
+        Push that complete on the pending wire and close the drain so a leftover
+        queue event cannot reopen the row. A different still-open run for the
+        same player is a live replacement; leave it alone.
+        """
+        controller = self._controller_for_stream_session(session)
+        if controller is None:
+            return False
+        scheduled = controller.scheduled_rows.get(session.player_id)
+        if scheduled is None:
+            return False
+        target = scheduled.session
+        if target.run_id != session.run_id:
+            target_resolution = get_stream_resolution(target.run_id)
+            target_state = (
+                target_resolution.state
+                if target_resolution is not None
+                else RowStreamResolutionState.OPEN
+            )
+            if target_state is not RowStreamResolutionState.CANCELED and not stream_drain.is_closed(
+                target.run_id
+            ):
+                return False
+        target_resolution = get_stream_resolution(target.run_id)
+        if (
+            target_resolution is not None
+            and target_resolution.state is RowStreamResolutionState.HARD_TERMINAL
+            and stream_drain.is_closed(target.run_id)
+        ):
+            return False
+        stream_drain.close(target.run_id)
+        if target.run_id != session.run_id:
+            stream_drain.close(session.run_id)
+        controller.push_domain_event_pending_wire(target, event)
+        return True
 
     def _deliver_orphan_empty(
         self: InferenceRowScheduler,
