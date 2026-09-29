@@ -15,6 +15,10 @@ from api.analytics.military_score_inference.accelerated_start import (
     scoreboard_host_turn,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
+from api.concepts.accelerated_scoreboard import (
+    opening_reveal_reported_deltas,
+    score_uses_opening_reveal,
+)
 from api.models.game import TurnInfo
 from api.models.player import Score
 
@@ -84,6 +88,12 @@ def observation_from_deltas(
     scoreboard_delta_source: str = "reported_change_fields",
 ) -> InferenceObservation:
     military_delta_2x, warship_delta, freighter_delta, priority_point_delta = deltas
+    planet_delta = score.planetchange
+    starbase_delta = score.starbasechange
+    if score_uses_opening_reveal(score, turn):
+        opening = opening_reveal_reported_deltas(score, turn.settings)
+        planet_delta = opening.planet_delta
+        starbase_delta = opening.starbase_delta
     return InferenceObservation(
         player_id=score.ownerid,
         turn=turn.settings.turn,
@@ -95,8 +105,8 @@ def observation_from_deltas(
         is_after_ship_limit=is_after_ship_limit(turn, score),
         military_partition_slack_2x=military_partition_slack_2x,
         scoreboard_delta_source=scoreboard_delta_source,
-        planet_delta=score.planetchange,
-        starbase_delta=score.starbasechange,
+        planet_delta=planet_delta,
+        starbase_delta=starbase_delta,
     )
 
 

@@ -341,7 +341,11 @@ def build_action_catalog(
             )
         )
     peer_rows = (
-        public_scoreboard_rows_from_scores(turn.scores, this_player_id=observation.player_id)
+        public_scoreboard_rows_from_scores(
+            turn.scores,
+            this_player_id=observation.player_id,
+            turn=turn,
+        )
         if turn is not None
         else ()
     )

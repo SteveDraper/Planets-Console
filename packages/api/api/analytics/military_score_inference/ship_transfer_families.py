@@ -29,8 +29,12 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
     transfer_budget_for_row,
     unique_incoming_class,
 )
+from api.concepts.accelerated_scoreboard import (
+    opening_reveal_reported_deltas,
+    score_uses_opening_reveal,
+)
 from api.models.components import Beam, Engine, Hull, Torpedo
-from api.models.game import GameSettings
+from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
 
 SHIP_LOSS_ACTION_PREFIX = "ship_loss:"
@@ -43,20 +47,38 @@ def public_scoreboard_rows_from_scores(
     scores: tuple[Score, ...] | list[Score],
     *,
     this_player_id: int,
+    turn: TurnInfo | None = None,
 ) -> tuple[PublicScoreboardRow, ...]:
-    return tuple(
-        PublicScoreboardRow(
+    rows: list[PublicScoreboardRow] = []
+    for score in scores:
+        if score.ownerid == this_player_id:
+            continue
+        rows.append(_public_scoreboard_row(score, turn))
+    return tuple(rows)
+
+
+def _public_scoreboard_row(score: Score, turn: TurnInfo | None) -> PublicScoreboardRow:
+    if turn is not None and score_uses_opening_reveal(score, turn):
+        opening = opening_reveal_reported_deltas(score, turn.settings)
+        return PublicScoreboardRow(
             player_id=score.ownerid,
-            warship_delta=score.shipchange,
-            freighter_delta=score.freighterchange,
-            military_delta_2x=2 * score.militarychange,
+            warship_delta=opening.warship_delta,
+            freighter_delta=opening.freighter_delta,
+            military_delta_2x=opening.military_delta_2x,
             starbases=score.starbases,
-            priority_point_delta=score.prioritypointchange,
-            planet_delta=score.planetchange,
-            starbase_delta=score.starbasechange,
+            priority_point_delta=opening.priority_point_delta,
+            planet_delta=opening.planet_delta,
+            starbase_delta=opening.starbase_delta,
         )
-        for score in scores
-        if score.ownerid != this_player_id
+    return PublicScoreboardRow(
+        player_id=score.ownerid,
+        warship_delta=score.shipchange,
+        freighter_delta=score.freighterchange,
+        military_delta_2x=2 * score.militarychange,
+        starbases=score.starbases,
+        priority_point_delta=score.prioritypointchange,
+        planet_delta=score.planetchange,
+        starbase_delta=score.starbasechange,
     )
 
 

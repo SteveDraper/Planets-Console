@@ -9,6 +9,8 @@ from api.concepts.accelerated_scoreboard import (
     HOMEBASE_STARTING_FREIGHTER_HULL_ID,
     accelerated_inference_segments,
     is_first_reliable_scoreboard_turn,
+    opening_reveal_reported_deltas,
+    score_uses_opening_reveal,
     starting_scoreboard_snapshot,
 )
 from api.models.game import TurnInfo
@@ -66,8 +68,13 @@ def scoreboard_placeholder_targets(
 
     turn_number = turn.settings.turn
     targets: list[ScoreboardPlaceholderTarget] = []
-    warship_builds = max(0, score.shipchange)
-    freighter_builds = max(0, score.freighterchange)
+    if score_uses_opening_reveal(score, turn):
+        opening = opening_reveal_reported_deltas(score, turn.settings)
+        warship_builds = max(0, opening.warship_delta)
+        freighter_builds = max(0, opening.freighter_delta)
+    else:
+        warship_builds = max(0, score.shipchange)
+        freighter_builds = max(0, score.freighterchange)
     if warship_builds > 0:
         targets.append(
             ScoreboardPlaceholderTarget(

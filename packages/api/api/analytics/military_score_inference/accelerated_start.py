@@ -28,10 +28,13 @@ from api.analytics.military_score_inference.scoring import (
     starbase_fighter_score_delta_2x,
 )
 from api.concepts.accelerated_scoreboard import (
+    OPENING_BASELINE_DELTA_SOURCE,
     accelerated_turn_count,  # noqa: F401
     first_reliable_accelerated_scoreboard_turn,  # noqa: F401
     is_first_reliable_scoreboard_turn,
     is_unreliable_accelerated_scoreboard_turn,
+    opening_reveal_reported_deltas,
+    score_uses_opening_reveal,
 )
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
@@ -235,7 +238,15 @@ def observation_deltas_from_score(
     prior_score: Score | None = None,
 ) -> tuple[int, int, int, int, str]:
     """Return scoreboard-row deltas for the reported host turn on this row."""
-    del turn
+    if score_uses_opening_reveal(score, turn):
+        opening = opening_reveal_reported_deltas(score, turn.settings)
+        return (
+            opening.military_delta_2x,
+            opening.warship_delta,
+            opening.freighter_delta,
+            opening.priority_point_delta,
+            OPENING_BASELINE_DELTA_SOURCE,
+        )
     reported = (
         reported_host_military_delta_2x(score),
         score.shipchange,

@@ -1,9 +1,15 @@
-"""Accelerated-start scoreboard helpers safe for compute-plane imports."""
+"""Accelerated-start scoreboard helpers safe for compute-plane imports.
+
+Also owns the non-accelerated opening reveal: turn 2 when ``acceleratedturns``
+is 0. That row's change columns are deltas from an empty turn 1 board, so
+callers subtract the homeworld baseline from the totals.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from api.concepts.races import is_horwasp
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
 
@@ -16,6 +22,9 @@ HOMEBASE_STARTING_FREIGHTER_HULL_ID = 16
 HOMEBASE_STARTING_FREIGHTER_ENGINE_ID = 9
 HOMEBASE_STARTING_CAPITAL_SHIPS = 0
 HOMEBASE_STARTING_STARBASES = 1
+HOMEBASE_STARTING_PLANETS = 1
+
+OPENING_BASELINE_DELTA_SOURCE = "opening_baseline"
 
 ACCEL_WINDOW_SEGMENT_ID = "accel_window"
 REPORTED_HOST_TURN_SEGMENT_ID = "reported_host_turn"
@@ -42,6 +51,18 @@ class AcceleratedInferenceSegment:
     warship_delta: int
     freighter_delta: int
     priority_point_delta: int
+
+
+@dataclass(frozen=True)
+class OpeningRevealDeltas:
+    """Build deltas for non-accelerated turn 2, after removing the homeworld baseline."""
+
+    military_delta_2x: int
+    warship_delta: int
+    freighter_delta: int
+    priority_point_delta: int
+    planet_delta: int
+    starbase_delta: int
 
 
 @dataclass(frozen=True)
@@ -87,6 +108,41 @@ def is_unreliable_accelerated_scoreboard_turn(turn_number: int, settings: GameSe
 def is_first_reliable_scoreboard_turn(turn_number: int, settings: GameSettings) -> bool:
     accelerated = accelerated_turn_count(settings)
     return accelerated > 0 and turn_number == accelerated
+
+
+def is_non_accelerated_opening_reveal(turn_number: int, settings: GameSettings) -> bool:
+    """True on turn 2 of a game with no accelerated start.
+
+    Turn 1 score rows are zeros. Turn 2 change columns equal the totals, so they
+    include the homeworld. Later turns report a normal prior-row delta.
+    """
+    return accelerated_turn_count(settings) == 0 and turn_number == 2
+
+
+def score_uses_opening_reveal(score: Score, turn: TurnInfo) -> bool:
+    """Whether this row's turn 2 deltas should drop the homeworld baseline.
+
+    Horwasps do not start with that starbase, so their change columns stay as reported.
+    """
+    if not is_non_accelerated_opening_reveal(turn.settings.turn, turn.settings):
+        return False
+    for player in turn.players:
+        if player.id == score.ownerid:
+            return not is_horwasp(player.raceid)
+    return True
+
+
+def opening_reveal_reported_deltas(score: Score, settings: GameSettings) -> OpeningRevealDeltas:
+    """Totals minus the homeworld baseline for a non-accelerated turn 2 row."""
+    baseline = starting_scoreboard_snapshot(settings)
+    return OpeningRevealDeltas(
+        military_delta_2x=cumulative_military_delta_2x(score, settings),
+        warship_delta=score.capitalships - baseline.capitalships,
+        freighter_delta=score.freighters - baseline.freighters,
+        priority_point_delta=score.prioritypoints - baseline.prioritypoints,
+        planet_delta=score.planets - HOMEBASE_STARTING_PLANETS,
+        starbase_delta=score.starbases - baseline.starbases,
+    )
 
 
 def homeworld_baseline_military_2x(settings: GameSettings) -> int:
