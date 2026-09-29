@@ -202,6 +202,13 @@ function normalizeOptionalNonNegativeInt(raw: unknown): number | undefined {
   return n
 }
 
+function normalizeOptionalPositiveInt(raw: unknown): number | undefined {
+  if (raw === undefined) return undefined
+  const n = parseJsonInteger(raw)
+  if (n == null || n < 1) return undefined
+  return n
+}
+
 export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null {
   if (raw == null || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
@@ -232,6 +239,14 @@ export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null
     return null
   }
   if (fillPattern != null) overlay.fillPattern = fillPattern
+  const leagueTeamId = normalizeOptionalPositiveInt(o.leagueTeamId ?? o.league_team_id)
+  if (
+    (o.leagueTeamId !== undefined || o.league_team_id !== undefined) &&
+    leagueTeamId === undefined
+  ) {
+    return null
+  }
+  if (leagueTeamId !== undefined) overlay.leagueTeamId = leagueTeamId
   const isPinned = normalizeOptionalBoolean(o.isPinned ?? o.is_pinned)
   if (isPinned !== undefined) overlay.isPinned = isPinned
   // Reject non-boolean isPinned when the key is present

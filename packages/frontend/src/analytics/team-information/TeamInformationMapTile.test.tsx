@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { MapDataResponse } from '../../api/bff'
+import { fetchLeagueTeams, type MapDataResponse } from '../../api/bff'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
 import { turnEnsureQueryKey } from '../../shell/shellContext'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
 import { useSessionStore } from '../../stores/session'
 import { useShellStore } from '../../stores/shell'
+import { useTeamInformationHighlightStore } from '../../stores/teamInformationHighlight'
 import {
   TEAM_INFORMATION_PREFERENCES_STORAGE_KEY,
   useTeamInformationPreferencesStore,
@@ -19,6 +20,14 @@ import { TeamInformationMapTile } from './TeamInformationMapTile'
 vi.mock('./api', () => ({
   fetchTeamInformationMap: vi.fn(),
 }))
+
+vi.mock('../../api/bff', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/bff')>()
+  return {
+    ...actual,
+    fetchLeagueTeams: vi.fn(),
+  }
+})
 
 const sampleScope = {
   gameId: '628580',
@@ -37,6 +46,17 @@ const mapPayload: MapDataResponse = {
   ],
 }
 
+function seedTurnRoster(client: QueryClient) {
+  client.setQueryData(turnEnsureQueryKey(sampleScope, 'alice', 0), {
+    ready: true,
+    turnUsernamesByPlayerId: new Map([
+      [1, 'alice'],
+      [2, 'carol'],
+    ]),
+    turnRelations: [],
+  })
+}
+
 function renderTile(ui: ReactNode, seed?: (client: QueryClient) => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   seed?.(client)
@@ -51,6 +71,7 @@ describe('TeamInformationMapTile', () => {
   beforeEach(() => {
     localStorage.removeItem(TEAM_INFORMATION_PREFERENCES_STORAGE_KEY)
     useTeamInformationPreferencesStore.setState({ ownedPlanetsOnly: false })
+    useTeamInformationHighlightStore.setState({ hoveredLeagueTeamId: null })
     useSessionStore.setState({ name: 'alice', password: null, credentialsRevision: 0 })
     useShellStore.setState({
       gameInfoContext: {
@@ -67,6 +88,10 @@ describe('TeamInformationMapTile', () => {
     })
     vi.mocked(fetchTeamInformationMap).mockReset()
     vi.mocked(fetchTeamInformationMap).mockResolvedValue(mapPayload)
+    vi.mocked(fetchLeagueTeams).mockReset()
+    vi.mocked(fetchLeagueTeams).mockResolvedValue({
+      teams: [{ id: 4, name: 'Blue Squadron' }],
+    })
   })
 
   it('greys the tile in tabular mode', () => {
@@ -86,9 +111,10 @@ describe('TeamInformationMapTile', () => {
       expect(checkbox).toBeDisabled()
     }
     expect(fetchTeamInformationMap).not.toHaveBeenCalled()
+    expect(fetchLeagueTeams).not.toHaveBeenCalled()
   })
 
-  it('lists team id and turn-roster usernames, and toggling does not refetch', async () => {
+  it('shows the league team name, hides member usernames, and toggling does not refetch', async () => {
     const user = userEvent.setup()
     renderTile(
       <TeamInformationMapTile
@@ -100,28 +126,49 @@ describe('TeamInformationMapTile', () => {
         analyticScope={sampleScope}
         turnDataReady
       />,
-      (client) => {
-        client.setQueryData(
-          turnEnsureQueryKey(sampleScope, 'alice', 0),
-          {
-            ready: true,
-            turnUsernamesByPlayerId: new Map([
-              [1, 'alice'],
-              [2, 'carol'],
-            ]),
-            turnRelations: [],
-          }
-        )
-      }
+      seedTurnRoster
     )
-    expect(await screen.findByText('alice, carol')).toBeInTheDocument()
-    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(await screen.findByText('Blue Squadron')).toBeInTheDocument()
+    expect(screen.getByRole('listitem')).toHaveAttribute('title', 'alice, carol')
+    expect(screen.queryByText('4')).not.toBeInTheDocument()
+    expect(screen.queryByText('alice, carol')).not.toBeInTheDocument()
+    expect(screen.queryByText('alice')).not.toBeInTheDocument()
+    expect(screen.queryByText('carol')).not.toBeInTheDocument()
     expect(document.querySelector('[data-fill-pattern="forward"]')).not.toBeNull()
     await waitFor(() => {
       expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
+      expect(fetchLeagueTeams).toHaveBeenCalledTimes(1)
+      expect(fetchLeagueTeams).toHaveBeenCalledWith('628580')
     })
+    await user.hover(screen.getByRole('listitem'))
+    expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBe(4)
+    await user.unhover(screen.getByRole('listitem'))
+    expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBeNull()
     await user.click(screen.getByRole('checkbox', { name: 'Owned planets only' }))
     expect(useTeamInformationPreferencesStore.getState().ownedPlanetsOnly).toBe(true)
     expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
+    expect(fetchLeagueTeams).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the numeric id when the directory name is null and still hides usernames', async () => {
+    vi.mocked(fetchLeagueTeams).mockResolvedValue({
+      teams: [{ id: 4, name: null }],
+    })
+    renderTile(
+      <TeamInformationMapTile
+        name="Team information"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        analyticScope={sampleScope}
+        turnDataReady
+      />,
+      seedTurnRoster
+    )
+    expect(await screen.findByText('4')).toBeInTheDocument()
+    expect(screen.queryByText('alice, carol')).not.toBeInTheDocument()
+    expect(screen.queryByText('alice')).not.toBeInTheDocument()
+    expect(screen.queryByText('carol')).not.toBeInTheDocument()
   })
 })

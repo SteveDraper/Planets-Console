@@ -281,6 +281,17 @@ describe('normalizeMapRegionOverlay', () => {
     ])
   })
 
+  it('keeps a positive league team id and rejects a non-positive one', () => {
+    expect(normalizeMapRegionOverlay({ ...validBoundary, leagueTeamId: 4 })).toMatchObject({
+      leagueTeamId: 4,
+    })
+    expect(normalizeMapRegionOverlay({ ...validBoundary, league_team_id: 9 })).toMatchObject({
+      leagueTeamId: 9,
+    })
+    expect(normalizeMapRegionOverlay({ ...validBoundary, leagueTeamId: 0 })).toBeNull()
+    expect(normalizeMapRegionOverlay(validBoundary)).not.toHaveProperty('leagueTeamId')
+  })
+
   it('keeps a known fill pattern and rejects an unknown one', () => {
     expect(normalizeMapRegionOverlay({ ...validBoundary, fillPattern: 'forward' })).toMatchObject({
       fillPattern: 'forward',

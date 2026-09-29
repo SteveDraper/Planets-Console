@@ -15,7 +15,7 @@ Related: [Adding a turn analytic](design-adding-a-turn-analytic.md), [Analytics 
 | Holes | Cells whose winning site is unowned are omitted from the all-planets set. Cells whose winning owner has `leagueteamid == 0` are omitted from both sets. Owned-planets-only fills the rectangle when every owner has a league team |
 | Paint | Shared **map region overlay** boundary polygons (line edges only). One overlay per disjoint component of a league team's union. Semi-transparent fill so planet dots stay readable |
 | Color | Each league team on the turn gets a distinct hue. Teams that share a border are placed as far apart on the wheel as the team count allows. A shared border whose hues are still within 60 degrees uses a different hatch (`solid`, `forward`, `back`, `horizontal`, `vertical`, `dots`). Both site sets share that style. Independent of **player color** |
-| Legend | Sidebar lists each league team that appears: swatch and league team name ([#549](https://github.com/SteveDraper/Planets-Console/issues/549), [#550](https://github.com/SteveDraper/Planets-Console/issues/550)). The numeric id shows only when the name is unresolved. Member usernames stay on the legend row for a later hover and are not drawn |
+| Legend | Sidebar lists each league team that appears: swatch and league team name ([#549](https://github.com/SteveDraper/Planets-Console/issues/549), [#550](https://github.com/SteveDraper/Planets-Console/issues/550)). The numeric id shows only when the name is unresolved. Member usernames are hover text on the row, not drawn in the row. Hovering a row outlines that team's painted regions with a solid high-opacity stroke. Cell hover names the team territory under the pointer, as its own descriptive section beside stellar cartography. Legend hover, the outline, and the cell hover run only while the analytic is enabled |
 | Exports | Empty catalog. No orchestrator profile. No map query params |
 
 Example sphere game: [686674](https://planets.nu) Bundy Sector (`sphere: true`, `mapshape` rectangular, 2278 by 2278). Help: planets.nu Sphere is a flattened torus; leaving one edge re-enters the opposite edge, and the wrap rectangle is used even when the planet disk is round.
@@ -63,7 +63,8 @@ BFF map handler passes the Core object through. The table route stays a validati
 - Register the map merger so `regionOverlays` from this analytic join the combined map.
 - Persist **Owned planets only** in localStorage (global, same sticky scope as other analytic display toggles). Default off.
 - Paint exactly one kind: `team-territory` when the checkbox is off, `team-territory-owned-only` when it is on. Filter in a team-information-owned function. Do not run these kinds through Visibility kind preferences.
-- Sidebar: generic enable control plus the checkbox and the legend. Legend rows come from `teams` on the map payload (swatch, id, usernames resolved from the turn roster). Grey the tile in tabular **view mode** via `supports_table=false`.
+- Sidebar: generic enable control plus the checkbox and the legend. Legend rows come from `teams` on the map payload (swatch, directory name or the numeric id when that name is null). Usernames are resolved from the turn roster onto the row, shown as hover text, and are not drawn in the row. Hovering a row sets the outlined league team. Names load from `GET /bff/games/{game_id}/league-teams` with TanStack Query for the open game, separate from the map query. Grey the tile in tabular **view mode** via `supports_table=false`.
+- Cell hover: a **map interaction contributor** (role `team-territory`) hit-tests the painted site set and contributes the team label. It `yieldsTo` planet hover and `mergesWith` fleet, region, and cartography (off a planet, the fleet card anchored at the ship hosts the team section). It is registered only while the analytic is enabled.
 - No edge-mirror strip. Opposite edges of one team share a color, which is the wrap cue.
 
 ## Layers
@@ -83,7 +84,7 @@ Stored GameInfo players already carry `username` and `leagueteamid`. `leagueteam
 - Core `GET /api/v1/games/{game_id}/league-teams`
 - BFF `GET /bff/games/{game_id}/league-teams` forwards to Core and returns the same body: `{ "teams": [{ "id", "name" }] }`
 
-`api/analytics/team_information.py` does not import the directory service.
+`api/analytics/team_information.py` does not import the directory service. The SPA does not fold this fetch into the team-information map compute.
 
 ## Tests
 
@@ -111,4 +112,4 @@ Stored GameInfo players already carry `username` and `leagueteamid`. `leagueteam
 
 ## Out of scope
 
-Hover and context menu for member usernames, edge-mirror margin, in-game `teamid` coloring, tabular tile, export queries, per-team color pickers, client-side distance. League team names are [#549](https://github.com/SteveDraper/Planets-Console/issues/549) and [#550](https://github.com/SteveDraper/Planets-Console/issues/550).
+Context menu for member usernames, edge-mirror margin, in-game `teamid` coloring, tabular tile, export queries, per-team color pickers, client-side distance. League team names are [#549](https://github.com/SteveDraper/Planets-Console/issues/549) and [#550](https://github.com/SteveDraper/Planets-Console/issues/550).

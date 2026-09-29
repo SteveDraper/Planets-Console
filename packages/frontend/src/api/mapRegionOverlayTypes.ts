@@ -130,6 +130,8 @@ export type MapRegionOverlay = {
    * Screen-spaced so the pattern stays readable when the map is zoomed out.
    */
   fillPattern?: MapRegionFillPattern
+  /** League team that owns this territory component. Team-information overlays only. */
+  leagueTeamId?: number
   geometry: MapRegionOverlayGeometry
   isPinned?: boolean
   status?: string
