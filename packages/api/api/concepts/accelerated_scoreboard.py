@@ -1,9 +1,15 @@
-"""Accelerated-start scoreboard helpers safe for compute-plane imports."""
+"""Accelerated-start scoreboard helpers safe for compute-plane imports.
+
+Also owns the non-accelerated opening reveal: turn 2 when ``acceleratedturns``
+is 0. That row's change columns are deltas from an empty turn 1 board, so
+callers subtract the homeworld baseline from the totals.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from api.concepts.races import is_horwasp
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
 
@@ -16,6 +22,10 @@ HOMEBASE_STARTING_FREIGHTER_HULL_ID = 16
 HOMEBASE_STARTING_FREIGHTER_ENGINE_ID = 9
 HOMEBASE_STARTING_CAPITAL_SHIPS = 0
 HOMEBASE_STARTING_STARBASES = 1
+HOMEBASE_STARTING_PLANETS = 1
+
+OPENING_BASELINE_DELTA_SOURCE = "opening_baseline"
+REPORTED_CHANGE_FIELDS_DELTA_SOURCE = "reported_change_fields"
 
 ACCEL_WINDOW_SEGMENT_ID = "accel_window"
 REPORTED_HOST_TURN_SEGMENT_ID = "reported_host_turn"
@@ -31,6 +41,7 @@ class ScoreboardSnapshot:
     capitalships: int
     freighters: int
     starbases: int
+    planets: int
     prioritypoints: int = 0
 
 
@@ -42,6 +53,19 @@ class AcceleratedInferenceSegment:
     warship_delta: int
     freighter_delta: int
     priority_point_delta: int
+
+
+@dataclass(frozen=True)
+class ReportedScoreboardDeltas:
+    """Per-row build deltas a score row reports for its host turn."""
+
+    military_delta_2x: int
+    warship_delta: int
+    freighter_delta: int
+    priority_point_delta: int
+    planet_delta: int
+    starbase_delta: int
+    delta_source: str
 
 
 @dataclass(frozen=True)
@@ -89,6 +113,69 @@ def is_first_reliable_scoreboard_turn(turn_number: int, settings: GameSettings) 
     return accelerated > 0 and turn_number == accelerated
 
 
+def is_non_accelerated_opening_reveal(turn_number: int, settings: GameSettings) -> bool:
+    """True on turn 2 of a game with no accelerated start.
+
+    Turn 1 score rows are zeros. Turn 2 change columns equal the totals, so they
+    include the homeworld. Later turns report a normal prior-row delta.
+    """
+    return accelerated_turn_count(settings) == 0 and turn_number == 2
+
+
+HORWASP_STARTING_SNAPSHOT = ScoreboardSnapshot(
+    militaryscore=0,
+    capitalships=HOMEBASE_STARTING_CAPITAL_SHIPS,
+    freighters=HOMEBASE_STARTING_FREIGHTERS,
+    starbases=0,
+    planets=HOMEBASE_STARTING_PLANETS,
+)
+
+
+def _opening_reveal_baseline(score: Score, turn: TurnInfo) -> ScoreboardSnapshot:
+    """Homeworld baseline the score owner starts with.
+
+    Horwasps start with the homeworld and starting freighter but no starbase and
+    no planet defense posts.
+    """
+    for player in turn.players:
+        if player.id == score.ownerid:
+            if is_horwasp(player.raceid):
+                return HORWASP_STARTING_SNAPSHOT
+            return starting_scoreboard_snapshot(turn.settings)
+    raise ValueError(
+        f"Score owner {score.ownerid} is not in turn {turn.settings.turn} players; "
+        "cannot choose the opening-reveal baseline"
+    )
+
+
+def reported_scoreboard_deltas(score: Score, turn: TurnInfo) -> ReportedScoreboardDeltas:
+    """Build deltas this score row reports for its host turn.
+
+    On the non-accelerated opening reveal the totals minus the owner's homeworld
+    baseline; otherwise the row's change columns.
+    """
+    if is_non_accelerated_opening_reveal(turn.settings.turn, turn.settings):
+        baseline = _opening_reveal_baseline(score, turn)
+        return ReportedScoreboardDeltas(
+            military_delta_2x=2 * (score.militaryscore - baseline.militaryscore),
+            warship_delta=score.capitalships - baseline.capitalships,
+            freighter_delta=score.freighters - baseline.freighters,
+            priority_point_delta=score.prioritypoints - baseline.prioritypoints,
+            planet_delta=score.planets - baseline.planets,
+            starbase_delta=score.starbases - baseline.starbases,
+            delta_source=OPENING_BASELINE_DELTA_SOURCE,
+        )
+    return ReportedScoreboardDeltas(
+        military_delta_2x=reported_host_military_delta_2x(score),
+        warship_delta=score.shipchange,
+        freighter_delta=score.freighterchange,
+        priority_point_delta=score.prioritypointchange,
+        planet_delta=score.planetchange,
+        starbase_delta=score.starbasechange,
+        delta_source=REPORTED_CHANGE_FIELDS_DELTA_SOURCE,
+    )
+
+
 def homeworld_baseline_military_2x(settings: GameSettings) -> int:
     if not settings.homeworldhasstarbase:
         return 0
@@ -106,12 +193,14 @@ def starting_scoreboard_snapshot(settings: GameSettings) -> ScoreboardSnapshot:
             capitalships=HOMEBASE_STARTING_CAPITAL_SHIPS,
             freighters=0,
             starbases=0,
+            planets=HOMEBASE_STARTING_PLANETS,
         )
     return ScoreboardSnapshot(
         militaryscore=homeworld_baseline_military_2x(settings) // 2,
         capitalships=HOMEBASE_STARTING_CAPITAL_SHIPS,
         freighters=HOMEBASE_STARTING_FREIGHTERS,
         starbases=HOMEBASE_STARTING_STARBASES,
+        planets=HOMEBASE_STARTING_PLANETS,
     )
 
 
@@ -137,6 +226,7 @@ def synthetic_scoreboard_before_reported_deltas(score: Score) -> ScoreboardSnaps
         capitalships=score.capitalships - score.shipchange,
         freighters=score.freighters - score.freighterchange,
         starbases=score.starbases - score.starbasechange,
+        planets=score.planets - score.planetchange,
         prioritypoints=score.prioritypoints - score.prioritypointchange,
     )
 

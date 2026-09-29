@@ -89,14 +89,10 @@ def build_inference_observation(
 ) -> InferenceObservation:
     """Build solver observation for the reported host turn on this scoreboard row."""
     prior_score = prior_scoreboard_row_score(score, turn, load_scoreboard_turn)
-    military_delta_2x, warship_delta, freighter_delta, priority_point_delta, delta_source = (
-        observation_deltas_from_score(score, turn, prior_score=prior_score)
-    )
     return observation_from_deltas(
         score,
         turn,
-        (military_delta_2x, warship_delta, freighter_delta, priority_point_delta),
-        scoreboard_delta_source=delta_source,
+        observation_deltas_from_score(score, turn, prior_score=prior_score),
     )
 
 

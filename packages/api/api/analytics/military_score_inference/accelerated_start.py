@@ -28,10 +28,13 @@ from api.analytics.military_score_inference.scoring import (
     starbase_fighter_score_delta_2x,
 )
 from api.concepts.accelerated_scoreboard import (
+    OPENING_BASELINE_DELTA_SOURCE,
+    ReportedScoreboardDeltas,
     accelerated_turn_count,  # noqa: F401
     first_reliable_accelerated_scoreboard_turn,  # noqa: F401
     is_first_reliable_scoreboard_turn,
     is_unreliable_accelerated_scoreboard_turn,
+    reported_scoreboard_deltas,
 )
 from api.models.game import GameSettings, TurnInfo
 from api.models.player import Score
@@ -54,6 +57,7 @@ SCOREBOARD_MILITARY_PARTITION_SLACK_2X = 1
 
 ACCEL_WINDOW_SEGMENT_ID = "accel_window"
 REPORTED_HOST_TURN_SEGMENT_ID = "reported_host_turn"
+PRIOR_ROW_TOTAL_DIFF_DELTA_SOURCE = "prior_row_total_diff"
 
 
 @dataclass(frozen=True)
@@ -206,12 +210,12 @@ def effective_prior_score_row(
     return _apply_snapshot(score_at_reliable_turn, snapshot)
 
 
-def _reported_scoreboard_changes_are_zero(score: Score) -> bool:
+def _build_deltas_are_zero(deltas: ReportedScoreboardDeltas) -> bool:
     return (
-        score.militarychange == 0
-        and score.shipchange == 0
-        and score.freighterchange == 0
-        and score.prioritypointchange == 0
+        deltas.military_delta_2x == 0
+        and deltas.warship_delta == 0
+        and deltas.freighter_delta == 0
+        and deltas.priority_point_delta == 0
     )
 
 
@@ -233,21 +237,32 @@ def observation_deltas_from_score(
     turn: TurnInfo,
     *,
     prior_score: Score | None = None,
-) -> tuple[int, int, int, int, str]:
-    """Return scoreboard-row deltas for the reported host turn on this row."""
-    del turn
-    reported = (
-        reported_host_military_delta_2x(score),
-        score.shipchange,
-        score.freighterchange,
-        score.prioritypointchange,
-    )
-    if not _reported_scoreboard_changes_are_zero(score) or prior_score is None:
-        return (*reported, "reported_change_fields")
+) -> ReportedScoreboardDeltas:
+    """Return scoreboard-row deltas for the reported host turn on this row.
+
+    The non-accelerated opening reveal stays on ``opening_baseline`` when the
+    prior row is the all-zero turn 1 board. On any other row, zero build deltas
+    fall back to that prior row's totals when one is given.
+    """
+    reported = reported_scoreboard_deltas(score, turn)
+    if (
+        reported.delta_source == OPENING_BASELINE_DELTA_SOURCE
+        or prior_score is None
+        or not _build_deltas_are_zero(reported)
+    ):
+        return reported
     from_totals = scoreboard_row_deltas_from_prior_totals(score, prior_score)
     if from_totals == (0, 0, 0, 0):
-        return (*reported, "reported_change_fields")
-    return (*from_totals, "prior_row_total_diff")
+        return reported
+    military_delta_2x, warship_delta, freighter_delta, priority_point_delta = from_totals
+    return replace(
+        reported,
+        military_delta_2x=military_delta_2x,
+        warship_delta=warship_delta,
+        freighter_delta=freighter_delta,
+        priority_point_delta=priority_point_delta,
+        delta_source=PRIOR_ROW_TOTAL_DIFF_DELTA_SOURCE,
+    )
 
 
 def accelerated_window_military_change(score: Score, turn: TurnInfo) -> int:

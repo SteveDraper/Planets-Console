@@ -143,7 +143,11 @@ def pairing_and_idle_dock_from_turn(
     this_row = public_scoreboard_row_from_observation(observation)
     pairing = classify_public_scoreboard_pairing(
         this_row,
-        public_scoreboard_rows_from_scores(turn.scores, this_player_id=observation.player_id),
+        public_scoreboard_rows_from_scores(
+            turn.scores,
+            this_player_id=observation.player_id,
+            turn=turn,
+        ),
         settings=turn.settings,
         is_after_ship_limit=observation.is_after_ship_limit,
     )
