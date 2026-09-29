@@ -269,10 +269,11 @@ def admit_scores_export_work(
 ) -> bool:
     """Admit scores work for one scope without waiting on the orchestrator.
 
-    Cheap ImmediateRowAdmission terminals are recorded as ensure-ephemeral and
-    written to inference-row storage when missing; real solve work schedules a
-    ``RowRun`` for orchestrator ``tier_solve``. Leaf job-wire builders call this
-    (never ``ensure_scores_export`` / submit+wait).
+    Admission skips go through ``persist_missing_admission_skip``, which records
+    the ImmediateRowAdmission as ensure-ephemeral and rewrites the inference row
+    when storage does not have it; real solve work
+    schedules a ``RowRun`` for orchestrator ``tier_solve``. Leaf job-wire
+    builders call this (never ``ensure_scores_export`` / submit+wait).
 
     ``overlay_ensure`` may sync-ensure prior fleet only for non-DAG callers; DAG
     materialize/tier wires must pass ``False`` (fleet already on DependencyOutputs).
@@ -289,6 +290,8 @@ def admit_scores_export_work(
         return True
     if not is_build_inference_available(turn):
         return True
+    if persist_missing_admission_skip(ctx, scope):
+        return True
 
     snapshot = gather_scores_ensure_probe_snapshot(ctx, services, scope, turn)
     resolution_context = _scores_resolution_context(ctx, services, scope, turn)
@@ -296,11 +299,6 @@ def admit_scores_export_work(
         snapshot,
         resolution_context=resolution_context,
     ):
-        # In-memory skip admissions satisfy ensure without a disk row. Fleet's
-        # materialization probe does not see that ephemeral, so rewrite the row
-        # when a deliberate skip (full alliance and the other admission skips)
-        # has lost its stored terminal.
-        persist_missing_admission_skip(ctx, scope)
         return True
 
     mutated = _ensure_admit_inference_row(
@@ -345,19 +343,17 @@ def _ensure_admit_inference_row(
     *,
     overlay_ensure: bool = False,
 ) -> bool:
-    """Persist an admission skip, else schedule a RowRun for CP-SAT."""
+    """Schedule a RowRun for CP-SAT; admission skips are handled by the caller."""
     player_id = scope.player_id
     if player_id is None:
         return False
-
-    if persist_missing_admission_skip(ctx, scope):
-        return True
 
     inputs = _scores_row_ensure_inputs(services, scope, turn)
     if inputs is None:
         return False
     score = inputs.score
-    # Admission skips, including a missing scoreboard row, returned above.
+    # Admission skips, including a missing scoreboard row, return earlier in
+    # ``admit_scores_export_work``.
     assert score is not None
     if services.scheduler.row_run_for_player(inputs.stream_scope, inputs.player_id) is not None:
         return False
@@ -428,7 +424,8 @@ def persist_missing_admission_skip(
     sees open turn evidence. Rewriting the skip row closes evidence so
     ``tier_solve`` can skip and fleet finalization can persist.
 
-    Returns True when this scope is an admission skip.
+    ``admit_scores_export_work`` is the only caller; job-wire builders reach it
+    through admit. Returns True when this scope is an admission skip.
     """
     if scope.player_id is None or scope.turn <= 1:
         return False
