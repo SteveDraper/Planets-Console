@@ -216,6 +216,82 @@ def test_non_accelerated_turn2_without_homeworld_starbase_keeps_the_homeworld(sa
     assert deltas.freighter_delta == 0
 
 
+def _idle_homeworld(template):
+    """Starbase homeworld only. Change columns equal the totals."""
+    return _score(
+        template,
+        ownerid=51,
+        turn=2,
+        militaryscore=2110,
+        militarychange=2110,
+        capitalships=0,
+        shipchange=0,
+        freighters=1,
+        freighterchange=1,
+        starbases=1,
+        starbasechange=1,
+        planets=1,
+        planetchange=1,
+    )
+
+
+def _zero_turn1(template, *, ownerid: int):
+    return _score(
+        template,
+        ownerid=ownerid,
+        turn=1,
+        militaryscore=0,
+        militarychange=0,
+        capitalships=0,
+        shipchange=0,
+        freighters=0,
+        freighterchange=0,
+        starbases=0,
+        starbasechange=0,
+        planets=0,
+        planetchange=0,
+    )
+
+
+def _assert_zero_opening_baseline(observation):
+    assert observation.scoreboard_delta_source == OPENING_BASELINE_DELTA_SOURCE
+    assert observation.military_delta_2x == 0
+    assert observation.warship_delta == 0
+    assert observation.freighter_delta == 0
+    assert observation.priority_point_delta == 0
+    assert observation.planet_delta == 0
+    assert observation.starbase_delta == 0
+
+
+def _observation_with_zero_turn1(score, turn, sample_turn):
+    prior = _zero_turn1(sample_turn.scores[0], ownerid=score.ownerid)
+    loaded_turns: list[int] = []
+
+    def load_scoreboard_turn(turn_number: int):
+        loaded_turns.append(turn_number)
+        return replace(sample_turn, scores=(prior,))
+
+    observation = build_inference_observation(
+        score,
+        turn,
+        load_scoreboard_turn=load_scoreboard_turn,
+    )
+    assert loaded_turns == [1]
+    return observation
+
+
+def test_turn2_zero_prior_keeps_the_opening_baseline(sample_turn):
+    """A loaded all-zero turn 1 row leaves idle turn 2 deltas on the baseline."""
+    template = sample_turn.scores[0]
+    idle = _idle_homeworld(template)
+    idle_turn = _turn(sample_turn, turn_number=2, acceleratedturns=0, scores=[idle])
+    _assert_zero_opening_baseline(_observation_with_zero_turn1(idle, idle_turn, sample_turn))
+
+    horwasp = _horwasp(template, freighters=1)
+    horwasp_turn = _horwasp_turn(sample_turn, horwasp)
+    _assert_zero_opening_baseline(_observation_with_zero_turn1(horwasp, horwasp_turn, sample_turn))
+
+
 def test_horwasp_turn2_subtracts_the_starbaseless_baseline(sample_turn):
     template = sample_turn.scores[0]
     horwasp = _horwasp(template, freighters=1)

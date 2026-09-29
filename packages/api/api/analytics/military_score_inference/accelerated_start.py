@@ -240,7 +240,9 @@ def observation_deltas_from_score(
 ) -> ReportedScoreboardDeltas:
     """Return scoreboard-row deltas for the reported host turn on this row.
 
-    Zero change columns fall back to the prior row's totals when one is given.
+    The non-accelerated opening reveal stays on ``opening_baseline`` when the
+    prior row is the all-zero turn 1 board. On any other row, zero build deltas
+    fall back to that prior row's totals when one is given.
     """
     reported = reported_scoreboard_deltas(score, turn)
     if (
