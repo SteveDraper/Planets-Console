@@ -305,10 +305,11 @@ def _zeroed_excess_out(row: PublicScoreboardRow) -> PublicScoreboardRow:
     )
 
 
-def test_peer_rows_include_viewpoint_federation_when_solving_privateer():
+def test_peer_rows_include_viewpoint_federation_when_solving_privateer(sample_turn):
     peers = public_scoreboard_rows_from_scores(
         privateer_peer_scores(),
         this_player_id=PRIVATEER_PLAYER_ID,
+        turn=sample_turn,
     )
     peer_ids = {row.player_id for row in peers}
     assert FEDERATION_PLAYER_ID in peer_ids

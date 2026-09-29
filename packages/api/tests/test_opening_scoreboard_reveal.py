@@ -19,6 +19,8 @@ from api.analytics.military_score_inference.ship_transfer_families import (
 from api.concepts.accelerated_scoreboard import (
     OPENING_BASELINE_DELTA_SOURCE,
     homeworld_baseline_military_2x,
+    reported_scoreboard_deltas,
+    starting_scoreboard_snapshot,
 )
 
 
@@ -150,6 +152,37 @@ def test_non_accelerated_turn2_public_rows_use_the_same_baseline(sample_turn):
     assert peers[0].freighter_delta == 0
     assert peers[0].planet_delta == 0
     assert peers[0].starbase_delta == 0
+
+
+def test_non_accelerated_turn2_without_homeworld_starbase_keeps_the_homeworld(sample_turn):
+    template = sample_turn.scores[0]
+    score = _score(
+        template,
+        ownerid=51,
+        turn=2,
+        militaryscore=0,
+        militarychange=0,
+        capitalships=0,
+        shipchange=0,
+        freighters=0,
+        freighterchange=0,
+        starbases=0,
+        starbasechange=0,
+        planets=1,
+        planetchange=1,
+    )
+    turn = _turn(sample_turn, turn_number=2, acceleratedturns=0, scores=[score])
+    turn = replace(turn, settings=replace(turn.settings, homeworldhasstarbase=False))
+
+    baseline = starting_scoreboard_snapshot(turn.settings)
+    deltas = reported_scoreboard_deltas(score, turn)
+
+    assert baseline.planets == 1
+    assert baseline.starbases == 0
+    assert deltas.delta_source == OPENING_BASELINE_DELTA_SOURCE
+    assert deltas.planet_delta == 0
+    assert deltas.starbase_delta == 0
+    assert deltas.freighter_delta == 0
 
 
 def test_horwasp_turn2_keeps_reported_change_columns(sample_turn):

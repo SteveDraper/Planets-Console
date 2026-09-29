@@ -90,7 +90,11 @@ def _pairing_for_player(player_id: int, score_turn: TurnInfo):
     observation = build_inference_observation(score, score_turn)
     pairing = classify_public_scoreboard_pairing(
         public_scoreboard_row_from_observation(observation),
-        public_scoreboard_rows_from_scores(score_turn.scores, this_player_id=player_id),
+        public_scoreboard_rows_from_scores(
+            score_turn.scores,
+            this_player_id=player_id,
+            turn=score_turn,
+        ),
     )
     return observation, pairing
 

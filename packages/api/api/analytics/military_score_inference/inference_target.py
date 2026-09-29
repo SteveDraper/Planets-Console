@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from api.analytics.military_score_inference.accelerated_start import (
     SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
@@ -16,8 +16,8 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.concepts.accelerated_scoreboard import (
-    opening_reveal_reported_deltas,
-    score_uses_opening_reveal,
+    ReportedScoreboardDeltas,
+    reported_scoreboard_deltas,
 )
 from api.models.game import TurnInfo
 from api.models.player import Score
@@ -82,31 +82,23 @@ def prior_scoreboard_row_score(
 def observation_from_deltas(
     score: Score,
     turn: TurnInfo,
-    deltas: tuple[int, int, int, int],
+    deltas: ReportedScoreboardDeltas,
     *,
     military_partition_slack_2x: int = SCOREBOARD_MILITARY_PARTITION_SLACK_2X,
-    scoreboard_delta_source: str = "reported_change_fields",
 ) -> InferenceObservation:
-    military_delta_2x, warship_delta, freighter_delta, priority_point_delta = deltas
-    planet_delta = score.planetchange
-    starbase_delta = score.starbasechange
-    if score_uses_opening_reveal(score, turn):
-        opening = opening_reveal_reported_deltas(score, turn.settings)
-        planet_delta = opening.planet_delta
-        starbase_delta = opening.starbase_delta
     return InferenceObservation(
         player_id=score.ownerid,
         turn=turn.settings.turn,
-        military_delta_2x=military_delta_2x,
-        warship_delta=warship_delta,
-        freighter_delta=freighter_delta,
-        priority_point_delta=priority_point_delta,
+        military_delta_2x=deltas.military_delta_2x,
+        warship_delta=deltas.warship_delta,
+        freighter_delta=deltas.freighter_delta,
+        priority_point_delta=deltas.priority_point_delta,
         starbases_owned=score.starbases,
         is_after_ship_limit=is_after_ship_limit(turn, score),
         military_partition_slack_2x=military_partition_slack_2x,
-        scoreboard_delta_source=scoreboard_delta_source,
-        planet_delta=planet_delta,
-        starbase_delta=starbase_delta,
+        scoreboard_delta_source=deltas.delta_source,
+        planet_delta=deltas.planet_delta,
+        starbase_delta=deltas.starbase_delta,
     )
 
 
@@ -118,13 +110,14 @@ def observation_from_accelerated_segment(
     return observation_from_deltas(
         score,
         turn,
-        (
-            segment.military_delta_2x,
-            segment.warship_delta,
-            segment.freighter_delta,
-            segment.priority_point_delta,
+        replace(
+            reported_scoreboard_deltas(score, turn),
+            military_delta_2x=segment.military_delta_2x,
+            warship_delta=segment.warship_delta,
+            freighter_delta=segment.freighter_delta,
+            priority_point_delta=segment.priority_point_delta,
+            delta_source="accelerated_segment",
         ),
-        scoreboard_delta_source="accelerated_segment",
     )
 
 
@@ -232,15 +225,11 @@ def resolve_inference_target_for_host_turn(
     if expected_host_turn is None or expected_host_turn != host_turn:
         return None
     prior_score = prior_scoreboard_row_score(score, turn, load_scoreboard_turn)
-    military_delta_2x, warship_delta, freighter_delta, priority_point_delta, delta_source = (
-        observation_deltas_from_score(score, turn, prior_score=prior_score)
-    )
     return ResolvedInferenceTarget(
         observation=observation_from_deltas(
             score,
             turn,
-            (military_delta_2x, warship_delta, freighter_delta, priority_point_delta),
-            scoreboard_delta_source=delta_source,
+            observation_deltas_from_score(score, turn, prior_score=prior_score),
         ),
         turn_info=turn,
         score=score,

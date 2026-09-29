@@ -2,7 +2,9 @@
 
 The leg reads settings, roster id/username/raceid, and current-turn score rows.
 ``raceid`` distinguishes Horwasps on the non-accelerated turn 2 baseline adjustment.
-Score ``planets`` is the planet total for that same adjustment. The planet list,
+Score ``planets`` is the planet total for that same adjustment, and
+``planetchange`` is the planet delta ``reported_scoreboard_deltas`` reads on
+the change-column path. The planet list,
 ships, hulls, and messages stay off the wire. The slice is a local object inside
 the leg and is never stored in the process ``TurnInfo`` cache.
 """
@@ -28,6 +30,7 @@ _SCORE_FIELDS = (
     "starbases",
     "starbasechange",
     "planets",
+    "planetchange",
     "prioritypoints",
     "prioritypointchange",
 )
