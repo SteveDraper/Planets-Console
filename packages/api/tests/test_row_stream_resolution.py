@@ -65,15 +65,37 @@ def test_missed_admission_replaces_provisional_claim_with_failure() -> None:
     assert resolution.state is RowStreamResolutionState.HARD_TERMINAL
 
 
-def test_cancel_silences_later_delivery() -> None:
-    resolution = RowStreamResolution()
+def test_cancel_silences_later_non_complete_triggers() -> None:
+    for trigger in (
+        RowStreamResolutionTrigger.DURABLE_FAILURE,
+        RowStreamResolutionTrigger.SOFT_PROVISIONAL,
+        RowStreamResolutionTrigger.ADMISSION_MISSED,
+        RowStreamResolutionTrigger.CANCELED,
+    ):
+        resolution = RowStreamResolution()
+        assert (
+            resolution.transition(RowStreamResolutionTrigger.CANCELED) is RowStreamDelivery.SILENCE
+        )
+        assert resolution.state is RowStreamResolutionState.CANCELED
 
-    assert resolution.transition(RowStreamResolutionTrigger.CANCELED) is RowStreamDelivery.SILENCE
-    assert resolution.state is RowStreamResolutionState.CANCELED
+        assert resolution.transition(trigger) is RowStreamDelivery.SILENCE
+        assert resolution.state is RowStreamResolutionState.CANCELED
+
+
+def test_cancel_upgrades_once_on_durable_complete() -> None:
+    resolution = RowStreamResolution()
+    resolution.transition(RowStreamResolutionTrigger.CANCELED)
+
+    assert (
+        resolution.transition(RowStreamResolutionTrigger.DURABLE_COMPLETE)
+        is RowStreamDelivery.UPGRADE
+    )
+    assert resolution.state is RowStreamResolutionState.HARD_TERMINAL
     assert (
         resolution.transition(RowStreamResolutionTrigger.DURABLE_COMPLETE)
         is RowStreamDelivery.SILENCE
     )
+    assert resolution.state is RowStreamResolutionState.HARD_TERMINAL
 
 
 def test_multiplex_closed_independent_of_fsm_state() -> None:

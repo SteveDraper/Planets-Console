@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
     ScheduledInferenceRow,
+    ScheduleRowAdmission,
     iter_scores_table_inference_events,
     schedule_inference_row,
 )
@@ -1060,6 +1061,75 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
         except Exception:
             break
     assert not any(isinstance(e, RowFailed) for e in queued)
+
+
+def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
+    sample_turn,
+    monkeypatch,
+    request,
+):
+    """Cancelling a duplicate schedule must not fail the survivor's running node.
+
+    ``dispatch_admission`` schedules the new row (force_fresh attach caches the
+    in-flight execution generation) and then ``cancel_row_run`` on that duplicate
+    so the existing row wins. Aborting that shared generation leaves scores
+    ``failed`` and fleet ``waiting_deps`` with the stream row still in progress.
+    """
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+    from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
+
+    reset_inference_table_stream_registry_for_tests()
+    reset_orchestrators_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    scheduler = InferenceRowScheduler()
+    controller: InferenceTableStreamController | None = None
+
+    def cleanup() -> None:
+        if controller is not None:
+            controller.end_stream(scheduler)
+        reset_orchestrators_for_tests()
+        reset_compute_worker_pool_for_tests(worker_count=1)
+
+    request.addfinalizer(cleanup)
+
+    player_id = sample_turn.scores[0].ownerid
+    scope_key = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope_key)
+    controller = InferenceTableStreamController(
+        scope=scope_key,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(player_id,),
+        scheduler=scheduler,
+        game_id=628580,
+        perspective=1,
+        query_context=minimal_stream_query_context(sample_turn),
+    )
+    controller.attach()
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
+
+    survivor = _schedule_player_row(
+        scheduler,
+        sample_turn,
+        player_id=player_id,
+        stream_token=stream_token,
+    )
+    controller.register_scheduled_row(player_id, survivor)
+    scope = scheduler._root_scope_for_session(survivor.session)
+    orchestrator = get_compute_orchestrator()
+    assert orchestrator.nodes[scope].state == "running"
+    before_generation = orchestrator.execution_generation_for_scope(scope)
+
+    dispatch = controller.dispatch_admission(player_id, ScheduleRowAdmission())
+
+    node = orchestrator.nodes[scope]
+    assert node.state == "running"
+    assert node.error is None
+    assert orchestrator.execution_generation_for_scope(scope) == before_generation
+    assert dispatch.scheduled is not None
+    assert dispatch.scheduled.session.run_id == survivor.session.run_id
+    assert not survivor.session.cancel_token.is_cancelled()
+    assert scheduler._runs[survivor.session.run_id] == scope
 
 
 def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monkeypatch):

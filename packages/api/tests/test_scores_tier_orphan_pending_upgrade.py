@@ -14,6 +14,9 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 )
 from api.analytics.military_score_inference.inference_stream_rows import ScheduledInferenceRow
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
+)
 from api.analytics.military_score_inference.inference_table_stream_controller import (
     InferenceTableStreamController,
 )
@@ -459,6 +462,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
     assert any(event.get("type") == "complete" for event in pending), (
         f"expected admission complete on pending wire, got pending={pending!r} queued={queued!r}"
     )
+    assert all(event.get("runId") == session.run_id for event in pending)
     assert stream_drain.is_closed(session.run_id)
     assert get_row_run(run.run_id) is None
 
@@ -515,6 +519,7 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
     assert any(event.get("type") in {"complete", "error"} for event in pending), (
         f"expected pending-wire terminal after drain close, got {pending!r}"
     )
+    assert all(event.get("runId") == session.run_id for event in pending)
 
 
 def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monkeypatch) -> None:
@@ -632,3 +637,91 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
     hard_resolution = get_stream_resolution(session.run_id)
     assert hard_resolution is not None
     assert hard_resolution.state is RowStreamResolutionState.HARD_TERMINAL
+
+
+def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> None:
+    """A cancel-sealed multiplex row must still show a later durable complete.
+
+    The table stays connected, so it will not replay the stored row on its own.
+    FSM silence would leave the searching badge up after the DAG has finished.
+    """
+    ui_session = _session(sample_turn)
+    solved_session = InferenceRowStreamSession(
+        player_id=ui_session.player_id,
+        observation=ui_session.observation,
+        turn=ui_session.turn,
+        game_id=ui_session.game_id,
+        perspective=ui_session.perspective,
+        turn_number=ui_session.turn_number,
+    )
+    scope = _scope_for(ui_session)
+    stream_scope = InferenceStreamScope(
+        game_id=ui_session.game_id,
+        perspective=ui_session.perspective,
+        turn_number=ui_session.turn_number,
+    )
+
+    orchestrator = _singleton_orchestrator()
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    stream_token = scheduler.begin_scope(stream_scope)
+    controller = InferenceTableStreamController(
+        scope=stream_scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=(ui_session.player_id,),
+        scheduler=scheduler,
+        game_id=ui_session.game_id,
+        perspective=ui_session.perspective,
+    )
+    controller.register_scheduled_row(
+        ui_session.player_id,
+        ScheduledInferenceRow(player_id=ui_session.player_id, session=ui_session),
+    )
+    controller.attach()
+    stream_drain.seal_canceled(ui_session.run_id)
+
+    solved_run = RowRun(solved_session)
+    register_row_run(solved_run)
+    scheduler._runs[solved_run.run_id] = scope
+    row_complete = row_complete_with_summary(
+        InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
+        summary="exact after cancel",
+    )
+    _set_scope_node(
+        orchestrator,
+        scope,
+        state="complete",
+        priority_band="stream_attached",
+        result_wire={"runId": solved_run.run_id, "rowComplete": row_complete},
+    )
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": solved_run.run_id, "rowComplete": row_complete},
+        ),
+    )
+
+    pending = controller.drain_pending_wire_events()
+    completes = [
+        event
+        for event in pending
+        if event.get("type") == "complete" and event.get("summary") == "exact after cancel"
+    ]
+    assert completes, f"cancelled open row never got the durable complete (pending={pending!r})"
+    assert completes[0].get("isComplete") is True
+    assert completes[0].get("playerId") == ui_session.player_id
+    assert completes[0].get("runId") == ui_session.run_id
+    assert stream_drain.is_closed(ui_session.run_id)
+
+    scheduler._runs[solved_run.run_id] = scope
+    scheduler._on_orchestrator_scope_outcome(
+        _outcome_snapshot(
+            scope,
+            state="complete",
+            result_wire={"runId": solved_run.run_id, "rowComplete": row_complete},
+        ),
+    )
+    assert not [
+        event for event in controller.drain_pending_wire_events() if event.get("type") == "complete"
+    ], "a second durable complete after the cancel upgrade must stay silent"

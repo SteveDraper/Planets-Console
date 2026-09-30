@@ -42,11 +42,15 @@ class RowStreamResolution:
     """Reduce stream terminal events into one explicit per-row lifecycle.
 
     Soft terminals are provisional: a later durable completion upgrades them through
-    the pending wire. Hard terminals and cancellations silence all later events.
+    the pending wire. A cancelled row that stays connected still needs its stored
+    result, so a durable completion also upgrades ``CANCELED`` to ``HARD_TERMINAL``.
+    Hard terminals silence all later events; cancellations silence every other
+    trigger.
 
     ``multiplex_closed`` is independent of FSM state for non-cancel closes (e.g. a
     hard terminal that closes drain after deliver). Cancel-silent multiplex finish
-    must seal ``CANCELED`` *and* close drain so late terminals stay silenced.
+    must seal ``CANCELED`` *and* close drain so late terminals stay silenced and a
+    late durable completion routes to the pending wire.
     """
 
     state: RowStreamResolutionState = RowStreamResolutionState.OPEN
@@ -59,7 +63,7 @@ class RowStreamResolution:
                 self.state = RowStreamResolutionState.SOFT_PROVISIONAL
                 return RowStreamDelivery.DELIVER
             case (
-                RowStreamResolutionState.SOFT_PROVISIONAL,
+                RowStreamResolutionState.SOFT_PROVISIONAL | RowStreamResolutionState.CANCELED,
                 RowStreamResolutionTrigger.DURABLE_COMPLETE,
             ):
                 self.state = RowStreamResolutionState.HARD_TERMINAL

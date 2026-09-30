@@ -216,7 +216,10 @@ class InferenceTableStreamController(
         admission = self.resolve_row_admission(session.player_id)
         if isinstance(admission, ScheduleRowAdmission):
             return False
-        wires = list(self.dispatch_admission(session.player_id, admission).wire_events)
+        wires = [
+            tag_inference_stream_event(wire, player_id=session.player_id, run_id=session.run_id)
+            for wire in self.dispatch_admission(session.player_id, admission).wire_events
+        ]
         if not wires:
             return False
         with self.stream_lock:
@@ -239,7 +242,11 @@ class InferenceTableStreamController(
                 fleet_torp_input_status=session.fleet_torp_input_status,
             ):
                 self.pending_wire_events.append(
-                    tag_inference_stream_event(wire, player_id=session.player_id)
+                    tag_inference_stream_event(
+                        wire,
+                        player_id=session.player_id,
+                        run_id=session.run_id,
+                    )
                 )
         self.wake_multiplex.set()
 
@@ -267,7 +274,11 @@ class InferenceTableStreamController(
                     fleet_torp_input_status=session.fleet_torp_input_status,
                 ):
                     self.pending_wire_events.append(
-                        tag_inference_stream_event(wire, player_id=session.player_id)
+                        tag_inference_stream_event(
+                            wire,
+                            player_id=session.player_id,
+                            run_id=session.run_id,
+                        )
                     )
                     if wire.get("type") in _TERMINAL_EVENT_TYPES:
                         # Finish both the delivering session and the currently scheduled

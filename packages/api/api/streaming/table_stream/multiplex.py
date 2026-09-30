@@ -27,6 +27,27 @@ class ScheduledStreamRow(Protocol[EventT]):
     session: MultiplexSession[EventT]
 
 
+def _close_pending_terminal_run(
+    event: dict[str, object],
+    *,
+    active_rows: Callable[[], tuple[ScheduledStreamRow[EventT], ...]],
+    pending_run_ids: set[str],
+) -> None:
+    """Finish the row run that emitted a pending terminal before its queue is read.
+
+    Only the run named by ``runId`` is closed. A newer run for the same player stays
+    open, and a terminal without ``runId`` closes nothing.
+    """
+    run_id = event.get("runId")
+    if not isinstance(run_id, str):
+        return
+    for row in active_rows():
+        if row.session.run_id != run_id:
+            continue
+        pending_run_ids.discard(run_id)
+        stream_drain.close(run_id)
+
+
 def drain_available_multiplex_events(
     rows: tuple[ScheduledStreamRow[EventT], ...],
     *,
@@ -139,6 +160,16 @@ def iter_multiplexed_stream_events(
         if pending_events_provider is not None:
             for event in pending_events_provider():
                 yield event
+                # A pending complete/error is the terminal of the run that emitted
+                # it. Drop that run's queue before the read below so an
+                # already-queued progress or solution cannot reopen a finished row
+                # on the client.
+                if event.get("type") in terminal_types:
+                    _close_pending_terminal_run(
+                        event,
+                        active_rows=active_rows,
+                        pending_run_ids=pending_run_ids,
+                    )
         if not pending_run_ids:
             pending_run_ids = wait_and_refresh_pending()
             continue
@@ -156,6 +187,9 @@ def iter_multiplexed_stream_events(
             continue
         if session_is_cancelled(row.session):
             finish_cancelled_run(row)
+            continue
+        if stream_drain.is_closed(row.session.run_id):
+            pending_run_ids.discard(row.session.run_id)
             continue
         try:
             raw_event = row.session.event_queue.get(timeout=multiplex_wait_seconds)

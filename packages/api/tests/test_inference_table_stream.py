@@ -189,6 +189,15 @@ def test_tag_inference_stream_event_adds_player_id_except_global_pause():
         player_id=3,
     )
     assert tagged["playerId"] == 3
+    assert "runId" not in tagged
+    assert (
+        tag_inference_stream_event(
+            _wire_complete_event(summary="done"),
+            player_id=3,
+            run_id="run-a",
+        )["runId"]
+        == "run-a"
+    )
     assert tag_inference_stream_event({"type": "globalPause", "paused": True}, player_id=3) == {
         "type": "globalPause",
         "paused": True,
