@@ -15,9 +15,27 @@ export function applyTeamTerritorySiteSet(
 }
 
 /**
+ * Drop territory fills for unchecked legend rows.
+ * Hover and the legend outline use the list from before this filter.
+ */
+export function omitHiddenTeamTerritoryOverlays(
+  overlays: readonly MapRegionOverlay[],
+  hiddenLeagueTeamIds: readonly number[]
+): readonly MapRegionOverlay[] {
+  if (hiddenLeagueTeamIds.length === 0) return overlays
+  const hidden = new Set(hiddenLeagueTeamIds)
+  return overlays.filter((overlay) => {
+    if (!isTeamTerritoryKind(overlay.kind)) return true
+    const leagueTeamId = overlay.leagueTeamId
+    return leagueTeamId == null || !hidden.has(leagueTeamId)
+  })
+}
+
+/**
  * Paint pipeline: team-territory kinds stay out of ``paintNonTeamTerritory``
  * (Visibility kind preferences and homeworld selection). The selected site set
- * is inserted back in its original order.
+ * is inserted back in its original order. Legend visibility is a later filter
+ * (``omitHiddenTeamTerritoryOverlays``) so hover can still see hidden teams.
  */
 export function mapRegionOverlaysForPaint(
   overlays: readonly MapRegionOverlay[],

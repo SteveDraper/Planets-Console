@@ -463,7 +463,7 @@ One **descriptive** **map hover contribution** (role `minefield`) listing every 
 _Avoid_: picking only the smallest field, one contribution per overlapping field, analytic-private mouse capture
 
 **Team information analytic**:
-A map-only **turn analytic** (`analytic_id` `team-information`) that paints **team territory** for each **league team** on the shell turn. Selectable in the sidebar; greyed in tabular **view mode**. Spec: [design-team-information-analytic.md](docs/design-team-information-analytic.md).
+A map-only **turn analytic** (`analytic_id` `team-information`) that paints **team territory** for each **league team** on the shell turn. Selectable in the sidebar; greyed in tabular **view mode**. Each legend row can hide that league team's painted fill. Legend hover and map hover still outline and name the team when its fill is hidden. Spec: [design-team-information-analytic.md](docs/design-team-information-analytic.md).
 _Avoid_: in-game team coloring (`Player.teamid`), a tabular roster tile, tinting planet markers only
 
 **League team**:

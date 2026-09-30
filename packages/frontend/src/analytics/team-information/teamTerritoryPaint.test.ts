@@ -2,14 +2,19 @@ import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { isVisibilityRegionKind } from '../visibility/kinds'
 import { TEAM_TERRITORY_KIND, TEAM_TERRITORY_OWNED_ONLY_KIND } from './kinds'
-import { applyTeamTerritorySiteSet, mapRegionOverlaysForPaint } from './teamTerritoryPaint'
+import {
+  applyTeamTerritorySiteSet,
+  mapRegionOverlaysForPaint,
+  omitHiddenTeamTerritoryOverlays,
+} from './teamTerritoryPaint'
 
-function boundary(kind: string, id: string): MapRegionOverlay {
+function boundary(kind: string, id: string, leagueTeamId?: number): MapRegionOverlay {
   return {
     kind,
     id,
     fillColor: '#38bdf8',
     fillOpacity: 0.35,
+    ...(leagueTeamId != null ? { leagueTeamId } : {}),
     geometry: {
       type: 'boundary',
       vertices: [
@@ -63,5 +68,21 @@ describe('mapRegionOverlaysForPaint', () => {
     expect(out.map((overlay) => overlay.id)).toEqual(['ship-scan', 'team-territory:4:0'])
     expect(out[0]?.fillColor).toBe('#ff0000')
     expect(out[1]).toBe(allPlanets)
+  })
+})
+
+describe('omitHiddenTeamTerritoryOverlays', () => {
+  const team4 = boundary(TEAM_TERRITORY_KIND, 'team-territory:4:0', 4)
+  const team9 = boundary(TEAM_TERRITORY_OWNED_ONLY_KIND, 'team-territory-owned-only:9:0', 9)
+  const shipScan = boundary('ship-scan', 'ship-scan')
+  const overlays = [shipScan, team4, team9]
+
+  it('returns the same list when no league team is hidden', () => {
+    expect(omitHiddenTeamTerritoryOverlays(overlays, [])).toBe(overlays)
+  })
+
+  it('drops hidden league teams and keeps other teams and non-team overlays', () => {
+    const out = omitHiddenTeamTerritoryOverlays(overlays, [4])
+    expect(out.map((overlay) => overlay.id)).toEqual(['ship-scan', 'team-territory-owned-only:9:0'])
   })
 })

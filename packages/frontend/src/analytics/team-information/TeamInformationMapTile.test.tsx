@@ -70,7 +70,10 @@ function renderTile(ui: ReactNode, seed?: (client: QueryClient) => void) {
 describe('TeamInformationMapTile', () => {
   beforeEach(() => {
     localStorage.removeItem(TEAM_INFORMATION_PREFERENCES_STORAGE_KEY)
-    useTeamInformationPreferencesStore.setState({ ownedPlanetsOnly: false })
+    useTeamInformationPreferencesStore.setState({
+      ownedPlanetsOnly: false,
+      hiddenLeagueTeamIds: [],
+    })
     useTeamInformationHighlightStore.setState({ hoveredLeagueTeamId: null })
     useSessionStore.setState({ name: 'alice', password: null, credentialsRevision: 0 })
     useShellStore.setState({
@@ -148,6 +151,34 @@ describe('TeamInformationMapTile', () => {
     expect(useTeamInformationPreferencesStore.getState().ownedPlanetsOnly).toBe(true)
     expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
     expect(fetchLeagueTeams).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts checked, persists an uncheck, and still hovers an unchecked row', async () => {
+    const user = userEvent.setup()
+    renderTile(
+      <TeamInformationMapTile
+        name="Team information"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        analyticScope={sampleScope}
+        turnDataReady
+      />,
+      seedTurnRoster
+    )
+    const showTerritory = await screen.findByRole('checkbox', {
+      name: 'Show Blue Squadron territory',
+    })
+    expect(showTerritory).toBeChecked()
+    await user.click(showTerritory)
+    expect(showTerritory).not.toBeChecked()
+    expect(useTeamInformationPreferencesStore.getState().hiddenLeagueTeamIds).toEqual([4])
+    expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
+    await user.hover(screen.getByRole('listitem'))
+    expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBe(4)
+    await user.unhover(screen.getByRole('listitem'))
+    expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBeNull()
   })
 
   it('shows the numeric id when the directory name is null and still hides usernames', async () => {
