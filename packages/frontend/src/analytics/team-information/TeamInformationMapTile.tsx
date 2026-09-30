@@ -56,6 +56,10 @@ export function TeamInformationMapTile({
 }: TeamInformationMapTileProps) {
   const ownedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.ownedPlanetsOnly)
   const setOwnedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.setOwnedPlanetsOnly)
+  const hiddenLeagueTeamIds = useTeamInformationPreferencesStore((s) => s.hiddenLeagueTeamIds)
+  const setLeagueTeamRegionVisible = useTeamInformationPreferencesStore(
+    (s) => s.setLeagueTeamRegionVisible
+  )
   const setHoveredLeagueTeamId = useTeamInformationHighlightStore(
     (s) => s.setHoveredLeagueTeamId
   )
@@ -125,36 +129,48 @@ export function TeamInformationMapTile({
       </label>
       {showLegend ? (
         <ul aria-label="League teams" className="flex flex-col gap-1 border-t border-[#52575d]/40 px-2 py-2">
-          {legendRows.map((row) => (
-            <li
-              key={row.leagueTeamId}
-              className="flex min-w-0 items-start gap-2"
-              title={teamInformationLegendHoverTitle(row.usernames)}
-              onMouseEnter={() => setHoveredLeagueTeamId(row.leagueTeamId)}
-              onMouseLeave={() => setHoveredLeagueTeamId(null)}
-            >
-              <span
-                aria-hidden
-                data-fill-pattern={row.fillPattern}
-                className="relative mt-0.5 h-3 w-3 shrink-0 overflow-hidden rounded-sm border border-black/30"
-                style={{ backgroundColor: row.fillColor }}
+          {legendRows.map((row) => {
+            const legendText = teamInformationLegendText(row)
+            return (
+              <li
+                key={row.leagueTeamId}
+                className="flex min-w-0 items-start gap-2"
+                title={teamInformationLegendHoverTitle(row.usernames)}
+                onMouseEnter={() => setHoveredLeagueTeamId(row.leagueTeamId)}
+                onMouseLeave={() => setHoveredLeagueTeamId(null)}
               >
-                {row.fillPattern === 'solid' ? null : (
-                  <svg className="absolute inset-0 h-full w-full" viewBox="0 0 8 8">
-                    <FillPatternMarks pattern={row.fillPattern} />
-                  </svg>
-                )}
-              </span>
-              <span
-                className={cn(
-                  'min-w-0 text-xs text-slate-300',
-                  row.name == null && 'font-mono'
-                )}
-              >
-                {teamInformationLegendText(row)}
-              </span>
-            </li>
-          ))}
+                <input
+                  type="checkbox"
+                  checked={!hiddenLeagueTeamIds.includes(row.leagueTeamId)}
+                  aria-label={`Show ${legendText} territory`}
+                  onChange={(event) =>
+                    setLeagueTeamRegionVisible(row.leagueTeamId, event.target.checked)
+                  }
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+                />
+                <span
+                  aria-hidden
+                  data-fill-pattern={row.fillPattern}
+                  className="relative mt-0.5 h-3 w-3 shrink-0 overflow-hidden rounded-sm border border-black/30"
+                  style={{ backgroundColor: row.fillColor }}
+                >
+                  {row.fillPattern === 'solid' ? null : (
+                    <svg className="absolute inset-0 h-full w-full" viewBox="0 0 8 8">
+                      <FillPatternMarks pattern={row.fillPattern} />
+                    </svg>
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    'min-w-0 text-xs text-slate-300',
+                    row.name == null && 'font-mono'
+                  )}
+                >
+                  {legendText}
+                </span>
+              </li>
+            )
+          })}
         </ul>
       ) : null}
     </div>

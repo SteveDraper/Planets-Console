@@ -49,7 +49,10 @@ import {
   useHomeworldRegionSelectionMaterialize,
 } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
 import { isTeamTerritoryKind } from '../analytics/team-information/kinds'
-import { mapRegionOverlaysForPaint } from '../analytics/team-information/teamTerritoryPaint'
+import {
+  mapRegionOverlaysForPaint,
+  omitHiddenTeamTerritoryOverlays,
+} from '../analytics/team-information/teamTerritoryPaint'
 import { useLeagueTeamNames } from '../analytics/team-information/useLeagueTeamNames'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { homeworldOverlaysReadyForMaterialize } from '../lib/homeworldRegionSelection'
@@ -247,6 +250,7 @@ function MapGraphFlow({
   const edges = useMemo(() => toEdges(displayMapEdges), [displayMapEdges])
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
   const ownedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.ownedPlanetsOnly)
+  const hiddenLeagueTeamIds = useTeamInformationPreferencesStore((s) => s.hiddenLeagueTeamIds)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
@@ -294,6 +298,7 @@ function MapGraphFlow({
   const ownershipRegionOverlays = data.regionOverlays
 
   // Visibility prefs → region selection + envelope toggle.
+  // Site-set selection only. Legend checkboxes filter paint, not hover.
   const regionOverlays = useMemo(
     () =>
       mapRegionOverlaysForPaint(data.regionOverlays, ownedPlanetsOnly, (nonTeam) =>
@@ -310,6 +315,10 @@ function MapGraphFlow({
       selectedSectorIndexes,
       showEnvelopeOverlays,
     ]
+  )
+  const paintedRegionOverlays = useMemo(
+    () => omitHiddenTeamTerritoryOverlays(regionOverlays, hiddenLeagueTeamIds),
+    [hiddenLeagueTeamIds, regionOverlays]
   )
   const highlightedTeamOverlays = useMemo(() => {
     if (!teamInformationEnabled || hoveredLeagueTeamId == null) return []
@@ -356,7 +365,7 @@ function MapGraphFlow({
           nuIonStorms={data.nuIonStorms}
         />
       ) : null}
-      <MapRegionOverlayPane regionOverlays={regionOverlays} />
+      <MapRegionOverlayPane regionOverlays={paintedRegionOverlays} />
       <TeamTerritoryHighlightOutline regionOverlays={highlightedTeamOverlays} />
       <MinefieldMapPane minefields={data.minefields} shellTurn={analyticScope.turn} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />

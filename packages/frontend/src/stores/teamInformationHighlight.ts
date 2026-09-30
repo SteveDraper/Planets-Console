@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 type TeamInformationHighlightState = {
-  /** League team whose painted regions are outlined. Null when the legend is not hovered. */
+  /** League team whose regions are outlined. Null when the legend is not hovered. */
   hoveredLeagueTeamId: number | null
   setHoveredLeagueTeamId: (hoveredLeagueTeamId: number | null) => void
 }
