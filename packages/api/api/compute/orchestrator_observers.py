@@ -109,7 +109,11 @@ class OrchestratorObservers:
         return self._dispatch_commit_hooks
 
     def schedule_post_lock(self, callback: PostLockCallback) -> None:
-        """Append a callback to run after the orchestrator lock is released."""
+        """Append a callback to run after the orchestrator lock is released.
+
+        Caller holds the orchestrator condition. The callback runs from
+        ``drain_post_lock_callbacks`` with the condition released.
+        """
         self._post_lock_callbacks.append(callback)
 
     def register_dispatch_gate(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
@@ -27,6 +26,9 @@ from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
+from api.streaming.table_stream.scheduler_orchestrator_attachment import (
+    SchedulerOrchestratorAttachment,
+)
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
 from api.transport.fleet_table_stream import fleet_error_event
 
@@ -39,10 +41,13 @@ __all__ = [
 
 @dataclass
 class _FleetStreamOrchestratorBinding:
-    """One table-stream's leader context on the process-wide singleton orchestrator."""
+    """One table-stream's leader context on the process-wide singleton orchestrator.
+
+    Query context only. The scope-outcome listener is scheduler-lifetime; see
+    ``SchedulerOrchestratorAttachment``.
+    """
 
     orchestrator: ComputeOrchestrator
-    unregister_listener: Callable[[], None]
     query_context: AnalyticQueryContext
 
 
@@ -77,14 +82,24 @@ class FleetTableStreamScheduler:
         self._lock = threading.Lock()
         self._scope_guard = TableStreamScopeGuard[FleetTableStreamScope]()
         self._stream_bindings: dict[str, _FleetStreamOrchestratorBinding] = {}
+        self._orchestrator_attachment = SchedulerOrchestratorAttachment(
+            on_scope_outcome=self._on_orchestrator_scope_outcome,
+        )
 
     def begin_scope(self, scope: FleetTableStreamScope) -> str:
+        """Claim the active fleet table-stream scope.
+
+        Preempt drops runs under ``self._lock``. The scope-outcome listener is
+        registered after that lock is released, once per process orchestrator.
+        """
         with self._lock:
-            return self._scope_guard.begin_scope_locked(
+            token = self._scope_guard.begin_scope_locked(
                 scope,
                 on_same_scope_preempt=self._preempt_active_table_stream_locked,
                 on_scope_change=self._invalidate_retained_state_locked,
             )
+        self._orchestrator_attachment.ensure_registered()
+        return token
 
     def owns_table_stream(self, stream_token: str) -> bool:
         with self._lock:
@@ -198,6 +213,7 @@ class FleetTableStreamScheduler:
             submit_binding = binding
             submit_scope = root_scope
 
+        self._orchestrator_attachment.ensure_registered()
         if submit_binding is not None and submit_scope is not None:
             submit_binding.orchestrator.submit(
                 ComputeRequest(
@@ -248,14 +264,17 @@ class FleetTableStreamScheduler:
         *,
         stream_token: str,
     ) -> None:
+        """Drop one stream's runs and its query-context binding.
+
+        Does not touch the orchestrator. Safe when the caller already holds the
+        orchestrator condition (generator ``finally`` during garbage collection).
+        """
         with self._lock:
             self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
                 session.cancel_token.cancel()
                 self._runs.pop(session.run_id, None)
-            binding = self._stream_bindings.pop(stream_token, None)
-            if binding is not None:
-                self._release_stream_binding_locked(binding)
+            self._stream_bindings.pop(stream_token, None)
 
     def _binding_for_stream_locked(
         self,
@@ -263,6 +282,10 @@ class FleetTableStreamScheduler:
         *,
         query_context: AnalyticQueryContext,
     ) -> _FleetStreamOrchestratorBinding:
+        """Install the stream's query context. Caller holds ``self._lock``.
+
+        Does not register an orchestrator listener.
+        """
         existing = self._stream_bindings.get(stream_token)
         if existing is not None:
             return existing
@@ -271,13 +294,8 @@ class FleetTableStreamScheduler:
                 "fleet table-stream admit requires AnalyticQueryContext; "
                 "production must pass the TurnAnalyticService factory ctx"
             )
-        orchestrator = get_compute_orchestrator()
-        unregister = orchestrator.observers.register_scope_outcome_listener(
-            self._on_orchestrator_scope_outcome,
-        )
         binding = _FleetStreamOrchestratorBinding(
-            orchestrator=orchestrator,
-            unregister_listener=unregister,
+            orchestrator=get_compute_orchestrator(),
             query_context=query_context,
         )
         self._stream_bindings[stream_token] = binding
@@ -343,19 +361,11 @@ class FleetTableStreamScheduler:
             if stream_events:
                 _wake_multiplex_for_session(session)
 
-    def _release_stream_binding_locked(
-        self,
-        binding: _FleetStreamOrchestratorBinding,
-    ) -> None:
-        binding.unregister_listener()
-
     def _preempt_active_table_stream_locked(self) -> None:
         for run in self._runs.values():
             run.session.cancel_token.cancel()
         self._runs.clear()
-        for stream_token in list(self._stream_bindings):
-            binding = self._stream_bindings.pop(stream_token)
-            self._release_stream_binding_locked(binding)
+        self._stream_bindings.clear()
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()

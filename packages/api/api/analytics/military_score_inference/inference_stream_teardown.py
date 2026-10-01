@@ -6,7 +6,6 @@ teardown without cancelling in-flight solve work on detach.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -32,7 +31,6 @@ class InferenceStreamOrchestratorBinding:
 
     orchestrator: ComputeOrchestrator
     query_context: AnalyticQueryContext
-    unregister_dispatch_gate: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +57,11 @@ class InferenceStreamTeardownMixin:
         tier workers may still finish, persist from the RowComplete payload, and
         complete the DAG node. ``cancel_run`` is the explicit cancel path
         (lifecycle CANCEL then abort).
+
+        Detach runs under the scheduler lock and does not take the orchestrator
+        condition. The pause gate and scope-outcome listener are registered
+        after that lock is released, once per process orchestrator. The gate
+        follows ``_globally_paused``, which detach clears.
         """
         with self._lock:
             prior = self._scope_guard.active_scope
@@ -71,11 +74,13 @@ class InferenceStreamTeardownMixin:
                     return
                 self._detach_stream_runs_locked(turn=prior.turn_number)
 
-            return self._scope_guard.begin_scope_locked(
+            token = self._scope_guard.begin_scope_locked(
                 scope,
                 on_same_scope_preempt=on_same_scope_preempt,
                 on_scope_change=on_scope_change,
             )
+        self._orchestrator_attachment.ensure_registered()
+        return token
 
     def cancel_run(self: InferenceRowScheduler, run_id: str) -> None:
         """Cancel one row run and abort its orchestrator scope when no sibling remains.
@@ -156,9 +161,7 @@ class InferenceStreamTeardownMixin:
         if turn is None:
             clear_stream_resolutions()
             clear_row_runs()
-        for stream_token in list(self._stream_bindings):
-            binding = self._stream_bindings.pop(stream_token)
-            self._release_stream_binding_locked(binding)
+        self._stream_bindings.clear()
 
     def _invalidate_retained_state_locked(self: InferenceRowScheduler) -> None:
         # Full detach for shutdown / hard invalidate -- not used by begin_scope.
@@ -189,14 +192,6 @@ class InferenceStreamTeardownMixin:
             ComputeScopeAbortedError(SCORES_ROW_RUN_CANCELLED_MESSAGE),
             expected_execution_generation=execution_generation,
         )
-
-    def _release_stream_binding_locked(
-        self: InferenceRowScheduler,
-        binding: InferenceStreamOrchestratorBinding,
-    ) -> None:
-        if binding.unregister_dispatch_gate is not None:
-            binding.unregister_dispatch_gate()
-            binding.unregister_dispatch_gate = None
 
     def _remove_run_locked(
         self: InferenceRowScheduler,

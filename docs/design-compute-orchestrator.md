@@ -429,7 +429,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 **Keep** under `packages/api/api/streaming/table_stream/`:
 
-- Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, controller base, registry attach/detach.
+- Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, `SchedulerOrchestratorAttachment`, controller base, registry attach/detach.
 - Shared `RowStreamResolution` FSM + `multiplex_closed` drain bit + `route_terminal` (queue / pending / silence). Soft is a shared capability; scores supplies soft triggers, fleet does not.
 - `multiplex_closed` is the sole drain-closed source of truth (stored on the resolution registry). Sole **public** writer/reader facade is `streaming.table_stream.stream_drain` (`close` / `reopen_if_soft` / `is_closed` / `seal_canceled`) -- adapters must not call registry-private `_mark_multiplex_closed` / `_seal_canceled_finish` helpers. UUID run ids are never reused.
 - Generic retained-shell / persist-admission vocabulary (`row_run_admission.py`: `RowRunPhase`, `PersistAdmission`, `RowLifecycleOp`). Per-analytic registries own shells; production persist gates use analytic `PersistDecision` / registry `decide_*` (write + retire plan; scores: `tier_row_run_registry.decide_scores_row_persist`); scores applies lifecycle via `apply_scores_row_lifecycle` in `scores/row_lifecycle.py`. Ownership invariants: [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md).
@@ -437,10 +437,10 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 **Thin adapters** (same template for fleet and scores):
 
 - Submit `ComputeRequest` scopes to the **process-wide** orchestrator (`stream_attached` band for interactive work; `background` for warm-up deps).
-- Register process-wide `scope_outcome` / related listeners (and pause **dispatch gates**) with analytic/scope filters; unregister on disconnect. Adapters do **not** own an orchestrator instance.
-- Retain stream-only state (scope guard, per-row run registry, global pause gate).
+- Register one process-wide `scope_outcome` listener per scheduler, and at most one pause **dispatch gate**, through `SchedulerOrchestratorAttachment`. Both live for the scheduler, outside the scheduler lock. The listener and gate filter on analytic id (and, for pause, `_globally_paused`). Adapters do **not** own an orchestrator instance, and disconnect does not unregister these callbacks.
+- Retain stream-only state (scope guard, per-row run registry, global pause flag). Stream bindings store query context only.
 - **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
-- Stream teardown **detaches** observers only -- it does not cancel in-flight singleton DAG work (or abort a pending `persist`) solely because the observer left ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240).
+- Stream teardown drops stream ownership (and clears scores pause) without cancelling in-flight singleton DAG work or aborting a pending `persist` solely because the stream ended ([#209](https://github.com/SteveDraper/Planets-Console/issues/209)); origin-set prune is [#240](https://github.com/SteveDraper/Planets-Console/issues/240).
 
 **Table-stream row-run shell / persist admission (generic).** Any table-stream analytic that retains per-row shells across stream detach (detach ≠ cancel) reuses `RowRunPhase` (`REGISTERED` / `DETACHED` only), registry-internal `PersistAdmission` (`ALLOW` | `CANCEL_DENY` | `ABSENT`), and `RowLifecycleOp` (`DETACH` | `CANCEL` | `RETIRE`) from `streaming/table_stream/row_run_admission.py`. Cancel never becomes a retained shell phase. Soft/hard stream resolutions stay FIFO-bounded (`MAX_STREAM_RESOLUTIONS`) and delivery-only -- they do not gate persist. Multi-step tier DAG scheduling stays in `compute/` -- do not conflate.
 

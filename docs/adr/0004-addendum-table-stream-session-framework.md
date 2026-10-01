@@ -14,6 +14,7 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 |--------|----------------|
 | `multiplex.py` | Generic round-robin drain over per-row `event_queue`, `is_stream_active`, `wake_event`, terminal-type predicate |
 | `scope_guard.py` | `TableStreamScopeGuard` composed into both schedulers (`begin_scope`, `owns_table_stream`, `end_table_stream`) |
+| `scheduler_orchestrator_attachment.py` | One scope-outcome listener per scheduler, plus an optional dispatch gate (scores pause). Registered once on the live process orchestrator, outside the scheduler lock. Stream begin, preempt, and end do not register or unregister these callbacks |
 | `registry.py` | Generic scope-keyed controller registry (attach/detach, in-place reschedule lookup) |
 | `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, scheduled-row map); safe reschedule lock choreography (`reschedule_one` / `reschedule_all` / `install_admission_dispatch` -- never hold `stream_lock` across cancel, schedule, or orchestrator submit) |
 | `connect.py` | `iter_table_stream_connect` / `iter_table_stream_connect_with_scope` with guaranteed `finally` scope teardown |
