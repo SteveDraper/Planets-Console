@@ -93,13 +93,15 @@ class InferenceRowScheduler(
         self._stream_bindings: dict[str, InferenceStreamOrchestratorBinding] = {}
         self._globally_paused = False
         self._held_initial_submissions: list[HeldTierSubmission] = []
-        # Listener and pause gate are scheduler-lifetime. The gate reads
-        # ``_globally_paused``; pause and resume do not register or unregister it.
+        # Listener and pause gate are scheduler-lifetime. Do not register here:
+        # ``get_inference_row_scheduler`` holds ``_scheduler_lock`` across
+        # construction, and ``ensure_registered`` takes the orchestrator
+        # condition. Call sites register outside ``_lock``. The gate reads
+        # ``_globally_paused``.
         self._orchestrator_attachment = SchedulerOrchestratorAttachment(
             on_scope_outcome=self._on_orchestrator_scope_outcome,
             dispatch_gate=self._pause_dispatch_gate,
         )
-        self._orchestrator_attachment.ensure_registered()
 
     def owns_table_stream(self, stream_token: str) -> bool:
         with self._lock:
@@ -322,7 +324,12 @@ class InferenceRowScheduler(
             )
 
     def pause_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
-        """Soft pause: hold tier_solve dispatch; in-flight tier work is not cancelled."""
+        """Soft pause: hold tier_solve dispatch; in-flight tier work is not cancelled.
+
+        The pause gate is installed on the live process orchestrator before this
+        takes the scheduler lock, so a replaced orchestrator still honors pause.
+        """
+        self._orchestrator_attachment.ensure_registered()
         with self._lock:
             self._require_active_stream_for_scope_locked(scope)
             already_paused = self._globally_paused
@@ -343,6 +350,7 @@ class InferenceRowScheduler(
                 self._held_initial_submissions.clear()
                 self._broadcast_global_pause_locked(paused=False)
             inputs = self._global_pause_status_inputs_locked(scope)
+        self._orchestrator_attachment.ensure_registered()
         # Submit held work outside the scheduler lock (same ABBA risk as enqueue).
         for held_item in held:
             binding = self._stream_bindings.get(held_item.stream_token)
@@ -438,6 +446,7 @@ class InferenceRowScheduler(
                 # locks.
                 submit_binding = binding
                 submit_scope = root_scope
+        self._orchestrator_attachment.ensure_registered()
         if submit_binding is not None and submit_scope is not None:
             self._submit_tier_solve_locked(submit_binding, submit_scope)
         elif wake_deferred_scope is not None:

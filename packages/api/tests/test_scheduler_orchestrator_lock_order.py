@@ -134,6 +134,25 @@ def test_scores_pause_gate_is_registered_once_and_follows_the_pause_flag() -> No
     assert gate not in orchestrator.observers.dispatch_gates
 
 
+def test_scores_pause_rebinds_dispatch_gate_after_orchestrator_reset() -> None:
+    scheduler = InferenceRowScheduler()
+    scope = _scores_scope()
+    scheduler.begin_scope(scope)
+    reset_orchestrators_for_tests()
+    scheduler.pause_globally(scope)
+    orchestrator = get_compute_orchestrator()
+    gate = scheduler._pause_dispatch_gate
+    node = SimpleNamespace(
+        scope=SimpleNamespace(analytic_id=SCORES_ANALYTIC_ID),
+        profile_step_index=SCORES_TIER_SOLVE_PROFILE_INDEX,
+    )
+    try:
+        assert orchestrator.observers.dispatch_gates.count(gate) == 1
+        assert gate(node) is False
+    finally:
+        scheduler.shutdown()
+
+
 def test_scores_pause_and_detach_return_while_orchestrator_condition_held() -> None:
     scheduler = InferenceRowScheduler()
     scope = _scores_scope()

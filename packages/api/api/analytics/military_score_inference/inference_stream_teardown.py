@@ -58,8 +58,10 @@ class InferenceStreamTeardownMixin:
         complete the DAG node. ``cancel_run`` is the explicit cancel path
         (lifecycle CANCEL then abort).
 
-        Does not touch the orchestrator. The pause gate is scheduler-lifetime
-        and follows ``_globally_paused``, which detach clears.
+        Detach runs under the scheduler lock and does not take the orchestrator
+        condition. The pause gate and scope-outcome listener are registered
+        after that lock is released, once per process orchestrator. The gate
+        follows ``_globally_paused``, which detach clears.
         """
         with self._lock:
             prior = self._scope_guard.active_scope
@@ -72,11 +74,13 @@ class InferenceStreamTeardownMixin:
                     return
                 self._detach_stream_runs_locked(turn=prior.turn_number)
 
-            return self._scope_guard.begin_scope_locked(
+            token = self._scope_guard.begin_scope_locked(
                 scope,
                 on_same_scope_preempt=on_same_scope_preempt,
                 on_scope_change=on_scope_change,
             )
+        self._orchestrator_attachment.ensure_registered()
+        return token
 
     def cancel_run(self: InferenceRowScheduler, run_id: str) -> None:
         """Cancel one row run and abort its orchestrator scope when no sibling remains.
