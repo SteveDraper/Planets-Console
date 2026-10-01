@@ -1,4 +1,4 @@
-import { AnalyticSidebarTile } from '../AnalyticSidebarTile'
+import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 import { DisplayModeControl } from '../DisplayModeControl'
 import { useMinefieldsPreferencesStore } from '../../stores/minefieldsPreferences'
 import { useShellStore } from '../../stores/shell'
@@ -57,7 +57,7 @@ export function MinefieldsMapTile({
                 type="checkbox"
                 checked={pref.enabled}
                 onChange={(e) => setTypeEnabled(typeId, e.target.checked)}
-                className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+                className={analyticDetailCheckboxClassName}
               />
               <span className="min-w-0 truncate text-xs text-slate-300">
                 {MINEFIELD_TYPE_LABELS[typeId]}

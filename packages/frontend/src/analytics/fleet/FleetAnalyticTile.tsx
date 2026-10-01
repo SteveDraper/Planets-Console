@@ -13,7 +13,7 @@ import { usePlayerColor } from '../../stores/playerColors'
 import { useShellStore } from '../../stores/shell'
 import { fleetPlayerDisplayLabel } from './fleetPlayerDisplayLabel'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
-import { AnalyticSidebarTile } from '../AnalyticSidebarTile'
+import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 
 const TRAIL_EXTEND_OPTIONS = Array.from(
   { length: FLEET_HEADING_TRAIL_MAX_EXTEND_TURNS + 1 },
@@ -54,7 +54,7 @@ function FleetPlayerVisibilityRow({
         type="checkbox"
         checked={isVisible}
         onChange={(event) => onVisibleChange(event.target.checked)}
-        className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+        className={analyticDetailCheckboxClassName}
       />
       <span
         aria-hidden

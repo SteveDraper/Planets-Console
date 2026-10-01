@@ -1,4 +1,4 @@
-import { AnalyticSidebarTile } from '../AnalyticSidebarTile'
+import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 import type { ConnectionsFlareDepth, ConnectionsFlareMode } from './api'
 import { useConnectionsMapParamsStore } from './connectionsMapParamsStore'
 
@@ -115,7 +115,7 @@ export function ConnectionsMapTile({
             })
           }
           disabled={!supportsMode}
-          className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 accent-slate-400 disabled:opacity-50"
+          className={analyticDetailCheckboxClassName}
         />
         <span>Gravitonic movement</span>
       </label>

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import { analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../stellar-cartography/layers'
 import { defaultHomeworldRegionSelectionPreset } from '../../lib/homeworldRegionSelection'
 import { perspectiveRow } from '../../lib/perspectiveRowTestFixtures'
@@ -167,7 +168,9 @@ describe('HomeworldLocatorTile', () => {
     )
 
     await user.click(screen.getByRole('button', { name: /expand homeworld/i }))
-    expect(screen.getByRole('checkbox', { name: /show overlays/i })).toBeChecked()
+    const showOverlays = screen.getByRole('checkbox', { name: /show overlays/i })
+    expect(showOverlays).toBeChecked()
+    expect(showOverlays).toHaveClass(...analyticDetailCheckboxClassName.split(' '))
     expect(
       screen.queryByRole('radiogroup', { name: /homeworld region selection/i })
     ).not.toBeInTheDocument()

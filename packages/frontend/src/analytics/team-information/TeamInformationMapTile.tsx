@@ -6,7 +6,7 @@ import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useShellStore } from '../../stores/shell'
 import { useTeamInformationHighlightStore } from '../../stores/teamInformationHighlight'
 import { useTeamInformationPreferencesStore } from '../../stores/teamInformationPreferences'
-import { AnalyticSidebarTile } from '../AnalyticSidebarTile'
+import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 import {
   teamInformationLegendHoverTitle,
   teamInformationLegendRows,
@@ -104,7 +104,7 @@ export function TeamInformationMapTile({
           type="checkbox"
           checked={ownedPlanetsOnly}
           onChange={(event) => setOwnedPlanetsOnly(event.target.checked)}
-          className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+          className={analyticDetailCheckboxClassName}
         />
         <span className="min-w-0 truncate">Owned planets only</span>
       </label>
@@ -127,7 +127,7 @@ export function TeamInformationMapTile({
                   onChange={(event) =>
                     setLeagueTeamRegionVisible(row.leagueTeamId, event.target.checked)
                   }
-                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+                  className={cn(analyticDetailCheckboxClassName, 'mt-0.5')}
                 />
                 <span
                   aria-hidden

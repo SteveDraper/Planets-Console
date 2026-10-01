@@ -7,6 +7,10 @@ import { tileClassName } from './tileChrome'
 export const analyticEnableCheckboxClassName =
   'h-4 w-4 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0'
 
+/** Checkbox inside an analytics-bar details pane. One class so pane size and accent stay aligned. */
+export const analyticDetailCheckboxClassName =
+  'h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0 disabled:opacity-50'
+
 type AnalyticSidebarTileBase = {
   name: string
   enabled: boolean

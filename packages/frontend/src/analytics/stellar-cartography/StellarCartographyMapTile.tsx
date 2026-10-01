@@ -1,5 +1,5 @@
 import { cn } from '../../lib/utils'
-import { AnalyticSidebarTile } from '../AnalyticSidebarTile'
+import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 import {
   CARTOGRAPHY_LAYER_DEFINITIONS,
   EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
@@ -186,7 +186,7 @@ export function StellarCartographyMapTile({
                 )
               }
               disabled={layerDisabled}
-              className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 accent-slate-400 disabled:opacity-50"
+              className={analyticDetailCheckboxClassName}
             />
             <span>{layer.label}</span>
           </label>

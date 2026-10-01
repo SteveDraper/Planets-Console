@@ -1,5 +1,5 @@
 import { cn } from '../../lib/utils'
-import { AnalyticSidebarTile } from '../AnalyticSidebarTile'
+import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 import type { AnalyticShellScope } from '../../api/bff'
 import { usePersistStoreHydrated } from '../../lib/usePersistStoreHydrated'
 import { useScoresTablePreferencesStore } from '../../stores/scoresTablePreferences'
@@ -70,7 +70,7 @@ export function ScoresTableTile({
               includeBuildInference: e.target.checked,
             })
           }
-          className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 accent-slate-400 disabled:opacity-50"
+          className={analyticDetailCheckboxClassName}
         />
         <span>Include build inference</span>
       </label>

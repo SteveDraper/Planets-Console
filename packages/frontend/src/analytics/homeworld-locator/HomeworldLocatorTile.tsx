@@ -1,6 +1,6 @@
 import type { AnalyticShellScope } from '../../api/bff'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
-import { AnalyticSidebarTile } from '../AnalyticSidebarTile'
+import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 import { DisplayModeControl } from '../DisplayModeControl'
 import { useShellStore } from '../../stores/shell'
 import { homeworldInactiveHint } from './constants'
@@ -120,7 +120,7 @@ export function HomeworldLocatorTile({
           checked={showEnvelopeOverlays}
           onChange={(e) => setShowEnvelopeOverlays(e.target.checked)}
           aria-label="Show overlays"
-          className="h-4 w-4 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+          className={analyticDetailCheckboxClassName}
         />
         <span>Show overlays</span>
       </label>
