@@ -119,7 +119,7 @@ describe('HomeworldLocatorTile', () => {
     expect(screen.getByRole('button', { name: /expand homeworld/i })).toBeDisabled()
   })
 
-  it('shows unchecked when persisted enabled but inactive', () => {
+  it('stays checked when persisted enabled but inactive', () => {
     seedInactiveHomeworld()
     renderTile(
       <HomeworldLocatorTile
@@ -134,7 +134,7 @@ describe('HomeworldLocatorTile', () => {
     )
     const checkbox = screen.getByRole('checkbox')
     expect(checkbox).toBeDisabled()
-    expect(checkbox).not.toBeChecked()
+    expect(checkbox).toBeChecked()
   })
 
   it('allows enabling when available and mode is supported', () => {

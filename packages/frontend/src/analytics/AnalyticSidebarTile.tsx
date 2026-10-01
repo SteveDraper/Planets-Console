@@ -18,8 +18,6 @@ type AnalyticSidebarTileBase = {
    * even when the current view mode is supported.
    */
   available?: boolean
-  /** Enable-checkbox checked state. Defaults to `enabled`. */
-  checked?: boolean
   /** Native title, used for inactivity hints. */
   hint?: string
 }
@@ -56,7 +54,6 @@ export function AnalyticSidebarTile({
   depressed,
   onToggle,
   available,
-  checked,
   hint,
   canExpand,
   detailsLabel,
@@ -93,7 +90,7 @@ export function AnalyticSidebarTile({
         >
           <input
             type="checkbox"
-            checked={checked ?? enabled}
+            checked={enabled}
             onChange={() => canToggle && onToggle()}
             disabled={!canToggle}
             className={analyticEnableCheckboxClassName}

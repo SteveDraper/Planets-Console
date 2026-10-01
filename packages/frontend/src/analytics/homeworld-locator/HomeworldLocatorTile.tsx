@@ -71,8 +71,8 @@ export function HomeworldLocatorTile({
   const canToggle = supportsMode && available
   const hint = available ? undefined : homeworldInactiveHint(inactiveReason)
 
-  const canExpand = canToggle && enabled
-  const fetchEnabled = canExpand && turnDataReady
+  const canLoad = canToggle && enabled
+  const fetchEnabled = canLoad && turnDataReady
 
   const perspectives = useShellStore((s) => s.gameInfoContext?.perspectives)
   const roster = perspectives ?? EMPTY_ROSTER
@@ -111,7 +111,6 @@ export function HomeworldLocatorTile({
       depressed={depressed}
       onToggle={onToggle}
       available={available}
-      checked={enabled && available}
       hint={hint}
       detailsLabel="Homeworld locator options"
     >

@@ -61,7 +61,9 @@ describe('AnalyticSidebarTile', () => {
         <span>Owned planets only</span>
       </AnalyticSidebarTile>
     )
-    expect(screen.getByRole('checkbox', { name: 'Example' })).toBeDisabled()
+    const checkbox = screen.getByRole('checkbox', { name: 'Example' })
+    expect(checkbox).toBeDisabled()
+    expect(checkbox).toBeChecked()
     expect(screen.getByRole('button', { name: 'Expand Example options' })).toBeDisabled()
     expect(screen.queryByText('Owned planets only')).not.toBeInTheDocument()
   })
@@ -72,8 +74,10 @@ describe('AnalyticSidebarTile', () => {
         <span>Normal</span>
       </AnalyticSidebarTile>
     )
+    const checkbox = screen.getByRole('checkbox', { name: 'Example' })
     expect(container.firstChild).toHaveClass('opacity-50')
-    expect(screen.getByRole('checkbox', { name: 'Example' })).toBeDisabled()
+    expect(checkbox).toBeDisabled()
+    expect(checkbox).toBeChecked()
     expect(container.firstChild).toHaveAttribute('title', 'This game has no minefields')
   })
 })
