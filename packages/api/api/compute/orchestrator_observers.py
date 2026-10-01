@@ -7,6 +7,7 @@ semantics stay in one place without thin wrappers on the orchestrator.
 
 from __future__ import annotations
 
+import queue
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -97,6 +98,10 @@ class OrchestratorObservers:
         self._dispatch_gates: list[NodeDispatchGate] = []
         self._dispatch_commit_hooks: list[NodeDispatchCommitHook] = []
         self._post_lock_callbacks: list[PostLockCallback] = []
+        # Callbacks that acquire ``_condition``. Enqueued without taking it, so a
+        # caller that already holds the condition (or a scheduler lock) can defer
+        # unregister instead of nesting the opposite lock order.
+        self._deferred_lock_callbacks: queue.SimpleQueue[PostLockCallback] = queue.SimpleQueue()
 
     @property
     def dispatch_gates(self) -> list[NodeDispatchGate]:
@@ -109,8 +114,37 @@ class OrchestratorObservers:
         return self._dispatch_commit_hooks
 
     def schedule_post_lock(self, callback: PostLockCallback) -> None:
-        """Append a callback to run after the orchestrator lock is released."""
+        """Append a callback to run after the orchestrator lock is released.
+
+        Caller holds the orchestrator condition. The callback runs from
+        ``drain_post_lock_callbacks`` with the condition released.
+        """
         self._post_lock_callbacks.append(callback)
+
+    def defer_until_lock_free(self, callback: PostLockCallback) -> None:
+        """Queue a callback that acquires the orchestrator condition.
+
+        Safe while this thread already holds the condition or a scheduler lock.
+        ``drain_deferred_lock_callbacks`` and ``drain_post_lock_callbacks`` run
+        it with the condition released.
+        """
+        self._deferred_lock_callbacks.put(callback)
+
+    def drain_deferred_lock_callbacks(self) -> None:
+        """Run callbacks queued by ``defer_until_lock_free``.
+
+        Caller must not hold the orchestrator condition: each callback acquires it.
+        """
+        for callback in self._take_deferred_lock_callbacks():
+            callback()
+
+    def _take_deferred_lock_callbacks(self) -> tuple[PostLockCallback, ...]:
+        pending: list[PostLockCallback] = []
+        while True:
+            try:
+                pending.append(self._deferred_lock_callbacks.get_nowait())
+            except queue.Empty:
+                return tuple(pending)
 
     def register_dispatch_gate(
         self,
@@ -353,10 +387,13 @@ class OrchestratorObservers:
 
     def drain_post_lock_callbacks(self) -> None:
         while True:
+            deferred = self._take_deferred_lock_callbacks()
             with self._condition:
                 callbacks = tuple(self._post_lock_callbacks)
                 self._post_lock_callbacks.clear()
-            if not callbacks:
+            if not deferred and not callbacks:
                 return
+            for callback in deferred:
+                callback()
             for callback in callbacks:
                 callback()

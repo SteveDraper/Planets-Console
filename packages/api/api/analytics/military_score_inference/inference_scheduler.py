@@ -82,13 +82,9 @@ class InferenceRowScheduler(
         # while holding ``_lock`` (scheduler → orch nests ABBA with orch drain →
         # scheduler listeners, which also hangs diagnostics snapshot on orch).
         self._execution_generation_by_run_id: dict[str, int] = {}
-        # RLock: adapter methods hold this lock across orchestrator calls. When resume_globally
-        # calls _dispatch_ready_orchestrator_work_locked, dispatch_ready_work drains post-lock
-        # callbacks in the caller thread and the scope-outcome listener
-        # (_on_orchestrator_scope_outcome, _finalize_row_run) can re-acquire the lock on that
-        # thread. pause_globally shares the same lock while updating dispatch gates. Production
-        # tier_solve uses the thread pool backend, so listener completion is usually async rather
-        # than synchronous in the dispatch caller.
+        # RLock: a scope-outcome listener running on the dispatch caller can re-enter
+        # this scheduler. Do not hold the lock across orchestrator-condition acquires
+        # (dispatch-gate register/unregister, abort_scope, execution generation).
         self._lock = threading.RLock()
         self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
         self._stream_bindings: dict[str, InferenceStreamOrchestratorBinding] = {}
@@ -375,17 +371,20 @@ class InferenceRowScheduler(
         """Detach a table stream without cancelling its in-flight row runs."""
         remaining_bindings: tuple[InferenceStreamOrchestratorBinding, ...] = ()
         clear_pause_gates = False
+        released: InferenceStreamOrchestratorBinding | None = None
         with self._lock:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
                 self._remove_run_locked(session.run_id, op=RowLifecycleOp.DETACH)
             self._drop_held_for_stream_locked(stream_token)
-            binding = self._stream_bindings.pop(stream_token, None)
-            if binding is not None:
-                self._release_stream_binding_locked(binding)
+            released = self._stream_bindings.pop(stream_token, None)
             if owns_scope:
                 clear_pause_gates = self._clear_global_pause_for_active_scope_locked(scope)
                 remaining_bindings = tuple(self._stream_bindings.values())
+        # Stream finally / GC may already hold the orchestrator condition.
+        # Queue gate unregister instead of acquiring it on this thread.
+        if released is not None:
+            self._defer_dispatch_gate_unregister(released)
         if clear_pause_gates:
             self._sync_pause_dispatch_gates(remaining_bindings, paused=False)
 
@@ -410,6 +409,8 @@ class InferenceRowScheduler(
         submit_binding: InferenceStreamOrchestratorBinding | None = None
         submit_scope: ComputeScope | None = None
         wake_deferred_scope: ComputeScope | None = None
+        new_bindings: list[InferenceStreamOrchestratorBinding] = []
+        gates_paused = False
         with self._lock:
             resolved_token = (
                 stream_token
@@ -435,16 +436,25 @@ class InferenceRowScheduler(
             else:
                 # Create the stream binding even when paused so resume can submit held
                 # work (``resume_globally`` looks up binding by stream_token).
-                binding = self._binding_for_stream_locked(resolved_token, session=session)
+                binding, created = self._binding_for_stream_locked(
+                    resolved_token,
+                    session=session,
+                )
+                if created:
+                    new_bindings.append(binding)
+                    gates_paused = self._globally_paused
                 if self._globally_paused:
                     self._held_initial_submissions.append(
                         HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
                     )
-                    return
-                # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
-                # listeners that must not nest scheduler <-> orchestrator locks.
-                submit_binding = binding
-                submit_scope = root_scope
+                else:
+                    # Submit outside the scheduler lock: ``orchestrator.submit`` drains
+                    # diagnostics listeners that must not nest scheduler <-> orchestrator
+                    # locks.
+                    submit_binding = binding
+                    submit_scope = root_scope
+        if new_bindings:
+            self._sync_pause_dispatch_gates(tuple(new_bindings), paused=gates_paused)
         if submit_binding is not None and submit_scope is not None:
             self._submit_tier_solve_locked(submit_binding, submit_scope)
         elif wake_deferred_scope is not None:
@@ -472,7 +482,9 @@ class InferenceRowScheduler(
             unregister()
             self._unregister_scope_outcome = None
         with self._lock:
-            self._invalidate_retained_state_locked()
+            released = self._invalidate_retained_state_locked()
+        for binding in released:
+            self._release_stream_binding(binding)
 
     def _emit_held_solutions(
         self,
@@ -558,20 +570,25 @@ class InferenceRowScheduler(
         stream_token: str,
         *,
         session: InferenceRowStreamSession,
-    ) -> InferenceStreamOrchestratorBinding:
+    ) -> tuple[InferenceStreamOrchestratorBinding, bool]:
+        """Install a stream binding. Caller holds ``self._lock``.
+
+        Returns ``(binding, created)``. Dispatch-gate registration is intentionally
+        not done here: ``register_dispatch_gate`` acquires the orchestrator
+        condition, and this method runs under the scheduler lock.
+        """
         from api.compute.runtime import get_compute_orchestrator
 
         existing = self._stream_bindings.get(stream_token)
         if existing is not None:
-            return existing
+            return existing, False
         query_ctx = _query_context_for_session(session, scheduler=self)
         binding = InferenceStreamOrchestratorBinding(
             orchestrator=get_compute_orchestrator(),
             query_context=query_ctx,
         )
         self._stream_bindings[stream_token] = binding
-        self._apply_dispatch_gates_locked()
-        return binding
+        return binding, True
 
     def _wake_deferred_scores_after_row_run_adopt(
         self,
@@ -648,17 +665,6 @@ class InferenceRowScheduler(
         self._held_initial_submissions = [
             held for held in self._held_initial_submissions if held.stream_token != stream_token
         ]
-
-    def _apply_dispatch_gates_locked(self) -> None:
-        """Apply pause gates for current bindings.
-
-        Prefer ``_sync_pause_dispatch_gates`` outside the scheduler lock when possible.
-        This in-lock path remains for stream-binding setup where the binding is new.
-        """
-        self._sync_pause_dispatch_gates(
-            tuple(self._stream_bindings.values()),
-            paused=self._globally_paused,
-        )
 
     def _sync_pause_dispatch_gates(
         self,
