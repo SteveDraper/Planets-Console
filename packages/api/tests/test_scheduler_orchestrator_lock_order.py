@@ -218,9 +218,7 @@ def test_scores_pause_peek_leaves_scheduler_lock_free_and_detach_returns(
             with orchestrator._condition:
                 detach_go.set()
                 if not finished.wait(timeout=2):
-                    errors.append(
-                        "scores detach blocked while the orchestrator condition was held"
-                    )
+                    errors.append("scores detach blocked while the orchestrator condition was held")
                 else:
                     acquired = scheduler._lock.acquire(timeout=1)
                     if not acquired:
