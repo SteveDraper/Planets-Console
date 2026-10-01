@@ -101,7 +101,6 @@ export function FleetAnalyticTile({
       supportsMode={supportsMode}
       depressed={depressed}
       onToggle={onToggle}
-      canExpand={orderedPlayers.length > 0}
       detailsLabel="Fleet player visibility"
     >
       <label className="flex min-w-0 w-full items-center gap-1.5">
