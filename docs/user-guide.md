@@ -87,9 +87,10 @@ On the **right** of the header:
 
 ## Analytics sidebar
 
-The left column is titled **Analytics**. Each row is one analytic with a **checkbox** and its display name.
+The left column is titled **Analytics**. Each row is one analytic with a **checkbox** and its display name. The enable checkbox uses the same styling on every row.
 
 - Check an analytic to **include** it in the current view (tabular tables or map layers, depending on mode).
+- When an analytic has extra controls (filters, a legend, layer toggles), they sit in a **chevron** pane on that row. The pane opens only while the analytic is enabled.
 - Analytics that **do not support** the current mode stay visible but look **greyed out**; their checkboxes are disabled until you switch mode.
 - The **base map** layer (planet positions as nodes) is **not** listed here; in **map** mode it is still fetched and combined automatically with whatever map-capable analytics you enable (see below).
 - Which analytics are enabled, and **Stellar Cartography** layer toggles when that analytic is used, are **remembered in the browser** and restored when you reload the page. **Minefields** type enablement, color policy, and stance colors persist the same way.
@@ -108,11 +109,10 @@ While the list of analytics is loading from the server, the main area may show *
 **Connections** shows **one-turn** ship reachability between planets (warp wells, optional **flare** tricks) for the current game, turn, and viewpoint.
 
 - **Enable** it with the **Connections** checkbox in the sidebar (map mode only in practice; tabular support may be a placeholder).
-- When enabled, a **Flares** row appears under the tile title:
+- When enabled, use the **chevron** to open **Flares**, **Depth**, **Warp** (1--9), and **Gravitonic movement** (doubles effective range in the model).
   - **Do not show flares** -- only **direct** warp-well links; pairs reachable **only** via a flare **do not** appear.
   - **Show flares** -- direct links (solid gray) **plus** flare-only links where applicable (**dashed yellow**).
   - **Show only flares** -- only flare-assisted pairs.
-- Use the **chevron** on the Connections row to expand **Warp** (1--9) and **Gravitonic movement** (doubles effective range in the model).
 
 Technical detail, API query parameters, and merge rules live in [design-connections-analytic.md](design-connections-analytic.md).
 

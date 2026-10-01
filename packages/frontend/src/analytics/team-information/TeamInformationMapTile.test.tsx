@@ -110,9 +110,9 @@ describe('TeamInformationMapTile', () => {
       />
     )
     expect(container.firstChild).toHaveClass('opacity-50')
-    for (const checkbox of screen.getAllByRole('checkbox')) {
-      expect(checkbox).toBeDisabled()
-    }
+    expect(screen.getByRole('checkbox', { name: 'Team information' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Expand Team information options' })).toBeDisabled()
+    expect(screen.queryByRole('checkbox', { name: 'Owned planets only' })).not.toBeInTheDocument()
     expect(fetchTeamInformationMap).not.toHaveBeenCalled()
     expect(fetchLeagueTeams).not.toHaveBeenCalled()
   })
@@ -131,6 +131,7 @@ describe('TeamInformationMapTile', () => {
       />,
       seedTurnRoster
     )
+    await user.click(screen.getByRole('button', { name: 'Expand Team information options' }))
     expect(await screen.findByText('Blue Squadron')).toBeInTheDocument()
     expect(screen.getByRole('listitem')).toHaveAttribute('title', 'alice, carol')
     expect(screen.queryByText('4')).not.toBeInTheDocument()
@@ -167,6 +168,7 @@ describe('TeamInformationMapTile', () => {
       />,
       seedTurnRoster
     )
+    await user.click(screen.getByRole('button', { name: 'Expand Team information options' }))
     const showTerritory = await screen.findByRole('checkbox', {
       name: 'Show Blue Squadron territory',
     })
@@ -182,6 +184,7 @@ describe('TeamInformationMapTile', () => {
   })
 
   it('shows the numeric id when the directory name is null and still hides usernames', async () => {
+    const user = userEvent.setup()
     vi.mocked(fetchLeagueTeams).mockResolvedValue({
       teams: [{ id: 4, name: null }],
     })
@@ -197,6 +200,7 @@ describe('TeamInformationMapTile', () => {
       />,
       seedTurnRoster
     )
+    await user.click(screen.getByRole('button', { name: 'Expand Team information options' }))
     expect(await screen.findByText('4')).toBeInTheDocument()
     expect(screen.queryByText('alice, carol')).not.toBeInTheDocument()
     expect(screen.queryByText('alice')).not.toBeInTheDocument()

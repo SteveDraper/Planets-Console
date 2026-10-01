@@ -83,6 +83,22 @@ describe('FleetAnalyticTile', () => {
     expect(screen.queryByLabelText('Alice')).not.toBeInTheDocument()
   })
 
+  it('opens the heading trail control when the player roster is empty', async () => {
+    const user = userEvent.setup()
+    useShellStore.setState((state) => ({
+      ...state,
+      gameInfoContext: state.gameInfoContext
+        ? { ...state.gameInfoContext, perspectives: [] }
+        : null,
+    }))
+    renderTile()
+    const expand = screen.getByLabelText('Expand Fleet player visibility')
+    expect(expand).toBeEnabled()
+    await user.click(expand)
+    expect(screen.getByLabelText('Fleet heading trail extend turns')).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'Alice' })).not.toBeInTheDocument()
+  })
+
   it('shows all players enabled by default', async () => {
     const user = userEvent.setup()
     renderTile()

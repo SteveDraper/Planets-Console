@@ -114,6 +114,10 @@ The names `planets/`, `PlanetList`, and `usePlanets` used elsewhere in this file
 
 A component starts in its feature folder. If it later becomes reusable across multiple features, promote it to `src/components/`.
 
+### Analytics sidebar
+
+Every analytics-bar row is `AnalyticSidebarTile` (`src/analytics/AnalyticSidebarTile.tsx`): shared enable checkbox, tile chrome, and chevron. Extra controls are `children` and render only in the expanded pane. Do not copy the header markup into a new tile. See [design-adding-a-turn-analytic.md](../../docs/design-adding-a-turn-analytic.md) §4.
+
 ## Graphs — React Flow
 
 - Wrap React Flow in a feature-specific component; never use it directly in a route

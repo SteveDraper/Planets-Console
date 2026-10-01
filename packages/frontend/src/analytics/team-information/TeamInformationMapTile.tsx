@@ -6,7 +6,7 @@ import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useShellStore } from '../../stores/shell'
 import { useTeamInformationHighlightStore } from '../../stores/teamInformationHighlight'
 import { useTeamInformationPreferencesStore } from '../../stores/teamInformationPreferences'
-import { tileClassName } from '../tileChrome'
+import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
 import {
   teamInformationLegendHoverTitle,
   teamInformationLegendRows,
@@ -91,44 +91,25 @@ export function TeamInformationMapTile({
   useEffect(() => () => setHoveredLeagueTeamId(null), [setHoveredLeagueTeamId])
 
   return (
-    <div
-      className={cn(
-        tileClassName({ supportsMode, depressed }),
-        'flex min-w-0 max-w-full flex-col'
-      )}
+    <AnalyticSidebarTile
+      name={name}
+      enabled={enabled}
+      supportsMode={supportsMode}
+      depressed={depressed}
+      onToggle={onToggle}
+      detailsLabel="Team information options"
     >
-      <label
-        className={cn(
-          'flex cursor-pointer items-center gap-2 px-2 py-1.5',
-          !supportsMode && 'cursor-default'
-        )}
-      >
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={() => supportsMode && onToggle()}
-          disabled={!supportsMode}
-          className="h-4 w-4 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
-        />
-        <span className="min-w-0 truncate">{name}</span>
-      </label>
-      <label
-        className={cn(
-          'flex items-center gap-2 px-2 pb-1.5',
-          supportsMode ? 'cursor-pointer' : 'cursor-default'
-        )}
-      >
+      <label className="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
           checked={ownedPlanetsOnly}
           onChange={(event) => setOwnedPlanetsOnly(event.target.checked)}
-          disabled={!supportsMode}
-          className="h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+          className={analyticDetailCheckboxClassName}
         />
-        <span className="min-w-0 truncate text-xs text-slate-300">Owned planets only</span>
+        <span className="min-w-0 truncate">Owned planets only</span>
       </label>
       {showLegend ? (
-        <ul aria-label="League teams" className="flex flex-col gap-1 border-t border-[#52575d]/40 px-2 py-2">
+        <ul aria-label="League teams" className="flex flex-col gap-1">
           {legendRows.map((row) => {
             const legendText = teamInformationLegendText(row)
             return (
@@ -146,7 +127,7 @@ export function TeamInformationMapTile({
                   onChange={(event) =>
                     setLeagueTeamRegionVisible(row.leagueTeamId, event.target.checked)
                   }
-                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-[#52575d] bg-slate-700 text-slate-200 accent-slate-400 focus:ring-[#52575d] focus:ring-offset-0"
+                  className={cn(analyticDetailCheckboxClassName, 'mt-0.5')}
                 />
                 <span
                   aria-hidden
@@ -173,6 +154,6 @@ export function TeamInformationMapTile({
           })}
         </ul>
       ) : null}
-    </div>
+    </AnalyticSidebarTile>
   )
 }

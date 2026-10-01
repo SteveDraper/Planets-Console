@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { GenericAnalyticCheckbox } from './GenericAnalyticCheckbox'
+import { AnalyticSidebarTile } from './AnalyticSidebarTile'
 import {
   shellAnalyticRegistrationFor,
   sidebarTileChrome,
@@ -12,5 +12,5 @@ export function renderShellAnalyticSidebar(ctx: ShellAnalyticSidebarContext): Re
   if (custom != null) {
     return custom
   }
-  return <GenericAnalyticCheckbox {...sidebarTileChrome(ctx)} />
+  return <AnalyticSidebarTile {...sidebarTileChrome(ctx)} />
 }
