@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
@@ -27,6 +26,9 @@ from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
+from api.streaming.table_stream.scheduler_orchestrator_attachment import (
+    SchedulerOrchestratorAttachment,
+)
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
 from api.transport.fleet_table_stream import fleet_error_event
 
@@ -39,10 +41,13 @@ __all__ = [
 
 @dataclass
 class _FleetStreamOrchestratorBinding:
-    """One table-stream's leader context on the process-wide singleton orchestrator."""
+    """One table-stream's leader context on the process-wide singleton orchestrator.
+
+    Query context only. The scope-outcome listener is scheduler-lifetime; see
+    ``SchedulerOrchestratorAttachment``.
+    """
 
     orchestrator: ComputeOrchestrator
-    unregister_listener: Callable[[], None]
     query_context: AnalyticQueryContext
 
 
@@ -77,37 +82,23 @@ class FleetTableStreamScheduler:
         self._lock = threading.Lock()
         self._scope_guard = TableStreamScopeGuard[FleetTableStreamScope]()
         self._stream_bindings: dict[str, _FleetStreamOrchestratorBinding] = {}
-        self._binding_register_events: dict[str, threading.Event] = {}
+        self._orchestrator_attachment = SchedulerOrchestratorAttachment(
+            on_scope_outcome=self._on_orchestrator_scope_outcome,
+        )
 
     def begin_scope(self, scope: FleetTableStreamScope) -> str:
         """Claim the active fleet table-stream scope.
 
-        Preempt drops runs under ``self._lock`` and defers orchestrator listener
-        unregister. When a binding was popped, the deferred unregister runs after
-        the lock is released, so this method blocks on the orchestrator condition
-        without holding ``self._lock``. Callers must not already hold that
-        condition.
+        Preempt drops runs under ``self._lock``. The scope-outcome listener is
+        registered after that lock is released, once per process orchestrator.
         """
-        should_drain = False
-
-        def on_same_scope_preempt() -> None:
-            nonlocal should_drain
-            should_drain = should_drain or bool(self._stream_bindings)
-            self._preempt_active_table_stream_locked()
-
-        def on_scope_change() -> None:
-            nonlocal should_drain
-            should_drain = should_drain or bool(self._stream_bindings)
-            self._invalidate_retained_state_locked()
-
         with self._lock:
             token = self._scope_guard.begin_scope_locked(
                 scope,
-                on_same_scope_preempt=on_same_scope_preempt,
-                on_scope_change=on_scope_change,
+                on_same_scope_preempt=self._preempt_active_table_stream_locked,
+                on_scope_change=self._invalidate_retained_state_locked,
             )
-        if should_drain:
-            get_compute_orchestrator().observers.drain_deferred_lock_callbacks()
+        self._orchestrator_attachment.ensure_registered()
         return token
 
     def owns_table_stream(self, stream_token: str) -> bool:
@@ -190,17 +181,10 @@ class FleetTableStreamScheduler:
             if early is not None:
                 return early.session
             assert stream_token is not None
-
-        # Listener registration takes the orchestrator condition. Never do that
-        # while holding ``self._lock`` (fleet lock -> orchestrator condition).
-        binding = self._binding_for_stream(stream_token, query_context=query_context)
-
-        with self._lock:
-            early = self._enqueue_admission_early_return_locked(
-                player_id, stream_token=stream_token
+            binding = self._binding_for_stream_locked(
+                stream_token,
+                query_context=query_context,
             )
-            if early is not None:
-                return early.session
             progress_tracker = FleetLedgerWireProgressTracker(
                 host_turn=host_turn,
                 wire_before=wire_before,
@@ -229,6 +213,7 @@ class FleetTableStreamScheduler:
             submit_binding = binding
             submit_scope = root_scope
 
+        self._orchestrator_attachment.ensure_registered()
         if submit_binding is not None and submit_scope is not None:
             submit_binding.orchestrator.submit(
                 ComputeRequest(
@@ -279,73 +264,42 @@ class FleetTableStreamScheduler:
         *,
         stream_token: str,
     ) -> None:
-        """Drop one stream's runs and queue listener unregister.
+        """Drop one stream's runs and its query-context binding.
 
-        Unregister is deferred. This method returns even when the caller already
-        holds the orchestrator condition (generator ``finally`` during garbage
-        collection). ``drain_deferred_lock_callbacks`` removes the listener.
+        Does not touch the orchestrator. Safe when the caller already holds the
+        orchestrator condition (generator ``finally`` during garbage collection).
         """
         with self._lock:
             self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
                 session.cancel_token.cancel()
                 self._runs.pop(session.run_id, None)
-            binding = self._stream_bindings.pop(stream_token, None)
-            if binding is not None:
-                self._defer_binding_unregister_locked(binding)
+            self._stream_bindings.pop(stream_token, None)
 
-    def _binding_for_stream(
+    def _binding_for_stream_locked(
         self,
         stream_token: str,
         *,
         query_context: AnalyticQueryContext,
     ) -> _FleetStreamOrchestratorBinding:
-        """Return the stream binding, registering its listener outside ``self._lock``.
+        """Install the stream's query context. Caller holds ``self._lock``.
 
-        Parallel admits for one token share a single registration. Waiters block
-        on a per-token ``Event``, not on the fleet lock or the orchestrator
-        condition.
+        Does not register an orchestrator listener.
         """
-        while True:
-            with self._lock:
-                existing = self._stream_bindings.get(stream_token)
-                if existing is not None:
-                    return existing
-                event = self._binding_register_events.get(stream_token)
-                if event is None:
-                    event = threading.Event()
-                    self._binding_register_events[stream_token] = event
-                    register_owner = True
-                else:
-                    register_owner = False
-            if not register_owner:
-                event.wait()
-                continue
-            try:
-                if query_context is None:
-                    raise ValueError(
-                        "fleet table-stream admit requires AnalyticQueryContext; "
-                        "production must pass the TurnAnalyticService factory ctx"
-                    )
-                orchestrator = get_compute_orchestrator()
-                unregister = orchestrator.observers.register_scope_outcome_listener(
-                    self._on_orchestrator_scope_outcome,
-                )
-                binding = _FleetStreamOrchestratorBinding(
-                    orchestrator=orchestrator,
-                    unregister_listener=unregister,
-                    query_context=query_context,
-                )
-                with self._lock:
-                    self._stream_bindings[stream_token] = binding
-                    if self._binding_register_events.get(stream_token) is event:
-                        self._binding_register_events.pop(stream_token, None)
-                return binding
-            finally:
-                event.set()
-                with self._lock:
-                    if self._binding_register_events.get(stream_token) is event:
-                        self._binding_register_events.pop(stream_token, None)
+        existing = self._stream_bindings.get(stream_token)
+        if existing is not None:
+            return existing
+        if query_context is None:
+            raise ValueError(
+                "fleet table-stream admit requires AnalyticQueryContext; "
+                "production must pass the TurnAnalyticService factory ctx"
+            )
+        binding = _FleetStreamOrchestratorBinding(
+            orchestrator=get_compute_orchestrator(),
+            query_context=query_context,
+        )
+        self._stream_bindings[stream_token] = binding
+        return binding
 
     def _on_orchestrator_scope_outcome(
         self,
@@ -407,26 +361,11 @@ class FleetTableStreamScheduler:
             if stream_events:
                 _wake_multiplex_for_session(session)
 
-    def _defer_binding_unregister_locked(
-        self,
-        binding: _FleetStreamOrchestratorBinding,
-    ) -> None:
-        """Queue listener unregister. Caller may hold ``self._lock``.
-
-        ``unregister_listener`` acquires the orchestrator condition. Running it
-        here would nest fleet lock -> orchestrator condition, and a
-        garbage-collection finalizer that already holds the condition would
-        self-deadlock. Drain runs the callback with both locks free.
-        """
-        binding.orchestrator.observers.defer_until_lock_free(binding.unregister_listener)
-
     def _preempt_active_table_stream_locked(self) -> None:
         for run in self._runs.values():
             run.session.cancel_token.cancel()
         self._runs.clear()
-        for stream_token in list(self._stream_bindings):
-            binding = self._stream_bindings.pop(stream_token)
-            self._defer_binding_unregister_locked(binding)
+        self._stream_bindings.clear()
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()

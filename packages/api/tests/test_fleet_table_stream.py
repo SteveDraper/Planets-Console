@@ -875,7 +875,6 @@ def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
     scheduler = FleetTableStreamScheduler()
     scheduler._stream_bindings["tok"] = _FleetStreamOrchestratorBinding(
         orchestrator=None,  # type: ignore[arg-type]
-        unregister_listener=lambda: None,
         query_context=ctx,
     )
     scheduler._runs[session.run_id] = _FleetPlayerOrchestratorRun(
