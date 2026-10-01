@@ -1,17 +1,20 @@
 """Scheduler locks must not be held while acquiring the orchestrator condition.
 
 Fleet and scores attach to the process orchestrator once per scheduler
-(``SchedulerOrchestratorAttachment``). Stream preempt, end, pause, and detach
-only mutate scheduler maps, so a caller that already holds the orchestrator
-condition can finish them.
+(``SchedulerOrchestratorAttachment``). Stream preempt, end, and detach only
+mutate scheduler maps, so a caller that already holds the orchestrator
+condition can finish them. Pause status peeks that orchestrator after
+releasing the scheduler lock, so the lock stays free while the peek waits.
 """
 
 from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.fleet_table_stream_scheduler import FleetTableStreamScheduler
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -19,12 +22,16 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_teardown import (
+    InferenceStreamOrchestratorBinding,
+)
 from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
 from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator_observers import OrchestratorObservers
 from api.compute.pools import reset_compute_worker_pool_for_tests
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
+from api.compute.scope import ComputeScope
 
 
 @pytest.fixture(autouse=True)
@@ -153,41 +160,78 @@ def test_scores_pause_rebinds_dispatch_gate_after_orchestrator_reset() -> None:
         scheduler.shutdown()
 
 
-def test_scores_pause_and_detach_return_while_orchestrator_condition_held() -> None:
+def test_scores_pause_peek_leaves_scheduler_lock_free_and_detach_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     scheduler = InferenceRowScheduler()
     scope = _scores_scope()
     token = scheduler.begin_scope(scope)
     orchestrator = get_compute_orchestrator()
+    # Pause status reads binding.orchestrator. Query context is unused on this path.
+    scheduler._stream_bindings[token] = InferenceStreamOrchestratorBinding(
+        orchestrator=orchestrator,
+        query_context=cast(AnalyticQueryContext, SimpleNamespace()),
+    )
+    entered_peek = threading.Event()
+    real_peek = orchestrator.peek_ready_step_indexes
+
+    def _peek(scopes: tuple[ComputeScope, ...]) -> dict[ComputeScope, int]:
+        entered_peek.set()
+        return real_peek(scopes)
+
+    monkeypatch.setattr(orchestrator, "peek_ready_step_indexes", _peek)
     orchestrator_held = threading.Event()
+    pause_finished = threading.Event()
+    detach_go = threading.Event()
     finished = threading.Event()
     errors: list[str] = []
+    pause_blocked_without_scheduler_lock = False
 
-    def _pause_and_detach() -> None:
+    def _pause_then_detach() -> None:
         assert orchestrator_held.wait(timeout=2)
         scheduler.pause_globally(scope)
+        pause_finished.set()
+        assert detach_go.wait(timeout=2)
         scheduler.detach_inference_stream(scope, (), stream_token=token)
         finished.set()
 
-    worker = threading.Thread(target=_pause_and_detach)
+    worker = threading.Thread(target=_pause_then_detach)
     worker.start()
     try:
         with orchestrator._condition:
             orchestrator_held.set()
-            if not finished.wait(timeout=2):
-                errors.append(
-                    "scores pause/detach blocked while the orchestrator condition was held"
-                )
+            if not entered_peek.wait(timeout=2):
+                errors.append("pause did not reach the orchestrator peek")
             else:
                 acquired = scheduler._lock.acquire(timeout=1)
                 if not acquired:
-                    errors.append("inference scheduler lock still held after pause/detach")
+                    errors.append(
+                        "inference scheduler lock held while pause waited on the "
+                        "orchestrator condition"
+                    )
                 else:
                     scheduler._lock.release()
+                    pause_blocked_without_scheduler_lock = True
+        if pause_blocked_without_scheduler_lock and not pause_finished.wait(timeout=2):
+            errors.append("pause did not finish after the orchestrator condition was released")
+        elif pause_blocked_without_scheduler_lock:
+            with orchestrator._condition:
+                detach_go.set()
+                if not finished.wait(timeout=2):
+                    errors.append(
+                        "scores detach blocked while the orchestrator condition was held"
+                    )
+                else:
+                    acquired = scheduler._lock.acquire(timeout=1)
+                    if not acquired:
+                        errors.append("inference scheduler lock still held after detach")
+                    else:
+                        scheduler._lock.release()
         worker.join(timeout=2)
         if worker.is_alive():
-            errors.append(
-                "scores pause/detach thread still blocked after the condition was released"
-            )
+            errors.append("scores pause/detach thread still blocked")
         assert errors == []
     finally:
+        detach_go.set()
+        worker.join(timeout=2)
         scheduler.shutdown()
