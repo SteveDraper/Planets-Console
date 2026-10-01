@@ -31,18 +31,11 @@ type AnalyticSidebarTileProps = AnalyticSidebarTileBase &
     | {
         children?: undefined
         detailsLabel?: undefined
-        canExpand?: undefined
       }
     | {
         children: ReactNode
         /** Accessible name: Expand/Collapse {detailsLabel}. */
         detailsLabel: string
-        /**
-         * Extra gate for the chevron. Omit to enable it whenever the row can
-         * be toggled and the analytic is enabled. Pass false when the pane
-         * would be empty.
-         */
-        canExpand?: boolean
       }
   )
 
@@ -59,13 +52,12 @@ export function AnalyticSidebarTile({
   onToggle,
   available,
   hint,
-  canExpand,
   detailsLabel,
   children,
 }: AnalyticSidebarTileProps) {
   const canToggle = supportsMode && (available ?? true)
   const hasDetails = children != null
-  const detailsOpenable = hasDetails && canToggle && enabled && (canExpand ?? true)
+  const detailsOpenable = hasDetails && canToggle && enabled
   const [expanded, setExpanded] = useState(false)
   const [prevDetailsOpenable, setPrevDetailsOpenable] = useState(detailsOpenable)
   if (detailsOpenable !== prevDetailsOpenable) {
