@@ -128,6 +128,8 @@ Adding a **turn analytic** touches:
 
 Frontend **Shell chrome** is **optional** and sparse: a **shell analytic registration** (`shellAnalyticRegistry.ts`) when generic checkbox + generic table are not enough. Map fetch/merge is a sibling registry (`mapAnalyticRegistry.ts`). See [design-adding-a-turn-analytic.md §4](design-adding-a-turn-analytic.md#4-frontend-optional) and [ADR 0026](adr/0026-shell-analytic-registration.md).
 
+Every analytics-bar row, including the generic checkbox, is `AnalyticSidebarTile`. The enable checkbox and tile chrome are that component. When an analytic has extra controls, they are the tile's children and appear only in the chevron pane, and only while the analytic is enabled for the current view mode. Do not hand-roll a second header.
+
 ### Frontend map fetch vs Shell chrome
 
 The SPA does **not** put map GET orchestration on the shell registration, and it does **not** branch on analytic id in `MainArea`:

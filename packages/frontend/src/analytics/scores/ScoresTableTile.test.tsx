@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -33,6 +34,11 @@ function renderTile(ui: ReactNode) {
   })
 }
 
+async function expandScoresOptions() {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'Expand Scores options' }))
+}
+
 describe('ScoresTableTile', () => {
   beforeEach(async () => {
     const { fetchAnalyticTable } = await import('../../api/bff')
@@ -60,6 +66,7 @@ describe('ScoresTableTile', () => {
       />
     )
 
+    await expandScoresOptions()
     const inferenceCheckbox = await screen.findByLabelText('Include build inference')
     await waitFor(() => {
       expect(inferenceCheckbox).not.toBeDisabled()
@@ -83,6 +90,7 @@ describe('ScoresTableTile', () => {
       />
     )
 
+    expect(screen.getByRole('button', { name: 'Expand Scores options' })).toBeDisabled()
     expect(screen.queryByLabelText('Include build inference')).toBeNull()
   })
 
@@ -109,6 +117,7 @@ describe('ScoresTableTile', () => {
       />
     )
 
+    await expandScoresOptions()
     const inferenceCheckbox = await screen.findByLabelText('Include build inference')
     await waitFor(() => {
       expect(inferenceCheckbox).toBeDisabled()
@@ -119,7 +128,7 @@ describe('ScoresTableTile', () => {
     })
   })
 
-  it('keeps include build inference disabled until availability is known', () => {
+  it('keeps include build inference disabled until availability is known', async () => {
     renderTile(
       <ScoresTableTile
         name="Scores"
@@ -132,6 +141,7 @@ describe('ScoresTableTile', () => {
       />
     )
 
+    await expandScoresOptions()
     const inferenceCheckbox = screen.getByLabelText('Include build inference')
     expect(inferenceCheckbox).toBeDisabled()
     expect(inferenceCheckbox).not.toHaveAttribute('title')

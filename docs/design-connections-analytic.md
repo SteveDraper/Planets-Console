@@ -107,7 +107,7 @@ The BFF does not recompute logic; it forwards to Core **`get_turn_analytics`** w
   - **`flareMode`** (`off` \| `include` \| `only`),
   - **`flareDepth`** (1--3; hop budget / annulus cap as above; **Depth** in the UI).
 
-Controls live in **`ConnectionsMapTile`**: **Flares** and **Depth** are shown when Connections is enabled; **Warp** and **Gravitonic** sit in the expandable section (chevron).
+Controls live in the shared sidebar chevron pane on **`ConnectionsMapTile`**: **Flares**, **Depth**, **Warp**, and **Gravitonic**. The pane opens only while Connections is enabled.
 
 **Important:** With **`flareMode: off`**, the server **drops** pairs that are **only** reachable via flare. For maps where the only link between two planets is a flare, you must use **`include`** or **`only`** to see an edge.
 

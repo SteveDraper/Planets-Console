@@ -282,6 +282,8 @@ An unregistered selectable id is not an error: generic checkbox + generic table.
 
 `renderSidebar` receives `ShellAnalyticSidebarContext`: `viewMode`, `catalogItem`, `enabled`, `onToggle`, plus shell-owned `turnDataReady` and `analyticScope` so tiles do not re-derive ensure/scope.
 
+**Sidebar row chrome.** Every analytics-bar row is [`AnalyticSidebarTile`](../packages/frontend/src/analytics/AnalyticSidebarTile.tsx): the enable checkbox, the catalog name, and the depressed/raised tile. The enable checkbox uses one shared class (`analyticEnableCheckboxClassName`) so the accent is the same on every row. Extra controls (filters, legends, layer toggles) are `children` and render only in the chevron pane. The chevron is enabled only when the row can be toggled and the analytic is enabled; pass `canExpand={false}` when the pane would be empty. A row with no extra controls omits the chevron (the generic checkbox). Do not copy the header markup into a new tile.
+
 Generic paths (no frontend module required):
 
 - **Table:** `MainArea` uses `TableView` when registered, otherwise `GenericTableTile` calling `fetchAnalyticTable(analyticId, analyticScope)`.
@@ -318,6 +320,7 @@ Do not add `if (analyticId === ...)` in `MainArea` for map fetch. A new parametr
 
 - [ ] Query wire names match BFF and `api/transport/` (if params cross layers)
 - [ ] Custom chrome is a `ShellAnalyticChrome` plus one registry line; extra GET params go in `shellAnalyticQueryParams.ts`; `App` / `AnalyticsBar` / `MainArea` / generic fetch stay id-switch free
+- [ ] Sidebar extra controls are `children` of `AnalyticSidebarTile` (chevron pane). Do not hand-roll the enable checkbox, tile chrome, or chevron
 - [ ] Unregistered selectable ids fall back to generic checkbox + generic table (not an error)
 - [ ] Map fetch/merge stays on `mapAnalyticRegistry`; map paint remains [#383](https://github.com/SteveDraper/Planets-Console/issues/383)
 - [ ] Connections-style knobs: analytic-owned ephemeral store, not `App` `useState` and not persisted unless the product asks for it
