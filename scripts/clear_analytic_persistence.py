@@ -184,9 +184,9 @@ def _clear_fleet_turn(
     dry_run: bool,
     result: ClearAnalyticPersistenceResult,
 ) -> None:
-    """Delete per-player fleet ledger files at one turn, plus a legacy shared document."""
+    """Delete per-player fleet ledger files at one turn."""
     fleet = FleetSnapshotPersistenceService(storage)
-    prefix = fleet.document_key(game_id, perspective, turn_number)
+    prefix = fleet.ledger_prefix(game_id, perspective, turn_number)
     for segment in _list_segments(storage, prefix):
         if not segment.isdigit():
             continue
@@ -196,7 +196,6 @@ def _clear_fleet_turn(
             dry_run=dry_run,
             result=result,
         )
-    _delete_document(storage, prefix, dry_run=dry_run, result=result)
 
 
 def _clear_fleet_evidence_marks(

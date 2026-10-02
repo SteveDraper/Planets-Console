@@ -24,6 +24,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.errors import NotFoundError, UnhandledFormatError
+from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.file_backend_io_accounting import CountingStorageBackend, FileIoCounts
@@ -169,7 +170,7 @@ def _legacy_players_document(sample_ledger: FleetAcquisitionLedger) -> dict:
 
 
 def test_unversioned_players_document_is_split_on_open(sample_ledger):
-    key = FleetSnapshotPersistenceService.document_key(628580, 1, 111)
+    key = FleetSnapshotPersistenceService.ledger_prefix(628580, 1, 111)
     backend = MemoryAssetBackend(
         documents={key: _legacy_players_document(sample_ledger)},
         migrations=(fleet_storage_migration(),),
@@ -191,7 +192,7 @@ def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
     backend = MemoryAssetBackend(initial={}, migrations=(fleet_storage_migration(),))
     persistence = FleetSnapshotPersistenceService(backend)
     legacy_document = _legacy_players_document(sample_ledger)
-    backend.put(persistence.document_key(628580, 1, 111), legacy_document)
+    backend.put(persistence.ledger_prefix(628580, 1, 111), legacy_document)
 
     with pytest.raises(
         UnhandledFormatError,
@@ -199,7 +200,7 @@ def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
     ):
         persistence.get_ledger(628580, 1, 111, 8)
 
-    assert backend.get(persistence.document_key(628580, 1, 111)) == legacy_document
+    assert backend.get(persistence.ledger_prefix(628580, 1, 111)) == legacy_document
     assert not backend.has_document(persistence.ledger_key(628580, 1, 111, 8))
 
 
@@ -277,6 +278,55 @@ def test_delete_ledger_removes_one_player_entry(persistence, sample_ledger):
 
     assert persistence.get_ledger(628580, 1, 111, 8) is None
     assert persistence.get_ledger(628580, 1, 111, 3) is not None
+    assert persistence.list_ledger_player_ids(628580, 1, 111) == [3]
+
+
+def test_delete_snapshot_removes_all_player_ledgers(persistence, memory_backend, sample_ledger):
+    other_ledger = FleetAcquisitionLedger(player_id=3, player_name="other")
+    persistence.put_ledger(628580, 1, 111, 8, PersistedFleetLedger(ledger=sample_ledger))
+    persistence.put_ledger(628580, 1, 111, 3, PersistedFleetLedger(ledger=other_ledger))
+    prefix = persistence.ledger_prefix(628580, 1, 111)
+
+    persistence.delete_snapshot(628580, 1, 111)
+
+    assert persistence.list_ledger_player_ids(628580, 1, 111) == []
+    assert persistence.get_snapshot(628580, 1, 111) is None
+    assert persistence.get_ledger(628580, 1, 111, 8) is None
+    assert persistence.get_ledger(628580, 1, 111, 3) is None
+    assert not memory_backend.has_document(prefix)
+    with pytest.raises(NotFoundError):
+        memory_backend.list(prefix)
+
+
+def test_delete_last_ledger_prunes_empty_dirs_on_file_backend(tmp_path, sample_ledger):
+    storage_root = tmp_path / "data"
+    backend = FileStorageBackend(storage_root)
+    persistence = FleetSnapshotPersistenceService(backend)
+    other_ledger = FleetAcquisitionLedger(player_id=3, player_name="other")
+    persistence.put_ledger(628580, 1, 111, 8, PersistedFleetLedger(ledger=sample_ledger))
+    persistence.put_ledger(628580, 1, 111, 3, PersistedFleetLedger(ledger=other_ledger))
+    prefix = persistence.ledger_prefix(628580, 1, 111)
+    fleet_dir = storage_root / "games" / "628580" / "1" / "turns" / "111" / "analytics" / "fleet"
+    assert (fleet_dir / "8.json").is_file()
+    assert (fleet_dir / "3.json").is_file()
+
+    persistence.delete_ledger(628580, 1, 111, 8)
+    assert persistence.list_ledger_player_ids(628580, 1, 111) == [3]
+    assert (fleet_dir / "3.json").is_file()
+    assert not (fleet_dir / "8.json").exists()
+
+    persistence.delete_snapshot(628580, 1, 111)
+
+    assert persistence.list_ledger_player_ids(628580, 1, 111) == []
+    assert persistence.get_snapshot(628580, 1, 111) is None
+    assert not backend.has_document(prefix)
+    assert not fleet_dir.exists()
+    parent_document = (
+        storage_root / "games" / "628580" / "1" / "turns" / "111" / "analytics" / "fleet.json"
+    )
+    assert not parent_document.exists()
+    with pytest.raises(NotFoundError):
+        backend.list(prefix)
 
 
 def test_put_ledger_does_not_invoke_on_snapshot_persisted(persistence, sample_ledger):

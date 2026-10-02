@@ -100,7 +100,7 @@ class FleetSnapshotPersistenceService:
         self._generation_lock = threading.Lock()
 
     @staticmethod
-    def document_key(game_id: int, perspective: int, turn_number: int) -> str:
+    def ledger_prefix(game_id: int, perspective: int, turn_number: int) -> str:
         """Directory prefix of per-player ledger documents for one turn."""
         return f"games/{game_id}/{perspective}/turns/{turn_number}/analytics/{ANALYTIC_ID}"
 
@@ -323,7 +323,6 @@ class FleetSnapshotPersistenceService:
         for player_id in self._list_player_ids(game_id, perspective, turn_number):
             self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
             self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
-        self._delete_if_present(self.document_key(game_id, perspective, turn_number))
 
     def evidence_mark(
         self,
@@ -678,7 +677,7 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         turn_number: int,
     ) -> list[int]:
-        prefix = self.document_key(game_id, perspective, turn_number)
+        prefix = self.ledger_prefix(game_id, perspective, turn_number)
         player_ids: list[int] = []
         for segment in self._list_segments(prefix):
             if segment.isdigit():

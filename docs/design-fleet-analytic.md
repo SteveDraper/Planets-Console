@@ -227,7 +227,7 @@ Each file is that player's **fleet acquisition ledger**, **fleet materialization
 | **Invalidation** | Turn document replace at `T`: delete fleet ledger files at turns `>= T` at that **perspective**. Durable scores evidence for player P at host *H*: bump P's evidence mark only. Held-solution admission bumps the in-memory epoch only and does not touch ledger files |
 | **Materialization version** | Per ledger file. Bump conservatively when materialization semantics change. Stale version --> delete that player's file and treat as a cache miss |
 | **Invalidation generation** | In-memory per `(gameId, perspective, playerId)` counter bumped on fleet invalidation; gap-fill aborts mid-chain when it advances (see section 5.1). Durable **fleet evidence generation** is a separate per-player mark |
-| **Migration** | Legacy monolithic snapshot, then the shared turn document, split on read into `fleet/{playerId}` files |
+| **Migration** | Legacy monolithic snapshot, then the shared turn document, split into `fleet/{playerId}` files by the storage migration in [ADR 0033](adr/0033-storage-versioned-breakpoint-migrations.md) when the directory opens. Fleet reads do not detect that shape |
 | **Shared turn context** | Global id-bound inputs from RST scoreboard totals are read once per turn; not stored as a cross-player mutable ledger |
 
 ### 5.1 Gap-fill scope, concurrency, and `ConflictError`
