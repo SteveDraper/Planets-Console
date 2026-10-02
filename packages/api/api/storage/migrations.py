@@ -83,17 +83,18 @@ class StorageMigration:
     ``introduced_pattern`` is the longer breakpoint this step adds. A structural
     handler rewrites document shape before generic re-home. ``rehome_map_suffix``
     is the in-document map whose keys become the new path segment.
-    ``retires_parent`` means a leftover parent document is the old layout when it
-    still contains one of ``retired_keys``. A parent without those keys is a
-    current document at the shorter breakpoint.
+    ``remove_parent`` deletes that parent after the children are written. When it
+    is false, the map is removed and the parent is written back.
+    ``holds_retired_path``, when set, reports whether a copied-in parent still
+    contains the requested breakpoint. Re-home residue is checked either way.
     """
 
     version: int
     introduced_pattern: tuple[str, ...]
     structural_handler: StructuralHandler | None = None
     rehome_map_suffix: str | None = None
-    retires_parent: bool = False
-    retired_keys: tuple[str, ...] = ()
+    remove_parent: bool = False
+    holds_retired_path: Callable[[JSONValue, str], bool] | None = None
 
 
 def version_label(version: int | None) -> str:
@@ -143,28 +144,22 @@ def generic_rehome(
     introduced_pattern: tuple[str, ...],
     map_suffix: str,
     patterns: BreakpointPatterns,
+    *,
+    remove_parent: bool = False,
 ) -> None:
     """Move each child of ``map_suffix`` onto ``introduced_pattern``.
 
-    The logical key ``{parent}/{map_suffix}/{child}`` keeps the same JSON value.
-    Those children are removed from the parent document.
+    Each real child key is resolved as ``{parent}/{map_suffix}/{child}`` against
+    the full breakpoint registry and again with ``introduced_pattern`` removed.
+    When ``remove_parent`` is true and the map is present, children are written
+    and the parent document is deleted, including when the map is empty.
+    Otherwise the map is removed and the parent is written back.
     """
     reduced = tuple(pattern for pattern in patterns if pattern != introduced_pattern)
     paths = [path for path in store.iter_document_paths() if path != STORAGE_VERSION_KEY]
     for path in paths:
-        probe = f"{path}/{map_suffix}/_"
-        try:
-            new_breakpoint, new_suffix = resolve_breakpoint(probe, patterns)
-            old_breakpoint, _old_suffix = resolve_breakpoint(probe, reduced)
-        except ValidationError:
-            continue
-        if new_breakpoint != probe or new_suffix is not None:
-            continue
-        if old_breakpoint != path:
-            continue
-        if not pattern_matches_breakpoint(introduced_pattern, new_breakpoint):
-            continue
-        if not store.has_document(path):
+        prefix = _rehome_child_prefix(path, map_suffix, introduced_pattern)
+        if prefix is None or not store.has_document(path):
             continue
         document = deep_copy_value(store.read_document(path))
         if not isinstance(document, dict):
@@ -175,10 +170,21 @@ def generic_rehome(
         for child_key, child_value in mapping.items():
             if not _is_path_segment(child_key):
                 continue
-            store.write_document(
-                f"{path}/{map_suffix}/{child_key}",
-                deep_copy_value(child_value),
-            )
+            destination = f"{prefix}/{child_key}"
+            if not _child_is_rehome_target(
+                path,
+                map_suffix,
+                child_key,
+                destination,
+                introduced_pattern,
+                patterns,
+                reduced,
+            ):
+                continue
+            store.write_document(destination, deep_copy_value(child_value))
+        if remove_parent:
+            store.remove_document(path)
+            continue
         _delete_mapping(document, map_suffix)
         store.write_document(path, document)
 
@@ -209,17 +215,12 @@ def superseded_layout_error(
             continue
         if old_breakpoint == breakpoint_path or not store.has_document(old_breakpoint):
             continue
-        if step.retires_parent:
-            if _parent_holds_retired_keys(store, old_breakpoint, step.retired_keys):
-                previous = step.version - 1
-                found = "unversioned" if previous < 1 else str(previous)
-                return UnhandledFormatError(found, str(step.version))
-            continue
-        if _rehome_child_still_present(
+        if _retired_document_holds_requested_path(
             store,
+            step,
             old_breakpoint,
             old_suffix,
-            step.rehome_map_suffix,
+            breakpoint_path,
         ):
             previous = step.version - 1
             found = "unversioned" if previous < 1 else str(previous)
@@ -227,15 +228,24 @@ def superseded_layout_error(
     return None
 
 
-def _parent_holds_retired_keys(
+def _retired_document_holds_requested_path(
     store: DocumentStore,
+    step: StorageMigration,
     old_breakpoint: str,
-    retired_keys: tuple[str, ...],
+    old_suffix: str | None,
+    breakpoint_path: str,
 ) -> bool:
-    if not retired_keys:
+    if _rehome_child_still_present(
+        store,
+        old_breakpoint,
+        old_suffix,
+        step.rehome_map_suffix,
+    ):
         return True
-    document = store.read_document(old_breakpoint)
-    return isinstance(document, dict) and any(key in document for key in retired_keys)
+    holds_path = step.holds_retired_path
+    if holds_path is None:
+        return False
+    return holds_path(store.read_document(old_breakpoint), breakpoint_path)
 
 
 def _rehome_child_still_present(
@@ -246,17 +256,32 @@ def _rehome_child_still_present(
 ) -> bool:
     if map_suffix is None or old_suffix is None:
         return False
-    prefix = f"{map_suffix}/"
-    if not old_suffix.startswith(prefix):
-        return False
-    child_key = old_suffix[len(prefix) :]
-    if not _is_path_segment(child_key) or "/" in child_key:
+    child_key = _child_key_in_rehome_suffix(old_suffix, map_suffix)
+    if child_key is None:
         return False
     document = store.read_document(old_breakpoint)
     if not isinstance(document, dict):
         return False
     mapping = _mapping_at(document, map_suffix)
     return mapping is not None and child_key in mapping
+
+
+def _child_key_in_rehome_suffix(old_suffix: str, map_suffix: str) -> str | None:
+    """Return the map key named by a retired logical suffix.
+
+    Scores leaves ``{map_suffix}/{child}`` on the shorter breakpoint. Fleet's
+    player id is the whole suffix, because the map name stays inside the parent.
+    """
+    prefix = f"{map_suffix}/"
+    if old_suffix.startswith(prefix):
+        child_key = old_suffix[len(prefix) :]
+    elif "/" not in old_suffix:
+        child_key = old_suffix
+    else:
+        return None
+    if not _is_path_segment(child_key) or "/" in child_key:
+        return None
+    return child_key
 
 
 def _run_step(
@@ -272,7 +297,13 @@ def _run_step(
     if step.structural_handler is not None:
         step.structural_handler(context)
     if step.rehome_map_suffix is not None:
-        generic_rehome(store, step.introduced_pattern, step.rehome_map_suffix, patterns)
+        generic_rehome(
+            store,
+            step.introduced_pattern,
+            step.rehome_map_suffix,
+            patterns,
+            remove_parent=step.remove_parent,
+        )
 
 
 def _reject_duplicate_versions(
@@ -311,6 +342,82 @@ def _read_version(store: DocumentStore, minimum_version: int | None) -> int:
 
 def _stamp(store: DocumentStore, version: int) -> None:
     store.write_document(STORAGE_VERSION_KEY, {"version": version})
+
+
+def _rehome_child_prefix(
+    parent_path: str,
+    map_suffix: str,
+    introduced_pattern: tuple[str, ...],
+) -> str | None:
+    """Return the path prefix each map child is written under.
+
+    The prefix is the parent when the introduced breakpoint adds only the child
+    segment (fleet ``.../fleet/{playerId}``). It is ``{parent}/{map_suffix}``
+    when that map name is itself a path segment (scores ``inference_rows``).
+    """
+    if len(introduced_pattern) < 2 or introduced_pattern[-1] != "*":
+        return None
+    parent_pattern = introduced_pattern[:-1]
+    if pattern_matches_breakpoint(parent_pattern, parent_path):
+        return parent_path
+    map_path = f"{parent_path}/{map_suffix}"
+    if pattern_matches_breakpoint(parent_pattern, map_path):
+        return map_path
+    return None
+
+
+def _child_is_rehome_target(
+    parent_path: str,
+    map_suffix: str,
+    child_key: str,
+    destination: str,
+    introduced_pattern: tuple[str, ...],
+    patterns: BreakpointPatterns,
+    reduced: BreakpointPatterns,
+) -> bool:
+    """Return whether ``child_key`` moves from ``parent_path`` onto ``destination``.
+
+    ``{parent}/{map_suffix}/{child}`` is resolved on both registries. That path
+    is the new document when the map name is a path segment. Fleet keeps the
+    map name inside the retired document, so ``destination`` is checked on its
+    own once the map path still resolves to the parent.
+    """
+    map_logical = f"{parent_path}/{map_suffix}/{child_key}"
+    mapped = _resolved_breakpoints(map_logical, patterns, reduced)
+    if mapped is None:
+        return False
+    new_breakpoint, new_suffix, old_breakpoint = mapped
+    if old_breakpoint != parent_path:
+        return False
+    if new_breakpoint == map_logical and new_suffix is None:
+        return destination == map_logical and pattern_matches_breakpoint(
+            introduced_pattern,
+            new_breakpoint,
+        )
+    moved = _resolved_breakpoints(destination, patterns, reduced)
+    if moved is None:
+        return False
+    dest_breakpoint, dest_suffix, retired_breakpoint = moved
+    return (
+        dest_breakpoint == destination
+        and dest_suffix is None
+        and retired_breakpoint == parent_path
+        and pattern_matches_breakpoint(introduced_pattern, dest_breakpoint)
+    )
+
+
+def _resolved_breakpoints(
+    logical_path: str,
+    patterns: BreakpointPatterns,
+    reduced: BreakpointPatterns,
+) -> tuple[str, str | None, str] | None:
+    """Return ``(new_breakpoint, new_suffix, old_breakpoint)`` for ``logical_path``."""
+    try:
+        new_breakpoint, new_suffix = resolve_breakpoint(logical_path, patterns)
+        old_breakpoint, _old_suffix = resolve_breakpoint(logical_path, reduced)
+    except ValidationError:
+        return None
+    return new_breakpoint, new_suffix, old_breakpoint
 
 
 def _mapping_at(document: dict[str, JSONValue], map_suffix: str) -> dict[str, JSONValue] | None:
