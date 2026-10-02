@@ -85,6 +85,23 @@ class FileBackendDocumentLru:
         self._listings: LruCache[str, tuple[str, ...]] = LruCache(listing_maxsize)
         self._epoch = 0
         self._lock = threading.Lock()
+        # One lock per breakpoint so nested puts of the same document cannot
+        # replace each other from a stale copy. Shared with every backend on
+        # this root, same as the document map.
+        self._mutation_locks: dict[str, threading.Lock] = {}
+
+    def document_lock(self, breakpoint_path: str) -> threading.Lock:
+        """Return the mutation lock for one breakpoint document.
+
+        Callers hold it across a nested read-modify-write. Distinct breakpoint
+        paths do not share a lock. Never acquire this while holding ``_lock``.
+        """
+        with self._lock:
+            lock = self._mutation_locks.get(breakpoint_path)
+            if lock is None:
+                lock = threading.Lock()
+                self._mutation_locks[breakpoint_path] = lock
+            return lock
 
     def get_document(self, breakpoint_path: str) -> tuple[JSONValue | None, int]:
         """Return (retained tree or None, epoch). Fill from I/O only at this epoch."""
