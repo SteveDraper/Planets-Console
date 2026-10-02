@@ -17,4 +17,5 @@ A step either re-homes an unchanged logical key onto a longer breakpoint, or cal
 
 - New breakpoint splits register a migration keyed by the storage version they introduce. `boundaries.py` holds the pattern, not the document shape.
 - Single-process writers (ADR 0001) still apply. The version stamp is not a lock.
+- A read that misses the current breakpoint document consults retired layout: it resolves the path against the registry without the introduced pattern and asks whether that suffix is still in the retired document (`resolve_path`). The check runs only on a `get` miss and costs one existence check of the retired breakpoint document per miss. A hit on the current document does not consult the retired breakpoint.
 - See [design-storage-abstraction-and-crud-api.md](../design-storage-abstraction-and-crud-api.md) §16 and **CONTEXT.md** (**Storage version**, **Document**).

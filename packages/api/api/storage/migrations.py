@@ -86,8 +86,9 @@ class StorageMigration:
     handler rewrites document shape, including writing any new breakpoint
     documents it owns. When there is no handler, generic re-home splits each
     document onto the current registry. ``holds_retired_path``, when set,
-    reports whether a copied-in parent still contains the requested breakpoint.
-    Re-home residue is checked either way.
+    reports whether a copied-in parent still contains the retired suffix when
+    that suffix is not a JSON path in the parent. Re-home residue is
+    ``resolve_path`` of the suffix the previous registry stored.
     """
 
     version: int
@@ -179,7 +180,10 @@ def superseded_layout_error(
     """Return an error when ``path`` exists only on a breakpoint this version retired.
 
     Called after the current breakpoint document is missing. A hit on the current
-    document does not consult the retired breakpoint.
+    document does not consult the retired breakpoint. The previous location is
+    ``resolve_breakpoint`` on the registry without the introduced pattern -- the
+    same pairing generic re-home inverts when it partitions onto the current
+    registry. Residue is ``resolve_path`` of that suffix.
     """
     try:
         breakpoint_path, _suffix = resolve_breakpoint(path, patterns)
@@ -188,63 +192,61 @@ def superseded_layout_error(
     for step in migrations:
         if not pattern_matches_breakpoint(step.introduced_pattern, breakpoint_path):
             continue
-        reduced = tuple(pattern for pattern in patterns if pattern != step.introduced_pattern)
-        try:
-            old_breakpoint, _old_suffix = resolve_breakpoint(path, reduced)
-        except ValidationError:
+        location = _retired_document_location(
+            path,
+            current_breakpoint=breakpoint_path,
+            patterns=patterns,
+            introduced_pattern=step.introduced_pattern,
+        )
+        if location is None:
             continue
-        if old_breakpoint == breakpoint_path or not store.has_document(old_breakpoint):
+        old_breakpoint, old_suffix = location
+        if not store.has_document(old_breakpoint):
             continue
-        if _retired_document_holds_requested_path(
-            store,
-            step,
-            old_breakpoint,
-            breakpoint_path,
-        ):
-            previous = step.version - 1
-            found = "unversioned" if previous < 1 else str(previous)
-            return UnhandledFormatError(found, retired_by=str(step.version))
+        document = store.read_document(old_breakpoint)
+        if _document_holds_suffix(document, old_suffix):
+            return _retired_layout_error(step)
+        holds_path = step.holds_retired_path
+        if holds_path is not None and holds_path(document, old_suffix):
+            return _retired_layout_error(step)
     return None
 
 
-def _retired_document_holds_requested_path(
-    store: DocumentStore,
-    step: StorageMigration,
-    old_breakpoint: str,
-    breakpoint_path: str,
-) -> bool:
-    if _rehome_child_still_present(store, old_breakpoint, breakpoint_path):
-        return True
-    holds_path = step.holds_retired_path
-    if holds_path is None:
-        return False
-    return holds_path(store.read_document(old_breakpoint), breakpoint_path)
+def _retired_document_location(
+    path: str,
+    *,
+    current_breakpoint: str,
+    patterns: BreakpointPatterns,
+    introduced_pattern: tuple[str, ...],
+) -> tuple[str, str] | None:
+    """Return where ``path`` lived before ``introduced_pattern`` existed.
 
-
-def _rehome_child_still_present(
-    store: DocumentStore,
-    old_breakpoint: str,
-    breakpoint_path: str,
-) -> bool:
-    relative = _relative_child_path(old_breakpoint, breakpoint_path)
-    if relative is None:
-        return False
-    document = store.read_document(old_breakpoint)
+    ``(old_breakpoint, old_suffix)`` is the previous-registry result from
+    ``resolve_breakpoint``. ``None`` means this pattern did not shorten the
+    document that stores ``path``.
+    """
+    reduced = tuple(pattern for pattern in patterns if pattern != introduced_pattern)
     try:
-        resolve_path(document, relative)
+        old_breakpoint, old_suffix = resolve_breakpoint(path, reduced)
+    except ValidationError:
+        return None
+    if old_breakpoint == current_breakpoint or old_suffix is None:
+        return None
+    return old_breakpoint, old_suffix
+
+
+def _document_holds_suffix(document: JSONValue, suffix: str) -> bool:
+    try:
+        resolve_path(document, suffix)
     except NotFoundError, ValidationError:
         return False
     return True
 
 
-def _relative_child_path(parent: str, child: str) -> str | None:
-    prefix = f"{parent}/"
-    if not child.startswith(prefix):
-        return None
-    relative = child[len(prefix) :]
-    if relative == "":
-        return None
-    return relative
+def _retired_layout_error(step: StorageMigration) -> UnhandledFormatError:
+    previous = step.version - 1
+    found = "unversioned" if previous < 1 else str(previous)
+    return UnhandledFormatError(found, retired_by=str(step.version))
 
 
 def _run_step(

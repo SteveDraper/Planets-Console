@@ -24,6 +24,7 @@ from api.storage.migrations import (
     STORAGE_VERSION_KEY,
     MigrationContext,
     StorageMigration,
+    _retired_document_location,
     generic_rehome,
     open_store,
 )
@@ -282,6 +283,31 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
     assert raised.value.maximum_version == "1"
     assert raised.value.minimum_version is None
     assert raised.value.retired_by_version is None
+
+
+def test_retired_document_location_is_previous_registry_suffix():
+    assert _retired_document_location(
+        SCORES_ROW,
+        current_breakpoint=SCORES_ROW,
+        patterns=_scores_patterns(),
+        introduced_pattern=SCORES_PLAYER_PATTERN,
+    ) == (SCORES, "inference_rows/4")
+    fleet_step = fleet_storage_migration()
+    assert _retired_document_location(
+        FLEET_PLAYER,
+        current_breakpoint=FLEET_PLAYER,
+        patterns=BREAKPOINT_PATTERNS,
+        introduced_pattern=fleet_step.introduced_pattern,
+    ) == (FLEET, "8")
+    assert (
+        _retired_document_location(
+            SCORES,
+            current_breakpoint=SCORES,
+            patterns=_scores_patterns(),
+            introduced_pattern=SCORES_PLAYER_PATTERN,
+        )
+        is None
+    )
 
 
 def test_production_migrations_bind_fleet_step():

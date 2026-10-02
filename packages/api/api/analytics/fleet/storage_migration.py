@@ -39,13 +39,15 @@ def migrate_fleet_breakpoint(context: MigrationContext) -> None:
         context.delete_document(path)
 
 
-def fleet_retired_document_holds_path(document: JSONValue, breakpoint_path: str) -> bool:
-    """Return whether a copied-in parent still contains ``breakpoint_path``.
+def fleet_retired_document_holds_path(document: JSONValue, old_suffix: str) -> bool:
+    """Return whether a copied-in parent still contains ``old_suffix``.
 
-    The id is a ``ledgers`` map key or a ``players`` array ``playerId``.
-    Top-level leftover keys after a split are re-home residue.
+    ``old_suffix`` is the path the previous registry stored inside the parent.
+    The player id is its first segment: a ``ledgers`` map key or a ``players``
+    array ``playerId``. Nested keys that match the suffix itself are the
+    generic retired-suffix check, not this hook.
     """
-    player_key = breakpoint_path.rpartition("/")[2]
+    player_key = old_suffix.split("/", 1)[0]
     if player_key == "" or not isinstance(document, dict):
         return False
     ledgers = document.get(FLEET_LEDGERS_KEY)
