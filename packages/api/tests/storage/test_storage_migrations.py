@@ -25,8 +25,10 @@ from api.storage.migrations import (
     MigrationContext,
     StorageMigration,
     _retired_document_location,
+    _retired_layout_error,
     generic_rehome,
     open_store,
+    version_label,
 )
 from api.storage_factory import clear_backend_cache, get_storage, production_migrations
 
@@ -185,6 +187,75 @@ def test_unversioned_ledgers_document_splits_on_open(kind, tmp_path, monkeypatch
         backend.get(FLEET)
 
 
+@pytest.mark.parametrize(
+    ("version", "label"),
+    [
+        (None, "unversioned"),
+        (0, "0"),
+        (1, "1"),
+        (5, "5"),
+    ],
+)
+def test_version_label(version, label):
+    assert version_label(version) == label
+
+
+@pytest.mark.parametrize(
+    ("error", "found", "minimum", "maximum", "retired_by", "detail"),
+    [
+        (
+            UnhandledFormatError.below_minimum("0", "1"),
+            "0",
+            "1",
+            None,
+            None,
+            "found version 0, minimum supported version 1",
+        ),
+        (
+            UnhandledFormatError.above_maximum("5", "1"),
+            "5",
+            None,
+            "1",
+            None,
+            "found version 5, maximum supported version 1",
+        ),
+        (
+            UnhandledFormatError.retired_layout("unversioned", "1"),
+            "unversioned",
+            None,
+            None,
+            "1",
+            "found layout from version unversioned, retired by version 1",
+        ),
+        (
+            UnhandledFormatError.retired_layout("1", "2"),
+            "1",
+            None,
+            None,
+            "2",
+            "found layout from version 1, retired by version 2",
+        ),
+    ],
+)
+def test_unhandled_format_error_constructors(error, found, minimum, maximum, retired_by, detail):
+    assert error.http_error == 422
+    assert error.found_version == found
+    assert error.minimum_version == minimum
+    assert error.maximum_version == maximum
+    assert error.retired_by_version == retired_by
+    assert str(error) == f"Unhandled storage format: {detail}"
+
+
+def test_retired_layout_error_labels_previous_through_version_label():
+    pattern = ("games", "*", "info")
+    first = _retired_layout_error(StorageMigration(version=1, introduced_pattern=pattern))
+    assert first.found_version == version_label(None)
+    assert first.retired_by_version == version_label(1)
+    later = _retired_layout_error(StorageMigration(version=2, introduced_pattern=pattern))
+    assert later.found_version == version_label(1)
+    assert later.retired_by_version == version_label(2)
+
+
 def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
     root = tmp_path / "data"
     info = root / "games" / "1" / "info.json"
@@ -250,7 +321,7 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
         with pytest.raises(
             UnhandledFormatError,
             match="found version 5, maximum supported version 1",
-        ) as raised:
+        ):
             FileStorageBackend(
                 root,
                 minimum_version=None,
@@ -268,7 +339,7 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
         with pytest.raises(
             UnhandledFormatError,
             match="found version 5, maximum supported version 1",
-        ) as raised:
+        ):
             MemoryAssetBackend(
                 documents=seeded,
                 minimum_version=None,
@@ -276,14 +347,6 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
                 current_version=1,
             )
         assert seeded == original
-    message = str(raised.value)
-    assert message == "Unhandled storage format: found version 5, maximum supported version 1"
-    assert "minimum" not in message
-    assert raised.value.http_error == 422
-    assert raised.value.found_version == "5"
-    assert raised.value.maximum_version == "1"
-    assert raised.value.minimum_version is None
-    assert raised.value.retired_by_version is None
 
 
 def test_retired_document_location_is_previous_registry_suffix():

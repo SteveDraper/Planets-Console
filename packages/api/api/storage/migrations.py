@@ -122,14 +122,14 @@ def open_store(
 
     found = _read_version(store, minimum_version) if has_version else None
     if _is_below_minimum(found, minimum_version):
-        raise UnhandledFormatError(
+        raise UnhandledFormatError.below_minimum(
             version_label(found),
-            minimum=version_label(minimum_version),
+            version_label(minimum_version),
         )
     if found is not None and found > current_version:
-        raise UnhandledFormatError(
+        raise UnhandledFormatError.above_maximum(
             version_label(found),
-            maximum=version_label(current_version),
+            version_label(current_version),
         )
     stored = 0 if found is None else found
     if stored == current_version:
@@ -245,8 +245,10 @@ def _document_holds_suffix(document: JSONValue, suffix: str) -> bool:
 
 def _retired_layout_error(step: StorageMigration) -> UnhandledFormatError:
     previous = step.version - 1
-    found = "unversioned" if previous < 1 else str(previous)
-    return UnhandledFormatError(found, retired_by=str(step.version))
+    return UnhandledFormatError.retired_layout(
+        version_label(previous if previous >= 1 else None),
+        version_label(step.version),
+    )
 
 
 def _run_step(
@@ -292,10 +294,10 @@ def _read_version(store: DocumentStore, minimum_version: int | None) -> int:
     payload = store.read_document(STORAGE_VERSION_KEY)
     minimum = version_label(minimum_version)
     if not isinstance(payload, dict):
-        raise UnhandledFormatError(_UNREADABLE_VERSION, minimum=minimum)
+        raise UnhandledFormatError.below_minimum(_UNREADABLE_VERSION, minimum)
     version = payload.get("version")
     if isinstance(version, bool) or not isinstance(version, int):
-        raise UnhandledFormatError(_UNREADABLE_VERSION, minimum=minimum)
+        raise UnhandledFormatError.below_minimum(_UNREADABLE_VERSION, minimum)
     return version
 
 
