@@ -26,7 +26,7 @@ from api.storage.boundaries import (
     resolve_breakpoint,
 )
 from api.storage.documents import partition_breakpoint_document
-from api.storage.path_utils import deep_copy_value, resolve_path
+from api.storage.path_utils import resolve_path
 
 STORAGE_VERSION_KEY = "meta/storage-version"
 CURRENT_STORAGE_VERSION = 1
@@ -37,7 +37,11 @@ _UNREADABLE_VERSION = "unreadable"
 
 
 class DocumentStore(Protocol):
-    """Raw breakpoint documents. Callers do not resolve logical suffixes."""
+    """Raw breakpoint documents. Callers do not resolve logical suffixes.
+
+    ``read_document`` returns a defensive copy. Mutation of the returned value
+    does not change the stored document.
+    """
 
     def iter_document_paths(self) -> Iterator[str]: ...
 
@@ -66,7 +70,7 @@ class MigrationContext:
         for path in matches:
             if not self._store.has_document(path):
                 continue
-            yield path, deep_copy_value(self._store.read_document(path))
+            yield path, self._store.read_document(path)
 
     def put_document(self, breakpoint_path: str, value: JSONValue) -> None:
         self._store.write_document(breakpoint_path, value)
@@ -155,7 +159,7 @@ def generic_rehome(store: DocumentStore, patterns: BreakpointPatterns) -> None:
     for path in paths:
         if not store.has_document(path):
             continue
-        document = deep_copy_value(store.read_document(path))
+        document = store.read_document(path)
         partitioned = partition_breakpoint_document(path, document, patterns)
         if partitioned.get(path) == document and set(partitioned) == {path}:
             continue

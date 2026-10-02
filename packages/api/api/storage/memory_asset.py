@@ -32,6 +32,43 @@ from api.storage.migrations import (
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
+class _MemoryDocumentStore:
+    """Breakpoint documents for migrations. ``read_document`` returns a copy."""
+
+    def __init__(self, backend: MemoryAssetBackend) -> None:
+        self._backend = backend
+
+    def iter_document_paths(self) -> Iterator[str]:
+        with self._backend._lock:
+            paths = tuple(self._backend._documents)
+        yield from paths
+
+    def has_document(self, breakpoint_path: str) -> bool:
+        with self._backend._lock:
+            return breakpoint_path in self._backend._documents
+
+    def read_document(self, breakpoint_path: str) -> JSONValue:
+        with self._backend._lock:
+            try:
+                stored = self._backend._documents[breakpoint_path]
+            except KeyError:
+                raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
+            return deep_copy_value(stored)
+
+    def write_document(self, breakpoint_path: str, value: JSONValue) -> None:
+        validate_no_reserved_at_keys(value)
+        stored = deep_copy_value(value)
+        with self._backend._lock:
+            self._backend._documents[breakpoint_path] = stored
+
+    def remove_document(self, breakpoint_path: str) -> None:
+        with self._backend._lock:
+            try:
+                del self._backend._documents[breakpoint_path]
+            except KeyError:
+                raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
+
+
 class MemoryAssetBackend:
     """Storage backend that holds breakpoint documents in memory."""
 
@@ -60,42 +97,14 @@ class MemoryAssetBackend:
             self._documents = {path: deep_copy_value(value) for path, value in documents.items()}
         else:
             self._documents = partition_logical_tree(initial or {}, self._patterns)
+        self._document_store = _MemoryDocumentStore(self)
         open_store(
-            self,
+            self._document_store,
             patterns=self._patterns,
             migrations=self._migrations,
             current_version=self._current_version,
             minimum_version=self._minimum_version,
         )
-
-    def iter_document_paths(self) -> Iterator[str]:
-        with self._lock:
-            paths = tuple(self._documents)
-        yield from paths
-
-    def has_document(self, breakpoint_path: str) -> bool:
-        with self._lock:
-            return breakpoint_path in self._documents
-
-    def read_document(self, breakpoint_path: str) -> JSONValue:
-        with self._lock:
-            try:
-                return self._documents[breakpoint_path]
-            except KeyError:
-                raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
-
-    def write_document(self, breakpoint_path: str, value: JSONValue) -> None:
-        validate_no_reserved_at_keys(value)
-        stored = deep_copy_value(value)
-        with self._lock:
-            self._documents[breakpoint_path] = stored
-
-    def remove_document(self, breakpoint_path: str) -> None:
-        with self._lock:
-            try:
-                del self._documents[breakpoint_path]
-            except KeyError:
-                raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
 
     def get(self, key: str) -> JSONValue:
         """Return a deep copy of the value at path. Raises NotFoundError if path does not exist."""
@@ -107,7 +116,7 @@ class MemoryAssetBackend:
             document = self._documents.get(breakpoint_path)
             if document is None:
                 superseded = superseded_layout_error(
-                    self,
+                    self._document_store,
                     path,
                     patterns=self._patterns,
                     migrations=self._migrations,

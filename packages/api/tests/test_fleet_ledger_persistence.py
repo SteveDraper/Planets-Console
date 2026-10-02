@@ -201,7 +201,7 @@ def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
         persistence.get_ledger(628580, 1, 111, 8)
 
     assert backend.get(persistence.ledger_prefix(628580, 1, 111)) == legacy_document
-    assert not backend.has_document(persistence.ledger_key(628580, 1, 111, 8))
+    assert not backend._document_store.has_document(persistence.ledger_key(628580, 1, 111, 8))
 
 
 def test_upgrade_legacy_fleet_turn_document_maps_players_to_ledgers(sample_ledger):
@@ -293,7 +293,7 @@ def test_delete_snapshot_removes_all_player_ledgers(persistence, memory_backend,
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.get_ledger(628580, 1, 111, 8) is None
     assert persistence.get_ledger(628580, 1, 111, 3) is None
-    assert not memory_backend.has_document(prefix)
+    assert not memory_backend._document_store.has_document(prefix)
     with pytest.raises(NotFoundError):
         memory_backend.list(prefix)
 
@@ -319,7 +319,7 @@ def test_delete_last_ledger_prunes_empty_dirs_on_file_backend(tmp_path, sample_l
 
     assert persistence.list_ledger_player_ids(628580, 1, 111) == []
     assert persistence.get_snapshot(628580, 1, 111) is None
-    assert not backend.has_document(prefix)
+    assert not backend._document_store.has_document(prefix)
     assert not fleet_dir.exists()
     parent_document = (
         storage_root / "games" / "628580" / "1" / "turns" / "111" / "analytics" / "fleet.json"

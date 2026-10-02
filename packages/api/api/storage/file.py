@@ -33,6 +33,38 @@ from api.storage.migrations import (
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
+class _FileDocumentStore:
+    """Breakpoint documents for migrations. ``read_document`` returns a copy."""
+
+    def __init__(self, backend: FileStorageBackend) -> None:
+        self._backend = backend
+
+    def iter_document_paths(self) -> Iterator[str]:
+        root = self._backend._root
+        if not root.is_dir():
+            return
+        for file_path in root.rglob("*.json"):
+            if file_path.name.startswith("."):
+                continue
+            relative = file_path.relative_to(root).as_posix()
+            if relative.endswith(".json"):
+                yield relative[: -len(".json")]
+
+    def has_document(self, breakpoint_path: str) -> bool:
+        return self._backend._document_file(breakpoint_path).is_file()
+
+    def read_document(self, breakpoint_path: str) -> JSONValue:
+        return deep_copy_value(self._backend._load_document(breakpoint_path))
+
+    def write_document(self, breakpoint_path: str, value: JSONValue) -> None:
+        stored = deep_copy_value(value)
+        self._backend._atomic_write(self._backend._document_file(breakpoint_path), stored)
+        self._backend._document_lru.remember_document(breakpoint_path, stored)
+
+    def remove_document(self, breakpoint_path: str) -> None:
+        self._backend._delete_document(breakpoint_path)
+
+
 class FileStorageBackend:
     """Persist the logical JSON store as breakpoint JSON files under ``storage_root``.
 
@@ -61,8 +93,9 @@ class FileStorageBackend:
             MINIMUM_STORAGE_VERSION if minimum_version is None else minimum_version
         )
         self._document_lru = document_lru_for_root(storage_root)
+        self._document_store = _FileDocumentStore(self)
         open_store(
-            self,
+            self._document_store,
             patterns=self._patterns,
             migrations=self._migrations,
             current_version=self._current_version,
@@ -199,30 +232,6 @@ class FileStorageBackend:
         self._document_lru.fill_listing(prefix, names, epoch=epoch)
         return names
 
-    def iter_document_paths(self) -> Iterator[str]:
-        if not self._root.is_dir():
-            return
-        for file_path in self._root.rglob("*.json"):
-            if file_path.name.startswith("."):
-                continue
-            relative = file_path.relative_to(self._root).as_posix()
-            if relative.endswith(".json"):
-                yield relative[: -len(".json")]
-
-    def has_document(self, breakpoint_path: str) -> bool:
-        return self._document_file(breakpoint_path).is_file()
-
-    def read_document(self, breakpoint_path: str) -> JSONValue:
-        return self._load_document(breakpoint_path)
-
-    def write_document(self, breakpoint_path: str, value: JSONValue) -> None:
-        stored = deep_copy_value(value)
-        self._atomic_write(self._document_file(breakpoint_path), stored)
-        self._document_lru.remember_document(breakpoint_path, stored)
-
-    def remove_document(self, breakpoint_path: str) -> None:
-        self._delete_document(breakpoint_path)
-
     def get(self, key: str) -> JSONValue:
         path = self._normalize(key)
         if path == "":
@@ -232,7 +241,7 @@ class FileStorageBackend:
             document = self._load_document(breakpoint_path)
         except NotFoundError:
             superseded = superseded_layout_error(
-                self,
+                self._document_store,
                 path,
                 patterns=self._patterns,
                 migrations=self._migrations,
@@ -304,7 +313,7 @@ class FileStorageBackend:
         return list_logical(
             path,
             patterns=self._patterns,
-            document_exists=self.has_document,
+            document_exists=self._document_store.has_document,
             load_document=self._load_document,
             child_names=self._child_names,
         )

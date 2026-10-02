@@ -70,7 +70,7 @@ The file backend persists **documents** at **breakpoints** from a code registry 
 - Unregistered paths → `ValidationError` (fail fast)
 - Document writes: temp file + atomic `replace`; document delete: remove file + prune empty parent dirs
 - The ephemeral backend uses the same breakpoint resolution. A `put` of a longer breakpoint does not nest inside the shorter document
-- One **storage version** document per directory (`meta/storage-version`). Empty directories are stamped current. Older supported directories run registered migrations on open. See [ADR 0033](../../docs/adr/0033-storage-versioned-breakpoint-migrations.md). Production steps are assembled in `api.storage_factory` (composition; may import analytics) and injected when that module opens a backend.
+- One **storage version** document per directory (`meta/storage-version`). Empty directories are stamped current. Older supported directories run registered migrations on open. See [ADR 0033](../../docs/adr/0033-storage-versioned-breakpoint-migrations.md). Production steps are assembled in `api.storage_factory` (composition; may import analytics) and injected when that module opens a backend. Migrations talk to each backend through a private document-store adapter (`read_document` returns a copy). `StorageBackend` stays `get` / `put` / `delete` / `list`.
 
 **V1 patterns:** `games/*/info`, `games/*/*/turns/*`, `games/*/*/turns/*/analytics/*`, `games/*/*/turns/*/analytics/fleet/*`, `games/*/*/analytics/fleet-evidence/*`, `credentials/accounts/*`, `meta/storage-version`
 

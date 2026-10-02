@@ -32,6 +32,14 @@ from api.storage.migrations import (
 )
 from api.storage_factory import clear_backend_cache, get_storage, production_migrations
 
+_DOCUMENT_STORE_METHODS = (
+    "iter_document_paths",
+    "has_document",
+    "read_document",
+    "write_document",
+    "remove_document",
+)
+
 SCORES = "games/7/1/turns/3/analytics/scores"
 SCORES_ROW = f"{SCORES}/inference_rows/4"
 SCORES_PLAYER_PATTERN = (
@@ -58,6 +66,15 @@ LEDGER_WIRE = {
     "materializationVersion": FLEET_MATERIALIZATION_VERSION,
     "evidenceGeneration": 0,
 }
+
+
+def _store(backend: FileStorageBackend | MemoryAssetBackend):
+    return backend._document_store
+
+
+def _document_map(backend: MemoryAssetBackend) -> dict:
+    store = _store(backend)
+    return {path: store.read_document(path) for path in store.iter_document_paths()}
 
 
 def _scores_patterns() -> tuple[tuple[str, ...], ...]:
@@ -114,7 +131,7 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
         FileStorageBackend(root, patterns=_scores_patterns(), migrations=(_scores_migration(),))
     else:
         MemoryAssetBackend(
-            documents=dict(backend._documents),
+            documents=_document_map(backend),
             patterns=_scores_patterns(),
             migrations=(_scores_migration(),),
         )
@@ -492,18 +509,19 @@ def test_copied_fleet_document_errors_only_for_held_player(kind, document, tmp_p
     else:
         root = tmp_path / "data"
         backend = FileStorageBackend(root, migrations=migrations)
-    backend.write_document(FLEET, document)
+    store = _store(backend)
+    store.write_document(FLEET, document)
     with pytest.raises(
         UnhandledFormatError,
         match="found layout from version unversioned, retired by version 1",
     ):
         backend.get(FLEET_PLAYER)
-    assert backend.read_document(FLEET) == document
-    assert not backend.has_document(FLEET_PLAYER)
+    assert store.read_document(FLEET) == document
+    assert not store.has_document(FLEET_PLAYER)
     with pytest.raises(NotFoundError):
         backend.get(f"{FLEET}/999")
-    assert not backend.has_document(f"{FLEET}/999")
-    assert backend.read_document(FLEET) == document
+    assert not store.has_document(f"{FLEET}/999")
+    assert store.read_document(FLEET) == document
 
 
 @pytest.mark.parametrize("kind", ["memory", "file"])
@@ -536,12 +554,13 @@ def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
         migrations=(),
         current_version=0,
     )
-    migrate_fleet_breakpoint(MigrationContext(backend))
-    assert not backend.has_document(FLEET)
-    assert backend.read_document(FLEET_PLAYER) == expected
-    assert not backend.has_document(ledgers_path)
-    assert backend.read_document(f"{ledgers_path}/8") == LEDGER_WIRE
-    assert backend.read_document(other_path) == other
+    migrate_fleet_breakpoint(MigrationContext(_store(backend)))
+    store = _store(backend)
+    assert not store.has_document(FLEET)
+    assert store.read_document(FLEET_PLAYER) == expected
+    assert not store.has_document(ledgers_path)
+    assert store.read_document(f"{ledgers_path}/8") == LEDGER_WIRE
+    assert store.read_document(other_path) == other
 
 
 def test_open_splits_upgraded_parent_and_retries_as_noop():
@@ -551,8 +570,9 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
         current_version=0,
     )
     step = fleet_storage_migration()
+    store = _store(backend)
     open_store(
-        backend,
+        store,
         patterns=BREAKPOINT_PATTERNS,
         migrations=(step,),
         current_version=CURRENT_STORAGE_VERSION,
@@ -562,13 +582,13 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
     with pytest.raises(NotFoundError):
         backend.get(FLEET)
 
-    migrate_fleet_breakpoint(MigrationContext(backend))
-    generic_rehome(backend, BREAKPOINT_PATTERNS)
+    migrate_fleet_breakpoint(MigrationContext(store))
+    generic_rehome(store, BREAKPOINT_PATTERNS)
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
-    assert not backend.has_document(FLEET)
+    assert not store.has_document(FLEET)
 
     open_store(
-        backend,
+        store,
         patterns=BREAKPOINT_PATTERNS,
         migrations=(step,),
         current_version=CURRENT_STORAGE_VERSION,
@@ -582,7 +602,7 @@ def test_empty_ledgers_map_removes_parent():
         documents={FLEET: {"ledgers": {}}},
         migrations=(fleet_storage_migration(),),
     )
-    assert not backend.has_document(FLEET)
+    assert not _store(backend).has_document(FLEET)
 
 
 def test_fleet_document_without_legacy_shape_stays():
@@ -591,3 +611,24 @@ def test_fleet_document_without_legacy_shape_stays():
         migrations=(fleet_storage_migration(),),
     )
     assert backend.get(FLEET) == {"note": True}
+
+
+@pytest.mark.parametrize("kind", ["memory", "file"])
+def test_document_store_read_returns_a_copy(kind, tmp_path):
+    if kind == "memory":
+        backend = MemoryAssetBackend(initial={}, migrations=())
+    else:
+        backend = FileStorageBackend(tmp_path / "data", migrations=())
+    store = _store(backend)
+    store.write_document("games/1/info", {"name": "keep"})
+    loaded = store.read_document("games/1/info")
+    assert isinstance(loaded, dict)
+    loaded["name"] = "mutated"
+    assert store.read_document("games/1/info") == {"name": "keep"}
+    assert backend.get("games/1/info") == {"name": "keep"}
+
+
+@pytest.mark.parametrize("cls", [FileStorageBackend, MemoryAssetBackend])
+@pytest.mark.parametrize("name", _DOCUMENT_STORE_METHODS)
+def test_backends_do_not_expose_document_store_methods(cls, name):
+    assert name not in vars(cls)
