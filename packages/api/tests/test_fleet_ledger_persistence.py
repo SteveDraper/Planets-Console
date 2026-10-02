@@ -193,7 +193,10 @@ def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
     legacy_document = _legacy_players_document(sample_ledger)
     backend.put(persistence.document_key(628580, 1, 111), legacy_document)
 
-    with pytest.raises(UnhandledFormatError, match="found version unversioned"):
+    with pytest.raises(
+        UnhandledFormatError,
+        match="found layout from version unversioned, retired by version 1",
+    ):
         persistence.get_ledger(628580, 1, 111, 8)
 
     assert backend.get(persistence.document_key(628580, 1, 111)) == legacy_document

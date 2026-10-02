@@ -122,7 +122,10 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
     parent["inference_rows"] = {"4": dict(ROW)}
     backend.put(SCORES, parent)
     backend.delete(SCORES_ROW)
-    with pytest.raises(UnhandledFormatError, match="found version unversioned"):
+    with pytest.raises(
+        UnhandledFormatError,
+        match="found layout from version unversioned, retired by version 1",
+    ):
         backend.get(SCORES_ROW)
 
 
@@ -192,7 +195,10 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
     version_payload = b'{"version": 0}\n'
     version.write_bytes(version_payload)
 
-    with pytest.raises(UnhandledFormatError, match="found version 0"):
+    with pytest.raises(
+        UnhandledFormatError,
+        match="found version 0, minimum supported version 1",
+    ):
         FileStorageBackend(root, minimum_version=1, migrations=(), current_version=1)
 
     assert info.read_bytes() == payload
@@ -202,7 +208,10 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
     plain_info = unversioned / "games" / "1" / "info.json"
     plain_info.parent.mkdir(parents=True)
     plain_info.write_bytes(payload)
-    with pytest.raises(UnhandledFormatError, match="found version unversioned"):
+    with pytest.raises(
+        UnhandledFormatError,
+        match="found version unversioned, minimum supported version 1",
+    ):
         FileStorageBackend(unversioned, minimum_version=1, migrations=(), current_version=1)
     assert plain_info.read_bytes() == payload
     assert not (unversioned / "meta" / "storage-version.json").exists()
@@ -212,7 +221,10 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         STORAGE_VERSION_KEY: {"version": 0},
     }
     original = json.loads(json.dumps(seeded))
-    with pytest.raises(UnhandledFormatError, match="found version 0"):
+    with pytest.raises(
+        UnhandledFormatError,
+        match="found version 0, minimum supported version 1",
+    ):
         MemoryAssetBackend(
             documents=seeded,
             minimum_version=1,
@@ -220,6 +232,57 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
             current_version=1,
         )
     assert seeded == original
+
+
+@pytest.mark.parametrize("kind", ["memory", "file"])
+def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
+    payload = b'{"name": "keep"}\n'
+    version_payload = b'{"version": 5}\n'
+    if kind == "file":
+        root = tmp_path / "data"
+        info = root / "games" / "1" / "info.json"
+        info.parent.mkdir(parents=True)
+        info.write_bytes(payload)
+        version = root / "meta" / "storage-version.json"
+        version.parent.mkdir(parents=True)
+        version.write_bytes(version_payload)
+        with pytest.raises(
+            UnhandledFormatError,
+            match="found version 5, maximum supported version 1",
+        ) as raised:
+            FileStorageBackend(
+                root,
+                minimum_version=None,
+                migrations=(),
+                current_version=1,
+            )
+        assert info.read_bytes() == payload
+        assert version.read_bytes() == version_payload
+    else:
+        seeded = {
+            "games/1/info": {"name": "keep"},
+            STORAGE_VERSION_KEY: {"version": 5},
+        }
+        original = json.loads(json.dumps(seeded))
+        with pytest.raises(
+            UnhandledFormatError,
+            match="found version 5, maximum supported version 1",
+        ) as raised:
+            MemoryAssetBackend(
+                documents=seeded,
+                minimum_version=None,
+                migrations=(),
+                current_version=1,
+            )
+        assert seeded == original
+    message = str(raised.value)
+    assert message == "Unhandled storage format: found version 5, maximum supported version 1"
+    assert "minimum" not in message
+    assert raised.value.http_error == 422
+    assert raised.value.found_version == "5"
+    assert raised.value.maximum_version == "1"
+    assert raised.value.minimum_version is None
+    assert raised.value.retired_by_version is None
 
 
 def test_production_migrations_bind_fleet_step():
@@ -302,7 +365,10 @@ def test_copied_fleet_document_errors_only_for_held_player(kind, document, tmp_p
         root = tmp_path / "data"
         backend = FileStorageBackend(root, migrations=migrations)
     backend.write_document(FLEET, document)
-    with pytest.raises(UnhandledFormatError, match="found version unversioned"):
+    with pytest.raises(
+        UnhandledFormatError,
+        match="found layout from version unversioned, retired by version 1",
+    ):
         backend.get(FLEET_PLAYER)
     assert backend.read_document(FLEET) == document
     assert not backend.has_document(FLEET_PLAYER)

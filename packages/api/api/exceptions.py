@@ -63,12 +63,29 @@ class UnhandledFormatError(CoreAPIError):
 
     http_error: int = 422
 
-    def __init__(self, found: str, minimum: str) -> None:
+    def __init__(
+        self,
+        found: str,
+        *,
+        minimum: str | None = None,
+        maximum: str | None = None,
+        retired_by: str | None = None,
+    ) -> None:
+        if minimum is not None and maximum is None and retired_by is None:
+            detail = f"found version {found}, minimum supported version {minimum}"
+        elif maximum is not None and minimum is None and retired_by is None:
+            detail = f"found version {found}, maximum supported version {maximum}"
+        elif retired_by is not None and minimum is None and maximum is None:
+            detail = f"found layout from version {found}, retired by version {retired_by}"
+        else:
+            raise ValueError(
+                "UnhandledFormatError requires exactly one of minimum, maximum, or retired_by"
+            )
         self.found_version = found
         self.minimum_version = minimum
-        super().__init__(
-            f"Unhandled storage format: found version {found}, minimum supported version {minimum}"
-        )
+        self.maximum_version = maximum
+        self.retired_by_version = retired_by
+        super().__init__(f"Unhandled storage format: {detail}")
 
 
 class LoginCredentialsRequiredError(CoreAPIError):
