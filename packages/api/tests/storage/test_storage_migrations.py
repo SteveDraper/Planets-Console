@@ -7,8 +7,13 @@ from pathlib import Path
 
 import pytest
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
-from api.analytics.fleet.storage_migration import migrate_fleet_breakpoint
+from api.analytics.fleet.storage_migration import (
+    fleet_storage_migration,
+    migrate_fleet_breakpoint,
+)
+from api.config import ApiConfig, get_config, set_config
 from api.errors import NotFoundError, UnhandledFormatError
+from api.storage import clear_backend_cache, get_storage, production_migrations
 from api.storage.boundaries import BREAKPOINT_PATTERNS
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
@@ -137,6 +142,11 @@ def test_new_directory_is_stamped_without_migrations(tmp_path, monkeypatch):
     FileStorageBackend(root)
     assert calls == []
 
+    bound = (fleet_storage_migration(),)
+    FileStorageBackend(tmp_path / "bound", migrations=bound)
+    MemoryAssetBackend(initial={}, migrations=bound)
+    assert calls == []
+
 
 @pytest.mark.parametrize("kind", ["memory", "file"])
 def test_fleet_handler_splits_ledgers_document(kind, tmp_path, monkeypatch):
@@ -151,15 +161,16 @@ def test_fleet_handler_splits_ledgers_document(kind, tmp_path, monkeypatch):
         wrapped,
     )
     document = {"ledgers": {"8": LEDGER_WIRE}}
+    migrations = (fleet_storage_migration(),)
     if kind == "memory":
-        backend = MemoryAssetBackend(documents={FLEET: document})
+        backend = MemoryAssetBackend(documents={FLEET: document}, migrations=migrations)
     else:
         root = tmp_path / "data"
         fleet_file = root / f"{FLEET}.json"
         fleet_file.parent.mkdir(parents=True)
         fleet_file.write_text(json.dumps(document), encoding="utf-8")
-        backend = FileStorageBackend(root)
-        FileStorageBackend(root)
+        backend = FileStorageBackend(root, migrations=migrations)
+        FileStorageBackend(root, migrations=migrations)
     assert calls == [1]
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
     with pytest.raises(NotFoundError):
@@ -207,9 +218,60 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
     assert seeded == original
 
 
+def test_production_migrations_bind_fleet_step():
+    steps = production_migrations()
+    assert len(steps) == 1
+    step = steps[0]
+    assert step.version == CURRENT_STORAGE_VERSION
+    assert step.structural_handler is migrate_fleet_breakpoint
+
+
+def test_get_storage_file_open_runs_fleet_migration(tmp_path):
+    root = tmp_path / "data"
+    fleet_file = root / f"{FLEET}.json"
+    fleet_file.parent.mkdir(parents=True)
+    fleet_file.write_text(json.dumps({"ledgers": {"8": LEDGER_WIRE}}), encoding="utf-8")
+    previous = get_config()
+    set_config(
+        ApiConfig(
+            storage_backend="file",
+            storage_root=str(root),
+            include_dummy_data=False,
+        )
+    )
+    clear_backend_cache()
+    try:
+        backend = get_storage()
+        assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
+        with pytest.raises(NotFoundError):
+            backend.get(FLEET)
+        assert backend.get(STORAGE_VERSION_KEY) == {"version": CURRENT_STORAGE_VERSION}
+    finally:
+        clear_backend_cache()
+        set_config(previous)
+
+
+def test_unversioned_store_without_steps_fails_closed(tmp_path):
+    root = tmp_path / "data"
+    info = root / "games" / "1" / "info.json"
+    info.parent.mkdir(parents=True)
+    payload = b'{"name": "keep"}\n'
+    info.write_bytes(payload)
+    with pytest.raises(RuntimeError, match="No storage migration registered for version 1"):
+        FileStorageBackend(root)
+    assert info.read_bytes() == payload
+    assert not (root / "meta" / "storage-version.json").exists()
+
+    seeded = {"games/1/info": {"name": "keep"}}
+    original = json.loads(json.dumps(seeded))
+    with pytest.raises(RuntimeError, match="No storage migration registered for version 1"):
+        MemoryAssetBackend(documents=seeded)
+    assert seeded == original
+
+
 def test_copied_fleet_document_is_unhandled(tmp_path):
     root = tmp_path / "data"
-    backend = FileStorageBackend(root)
+    backend = FileStorageBackend(root, migrations=(fleet_storage_migration(),))
     fleet_file = root / f"{FLEET}.json"
     fleet_file.parent.mkdir(parents=True)
     fleet_file.write_text(json.dumps({"ledgers": {"8": LEDGER_WIRE}}), encoding="utf-8")

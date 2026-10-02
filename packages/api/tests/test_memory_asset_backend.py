@@ -3,6 +3,7 @@
 import pytest
 from api.errors import NotFoundError, ValidationError
 from api.storage.memory_asset import MemoryAssetBackend
+from api.storage.migrations import CURRENT_STORAGE_VERSION
 
 INFO = "games/sample/info"
 NESTED = f"{INFO}/nested"
@@ -22,7 +23,8 @@ def backend():
                         },
                     }
                 }
-            }
+            },
+            "meta": {"storage-version": {"version": CURRENT_STORAGE_VERSION}},
         }
     )
 

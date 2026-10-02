@@ -42,6 +42,7 @@ from api.errors import NotFoundError  # noqa: E402
 from api.services.inference_row_persistence_service import (  # noqa: E402
     InferenceRowPersistenceService,
 )
+from api.storage import production_migrations  # noqa: E402
 from api.storage.base import StorageBackend  # noqa: E402
 from api.storage.file import FileStorageBackend  # noqa: E402
 
@@ -565,7 +566,10 @@ def main(
         typer.echo(f"game storage not found: {game_prefix}", err=True)
         raise typer.Exit(code=2)
 
-    storage = FileStorageBackend(storage_root.resolve())
+    storage = FileStorageBackend(
+        storage_root.resolve(),
+        migrations=production_migrations(),
+    )
     result = clear_analytic_persistence(
         storage,
         game_id=game_id,

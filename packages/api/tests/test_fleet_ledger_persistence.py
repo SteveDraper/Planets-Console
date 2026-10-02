@@ -13,6 +13,7 @@ from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_to_json,
     upgrade_legacy_fleet_turn_document,
 )
+from api.analytics.fleet.storage_migration import fleet_storage_migration
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetFieldKnown,
@@ -171,6 +172,7 @@ def test_unversioned_players_document_is_split_on_open(sample_ledger):
     key = FleetSnapshotPersistenceService.document_key(628580, 1, 111)
     backend = MemoryAssetBackend(
         documents={key: _legacy_players_document(sample_ledger)},
+        migrations=(fleet_storage_migration(),),
     )
     persistence = FleetSnapshotPersistenceService(backend)
 
@@ -185,19 +187,17 @@ def test_unversioned_players_document_is_split_on_open(sample_ledger):
         backend.get(key)
 
 
-def test_fleet_does_not_rewrite_legacy_document_after_open(
-    persistence,
-    memory_backend,
-    sample_ledger,
-):
+def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
+    backend = MemoryAssetBackend(initial={}, migrations=(fleet_storage_migration(),))
+    persistence = FleetSnapshotPersistenceService(backend)
     legacy_document = _legacy_players_document(sample_ledger)
-    memory_backend.put(persistence.document_key(628580, 1, 111), legacy_document)
+    backend.put(persistence.document_key(628580, 1, 111), legacy_document)
 
     with pytest.raises(UnhandledFormatError, match="found version unversioned"):
         persistence.get_ledger(628580, 1, 111, 8)
 
-    assert memory_backend.get(persistence.document_key(628580, 1, 111)) == legacy_document
-    assert not memory_backend.has_document(persistence.ledger_key(628580, 1, 111, 8))
+    assert backend.get(persistence.document_key(628580, 1, 111)) == legacy_document
+    assert not backend.has_document(persistence.ledger_key(628580, 1, 111, 8))
 
 
 def test_upgrade_legacy_fleet_turn_document_maps_players_to_ledgers(sample_ledger):

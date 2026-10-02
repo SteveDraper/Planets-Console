@@ -28,7 +28,6 @@ from api.storage.migrations import (
     MINIMUM_STORAGE_VERSION,
     StorageMigration,
     open_store,
-    production_migrations,
     superseded_layout_error,
 )
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
@@ -48,13 +47,13 @@ class FileStorageBackend:
         storage_root: Path,
         *,
         patterns: BreakpointPatterns | None = None,
-        migrations: tuple[StorageMigration, ...] | None = None,
+        migrations: tuple[StorageMigration, ...] = (),
         current_version: int | None = None,
         minimum_version: int | None = None,
     ) -> None:
         self._root = storage_root
         self._patterns = BREAKPOINT_PATTERNS if patterns is None else patterns
-        self._migrations = production_migrations() if migrations is None else migrations
+        self._migrations = migrations
         self._current_version = (
             CURRENT_STORAGE_VERSION if current_version is None else current_version
         )

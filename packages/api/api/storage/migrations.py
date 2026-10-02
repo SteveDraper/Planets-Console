@@ -103,17 +103,6 @@ def version_label(version: int | None) -> str:
     return str(version)
 
 
-def production_migrations() -> tuple[StorageMigration, ...]:
-    """Return the migrations bound into every store open.
-
-    Fleet owns the players/ledgers shape rewrite. Storage calls it here so a
-    backend runs the handler on open without the analytic probing the old key.
-    """
-    from api.analytics.fleet.storage_migration import fleet_storage_migration
-
-    return (fleet_storage_migration(),)
-
-
 def open_store(
     store: DocumentStore,
     *,
