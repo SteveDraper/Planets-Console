@@ -42,9 +42,9 @@ from api.errors import NotFoundError  # noqa: E402
 from api.services.inference_row_persistence_service import (  # noqa: E402
     InferenceRowPersistenceService,
 )
-from api.storage import production_migrations  # noqa: E402
 from api.storage.base import StorageBackend  # noqa: E402
 from api.storage.file import FileStorageBackend  # noqa: E402
+from api.storage_factory import production_migrations  # noqa: E402
 
 WILDCARD = "*"
 _HULL_MASKS_KEY = "inference_hull_catalog_masks"

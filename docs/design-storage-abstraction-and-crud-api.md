@@ -288,7 +288,7 @@ Code defaults stay `ephemeral` so tests and CI need no config file; repo `.confi
 ### 15.7 Deliverables (acceptance)
 
 1. `FileStorageBackend` in `packages/api/api/storage/file.py` implementing §15.2–15.4.
-2. Breakpoint registry module with v1 patterns; factory in `get_storage()` selects backend from config.
+2. Breakpoint registry module with v1 patterns; factory in `api.storage_factory.get_storage()` selects backend from config.
 3. Ephemeral backend updated for root list-only (§15.4).
 4. Conformance tests per §15.6; existing storage tests updated.
 5. `ApiConfig.storage_root`, config loading, `.config.yaml`, `docs/configuration.md`, and `.gitignore` updated.

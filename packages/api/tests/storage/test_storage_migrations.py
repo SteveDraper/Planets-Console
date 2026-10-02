@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -15,7 +16,6 @@ from api.analytics.fleet.storage_migration import (
 )
 from api.config import ApiConfig, get_config, set_config
 from api.errors import NotFoundError, UnhandledFormatError
-from api.storage import clear_backend_cache, get_storage, production_migrations
 from api.storage.boundaries import BREAKPOINT_PATTERNS
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
@@ -28,6 +28,7 @@ from api.storage.migrations import (
     generic_rehome,
     open_store,
 )
+from api.storage_factory import clear_backend_cache, get_storage, production_migrations
 
 SCORES = "games/7/1/turns/3/analytics/scores"
 SCORES_ROW = f"{SCORES}/inference_rows/4"
@@ -308,6 +309,47 @@ def test_retired_document_location_is_previous_registry_suffix():
         )
         is None
     )
+
+
+def _storage_source_layer_violations(path: Path) -> list[str]:
+    """Return forbidden module names referenced in ``path`` (imports, lazy or not)."""
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    forbidden_prefixes = ("api.analytics", "api.services", "api.storage_factory")
+    hits: list[str] = []
+
+    def _is_forbidden(name: str | None) -> bool:
+        if name is None:
+            return False
+        return any(name == prefix or name.startswith(f"{prefix}.") for prefix in forbidden_prefixes)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if _is_forbidden(alias.name):
+                    hits.append(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            if _is_forbidden(node.module):
+                hits.append(node.module)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if _is_forbidden(node.value):
+                hits.append(node.value)
+    for prefix in forbidden_prefixes:
+        if prefix in source:
+            hits.append(prefix)
+    return list(dict.fromkeys(hits))
+
+
+def test_storage_package_does_not_import_analytics_services_or_factory():
+    storage_dir = Path(__file__).resolve().parents[2] / "api" / "storage"
+    assert storage_dir.is_dir()
+    offenders: list[str] = []
+    for path in sorted(storage_dir.rglob("*.py")):
+        imported = _storage_source_layer_violations(path)
+        if imported:
+            relative = path.relative_to(storage_dir)
+            offenders.append(f"{relative}: {', '.join(imported)}")
+    assert offenders == []
 
 
 def test_production_migrations_bind_fleet_step():

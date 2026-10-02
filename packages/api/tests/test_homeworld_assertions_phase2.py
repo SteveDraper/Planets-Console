@@ -45,8 +45,8 @@ from api.services.homeworld_assertion_service import (
     HomeworldAssertionService,
     homeworld_sectors_exist,
 )
-from api.storage import clear_backend_cache, get_storage
 from api.storage.memory_asset import MemoryAssetBackend
+from api.storage_factory import clear_backend_cache, get_storage
 from fastapi.testclient import TestClient
 
 from tests.test_homeworld_locator_core import _export_services, _services

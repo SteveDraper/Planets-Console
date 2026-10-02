@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
-from api.storage import clear_backend_cache, get_storage
+from api.storage_factory import clear_backend_cache, get_storage
 from fastapi.testclient import TestClient
 
 

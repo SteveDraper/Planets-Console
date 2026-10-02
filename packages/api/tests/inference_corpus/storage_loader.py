@@ -7,7 +7,8 @@ from api.models.game import GameInfo, TurnInfo
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.turn_load_service import TurnLoadService
-from api.storage import StorageBackend, clear_backend_cache, get_storage
+from api.storage import StorageBackend
+from api.storage_factory import clear_backend_cache, get_storage
 
 
 def configure_file_storage(*, storage_root: Path) -> StorageBackend:

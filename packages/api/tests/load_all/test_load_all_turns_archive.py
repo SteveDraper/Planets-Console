@@ -209,7 +209,7 @@ def test_iter_load_all_turns_emits_perspective_first_progress() -> None:
 def test_load_all_turns_requires_login() -> None:
     _, _, _, _, load_all = load_services()
     with open(ASSETS_DIR / "game_info_sample.json") as handle:
-        from api.storage import get_storage
+        from api.storage_factory import get_storage
 
         get_storage().put("games/628580/info", json.load(handle))
 

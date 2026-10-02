@@ -10,7 +10,8 @@ from api.services.stack import ServiceStack, build_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
-from api.storage import StorageBackend, get_storage
+from api.storage import StorageBackend
+from api.storage_factory import get_storage
 
 
 def get_service_stack(

@@ -8,8 +8,8 @@ from api.config import ApiConfig, set_config
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.turn_load_service import TurnLoadService
-from api.storage import clear_backend_cache, get_storage
 from api.storage.base import StorageBackend
+from api.storage_factory import clear_backend_cache, get_storage
 
 
 def make_turn_load_service_for_storage_root(storage_root: Path) -> TurnLoadService:

@@ -10,8 +10,8 @@ from api.services.stack import (
     clear_process_service_stack,
     get_process_service_stack,
 )
-from api.storage import clear_backend_cache
 from api.storage.memory_asset import MemoryAssetBackend
+from api.storage_factory import clear_backend_cache
 
 
 def test_build_game_credential_services_returns_games_and_credentials(monkeypatch):
@@ -44,7 +44,7 @@ def test_build_game_credential_services_returns_games_and_credentials(monkeypatc
 
 def test_build_default_game_credential_services_uses_process_storage(monkeypatch):
     storage = MemoryAssetBackend(initial={})
-    monkeypatch.setattr("api.storage.get_storage", lambda: storage)
+    monkeypatch.setattr("api.storage_factory.get_storage", lambda: storage)
     constructed: list[str] = []
 
     class TrackingTurnAnalyticService:
@@ -65,7 +65,7 @@ def test_build_default_game_credential_services_uses_process_storage(monkeypatch
 
 def test_get_process_service_stack_is_a_singleton(monkeypatch):
     storage = MemoryAssetBackend(initial={})
-    monkeypatch.setattr("api.storage.get_storage", lambda: storage)
+    monkeypatch.setattr("api.storage_factory.get_storage", lambda: storage)
     clear_process_service_stack()
     try:
         first = get_process_service_stack()
@@ -79,7 +79,7 @@ def test_get_process_service_stack_is_a_singleton(monkeypatch):
 
 def test_clear_backend_cache_drops_process_service_stack(monkeypatch):
     storage = MemoryAssetBackend(initial={})
-    monkeypatch.setattr("api.storage.get_storage", lambda: storage)
+    monkeypatch.setattr("api.storage_factory.get_storage", lambda: storage)
     clear_process_service_stack()
     try:
         first = get_process_service_stack()
