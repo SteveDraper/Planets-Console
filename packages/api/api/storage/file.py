@@ -186,6 +186,18 @@ class FileStorageBackend:
             raise ValidationError("Cannot put root path")
         breakpoint_path, suffix = resolve_breakpoint(path)
         value_copy = deep_copy_value(value)
+        # Nested keys of one breakpoint share a JSON document. Concurrent
+        # read-modify-write otherwise drops sibling keys (scores inference rows
+        # during map ensure).
+        with self._document_lru.document_lock(breakpoint_path):
+            self._put_document(breakpoint_path, suffix, value_copy)
+
+    def _put_document(
+        self,
+        breakpoint_path: str,
+        suffix: str | None,
+        value_copy: JSONValue,
+    ) -> None:
         file_path = self._document_file(breakpoint_path)
 
         if suffix is None:
@@ -232,28 +244,29 @@ class FileStorageBackend:
         if path == "":
             raise ValidationError("Cannot delete root path")
         breakpoint_path, suffix = resolve_breakpoint(path)
-        if suffix is None:
-            self._delete_document(breakpoint_path)
-            return
+        with self._document_lru.document_lock(breakpoint_path):
+            if suffix is None:
+                self._delete_document(breakpoint_path)
+                return
 
-        document = deep_copy_value(self._load_document(breakpoint_path))
-        parent, segment, is_array_index = resolve_parent_and_segment(document, suffix)
-        if is_array_index:
-            idx = parse_index_segment(segment)
-            arr = parent
-            if idx < 0:
-                idx += len(arr)
-            if idx < 0 or idx >= len(arr):
-                raise NotFoundError(f"Array index out of range: {segment}")
-            arr.pop(idx)
-        else:
-            assert isinstance(parent, dict)
-            if segment not in parent:
-                raise NotFoundError(f"Path does not exist: {segment!r}")
-            del parent[segment]
+            document = deep_copy_value(self._load_document(breakpoint_path))
+            parent, segment, is_array_index = resolve_parent_and_segment(document, suffix)
+            if is_array_index:
+                idx = parse_index_segment(segment)
+                arr = parent
+                if idx < 0:
+                    idx += len(arr)
+                if idx < 0 or idx >= len(arr):
+                    raise NotFoundError(f"Array index out of range: {segment}")
+                arr.pop(idx)
+            else:
+                assert isinstance(parent, dict)
+                if segment not in parent:
+                    raise NotFoundError(f"Path does not exist: {segment!r}")
+                del parent[segment]
 
-        self._atomic_write(self._document_file(breakpoint_path), document)
-        self._document_lru.remember_document(breakpoint_path, document)
+            self._atomic_write(self._document_file(breakpoint_path), document)
+            self._document_lru.remember_document(breakpoint_path, document)
 
     def list(self, prefix: str) -> list[str]:
         path = self._normalize(prefix)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,6 +35,46 @@ def test_document_paths_on_disk(backend, storage_root):
     assert turn_path.is_file()
     assert json.loads(info_path.read_text(encoding="utf-8")) == {"name": "Serada"}
     assert json.loads(turn_path.read_text(encoding="utf-8")) == {"turn": 111}
+
+
+def test_concurrent_nested_puts_keep_sibling_keys(storage_root):
+    """Overlapping read-modify-write of one breakpoint must not drop sibling keys.
+
+    Scores inference rows share one turn document. Map ensure writes many of
+    those rows at once; a stale replace used to delete a just-written admission
+    skip and fail scores tier_solve with no attachable RowRun.
+    """
+    first = FileStorageBackend(storage_root)
+    second = FileStorageBackend(storage_root.resolve())
+    document = f"{TURN}/analytics/scores"
+    first.put(document, {"inference_rows": {}})
+    errors: list[BaseException] = []
+
+    def write(storage: FileStorageBackend, player_id: int) -> None:
+        try:
+            storage.put(
+                f"{document}/inference_rows/{player_id}",
+                {"status": "full_alliance", "n": player_id},
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(
+            target=write,
+            args=(first if player_id % 2 == 0 else second, player_id),
+        )
+        for player_id in range(48)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    for player_id in range(48):
+        stored = first.get(f"{document}/inference_rows/{player_id}")
+        assert stored == {"status": "full_alliance", "n": player_id}
 
 
 def test_nested_path_stored_inside_document(backend, storage_root):
