@@ -1,10 +1,9 @@
 """Fleet layout step in the storage migration pipeline.
 
 The handler upgrades a legacy ``players`` array to an in-document ``ledgers``
-map. Generic re-home then writes one document per player at
-``.../analytics/fleet/{playerId}`` and deletes the parent. Row-content stamps
-such as ``materializationVersion`` stay on the ledger and are applied when
-fleet reads the player file.
+map, then writes one document per player at ``.../analytics/fleet/{playerId}``
+and deletes the parent. Row-content stamps such as ``materializationVersion``
+stay on the ledger and are applied when fleet reads the player file.
 """
 
 from __future__ import annotations
@@ -25,27 +24,33 @@ _PLAYER_ID_KEY = "playerId"
 
 
 def migrate_fleet_breakpoint(context: MigrationContext) -> None:
-    """Upgrade a legacy ``players`` array to an in-document ``ledgers`` map.
+    """Upgrade a legacy ``players`` array and write per-player fleet documents.
 
-    Documents that already use ``ledgers``, and documents with neither shape,
-    stay as they are. Generic re-home writes the player files and deletes the
-    parent.
+    ``ledgers`` map keys become ``.../analytics/fleet/{playerId}`` documents.
+    The parent is deleted, including when the map is empty. Documents with
+    neither shape stay as they are.
     """
     for path, document in context.iter_documents(_FLEET_PARENT_PATTERN):
-        if not isinstance(document, dict) or not is_legacy_fleet_turn_document(document):
+        ledgers = _fleet_ledgers_map(document)
+        if ledgers is None:
             continue
-        context.put_document(path, upgrade_legacy_fleet_turn_document(document))
+        for player_key, ledger in ledgers.items():
+            context.put_document(f"{path}/{player_key}", ledger)
+        context.delete_document(path)
 
 
 def fleet_retired_document_holds_path(document: JSONValue, breakpoint_path: str) -> bool:
-    """Return whether a legacy ``players`` array still contains ``breakpoint_path``.
+    """Return whether a copied-in parent still contains ``breakpoint_path``.
 
-    Ledgers-map membership is re-home residue: the map key is the path segment.
-    This check is the pre-upgrade array, where the id is ``playerId``.
+    The id is a ``ledgers`` map key or a ``players`` array ``playerId``.
+    Top-level leftover keys after a split are re-home residue.
     """
     player_key = breakpoint_path.rpartition("/")[2]
     if player_key == "" or not isinstance(document, dict):
         return False
+    ledgers = document.get(FLEET_LEDGERS_KEY)
+    if isinstance(ledgers, dict) and player_key in ledgers:
+        return True
     return _players_array_holds_id(document.get(_PLAYERS_KEY), player_key)
 
 
@@ -55,10 +60,20 @@ def fleet_storage_migration() -> StorageMigration:
         version=1,
         introduced_pattern=_FLEET_PLAYER_PATTERN,
         structural_handler=migrate_fleet_breakpoint,
-        rehome_map_suffix=FLEET_LEDGERS_KEY,
-        remove_parent=True,
         holds_retired_path=fleet_retired_document_holds_path,
     )
+
+
+def _fleet_ledgers_map(document: JSONValue) -> dict[str, JSONValue] | None:
+    if not isinstance(document, dict):
+        return None
+    payload = document
+    if is_legacy_fleet_turn_document(payload):
+        payload = upgrade_legacy_fleet_turn_document(payload)
+    ledgers = payload.get(FLEET_LEDGERS_KEY)
+    if not isinstance(ledgers, dict):
+        return None
+    return ledgers
 
 
 def _players_array_holds_id(players: JSONValue, player_key: str) -> bool:

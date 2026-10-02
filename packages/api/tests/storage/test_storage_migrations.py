@@ -64,7 +64,6 @@ def _scores_migration() -> StorageMigration:
     return StorageMigration(
         version=1,
         introduced_pattern=SCORES_PLAYER_PATTERN,
-        rehome_map_suffix="inference_rows",
     )
 
 
@@ -291,8 +290,6 @@ def test_production_migrations_bind_fleet_step():
     step = steps[0]
     assert step.version == CURRENT_STORAGE_VERSION
     assert step.structural_handler is migrate_fleet_breakpoint
-    assert step.rehome_map_suffix == "ledgers"
-    assert step.remove_parent is True
     assert step.holds_retired_path is fleet_retired_document_holds_path
 
 
@@ -396,8 +393,9 @@ def test_unversioned_players_document_splits_on_open(kind, tmp_path):
         backend.get(FLEET)
 
 
-def test_fleet_handler_upgrades_players_and_leaves_ledgers():
+def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
     players = _legacy_players_parent()
+    expected = upgrade_legacy_fleet_turn_document(players)["ledgers"]["8"]
     ledgers_path = "games/1/1/turns/4/analytics/fleet"
     ledgers = {"ledgers": {"8": LEDGER_WIRE}, "kept": True}
     other_path = "games/1/1/turns/5/analytics/fleet"
@@ -408,12 +406,10 @@ def test_fleet_handler_upgrades_players_and_leaves_ledgers():
         current_version=0,
     )
     migrate_fleet_breakpoint(MigrationContext(backend))
-    upgraded = backend.read_document(FLEET)
-    assert isinstance(upgraded, dict)
-    assert "players" not in upgraded
-    assert upgraded["ledgers"]["8"]["ledger"]["playerId"] == 8
-    assert not backend.has_document(FLEET_PLAYER)
-    assert backend.read_document(ledgers_path) == ledgers
+    assert not backend.has_document(FLEET)
+    assert backend.read_document(FLEET_PLAYER) == expected
+    assert not backend.has_document(ledgers_path)
+    assert backend.read_document(f"{ledgers_path}/8") == LEDGER_WIRE
     assert backend.read_document(other_path) == other
 
 
@@ -424,7 +420,6 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
         current_version=0,
     )
     step = fleet_storage_migration()
-    assert step.rehome_map_suffix is not None
     open_store(
         backend,
         patterns=BREAKPOINT_PATTERNS,
@@ -437,13 +432,7 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
         backend.get(FLEET)
 
     migrate_fleet_breakpoint(MigrationContext(backend))
-    generic_rehome(
-        backend,
-        step.introduced_pattern,
-        step.rehome_map_suffix,
-        BREAKPOINT_PATTERNS,
-        remove_parent=step.remove_parent,
-    )
+    generic_rehome(backend, BREAKPOINT_PATTERNS)
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
     assert not backend.has_document(FLEET)
 

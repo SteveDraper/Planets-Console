@@ -32,6 +32,24 @@ def partition_logical_tree(
     patterns: BreakpointPatterns,
 ) -> dict[str, JSONValue]:
     """Split a nested logical tree into one value per breakpoint document."""
+    if not isinstance(root, dict):
+        return {}
+    return _collect_breakpoint_documents(list(root.items()), patterns)
+
+
+def partition_breakpoint_document(
+    breakpoint_path: str,
+    document: JSONValue,
+    patterns: BreakpointPatterns,
+) -> dict[str, JSONValue]:
+    """Split one stored document into this breakpoint plus any longer ones under it."""
+    return _collect_breakpoint_documents([(breakpoint_path, document)], patterns)
+
+
+def _collect_breakpoint_documents(
+    start_nodes: list[tuple[str, JSONValue]],
+    patterns: BreakpointPatterns,
+) -> dict[str, JSONValue]:
     documents: dict[str, JSONValue] = {}
 
     def place(node: JSONValue, path: str) -> None:
@@ -43,13 +61,13 @@ def partition_logical_tree(
                     place(child, f"{path}/{key}" if path else key)
             return
         if breakpoint_path == path:
-            documents[path] = _extract_document(node, path, path)
+            documents[path] = extract_document(node, path, path)
             return
         if isinstance(node, dict):
             for key, child in node.items():
                 place(child, f"{path}/{key}")
 
-    def _extract_document(node: JSONValue, document_path: str, node_path: str) -> JSONValue:
+    def extract_document(node: JSONValue, document_path: str, node_path: str) -> JSONValue:
         if not isinstance(node, dict):
             return deep_copy_value(node)
         kept: dict[str, JSONValue] = {}
@@ -63,12 +81,14 @@ def partition_logical_tree(
             if child_breakpoint != document_path:
                 place(child, child_path)
                 continue
-            kept[key] = _extract_document(child, document_path, child_path)
+            extracted = extract_document(child, document_path, child_path)
+            if isinstance(child, dict) and child and extracted == {}:
+                continue
+            kept[key] = extracted
         return kept
 
-    if isinstance(root, dict):
-        for key, child in root.items():
-            place(child, key)
+    for path, node in start_nodes:
+        place(node, path)
     return documents
 
 
