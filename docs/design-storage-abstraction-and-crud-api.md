@@ -295,6 +295,23 @@ Code defaults stay `ephemeral` so tests and CI need no config file; repo `.confi
 
 ---
 
+## 16. Storage version and breakpoint migrations
+
+[ADR 0033](adr/0033-storage-versioned-breakpoint-migrations.md). Both backends resolve a logical path to one breakpoint document plus an optional in-document suffix. A `put` of a longer breakpoint does not nest inside the shorter document.
+
+The data directory has one **storage version** at `meta/storage-version`. An empty directory is stamped with the current version and does not run migrations. An older supported directory runs the remaining steps in order, then stamps the current version. A second open does not run them again. A directory older than the minimum still supported raises `UnhandledFormatError` and is not rewritten.
+
+Each step is keyed by the version it brings the directory to, and names the breakpoint it introduces:
+
+- **Generic re-home.** The logical key is unchanged. Children of a named in-document map become their own documents. Scores `inference_rows/{playerId}` is the shape this step is for; performing that breakpoint move is a later change.
+- **Structural handler.** An analytic registers a JSON rewrite for a storage version. Fleet's `players` / `ledgers` document becomes `.../analytics/fleet/{playerId}` this way. The handler does not import `FileStorageBackend`. After the directory is current, fleet persistence does not probe or rewrite the legacy document.
+
+A read of the current breakpoint does not consult the retired one. If the current document is missing and the retired document still holds that path, the read raises the same unhandled-format error.
+
+Row-content stamps (scores `persistence_version`, fleet `materializationVersion`) stay in the analytic.
+
+---
+
 ## Addendum: Summary of storage unit tests
 
 The storage implementation is covered by test modules under `packages/api/tests/` and `packages/api/tests/storage/`:

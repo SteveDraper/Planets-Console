@@ -124,7 +124,7 @@ One ledger file per player:
 games/{gameId}/{perspective}/turns/{turn}/analytics/fleet/{playerId}
 ```
 
-`put_ledger` and a clear of that player replace or unlink only that file. A legacy shared `.../analytics/fleet` document is split into these files on read, then removed.
+`put_ledger` and a clear of that player replace or unlink only that file. A legacy shared `.../analytics/fleet` document is split into these files by the storage migration in [ADR 0033](0033-storage-versioned-breakpoint-migrations.md) when the directory opens, then removed. Fleet reads do not detect that shape.
 
 ### Fleet evidence generation
 

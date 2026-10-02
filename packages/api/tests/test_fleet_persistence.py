@@ -1387,10 +1387,14 @@ def test_stale_materialization_version_is_deleted_on_read(persistence, load_turn
         player_entry = ledger_wire[player_key]
         if isinstance(player_entry, dict):
             player_entry["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
-    memory_backend.put(
-        persistence.document_key(628580, 1, 111),
-        stale_payload,
-    )
+    ledgers = stale_payload[FLEET_LEDGERS_KEY]
+    assert isinstance(ledgers, dict)
+    for player_key, player_entry in ledgers.items():
+        assert isinstance(player_entry, dict)
+        memory_backend.put(
+            persistence.ledger_key(628580, 1, 111, int(player_key)),
+            player_entry,
+        )
     first_player_id = snapshot.players[0].player_id
     generation_before = persistence.player_invalidation_generation(628580, 1, first_player_id)
 
@@ -1403,24 +1407,19 @@ def test_stale_materialization_version_is_deleted_on_read(persistence, load_turn
 
 
 def test_missing_materialization_version_is_deleted_on_read(persistence, load_turn, memory_backend):
-    from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
-
     turn = load_turn(111)
     assert turn is not None
     snapshot = ensure_fleet_baseline(628580, 1, turn)
-    legacy_payload = {
-        "analyticId": "fleet",
-        "gameId": 628580,
-        "perspective": 1,
-        "turn": 111,
-        "players": [
-            fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in snapshot.players
-        ],
-    }
-    memory_backend.put(
-        persistence.document_key(628580, 1, 111),
-        legacy_payload,
-    )
+    payload = fleet_turn_snapshot_to_json(snapshot)
+    ledgers = payload[FLEET_LEDGERS_KEY]
+    assert isinstance(ledgers, dict)
+    for player_key, player_entry in ledgers.items():
+        assert isinstance(player_entry, dict)
+        player_entry.pop("materializationVersion", None)
+        memory_backend.put(
+            persistence.ledger_key(628580, 1, 111, int(player_key)),
+            player_entry,
+        )
 
     assert persistence.get_snapshot(628580, 1, 111) is None
     assert persistence.has_snapshot(628580, 1, 111) is False
@@ -1439,10 +1438,14 @@ def test_stale_chain_anchor_skipped_during_gap_fill(persistence, load_turn, memo
         player_entry = ledger_wire[player_key]
         if isinstance(player_entry, dict):
             player_entry["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
-    memory_backend.put(
-        persistence.document_key(628580, 1, 110),
-        stale_payload,
-    )
+    ledgers = stale_payload[FLEET_LEDGERS_KEY]
+    assert isinstance(ledgers, dict)
+    for player_key, player_entry in ledgers.items():
+        assert isinstance(player_entry, dict)
+        memory_backend.put(
+            persistence.ledger_key(628580, 1, 110, int(player_key)),
+            player_entry,
+        )
 
     # Drop stale entries (and absorb generation bumps) before coherent rematerialize.
     for player in stale_anchor.players:

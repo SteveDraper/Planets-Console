@@ -69,8 +69,10 @@ The file backend persists **documents** at **breakpoints** from a code registry 
 - Nested paths without a deeper breakpoint are stored **inside** that JSON file
 - Unregistered paths → `ValidationError` (fail fast)
 - Document writes: temp file + atomic `replace`; document delete: remove file + prune empty parent dirs
+- The ephemeral backend uses the same breakpoint resolution. A `put` of a longer breakpoint does not nest inside the shorter document
+- One **storage version** document per directory (`meta/storage-version`). Empty directories are stamped current. Older supported directories run registered migrations on open. See [ADR 0033](../../docs/adr/0033-storage-versioned-breakpoint-migrations.md)
 
-**V1 patterns:** `games/*/info`, `games/*/*/turns/*`, `games/*/*/turns/*/analytics/fleet/*`, `games/*/*/analytics/fleet-evidence/*`, `credentials/accounts/*`
+**V1 patterns:** `games/*/info`, `games/*/*/turns/*`, `games/*/*/turns/*/analytics/*`, `games/*/*/turns/*/analytics/fleet/*`, `games/*/*/analytics/fleet-evidence/*`, `credentials/accounts/*`, `meta/storage-version`
 
 ## Adding a New Implementation
 

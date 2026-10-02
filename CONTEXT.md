@@ -791,7 +791,7 @@ Per-player pair at `fleet@N`: `turnEvidenceAtN` (turn-*N* RST ingest + `scores@N
 _Avoid_: inferring finality from cache hit, global provenance for all players
 
 **Fleet turn snapshot**:
-Legacy name for the turn-scoped fleet persistence document at `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. **Current model (ADR 0004):** the document holds per-player **fleet ledger persistence** entries, not one undifferentiated all-players snapshot. Materialize each player by chaining from that player's prior ledger plus turn-*T* evidence. Shared global id-bound inputs are read from RST per turn, not stored as a cross-player ledger. Turn document replace at *T* deletes ledger files at turns `>= T`. Durable scores evidence bumps that player's **fleet evidence generation** from the host turn forward and leaves the files in place.
+Legacy name for the turn-scoped fleet persistence document at `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. **Current model (ADR 0004):** one **fleet ledger persistence** document per player at `.../analytics/fleet/{playerId}`, not one undifferentiated all-players snapshot. Materialize each player by chaining from that player's prior ledger plus turn-*T* evidence. Shared global id-bound inputs are read from RST per turn, not stored as a cross-player ledger. Turn document replace at *T* deletes ledger files at turns `>= T`. Durable scores evidence bumps that player's **fleet evidence generation** from the host turn forward and leaves the files in place.
 _Avoid_: perspective-wide single ledger file as ensure-final, recompute 1..T on every GET
 
 **Fleet ensure baseline**:
@@ -1375,11 +1375,11 @@ A declared point in the path hierarchy where persistence writes a separate JSON 
 _Avoid_: shard key, partition (without "breakpoint" context)
 
 **Document** (storage):
-One JSON file on disk corresponding to a breakpoint path. Nested logical paths without an intervening breakpoint are stored inside the document, not as separate files.
+The JSON value at one **breakpoint**. The file backend stores it as one file; the ephemeral backend keeps the same document map in memory. A longer breakpoint is its own document on both. Nested logical paths without a deeper breakpoint live inside the document.
 _Avoid_: node, blob (when persistence boundary is meant)
 
 **Ephemeral backend**:
-The in-memory backend used for tests and dev; mutations do not survive process restart.
+The in-memory backend used for tests and dev; mutations do not survive process restart. It resolves **breakpoint** documents the same way as the **file backend**.
 _Avoid_: temporary storage (ambiguous with session state)
 
 **File backend**:
@@ -1391,16 +1391,24 @@ The code-defined list of path patterns that declares where JSON documents begin.
 _Avoid_: storage schema file, boundaries YAML
 
 **Registered path**:
-A logical store path that matches at least one breakpoint pattern (longest matching prefix wins). Only registered paths may be read or written by the file backend; unregistered paths fail fast.
+A logical store path that matches at least one breakpoint pattern (longest matching prefix wins). Only registered paths may be read or written; unregistered paths fail fast on every backend.
 _Avoid_: valid key (too generic)
+
+**Storage version**:
+The version of one data directory, stored once for that directory. An empty directory is stamped with the current version. A directory at an older supported version is brought forward when the store opens. A directory older than the minimum still supported is unreadable.
+_Avoid_: per-row schema version, persistence_version (row content)
 
 **V1 breakpoint patterns**:
 - `games/*/info` -- **GameInfo** document
 - `games/*/*/turns/*` -- **TurnInfo** document per **perspective** and turn
 - `games/*/analytics/*` -- game-global **analytic persistence** document per analytic id
 - `games/*/*/analytics/*` -- per-**perspective** **analytic persistence** document per analytic id (nested keys such as `evidence` live inside the document)
+- `games/*/*/analytics/fleet-evidence/*` -- **fleet evidence generation** mark for one player
 - `games/*/*/turns/*/analytics/*` -- per-turn **analytic persistence** document per analytic id (separate from the **TurnInfo** snapshot at the same turn path)
+- `games/*/*/turns/*/analytics/fleet/*` -- one **fleet ledger persistence** document per player
 - `credentials/accounts/*` -- account record for one login name (**account API key** and future account fields); one **document** per name
+- `league-teams/*` -- one league team directory document per team id
+- `meta/storage-version` -- the directory's **storage version**
 
 **Analytic persistence**:
 Server-side cached output for a **turn analytic** that must not recompute on every request. Three tiers under the `analytics/` namespace (see [ADR 0002](docs/adr/0002-analytic-persistence.md)): **game-global** `games/{gameId}/analytics/{analytic_id}` (e.g. **Scores** hull catalog mask overrides, **homeworld locator state (game-global)**); **perspective supplement** `games/{gameId}/{perspective}/analytics/{analytic_id}/...`; **turn-scoped supplement** `games/{gameId}/{perspective}/turns/{turn}/analytics/{analytic_id}` (one JSON document per shell turn and **perspective**, distinct from the **TurnInfo** file at `.../turns/{turn}` -- e.g. **Scores inference row persistence**, **fleet ledger persistence**, **homeworld evidence aggregate**). **Homeworld locator** uses game-global state plus turn-scoped evidence aggregates; the **homeworld candidate view** is materialized for serve.

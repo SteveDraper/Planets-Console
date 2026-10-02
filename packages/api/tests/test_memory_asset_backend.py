@@ -61,4 +61,4 @@ def test_get_missing_raises(backend):
 
 
 def test_list_root(backend):
-    assert backend.list("") == ["games"]
+    assert backend.list("") == ["games", "meta"]

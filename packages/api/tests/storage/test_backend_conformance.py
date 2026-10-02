@@ -67,7 +67,7 @@ def test_credentials_document(backend):
 def test_root_list_only(backend):
     backend.put(GAME_INFO, {"name": "A"})
     backend.put(ACCOUNT, {"api_key": "k"})
-    assert set(backend.list("")) == {"games", "credentials"}
+    assert set(backend.list("")) == {"games", "credentials", "meta"}
     with pytest.raises(ValidationError, match="Cannot get root"):
         backend.get("")
     with pytest.raises(ValidationError, match="Cannot put root"):
@@ -115,6 +115,27 @@ def test_get_returns_deep_copy(backend):
     assert isinstance(value, dict)
     value["name"] = "mutated"
     assert backend.get(GAME_INFO) == {"name": "A"}
+
+
+def test_longer_breakpoint_put_does_not_nest_in_parent(backend):
+    parent = f"{TURN}/analytics/fleet"
+    child = f"{parent}/30"
+    backend.put(parent, {"ledgers": {"1": {"ok": True}}})
+    backend.put(child, {"ledger": {"playerId": 30}})
+    assert backend.get(child) == {"ledger": {"playerId": 30}}
+    stored_parent = backend.get(parent)
+    assert isinstance(stored_parent, dict)
+    assert "30" not in stored_parent
+    assert stored_parent["ledgers"]["1"]["ok"] is True
+
+
+def test_list_between_breakpoints_lists_sibling_documents(backend):
+    backend.put(TURN, {"turn": 111, "ships": []})
+    backend.put(f"{TURN}/analytics/fleet", {"ledgers": {}})
+    backend.put(f"{TURN}/analytics/scores", {"inference_rows": {}})
+    assert backend.list(f"{TURN}/analytics") == ["fleet", "scores"]
+    assert "ships" in backend.list(TURN)
+    assert "analytics" not in backend.list(TURN)
 
 
 def test_put_rejects_reserved_at_keys(backend):

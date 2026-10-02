@@ -242,7 +242,8 @@ def test_prune_empty_dirs_after_document_delete(backend, storage_root):
 def test_unregistered_put_leaves_no_files(backend, storage_root):
     with pytest.raises(ValidationError, match="Unregistered"):
         backend.put("orphan/path", {"x": 1})
-    assert list(storage_root.rglob("*")) == []
+    names = {path.relative_to(storage_root).as_posix() for path in storage_root.rglob("*")}
+    assert names == {"meta", "meta/storage-version.json"}
 
 
 def test_list_filesystem_prefix_before_document_exists(backend, storage_root):
@@ -305,4 +306,5 @@ def test_unsafe_path_segments_rejected_before_filesystem(backend, storage_root, 
         backend.get(path)
     with pytest.raises(ValidationError):
         backend.list(path)
-    assert list(storage_root.rglob("*")) == []
+    names = {path.relative_to(storage_root).as_posix() for path in storage_root.rglob("*")}
+    assert names == {"meta", "meta/storage-version.json"}

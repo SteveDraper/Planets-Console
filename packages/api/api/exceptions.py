@@ -58,6 +58,19 @@ class ValidationError(CoreAPIError):
     http_error: int = 422
 
 
+class UnhandledFormatError(CoreAPIError):
+    """Stored data uses a layout this code no longer migrates."""
+
+    http_error: int = 422
+
+    def __init__(self, found: str, minimum: str) -> None:
+        self.found_version = found
+        self.minimum_version = minimum
+        super().__init__(
+            f"Unhandled storage format: found version {found}, minimum supported version {minimum}"
+        )
+
+
 class LoginCredentialsRequiredError(CoreAPIError):
     """Stored API key is missing and no password was supplied for refresh."""
 

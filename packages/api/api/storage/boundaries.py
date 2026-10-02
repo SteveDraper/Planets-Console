@@ -20,7 +20,10 @@ BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("games", "*", "*", "turns", "*", "analytics", "fleet", "*"),
     ("credentials", "accounts", "*"),
     ("league-teams", "*"),
+    ("meta", "storage-version"),
 )
+
+BreakpointPatterns = tuple[tuple[str, ...], ...]
 
 
 def _validate_path_segment(segment: str) -> None:
@@ -66,18 +69,22 @@ def _pattern_prefix_matches(pattern: tuple[str, ...], segments: list[str]) -> bo
     return True
 
 
-def resolve_breakpoint(path: str) -> tuple[str, str | None]:
+def resolve_breakpoint(
+    path: str,
+    patterns: BreakpointPatterns | None = None,
+) -> tuple[str, str | None]:
     """Return ``(breakpoint_path, in_document_suffix)`` for a registered path.
 
     ``in_document_suffix`` is ``None`` when ``path`` is exactly the breakpoint.
     Raises ``ValidationError`` when the path is not covered by any pattern.
     """
+    registry = BREAKPOINT_PATTERNS if patterns is None else patterns
     segments = _path_segments(path)
     if not segments:
         raise ValidationError("Root path is not a registered document path")
 
     best_pattern: tuple[str, ...] | None = None
-    for pattern in BREAKPOINT_PATTERNS:
+    for pattern in registry:
         if len(segments) < len(pattern):
             continue
         if _pattern_matches_path(pattern, segments[: len(pattern)]):
@@ -93,28 +100,37 @@ def resolve_breakpoint(path: str) -> tuple[str, str | None]:
     return breakpoint_path, suffix
 
 
-def is_registered_path(path: str) -> bool:
+def pattern_matches_breakpoint(pattern: tuple[str, ...], breakpoint_path: str) -> bool:
+    """Return whether ``breakpoint_path`` matches ``pattern`` segment for segment."""
+    return _pattern_matches_path(pattern, _path_segments(breakpoint_path))
+
+
+def is_registered_path(path: str, patterns: BreakpointPatterns | None = None) -> bool:
     """Return whether ``path`` is covered by a breakpoint pattern."""
     try:
-        resolve_breakpoint(path)
+        resolve_breakpoint(path, patterns)
         return True
     except ValidationError:
         return False
 
 
-def is_navigable_prefix(prefix: str) -> bool:
+def is_navigable_prefix(prefix: str, patterns: BreakpointPatterns | None = None) -> bool:
     """Return whether ``prefix`` may be used with ``list``."""
+    registry = BREAKPOINT_PATTERNS if patterns is None else patterns
     if prefix == "":
         return True
     segments = _path_segments(prefix)
     if not segments:
         return True
-    if is_registered_path(prefix):
+    if is_registered_path(prefix, registry):
         return True
-    return any(_pattern_prefix_matches(pattern, segments) for pattern in BREAKPOINT_PATTERNS)
+    return any(_pattern_prefix_matches(pattern, segments) for pattern in registry)
 
 
-def is_prefix_of_longer_breakpoint(path: str) -> bool:
+def is_prefix_of_longer_breakpoint(
+    path: str,
+    patterns: BreakpointPatterns | None = None,
+) -> bool:
     """Return whether ``path`` is a strict prefix of a longer breakpoint pattern.
 
     When true, ``path`` sits between breakpoints (e.g. ``…/turns/N/analytics``
@@ -122,20 +138,21 @@ def is_prefix_of_longer_breakpoint(path: str) -> bool:
     ``list`` should enumerate the filesystem there instead of looking up a
     suffix inside the shorter document.
     """
+    registry = BREAKPOINT_PATTERNS if patterns is None else patterns
     segments = _path_segments(path)
     if not segments:
         return False
     try:
-        breakpoint_path, _suffix = resolve_breakpoint(path)
+        breakpoint_path, _suffix = resolve_breakpoint(path, registry)
     except ValidationError:
         return any(
             len(pattern) > len(segments) and _pattern_prefix_matches(pattern, segments)
-            for pattern in BREAKPOINT_PATTERNS
+            for pattern in registry
         )
     matched_len = len(_path_segments(breakpoint_path))
     return any(
         len(pattern) > matched_len and _pattern_prefix_matches(pattern, segments)
-        for pattern in BREAKPOINT_PATTERNS
+        for pattern in registry
     )
 
 

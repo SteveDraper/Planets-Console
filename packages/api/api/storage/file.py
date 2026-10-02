@@ -5,26 +5,33 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from collections.abc import Iterator
 from pathlib import Path
 
 from api.errors import NotFoundError, ValidationError
 from api.storage.base import JSONValue
 from api.storage.boundaries import (
+    BREAKPOINT_PATTERNS,
+    BreakpointPatterns,
     document_relpath,
-    is_navigable_prefix,
-    is_prefix_of_longer_breakpoint,
     resolve_breakpoint,
 )
 from api.storage.document_lru import document_lru_for_root
-from api.storage.path_utils import (
-    deep_copy_value,
-    ensure_ancestors,
-    list_children,
-    parse_index_segment,
-    resolve_parent_and_segment,
-    resolve_path,
-    validate_no_reserved_at_keys,
+from api.storage.documents import (
+    document_after_delete,
+    document_after_put,
+    list_logical,
+    read_logical,
 )
+from api.storage.migrations import (
+    CURRENT_STORAGE_VERSION,
+    MINIMUM_STORAGE_VERSION,
+    StorageMigration,
+    open_store,
+    production_migrations,
+    superseded_layout_error,
+)
+from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
 class FileStorageBackend:
@@ -36,9 +43,32 @@ class FileStorageBackend:
     deep copy.
     """
 
-    def __init__(self, storage_root: Path) -> None:
+    def __init__(
+        self,
+        storage_root: Path,
+        *,
+        patterns: BreakpointPatterns | None = None,
+        migrations: tuple[StorageMigration, ...] | None = None,
+        current_version: int | None = None,
+        minimum_version: int | None = None,
+    ) -> None:
         self._root = storage_root
+        self._patterns = BREAKPOINT_PATTERNS if patterns is None else patterns
+        self._migrations = production_migrations() if migrations is None else migrations
+        self._current_version = (
+            CURRENT_STORAGE_VERSION if current_version is None else current_version
+        )
+        self._minimum_version = (
+            MINIMUM_STORAGE_VERSION if minimum_version is None else minimum_version
+        )
         self._document_lru = document_lru_for_root(storage_root)
+        open_store(
+            self,
+            patterns=self._patterns,
+            migrations=self._migrations,
+            current_version=self._current_version,
+            minimum_version=self._minimum_version,
+        )
 
     def _normalize(self, key: str) -> str:
         return (key or "").strip().strip("/") or ""
@@ -170,21 +200,54 @@ class FileStorageBackend:
         self._document_lru.fill_listing(prefix, names, epoch=epoch)
         return names
 
+    def iter_document_paths(self) -> Iterator[str]:
+        if not self._root.is_dir():
+            return
+        for file_path in self._root.rglob("*.json"):
+            if file_path.name.startswith("."):
+                continue
+            relative = file_path.relative_to(self._root).as_posix()
+            if relative.endswith(".json"):
+                yield relative[: -len(".json")]
+
+    def has_document(self, breakpoint_path: str) -> bool:
+        return self._document_file(breakpoint_path).is_file()
+
+    def read_document(self, breakpoint_path: str) -> JSONValue:
+        return self._load_document(breakpoint_path)
+
+    def write_document(self, breakpoint_path: str, value: JSONValue) -> None:
+        stored = deep_copy_value(value)
+        self._atomic_write(self._document_file(breakpoint_path), stored)
+        self._document_lru.remember_document(breakpoint_path, stored)
+
+    def remove_document(self, breakpoint_path: str) -> None:
+        self._delete_document(breakpoint_path)
+
     def get(self, key: str) -> JSONValue:
         path = self._normalize(key)
         if path == "":
             raise ValidationError("Cannot get root path")
-        breakpoint_path, suffix = resolve_breakpoint(path)
-        document = self._load_document(breakpoint_path)
-        if suffix is None:
-            return deep_copy_value(document)
-        return deep_copy_value(resolve_path(document, suffix))
+        breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
+        try:
+            document = self._load_document(breakpoint_path)
+        except NotFoundError:
+            superseded = superseded_layout_error(
+                self,
+                path,
+                patterns=self._patterns,
+                migrations=self._migrations,
+            )
+            if superseded is not None:
+                raise superseded from None
+            raise
+        return read_logical(document, suffix)
 
     def put(self, key: str, value: JSONValue) -> None:
         path = self._normalize(key)
         if path == "":
             raise ValidationError("Cannot put root path")
-        breakpoint_path, suffix = resolve_breakpoint(path)
+        breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
         value_copy = deep_copy_value(value)
         # Nested keys of one breakpoint share a JSON document. Concurrent
         # read-modify-write otherwise drops sibling keys (scores inference rows
@@ -206,99 +269,48 @@ class FileStorageBackend:
             return
 
         try:
-            document = deep_copy_value(self._load_document(breakpoint_path))
+            current = self._load_document(breakpoint_path)
         except NotFoundError:
-            document = {}
-
-        if not isinstance(document, dict):
-            raise ValidationError(
-                f"Cannot create nested path under non-object document: {breakpoint_path!r}"
-            )
-
-        parent, segment, is_array_index = ensure_ancestors(document, suffix)
-        if is_array_index:
-            idx = parse_index_segment(segment)
-            if idx == len(parent):
-                parent.append(value_copy)
-            elif 0 <= idx < len(parent):
-                parent[idx] = value_copy
-            else:
-                n = len(parent)
-                if idx < 0:
-                    idx += n
-                if idx == n:
-                    parent.append(value_copy)
-                elif 0 <= idx < n:
-                    parent[idx] = value_copy
-                else:
-                    raise NotFoundError(f"Array index out of range: {segment}")
-        else:
-            assert isinstance(parent, dict)
-            parent[segment] = value_copy
-
-        self._atomic_write(file_path, document)
-        self._document_lru.remember_document(breakpoint_path, document)
+            current = None
+        updated = document_after_put(
+            current,
+            suffix,
+            value_copy,
+            breakpoint_path=breakpoint_path,
+        )
+        self._atomic_write(file_path, updated)
+        self._document_lru.remember_document(breakpoint_path, updated)
 
     def delete(self, key: str) -> None:
         path = self._normalize(key)
         if path == "":
             raise ValidationError("Cannot delete root path")
-        breakpoint_path, suffix = resolve_breakpoint(path)
+        breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
         with self._document_lru.document_lock(breakpoint_path):
             if suffix is None:
                 self._delete_document(breakpoint_path)
                 return
 
-            document = deep_copy_value(self._load_document(breakpoint_path))
-            parent, segment, is_array_index = resolve_parent_and_segment(document, suffix)
-            if is_array_index:
-                idx = parse_index_segment(segment)
-                arr = parent
-                if idx < 0:
-                    idx += len(arr)
-                if idx < 0 or idx >= len(arr):
-                    raise NotFoundError(f"Array index out of range: {segment}")
-                arr.pop(idx)
-            else:
-                assert isinstance(parent, dict)
-                if segment not in parent:
-                    raise NotFoundError(f"Path does not exist: {segment!r}")
-                del parent[segment]
-
-            self._atomic_write(self._document_file(breakpoint_path), document)
-            self._document_lru.remember_document(breakpoint_path, document)
+            document = self._load_document(breakpoint_path)
+            updated = document_after_delete(document, suffix)
+            self._atomic_write(self._document_file(breakpoint_path), updated)
+            self._document_lru.remember_document(breakpoint_path, updated)
 
     def list(self, prefix: str) -> list[str]:
+        # Intermediate prefixes between breakpoints (for example
+        # .../turns/N/analytics) list sibling documents, not a key inside the
+        # shorter document. An exact breakpoint that is also the directory of a
+        # longer one lists that directory when the shared file is absent.
         path = self._normalize(prefix)
-        if not is_navigable_prefix(path):
-            raise ValidationError(f"Unregistered store path prefix: {path!r}")
+        return list_logical(
+            path,
+            patterns=self._patterns,
+            document_exists=self.has_document,
+            load_document=self._load_document,
+            child_names=self._child_names,
+        )
 
-        if path == "":
-            if not self._root.is_dir():
-                return []
-            return self._list_filesystem_prefix("")
-
-        try:
-            breakpoint_path, suffix = resolve_breakpoint(path)
-        except ValidationError:
-            return self._list_filesystem_prefix(path)
-
-        # Intermediate prefixes between breakpoints (e.g. …/turns/N/analytics)
-        # must list sibling analytic documents on disk, not a missing key inside
-        # the shorter turn RST document. An exact breakpoint that is also the
-        # directory of a longer one (legacy …/analytics/fleet.json vs
-        # …/fleet/{playerId}.json) lists that directory when the shared file
-        # is absent.
-        if is_prefix_of_longer_breakpoint(path) and (
-            suffix is not None or not self._document_file(breakpoint_path).is_file()
-        ):
-            return self._list_filesystem_prefix(path)
-
-        try:
-            document = self._load_document(breakpoint_path)
-        except NotFoundError:
-            raise NotFoundError(f"Path does not exist: {path!r}") from None
-        if suffix is None:
-            return list_children(document)
-        node = resolve_path(document, suffix)
-        return list_children(node)
+    def _child_names(self, prefix: str) -> list[str]:
+        if prefix == "" and not self._root.is_dir():
+            return []
+        return self._list_filesystem_prefix(prefix)

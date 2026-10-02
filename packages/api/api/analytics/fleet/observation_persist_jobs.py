@@ -20,7 +20,6 @@ from api.compute.scope import ComputeScope
 from api.serialization.turn import turn_info_from_json
 from api.storage.base import JSONValue, StorageBackend
 from api.storage.file_json_jobs import (
-    PROBE_FLEET_KEY,
     PROBE_GAME_ID,
     PROBE_PERSPECTIVE,
     PROBE_TURN_KEY,
@@ -65,10 +64,10 @@ def time_observation_persist_jobs(
 ) -> ObservationPersistTiming:
     """Run observation_leg then persist against a synthetic fleet document.
 
-    Seeds the tmp file store with ``document`` (default
-    ``synthetic_large_fleet_document``), times ``run_fleet_observation_leg``
-    for player 1, then ``FleetPersistencePolicy.persist`` (the pool persist
-    hook). Does not use the OS console data directory.
+    ``document`` (default ``synthetic_large_fleet_document``) is the in-memory
+    prior ledger for player 1. The store receives the probe game info and turn
+    only. Times ``run_fleet_observation_leg`` then ``FleetPersistencePolicy.persist``.
+    Does not use the OS console data directory.
     """
     payload = document if document is not None else synthetic_large_fleet_document()
     encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -100,7 +99,6 @@ def time_observation_persist_jobs(
 
     storage.put(f"games/{PROBE_GAME_ID}/info", {"name": "probe"})
     storage.put(PROBE_TURN_KEY, {"turn": PROBE_TURN_NUMBER})
-    storage.put(PROBE_FLEET_KEY, payload)
 
     persistence = FleetSnapshotPersistenceService(storage)
 
