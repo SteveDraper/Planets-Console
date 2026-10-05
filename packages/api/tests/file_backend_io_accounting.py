@@ -2,7 +2,7 @@
 
 Wraps the existing file backend; this is not a second storage implementation.
 Counts are protocol methods (get/put/list/delete) plus the open / json / iterdir
-/ stat primitives ``FileStorageBackend`` uses. Assertions should lock those
+/ stat primitives the file document store uses. Assertions should lock those
 counts or overlap ratios, not wall milliseconds.
 """
 
@@ -163,7 +163,7 @@ def seed_file_store_tree(
 
 @contextmanager
 def count_file_backend_syscalls(counts: FileIoCounts) -> Iterator[FileIoCounts]:
-    """Count open / json / iterdir / stat used by ``api.storage.file``."""
+    """Count open / json / iterdir / stat used by ``api.storage.file_documents``."""
     real_open = open
     real_json_load = json.load
     real_json_dump = json.dump
@@ -201,9 +201,9 @@ def count_file_backend_syscalls(counts: FileIoCounts) -> Iterator[FileIoCounts]:
         return real_is_file(self)
 
     with (
-        patch("api.storage.file.open", counting_open),
-        patch("api.storage.file.json.load", counting_json_load),
-        patch("api.storage.file.json.dump", counting_json_dump),
+        patch("api.storage.file_documents.open", counting_open),
+        patch("api.storage.file_documents.json.load", counting_json_load),
+        patch("api.storage.file_documents.json.dump", counting_json_dump),
         patch.object(Path, "iterdir", counting_iterdir),
         patch.object(Path, "is_dir", counting_is_dir),
         patch.object(Path, "is_file", counting_is_file),

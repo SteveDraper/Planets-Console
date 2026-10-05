@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from api.errors import NotFoundError, ValidationError
 from api.storage.file import FileStorageBackend
+from api.storage.file_documents import FileDocumentStore
 
 GAME_INFO = "games/628580/info"
 TURN = "games/628580/1/turns/111"
@@ -95,7 +96,7 @@ def test_atomic_write_uses_temp_then_replace(backend, storage_root):
         calls.append(f"{Path(src).name}->{Path(dst).name}")
         return original_replace(src, dst)
 
-    with patch("api.storage.file.os.replace", side_effect=tracking_replace):
+    with patch("api.storage.file_documents.os.replace", side_effect=tracking_replace):
         backend.put(GAME_INFO, {"name": "A"})
 
     assert target.is_file()
@@ -117,7 +118,7 @@ def test_ensure_dir_retries_file_exists_after_concurrent_prune(backend, storage_
     with patch.object(Path, "mkdir", flaky_mkdir):
         with patch.object(Path, "is_dir", return_value=False):
             with patch.object(Path, "exists", return_value=False):
-                FileStorageBackend._ensure_dir(parent)
+                FileDocumentStore._ensure_dir(parent)
 
     assert calls["n"] >= 2
 
@@ -127,7 +128,7 @@ def test_ensure_dir_raises_when_path_is_a_file(backend, storage_root):
     blocker = storage_root / "not-a-dir"
     blocker.write_text("x", encoding="utf-8")
     with pytest.raises(FileExistsError):
-        FileStorageBackend._ensure_dir(blocker)
+        FileDocumentStore._ensure_dir(blocker)
 
 
 def test_get_maps_file_not_found_during_open_to_not_found(backend, storage_root):
@@ -141,7 +142,7 @@ def test_get_maps_file_not_found_during_open_to_not_found(backend, storage_root)
             raise FileNotFoundError(2, "No such file or directory", str(target))
         return real_open(path, *args, **kwargs)
 
-    with patch("api.storage.file.open", side_effect=racing_open):
+    with patch("api.storage.file_documents.open", side_effect=racing_open):
         with pytest.raises(NotFoundError, match="Document not found"):
             backend.get(TURN)
 
@@ -159,7 +160,7 @@ def test_put_nested_treats_vanished_document_as_empty(backend, storage_root):
             raise FileNotFoundError(2, "No such file or directory", str(target))
         return real_open(path, *args, **kwargs)
 
-    with patch("api.storage.file.open", side_effect=unlink_on_read):
+    with patch("api.storage.file_documents.open", side_effect=unlink_on_read):
         backend.put(f"{TURN}/settings", {"x": 1})
 
     assert json.loads(target.read_text(encoding="utf-8")) == {"settings": {"x": 1}}
@@ -176,7 +177,7 @@ def test_atomic_write_retries_replace_file_not_found(backend, storage_root):
             raise FileNotFoundError(2, "No such file or directory", str(dst))
         return original_replace(src, dst)
 
-    with patch("api.storage.file.os.replace", side_effect=flaky_replace):
+    with patch("api.storage.file_documents.os.replace", side_effect=flaky_replace):
         backend.put(GAME_INFO, {"name": "A"})
 
     assert calls["n"] == 2
@@ -192,7 +193,7 @@ def test_atomic_write_exhausted_retries_map_to_not_found(backend, storage_root):
         calls["n"] += 1
         raise FileNotFoundError(2, "No such file or directory", str(dst))
 
-    with patch("api.storage.file.os.replace", side_effect=always_missing):
+    with patch("api.storage.file_documents.os.replace", side_effect=always_missing):
         with pytest.raises(NotFoundError, match="Document not found"):
             backend.put(GAME_INFO, {"name": "A"})
 
@@ -221,7 +222,7 @@ def test_atomic_write_uses_unique_temp_name_per_write(backend, storage_root):
         temp_names.append(Path(src).name)
         return original_replace(src, dst)
 
-    with patch("api.storage.file.os.replace", side_effect=tracking_replace):
+    with patch("api.storage.file_documents.os.replace", side_effect=tracking_replace):
         backend.put(GAME_INFO, {"name": "A"})
         backend.put(GAME_INFO, {"name": "B"})
 
