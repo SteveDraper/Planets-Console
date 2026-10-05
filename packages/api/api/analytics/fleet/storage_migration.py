@@ -23,8 +23,6 @@ from api.storage.migrations import MigrationContext, StorageMigration
 # Exact shared turn document, before the per-player breakpoint.
 _FLEET_PARENT_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "fleet")
 _FLEET_PLAYER_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "fleet", "*")
-_PLAYERS_KEY = "players"
-_PLAYER_ID_KEY = "playerId"
 
 
 def migrate_fleet_breakpoint(context: MigrationContext) -> None:
@@ -44,30 +42,12 @@ def migrate_fleet_breakpoint(context: MigrationContext) -> None:
         context.delete_document(path)
 
 
-def fleet_retired_document_holds_path(document: JSONValue, old_suffix: str) -> bool:
-    """Return whether a copied-in parent still contains ``old_suffix``.
-
-    ``old_suffix`` is the path the previous registry stored inside the parent.
-    The player id is its first segment: a ``ledgers`` map key or a ``players``
-    array ``playerId``. Nested keys that match the suffix itself are the
-    generic retired-suffix check, not this hook.
-    """
-    player_key = old_suffix.split("/", 1)[0]
-    if player_key == "" or not isinstance(document, dict):
-        return False
-    ledgers = document.get(FLEET_LEDGERS_KEY)
-    if isinstance(ledgers, dict) and player_key in ledgers:
-        return True
-    return _players_array_holds_id(document.get(_PLAYERS_KEY), player_key)
-
-
 def fleet_storage_migration() -> StorageMigration:
     """Return the fleet step that brings a directory to storage version 1."""
     return StorageMigration(
         version=1,
         introduced_pattern=_FLEET_PLAYER_PATTERN,
         structural_handler=migrate_fleet_breakpoint,
-        holds_retired_path=fleet_retired_document_holds_path,
     )
 
 
@@ -90,17 +70,3 @@ def _fleet_ledgers_map(document: JSONValue) -> dict[str, JSONValue] | None:
     if not isinstance(ledgers, dict):
         return None
     return ledgers
-
-
-def _players_array_holds_id(players: JSONValue, player_key: str) -> bool:
-    if not isinstance(players, list):
-        return False
-    for entry in players:
-        if not isinstance(entry, dict):
-            continue
-        player_id = entry.get(_PLAYER_ID_KEY)
-        if isinstance(player_id, bool) or not isinstance(player_id, int):
-            continue
-        if str(player_id) == player_key:
-            return True
-    return False

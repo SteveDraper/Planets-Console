@@ -11,11 +11,11 @@ A step either re-homes an unchanged logical key onto a longer breakpoint, or cal
 ## Considered options
 
 - **Detect-on-read inside the analytic** -- the fleet service did this, including a delete-before-write so the memory tree matched files. Every new breakpoint would repeat that, and the two backends would keep different meanings of the same put.
-- **Per-row version documents** -- the layout change is a property of the directory. A copied-in document from an older breakpoint is unreadable once the directory version has moved past it, rather than being reinterpreted on read.
+- **Per-row version documents** -- the layout change is a property of the directory. A document does not carry its own layout version.
 
 ## Consequences
 
 - New breakpoint splits register a migration keyed by the storage version they introduce. `boundaries.py` holds the pattern, not the document shape.
 - Single-process writers (ADR 0001) still apply. The version stamp is not a lock.
-- A read that misses the current breakpoint document consults retired layout: it resolves the path against the registry without the introduced pattern and asks whether that suffix is still in the retired document (`resolve_path`). The check runs only on a `get` miss and costs one existence check of the retired breakpoint document per miss. A hit on the current document does not consult the retired breakpoint.
+- Documents introduced outside the app after the directory is stamped are unsupported. A `get` that misses the current breakpoint document raises `NotFoundError`. Open still rejects a directory below the minimum or above the current version and leaves it unchanged.
 - See [design-storage-abstraction-and-crud-api.md](../design-storage-abstraction-and-crud-api.md) §16 and **CONTEXT.md** (**Storage version**, **Document**).

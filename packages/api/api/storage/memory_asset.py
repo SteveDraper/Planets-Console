@@ -27,7 +27,6 @@ from api.storage.migrations import (
     MINIMUM_STORAGE_VERSION,
     StorageMigration,
     open_store,
-    superseded_layout_error,
 )
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
@@ -115,14 +114,6 @@ class MemoryAssetBackend:
             breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
             document = self._documents.get(breakpoint_path)
             if document is None:
-                superseded = superseded_layout_error(
-                    self._document_store,
-                    path,
-                    patterns=self._patterns,
-                    migrations=self._migrations,
-                )
-                if superseded is not None:
-                    raise superseded
                 raise NotFoundError(f"Document not found: {breakpoint_path!r}")
             return read_logical(document, suffix)
 

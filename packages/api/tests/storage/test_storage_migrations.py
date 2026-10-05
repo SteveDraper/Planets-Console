@@ -10,7 +10,6 @@ import pytest
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.serialization import upgrade_legacy_fleet_turn_document
 from api.analytics.fleet.storage_migration import (
-    fleet_retired_document_holds_path,
     fleet_storage_migration,
     migrate_fleet_breakpoint,
 )
@@ -24,8 +23,6 @@ from api.storage.migrations import (
     STORAGE_VERSION_KEY,
     MigrationContext,
     StorageMigration,
-    _retired_document_location,
-    _retired_layout_error,
     generic_rehome,
     open_store,
     version_label,
@@ -137,17 +134,6 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
         )
     assert calls == [1]
 
-    parent = backend.get(SCORES)
-    assert isinstance(parent, dict)
-    parent["inference_rows"] = {"4": dict(ROW)}
-    backend.put(SCORES, parent)
-    backend.delete(SCORES_ROW)
-    with pytest.raises(
-        UnhandledFormatError,
-        match="found layout from version unversioned, retired by version 1",
-    ):
-        backend.get(SCORES_ROW)
-
 
 def test_new_directory_is_stamped_without_migrations(tmp_path, monkeypatch):
     calls: list[str] = []
@@ -218,13 +204,12 @@ def test_version_label(version, label):
 
 
 @pytest.mark.parametrize(
-    ("error", "found", "minimum", "maximum", "retired_by", "detail"),
+    ("error", "found", "minimum", "maximum", "detail"),
     [
         (
             UnhandledFormatError.below_minimum("0", "1"),
             "0",
             "1",
-            None,
             None,
             "found version 0, minimum supported version 1",
         ),
@@ -233,44 +218,16 @@ def test_version_label(version, label):
             "5",
             None,
             "1",
-            None,
             "found version 5, maximum supported version 1",
-        ),
-        (
-            UnhandledFormatError.retired_layout("unversioned", "1"),
-            "unversioned",
-            None,
-            None,
-            "1",
-            "found layout from version unversioned, retired by version 1",
-        ),
-        (
-            UnhandledFormatError.retired_layout("1", "2"),
-            "1",
-            None,
-            None,
-            "2",
-            "found layout from version 1, retired by version 2",
         ),
     ],
 )
-def test_unhandled_format_error_constructors(error, found, minimum, maximum, retired_by, detail):
+def test_unhandled_format_error_constructors(error, found, minimum, maximum, detail):
     assert error.http_error == 422
     assert error.found_version == found
     assert error.minimum_version == minimum
     assert error.maximum_version == maximum
-    assert error.retired_by_version == retired_by
     assert str(error) == f"Unhandled storage format: {detail}"
-
-
-def test_retired_layout_error_labels_previous_through_version_label():
-    pattern = ("games", "*", "info")
-    first = _retired_layout_error(StorageMigration(version=1, introduced_pattern=pattern))
-    assert first.found_version == version_label(None)
-    assert first.retired_by_version == version_label(1)
-    later = _retired_layout_error(StorageMigration(version=2, introduced_pattern=pattern))
-    assert later.found_version == version_label(1)
-    assert later.retired_by_version == version_label(2)
 
 
 def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
@@ -366,31 +323,6 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
         assert seeded == original
 
 
-def test_retired_document_location_is_previous_registry_suffix():
-    assert _retired_document_location(
-        SCORES_ROW,
-        current_breakpoint=SCORES_ROW,
-        patterns=_scores_patterns(),
-        introduced_pattern=SCORES_PLAYER_PATTERN,
-    ) == (SCORES, "inference_rows/4")
-    fleet_step = fleet_storage_migration()
-    assert _retired_document_location(
-        FLEET_PLAYER,
-        current_breakpoint=FLEET_PLAYER,
-        patterns=BREAKPOINT_PATTERNS,
-        introduced_pattern=fleet_step.introduced_pattern,
-    ) == (FLEET, "8")
-    assert (
-        _retired_document_location(
-            SCORES,
-            current_breakpoint=SCORES,
-            patterns=_scores_patterns(),
-            introduced_pattern=SCORES_PLAYER_PATTERN,
-        )
-        is None
-    )
-
-
 def _storage_source_layer_violations(path: Path) -> list[str]:
     """Return forbidden module names referenced in ``path`` (imports, lazy or not)."""
     source = path.read_text(encoding="utf-8")
@@ -438,7 +370,6 @@ def test_production_migrations_bind_fleet_step():
     step = steps[0]
     assert step.version == CURRENT_STORAGE_VERSION
     assert step.structural_handler is migrate_fleet_breakpoint
-    assert step.holds_retired_path is fleet_retired_document_holds_path
 
 
 def test_get_storage_file_open_runs_fleet_migration(tmp_path):
@@ -493,36 +424,6 @@ def _legacy_players_parent() -> dict:
         "materializationVersion": FLEET_MATERIALIZATION_VERSION,
         "players": [{"playerId": 8, "playerName": "ace", "records": []}],
     }
-
-
-@pytest.mark.parametrize("kind", ["memory", "file"])
-@pytest.mark.parametrize(
-    "document",
-    [
-        {"ledgers": {"8": LEDGER_WIRE}},
-        _legacy_players_parent(),
-    ],
-)
-def test_copied_fleet_document_errors_only_for_held_player(kind, document, tmp_path):
-    migrations = (fleet_storage_migration(),)
-    if kind == "memory":
-        backend = MemoryAssetBackend(initial={}, migrations=migrations)
-    else:
-        root = tmp_path / "data"
-        backend = FileStorageBackend(root, migrations=migrations)
-    store = _store(backend)
-    store.write_document(FLEET, document)
-    with pytest.raises(
-        UnhandledFormatError,
-        match="found layout from version unversioned, retired by version 1",
-    ):
-        backend.get(FLEET_PLAYER)
-    assert store.read_document(FLEET) == document
-    assert not store.has_document(FLEET_PLAYER)
-    with pytest.raises(NotFoundError):
-        backend.get(f"{FLEET}/999")
-    assert not store.has_document(f"{FLEET}/999")
-    assert store.read_document(FLEET) == document
 
 
 @pytest.mark.parametrize("kind", ["memory", "file"])

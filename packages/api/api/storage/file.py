@@ -28,7 +28,6 @@ from api.storage.migrations import (
     MINIMUM_STORAGE_VERSION,
     StorageMigration,
     open_store,
-    superseded_layout_error,
 )
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
@@ -237,18 +236,7 @@ class FileStorageBackend:
         if path == "":
             raise ValidationError("Cannot get root path")
         breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
-        try:
-            document = self._load_document(breakpoint_path)
-        except NotFoundError:
-            superseded = superseded_layout_error(
-                self._document_store,
-                path,
-                patterns=self._patterns,
-                migrations=self._migrations,
-            )
-            if superseded is not None:
-                raise superseded from None
-            raise
+        document = self._load_document(breakpoint_path)
         return read_logical(document, suffix)
 
     def put(self, key: str, value: JSONValue) -> None:

@@ -3,8 +3,10 @@
 The directory carries one storage version at ``meta/storage-version``. An empty
 directory is stamped with the current version and does not run migrations.
 Older supported directories run the remaining steps in order, then stamp the
-current version. A directory older than the minimum still supported raises
-``UnhandledFormatError`` and is left unchanged.
+current version. A directory older than the minimum still supported, or newer
+than the current version, raises ``UnhandledFormatError`` and is left
+unchanged. Documents written outside the app after the stamp are unsupported;
+this module does not detect them.
 
 A structural handler is registered by the analytic that owns the document
 shape. Generic re-home splits each stored document onto longer breakpoints in
@@ -18,15 +20,13 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
-from api.errors import NotFoundError, UnhandledFormatError, ValidationError
+from api.errors import UnhandledFormatError
 from api.storage.base import JSONValue
 from api.storage.boundaries import (
     BreakpointPatterns,
     pattern_matches_breakpoint,
-    resolve_breakpoint,
 )
 from api.storage.documents import partition_breakpoint_document
-from api.storage.path_utils import resolve_path
 
 STORAGE_VERSION_KEY = "meta/storage-version"
 CURRENT_STORAGE_VERSION = 1
@@ -89,16 +89,12 @@ class StorageMigration:
     ``introduced_pattern`` is the longer breakpoint this step adds. A structural
     handler rewrites document shape, including writing any new breakpoint
     documents it owns. When there is no handler, generic re-home splits each
-    document onto the current registry. ``holds_retired_path``, when set,
-    reports whether a copied-in parent still contains the retired suffix when
-    that suffix is not a JSON path in the parent. Re-home residue is
-    ``resolve_path`` of the suffix the previous registry stored.
+    document onto the current registry.
     """
 
     version: int
     introduced_pattern: tuple[str, ...]
     structural_handler: StructuralHandler | None = None
-    holds_retired_path: Callable[[JSONValue, str], bool] | None = None
 
 
 def version_label(version: int | None) -> str:
@@ -172,87 +168,6 @@ def generic_rehome(store: DocumentStore, patterns: BreakpointPatterns) -> None:
             store.remove_document(path)
         elif remaining is not None:
             store.write_document(path, remaining)
-
-
-def superseded_layout_error(
-    store: DocumentStore,
-    path: str,
-    *,
-    patterns: BreakpointPatterns,
-    migrations: tuple[StorageMigration, ...],
-) -> UnhandledFormatError | None:
-    """Return an error when ``path`` exists only on a breakpoint this version retired.
-
-    Called after the current breakpoint document is missing. A hit on the current
-    document does not consult the retired breakpoint. The previous location is
-    ``resolve_breakpoint`` on the registry without the introduced pattern -- the
-    same pairing generic re-home inverts when it partitions onto the current
-    registry. Residue is ``resolve_path`` of that suffix.
-    """
-    try:
-        breakpoint_path, _suffix = resolve_breakpoint(path, patterns)
-    except ValidationError:
-        return None
-    for step in migrations:
-        if not pattern_matches_breakpoint(step.introduced_pattern, breakpoint_path):
-            continue
-        location = _retired_document_location(
-            path,
-            current_breakpoint=breakpoint_path,
-            patterns=patterns,
-            introduced_pattern=step.introduced_pattern,
-        )
-        if location is None:
-            continue
-        old_breakpoint, old_suffix = location
-        if not store.has_document(old_breakpoint):
-            continue
-        document = store.read_document(old_breakpoint)
-        if _document_holds_suffix(document, old_suffix):
-            return _retired_layout_error(step)
-        holds_path = step.holds_retired_path
-        if holds_path is not None and holds_path(document, old_suffix):
-            return _retired_layout_error(step)
-    return None
-
-
-def _retired_document_location(
-    path: str,
-    *,
-    current_breakpoint: str,
-    patterns: BreakpointPatterns,
-    introduced_pattern: tuple[str, ...],
-) -> tuple[str, str] | None:
-    """Return where ``path`` lived before ``introduced_pattern`` existed.
-
-    ``(old_breakpoint, old_suffix)`` is the previous-registry result from
-    ``resolve_breakpoint``. ``None`` means this pattern did not shorten the
-    document that stores ``path``.
-    """
-    reduced = tuple(pattern for pattern in patterns if pattern != introduced_pattern)
-    try:
-        old_breakpoint, old_suffix = resolve_breakpoint(path, reduced)
-    except ValidationError:
-        return None
-    if old_breakpoint == current_breakpoint or old_suffix is None:
-        return None
-    return old_breakpoint, old_suffix
-
-
-def _document_holds_suffix(document: JSONValue, suffix: str) -> bool:
-    try:
-        resolve_path(document, suffix)
-    except NotFoundError, ValidationError:
-        return False
-    return True
-
-
-def _retired_layout_error(step: StorageMigration) -> UnhandledFormatError:
-    previous = step.version - 1
-    return UnhandledFormatError.retired_layout(
-        version_label(previous if previous >= 1 else None),
-        version_label(step.version),
-    )
 
 
 def _run_step(

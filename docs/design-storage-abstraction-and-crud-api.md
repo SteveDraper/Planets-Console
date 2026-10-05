@@ -307,7 +307,7 @@ Each step is keyed by the version it brings the directory to, and names the brea
 - **Generic re-home.** The logical key is unchanged. Children of a named in-document map become their own documents. Scores `inference_rows/{playerId}` is the shape this step is for; performing that breakpoint move is a later change.
 - **Structural handler.** An analytic registers a JSON rewrite for a storage version. Fleet's `players` / `ledgers` document becomes `.../analytics/fleet/{playerId}` this way. The handler does not import `FileStorageBackend`. After the directory is current, fleet persistence does not probe or rewrite the legacy document.
 
-A read of the current breakpoint does not consult the retired one. If the current document is missing and the retired document still holds that path, the read raises the same unhandled-format error.
+Documents introduced outside the app after the stamp are unsupported. A read that misses the current breakpoint document raises `NotFoundError`.
 
 Row-content stamps (scores `persistence_version`, fleet `materializationVersion`) stay in the analytic.
 

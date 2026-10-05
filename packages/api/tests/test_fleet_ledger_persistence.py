@@ -23,7 +23,7 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
-from api.errors import NotFoundError, UnhandledFormatError
+from api.errors import NotFoundError
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -194,11 +194,7 @@ def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
     legacy_document = _legacy_players_document(sample_ledger)
     backend.put(persistence.ledger_prefix(628580, 1, 111), legacy_document)
 
-    with pytest.raises(
-        UnhandledFormatError,
-        match="found layout from version unversioned, retired by version 1",
-    ):
-        persistence.get_ledger(628580, 1, 111, 8)
+    assert persistence.get_ledger(628580, 1, 111, 8) is None
 
     assert backend.get(persistence.ledger_prefix(628580, 1, 111)) == legacy_document
     assert not backend._document_store.has_document(persistence.ledger_key(628580, 1, 111, 8))

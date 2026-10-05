@@ -70,12 +70,10 @@ class UnhandledFormatError(CoreAPIError):
         *,
         minimum_version: str | None = None,
         maximum_version: str | None = None,
-        retired_by_version: str | None = None,
     ) -> None:
         self.found_version = found
         self.minimum_version = minimum_version
         self.maximum_version = maximum_version
-        self.retired_by_version = retired_by_version
         super().__init__(f"Unhandled storage format: {detail}")
 
     @classmethod
@@ -92,14 +90,6 @@ class UnhandledFormatError(CoreAPIError):
             found,
             f"found version {found}, maximum supported version {maximum}",
             maximum_version=maximum,
-        )
-
-    @classmethod
-    def retired_layout(cls, found: str, retired_by: str) -> UnhandledFormatError:
-        return cls(
-            found,
-            f"found layout from version {found}, retired by version {retired_by}",
-            retired_by_version=retired_by,
         )
 
 

@@ -1395,7 +1395,7 @@ A logical store path that matches at least one breakpoint pattern (longest match
 _Avoid_: valid key (too generic)
 
 **Storage version**:
-The version of one data directory, stored once for that directory at `meta/storage-version`. An empty directory is stamped with the current version. A directory at an older supported version is brought forward when the store opens. A directory older than the minimum still supported is unreadable. The generic store API does not read, list, or write this namespace (`ValidationError`); migrations write the stamp through the document store.
+The version of one data directory, stored once for that directory at `meta/storage-version`. An empty directory is stamped with the current version. A directory at an older supported version is brought forward when the store opens. A directory older than the minimum still supported is unreadable. Documents written into the directory outside the app after the stamp are unsupported. The generic store API does not read, list, or write this namespace (`ValidationError`); migrations write the stamp through the document store.
 _Avoid_: per-row schema version, persistence_version (row content)
 
 **V1 breakpoint patterns**:
