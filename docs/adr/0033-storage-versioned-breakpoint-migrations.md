@@ -16,7 +16,7 @@ A step either re-homes an unchanged logical key onto a longer breakpoint, or cal
 ## Consequences
 
 - New breakpoint splits register a migration keyed by the storage version they introduce. `boundaries.py` holds the pattern, not the document shape.
-- Both backends open through one `StorageFormat` (breakpoint patterns, migration steps, current version, minimum version). `minimum_version` of `None` means an unversioned directory is still supported. The process factory binds analytic steps onto the default format.
+- Both backends open through one `StorageFormat` (breakpoint patterns, migration steps, minimum version). The current version is the highest registered step, or 0 when there are no steps. Steps must be versions `1..N` in order, and `minimum_version` must not exceed that current version. `minimum_version` of `None` means an unversioned directory is still supported. `DEFAULT_STORAGE_FORMAT` registers no steps, so an unversioned directory is already current. `production_storage_format()` is the only place analytic steps are bound.
 - Single-process writers (ADR 0001) still apply. The version stamp is not a lock.
 - Documents introduced outside the app after the directory is stamped are unsupported. A `get` that misses the current breakpoint document raises `NotFoundError`. Open still rejects a directory below the minimum or above the current version and leaves it unchanged.
 - An ephemeral seed (`MemoryAssetBackend` `initial`, including a `storage_asset_path` asset) is a logical tree in the current layout. It is partitioned and stamped at the current version and does not run migrations. A seed that contains the `meta` namespace raises `ValidationError`.

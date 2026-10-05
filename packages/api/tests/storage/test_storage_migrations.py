@@ -21,7 +21,6 @@ from api.storage.breakpoint_backend import BreakpointDocumentBackend
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend, MemoryDocumentStore
 from api.storage.migrations import (
-    CURRENT_STORAGE_VERSION,
     DEFAULT_STORAGE_FORMAT,
     STORAGE_VERSION_KEY,
     MigrationContext,
@@ -29,7 +28,6 @@ from api.storage.migrations import (
     StorageMigration,
     generic_rehome,
     open_store,
-    require_contiguous_migration_versions,
     version_label,
 )
 from api.storage.path_utils import deep_copy_value
@@ -160,7 +158,7 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
     assert calls == [1]
     assert backend.get(SCORES_ROW) == ROW
     assert backend.get(SCORES) == {"kept": True}
-    assert backend.get(STORAGE_VERSION_KEY) == {"version": CURRENT_STORAGE_VERSION}
+    assert backend.get(STORAGE_VERSION_KEY) == {"version": _scores_migration().version}
     with pytest.raises(NotFoundError):
         backend.get(f"{SCORES}/inference_rows/999")
 
@@ -259,8 +257,10 @@ def test_new_directory_is_stamped_without_migrations(tmp_path, monkeypatch):
     file_backend = FileStorageBackend(root)
     memory_backend = MemoryAssetBackend(initial={})
     assert calls == []
-    assert file_backend.get(STORAGE_VERSION_KEY) == {"version": CURRENT_STORAGE_VERSION}
-    assert memory_backend.get(STORAGE_VERSION_KEY) == {"version": CURRENT_STORAGE_VERSION}
+    empty_stamp = {"version": DEFAULT_STORAGE_FORMAT.current_version}
+    assert file_backend.get(STORAGE_VERSION_KEY) == empty_stamp
+    assert memory_backend.get(STORAGE_VERSION_KEY) == empty_stamp
+    assert DEFAULT_STORAGE_FORMAT.current_version == 0
     FileStorageBackend(root)
     assert calls == []
 
@@ -274,9 +274,9 @@ def test_new_directory_is_stamped_without_migrations(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "documents",
     [
-        {STORAGE_VERSION_KEY: {"version": CURRENT_STORAGE_VERSION}},
+        {STORAGE_VERSION_KEY: {"version": DEFAULT_STORAGE_FORMAT.current_version}},
         {
-            STORAGE_VERSION_KEY: {"version": CURRENT_STORAGE_VERSION},
+            STORAGE_VERSION_KEY: {"version": DEFAULT_STORAGE_FORMAT.current_version},
             "games/1/info": {"name": "keep"},
         },
     ],
@@ -298,7 +298,7 @@ def test_older_stamp_does_not_enumerate_before_migration():
     calls, storage_format = _info_step_format()
     open_store(store, storage_format)
     assert calls == [1]
-    assert store.documents[STORAGE_VERSION_KEY] == {"version": CURRENT_STORAGE_VERSION}
+    assert store.documents[STORAGE_VERSION_KEY] == {"version": storage_format.current_version}
     assert store.documents[info] == {"name": "keep"}
 
 
@@ -314,7 +314,7 @@ def test_unstamped_nonempty_store_migrates_without_full_enumeration():
     calls, storage_format = _info_step_format()
     open_store(store, storage_format)
     assert calls == [1]
-    assert store.documents[STORAGE_VERSION_KEY] == {"version": CURRENT_STORAGE_VERSION}
+    assert store.documents[STORAGE_VERSION_KEY] == {"version": storage_format.current_version}
     assert store.documents[info] == {"name": "keep"}
     assert store.documents[other] == {"name": "also"}
 
@@ -362,21 +362,38 @@ def test_version_label(version, label):
     assert version_label(version) == label
 
 
+def _info_step(version: int = 1) -> StorageMigration:
+    return StorageMigration(version=version, introduced_pattern=("games", "*", "info"))
+
+
+def test_storage_format_current_version_is_the_highest_step():
+    assert DEFAULT_STORAGE_FORMAT.current_version == 0
+    assert DEFAULT_STORAGE_FORMAT.minimum_version is None
+    one = StorageFormat(patterns=BREAKPOINT_PATTERNS, migrations=(_info_step(),))
+    assert one.current_version == 1
+    two = StorageFormat(
+        patterns=BREAKPOINT_PATTERNS,
+        migrations=(_info_step(1), _info_step(2)),
+        minimum_version=1,
+    )
+    assert two.current_version == 2
+
+
 def test_storage_format_rejects_an_invalid_migration_registry():
-    step = StorageMigration(version=1, introduced_pattern=("games", "*", "info"))
-    with pytest.raises(RuntimeError, match="Duplicate storage migration version 1"):
+    with pytest.raises(RuntimeError, match="versions 1..1 in order; found 1, 1"):
         StorageFormat(
             patterns=BREAKPOINT_PATTERNS,
-            migrations=(step, step),
-            current_version=1,
-            minimum_version=None,
+            migrations=(_info_step(), _info_step()),
         )
-    with pytest.raises(RuntimeError, match="outside 1..1"):
+    with pytest.raises(RuntimeError, match="versions 1..2 in order; found 2"):
         StorageFormat(
             patterns=BREAKPOINT_PATTERNS,
-            migrations=(StorageMigration(version=2, introduced_pattern=("games", "*", "info")),),
-            current_version=1,
-            minimum_version=None,
+            migrations=(_info_step(2),),
+        )
+    with pytest.raises(RuntimeError, match="versions 1..2 in order; found 2, 1"):
+        StorageFormat(
+            patterns=BREAKPOINT_PATTERNS,
+            migrations=(_info_step(2), _info_step(1)),
         )
     with pytest.raises(
         RuntimeError,
@@ -385,17 +402,9 @@ def test_storage_format_rejects_an_invalid_migration_registry():
         StorageFormat(
             patterns=BREAKPOINT_PATTERNS,
             migrations=(StorageMigration(version=1, introduced_pattern=("games", "*", "missing")),),
-            current_version=1,
-            minimum_version=None,
         )
-
-
-def test_bound_migrations_must_be_contiguous_through_current():
-    step = StorageMigration(version=2, introduced_pattern=("games", "*", "info"))
-    with pytest.raises(RuntimeError, match="contiguous versions 1..2; missing 1"):
-        require_contiguous_migration_versions((step,), 2)
-    with pytest.raises(RuntimeError, match="contiguous versions 1..1; missing 1"):
-        require_contiguous_migration_versions((), 1)
+    with pytest.raises(RuntimeError, match="minimum_version 1 exceeds current version 0"):
+        StorageFormat(patterns=BREAKPOINT_PATTERNS, migrations=(), minimum_version=1)
 
 
 _UNREADABLE_STAMP_DETAIL = "storage version stamp is not an object with an integer version"
@@ -496,7 +505,10 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         UnhandledFormatError,
         match="found version 0, minimum supported version 1",
     ):
-        FileStorageBackend(root, storage_format=_storage_format(minimum_version=1))
+        FileStorageBackend(
+            root,
+            storage_format=_storage_format(migrations=(_info_step(),), minimum_version=1),
+        )
 
     assert info.read_bytes() == payload
     assert version.read_bytes() == version_payload
@@ -509,7 +521,10 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         UnhandledFormatError,
         match="found version unversioned, minimum supported version 1",
     ):
-        FileStorageBackend(unversioned, storage_format=_storage_format(minimum_version=1))
+        FileStorageBackend(
+            unversioned,
+            storage_format=_storage_format(migrations=(_info_step(),), minimum_version=1),
+        )
     assert plain_info.read_bytes() == payload
     assert not (unversioned / "meta" / "storage-version.json").exists()
 
@@ -522,7 +537,10 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         UnhandledFormatError,
         match="found version 0, minimum supported version 1",
     ):
-        _opened_memory(seeded, _storage_format(minimum_version=1))
+        _opened_memory(
+            seeded,
+            _storage_format(migrations=(_info_step(),), minimum_version=1),
+        )
     assert seeded == original
 
 
@@ -532,9 +550,7 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
     version_payload = b'{"version": 5}\n'
     storage_format = StorageFormat(
         patterns=BREAKPOINT_PATTERNS,
-        migrations=(),
-        current_version=1,
-        minimum_version=None,
+        migrations=(_info_step(),),
     )
     if kind == "file":
         root = tmp_path / "data"
@@ -612,7 +628,7 @@ def test_production_migrations_bind_fleet_step():
     assert steps == production_migrations()
     assert len(steps) == 1
     step = steps[0]
-    assert step.version == storage_format.current_version == CURRENT_STORAGE_VERSION
+    assert step.version == storage_format.current_version == fleet_storage_migration().version
     assert step.structural_handler is migrate_fleet_breakpoint
 
 
@@ -635,28 +651,34 @@ def test_get_storage_file_open_runs_fleet_migration(tmp_path):
         assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
         with pytest.raises(NotFoundError):
             backend.get(FLEET)
-        assert backend.get(STORAGE_VERSION_KEY) == {"version": CURRENT_STORAGE_VERSION}
+        assert backend.get(STORAGE_VERSION_KEY) == {
+            "version": production_storage_format().current_version
+        }
     finally:
         clear_backend_cache()
         set_config(previous)
 
 
-def test_unversioned_store_without_steps_fails_closed(tmp_path):
+def test_default_format_opens_an_unversioned_directory(tmp_path):
     root = tmp_path / "data"
     info = root / "games" / "1" / "info.json"
     info.parent.mkdir(parents=True)
     payload = b'{"name": "keep"}\n'
     info.write_bytes(payload)
-    with pytest.raises(RuntimeError, match="No storage migration registered for version 1"):
-        FileStorageBackend(root)
+    backend = FileStorageBackend(root)
+    assert info.read_bytes() == payload
+    assert not (root / "meta" / "storage-version.json").exists()
+    assert backend.get("games/1/info") == {"name": "keep"}
+    FileStorageBackend(root)
     assert info.read_bytes() == payload
     assert not (root / "meta" / "storage-version.json").exists()
 
     seeded = {"games/1/info": {"name": "keep"}}
     original = json.loads(json.dumps(seeded))
-    with pytest.raises(RuntimeError, match="No storage migration registered for version 1"):
-        _opened_memory(seeded)
+    opened = _opened_memory(seeded)
     assert seeded == original
+    assert opened.get("games/1/info") == {"name": "keep"}
+    assert not _store(opened).has_document(STORAGE_VERSION_KEY)
 
 
 def _legacy_players_parent() -> dict:
@@ -726,7 +748,7 @@ def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
     other = {"note": True}
     backend = _opened_memory(
         {FLEET: players, ledgers_path: ledgers, other_path: other},
-        _storage_format(current_version=0),
+        DEFAULT_STORAGE_FORMAT,
     )
     migrate_fleet_breakpoint(MigrationContext(_store(backend)))
     store = _store(backend)
@@ -740,15 +762,13 @@ def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
 def test_open_splits_upgraded_parent_and_retries_as_noop():
     backend = _opened_memory(
         {FLEET: {"ledgers": {"8": LEDGER_WIRE}}},
-        _storage_format(current_version=0),
+        DEFAULT_STORAGE_FORMAT,
     )
     step = fleet_storage_migration()
     store = _store(backend)
     opened = StorageFormat(
         patterns=BREAKPOINT_PATTERNS,
         migrations=(step,),
-        current_version=CURRENT_STORAGE_VERSION,
-        minimum_version=None,
     )
     open_store(store, opened)
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
@@ -768,7 +788,7 @@ def test_interrupted_fleet_handler_converges_on_rerun():
     other = {"ledger": {"playerId": 9}}
     backend = _opened_memory(
         {FLEET: {"ledgers": {"8": LEDGER_WIRE, "9": other}}},
-        _storage_format(current_version=0),
+        DEFAULT_STORAGE_FORMAT,
     )
     store = _store(backend)
     store.write_document(FLEET_PLAYER, LEDGER_WIRE)
@@ -789,7 +809,7 @@ def test_interrupted_fleet_handler_converges_on_rerun():
 
     opened = _storage_format(migrations=(fleet_storage_migration(),))
     open_store(store, opened)
-    assert store.read_document(STORAGE_VERSION_KEY) == {"version": CURRENT_STORAGE_VERSION}
+    assert store.read_document(STORAGE_VERSION_KEY) == {"version": opened.current_version}
     assert not store.has_document(FLEET)
     assert store.read_document(FLEET_PLAYER) == LEDGER_WIRE
     assert store.read_document(f"{FLEET}/9") == other
@@ -806,7 +826,7 @@ def test_fleet_handler_skips_non_player_ledger_entries():
     }
     backend = _opened_memory(
         {FLEET: document},
-        _storage_format(current_version=0),
+        DEFAULT_STORAGE_FORMAT,
     )
     migrate_fleet_breakpoint(MigrationContext(_store(backend)))
     store = _store(backend)

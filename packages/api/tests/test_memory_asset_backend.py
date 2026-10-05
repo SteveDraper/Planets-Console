@@ -160,13 +160,13 @@ def test_legacy_shaped_seed_is_stamped_without_migration():
 
 
 def test_seed_stamps_the_bound_format_version():
-    storage_format = replace(DEFAULT_STORAGE_FORMAT, current_version=0, migrations=())
     backend = MemoryAssetBackend(
         initial={"games": {"1": {"info": {"name": "keep"}}}},
-        storage_format=storage_format,
+        storage_format=DEFAULT_STORAGE_FORMAT,
     )
     assert backend.get("games/1/info") == {"name": "keep"}
-    assert backend.get(STORAGE_VERSION_KEY) == {"version": 0}
+    assert backend.get(STORAGE_VERSION_KEY) == {"version": DEFAULT_STORAGE_FORMAT.current_version}
+    assert DEFAULT_STORAGE_FORMAT.current_version == 0
 
 
 @pytest.mark.parametrize(

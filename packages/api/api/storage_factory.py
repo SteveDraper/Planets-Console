@@ -31,7 +31,6 @@ from api.storage.migrations import (
     DEFAULT_STORAGE_FORMAT,
     StorageFormat,
     StorageMigration,
-    require_contiguous_migration_versions,
 )
 
 _backend_cache: StorageBackend | None = None
@@ -45,15 +44,10 @@ def production_migrations() -> tuple[StorageMigration, ...]:
 def production_storage_format() -> StorageFormat:
     """Return the format a process or maintenance script uses to open a data directory.
 
-    Bound steps must be contiguous versions ``1..current``. A gap is a registry
-    bug and raises ``RuntimeError``.
+    This is the only place analytic steps are bound. ``StorageFormat`` rejects
+    a step list that is not versions ``1..N`` in order.
     """
-    storage_format = replace(DEFAULT_STORAGE_FORMAT, migrations=production_migrations())
-    require_contiguous_migration_versions(
-        storage_format.migrations,
-        storage_format.current_version,
-    )
-    return storage_format
+    return replace(DEFAULT_STORAGE_FORMAT, migrations=production_migrations())
 
 
 def _load_asset(path: Path | None) -> dict:

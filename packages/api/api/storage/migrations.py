@@ -18,9 +18,10 @@ every due step finishes. Every step must be safe to re-run: it writes new
 documents before removing or shrinking the old one, so a directory left
 unstamped mid-step converges on the next open.
 
-``StorageFormat`` is the registry and version bounds a backend opens with.
-``minimum_version`` of ``None`` means an unversioned directory is still
-supported.
+``StorageFormat`` is the registry a backend opens with. Its current version
+is the highest registered step, or 0 when it registers none. Steps must be
+versions ``1..N`` in order. ``minimum_version`` of ``None`` means an
+unversioned directory is still supported.
 """
 
 from __future__ import annotations
@@ -41,9 +42,6 @@ from api.storage.document_store import DocumentStore
 from api.storage.documents import partition_breakpoint_document
 
 STORAGE_VERSION_KEY = "meta/storage-version"
-CURRENT_STORAGE_VERSION = 1
-# None means an unversioned directory is still supported.
-MINIMUM_STORAGE_VERSION: int | None = None
 
 
 class MigrationContext:
@@ -89,84 +87,73 @@ class StorageMigration:
     structural_handler: StructuralHandler | None = None
 
 
-def _validate_migrations(
-    migrations: tuple[StorageMigration, ...],
-    current_version: int,
-    patterns: BreakpointPatterns,
-) -> None:
-    """Raise when a step is out of range, duplicated, or names an unregistered pattern.
+def _highest_step_version(migrations: tuple[StorageMigration, ...]) -> int:
+    """Return the highest step version, or 0 when ``migrations`` is empty."""
+    if not migrations:
+        return 0
+    return max(step.version for step in migrations)
 
-    Contiguity of versions ``1..current_version`` is checked separately when
-    steps are bound. An empty tuple is valid here.
+
+def _validate_storage_format(
+    migrations: tuple[StorageMigration, ...],
+    patterns: BreakpointPatterns,
+    minimum_version: int | None,
+) -> None:
+    """Raise when steps are not versions ``1..N`` or ``minimum_version`` is too high.
+
+    ``N`` is the highest step version. An empty tuple is current version 0.
+    Each step must introduce a registered breakpoint. ``minimum_version`` of
+    ``None`` is allowed. A numeric minimum must not exceed the current
+    version. This is an internal registry bug, not a property of stored data.
     """
-    seen: set[int] = set()
+    versions = [step.version for step in migrations]
+    current_version = _highest_step_version(migrations)
+    if versions != list(range(1, current_version + 1)):
+        found = ", ".join(str(version) for version in versions)
+        raise RuntimeError(
+            f"Storage migrations must be versions 1..{current_version} in order; found {found}"
+        )
     for step in migrations:
-        if step.version < 1 or step.version > current_version:
-            raise RuntimeError(
-                f"Storage migration version {step.version} is outside 1..{current_version}"
-            )
-        if step.version in seen:
-            raise RuntimeError(f"Duplicate storage migration version {step.version}")
-        seen.add(step.version)
         if step.introduced_pattern not in patterns:
             raise RuntimeError(
                 f"Storage migration {step.version} introduces a breakpoint that is not registered"
             )
-
-
-def require_contiguous_migration_versions(
-    migrations: tuple[StorageMigration, ...],
-    current_version: int,
-) -> None:
-    """Raise when bound steps are not exactly versions ``1..current_version``.
-
-    This is an internal registry bug, not a property of stored data. An empty
-    step list is valid on ``StorageFormat`` until a caller binds steps.
-    Production binding must cover every version up to current.
-    """
-    expected = set(range(1, current_version + 1))
-    found = {step.version for step in migrations}
-    if found == expected:
-        return
-    missing = sorted(expected - found)
-    unexpected = sorted(found - expected)
-    parts: list[str] = []
-    if missing:
-        parts.append("missing " + ", ".join(str(version) for version in missing))
-    if unexpected:
-        parts.append("unexpected " + ", ".join(str(version) for version in unexpected))
-    raise RuntimeError(
-        f"Storage migrations must be contiguous versions 1..{current_version}; " + "; ".join(parts)
-    )
+    if minimum_version is not None and minimum_version > current_version:
+        raise RuntimeError(
+            f"minimum_version {minimum_version} exceeds current version {current_version}"
+        )
 
 
 @dataclass(frozen=True)
 class StorageFormat:
-    """Breakpoint registry and version bounds for one data directory.
+    """Breakpoint registry for one data directory.
 
-    ``minimum_version`` of ``None`` means an unversioned directory is still
-    supported. Callers that want the constants for this build use
-    ``DEFAULT_STORAGE_FORMAT`` and replace ``migrations`` when binding
-    analytic steps.
+    ``current_version`` is the highest registered step, or 0 when ``migrations``
+    is empty. ``minimum_version`` of ``None`` means an unversioned directory is
+    still supported. Bind analytic steps with ``replace`` on
+    ``DEFAULT_STORAGE_FORMAT``.
     """
 
     patterns: BreakpointPatterns
-    migrations: tuple[StorageMigration, ...]
-    current_version: int
-    minimum_version: int | None
+    migrations: tuple[StorageMigration, ...] = ()
+    minimum_version: int | None = None
 
     def __post_init__(self) -> None:
-        _validate_migrations(self.migrations, self.current_version, self.patterns)
+        _validate_storage_format(self.migrations, self.patterns, self.minimum_version)
+
+    @property
+    def current_version(self) -> int:
+        """Highest registered step version, or 0 when no steps are registered."""
+        return _highest_step_version(self.migrations)
 
 
-# Patterns and version bounds for this build. ``migrations`` is empty until a
-# caller binds analytic steps. ``minimum_version`` of None means an unversioned
-# directory is still supported.
+# Patterns for this build, with no steps. Current version is 0: an empty
+# directory is stamped 0, and an unversioned directory is already current.
+# ``minimum_version`` of None means an unversioned directory is still supported.
 DEFAULT_STORAGE_FORMAT = StorageFormat(
     patterns=BREAKPOINT_PATTERNS,
     migrations=(),
-    current_version=CURRENT_STORAGE_VERSION,
-    minimum_version=MINIMUM_STORAGE_VERSION,
+    minimum_version=None,
 )
 
 
