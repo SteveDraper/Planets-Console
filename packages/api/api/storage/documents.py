@@ -32,8 +32,6 @@ def partition_logical_tree(
     patterns: BreakpointPatterns,
 ) -> dict[str, JSONValue]:
     """Split a nested logical tree into one value per breakpoint document."""
-    if not isinstance(root, dict):
-        return {}
     return _collect_breakpoint_documents(list(root.items()), patterns)
 
 
@@ -51,45 +49,76 @@ def _collect_breakpoint_documents(
     patterns: BreakpointPatterns,
 ) -> dict[str, JSONValue]:
     documents: dict[str, JSONValue] = {}
-
-    def place(node: JSONValue, path: str) -> None:
-        try:
-            breakpoint_path, _suffix = resolve_breakpoint(path, patterns)
-        except ValidationError:
-            if isinstance(node, dict):
-                for key, child in node.items():
-                    place(child, f"{path}/{key}" if path else key)
-            return
-        if breakpoint_path == path:
-            documents[path] = extract_document(node, path, path)
-            return
-        if isinstance(node, dict):
-            for key, child in node.items():
-                place(child, f"{path}/{key}")
-
-    def extract_document(node: JSONValue, document_path: str, node_path: str) -> JSONValue:
-        if not isinstance(node, dict):
-            return deep_copy_value(node)
-        kept: dict[str, JSONValue] = {}
-        for key, child in node.items():
-            child_path = f"{node_path}/{key}"
-            try:
-                child_breakpoint, _suffix = resolve_breakpoint(child_path, patterns)
-            except ValidationError:
-                kept[key] = deep_copy_value(child)
-                continue
-            if child_breakpoint != document_path:
-                place(child, child_path)
-                continue
-            extracted = extract_document(child, document_path, child_path)
-            if isinstance(child, dict) and child and extracted == {}:
-                continue
-            kept[key] = extracted
-        return kept
-
     for path, node in start_nodes:
-        place(node, path)
+        _place_breakpoint_node(node, path, patterns, documents)
     return documents
+
+
+def _place_breakpoint_node(
+    node: JSONValue,
+    path: str,
+    patterns: BreakpointPatterns,
+    documents: dict[str, JSONValue],
+) -> None:
+    """Store ``path`` when it is a breakpoint; otherwise walk its child objects."""
+    try:
+        breakpoint_path, _suffix = resolve_breakpoint(path, patterns)
+    except ValidationError:
+        _place_child_objects(node, path, patterns, documents)
+        return
+    if breakpoint_path == path:
+        documents[path] = _extract_breakpoint_document(node, path, path, patterns, documents)
+        return
+    _place_child_objects(node, path, patterns, documents)
+
+
+def _place_child_objects(
+    node: JSONValue,
+    path: str,
+    patterns: BreakpointPatterns,
+    documents: dict[str, JSONValue],
+) -> None:
+    if not isinstance(node, dict):
+        return
+    for key, child in node.items():
+        child_path = f"{path}/{key}" if path else key
+        _place_breakpoint_node(child, child_path, patterns, documents)
+
+
+def _extract_breakpoint_document(
+    node: JSONValue,
+    document_path: str,
+    node_path: str,
+    patterns: BreakpointPatterns,
+    documents: dict[str, JSONValue],
+) -> JSONValue:
+    """Copy the part of ``node`` that stays in ``document_path``.
+
+    A longer breakpoint under this node is stored as its own document.
+    """
+    if not isinstance(node, dict):
+        return deep_copy_value(node)
+    kept: dict[str, JSONValue] = {}
+    for key, child in node.items():
+        child_path = f"{node_path}/{key}"
+        try:
+            child_breakpoint, _suffix = resolve_breakpoint(child_path, patterns)
+        except ValidationError:
+            kept[key] = deep_copy_value(child)
+            continue
+        if child_breakpoint != document_path:
+            _place_breakpoint_node(child, child_path, patterns, documents)
+            continue
+        extracted = _extract_breakpoint_document(
+            child, document_path, child_path, patterns, documents
+        )
+        # A non-empty object left empty held only longer breakpoints. Omit it
+        # so the shorter document does not keep an empty shell. An object that
+        # was already empty is kept.
+        if isinstance(child, dict) and child and extracted == {}:
+            continue
+        kept[key] = extracted
+    return kept
 
 
 def document_after_put(
