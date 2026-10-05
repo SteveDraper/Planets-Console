@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from api.app import app
 from api.config import ApiConfig, set_config
+from api.storage.migrations import STORAGE_VERSION_KEY
 from api.storage_factory import clear_backend_cache
 from fastapi.testclient import TestClient
 
@@ -113,3 +114,33 @@ def test_delete_returns_204(client):
 def test_delete_missing_returns_404(client):
     response = client.delete("/v1/store/games/missing/info")
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", f"/v1/store/{STORAGE_VERSION_KEY}", None),
+        ("GET", f"/v1/store/{STORAGE_VERSION_KEY.split('/', 1)[0]}", None),
+        ("GET", f"/v1/store/{STORAGE_VERSION_KEY}/version", None),
+        ("PUT", f"/v1/store/{STORAGE_VERSION_KEY}", {"version": 99}),
+        ("POST", f"/v1/store/{STORAGE_VERSION_KEY}", {"version": 99}),
+        ("DELETE", f"/v1/store/{STORAGE_VERSION_KEY}", None),
+    ],
+)
+def test_storage_meta_namespace_returns_422(client, method, path, body):
+    kwargs = {}
+    if body is not None:
+        kwargs["json"] = body
+    response = client.request(method, path, **kwargs)
+    assert response.status_code == 422
+    assert "reserved for storage metadata" in response.json()["detail"]
+
+
+def test_get_shallow_root_omits_storage_meta(client):
+    response = client.get("/v1/store/", params={"view": "shallow"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["path"] == ""
+    assert "games" in data["children"]
+    assert STORAGE_VERSION_KEY.split("/", 1)[0] not in data["children"]
+    assert data["count"] == len(data["children"])

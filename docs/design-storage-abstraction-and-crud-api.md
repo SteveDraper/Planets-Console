@@ -136,6 +136,7 @@ The following mapping is normative for implementation and tests:
 | Index segment used where parent resolves to non-array | `ValidationError` | 422 |
 | Array index out of range (including negative out of range) | `NotFoundError` | 404 |
 | Invalid query params (e.g. `view=foo`, invalid `merge=`) | `ValidationError` | 422 |
+| Path is in the storage-meta namespace (`meta` and every path under it) on create, read, update, delete, or shallow list | `ValidationError` | 422 |
 
 All write errors are fail-fast and preserve atomicity (no partial writes).
 
@@ -299,7 +300,7 @@ Code defaults stay `ephemeral` so tests and CI need no config file; repo `.confi
 
 [ADR 0033](adr/0033-storage-versioned-breakpoint-migrations.md). Both backends resolve a logical path to one breakpoint document plus an optional in-document suffix. A `put` of a longer breakpoint does not nest inside the shorter document.
 
-The data directory has one **storage version** at `meta/storage-version`. An empty directory is stamped with the current version and does not run migrations. An older supported directory runs the remaining steps in order, then stamps the current version. A second open does not run them again. A directory older than the minimum still supported raises `UnhandledFormatError` and is not rewritten.
+The data directory has one **storage version** at `meta/storage-version`. An empty directory is stamped with the current version and does not run migrations. An older supported directory runs the remaining steps in order, then stamps the current version. A second open does not run them again. A directory older than the minimum still supported raises `UnhandledFormatError` and is not rewritten. Generic store CRUD does not read, list, or write that namespace: `StoreService` raises `ValidationError` for every operation on `meta` and below, and a shallow listing of the store root omits `meta`. Backends still list and read the document; open and migration write the stamp through the document store.
 
 Each step is keyed by the version it brings the directory to, and names the breakpoint it introduces:
 
@@ -343,7 +344,8 @@ The storage implementation is covered by test modules under `packages/api/tests/
 **Store service (`test_store_service.py`)**  
 - **Create:** New path succeeds; existing path raises `ConflictError`; payload with reserved `@` key raises `ValidationError`.  
 - **Read:** Existing path returns value; missing path raises `NotFoundError`.  
-- **Read shallow:** Object node returns path, `node_type`, children, count; array node returns `@0`..`@(n-1)` and count.  
+- **Read shallow:** Object node returns path, `node_type`, children, count; array node returns `@0`..`@(n-1)` and count. Root listing omits the storage-meta segment.
+- **Storage-meta namespace:** Create, read, update, delete, and shallow list of `meta` and below raise `ValidationError` and leave the version stamp unchanged.  
 - **Update:** Deep merge for objects; array replace; array append/prepend via `merge_array`; object↔array or primitive↔object type change raises `ConflictError`; reserved `@` key raises `ValidationError`; missing path raises `NotFoundError`.  
 - **Delete:** Removes node; missing path raises `NotFoundError`.
 
@@ -351,6 +353,7 @@ The storage implementation is covered by test modules under `packages/api/tests/
 - **GET:** `view=full` returns node JSON; `view=shallow` returns path, `node_type`, `children`, `count`; invalid `view` returns 422; missing path returns 404.  
 - **PUT:** Create returns 201 and body; existing path returns 409; payload with `@` key returns 422.  
 - **POST:** Merge returns 200; `merge=append` / `merge=prepend` for arrays; invalid `merge` returns 422.  
-- **DELETE:** Success returns 204; missing path returns 404.  
+- **DELETE:** Success returns 204; missing path returns 404.
+- **Storage-meta namespace:** GET, PUT, POST, and DELETE of `meta/storage-version` (and the `meta` prefix) return 422. Shallow GET of the store root omits `meta`.  
 
 Ephemeral and store-layer tests use a per-test in-memory backend; file backend tests use a temporary `storage_root` directory.

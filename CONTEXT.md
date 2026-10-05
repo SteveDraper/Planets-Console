@@ -1395,7 +1395,7 @@ A logical store path that matches at least one breakpoint pattern (longest match
 _Avoid_: valid key (too generic)
 
 **Storage version**:
-The version of one data directory, stored once for that directory. An empty directory is stamped with the current version. A directory at an older supported version is brought forward when the store opens. A directory older than the minimum still supported is unreadable.
+The version of one data directory, stored once for that directory at `meta/storage-version`. An empty directory is stamped with the current version. A directory at an older supported version is brought forward when the store opens. A directory older than the minimum still supported is unreadable. The generic store API does not read, list, or write this namespace (`ValidationError`); migrations write the stamp through the document store.
 _Avoid_: per-row schema version, persistence_version (row content)
 
 **V1 breakpoint patterns**:
@@ -1423,7 +1423,7 @@ A read that returns only the **immediate child segment names** at a logical stor
 _Avoid_: directory listing, prefix scan
 
 **Store root path** (`""`):
-`list("")` returns top-level logical segments. `get`, `put`, and `delete` on the root path are rejected. All **StorageBackend** implementations must behave the same way.
+`list("")` returns top-level logical segments, including `meta`. `get`, `put`, and `delete` on the root path are rejected. All **StorageBackend** implementations must behave the same way. The generic store service omits `meta` from a shallow root listing.
 _Avoid_: whole-store read (no aggregate root document)
 
 **Backend conformance**:
