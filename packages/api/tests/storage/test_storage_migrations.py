@@ -15,7 +15,7 @@ from api.analytics.fleet.storage_migration import (
     migrate_fleet_breakpoint,
 )
 from api.config import ApiConfig, get_config, set_config
-from api.errors import NotFoundError, UnhandledFormatError
+from api.errors import NotFoundError, UnhandledFormatError, ValidationError
 from api.storage.boundaries import BREAKPOINT_PATTERNS
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
@@ -490,6 +490,7 @@ def _legacy_players_parent() -> dict:
         "gameId": 1,
         "perspective": 1,
         "turn": 3,
+        "materializationVersion": FLEET_MATERIALIZATION_VERSION,
         "players": [{"playerId": 8, "playerName": "ace", "records": []}],
     }
 
@@ -522,6 +523,35 @@ def test_copied_fleet_document_errors_only_for_held_player(kind, document, tmp_p
         backend.get(f"{FLEET}/999")
     assert not store.has_document(f"{FLEET}/999")
     assert store.read_document(FLEET) == document
+
+
+@pytest.mark.parametrize("kind", ["memory", "file"])
+def test_stale_players_document_with_unparseable_wire_is_deleted_on_open(kind, tmp_path):
+    document = {
+        "analyticId": "fleet",
+        "gameId": 1,
+        "perspective": 1,
+        "turn": 3,
+        "materializationVersion": FLEET_MATERIALIZATION_VERSION - 1,
+        "players": [{"playerId": "not-an-int"}],
+    }
+    with pytest.raises(ValidationError):
+        upgrade_legacy_fleet_turn_document(document)
+    migrations = (fleet_storage_migration(),)
+    if kind == "memory":
+        backend = MemoryAssetBackend(documents={FLEET: document}, migrations=migrations)
+    else:
+        root = tmp_path / "data"
+        fleet_file = root / f"{FLEET}.json"
+        fleet_file.parent.mkdir(parents=True)
+        fleet_file.write_text(json.dumps(document), encoding="utf-8")
+        backend = FileStorageBackend(root, migrations=migrations)
+    store = _store(backend)
+    assert not store.has_document(FLEET)
+    fleet_children = [path for path in store.iter_document_paths() if path.startswith(f"{FLEET}/")]
+    assert fleet_children == []
+    with pytest.raises(NotFoundError):
+        backend.get(FLEET)
 
 
 @pytest.mark.parametrize("kind", ["memory", "file"])
