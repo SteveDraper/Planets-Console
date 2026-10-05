@@ -391,6 +391,9 @@ def test_bound_migrations_must_be_contiguous_through_current():
         require_contiguous_migration_versions((), 1)
 
 
+_UNREADABLE_STAMP_DETAIL = "storage version stamp is not an object with an integer version"
+
+
 @pytest.mark.parametrize(
     ("error", "found", "minimum", "maximum", "detail"),
     [
@@ -408,6 +411,13 @@ def test_bound_migrations_must_be_contiguous_through_current():
             "1",
             "found version 5, maximum supported version 1",
         ),
+        (
+            UnhandledFormatError.unreadable_stamp(),
+            "unreadable",
+            None,
+            None,
+            _UNREADABLE_STAMP_DETAIL,
+        ),
     ],
 )
 def test_unhandled_format_error_constructors(error, found, minimum, maximum, detail):
@@ -416,6 +426,52 @@ def test_unhandled_format_error_constructors(error, found, minimum, maximum, det
     assert error.minimum_version == minimum
     assert error.maximum_version == maximum
     assert str(error) == f"Unhandled storage format: {detail}"
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        ["not-an-object"],
+        {"version": "1"},
+        {"version": True},
+    ],
+)
+def test_unreadable_stamp_is_not_rewritten(stamp, tmp_path):
+    info = "games/1/info"
+    documents = {
+        info: {"name": "keep"},
+        STORAGE_VERSION_KEY: stamp,
+    }
+    expected = json.loads(json.dumps(documents))
+    store = _CountingStore(json.loads(json.dumps(documents)))
+    with pytest.raises(UnhandledFormatError, match=_UNREADABLE_STAMP_DETAIL) as raised:
+        open_store(store, DEFAULT_STORAGE_FORMAT)
+    assert str(raised.value) == f"Unhandled storage format: {_UNREADABLE_STAMP_DETAIL}"
+    assert raised.value.found_version == "unreadable"
+    assert raised.value.http_error == 422
+    assert raised.value.minimum_version is None
+    assert raised.value.maximum_version is None
+    assert store.documents == expected
+
+    root = tmp_path / "data"
+    info_file = root / "games" / "1" / "info.json"
+    info_file.parent.mkdir(parents=True)
+    payload = b'{"name": "keep"}\n'
+    info_file.write_bytes(payload)
+    version = root / "meta" / "storage-version.json"
+    version.parent.mkdir(parents=True)
+    version_payload = json.dumps(stamp).encode() + b"\n"
+    version.write_bytes(version_payload)
+    with pytest.raises(UnhandledFormatError, match=_UNREADABLE_STAMP_DETAIL):
+        FileStorageBackend(root)
+    assert info_file.read_bytes() == payload
+    assert version.read_bytes() == version_payload
+
+    seeded = json.loads(json.dumps(documents))
+    original = json.loads(json.dumps(seeded))
+    with pytest.raises(UnhandledFormatError, match=_UNREADABLE_STAMP_DETAIL):
+        MemoryAssetBackend(documents=seeded)
+    assert seeded == original
 
 
 def test_directory_older_than_minimum_is_not_rewritten(tmp_path):

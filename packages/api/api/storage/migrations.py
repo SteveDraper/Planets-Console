@@ -3,10 +3,11 @@
 The directory carries one storage version at ``meta/storage-version``. An empty
 directory is stamped with the current version and does not run migrations.
 Older supported directories run the remaining steps in order, then stamp the
-current version. A directory older than the minimum still supported, or newer
-than the current version, raises ``UnhandledFormatError`` and is left
-unchanged. Documents written outside the app after the stamp are unsupported;
-this module does not detect them.
+current version. A directory older than the minimum still supported, newer
+than the current version, or carrying a stamp that is not an object with an
+integer version, raises ``UnhandledFormatError`` and is left unchanged.
+Documents written outside the app after the stamp are unsupported; this module
+does not detect them.
 
 A structural handler is registered by the analytic that owns the document
 shape. Generic re-home splits documents that held the introduced breakpoint's
@@ -38,8 +39,6 @@ STORAGE_VERSION_KEY = "meta/storage-version"
 CURRENT_STORAGE_VERSION = 1
 # None means an unversioned directory is still supported.
 MINIMUM_STORAGE_VERSION: int | None = None
-
-_UNREADABLE_VERSION = "unreadable"
 
 
 class DocumentStore(Protocol):
@@ -200,7 +199,7 @@ def open_store(store: DocumentStore, storage_format: StorageFormat) -> None:
         _stamp(store, current_version)
         return
 
-    found = _read_version(store, minimum_version) if has_version else None
+    found = _read_version(store) if has_version else None
     if _is_below_minimum(found, minimum_version):
         raise UnhandledFormatError.below_minimum(
             version_label(found),
@@ -285,14 +284,11 @@ def _is_below_minimum(found: int | None, minimum: int | None) -> bool:
     return found < minimum
 
 
-def _read_version(store: DocumentStore, minimum_version: int | None) -> int:
+def _read_version(store: DocumentStore) -> int:
     payload = store.read_document(STORAGE_VERSION_KEY)
-    minimum = version_label(minimum_version)
-    if not isinstance(payload, dict):
-        raise UnhandledFormatError.below_minimum(_UNREADABLE_VERSION, minimum)
-    version = payload.get("version")
+    version = payload.get("version") if isinstance(payload, dict) else None
     if isinstance(version, bool) or not isinstance(version, int):
-        raise UnhandledFormatError.below_minimum(_UNREADABLE_VERSION, minimum)
+        raise UnhandledFormatError.unreadable_stamp()
     return version
 
 

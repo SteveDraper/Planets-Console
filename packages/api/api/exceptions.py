@@ -59,7 +59,7 @@ class ValidationError(CoreAPIError):
 
 
 class UnhandledFormatError(CoreAPIError):
-    """Stored data uses a layout this code no longer migrates."""
+    """Stored data is outside the layouts this code can open."""
 
     http_error: int = 422
 
@@ -90,6 +90,13 @@ class UnhandledFormatError(CoreAPIError):
             found,
             f"found version {found}, maximum supported version {maximum}",
             maximum_version=maximum,
+        )
+
+    @classmethod
+    def unreadable_stamp(cls) -> UnhandledFormatError:
+        return cls(
+            "unreadable",
+            "storage version stamp is not an object with an integer version",
         )
 
 
