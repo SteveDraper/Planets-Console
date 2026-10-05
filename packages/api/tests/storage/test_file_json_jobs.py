@@ -8,6 +8,7 @@ from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.storage.file_json_jobs import (
     LARGE_DOCUMENT_TARGET_BYTES,
     LARGE_DOCUMENT_TARGET_NODES,
+    PROBE_TURN_KEY,
     json_node_count,
     open_probe_file_backend,
     synthetic_large_fleet_document,
@@ -47,13 +48,16 @@ def test_time_file_json_jobs_tiny_mix_counts(tmp_path):
 
 
 def test_time_large_document_jobs_reports_gil_serial_get_and_loads(tmp_path):
+    root = tmp_path / "large"
     document = synthetic_large_fleet_document(min_bytes=8_000, min_nodes=400)
     timing = time_large_document_jobs(
-        tmp_path / "large",
+        root,
         document=document,
         iterations=2,
         worker_count=8,
     )
+    assert (root / f"{PROBE_TURN_KEY}/analytics/fleet/1.json").is_file()
+    assert not (root / f"{PROBE_TURN_KEY}/analytics/fleet.json").exists()
     assert timing.encoded_bytes >= 8_000
     assert timing.node_count >= 400
     assert timing.player_count == 11
