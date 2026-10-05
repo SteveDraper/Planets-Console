@@ -6,11 +6,7 @@ from pathlib import Path
 
 from api.errors import NotFoundError, ValidationError
 from api.storage.base import JSONValue
-from api.storage.boundaries import (
-    BREAKPOINT_PATTERNS,
-    BreakpointPatterns,
-    resolve_breakpoint,
-)
+from api.storage.boundaries import resolve_breakpoint
 from api.storage.documents import (
     document_after_delete,
     document_after_put,
@@ -18,12 +14,7 @@ from api.storage.documents import (
     read_logical,
 )
 from api.storage.file_documents import FileDocumentStore
-from api.storage.migrations import (
-    CURRENT_STORAGE_VERSION,
-    MINIMUM_STORAGE_VERSION,
-    StorageMigration,
-    open_store,
-)
+from api.storage.migrations import DEFAULT_STORAGE_FORMAT, StorageFormat, open_store
 from api.storage.path_utils import deep_copy_value
 
 
@@ -40,27 +31,12 @@ class FileStorageBackend:
         self,
         storage_root: Path,
         *,
-        patterns: BreakpointPatterns | None = None,
-        migrations: tuple[StorageMigration, ...] = (),
-        current_version: int | None = None,
-        minimum_version: int | None = None,
+        storage_format: StorageFormat | None = None,
     ) -> None:
-        self._patterns = BREAKPOINT_PATTERNS if patterns is None else patterns
-        self._migrations = migrations
-        self._current_version = (
-            CURRENT_STORAGE_VERSION if current_version is None else current_version
-        )
-        self._minimum_version = (
-            MINIMUM_STORAGE_VERSION if minimum_version is None else minimum_version
-        )
+        resolved_format = DEFAULT_STORAGE_FORMAT if storage_format is None else storage_format
+        self._patterns = resolved_format.patterns
         self._document_store = FileDocumentStore(storage_root)
-        open_store(
-            self._document_store,
-            patterns=self._patterns,
-            migrations=self._migrations,
-            current_version=self._current_version,
-            minimum_version=self._minimum_version,
-        )
+        open_store(self._document_store, resolved_format)
 
     def _normalize(self, key: str) -> str:
         return (key or "").strip().strip("/") or ""

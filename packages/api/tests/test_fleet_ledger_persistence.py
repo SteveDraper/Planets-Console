@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ from api.analytics.fleet.types import (
 from api.errors import NotFoundError
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
+from api.storage.migrations import DEFAULT_STORAGE_FORMAT
 
 from tests.file_backend_io_accounting import CountingStorageBackend, FileIoCounts
 
@@ -173,7 +175,7 @@ def test_unversioned_players_document_is_split_on_open(sample_ledger):
     key = FleetSnapshotPersistenceService.ledger_prefix(628580, 1, 111)
     backend = MemoryAssetBackend(
         documents={key: _legacy_players_document(sample_ledger)},
-        migrations=(fleet_storage_migration(),),
+        storage_format=replace(DEFAULT_STORAGE_FORMAT, migrations=(fleet_storage_migration(),)),
     )
     persistence = FleetSnapshotPersistenceService(backend)
 
@@ -189,7 +191,10 @@ def test_unversioned_players_document_is_split_on_open(sample_ledger):
 
 
 def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
-    backend = MemoryAssetBackend(initial={}, migrations=(fleet_storage_migration(),))
+    backend = MemoryAssetBackend(
+        initial={},
+        storage_format=replace(DEFAULT_STORAGE_FORMAT, migrations=(fleet_storage_migration(),)),
+    )
     persistence = FleetSnapshotPersistenceService(backend)
     legacy_document = _legacy_players_document(sample_ledger)
     backend.put(persistence.ledger_prefix(628580, 1, 111), legacy_document)

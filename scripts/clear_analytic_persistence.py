@@ -44,7 +44,7 @@ from api.services.inference_row_persistence_service import (  # noqa: E402
 )
 from api.storage.base import StorageBackend  # noqa: E402
 from api.storage.file import FileStorageBackend  # noqa: E402
-from api.storage_factory import production_migrations  # noqa: E402
+from api.storage_factory import production_storage_format  # noqa: E402
 
 WILDCARD = "*"
 _HULL_MASKS_KEY = "inference_hull_catalog_masks"
@@ -567,7 +567,7 @@ def main(
 
     storage = FileStorageBackend(
         storage_root.resolve(),
-        migrations=production_migrations(),
+        storage_format=production_storage_format(),
     )
     result = clear_analytic_persistence(
         storage,

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 from api.errors import NotFoundError, ValidationError
 from api.storage.base import JSONValue
-from api.storage.boundaries import BREAKPOINT_PATTERNS, BreakpointPatterns, resolve_breakpoint
+from api.storage.boundaries import resolve_breakpoint
 from api.storage.documents import (
     child_names_for_prefix,
     document_after_delete,
@@ -23,12 +23,7 @@ from api.storage.documents import (
     partition_logical_tree,
     read_logical,
 )
-from api.storage.migrations import (
-    CURRENT_STORAGE_VERSION,
-    MINIMUM_STORAGE_VERSION,
-    StorageMigration,
-    open_store,
-)
+from api.storage.migrations import DEFAULT_STORAGE_FORMAT, StorageFormat, open_store
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
@@ -113,33 +108,18 @@ class MemoryAssetBackend:
         initial: dict[str, JSONValue] | None = None,
         *,
         documents: dict[str, JSONValue] | None = None,
-        patterns: BreakpointPatterns | None = None,
-        migrations: tuple[StorageMigration, ...] = (),
-        current_version: int | None = None,
-        minimum_version: int | None = None,
+        storage_format: StorageFormat | None = None,
     ) -> None:
         if documents is not None and initial is not None:
             raise ValueError("pass initial or documents, not both")
-        self._patterns = BREAKPOINT_PATTERNS if patterns is None else patterns
-        self._migrations = migrations
-        self._current_version = (
-            CURRENT_STORAGE_VERSION if current_version is None else current_version
-        )
-        self._minimum_version = (
-            MINIMUM_STORAGE_VERSION if minimum_version is None else minimum_version
-        )
+        resolved_format = DEFAULT_STORAGE_FORMAT if storage_format is None else storage_format
+        self._patterns = resolved_format.patterns
         if documents is not None:
             seeded = {path: deep_copy_value(value) for path, value in documents.items()}
         else:
             seeded = partition_logical_tree(initial or {}, self._patterns)
         self._document_store = MemoryDocumentStore(seeded)
-        open_store(
-            self._document_store,
-            patterns=self._patterns,
-            migrations=self._migrations,
-            current_version=self._current_version,
-            minimum_version=self._minimum_version,
-        )
+        open_store(self._document_store, resolved_format)
 
     def get(self, key: str) -> JSONValue:
         """Return a deep copy of the value at path. Raises NotFoundError if path does not exist."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -20,8 +21,10 @@ from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
 from api.storage.migrations import (
     CURRENT_STORAGE_VERSION,
+    DEFAULT_STORAGE_FORMAT,
     STORAGE_VERSION_KEY,
     MigrationContext,
+    StorageFormat,
     StorageMigration,
     generic_rehome,
     open_store,
@@ -65,6 +68,10 @@ LEDGER_WIRE = {
 }
 
 
+def _storage_format(**overrides) -> StorageFormat:
+    return replace(DEFAULT_STORAGE_FORMAT, **overrides)
+
+
 def _store(backend: FileStorageBackend | MemoryAssetBackend):
     return backend._document_store
 
@@ -99,8 +106,7 @@ def _open_scores(kind: str, root: Path, monkeypatch: pytest.MonkeyPatch):
     if kind == "memory":
         backend = MemoryAssetBackend(
             documents={SCORES: {"inference_rows": {"4": ROW}, "kept": True}},
-            patterns=patterns,
-            migrations=migrations,
+            storage_format=_storage_format(patterns=patterns, migrations=migrations),
         )
     else:
         scores_file = root / f"{SCORES}.json"
@@ -109,7 +115,10 @@ def _open_scores(kind: str, root: Path, monkeypatch: pytest.MonkeyPatch):
             json.dumps({"inference_rows": {"4": ROW}, "kept": True}),
             encoding="utf-8",
         )
-        backend = FileStorageBackend(root, patterns=patterns, migrations=migrations)
+        backend = FileStorageBackend(
+            root,
+            storage_format=_storage_format(patterns=patterns, migrations=migrations),
+        )
     return backend, calls
 
 
@@ -125,12 +134,20 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
         backend.get(f"{SCORES}/inference_rows/999")
 
     if kind == "file":
-        FileStorageBackend(root, patterns=_scores_patterns(), migrations=(_scores_migration(),))
+        FileStorageBackend(
+            root,
+            storage_format=_storage_format(
+                patterns=_scores_patterns(),
+                migrations=(_scores_migration(),),
+            ),
+        )
     else:
         MemoryAssetBackend(
             documents=_document_map(backend),
-            patterns=_scores_patterns(),
-            migrations=(_scores_migration(),),
+            storage_format=_storage_format(
+                patterns=_scores_patterns(),
+                migrations=(_scores_migration(),),
+            ),
         )
     assert calls == [1]
 
@@ -202,8 +219,9 @@ def test_new_directory_is_stamped_without_migrations(tmp_path, monkeypatch):
     assert calls == []
 
     bound = (fleet_storage_migration(),)
-    FileStorageBackend(tmp_path / "bound", migrations=bound)
-    MemoryAssetBackend(initial={}, migrations=bound)
+    bound_format = _storage_format(migrations=bound)
+    FileStorageBackend(tmp_path / "bound", storage_format=bound_format)
+    MemoryAssetBackend(initial={}, storage_format=bound_format)
     assert calls == []
 
 
@@ -221,15 +239,16 @@ def test_unversioned_ledgers_document_splits_on_open(kind, tmp_path, monkeypatch
     )
     document = {"ledgers": {"8": LEDGER_WIRE}}
     migrations = (fleet_storage_migration(),)
+    storage_format = _storage_format(migrations=migrations)
     if kind == "memory":
-        backend = MemoryAssetBackend(documents={FLEET: document}, migrations=migrations)
+        backend = MemoryAssetBackend(documents={FLEET: document}, storage_format=storage_format)
     else:
         root = tmp_path / "data"
         fleet_file = root / f"{FLEET}.json"
         fleet_file.parent.mkdir(parents=True)
         fleet_file.write_text(json.dumps(document), encoding="utf-8")
-        backend = FileStorageBackend(root, migrations=migrations)
-        FileStorageBackend(root, migrations=migrations)
+        backend = FileStorageBackend(root, storage_format=storage_format)
+        FileStorageBackend(root, storage_format=storage_format)
     assert calls == [1]
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
     with pytest.raises(NotFoundError):
@@ -247,6 +266,24 @@ def test_unversioned_ledgers_document_splits_on_open(kind, tmp_path, monkeypatch
 )
 def test_version_label(version, label):
     assert version_label(version) == label
+
+
+def test_storage_format_rejects_an_invalid_migration_registry():
+    step = StorageMigration(version=1, introduced_pattern=("games", "*", "info"))
+    with pytest.raises(RuntimeError, match="Duplicate storage migration version 1"):
+        StorageFormat(
+            patterns=BREAKPOINT_PATTERNS,
+            migrations=(step, step),
+            current_version=1,
+            minimum_version=None,
+        )
+    with pytest.raises(RuntimeError, match="outside 1..1"):
+        StorageFormat(
+            patterns=BREAKPOINT_PATTERNS,
+            migrations=(StorageMigration(version=2, introduced_pattern=("games", "*", "info")),),
+            current_version=1,
+            minimum_version=None,
+        )
 
 
 @pytest.mark.parametrize(
@@ -291,7 +328,7 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         UnhandledFormatError,
         match="found version 0, minimum supported version 1",
     ):
-        FileStorageBackend(root, minimum_version=1, migrations=(), current_version=1)
+        FileStorageBackend(root, storage_format=_storage_format(minimum_version=1))
 
     assert info.read_bytes() == payload
     assert version.read_bytes() == version_payload
@@ -304,7 +341,7 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         UnhandledFormatError,
         match="found version unversioned, minimum supported version 1",
     ):
-        FileStorageBackend(unversioned, minimum_version=1, migrations=(), current_version=1)
+        FileStorageBackend(unversioned, storage_format=_storage_format(minimum_version=1))
     assert plain_info.read_bytes() == payload
     assert not (unversioned / "meta" / "storage-version.json").exists()
 
@@ -319,9 +356,7 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
     ):
         MemoryAssetBackend(
             documents=seeded,
-            minimum_version=1,
-            migrations=(),
-            current_version=1,
+            storage_format=_storage_format(minimum_version=1),
         )
     assert seeded == original
 
@@ -330,6 +365,12 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
 def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
     payload = b'{"name": "keep"}\n'
     version_payload = b'{"version": 5}\n'
+    storage_format = StorageFormat(
+        patterns=BREAKPOINT_PATTERNS,
+        migrations=(),
+        current_version=1,
+        minimum_version=None,
+    )
     if kind == "file":
         root = tmp_path / "data"
         info = root / "games" / "1" / "info.json"
@@ -342,12 +383,7 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
             UnhandledFormatError,
             match="found version 5, maximum supported version 1",
         ):
-            FileStorageBackend(
-                root,
-                minimum_version=None,
-                migrations=(),
-                current_version=1,
-            )
+            FileStorageBackend(root, storage_format=storage_format)
         assert info.read_bytes() == payload
         assert version.read_bytes() == version_payload
     else:
@@ -360,12 +396,7 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
             UnhandledFormatError,
             match="found version 5, maximum supported version 1",
         ):
-            MemoryAssetBackend(
-                documents=seeded,
-                minimum_version=None,
-                migrations=(),
-                current_version=1,
-            )
+            MemoryAssetBackend(documents=seeded, storage_format=storage_format)
         assert seeded == original
 
 
@@ -484,15 +515,15 @@ def test_stale_players_document_with_unparseable_wire_is_deleted_on_open(kind, t
     }
     with pytest.raises(ValidationError):
         upgrade_legacy_fleet_turn_document(document)
-    migrations = (fleet_storage_migration(),)
+    storage_format = _storage_format(migrations=(fleet_storage_migration(),))
     if kind == "memory":
-        backend = MemoryAssetBackend(documents={FLEET: document}, migrations=migrations)
+        backend = MemoryAssetBackend(documents={FLEET: document}, storage_format=storage_format)
     else:
         root = tmp_path / "data"
         fleet_file = root / f"{FLEET}.json"
         fleet_file.parent.mkdir(parents=True)
         fleet_file.write_text(json.dumps(document), encoding="utf-8")
-        backend = FileStorageBackend(root, migrations=migrations)
+        backend = FileStorageBackend(root, storage_format=storage_format)
     store = _store(backend)
     assert not store.has_document(FLEET)
     fleet_children = [path for path in store.iter_document_paths() if path.startswith(f"{FLEET}/")]
@@ -505,15 +536,15 @@ def test_stale_players_document_with_unparseable_wire_is_deleted_on_open(kind, t
 def test_unversioned_players_document_splits_on_open(kind, tmp_path):
     document = _legacy_players_parent()
     expected = upgrade_legacy_fleet_turn_document(document)["ledgers"]["8"]
-    migrations = (fleet_storage_migration(),)
+    storage_format = _storage_format(migrations=(fleet_storage_migration(),))
     if kind == "memory":
-        backend = MemoryAssetBackend(documents={FLEET: document}, migrations=migrations)
+        backend = MemoryAssetBackend(documents={FLEET: document}, storage_format=storage_format)
     else:
         root = tmp_path / "data"
         fleet_file = root / f"{FLEET}.json"
         fleet_file.parent.mkdir(parents=True)
         fleet_file.write_text(json.dumps(document), encoding="utf-8")
-        backend = FileStorageBackend(root, migrations=migrations)
+        backend = FileStorageBackend(root, storage_format=storage_format)
     assert backend.get(FLEET_PLAYER) == expected
     with pytest.raises(NotFoundError):
         backend.get(FLEET)
@@ -528,8 +559,7 @@ def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
     other = {"note": True}
     backend = MemoryAssetBackend(
         documents={FLEET: players, ledgers_path: ledgers, other_path: other},
-        migrations=(),
-        current_version=0,
+        storage_format=_storage_format(current_version=0),
     )
     migrate_fleet_breakpoint(MigrationContext(_store(backend)))
     store = _store(backend)
@@ -543,18 +573,17 @@ def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
 def test_open_splits_upgraded_parent_and_retries_as_noop():
     backend = MemoryAssetBackend(
         documents={FLEET: {"ledgers": {"8": LEDGER_WIRE}}},
-        migrations=(),
-        current_version=0,
+        storage_format=_storage_format(current_version=0),
     )
     step = fleet_storage_migration()
     store = _store(backend)
-    open_store(
-        store,
+    opened = StorageFormat(
         patterns=BREAKPOINT_PATTERNS,
         migrations=(step,),
         current_version=CURRENT_STORAGE_VERSION,
         minimum_version=None,
     )
+    open_store(store, opened)
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
     with pytest.raises(NotFoundError):
         backend.get(FLEET)
@@ -564,20 +593,14 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
     assert not store.has_document(FLEET)
 
-    open_store(
-        store,
-        patterns=BREAKPOINT_PATTERNS,
-        migrations=(step,),
-        current_version=CURRENT_STORAGE_VERSION,
-        minimum_version=None,
-    )
+    open_store(store, opened)
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
 
 
 def test_empty_ledgers_map_removes_parent():
     backend = MemoryAssetBackend(
         documents={FLEET: {"ledgers": {}}},
-        migrations=(fleet_storage_migration(),),
+        storage_format=_storage_format(migrations=(fleet_storage_migration(),)),
     )
     assert not _store(backend).has_document(FLEET)
 
@@ -585,7 +608,7 @@ def test_empty_ledgers_map_removes_parent():
 def test_fleet_document_without_legacy_shape_stays():
     backend = MemoryAssetBackend(
         documents={FLEET: {"note": True}},
-        migrations=(fleet_storage_migration(),),
+        storage_format=_storage_format(migrations=(fleet_storage_migration(),)),
     )
     assert backend.get(FLEET) == {"note": True}
 
@@ -593,9 +616,9 @@ def test_fleet_document_without_legacy_shape_stays():
 @pytest.mark.parametrize("kind", ["memory", "file"])
 def test_document_store_read_returns_a_copy(kind, tmp_path):
     if kind == "memory":
-        backend = MemoryAssetBackend(initial={}, migrations=())
+        backend = MemoryAssetBackend(initial={})
     else:
-        backend = FileStorageBackend(tmp_path / "data", migrations=())
+        backend = FileStorageBackend(tmp_path / "data")
     store = _store(backend)
     store.write_document("games/1/info", {"name": "keep"})
     loaded = store.read_document("games/1/info")

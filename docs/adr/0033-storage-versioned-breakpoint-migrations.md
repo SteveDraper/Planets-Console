@@ -16,6 +16,7 @@ A step either re-homes an unchanged logical key onto a longer breakpoint, or cal
 ## Consequences
 
 - New breakpoint splits register a migration keyed by the storage version they introduce. `boundaries.py` holds the pattern, not the document shape.
+- Both backends open through one `StorageFormat` (breakpoint patterns, migration steps, current version, minimum version). `minimum_version` of `None` means an unversioned directory is still supported. The process factory binds analytic steps onto the default format.
 - Single-process writers (ADR 0001) still apply. The version stamp is not a lock.
 - Documents introduced outside the app after the directory is stamped are unsupported. A `get` that misses the current breakpoint document raises `NotFoundError`. Open still rejects a directory below the minimum or above the current version and leaves it unchanged.
 - See [design-storage-abstraction-and-crud-api.md](../design-storage-abstraction-and-crud-api.md) §16 and **CONTEXT.md** (**Storage version**, **Document**).

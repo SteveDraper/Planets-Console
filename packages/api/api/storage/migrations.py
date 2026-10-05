@@ -11,6 +11,10 @@ this module does not detect them.
 A structural handler is registered by the analytic that owns the document
 shape. Generic re-home splits documents that held the introduced breakpoint's
 keys as an in-document suffix. Handlers see JSON documents and keys.
+
+``StorageFormat`` is the registry and version bounds a backend opens with.
+``minimum_version`` of ``None`` means an unversioned directory is still
+supported.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from typing import Protocol
 from api.errors import UnhandledFormatError
 from api.storage.base import JSONValue
 from api.storage.boundaries import (
+    BREAKPOINT_PATTERNS,
     BreakpointPatterns,
     is_rehome_candidate,
     pattern_matches_breakpoint,
@@ -98,6 +103,51 @@ class StorageMigration:
     structural_handler: StructuralHandler | None = None
 
 
+def _reject_duplicate_versions(
+    migrations: tuple[StorageMigration, ...],
+    current_version: int,
+) -> None:
+    seen: set[int] = set()
+    for step in migrations:
+        if step.version < 1 or step.version > current_version:
+            raise RuntimeError(
+                f"Storage migration version {step.version} is outside 1..{current_version}"
+            )
+        if step.version in seen:
+            raise RuntimeError(f"Duplicate storage migration version {step.version}")
+        seen.add(step.version)
+
+
+@dataclass(frozen=True)
+class StorageFormat:
+    """Breakpoint registry and version bounds for one data directory.
+
+    ``minimum_version`` of ``None`` means an unversioned directory is still
+    supported. Callers that want the constants for this build use
+    ``DEFAULT_STORAGE_FORMAT`` and replace ``migrations`` when binding
+    analytic steps.
+    """
+
+    patterns: BreakpointPatterns
+    migrations: tuple[StorageMigration, ...]
+    current_version: int
+    minimum_version: int | None
+
+    def __post_init__(self) -> None:
+        _reject_duplicate_versions(self.migrations, self.current_version)
+
+
+# Patterns and version bounds for this build. ``migrations`` is empty until a
+# caller binds analytic steps. ``minimum_version`` of None means an unversioned
+# directory is still supported.
+DEFAULT_STORAGE_FORMAT = StorageFormat(
+    patterns=BREAKPOINT_PATTERNS,
+    migrations=(),
+    current_version=CURRENT_STORAGE_VERSION,
+    minimum_version=MINIMUM_STORAGE_VERSION,
+)
+
+
 def version_label(version: int | None) -> str:
     """Return the label used in ``UnhandledFormatError``."""
     if version is None:
@@ -105,16 +155,10 @@ def version_label(version: int | None) -> str:
     return str(version)
 
 
-def open_store(
-    store: DocumentStore,
-    *,
-    patterns: BreakpointPatterns,
-    migrations: tuple[StorageMigration, ...],
-    current_version: int,
-    minimum_version: int | None,
-) -> None:
-    """Stamp ``store`` at ``current_version``, running any migrations still due."""
-    _reject_duplicate_versions(migrations, current_version)
+def open_store(store: DocumentStore, storage_format: StorageFormat) -> None:
+    """Stamp ``store`` at ``storage_format.current_version``, running migrations still due."""
+    current_version = storage_format.current_version
+    minimum_version = storage_format.minimum_version
     user_paths = [path for path in store.iter_document_paths() if path != STORAGE_VERSION_KEY]
     has_version = store.has_document(STORAGE_VERSION_KEY)
     if not user_paths and not has_version:
@@ -136,13 +180,13 @@ def open_store(
     if stored == current_version:
         return
 
-    by_version = {step.version: step for step in migrations}
+    by_version = {step.version: step for step in storage_format.migrations}
     context = MigrationContext(store)
     for version in range(stored + 1, current_version + 1):
         step = by_version.get(version)
         if step is None:
             raise RuntimeError(f"No storage migration registered for version {version}")
-        _run_step(step, context, store, patterns)
+        _run_step(step, context, store, storage_format.patterns)
     _stamp(store, current_version)
 
 
@@ -196,21 +240,6 @@ def _run_step(
         step.structural_handler(context)
     else:
         generic_rehome(store, patterns, step.introduced_pattern)
-
-
-def _reject_duplicate_versions(
-    migrations: tuple[StorageMigration, ...],
-    current_version: int,
-) -> None:
-    seen: set[int] = set()
-    for step in migrations:
-        if step.version < 1 or step.version > current_version:
-            raise RuntimeError(
-                f"Storage migration version {step.version} is outside 1..{current_version}"
-            )
-        if step.version in seen:
-            raise RuntimeError(f"Duplicate storage migration version {step.version}")
-        seen.add(step.version)
 
 
 def _is_below_minimum(found: int | None, minimum: int | None) -> bool:
