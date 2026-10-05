@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from api.storage.breakpoint_backend import BreakpointDocumentBackend
+from api.storage.breakpoint_backend import BreakpointDocumentBackend, resolve_storage_format
 from api.storage.file_documents import FileDocumentStore
-from api.storage.migrations import StorageFormat
+from api.storage.migrations import StorageFormat, open_store
 
 
 class FileStorageBackend(BreakpointDocumentBackend):
@@ -16,7 +16,8 @@ class FileStorageBackend(BreakpointDocumentBackend):
     in a process-wide LRU keyed by resolved root. Successful put/delete
     invalidates ancestor listings even when the document is not retained.
     ``get`` returns a deep copy. Breakpoint file I/O lives on the composed
-    ``FileDocumentStore``.
+    ``FileDocumentStore``. The directory is opened before logical reads and
+    writes.
     """
 
     def __init__(
@@ -25,4 +26,7 @@ class FileStorageBackend(BreakpointDocumentBackend):
         *,
         storage_format: StorageFormat | None = None,
     ) -> None:
-        super().__init__(FileDocumentStore(storage_root), storage_format)
+        document_store = FileDocumentStore(storage_root)
+        resolved_format = resolve_storage_format(storage_format)
+        open_store(document_store, resolved_format)
+        super().__init__(document_store, resolved_format)

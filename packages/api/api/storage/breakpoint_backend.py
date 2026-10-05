@@ -12,7 +12,7 @@ from api.storage.documents import (
     list_logical,
     read_logical,
 )
-from api.storage.migrations import DEFAULT_STORAGE_FORMAT, StorageFormat, open_store
+from api.storage.migrations import DEFAULT_STORAGE_FORMAT, StorageFormat
 from api.storage.path_utils import deep_copy_value, normalize_store_key
 
 
@@ -24,10 +24,12 @@ def resolve_storage_format(storage_format: StorageFormat | None) -> StorageForma
 
 
 class BreakpointDocumentBackend:
-    """Logical JSON store over breakpoint documents.
+    """Logical JSON store over an already prepared breakpoint document store.
 
-    ``get`` returns a deep copy. ``put`` and ``delete`` hold the store's
-    ``document_lock`` for the whole read-modify-write of one breakpoint.
+    A file directory is opened, or an ephemeral seed is partitioned and
+    stamped, before this backend is constructed. ``get`` returns a deep copy.
+    ``put`` and ``delete`` hold the store's ``document_lock`` for the whole
+    read-modify-write of one breakpoint.
     """
 
     def __init__(
@@ -38,7 +40,6 @@ class BreakpointDocumentBackend:
         resolved_format = resolve_storage_format(storage_format)
         self._patterns = resolved_format.patterns
         self._document_store = document_store
-        open_store(document_store, resolved_format)
 
     def get(self, key: str) -> JSONValue:
         path = normalize_store_key(key)

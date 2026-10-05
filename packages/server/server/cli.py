@@ -87,7 +87,7 @@ Config structure:
   server.port             int      [default: 8000]     Bind port
   api.storage_backend     string   [default: ephemeral]  Backend ID (ephemeral | file)
   api.storage_root        string   [default: ./.data]    File backend root directory
-  api.storage_asset_path  string or null  [default: null]   Ephemeral JSON seed; null = empty
+  api.storage_asset_path  string or null  [default: null]   Current-layout JSON seed; null = empty
   api.include_dummy_data  bool     [default: false]  Seed sample game data on startup
   bff.cors_origins        list of strings  CORS origins for the SPA
   bff.show_initial_game   string or null [default: null]  SPA loads this game without login

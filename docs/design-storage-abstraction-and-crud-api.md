@@ -145,7 +145,7 @@ All write errors are fail-fast and preserve atomicity (no partial writes).
 ## 8. Test implementation (asset-backed in-memory backend)
 
 - **Location:** `packages/api/api/storage/` (e.g. `memory_asset.py`). Not referenced outside the storage subpackage except via the `StorageBackend` protocol and dependency injection (see storage.mdc).
-- **Data source:** A **single monolithic JSON file** whose structure defines the initial path space (e.g. top-level keys `game`, `planets`; nested structure gives path segments). Loaded at backend instantiation and deep-copied into an in-memory structure.
+- **Data source:** A **single monolithic JSON file** that is a logical tree in the current breakpoint layout (for example `games/{id}/info` with nested fields inside that document). Loaded at backend instantiation, partitioned into breakpoint documents, and stamped at the current version. Migrations do not run over it. The `meta` namespace is rejected.
 - **Behaviour:** Full CRUD. The backend holds a mutable in-memory copy of the initial JSON so that `get`, `put`, `delete`, and `list` are all implemented. This allows all store semantics (create-only, merge, path resolution, reserved `@` validation) to be unit tested without persistence. No writes to disk; mutations affect only the in-memory state.
 - **Asset location:** Under `packages/api/api/storage/assets/` (e.g. `store_test.json`) or similar; the exact path is an implementation detail.
 
@@ -300,7 +300,7 @@ Code defaults stay `ephemeral` so tests and CI need no config file; repo `.confi
 
 [ADR 0033](adr/0033-storage-versioned-breakpoint-migrations.md). Both backends resolve a logical path to one breakpoint document plus an optional in-document suffix. A `put` of a longer breakpoint does not nest inside the shorter document.
 
-The data directory has one **storage version** at `meta/storage-version`. An empty directory is stamped with the current version and does not run migrations. An older supported directory runs the remaining steps in order, then stamps the current version. A second open does not run them again. A directory older than the minimum still supported raises `UnhandledFormatError` and is not rewritten. Generic store CRUD does not read, list, or write that namespace: `StoreService` raises `ValidationError` for every operation on `meta` and below, and a shallow listing of the store root omits `meta`. Backends still list and read the document; open and migration write the stamp through the document store.
+The data directory has one **storage version** at `meta/storage-version`. An empty directory is stamped with the current version and does not run migrations. An older supported directory runs the remaining steps in order, then stamps the current version. A second open does not run them again. A directory older than the minimum still supported raises `UnhandledFormatError` and is not rewritten. An ephemeral seed (`initial`, including a `storage_asset_path` asset) is a logical tree in the current layout: it is partitioned and stamped at the current version, and migrations do not run over it. A seed that contains the `meta` namespace raises `ValidationError`. Generic store CRUD does not read, list, or write that namespace: `StoreService` raises `ValidationError` for every operation on `meta` and below, and a shallow listing of the store root omits `meta`. Backends still list and read the document; open and migration write the stamp through the document store.
 
 Each step is keyed by the version it brings the directory to, and names the breakpoint it introduces:
 

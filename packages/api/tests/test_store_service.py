@@ -6,7 +6,7 @@ import pytest
 from api.errors import ConflictError, NotFoundError, ValidationError
 from api.services.store_service import StoreService
 from api.storage.memory_asset import MemoryAssetBackend
-from api.storage.migrations import CURRENT_STORAGE_VERSION, STORAGE_VERSION_KEY
+from api.storage.migrations import STORAGE_VERSION_KEY
 
 INFO = "games/sample/info"
 NESTED = f"{INFO}/nested"
@@ -28,7 +28,6 @@ def storage():
                         }
                     }
                 },
-                "meta": {"storage-version": {"version": CURRENT_STORAGE_VERSION}},
             }
         )
     )

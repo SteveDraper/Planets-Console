@@ -57,9 +57,11 @@ def production_storage_format() -> StorageFormat:
 
 
 def _load_asset(path: Path | None) -> dict:
-    """Load JSON from path; if path is None, return empty dict.
+    """Load a current-layout logical JSON tree.
 
-    If path is set but not a file, raise.
+    ``None`` returns an empty tree. A path that is not a file raises.
+    ``MemoryAssetBackend`` partitions the tree and rejects the ``meta``
+    namespace.
     """
     if path is None:
         return {}

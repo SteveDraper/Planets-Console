@@ -1379,7 +1379,7 @@ The JSON value at one **breakpoint**. The file backend stores it as one file; th
 _Avoid_: node, blob (when persistence boundary is meant)
 
 **Ephemeral backend**:
-The in-memory backend used for tests and dev; mutations do not survive process restart. It resolves **breakpoint** documents the same way as the **file backend**.
+The in-memory backend used for tests and dev; mutations do not survive process restart. It resolves **breakpoint** documents the same way as the **file backend**. An `initial` tree or `storage_asset_path` asset is a logical tree in the current layout: partitioned and stamped at the current **storage version** without running migrations. A seed that contains the `meta` namespace is rejected.
 _Avoid_: temporary storage (ambiguous with session state)
 
 **File backend**:

@@ -1,9 +1,11 @@
 """In-memory StorageBackend.
 
 Documents are keyed by breakpoint path, matching the file backend. A put of a
-longer breakpoint does not nest inside the shorter document. An optional
-``initial`` tree is partitioned into those documents on open. ``documents``
-seeds the breakpoint map directly so a test can open an older layout.
+longer breakpoint does not nest inside the shorter document. ``initial`` is a
+logical JSON tree in the current layout, including a ``storage_asset_path``
+asset. It is partitioned with the current registry and stamped at the current
+version. Migrations do not run over that seed. A tree that contains the
+``meta`` namespace raises ``ValidationError``.
 """
 
 from __future__ import annotations
@@ -12,11 +14,11 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from api.errors import NotFoundError
+from api.errors import NotFoundError, ValidationError
 from api.storage.base import JSONValue
 from api.storage.breakpoint_backend import BreakpointDocumentBackend, resolve_storage_format
 from api.storage.documents import child_names_for_prefix, partition_logical_tree
-from api.storage.migrations import StorageFormat
+from api.storage.migrations import STORAGE_VERSION_KEY, StorageFormat, stamp_version
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
@@ -88,24 +90,31 @@ class MemoryDocumentStore:
             raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
 
 
+def _reject_seed_meta(root: dict[str, JSONValue]) -> None:
+    """Raise when ``root`` contains the storage-meta namespace."""
+    namespace = STORAGE_VERSION_KEY.split("/", 1)[0]
+    if namespace in root:
+        raise ValidationError(f"Seed must not contain the {namespace!r} namespace")
+
+
 class MemoryAssetBackend(BreakpointDocumentBackend):
     """Storage backend that holds breakpoint documents in memory.
 
-    The document map and its lock live on the composed ``MemoryDocumentStore``.
+    ``initial`` is a current-layout logical tree. It is partitioned and stamped
+    at the bound format's current version. The document map and its lock live
+    on the composed ``MemoryDocumentStore``.
     """
 
     def __init__(
         self,
         initial: dict[str, JSONValue] | None = None,
         *,
-        documents: dict[str, JSONValue] | None = None,
         storage_format: StorageFormat | None = None,
     ) -> None:
-        if documents is not None and initial is not None:
-            raise ValueError("pass initial or documents, not both")
         resolved_format = resolve_storage_format(storage_format)
-        if documents is not None:
-            seeded = {path: deep_copy_value(value) for path, value in documents.items()}
-        else:
-            seeded = partition_logical_tree(initial or {}, resolved_format.patterns)
-        super().__init__(MemoryDocumentStore(seeded), resolved_format)
+        tree = {} if initial is None else initial
+        _reject_seed_meta(tree)
+        seeded = partition_logical_tree(tree, resolved_format.patterns)
+        document_store = MemoryDocumentStore(seeded)
+        stamp_version(document_store, resolved_format.current_version)
+        super().__init__(document_store, resolved_format)

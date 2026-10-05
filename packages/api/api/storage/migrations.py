@@ -183,7 +183,7 @@ def open_store(store: DocumentStore, storage_format: StorageFormat) -> None:
     minimum_version = storage_format.minimum_version
     has_version = store.has_document(STORAGE_VERSION_KEY)
     if not has_version and not _has_user_document(store):
-        _stamp(store, current_version)
+        stamp_version(store, current_version)
         return
 
     found = _read_version(store) if has_version else None
@@ -208,7 +208,7 @@ def open_store(store: DocumentStore, storage_format: StorageFormat) -> None:
         if step is None:
             raise RuntimeError(f"No storage migration registered for version {version}")
         _run_step(step, context, store, storage_format.patterns)
-    _stamp(store, current_version)
+    stamp_version(store, current_version)
 
 
 def generic_rehome(
@@ -279,5 +279,6 @@ def _read_version(store: DocumentStore) -> int:
     return version
 
 
-def _stamp(store: DocumentStore, version: int) -> None:
+def stamp_version(store: DocumentStore, version: int) -> None:
+    """Write the storage version document. Does not run migrations."""
     store.write_document(STORAGE_VERSION_KEY, {"version": version})

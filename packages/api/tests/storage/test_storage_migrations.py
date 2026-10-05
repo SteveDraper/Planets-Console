@@ -19,7 +19,7 @@ from api.errors import NotFoundError, UnhandledFormatError, ValidationError
 from api.storage.boundaries import BREAKPOINT_PATTERNS
 from api.storage.breakpoint_backend import BreakpointDocumentBackend
 from api.storage.file import FileStorageBackend
-from api.storage.memory_asset import MemoryAssetBackend
+from api.storage.memory_asset import MemoryAssetBackend, MemoryDocumentStore
 from api.storage.migrations import (
     CURRENT_STORAGE_VERSION,
     DEFAULT_STORAGE_FORMAT,
@@ -32,6 +32,7 @@ from api.storage.migrations import (
     require_contiguous_migration_versions,
     version_label,
 )
+from api.storage.path_utils import deep_copy_value
 from api.storage_factory import (
     clear_backend_cache,
     get_storage,
@@ -73,13 +74,24 @@ def _storage_format(**overrides) -> StorageFormat:
     return replace(DEFAULT_STORAGE_FORMAT, **overrides)
 
 
-def _store(backend: FileStorageBackend | MemoryAssetBackend):
+def _store(backend: BreakpointDocumentBackend):
     return backend._document_store
 
 
-def _document_map(backend: MemoryAssetBackend) -> dict:
+def _document_map(backend: BreakpointDocumentBackend) -> dict:
     store = _store(backend)
     return {path: store.read_document(path) for path in store.iter_document_paths()}
+
+
+def _opened_memory(
+    documents: dict,
+    storage_format: StorageFormat | None = None,
+) -> BreakpointDocumentBackend:
+    """Open breakpoint documents, then wrap them in the shared backend."""
+    resolved = DEFAULT_STORAGE_FORMAT if storage_format is None else storage_format
+    store = MemoryDocumentStore({path: deep_copy_value(value) for path, value in documents.items()})
+    open_store(store, resolved)
+    return BreakpointDocumentBackend(store, resolved)
 
 
 def _scores_patterns() -> tuple[tuple[str, ...], ...]:
@@ -105,9 +117,9 @@ def _open_scores(kind: str, root: Path, monkeypatch: pytest.MonkeyPatch):
     patterns = _scores_patterns()
     migrations = (_scores_migration(),)
     if kind == "memory":
-        backend = MemoryAssetBackend(
-            documents={SCORES: {"inference_rows": {"4": ROW}, "kept": True}},
-            storage_format=_storage_format(patterns=patterns, migrations=migrations),
+        backend = _opened_memory(
+            {SCORES: {"inference_rows": {"4": ROW}, "kept": True}},
+            _storage_format(patterns=patterns, migrations=migrations),
         )
     else:
         scores_file = root / f"{SCORES}.json"
@@ -161,9 +173,9 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
             ),
         )
     else:
-        MemoryAssetBackend(
-            documents=_document_map(backend),
-            storage_format=_storage_format(
+        _opened_memory(
+            _document_map(backend),
+            _storage_format(
                 patterns=_scores_patterns(),
                 migrations=(_scores_migration(),),
             ),
@@ -323,7 +335,7 @@ def test_unversioned_ledgers_document_splits_on_open(kind, tmp_path, monkeypatch
     migrations = (fleet_storage_migration(),)
     storage_format = _storage_format(migrations=migrations)
     if kind == "memory":
-        backend = MemoryAssetBackend(documents={FLEET: document}, storage_format=storage_format)
+        backend = _opened_memory({FLEET: document}, storage_format)
     else:
         root = tmp_path / "data"
         fleet_file = root / f"{FLEET}.json"
@@ -465,7 +477,7 @@ def test_unreadable_stamp_is_not_rewritten(stamp, tmp_path):
     seeded = json.loads(json.dumps(documents))
     original = json.loads(json.dumps(seeded))
     with pytest.raises(UnhandledFormatError, match=_UNREADABLE_STAMP_DETAIL):
-        MemoryAssetBackend(documents=seeded)
+        _opened_memory(seeded)
     assert seeded == original
 
 
@@ -510,10 +522,7 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         UnhandledFormatError,
         match="found version 0, minimum supported version 1",
     ):
-        MemoryAssetBackend(
-            documents=seeded,
-            storage_format=_storage_format(minimum_version=1),
-        )
+        _opened_memory(seeded, _storage_format(minimum_version=1))
     assert seeded == original
 
 
@@ -552,7 +561,7 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
             UnhandledFormatError,
             match="found version 5, maximum supported version 1",
         ):
-            MemoryAssetBackend(documents=seeded, storage_format=storage_format)
+            _opened_memory(seeded, storage_format)
         assert seeded == original
 
 
@@ -646,7 +655,7 @@ def test_unversioned_store_without_steps_fails_closed(tmp_path):
     seeded = {"games/1/info": {"name": "keep"}}
     original = json.loads(json.dumps(seeded))
     with pytest.raises(RuntimeError, match="No storage migration registered for version 1"):
-        MemoryAssetBackend(documents=seeded)
+        _opened_memory(seeded)
     assert seeded == original
 
 
@@ -675,7 +684,7 @@ def test_stale_players_document_with_unparseable_wire_is_deleted_on_open(kind, t
         upgrade_legacy_fleet_turn_document(document)
     storage_format = _storage_format(migrations=(fleet_storage_migration(),))
     if kind == "memory":
-        backend = MemoryAssetBackend(documents={FLEET: document}, storage_format=storage_format)
+        backend = _opened_memory({FLEET: document}, storage_format)
     else:
         root = tmp_path / "data"
         fleet_file = root / f"{FLEET}.json"
@@ -696,7 +705,7 @@ def test_unversioned_players_document_splits_on_open(kind, tmp_path):
     expected = upgrade_legacy_fleet_turn_document(document)["ledgers"]["8"]
     storage_format = _storage_format(migrations=(fleet_storage_migration(),))
     if kind == "memory":
-        backend = MemoryAssetBackend(documents={FLEET: document}, storage_format=storage_format)
+        backend = _opened_memory({FLEET: document}, storage_format)
     else:
         root = tmp_path / "data"
         fleet_file = root / f"{FLEET}.json"
@@ -715,9 +724,9 @@ def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
     ledgers = {"ledgers": {"8": LEDGER_WIRE}, "kept": True}
     other_path = "games/1/1/turns/5/analytics/fleet"
     other = {"note": True}
-    backend = MemoryAssetBackend(
-        documents={FLEET: players, ledgers_path: ledgers, other_path: other},
-        storage_format=_storage_format(current_version=0),
+    backend = _opened_memory(
+        {FLEET: players, ledgers_path: ledgers, other_path: other},
+        _storage_format(current_version=0),
     )
     migrate_fleet_breakpoint(MigrationContext(_store(backend)))
     store = _store(backend)
@@ -729,9 +738,9 @@ def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
 
 
 def test_open_splits_upgraded_parent_and_retries_as_noop():
-    backend = MemoryAssetBackend(
-        documents={FLEET: {"ledgers": {"8": LEDGER_WIRE}}},
-        storage_format=_storage_format(current_version=0),
+    backend = _opened_memory(
+        {FLEET: {"ledgers": {"8": LEDGER_WIRE}}},
+        _storage_format(current_version=0),
     )
     step = fleet_storage_migration()
     store = _store(backend)
@@ -757,9 +766,9 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
 
 def test_interrupted_fleet_handler_converges_on_rerun():
     other = {"ledger": {"playerId": 9}}
-    backend = MemoryAssetBackend(
-        documents={FLEET: {"ledgers": {"8": LEDGER_WIRE, "9": other}}},
-        storage_format=_storage_format(current_version=0),
+    backend = _opened_memory(
+        {FLEET: {"ledgers": {"8": LEDGER_WIRE, "9": other}}},
+        _storage_format(current_version=0),
     )
     store = _store(backend)
     store.write_document(FLEET_PLAYER, LEDGER_WIRE)
@@ -795,9 +804,9 @@ def test_fleet_handler_skips_non_player_ledger_entries():
             "10": None,
         }
     }
-    backend = MemoryAssetBackend(
-        documents={FLEET: document},
-        storage_format=_storage_format(current_version=0),
+    backend = _opened_memory(
+        {FLEET: document},
+        _storage_format(current_version=0),
     )
     migrate_fleet_breakpoint(MigrationContext(_store(backend)))
     store = _store(backend)
@@ -808,17 +817,17 @@ def test_fleet_handler_skips_non_player_ledger_entries():
 
 
 def test_empty_ledgers_map_removes_parent():
-    backend = MemoryAssetBackend(
-        documents={FLEET: {"ledgers": {}}},
-        storage_format=_storage_format(migrations=(fleet_storage_migration(),)),
+    backend = _opened_memory(
+        {FLEET: {"ledgers": {}}},
+        _storage_format(migrations=(fleet_storage_migration(),)),
     )
     assert not _store(backend).has_document(FLEET)
 
 
 def test_fleet_document_without_legacy_shape_stays():
-    backend = MemoryAssetBackend(
-        documents={FLEET: {"note": True}},
-        storage_format=_storage_format(migrations=(fleet_storage_migration(),)),
+    backend = _opened_memory(
+        {FLEET: {"note": True}},
+        _storage_format(migrations=(fleet_storage_migration(),)),
     )
     assert backend.get(FLEET) == {"note": True}
 

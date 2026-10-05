@@ -25,9 +25,10 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.errors import NotFoundError
+from api.storage.breakpoint_backend import BreakpointDocumentBackend
 from api.storage.file import FileStorageBackend
-from api.storage.memory_asset import MemoryAssetBackend
-from api.storage.migrations import DEFAULT_STORAGE_FORMAT
+from api.storage.memory_asset import MemoryAssetBackend, MemoryDocumentStore
+from api.storage.migrations import DEFAULT_STORAGE_FORMAT, open_store
 
 from tests.file_backend_io_accounting import CountingStorageBackend, FileIoCounts
 
@@ -173,10 +174,10 @@ def _legacy_players_document(sample_ledger: FleetAcquisitionLedger) -> dict:
 
 def test_unversioned_players_document_is_split_on_open(sample_ledger):
     key = FleetSnapshotPersistenceService.ledger_prefix(628580, 1, 111)
-    backend = MemoryAssetBackend(
-        documents={key: _legacy_players_document(sample_ledger)},
-        storage_format=replace(DEFAULT_STORAGE_FORMAT, migrations=(fleet_storage_migration(),)),
-    )
+    storage_format = replace(DEFAULT_STORAGE_FORMAT, migrations=(fleet_storage_migration(),))
+    store = MemoryDocumentStore({key: _legacy_players_document(sample_ledger)})
+    open_store(store, storage_format)
+    backend = BreakpointDocumentBackend(store, storage_format)
     persistence = FleetSnapshotPersistenceService(backend)
 
     loaded = persistence.get_ledger(628580, 1, 111, 8)
