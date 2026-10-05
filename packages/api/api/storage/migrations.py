@@ -185,9 +185,8 @@ def open_store(store: DocumentStore, storage_format: StorageFormat) -> None:
     """Stamp ``store`` at ``storage_format.current_version``, running migrations still due."""
     current_version = storage_format.current_version
     minimum_version = storage_format.minimum_version
-    user_paths = [path for path in store.iter_document_paths() if path != STORAGE_VERSION_KEY]
     has_version = store.has_document(STORAGE_VERSION_KEY)
-    if not user_paths and not has_version:
+    if not has_version and not _has_user_document(store):
         _stamp(store, current_version)
         return
 
@@ -266,6 +265,10 @@ def _run_step(
         step.structural_handler(context)
     else:
         generic_rehome(store, patterns, step.introduced_pattern)
+
+
+def _has_user_document(store: DocumentStore) -> bool:
+    return any(path != STORAGE_VERSION_KEY for path in store.iter_document_paths())
 
 
 def _is_below_minimum(found: int | None, minimum: int | None) -> bool:

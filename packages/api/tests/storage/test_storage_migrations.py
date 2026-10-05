@@ -128,6 +128,24 @@ def _open_scores(kind: str, root: Path, monkeypatch: pytest.MonkeyPatch):
     return backend, calls
 
 
+def _info_step_format() -> tuple[list[int], StorageFormat]:
+    calls: list[int] = []
+
+    def handler(_context: MigrationContext) -> None:
+        calls.append(1)
+
+    storage_format = _storage_format(
+        migrations=(
+            StorageMigration(
+                version=1,
+                introduced_pattern=("games", "*", "info"),
+                structural_handler=handler,
+            ),
+        ),
+    )
+    return calls, storage_format
+
+
 @pytest.mark.parametrize("kind", ["memory", "file"])
 def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
     root = tmp_path / "data"
@@ -182,6 +200,21 @@ class _CountingStore:
         del self.documents[breakpoint_path]
 
 
+class _NoEnumerateStore(_CountingStore):
+    """Path enumeration is a failure. Used when open must not walk the tree."""
+
+    def iter_document_paths(self):
+        raise AssertionError("open_store enumerated documents")
+
+
+class _StopAfterFirstUserPath(_CountingStore):
+    """Yields one non-stamp path, then fails if the caller keeps walking."""
+
+    def iter_document_paths(self):
+        yield next(path for path in self.documents if path != STORAGE_VERSION_KEY)
+        raise AssertionError("open_store enumerated past the first user document")
+
+
 def test_generic_rehome_does_not_read_unrelated_documents():
     turn = "games/7/1/turns/9"
     info = "games/7/info"
@@ -229,6 +262,54 @@ def test_new_directory_is_stamped_without_migrations(tmp_path, monkeypatch):
     FileStorageBackend(tmp_path / "bound", storage_format=bound_format)
     MemoryAssetBackend(initial={}, storage_format=bound_format)
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "documents",
+    [
+        {STORAGE_VERSION_KEY: {"version": CURRENT_STORAGE_VERSION}},
+        {
+            STORAGE_VERSION_KEY: {"version": CURRENT_STORAGE_VERSION},
+            "games/1/info": {"name": "keep"},
+        },
+    ],
+)
+def test_stamped_current_store_does_not_enumerate_documents(documents):
+    store = _NoEnumerateStore(dict(documents))
+    open_store(store, DEFAULT_STORAGE_FORMAT)
+    assert store.documents == documents
+
+
+def test_older_stamp_does_not_enumerate_before_migration():
+    info = "games/1/info"
+    store = _NoEnumerateStore(
+        {
+            STORAGE_VERSION_KEY: {"version": 0},
+            info: {"name": "keep"},
+        }
+    )
+    calls, storage_format = _info_step_format()
+    open_store(store, storage_format)
+    assert calls == [1]
+    assert store.documents[STORAGE_VERSION_KEY] == {"version": CURRENT_STORAGE_VERSION}
+    assert store.documents[info] == {"name": "keep"}
+
+
+def test_unstamped_nonempty_store_migrates_without_full_enumeration():
+    info = "games/1/info"
+    other = "games/2/info"
+    store = _StopAfterFirstUserPath(
+        {
+            info: {"name": "keep"},
+            other: {"name": "also"},
+        }
+    )
+    calls, storage_format = _info_step_format()
+    open_store(store, storage_format)
+    assert calls == [1]
+    assert store.documents[STORAGE_VERSION_KEY] == {"version": CURRENT_STORAGE_VERSION}
+    assert store.documents[info] == {"name": "keep"}
+    assert store.documents[other] == {"name": "also"}
 
 
 @pytest.mark.parametrize("kind", ["memory", "file"])
