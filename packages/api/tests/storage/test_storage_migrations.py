@@ -17,6 +17,7 @@ from api.analytics.fleet.storage_migration import (
 from api.config import ApiConfig, get_config, set_config
 from api.errors import NotFoundError, UnhandledFormatError, ValidationError
 from api.storage.boundaries import BREAKPOINT_PATTERNS
+from api.storage.breakpoint_backend import BreakpointDocumentBackend
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
 from api.storage.migrations import (
@@ -38,13 +39,7 @@ from api.storage_factory import (
     production_storage_format,
 )
 
-_DOCUMENT_STORE_METHODS = (
-    "iter_document_paths",
-    "has_document",
-    "read_document",
-    "write_document",
-    "remove_document",
-)
+_BACKEND_METHODS = frozenset({"get", "put", "delete", "list"})
 
 SCORES = "games/7/1/turns/3/analytics/scores"
 SCORES_ROW = f"{SCORES}/inference_rows/4"
@@ -843,7 +838,20 @@ def test_document_store_read_returns_a_copy(kind, tmp_path):
     assert backend.get("games/1/info") == {"name": "keep"}
 
 
+def _public_methods(cls: type) -> set[str]:
+    names: set[str] = set()
+    for klass in cls.__mro__:
+        if klass is object:
+            break
+        for name, value in vars(klass).items():
+            if name.startswith("_") or not callable(value):
+                continue
+            names.add(name)
+    return names
+
+
 @pytest.mark.parametrize("cls", [FileStorageBackend, MemoryAssetBackend])
-@pytest.mark.parametrize("name", _DOCUMENT_STORE_METHODS)
-def test_backends_do_not_expose_document_store_methods(cls, name):
-    assert name not in vars(cls)
+def test_public_backend_surface_is_shared_crud(cls):
+    assert _public_methods(cls) == _BACKEND_METHODS
+    for name in _BACKEND_METHODS:
+        assert getattr(cls, name) is getattr(BreakpointDocumentBackend, name)

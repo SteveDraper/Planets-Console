@@ -1,7 +1,6 @@
 """Breakpoint JSON files for one storage root.
 
-``FileStorageBackend`` composes this store. Migrations use it as a
-``DocumentStore``.
+``FileStorageBackend`` opens this store. Migrations use it as a ``DocumentStore``.
 """
 
 from __future__ import annotations

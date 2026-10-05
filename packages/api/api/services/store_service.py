@@ -16,6 +16,7 @@ from api.storage.migrations import STORAGE_VERSION_KEY
 from api.storage.path_utils import (
     deep_copy_value,
     list_children,
+    normalize_store_key,
     validate_no_reserved_at_keys,
 )
 
@@ -24,7 +25,7 @@ _STORAGE_META_NAMESPACE = STORAGE_VERSION_KEY.split("/", 1)[0]
 
 def _normalize_store_path(path: str) -> str:
     """Return the logical path, rejecting the storage-meta namespace."""
-    path_norm = (path or "").strip().strip("/") or ""
+    path_norm = normalize_store_key(path)
     if path_norm == _STORAGE_META_NAMESPACE or path_norm.startswith(f"{_STORAGE_META_NAMESPACE}/"):
         raise ValidationError(f"Path is reserved for storage metadata: {path_norm!r}")
     return path_norm

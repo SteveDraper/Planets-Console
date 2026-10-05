@@ -12,18 +12,11 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from api.errors import NotFoundError, ValidationError
+from api.errors import NotFoundError
 from api.storage.base import JSONValue
-from api.storage.boundaries import resolve_breakpoint
-from api.storage.documents import (
-    child_names_for_prefix,
-    document_after_delete,
-    document_after_put,
-    list_logical,
-    partition_logical_tree,
-    read_logical,
-)
-from api.storage.migrations import DEFAULT_STORAGE_FORMAT, StorageFormat, open_store
+from api.storage.breakpoint_backend import BreakpointDocumentBackend, resolve_storage_format
+from api.storage.documents import child_names_for_prefix, partition_logical_tree
+from api.storage.migrations import StorageFormat
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
@@ -31,8 +24,9 @@ class MemoryDocumentStore:
     """In-memory breakpoint documents.
 
     Owns the document map and its lock. ``read_document`` returns a copy.
-    Logical updates take ``hold`` for the whole read-modify-write; store
-    methods re-enter that lock.
+    Logical updates take ``document_lock`` for the whole read-modify-write;
+    store methods re-enter that lock. ``replace_document`` rejects reserved
+    ``@`` object keys.
     """
 
     def __init__(self, documents: dict[str, JSONValue]) -> None:
@@ -40,8 +34,11 @@ class MemoryDocumentStore:
         self._documents = documents
 
     @contextmanager
-    def hold(self) -> Iterator[None]:
-        """Hold the document map lock for one logical read-modify-write."""
+    def document_lock(self, breakpoint_path: str) -> Iterator[None]:
+        """Hold the document map lock for one logical read-modify-write.
+
+        One lock covers every breakpoint, including ``breakpoint_path``.
+        """
         with self._lock:
             yield
 
@@ -65,13 +62,12 @@ class MemoryDocumentStore:
 
     def replace_document(self, breakpoint_path: str, value: JSONValue) -> None:
         """Store ``value`` as this breakpoint document."""
+        validate_no_reserved_at_keys(value)
         with self._lock:
             self._documents[breakpoint_path] = value
 
     def write_document(self, breakpoint_path: str, value: JSONValue) -> None:
-        validate_no_reserved_at_keys(value)
-        stored = deep_copy_value(value)
-        self.replace_document(breakpoint_path, stored)
+        self.replace_document(breakpoint_path, deep_copy_value(value))
 
     def remove_document(self, breakpoint_path: str) -> None:
         with self._lock:
@@ -92,7 +88,7 @@ class MemoryDocumentStore:
             raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
 
 
-class MemoryAssetBackend:
+class MemoryAssetBackend(BreakpointDocumentBackend):
     """Storage backend that holds breakpoint documents in memory.
 
     The document map and its lock live on the composed ``MemoryDocumentStore``.
@@ -107,77 +103,9 @@ class MemoryAssetBackend:
     ) -> None:
         if documents is not None and initial is not None:
             raise ValueError("pass initial or documents, not both")
-        resolved_format = DEFAULT_STORAGE_FORMAT if storage_format is None else storage_format
-        self._patterns = resolved_format.patterns
+        resolved_format = resolve_storage_format(storage_format)
         if documents is not None:
             seeded = {path: deep_copy_value(value) for path, value in documents.items()}
         else:
-            seeded = partition_logical_tree(initial or {}, self._patterns)
-        self._document_store = MemoryDocumentStore(seeded)
-        open_store(self._document_store, resolved_format)
-
-    def get(self, key: str) -> JSONValue:
-        """Return a deep copy of the value at path. Raises NotFoundError if path does not exist."""
-        with self._document_store.hold():
-            path = _normalize(key)
-            if path == "":
-                raise ValidationError("Cannot get root path")
-            breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
-            if not self._document_store.has_document(breakpoint_path):
-                raise NotFoundError(f"Document not found: {breakpoint_path!r}")
-            document = self._document_store.load_document(breakpoint_path)
-            return read_logical(document, suffix)
-
-    def put(self, key: str, value: JSONValue) -> None:
-        """Store value at path. Creates the breakpoint document if needed."""
-        with self._document_store.hold():
-            path = _normalize(key)
-            if path == "":
-                raise ValidationError("Cannot put root path")
-            breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
-            validate_no_reserved_at_keys(value)
-            value_copy = deep_copy_value(value)
-            missing = not self._document_store.has_document(breakpoint_path)
-            current = None if missing else self._document_store.load_document(breakpoint_path)
-            updated = document_after_put(
-                current,
-                suffix,
-                value_copy,
-                breakpoint_path=breakpoint_path,
-                missing=missing,
-            )
-            self._document_store.replace_document(breakpoint_path, updated)
-
-    def delete(self, key: str) -> None:
-        """Remove the node at path. Raises NotFoundError if path does not exist."""
-        with self._document_store.hold():
-            path = _normalize(key)
-            if path == "":
-                raise ValidationError("Cannot delete root path")
-            breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
-            if not self._document_store.has_document(breakpoint_path):
-                raise NotFoundError(f"Document not found: {breakpoint_path!r}")
-            if suffix is None:
-                self._document_store.remove_document(breakpoint_path)
-                return
-            document = self._document_store.load_document(breakpoint_path)
-            self._document_store.replace_document(
-                breakpoint_path,
-                document_after_delete(document, suffix),
-            )
-
-    def list(self, prefix: str) -> list[str]:
-        """Return next-hop segment names under the prefix."""
-        with self._document_store.hold():
-            path = _normalize(prefix)
-            return list_logical(
-                path,
-                patterns=self._patterns,
-                document_exists=self._document_store.has_document,
-                load_document=self._document_store.load_document,
-                child_names=self._document_store.child_names,
-            )
-
-
-def _normalize(key: str) -> str:
-    return (key or "").strip().strip("/") or ""
+            seeded = partition_logical_tree(initial or {}, resolved_format.patterns)
+        super().__init__(MemoryDocumentStore(seeded), resolved_format)

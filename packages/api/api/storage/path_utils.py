@@ -10,6 +10,14 @@ from api.errors import NotFoundError, ValidationError
 from api.storage.base import JSONValue
 
 
+def normalize_store_key(key: str) -> str:
+    """Return ``key`` with surrounding whitespace and slashes removed.
+
+    Empty, whitespace, and slash-only keys are the root path ``""``.
+    """
+    return (key or "").strip().strip("/") or ""
+
+
 def parse_index_segment(segment: str) -> int:
     """Parse @N or @-N. Raises ValidationError if not valid.
 

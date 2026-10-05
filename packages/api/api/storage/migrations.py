@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Protocol
 
 from api.errors import UnhandledFormatError
 from api.storage.base import JSONValue
@@ -38,30 +37,13 @@ from api.storage.boundaries import (
     pattern_matches_breakpoint,
     rehome_source_patterns,
 )
+from api.storage.document_store import DocumentStore
 from api.storage.documents import partition_breakpoint_document
 
 STORAGE_VERSION_KEY = "meta/storage-version"
 CURRENT_STORAGE_VERSION = 1
 # None means an unversioned directory is still supported.
 MINIMUM_STORAGE_VERSION: int | None = None
-
-
-class DocumentStore(Protocol):
-    """Raw breakpoint documents. Callers do not resolve logical suffixes.
-
-    ``read_document`` returns a defensive copy. Mutation of the returned value
-    does not change the stored document.
-    """
-
-    def iter_document_paths(self) -> Iterator[str]: ...
-
-    def has_document(self, breakpoint_path: str) -> bool: ...
-
-    def read_document(self, breakpoint_path: str) -> JSONValue: ...
-
-    def write_document(self, breakpoint_path: str, value: JSONValue) -> None: ...
-
-    def remove_document(self, breakpoint_path: str) -> None: ...
 
 
 class MigrationContext:
