@@ -760,6 +760,37 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
 
 
+def test_interrupted_fleet_handler_converges_on_rerun():
+    other = {"ledger": {"playerId": 9}}
+    backend = MemoryAssetBackend(
+        documents={FLEET: {"ledgers": {"8": LEDGER_WIRE, "9": other}}},
+        storage_format=_storage_format(current_version=0),
+    )
+    store = _store(backend)
+    store.write_document(FLEET_PLAYER, LEDGER_WIRE)
+    assert store.has_document(FLEET)
+    assert not store.has_document(f"{FLEET}/9")
+    assert not store.has_document(STORAGE_VERSION_KEY)
+
+    migrate_fleet_breakpoint(MigrationContext(store))
+    assert not store.has_document(FLEET)
+    assert store.read_document(FLEET_PLAYER) == LEDGER_WIRE
+    assert store.read_document(f"{FLEET}/9") == other
+    assert not store.has_document(STORAGE_VERSION_KEY)
+
+    migrate_fleet_breakpoint(MigrationContext(store))
+    assert not store.has_document(FLEET)
+    assert store.read_document(FLEET_PLAYER) == LEDGER_WIRE
+    assert store.read_document(f"{FLEET}/9") == other
+
+    opened = _storage_format(migrations=(fleet_storage_migration(),))
+    open_store(store, opened)
+    assert store.read_document(STORAGE_VERSION_KEY) == {"version": CURRENT_STORAGE_VERSION}
+    assert not store.has_document(FLEET)
+    assert store.read_document(FLEET_PLAYER) == LEDGER_WIRE
+    assert store.read_document(f"{FLEET}/9") == other
+
+
 def test_fleet_handler_skips_non_player_ledger_entries():
     document = {
         "ledgers": {

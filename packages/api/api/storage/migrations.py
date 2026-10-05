@@ -13,6 +13,11 @@ A structural handler is registered by the analytic that owns the document
 shape. Generic re-home splits documents that held the introduced breakpoint's
 keys as an in-document suffix. Handlers see JSON documents and keys.
 
+Steps are not atomic across documents. The version stamp is written only after
+every due step finishes. Every step must be safe to re-run: it writes new
+documents before removing or shrinking the old one, so a directory left
+unstamped mid-step converges on the next open.
+
 ``StorageFormat`` is the registry and version bounds a backend opens with.
 ``minimum_version`` of ``None`` means an unversioned directory is still
 supported.

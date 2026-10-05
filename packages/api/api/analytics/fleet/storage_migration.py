@@ -3,10 +3,11 @@
 A current-version legacy ``players`` array is upgraded to an in-document
 ``ledgers`` map, then written one document per numeric player id at
 ``.../analytics/fleet/{playerId}``. Non-numeric keys and non-object values
-are skipped. The parent is deleted. A legacy ``players`` document whose
-``materializationVersion`` is not current is deleted without parsing player
-wires. ``ledgers`` documents are split as stored; per-ledger version checks
-stay on fleet read.
+are skipped. The parent is deleted after those player documents are written,
+so running the step again converges on the same documents. A legacy ``players``
+document whose ``materializationVersion`` is not current is deleted without
+parsing player wires. ``ledgers`` documents are split as stored; per-ledger
+version checks stay on fleet read.
 """
 
 from __future__ import annotations
@@ -32,9 +33,9 @@ def migrate_fleet_breakpoint(context: MigrationContext) -> None:
     A current-version ``players`` array is upgraded, then each numeric
     ``ledgers`` key whose value is an object is written at
     ``.../analytics/fleet/{playerId}``. Other entries are skipped. A stale
-    ``players`` document is removed without parsing. The parent is deleted,
-    including when the map is empty. Documents with neither shape stay as
-    they are.
+    ``players`` document is removed without parsing. The parent is deleted
+    after those writes, including when the map is empty, so a re-run
+    converges. Documents with neither shape stay as they are.
     """
     for path, document in context.iter_documents(_FLEET_PARENT_PATTERN):
         ledgers = _fleet_ledgers_map(document)
