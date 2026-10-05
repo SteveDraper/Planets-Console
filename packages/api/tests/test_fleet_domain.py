@@ -20,8 +20,6 @@ from api.analytics.fleet.serialization import (
     fleet_materialization_provenance_to_json,
     fleet_ship_record_from_json,
     fleet_ship_record_to_json,
-    fleet_turn_snapshot_from_json,
-    fleet_turn_snapshot_to_json,
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
 )
@@ -43,7 +41,6 @@ from api.analytics.fleet.types import (
     FleetRowQualifiers,
     FleetShipRecord,
     FleetShipRecordFields,
-    FleetTurnSnapshot,
     PersistedFleetLedger,
 )
 from api.analytics.military_score_inference.models import InferenceSolutionShipBuild
@@ -283,41 +280,6 @@ def test_persisted_fleet_ledger_round_trip():
     assert restored == persisted
 
 
-def test_fleet_turn_snapshot_round_trip():
-    snapshot = FleetTurnSnapshot(
-        analytic_id="fleet",
-        game_id=628580,
-        perspective=1,
-        turn=111,
-        materialization_version=FLEET_MATERIALIZATION_VERSION,
-        players=[
-            FleetAcquisitionLedger(
-                player_id=8,
-                player_name="koshling",
-                records=[
-                    FleetShipRecord(
-                        record_id="rec-1",
-                        fields=FleetShipRecordFields(
-                            ship_id=FleetFieldKnown(value=301),
-                            hull=FleetFieldKnown(value=13),
-                        ),
-                    )
-                ],
-                discrepancy=FleetCountDiscrepancy(
-                    host_turn=111,
-                    active_row_count=2,
-                    scoreboard_implied_count=1,
-                ),
-            )
-        ],
-    )
-
-    wire = fleet_turn_snapshot_to_json(snapshot)
-    restored = fleet_turn_snapshot_from_json(wire)
-    assert restored == snapshot
-    assert fleet_turn_snapshot_to_json(restored) == wire
-
-
 def test_fleet_acquisition_ledger_round_trip():
     ledger = FleetAcquisitionLedger(
         player_id=3,
@@ -411,11 +373,6 @@ def test_fleet_field_constraint_region_requires_locator():
             fleet_acquisition_ledger_from_json,
             {"playerId": 1, "records": [42]},
             "fleet acquisition ledger records\\[0\\] must be an object",
-        ),
-        (
-            fleet_turn_snapshot_from_json,
-            {"analyticId": "fleet", "perspective": 1, "turn": 5, "players": []},
-            "fleet turn snapshot gameId must be an int",
         ),
     ],
 )

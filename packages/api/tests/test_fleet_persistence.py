@@ -15,9 +15,9 @@ from api.analytics.fleet.chain import (
     get_or_materialize_fleet_ledger_for_player,
     get_or_materialize_fleet_snapshot,
 )
-from api.analytics.fleet.constants import FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.serialization import fleet_turn_snapshot_to_json
+from api.analytics.fleet.storage_migration import FLEET_LEDGERS_KEY
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetFieldKnown,
@@ -32,6 +32,8 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
+
+from tests.fleet_fixtures import legacy_fleet_ledgers_document
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -1381,7 +1383,7 @@ def test_stale_materialization_version_is_deleted_on_read(persistence, load_turn
     turn = load_turn(111)
     assert turn is not None
     snapshot = ensure_fleet_baseline(628580, 1, turn)
-    stale_payload = fleet_turn_snapshot_to_json(snapshot)
+    stale_payload = legacy_fleet_ledgers_document(snapshot)
     ledger_wire = stale_payload[FLEET_LEDGERS_KEY]
     for player_key in ledger_wire:
         player_entry = ledger_wire[player_key]
@@ -1410,7 +1412,7 @@ def test_missing_materialization_version_is_deleted_on_read(persistence, load_tu
     turn = load_turn(111)
     assert turn is not None
     snapshot = ensure_fleet_baseline(628580, 1, turn)
-    payload = fleet_turn_snapshot_to_json(snapshot)
+    payload = legacy_fleet_ledgers_document(snapshot)
     ledgers = payload[FLEET_LEDGERS_KEY]
     assert isinstance(ledgers, dict)
     for player_key, player_entry in ledgers.items():
@@ -1432,7 +1434,7 @@ def test_stale_chain_anchor_skipped_during_gap_fill(persistence, load_turn, memo
     stale_anchor.players[0].records.append(
         FleetShipRecord(record_id="stale-rec", disposition="active"),
     )
-    stale_payload = fleet_turn_snapshot_to_json(stale_anchor)
+    stale_payload = legacy_fleet_ledgers_document(stale_anchor)
     ledger_wire = stale_payload[FLEET_LEDGERS_KEY]
     for player_key in ledger_wire:
         player_entry = ledger_wire[player_key]

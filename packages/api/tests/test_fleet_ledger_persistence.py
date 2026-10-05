@@ -7,14 +7,13 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from api.analytics.fleet.constants import FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.serialization import (
-    fleet_turn_snapshot_to_json,
-    persisted_fleet_ledger_to_json,
+from api.analytics.fleet.storage_migration import (
+    FLEET_LEDGERS_KEY,
+    fleet_storage_migration,
     upgrade_legacy_fleet_turn_document,
 )
-from api.analytics.fleet.storage_migration import fleet_storage_migration
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetFieldKnown,
@@ -31,12 +30,9 @@ from api.storage.memory_asset import MemoryAssetBackend, MemoryDocumentStore
 from api.storage.migrations import DEFAULT_STORAGE_FORMAT, open_store
 
 from tests.file_backend_io_accounting import CountingStorageBackend, FileIoCounts
+from tests.fleet_fixtures import legacy_fleet_ledgers_document, legacy_fleet_players_document
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
-
-
-def _legacy_player_wire(ledger: FleetAcquisitionLedger) -> dict:
-    return persisted_fleet_ledger_to_json(PersistedFleetLedger(ledger=ledger))["ledger"]
 
 
 @pytest.fixture
@@ -162,14 +158,15 @@ def test_has_final_ledger_requires_both_provenance_flags(persistence, sample_led
 
 
 def _legacy_players_document(sample_ledger: FleetAcquisitionLedger) -> dict:
-    return {
-        "analyticId": "fleet",
-        "gameId": 628580,
-        "perspective": 1,
-        "turn": 111,
-        "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [_legacy_player_wire(sample_ledger)],
-    }
+    return legacy_fleet_players_document(
+        FleetTurnSnapshot(
+            game_id=628580,
+            perspective=1,
+            turn=111,
+            materialization_version=FLEET_MATERIALIZATION_VERSION,
+            players=[sample_ledger],
+        ),
+    )
 
 
 def test_unversioned_players_document_is_split_on_open(sample_ledger):
@@ -207,14 +204,7 @@ def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
 
 
 def test_upgrade_legacy_fleet_turn_document_maps_players_to_ledgers(sample_ledger):
-    legacy_document = {
-        "analyticId": "fleet",
-        "gameId": 628580,
-        "perspective": 1,
-        "turn": 111,
-        "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [_legacy_player_wire(sample_ledger)],
-    }
+    legacy_document = _legacy_players_document(sample_ledger)
     upgraded = upgrade_legacy_fleet_turn_document(legacy_document)
     assert "players" not in upgraded
     assert upgraded[FLEET_LEDGERS_KEY]["8"]["provenance"] == {
@@ -229,7 +219,7 @@ def test_stale_per_ledger_materialization_version_is_deleted_on_read(
     memory_backend,
     sample_ledger,
 ):
-    document = fleet_turn_snapshot_to_json(
+    document = legacy_fleet_ledgers_document(
         FleetTurnSnapshot(
             analytic_id="fleet",
             game_id=628580,

@@ -9,11 +9,13 @@ from pathlib import Path
 
 import pytest
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
-from api.analytics.fleet.serialization import upgrade_legacy_fleet_turn_document
 from api.analytics.fleet.storage_migration import (
+    FLEET_LEDGERS_KEY,
     fleet_storage_migration,
     migrate_fleet_breakpoint,
+    upgrade_legacy_fleet_turn_document,
 )
+from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.config import ApiConfig, get_config, set_config
 from api.errors import NotFoundError, UnhandledFormatError, ValidationError
 from api.storage.boundaries import BREAKPOINT_PATTERNS
@@ -37,6 +39,7 @@ from api.storage_factory import (
     production_migrations,
     production_storage_format,
 )
+from tests.fleet_fixtures import legacy_fleet_players_document
 
 _BACKEND_METHODS = frozenset({"get", "put", "delete", "list"})
 
@@ -682,14 +685,15 @@ def test_default_format_opens_an_unversioned_directory(tmp_path):
 
 
 def _legacy_players_parent() -> dict:
-    return {
-        "analyticId": "fleet",
-        "gameId": 1,
-        "perspective": 1,
-        "turn": 3,
-        "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [{"playerId": 8, "playerName": "ace", "records": []}],
-    }
+    return legacy_fleet_players_document(
+        FleetTurnSnapshot(
+            game_id=1,
+            perspective=1,
+            turn=3,
+            materialization_version=FLEET_MATERIALIZATION_VERSION,
+            players=[FleetAcquisitionLedger(player_id=8, player_name="ace")],
+        ),
+    )
 
 
 @pytest.mark.parametrize("kind", ["memory", "file"])
@@ -724,7 +728,7 @@ def test_stale_players_document_with_unparseable_wire_is_deleted_on_open(kind, t
 @pytest.mark.parametrize("kind", ["memory", "file"])
 def test_unversioned_players_document_splits_on_open(kind, tmp_path):
     document = _legacy_players_parent()
-    expected = upgrade_legacy_fleet_turn_document(document)["ledgers"]["8"]
+    expected = upgrade_legacy_fleet_turn_document(document)[FLEET_LEDGERS_KEY]["8"]
     storage_format = _storage_format(migrations=(fleet_storage_migration(),))
     if kind == "memory":
         backend = _opened_memory({FLEET: document}, storage_format)
@@ -741,7 +745,7 @@ def test_unversioned_players_document_splits_on_open(kind, tmp_path):
 
 def test_fleet_handler_writes_player_documents_from_players_and_ledgers():
     players = _legacy_players_parent()
-    expected = upgrade_legacy_fleet_turn_document(players)["ledgers"]["8"]
+    expected = upgrade_legacy_fleet_turn_document(players)[FLEET_LEDGERS_KEY]["8"]
     ledgers_path = "games/1/1/turns/4/analytics/fleet"
     ledgers = {"ledgers": {"8": LEDGER_WIRE}, "kept": True}
     other_path = "games/1/1/turns/5/analytics/fleet"

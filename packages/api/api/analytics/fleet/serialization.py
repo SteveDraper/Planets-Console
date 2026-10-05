@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.fleet.constants import (
-    ANALYTIC_ID,
-    FLEET_LEDGERS_KEY,
-    FLEET_MATERIALIZATION_VERSION,
-)
+from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.types import (
     FLEET_BOUNDED_OPERATORS,
     FLEET_EVIDENCE_EVENT_KINDS,
@@ -49,13 +45,6 @@ def _require_object_list(raw: object, *, field_name: str) -> list[dict[str, Any]
             raise ValidationError(f"{field_name}[{index}] must be an object")
         entries.append(item)
     return entries
-
-
-def _require_int_field(data: dict[str, Any], key: str, *, field_name: str) -> int:
-    value = data.get(key)
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ValidationError(f"{field_name} {key} must be an int")
-    return value
 
 
 def append_fleet_evidence_event(
@@ -653,11 +642,6 @@ def _fleet_turn_snapshot_players_to_json(
     return [fleet_acquisition_ledger_to_json(player_ledger) for player_ledger in ordered]
 
 
-def is_legacy_fleet_turn_document(data: dict[str, Any]) -> bool:
-    """Return whether ``data`` uses the monolithic ``players`` array wire shape."""
-    return FLEET_LEDGERS_KEY not in data and "players" in data
-
-
 def fleet_materialization_provenance_from_json(
     data: dict[str, Any],
 ) -> FleetMaterializationProvenance:
@@ -771,79 +755,6 @@ def fleet_ledger_is_ensure_final(
     return persisted.evidence_generation == mark.evidence_generation
 
 
-def upgrade_legacy_fleet_turn_document(data: dict[str, Any]) -> dict[str, Any]:
-    """Upgrade monolithic ``players`` wire to in-document ``ledgers/{playerId}`` keys.
-
-    Migrated entries use default (non-final) provenance: the monolithic path never
-    recorded materialization closure, so migration must not claim ensure-closed legs.
-    """
-    version = fleet_materialization_version_from_json(data)
-    ledgers: dict[str, Any] = {}
-    for player_wire in _require_object_list(
-        data.get("players", []),
-        field_name="fleet turn snapshot players",
-    ):
-        ledger = fleet_acquisition_ledger_from_json(player_wire)
-        ledgers[str(ledger.player_id)] = persisted_fleet_ledger_to_json(
-            PersistedFleetLedger(
-                ledger=ledger,
-                provenance=FleetMaterializationProvenance(),
-                materialization_version=version,
-            ),
-        )
-    return {
-        "analyticId": data.get("analyticId", ANALYTIC_ID),
-        "gameId": _require_int_field(data, "gameId", field_name="fleet turn snapshot"),
-        "perspective": _require_int_field(data, "perspective", field_name="fleet turn snapshot"),
-        "turn": _require_int_field(data, "turn", field_name="fleet turn snapshot"),
-        FLEET_LEDGERS_KEY: ledgers,
-    }
-
-
-def _fleet_turn_snapshot_ledgers_to_json(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
-    ledgers: dict[str, Any] = {}
-    for player_ledger in snapshot.players:
-        ledgers[str(player_ledger.player_id)] = persisted_fleet_ledger_to_json(
-            PersistedFleetLedger(
-                ledger=player_ledger,
-                provenance=FleetMaterializationProvenance(),
-                materialization_version=snapshot.materialization_version,
-            ),
-        )
-    return ledgers
-
-
-def _fleet_turn_snapshot_from_ledgers_document(data: dict[str, Any]) -> FleetTurnSnapshot:
-    analytic_id = data.get("analyticId", ANALYTIC_ID)
-    if not isinstance(analytic_id, str):
-        raise ValidationError("fleet turn snapshot analyticId must be a string")
-
-    game_id = _require_int_field(data, "gameId", field_name="fleet turn snapshot")
-    perspective = _require_int_field(data, "perspective", field_name="fleet turn snapshot")
-    turn = _require_int_field(data, "turn", field_name="fleet turn snapshot")
-    ledgers_wire = data.get(FLEET_LEDGERS_KEY, {})
-    if not isinstance(ledgers_wire, dict):
-        raise ValidationError("fleet turn snapshot ledgers must be an object")
-
-    persisted_ledgers = [
-        persisted_fleet_ledger_from_json(ledger_wire)
-        for ledger_wire in ledgers_wire.values()
-        if isinstance(ledger_wire, dict)
-    ]
-    materialization_version = 0
-    if persisted_ledgers:
-        materialization_version = persisted_ledgers[0].materialization_version
-
-    return FleetTurnSnapshot(
-        analytic_id=analytic_id,
-        game_id=game_id,
-        perspective=perspective,
-        turn=turn,
-        materialization_version=materialization_version,
-        players=[persisted.ledger for persisted in persisted_ledgers],
-    )
-
-
 def fleet_turn_snapshot_to_compute_wire(
     snapshot: FleetTurnSnapshot,
     turn: TurnInfo,
@@ -882,41 +793,3 @@ def materialization_version_from_fleet_compute_result_wire(
 
 def is_current_fleet_materialization_version(version: int) -> bool:
     return version == FLEET_MATERIALIZATION_VERSION
-
-
-def fleet_turn_snapshot_to_json(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
-    return {
-        "analyticId": snapshot.analytic_id,
-        "gameId": snapshot.game_id,
-        "perspective": snapshot.perspective,
-        "turn": snapshot.turn,
-        FLEET_LEDGERS_KEY: _fleet_turn_snapshot_ledgers_to_json(snapshot),
-    }
-
-
-def fleet_turn_snapshot_from_json(data: dict[str, Any]) -> FleetTurnSnapshot:
-    if is_legacy_fleet_turn_document(data):
-        analytic_id = data.get("analyticId", ANALYTIC_ID)
-        if not isinstance(analytic_id, str):
-            raise ValidationError("fleet turn snapshot analyticId must be a string")
-
-        game_id = _require_int_field(data, "gameId", field_name="fleet turn snapshot")
-        perspective = _require_int_field(data, "perspective", field_name="fleet turn snapshot")
-        turn = _require_int_field(data, "turn", field_name="fleet turn snapshot")
-
-        return FleetTurnSnapshot(
-            analytic_id=analytic_id,
-            game_id=game_id,
-            perspective=perspective,
-            turn=turn,
-            materialization_version=fleet_materialization_version_from_json(data),
-            players=[
-                fleet_acquisition_ledger_from_json(player_ledger)
-                for player_ledger in _require_object_list(
-                    data.get("players", []),
-                    field_name="fleet turn snapshot players",
-                )
-            ],
-        )
-
-    return _fleet_turn_snapshot_from_ledgers_document(data)

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
+from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
+from api.analytics.fleet.storage_migration import upgrade_legacy_fleet_turn_document
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
 from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_from_json
@@ -88,6 +91,23 @@ def single_ship_turn(
         }
     ]
     return turn_info_from_json(turn_data)
+
+
+def legacy_fleet_players_document(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
+    """Monolithic shared-turn document: one ``players`` array of ledger wires."""
+    return {
+        "analyticId": snapshot.analytic_id,
+        "gameId": snapshot.game_id,
+        "perspective": snapshot.perspective,
+        "turn": snapshot.turn,
+        "materializationVersion": snapshot.materialization_version,
+        "players": [fleet_acquisition_ledger_to_json(player) for player in snapshot.players],
+    }
+
+
+def legacy_fleet_ledgers_document(snapshot: FleetTurnSnapshot) -> dict[str, Any]:
+    """Shared-turn ``ledgers`` map from upgrading the monolithic ``players`` document."""
+    return upgrade_legacy_fleet_turn_document(legacy_fleet_players_document(snapshot))
 
 
 def ledger_for_player(snapshot: FleetTurnSnapshot, player_id: int) -> FleetAcquisitionLedger:
