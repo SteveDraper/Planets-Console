@@ -9,13 +9,30 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from api.analytics.fleet.fleet_table_stream_registry import (
+    reset_fleet_table_stream_registry_for_tests,
+)
+from api.analytics.fleet.fleet_table_stream_scheduler import (
+    reset_fleet_table_stream_scheduler_for_tests,
+)
 from api.analytics.fleet.storage_migration import fleet_storage_migration
+from api.analytics.military_score_inference.inference_scheduler import (
+    reset_inference_row_scheduler_for_tests,
+)
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    reset_inference_table_stream_registry_for_tests,
+)
 from api.config import get_config
 from api.services.stack import clear_process_service_stack
 from api.storage.base import StorageBackend
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
-from api.storage.migrations import DEFAULT_STORAGE_FORMAT, StorageFormat, StorageMigration
+from api.storage.migrations import (
+    DEFAULT_STORAGE_FORMAT,
+    StorageFormat,
+    StorageMigration,
+    require_contiguous_migration_versions,
+)
 
 _backend_cache: StorageBackend | None = None
 
@@ -26,8 +43,17 @@ def production_migrations() -> tuple[StorageMigration, ...]:
 
 
 def production_storage_format() -> StorageFormat:
-    """Return the format a process or maintenance script uses to open a data directory."""
-    return replace(DEFAULT_STORAGE_FORMAT, migrations=production_migrations())
+    """Return the format a process or maintenance script uses to open a data directory.
+
+    Bound steps must be contiguous versions ``1..current``. A gap is a registry
+    bug and raises ``RuntimeError``.
+    """
+    storage_format = replace(DEFAULT_STORAGE_FORMAT, migrations=production_migrations())
+    require_contiguous_migration_versions(
+        storage_format.migrations,
+        storage_format.current_version,
+    )
+    return storage_format
 
 
 def _load_asset(path: Path | None) -> dict:
@@ -62,7 +88,15 @@ def get_storage() -> StorageBackend:
 
 
 def clear_backend_cache() -> None:
-    """Clear the cached backend (for tests after config change)."""
+    """Clear the cached backend, service stack, and analytic singletons.
+
+    Tests call this after a config change. Stream and scheduler singletons are
+    process-wide, so this reset drops them with the backend.
+    """
     global _backend_cache
     _backend_cache = None
     clear_process_service_stack()
+    reset_inference_row_scheduler_for_tests()
+    reset_inference_table_stream_registry_for_tests()
+    reset_fleet_table_stream_scheduler_for_tests()
+    reset_fleet_table_stream_registry_for_tests()

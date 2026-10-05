@@ -104,6 +104,19 @@ def test_get_missing_raises(backend):
         backend.get(GAME_INFO)
 
 
+def test_null_document_is_stored(backend):
+    backend.put(GAME_INFO, None)
+    assert backend.get(GAME_INFO) is None
+    with pytest.raises(ValidationError, match="non-object"):
+        backend.put(GAME_NESTED, {"difficulty": "hard"})
+    assert backend.get(GAME_INFO) is None
+    backend.delete(GAME_INFO)
+    with pytest.raises(NotFoundError):
+        backend.get(GAME_INFO)
+    with pytest.raises(NotFoundError):
+        backend.delete(GAME_INFO)
+
+
 def test_delete_missing_raises(backend):
     with pytest.raises(NotFoundError):
         backend.delete(GAME_INFO)

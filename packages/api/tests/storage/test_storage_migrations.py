@@ -28,9 +28,15 @@ from api.storage.migrations import (
     StorageMigration,
     generic_rehome,
     open_store,
+    require_contiguous_migration_versions,
     version_label,
 )
-from api.storage_factory import clear_backend_cache, get_storage, production_migrations
+from api.storage_factory import (
+    clear_backend_cache,
+    get_storage,
+    production_migrations,
+    production_storage_format,
+)
 
 _DOCUMENT_STORE_METHODS = (
     "iter_document_paths",
@@ -286,6 +292,14 @@ def test_storage_format_rejects_an_invalid_migration_registry():
         )
 
 
+def test_bound_migrations_must_be_contiguous_through_current():
+    step = StorageMigration(version=2, introduced_pattern=("games", "*", "info"))
+    with pytest.raises(RuntimeError, match="contiguous versions 1..2; missing 1"):
+        require_contiguous_migration_versions((step,), 2)
+    with pytest.raises(RuntimeError, match="contiguous versions 1..1; missing 1"):
+        require_contiguous_migration_versions((), 1)
+
+
 @pytest.mark.parametrize(
     ("error", "found", "minimum", "maximum", "detail"),
     [
@@ -442,10 +456,12 @@ def test_storage_package_does_not_import_analytics_services_or_factory():
 
 
 def test_production_migrations_bind_fleet_step():
-    steps = production_migrations()
+    storage_format = production_storage_format()
+    steps = storage_format.migrations
+    assert steps == production_migrations()
     assert len(steps) == 1
     step = steps[0]
-    assert step.version == CURRENT_STORAGE_VERSION
+    assert step.version == storage_format.current_version == CURRENT_STORAGE_VERSION
     assert step.structural_handler is migrate_fleet_breakpoint
 
 
@@ -595,6 +611,27 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
 
     open_store(store, opened)
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
+
+
+def test_fleet_handler_skips_non_player_ledger_entries():
+    document = {
+        "ledgers": {
+            "8": LEDGER_WIRE,
+            "note": {"ledger": {}},
+            "9": "not-a-ledger",
+            "10": None,
+        }
+    }
+    backend = MemoryAssetBackend(
+        documents={FLEET: document},
+        storage_format=_storage_format(current_version=0),
+    )
+    migrate_fleet_breakpoint(MigrationContext(_store(backend)))
+    store = _store(backend)
+    assert not store.has_document(FLEET)
+    assert store.read_document(FLEET_PLAYER) == LEDGER_WIRE
+    for skipped in ("note", "9", "10"):
+        assert not store.has_document(f"{FLEET}/{skipped}")
 
 
 def test_empty_ledgers_map_removes_parent():

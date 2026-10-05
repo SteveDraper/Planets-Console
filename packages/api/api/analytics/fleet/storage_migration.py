@@ -1,11 +1,12 @@
 """Fleet layout step in the storage migration pipeline.
 
 A current-version legacy ``players`` array is upgraded to an in-document
-``ledgers`` map, then written one document per player at
-``.../analytics/fleet/{playerId}``. The parent is deleted. A legacy
-``players`` document whose ``materializationVersion`` is not current is
-deleted without parsing player wires. ``ledgers`` documents are split as
-stored; per-ledger version checks stay on fleet read.
+``ledgers`` map, then written one document per numeric player id at
+``.../analytics/fleet/{playerId}``. Non-numeric keys and non-object values
+are skipped. The parent is deleted. A legacy ``players`` document whose
+``materializationVersion`` is not current is deleted without parsing player
+wires. ``ledgers`` documents are split as stored; per-ledger version checks
+stay on fleet read.
 """
 
 from __future__ import annotations
@@ -28,16 +29,20 @@ _FLEET_PLAYER_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "fleet", 
 def migrate_fleet_breakpoint(context: MigrationContext) -> None:
     """Split fleet parent documents into per-player files.
 
-    A current-version ``players`` array is upgraded, then each ``ledgers``
-    key is written at ``.../analytics/fleet/{playerId}``. A stale ``players``
-    document is removed without parsing. The parent is deleted, including
-    when the map is empty. Documents with neither shape stay as they are.
+    A current-version ``players`` array is upgraded, then each numeric
+    ``ledgers`` key whose value is an object is written at
+    ``.../analytics/fleet/{playerId}``. Other entries are skipped. A stale
+    ``players`` document is removed without parsing. The parent is deleted,
+    including when the map is empty. Documents with neither shape stay as
+    they are.
     """
     for path, document in context.iter_documents(_FLEET_PARENT_PATTERN):
         ledgers = _fleet_ledgers_map(document)
         if ledgers is None:
             continue
         for player_key, ledger in ledgers.items():
+            if not player_key.isdigit() or not isinstance(ledger, dict):
+                continue
             context.put_document(f"{path}/{player_key}", ledger)
         context.delete_document(path)
 

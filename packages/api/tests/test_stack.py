@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from api.analytics.military_score_inference.inference_scheduler import (
+    get_inference_row_scheduler,
+    inference_row_scheduler_if_initialized,
+    reset_inference_row_scheduler_for_tests,
+)
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.stack import (
@@ -98,4 +103,17 @@ def test_clear_backend_cache_drops_process_service_stack(monkeypatch):
         assert rebuilt.games is not first.games
         assert rebuilt.turns is not first.turns
     finally:
+        clear_process_service_stack()
+
+
+def test_clear_backend_cache_resets_analytic_singletons():
+    reset_inference_row_scheduler_for_tests()
+    scheduler = get_inference_row_scheduler()
+    try:
+        clear_process_service_stack()
+        assert inference_row_scheduler_if_initialized() is scheduler
+        clear_backend_cache()
+        assert inference_row_scheduler_if_initialized() is None
+    finally:
+        reset_inference_row_scheduler_for_tests()
         clear_process_service_stack()

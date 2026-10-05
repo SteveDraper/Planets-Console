@@ -98,15 +98,17 @@ def document_after_put(
     value: JSONValue,
     *,
     breakpoint_path: str,
+    missing: bool,
 ) -> JSONValue:
     """Return the breakpoint document after storing ``value`` at ``suffix``.
 
-    ``suffix`` ``None`` replaces the document. A missing document starts as ``{}``
-    when the write is nested.
+    ``suffix`` ``None`` replaces the document. ``missing`` means the breakpoint
+    does not exist; a nested write then starts from ``{}``. A present document
+    may be JSON null, which is not the same as absence.
     """
     if suffix is None:
         return value
-    copied: JSONValue = {} if document is None else deep_copy_value(document)
+    copied: JSONValue = {} if missing else deep_copy_value(document)
     if not isinstance(copied, dict):
         raise ValidationError(
             f"Cannot create nested path under non-object document: {breakpoint_path!r}"

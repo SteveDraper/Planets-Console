@@ -138,29 +138,12 @@ def get_process_service_stack() -> ServiceStack:
 
 
 def clear_process_service_stack() -> None:
-    """Drop the cached stack and process-wide analytic stream/scheduler singletons."""
+    """Drop the cached stack and shut down its background workers."""
     global _process_stack
     stack = _process_stack
     _process_stack = None
     if stack is not None:
         stack.analytics.shutdown_background_workers()
-    from api.analytics.fleet.fleet_table_stream_registry import (
-        reset_fleet_table_stream_registry_for_tests,
-    )
-    from api.analytics.fleet.fleet_table_stream_scheduler import (
-        reset_fleet_table_stream_scheduler_for_tests,
-    )
-    from api.analytics.military_score_inference.inference_scheduler import (
-        reset_inference_row_scheduler_for_tests,
-    )
-    from api.analytics.military_score_inference.inference_table_stream_registry import (
-        reset_inference_table_stream_registry_for_tests,
-    )
-
-    reset_inference_row_scheduler_for_tests()
-    reset_inference_table_stream_registry_for_tests()
-    reset_fleet_table_stream_scheduler_for_tests()
-    reset_fleet_table_stream_registry_for_tests()
 
 
 def build_game_credential_services(

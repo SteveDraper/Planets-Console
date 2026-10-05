@@ -73,13 +73,16 @@ class FileStorageBackend:
 
         try:
             current = self._document_store.load_document(breakpoint_path)
+            missing = False
         except NotFoundError:
             current = None
+            missing = True
         updated = document_after_put(
             current,
             suffix,
             value_copy,
             breakpoint_path=breakpoint_path,
+            missing=missing,
         )
         self._document_store.replace_document(breakpoint_path, updated)
 

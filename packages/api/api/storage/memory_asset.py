@@ -54,11 +54,6 @@ class MemoryDocumentStore:
         with self._lock:
             return breakpoint_path in self._documents
 
-    def get_document(self, breakpoint_path: str) -> JSONValue | None:
-        """Return the stored object, or None when the breakpoint is absent."""
-        with self._lock:
-            return self._documents.get(breakpoint_path)
-
     def load_document(self, breakpoint_path: str) -> JSONValue:
         """Return the stored object. Do not mutate the result."""
         with self._lock:
@@ -128,9 +123,9 @@ class MemoryAssetBackend:
             if path == "":
                 raise ValidationError("Cannot get root path")
             breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
-            document = self._document_store.get_document(breakpoint_path)
-            if document is None:
+            if not self._document_store.has_document(breakpoint_path):
                 raise NotFoundError(f"Document not found: {breakpoint_path!r}")
+            document = self._document_store.load_document(breakpoint_path)
             return read_logical(document, suffix)
 
     def put(self, key: str, value: JSONValue) -> None:
@@ -142,11 +137,14 @@ class MemoryAssetBackend:
             breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
             validate_no_reserved_at_keys(value)
             value_copy = deep_copy_value(value)
+            missing = not self._document_store.has_document(breakpoint_path)
+            current = None if missing else self._document_store.load_document(breakpoint_path)
             updated = document_after_put(
-                self._document_store.get_document(breakpoint_path),
+                current,
                 suffix,
                 value_copy,
                 breakpoint_path=breakpoint_path,
+                missing=missing,
             )
             self._document_store.replace_document(breakpoint_path, updated)
 
@@ -157,12 +155,12 @@ class MemoryAssetBackend:
             if path == "":
                 raise ValidationError("Cannot delete root path")
             breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
-            document = self._document_store.get_document(breakpoint_path)
-            if document is None:
+            if not self._document_store.has_document(breakpoint_path):
                 raise NotFoundError(f"Document not found: {breakpoint_path!r}")
             if suffix is None:
                 self._document_store.remove_document(breakpoint_path)
                 return
+            document = self._document_store.load_document(breakpoint_path)
             self._document_store.replace_document(
                 breakpoint_path,
                 document_after_delete(document, suffix),

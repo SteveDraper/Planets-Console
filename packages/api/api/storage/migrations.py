@@ -118,6 +118,32 @@ def _reject_duplicate_versions(
         seen.add(step.version)
 
 
+def require_contiguous_migration_versions(
+    migrations: tuple[StorageMigration, ...],
+    current_version: int,
+) -> None:
+    """Raise when bound steps are not exactly versions ``1..current_version``.
+
+    This is an internal registry bug, not a property of stored data. An empty
+    step list is valid on ``StorageFormat`` until a caller binds steps.
+    Production binding must cover every version up to current.
+    """
+    expected = set(range(1, current_version + 1))
+    found = {step.version for step in migrations}
+    if found == expected:
+        return
+    missing = sorted(expected - found)
+    unexpected = sorted(found - expected)
+    parts: list[str] = []
+    if missing:
+        parts.append("missing " + ", ".join(str(version) for version in missing))
+    if unexpected:
+        parts.append("unexpected " + ", ".join(str(version) for version in unexpected))
+    raise RuntimeError(
+        f"Storage migrations must be contiguous versions 1..{current_version}; " + "; ".join(parts)
+    )
+
+
 @dataclass(frozen=True)
 class StorageFormat:
     """Breakpoint registry and version bounds for one data directory.
