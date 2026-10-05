@@ -105,6 +105,55 @@ def pattern_matches_breakpoint(pattern: tuple[str, ...], breakpoint_path: str) -
     return _pattern_matches_path(pattern, _path_segments(breakpoint_path))
 
 
+def _is_shorter_pattern_prefix(shorter: tuple[str, ...], longer: tuple[str, ...]) -> bool:
+    """Return whether ``shorter`` is a strict prefix of ``longer``.
+
+    ``*`` in ``shorter`` matches the corresponding segment of ``longer``.
+    """
+    if len(shorter) >= len(longer):
+        return False
+    return _pattern_prefix_matches(shorter, list(longer[: len(shorter)]))
+
+
+def rehome_source_patterns(
+    introduced_pattern: tuple[str, ...],
+    patterns: BreakpointPatterns,
+) -> tuple[tuple[str, ...], ...]:
+    """Return the breakpoints that held ``introduced_pattern`` keys as a suffix.
+
+    A source is a registered strict prefix of ``introduced_pattern`` with no
+    longer registered prefix. Shorter ancestors are not sources: the longer
+    breakpoint already stores those keys in its own document. The introduced
+    pattern itself is not a source.
+    """
+    prefixes = [
+        pattern for pattern in patterns if _is_shorter_pattern_prefix(pattern, introduced_pattern)
+    ]
+    if not prefixes:
+        return ()
+    longest = max(len(pattern) for pattern in prefixes)
+    return tuple(pattern for pattern in prefixes if len(pattern) == longest)
+
+
+def is_rehome_candidate(
+    breakpoint_path: str,
+    introduced_pattern: tuple[str, ...],
+    source_patterns: tuple[tuple[str, ...], ...],
+) -> bool:
+    """Return whether ``breakpoint_path`` can hold keys of ``introduced_pattern``.
+
+    ``source_patterns`` comes from ``rehome_source_patterns``. The path must
+    match one of those patterns and line up with ``introduced_pattern``, so a
+    wildcard source does not include sibling documents.
+    """
+    segments = _path_segments(breakpoint_path)
+    if len(segments) >= len(introduced_pattern):
+        return False
+    if not _pattern_prefix_matches(introduced_pattern, segments):
+        return False
+    return any(pattern_matches_breakpoint(pattern, breakpoint_path) for pattern in source_patterns)
+
+
 def is_registered_path(path: str, patterns: BreakpointPatterns | None = None) -> bool:
     """Return whether ``path`` is covered by a breakpoint pattern."""
     try:

@@ -135,6 +135,52 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
     assert calls == [1]
 
 
+class _CountingStore:
+    """Document store that records ``read_document`` paths."""
+
+    def __init__(self, documents: dict) -> None:
+        self.documents = documents
+        self.reads: list[str] = []
+
+    def iter_document_paths(self):
+        yield from tuple(self.documents)
+
+    def has_document(self, breakpoint_path: str) -> bool:
+        return breakpoint_path in self.documents
+
+    def read_document(self, breakpoint_path: str):
+        self.reads.append(breakpoint_path)
+        return self.documents[breakpoint_path]
+
+    def write_document(self, breakpoint_path: str, value) -> None:
+        self.documents[breakpoint_path] = value
+
+    def remove_document(self, breakpoint_path: str) -> None:
+        del self.documents[breakpoint_path]
+
+
+def test_generic_rehome_does_not_read_unrelated_documents():
+    turn = "games/7/1/turns/9"
+    info = "games/7/info"
+    fleet = "games/7/1/turns/3/analytics/fleet"
+    documents = {
+        turn: {"rst": True},
+        info: {"name": "keep"},
+        fleet: {"note": True},
+        SCORES: {"inference_rows": {"4": ROW}, "kept": True},
+        STORAGE_VERSION_KEY: {"version": 0},
+    }
+    store = _CountingStore(documents)
+    generic_rehome(store, _scores_patterns(), SCORES_PLAYER_PATTERN)
+    assert store.reads == [SCORES]
+    assert documents[SCORES] == {"kept": True}
+    assert documents[SCORES_ROW] == ROW
+    assert documents[turn] == {"rst": True}
+    assert documents[info] == {"name": "keep"}
+    assert documents[fleet] == {"note": True}
+    assert documents[STORAGE_VERSION_KEY] == {"version": 0}
+
+
 def test_new_directory_is_stamped_without_migrations(tmp_path, monkeypatch):
     calls: list[str] = []
 
@@ -514,7 +560,7 @@ def test_open_splits_upgraded_parent_and_retries_as_noop():
         backend.get(FLEET)
 
     migrate_fleet_breakpoint(MigrationContext(store))
-    generic_rehome(store, BREAKPOINT_PATTERNS)
+    generic_rehome(store, BREAKPOINT_PATTERNS, fleet_storage_migration().introduced_pattern)
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
     assert not store.has_document(FLEET)
 

@@ -5,9 +5,12 @@ from pathlib import Path
 import pytest
 from api.errors import ValidationError
 from api.storage.boundaries import (
+    BREAKPOINT_PATTERNS,
     document_relpath,
     is_navigable_prefix,
     is_registered_path,
+    is_rehome_candidate,
+    rehome_source_patterns,
     resolve_breakpoint,
 )
 
@@ -132,3 +135,62 @@ def test_is_navigable_prefix_rejects_unsafe_segments(path: str):
 
 def test_is_registered_path_rejects_unsafe_segments():
     assert not is_registered_path("games/../info")
+
+
+_SCORES_PLAYER_PATTERN = (
+    "games",
+    "*",
+    "*",
+    "turns",
+    "*",
+    "analytics",
+    "scores",
+    "inference_rows",
+    "*",
+)
+_FLEET_PLAYER_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "fleet", "*")
+_ANALYTICS_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "*")
+_SCORES_PATTERNS = BREAKPOINT_PATTERNS + (_SCORES_PLAYER_PATTERN,)
+
+
+def test_rehome_source_is_the_longest_registered_prefix():
+    assert rehome_source_patterns(_SCORES_PLAYER_PATTERN, _SCORES_PATTERNS) == (_ANALYTICS_PATTERN,)
+    assert rehome_source_patterns(_FLEET_PLAYER_PATTERN, BREAKPOINT_PATTERNS) == (
+        _ANALYTICS_PATTERN,
+    )
+
+
+def test_rehome_candidate_excludes_ancestors_and_siblings():
+    scores_sources = rehome_source_patterns(_SCORES_PLAYER_PATTERN, _SCORES_PATTERNS)
+    scores_parent = "games/7/1/turns/3/analytics/scores"
+    assert is_rehome_candidate(scores_parent, _SCORES_PLAYER_PATTERN, scores_sources)
+    assert not is_rehome_candidate("games/7/1/turns/9", _SCORES_PLAYER_PATTERN, scores_sources)
+    assert not is_rehome_candidate(
+        "games/7/1/turns/3/analytics/fleet",
+        _SCORES_PLAYER_PATTERN,
+        scores_sources,
+    )
+    assert not is_rehome_candidate(
+        f"{scores_parent}/inference_rows/4",
+        _SCORES_PLAYER_PATTERN,
+        scores_sources,
+    )
+    assert not is_rehome_candidate("games/7/info", _SCORES_PLAYER_PATTERN, scores_sources)
+    assert not is_rehome_candidate(
+        "meta/storage-version",
+        _SCORES_PLAYER_PATTERN,
+        scores_sources,
+    )
+
+    fleet_sources = rehome_source_patterns(_FLEET_PLAYER_PATTERN, BREAKPOINT_PATTERNS)
+    assert is_rehome_candidate(
+        "games/1/1/turns/3/analytics/fleet",
+        _FLEET_PLAYER_PATTERN,
+        fleet_sources,
+    )
+    assert not is_rehome_candidate("games/1/1/turns/3", _FLEET_PLAYER_PATTERN, fleet_sources)
+    assert not is_rehome_candidate(
+        "games/1/1/turns/3/analytics/scores",
+        _FLEET_PLAYER_PATTERN,
+        fleet_sources,
+    )

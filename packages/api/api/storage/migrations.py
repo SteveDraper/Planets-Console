@@ -9,9 +9,8 @@ unchanged. Documents written outside the app after the stamp are unsupported;
 this module does not detect them.
 
 A structural handler is registered by the analytic that owns the document
-shape. Generic re-home splits each stored document onto longer breakpoints in
-the current registry when the logical key is unchanged. Handlers see JSON
-documents and keys.
+shape. Generic re-home splits documents that held the introduced breakpoint's
+keys as an in-document suffix. Handlers see JSON documents and keys.
 """
 
 from __future__ import annotations
@@ -24,7 +23,9 @@ from api.errors import UnhandledFormatError
 from api.storage.base import JSONValue
 from api.storage.boundaries import (
     BreakpointPatterns,
+    is_rehome_candidate,
     pattern_matches_breakpoint,
+    rehome_source_patterns,
 )
 from api.storage.documents import partition_breakpoint_document
 
@@ -88,8 +89,8 @@ class StorageMigration:
 
     ``introduced_pattern`` is the longer breakpoint this step adds. A structural
     handler rewrites document shape, including writing any new breakpoint
-    documents it owns. When there is no handler, generic re-home splits each
-    document onto the current registry.
+    documents it owns. When there is no handler, generic re-home splits
+    documents at the longest registered prefix of that pattern.
     """
 
     version: int
@@ -145,13 +146,24 @@ def open_store(
     _stamp(store, current_version)
 
 
-def generic_rehome(store: DocumentStore, patterns: BreakpointPatterns) -> None:
-    """Split each stored document onto longer breakpoints in ``patterns``.
+def generic_rehome(
+    store: DocumentStore,
+    patterns: BreakpointPatterns,
+    introduced_pattern: tuple[str, ...],
+) -> None:
+    """Split documents that hold ``introduced_pattern`` onto that breakpoint.
 
+    Only the longest registered prefix of ``introduced_pattern`` is read.
     Newly separate breakpoint documents are written. The parent is rewritten
     without those keys, or deleted when it is empty.
     """
-    paths = [path for path in store.iter_document_paths() if path != STORAGE_VERSION_KEY]
+    source_patterns = rehome_source_patterns(introduced_pattern, patterns)
+    paths = [
+        path
+        for path in store.iter_document_paths()
+        if path != STORAGE_VERSION_KEY
+        and is_rehome_candidate(path, introduced_pattern, source_patterns)
+    ]
     for path in paths:
         if not store.has_document(path):
             continue
@@ -183,7 +195,7 @@ def _run_step(
     if step.structural_handler is not None:
         step.structural_handler(context)
     else:
-        generic_rehome(store, patterns)
+        generic_rehome(store, patterns, step.introduced_pattern)
 
 
 def _reject_duplicate_versions(
