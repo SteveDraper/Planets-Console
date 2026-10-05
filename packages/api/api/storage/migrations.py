@@ -103,10 +103,16 @@ class StorageMigration:
     structural_handler: StructuralHandler | None = None
 
 
-def _reject_duplicate_versions(
+def _validate_migrations(
     migrations: tuple[StorageMigration, ...],
     current_version: int,
+    patterns: BreakpointPatterns,
 ) -> None:
+    """Raise when a step is out of range, duplicated, or names an unregistered pattern.
+
+    Contiguity of versions ``1..current_version`` is checked separately when
+    steps are bound. An empty tuple is valid here.
+    """
     seen: set[int] = set()
     for step in migrations:
         if step.version < 1 or step.version > current_version:
@@ -116,6 +122,10 @@ def _reject_duplicate_versions(
         if step.version in seen:
             raise RuntimeError(f"Duplicate storage migration version {step.version}")
         seen.add(step.version)
+        if step.introduced_pattern not in patterns:
+            raise RuntimeError(
+                f"Storage migration {step.version} introduces a breakpoint that is not registered"
+            )
 
 
 def require_contiguous_migration_versions(
@@ -160,7 +170,7 @@ class StorageFormat:
     minimum_version: int | None
 
     def __post_init__(self) -> None:
-        _reject_duplicate_versions(self.migrations, self.current_version)
+        _validate_migrations(self.migrations, self.current_version, self.patterns)
 
 
 # Patterns and version bounds for this build. ``migrations`` is empty until a
@@ -257,10 +267,6 @@ def _run_step(
     store: DocumentStore,
     patterns: BreakpointPatterns,
 ) -> None:
-    if step.introduced_pattern not in patterns:
-        raise RuntimeError(
-            f"Storage migration {step.version} introduces a breakpoint that is not registered"
-        )
     if step.structural_handler is not None:
         step.structural_handler(context)
     else:

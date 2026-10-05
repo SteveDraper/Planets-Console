@@ -371,6 +371,16 @@ def test_storage_format_rejects_an_invalid_migration_registry():
             current_version=1,
             minimum_version=None,
         )
+    with pytest.raises(
+        RuntimeError,
+        match="Storage migration 1 introduces a breakpoint that is not registered",
+    ):
+        StorageFormat(
+            patterns=BREAKPOINT_PATTERNS,
+            migrations=(StorageMigration(version=1, introduced_pattern=("games", "*", "missing")),),
+            current_version=1,
+            minimum_version=None,
+        )
 
 
 def test_bound_migrations_must_be_contiguous_through_current():
