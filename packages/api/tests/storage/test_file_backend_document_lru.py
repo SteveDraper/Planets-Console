@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import io
 import json
 from pathlib import Path
 
@@ -357,7 +358,52 @@ def test_fill_listing_after_child_put_does_not_install_stale_names() -> None:
 
 def _json_string_file_size(text: str) -> int:
     """Byte size of a JSON string document plus the trailing newline the store writes."""
-    return len(json.dumps(text).encode("utf-8")) + 1
+    return len((json.dumps(text, ensure_ascii=False) + "\n").encode("utf-8"))
+
+
+def test_non_ascii_encoded_bytes_select_large_cache_without_stat(storage_root: Path) -> None:
+    """Encoded UTF-8 byte size selects the large-document cache."""
+    backend = open_file_storage_backend(storage_root)
+    unit = "é"
+    overhead = _json_string_file_size("")
+    byte_width = len(unit.encode("utf-8"))
+    repeats = (LARGE_DOCUMENT_MIN_BYTES - overhead + byte_width - 1) // byte_width
+    text = unit * repeats
+    encoded_size = _json_string_file_size(text)
+    assert len(text) < LARGE_DOCUMENT_MIN_BYTES
+    assert len(json.dumps(text, ensure_ascii=False)) < LARGE_DOCUMENT_MIN_BYTES
+    assert encoded_size >= LARGE_DOCUMENT_MIN_BYTES
+
+    counts = FileIoCounts()
+    with count_file_backend_syscalls(counts):
+        backend.put(FLEET, text)
+    assert counts.stat_calls == 0
+    assert counts.json_dump_calls == 1
+    assert counts.json_load_calls == 0
+    assert counts.open_write_calls == 1
+    assert counts.open_read_calls == 0
+
+    lru = _lru(storage_root)
+    assert lru.has_large_document(FLEET)
+    assert not lru.has_small_document(FLEET)
+    fleet_path = storage_root / "games/628580/1/turns/111/analytics/fleet.json"
+    legacy = io.StringIO()
+    json.dump(text, legacy, ensure_ascii=False)
+    legacy.write("\n")
+    on_disk = fleet_path.read_bytes()
+    assert on_disk == legacy.getvalue().encode("utf-8")
+    assert len(on_disk) == encoded_size
+
+    lru.drop_document(FLEET)
+    counts.reset()
+    with count_file_backend_syscalls(counts):
+        assert backend.get(FLEET) == text
+    assert counts.stat_calls == 0
+    assert counts.json_load_calls == 1
+    assert counts.open_read_calls == 1
+    assert counts.open_write_calls == 0
+    assert lru.has_large_document(FLEET)
+    assert not lru.has_small_document(FLEET)
 
 
 def test_file_byte_size_selects_cache_and_put_can_cross(storage_root: Path) -> None:

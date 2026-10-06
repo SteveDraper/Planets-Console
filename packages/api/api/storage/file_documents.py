@@ -56,11 +56,11 @@ class FileDocumentStore:
     def replace_document(self, breakpoint_path: str, value: JSONValue) -> None:
         """Persist ``value`` and retain that same object in the LRU."""
         file_path = self._document_file(breakpoint_path)
-        self._atomic_write(file_path, value)
+        byte_size = self._atomic_write(file_path, value)
         self._document_lru.remember_document(
             breakpoint_path,
             value,
-            byte_size=file_path.stat().st_size,
+            byte_size=byte_size,
         )
 
     def remove_document(self, breakpoint_path: str) -> None:
@@ -82,21 +82,18 @@ class FileDocumentStore:
             return cached
         file_path = self._document_file(breakpoint_path)
         try:
-            with open(file_path, encoding="utf-8") as handle:
-                loaded = json.load(handle)
+            with open(file_path, "rb") as handle:
+                raw = handle.read()
         except FileNotFoundError:
             # Concurrent delete/prune can unlink between a peer's write and this
             # open (same race as ``_ensure_dir`` after a persistence clear).
             raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
-        try:
-            byte_size = file_path.stat().st_size
-        except FileNotFoundError:
-            return loaded
+        loaded = json.loads(raw)
         self._document_lru.fill_document(
             breakpoint_path,
             loaded,
             epoch=epoch,
-            byte_size=byte_size,
+            byte_size=len(raw),
         )
         return loaded
 
@@ -140,36 +137,38 @@ class FileDocumentStore:
             raise last_error
         path.mkdir(parents=True, exist_ok=True)
 
-    def _write_replaced(self, file_path: Path, value: JSONValue) -> None:
+    def _write_replaced(self, file_path: Path, value: JSONValue) -> int:
+        """Atomically replace ``file_path`` and return its byte size."""
         self._ensure_dir(file_path.parent)
+        payload = (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
         temp_path = file_path.with_name(
             f".{file_path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
         )
         try:
-            with open(temp_path, "w", encoding="utf-8") as handle:
-                json.dump(value, handle, ensure_ascii=False)
-                handle.write("\n")
+            with open(temp_path, "wb") as handle:
+                handle.write(payload)
             os.replace(temp_path, file_path)
         finally:
             temp_path.unlink(missing_ok=True)
+        return len(payload)
 
-    def _atomic_write(self, file_path: Path, value: JSONValue, *, attempts: int = 8) -> None:
+    def _atomic_write(self, file_path: Path, value: JSONValue, *, attempts: int = 8) -> int:
         """Write ``value`` via temp + replace, retrying when a peer prunes the parent.
 
         After a persistence clear, concurrent fleet/scores puts share
         ``…/turns/N/analytics``. A pruner can remove that directory after
         ``_ensure_dir`` and before ``open`` / ``os.replace``, which raises
         ``FileNotFoundError`` with the destination path (e.g. ``fleet.json``).
+        Returns the byte size of the written file.
         """
         validate_no_reserved_at_keys(value)
-        for attempt in range(attempts):
+        for _ in range(attempts):
             try:
-                self._write_replaced(file_path, value)
-                return
+                return self._write_replaced(file_path, value)
             except FileNotFoundError:
-                if attempt + 1 >= attempts:
-                    relative_path = file_path.relative_to(self._root).as_posix()
-                    raise NotFoundError(f"Document not found: {relative_path!r}") from None
+                continue
+        relative_path = file_path.relative_to(self._root).as_posix()
+        raise NotFoundError(f"Document not found: {relative_path!r}")
 
     def _prune_empty_dirs(self, start: Path) -> None:
         current = start
