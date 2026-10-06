@@ -12,11 +12,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from api.config import get_config
 from api.errors import NotFoundError
 from api.storage.base import JSONValue
 from api.storage.boundaries import document_relpath
-from api.storage.document_lru import document_lru_for_root
+from api.storage.document_lru import DocumentCacheCaps, document_lru_for_root
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
@@ -24,19 +23,15 @@ class FileDocumentStore:
     """Breakpoint JSON files under one storage root.
 
     Owns atomic replace, delete and prune, directory listing, and the process
-    LRU for that root. ``read_document`` returns a copy. ``load_document``
+    LRU for that root. ``cache_caps`` is required and selects that LRU.
+    ``read_document`` returns a copy. ``load_document``
     returns the retained tree or the object just read from disk.
     ``replace_document`` persists the given object and keeps it in the LRU.
     """
 
-    def __init__(self, storage_root: Path) -> None:
+    def __init__(self, storage_root: Path, *, cache_caps: DocumentCacheCaps) -> None:
         self._root = storage_root
-        cfg = get_config()
-        self._document_lru = document_lru_for_root(
-            storage_root,
-            small_document_maxsize=cfg.storage_small_document_lru_maxsize,
-            large_document_maxsize=cfg.storage_large_document_lru_maxsize,
-        )
+        self._document_lru = document_lru_for_root(storage_root, cache_caps)
 
     def iter_document_paths(self) -> Iterator[str]:
         root = self._root

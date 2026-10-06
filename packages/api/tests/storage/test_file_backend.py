@@ -11,6 +11,7 @@ import pytest
 from api.errors import NotFoundError, ValidationError
 from api.storage.file import FileStorageBackend
 from api.storage.file_documents import FileDocumentStore
+from tests.file_storage_helpers import open_file_storage_backend
 
 GAME_INFO = "games/628580/info"
 TURN = "games/628580/1/turns/111"
@@ -23,7 +24,7 @@ def storage_root(tmp_path):
 
 @pytest.fixture
 def backend(storage_root):
-    return FileStorageBackend(storage_root)
+    return open_file_storage_backend(storage_root)
 
 
 def test_document_paths_on_disk(backend, storage_root):
@@ -59,8 +60,8 @@ def test_scores_inference_row_put_does_not_rewrite_sibling_file(backend, storage
 
 def test_concurrent_nested_puts_keep_sibling_keys(storage_root):
     """Overlapping read-modify-write of one breakpoint must not drop sibling keys."""
-    first = FileStorageBackend(storage_root)
-    second = FileStorageBackend(storage_root.resolve())
+    first = open_file_storage_backend(storage_root)
+    second = open_file_storage_backend(storage_root.resolve())
     document = f"{TURN}/analytics/homeworld-locator"
     first.put(document, {})
     errors: list[BaseException] = []

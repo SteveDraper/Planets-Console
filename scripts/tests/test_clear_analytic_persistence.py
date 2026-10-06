@@ -13,11 +13,13 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     PersistedFleetLedger,
 )
+from api.config import ApiConfig
 from api.errors import NotFoundError
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.base import StorageBackend
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
+from api.storage_factory import document_cache_caps_from_config
 from clear_analytic_persistence import (
     clear_analytic_persistence,
     parse_analytics_ids,
@@ -266,7 +268,10 @@ def test_analytics_filter_homeworld_turn_docs(storage: MemoryAssetBackend) -> No
 
 
 def test_file_backend_clear_removes_per_player_fleet_files(tmp_path) -> None:
-    storage = FileStorageBackend(tmp_path)
+    storage = FileStorageBackend(
+        tmp_path,
+        cache_caps=document_cache_caps_from_config(ApiConfig()),
+    )
     storage.put("games/628580/info", {"name": "test"})
     _put_fleet_ledger(storage, game_id=628580, perspective=1, turn=27, player_id=8)
     _put_fleet_ledger(storage, game_id=628580, perspective=1, turn=27, player_id=9)

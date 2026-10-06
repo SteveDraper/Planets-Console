@@ -11,8 +11,10 @@ including ``…/turns/{turn}/analytics/{id}``, are admitted.
 Admitted documents are split by file byte size at insert. Documents under
 128 KB use the small-document cache. Documents of 128 KB and above use the
 large-document cache. A later put that crosses the threshold moves the entry.
-``get`` finds the document in whichever cache holds it. Caps are required
-constructor arguments; they are not defaulted on this type.
+``get`` finds the document in whichever cache holds it. Openers pass
+``DocumentCacheCaps``. This module does not read process config, and the
+cache type does not default either cap. A later opener of the same resolved
+root with different caps raises ``ConflictError``.
 
 Listings are a separate map of filesystem prefix to child names. Successful
 put/delete of a document -- admitted or not -- drops ancestor prefix listings;
@@ -23,8 +25,10 @@ I/O installs only when that epoch is still current.
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
+from api.errors import ConflictError
 from api.lru_cache import LruCache
 from api.storage.base import JSONValue
 from api.storage.boundaries import _pattern_matches_path
@@ -38,6 +42,17 @@ _CREDENTIALS_PATTERN = ("credentials", "accounts", "*")
 
 _registry_lock = threading.Lock()
 _lrus_by_root: dict[str, FileBackendDocumentLru] = {}
+
+
+@dataclass(frozen=True)
+class DocumentCacheCaps:
+    """Entry caps for one root's small-document and large-document caches.
+
+    Both sizes are required. This type does not default either cap.
+    """
+
+    small_document_maxsize: int
+    large_document_maxsize: int
 
 
 def _path_segments(path: str) -> list[str]:
@@ -60,24 +75,36 @@ def _root_key(storage_root: Path) -> str:
 
 def document_lru_for_root(
     storage_root: Path,
-    *,
-    small_document_maxsize: int,
-    large_document_maxsize: int,
+    cache_caps: DocumentCacheCaps,
 ) -> FileBackendDocumentLru:
-    """Return the process LRU for ``storage_root``, creating it if needed.
+    """Return the process LRU for ``storage_root``, creating it when absent.
 
-    The first caller for a root constructs the cache with these caps. A later
-    caller for the same root receives that cache.
+    The first caller for a resolved root constructs the cache with ``cache_caps``.
+    A later caller with equal caps receives that cache. Different caps raise
+    ``ConflictError``.
     """
     key = _root_key(storage_root)
     with _registry_lock:
         existing = _lrus_by_root.get(key)
         if existing is None:
-            existing = FileBackendDocumentLru(
-                small_document_maxsize=small_document_maxsize,
-                large_document_maxsize=large_document_maxsize,
+            created = FileBackendDocumentLru(
+                small_document_maxsize=cache_caps.small_document_maxsize,
+                large_document_maxsize=cache_caps.large_document_maxsize,
             )
-            _lrus_by_root[key] = existing
+            _lrus_by_root[key] = created
+            return created
+        if (
+            existing._small_document_maxsize != cache_caps.small_document_maxsize
+            or existing._large_document_maxsize != cache_caps.large_document_maxsize
+        ):
+            raise ConflictError(
+                f"Document cache caps for storage root {key} are already "
+                f"small={existing._small_document_maxsize} "
+                f"large={existing._large_document_maxsize}; "
+                "this opener requested "
+                f"small={cache_caps.small_document_maxsize} "
+                f"large={cache_caps.large_document_maxsize}"
+            )
         return existing
 
 

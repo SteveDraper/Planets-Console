@@ -4,8 +4,8 @@ import json
 
 import pytest
 from api.services.store_service import StoreService
-from api.storage.file import FileStorageBackend
 
+from tests.file_storage_helpers import open_file_storage_backend
 from tests.inference_corpus.manifest import FIXTURES_ROOT
 from tests.inference_corpus.models import CaseOutcome
 from tests.inference_corpus.report import run_local_corpus
@@ -19,7 +19,7 @@ from tests.inference_corpus.storage_loader import (
 @pytest.fixture
 def local_corpus_storage(tmp_path):
     storage_root = tmp_path / "data"
-    backend = FileStorageBackend(storage_root)
+    backend = open_file_storage_backend(storage_root)
     fixture_game_root = FIXTURES_ROOT / "628580"
     backend.put("games/628580/info", json.loads((fixture_game_root / "info.json").read_text()))
     for turn_number in (2, 3):

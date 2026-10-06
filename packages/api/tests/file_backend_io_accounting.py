@@ -17,7 +17,8 @@ from typing import Any
 from unittest.mock import patch
 
 from api.storage.base import JSONValue, StorageBackend
-from api.storage.file import FileStorageBackend
+
+from tests.file_storage_helpers import open_file_storage_backend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -213,5 +214,5 @@ def count_file_backend_syscalls(counts: FileIoCounts) -> Iterator[FileIoCounts]:
 
 def make_counting_file_backend(storage_root: Path) -> tuple[CountingStorageBackend, FileIoCounts]:
     counts = FileIoCounts()
-    inner = FileStorageBackend(storage_root)
+    inner = open_file_storage_backend(storage_root)
     return CountingStorageBackend(inner, counts), counts

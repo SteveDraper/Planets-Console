@@ -40,6 +40,7 @@ from api.storage_factory import (
     production_migrations,
     production_storage_format,
 )
+from tests.file_storage_helpers import open_file_storage_backend
 from tests.fleet_fixtures import legacy_fleet_players_document
 
 _BACKEND_METHODS = frozenset({"get", "put", "delete", "list"})
@@ -116,7 +117,7 @@ def _open_scores(kind: str, root: Path, monkeypatch: pytest.MonkeyPatch):
             json.dumps({"inference_rows": {"4": ROW}, "kept": True}),
             encoding="utf-8",
         )
-        backend = FileStorageBackend(
+        backend = open_file_storage_backend(
             root,
             storage_format=_storage_format(patterns=patterns, migrations=migrations),
         )
@@ -153,7 +154,7 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
         backend.get(f"{SCORES}/inference_rows/999")
 
     if kind == "file":
-        FileStorageBackend(
+        open_file_storage_backend(
             root,
             storage_format=_storage_format(
                 patterns=BREAKPOINT_PATTERNS,
@@ -244,19 +245,19 @@ def test_new_directory_is_stamped_without_migrations(tmp_path, monkeypatch):
         wrapped,
     )
     root = tmp_path / "data"
-    file_backend = FileStorageBackend(root)
+    file_backend = open_file_storage_backend(root)
     memory_backend = MemoryAssetBackend(initial={})
     assert calls == []
     empty_stamp = {"version": DEFAULT_STORAGE_FORMAT.current_version}
     assert file_backend.get(STORAGE_VERSION_KEY) == empty_stamp
     assert memory_backend.get(STORAGE_VERSION_KEY) == empty_stamp
     assert DEFAULT_STORAGE_FORMAT.current_version == 0
-    FileStorageBackend(root)
+    open_file_storage_backend(root)
     assert calls == []
 
     bound = (fleet_storage_migration(),)
     bound_format = _storage_format(migrations=bound)
-    FileStorageBackend(tmp_path / "bound", storage_format=bound_format)
+    open_file_storage_backend(tmp_path / "bound", storage_format=bound_format)
     MemoryAssetBackend(initial={}, storage_format=bound_format)
     assert calls == []
 
@@ -331,8 +332,8 @@ def test_unversioned_ledgers_document_splits_on_open(kind, tmp_path, monkeypatch
         fleet_file = root / f"{FLEET}.json"
         fleet_file.parent.mkdir(parents=True)
         fleet_file.write_text(json.dumps(document), encoding="utf-8")
-        backend = FileStorageBackend(root, storage_format=storage_format)
-        FileStorageBackend(root, storage_format=storage_format)
+        backend = open_file_storage_backend(root, storage_format=storage_format)
+        open_file_storage_backend(root, storage_format=storage_format)
     assert calls == [1]
     assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
     with pytest.raises(NotFoundError):
@@ -469,7 +470,7 @@ def test_unreadable_stamp_is_not_rewritten(stamp, tmp_path):
     version_payload = json.dumps(stamp).encode() + b"\n"
     version.write_bytes(version_payload)
     with pytest.raises(UnhandledFormatError, match=_UNREADABLE_STAMP_DETAIL):
-        FileStorageBackend(root)
+        open_file_storage_backend(root)
     assert info_file.read_bytes() == payload
     assert version.read_bytes() == version_payload
 
@@ -495,7 +496,7 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         UnhandledFormatError,
         match="found version 0, minimum supported version 1",
     ):
-        FileStorageBackend(
+        open_file_storage_backend(
             root,
             storage_format=_storage_format(migrations=(_info_step(),), minimum_version=1),
         )
@@ -511,7 +512,7 @@ def test_directory_older_than_minimum_is_not_rewritten(tmp_path):
         UnhandledFormatError,
         match="found version unversioned, minimum supported version 1",
     ):
-        FileStorageBackend(
+        open_file_storage_backend(
             unversioned,
             storage_format=_storage_format(migrations=(_info_step(),), minimum_version=1),
         )
@@ -554,7 +555,7 @@ def test_directory_newer_than_current_is_not_rewritten(kind, tmp_path):
             UnhandledFormatError,
             match="found version 5, maximum supported version 1",
         ):
-            FileStorageBackend(root, storage_format=storage_format)
+            open_file_storage_backend(root, storage_format=storage_format)
         assert info.read_bytes() == payload
         assert version.read_bytes() == version_payload
     else:
@@ -575,7 +576,7 @@ def _storage_source_layer_violations(path: Path) -> list[str]:
     """Return forbidden module names referenced in ``path`` (imports, lazy or not)."""
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
-    forbidden_prefixes = ("api.analytics", "api.services", "api.storage_factory")
+    forbidden_prefixes = ("api.analytics", "api.services", "api.storage_factory", "api.config")
     hits: list[str] = []
 
     def _is_forbidden(name: str | None) -> bool:
@@ -600,7 +601,7 @@ def _storage_source_layer_violations(path: Path) -> list[str]:
     return list(dict.fromkeys(hits))
 
 
-def test_storage_package_does_not_import_analytics_services_or_factory():
+def test_storage_package_does_not_import_analytics_services_factory_or_config():
     storage_dir = Path(__file__).resolve().parents[2] / "api" / "storage"
     assert storage_dir.is_dir()
     offenders: list[str] = []
@@ -667,7 +668,7 @@ def test_production_open_splits_shared_scores_document(tmp_path):
     fleet_file = root / f"{FLEET}.json"
     fleet_file.parent.mkdir(parents=True)
     fleet_file.write_text(json.dumps({"ledgers": {"8": LEDGER_WIRE}}), encoding="utf-8")
-    backend = FileStorageBackend(root, storage_format=production_storage_format())
+    backend = open_file_storage_backend(root, storage_format=production_storage_format())
     assert backend.get(SCORES_ROW) == ROW
     assert backend.get(f"{SCORES}/inference_rows/5") == other
     with pytest.raises(NotFoundError):
@@ -693,7 +694,7 @@ def test_version_one_directory_splits_scores_without_rerunning_fleet(tmp_path):
     version_file = root / "meta" / "storage-version.json"
     version_file.parent.mkdir(parents=True)
     version_file.write_text(json.dumps({"version": 1}), encoding="utf-8")
-    backend = FileStorageBackend(root, storage_format=production_storage_format())
+    backend = open_file_storage_backend(root, storage_format=production_storage_format())
     assert backend.get(SCORES_ROW) == ROW
     assert not scores_file.exists()
     assert backend.get(FLEET) == fleet_parent
@@ -706,11 +707,11 @@ def test_default_format_opens_an_unversioned_directory(tmp_path):
     info.parent.mkdir(parents=True)
     payload = b'{"name": "keep"}\n'
     info.write_bytes(payload)
-    backend = FileStorageBackend(root)
+    backend = open_file_storage_backend(root)
     assert info.read_bytes() == payload
     assert not (root / "meta" / "storage-version.json").exists()
     assert backend.get("games/1/info") == {"name": "keep"}
-    FileStorageBackend(root)
+    open_file_storage_backend(root)
     assert info.read_bytes() == payload
     assert not (root / "meta" / "storage-version.json").exists()
 
@@ -754,7 +755,7 @@ def test_stale_players_document_with_unparseable_wire_is_deleted_on_open(kind, t
         fleet_file = root / f"{FLEET}.json"
         fleet_file.parent.mkdir(parents=True)
         fleet_file.write_text(json.dumps(document), encoding="utf-8")
-        backend = FileStorageBackend(root, storage_format=storage_format)
+        backend = open_file_storage_backend(root, storage_format=storage_format)
     store = _store(backend)
     assert not store.has_document(FLEET)
     fleet_children = [path for path in store.iter_document_paths() if path.startswith(f"{FLEET}/")]
@@ -775,7 +776,7 @@ def test_unversioned_players_document_splits_on_open(kind, tmp_path):
         fleet_file = root / f"{FLEET}.json"
         fleet_file.parent.mkdir(parents=True)
         fleet_file.write_text(json.dumps(document), encoding="utf-8")
-        backend = FileStorageBackend(root, storage_format=storage_format)
+        backend = open_file_storage_backend(root, storage_format=storage_format)
     assert backend.get(FLEET_PLAYER) == expected
     with pytest.raises(NotFoundError):
         backend.get(FLEET)
@@ -899,7 +900,7 @@ def test_document_store_read_returns_a_copy(kind, tmp_path):
     if kind == "memory":
         backend = MemoryAssetBackend(initial={})
     else:
-        backend = FileStorageBackend(tmp_path / "data")
+        backend = open_file_storage_backend(tmp_path / "data")
     store = _store(backend)
     store.write_document("games/1/info", {"name": "keep"})
     loaded = store.read_document("games/1/info")

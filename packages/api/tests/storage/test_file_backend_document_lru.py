@@ -8,14 +8,17 @@ from pathlib import Path
 
 import pytest
 from api.config import ApiConfig, get_config, set_config
-from api.errors import NotFoundError
+from api.errors import ConflictError, NotFoundError
 from api.storage.document_lru import (
     LARGE_DOCUMENT_MIN_BYTES,
+    DocumentCacheCaps,
     FileBackendDocumentLru,
     admits_breakpoint_document,
     document_lru_for_root,
 )
 from api.storage.file import FileStorageBackend
+from api.storage.file_documents import FileDocumentStore
+from api.storage_factory import clear_backend_cache, document_cache_caps_from_config, get_storage
 from tests.file_backend_io_accounting import (
     ANALYTICS_PREFIX,
     FLEET_KEY,
@@ -23,6 +26,7 @@ from tests.file_backend_io_accounting import (
     FileIoCounts,
     count_file_backend_syscalls,
 )
+from tests.file_storage_helpers import DEFAULT_DOCUMENT_CACHE_CAPS, open_file_storage_backend
 
 GAME_INFO = "games/628580/info"
 TURN = "games/628580/1/turns/111"
@@ -35,14 +39,12 @@ SCORES = f"{ANALYTICS_PREFIX}/scores"
 HOMEWORLD = f"{ANALYTICS_PREFIX}/homeworld-locator"
 
 
-def _lru(storage_root: Path) -> FileBackendDocumentLru:
-    """Return the process LRU for ``storage_root`` using the current config caps."""
-    cfg = get_config()
-    return document_lru_for_root(
-        storage_root,
-        small_document_maxsize=cfg.storage_small_document_lru_maxsize,
-        large_document_maxsize=cfg.storage_large_document_lru_maxsize,
-    )
+def _lru(
+    storage_root: Path,
+    cache_caps: DocumentCacheCaps = DEFAULT_DOCUMENT_CACHE_CAPS,
+) -> FileBackendDocumentLru:
+    """Return the process LRU for ``storage_root`` at ``cache_caps``."""
+    return document_lru_for_root(storage_root, cache_caps)
 
 
 def _document_lru(*, small: int, large: int) -> FileBackendDocumentLru:
@@ -59,7 +61,7 @@ def storage_root(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def backend(storage_root: Path) -> FileStorageBackend:
-    return FileStorageBackend(storage_root)
+    return open_file_storage_backend(storage_root)
 
 
 def test_admits_analytic_and_game_info_not_turn_or_credentials() -> None:
@@ -145,58 +147,94 @@ def test_credentials_are_not_retained(backend: FileStorageBackend, storage_root:
 
 
 def test_cache_caps_have_no_constructor_default() -> None:
-    parameters = inspect.signature(FileBackendDocumentLru.__init__).parameters
-    assert parameters["small_document_maxsize"].default is inspect.Parameter.empty
-    assert parameters["large_document_maxsize"].default is inspect.Parameter.empty
+    lru_parameters = inspect.signature(FileBackendDocumentLru.__init__).parameters
+    assert lru_parameters["small_document_maxsize"].default is inspect.Parameter.empty
+    assert lru_parameters["large_document_maxsize"].default is inspect.Parameter.empty
+    for cls in (FileStorageBackend, FileDocumentStore):
+        parameters = inspect.signature(cls.__init__).parameters
+        assert parameters["cache_caps"].default is inspect.Parameter.empty
 
 
-def test_absent_config_uses_dataclass_cache_caps(storage_root: Path) -> None:
+def test_get_storage_injects_config_cache_caps(tmp_path: Path) -> None:
+    root = tmp_path / "data"
     previous = get_config()
-    set_config(ApiConfig())
+    defaults = document_cache_caps_from_config(ApiConfig())
+    set_config(ApiConfig(storage_backend="file", storage_root=str(root)))
+    clear_backend_cache()
     try:
-        backend = FileStorageBackend(storage_root)
-        backend.put(FLEET, {"ledgers": {}})
-        lru = _lru(storage_root)
+        get_storage().put(FLEET, {"ledgers": {}})
+        lru = document_lru_for_root(root, defaults)
         assert lru.small_document_maxsize() == 256
         assert lru.large_document_maxsize() == 16
         assert lru.has_small_document(FLEET)
         assert not lru.has_large_document(FLEET)
     finally:
+        clear_backend_cache()
         set_config(previous)
+
+
+def test_get_storage_injects_overridden_cache_caps(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    previous = get_config()
+    caps = DocumentCacheCaps(small_document_maxsize=32, large_document_maxsize=4)
+    set_config(
+        ApiConfig(
+            storage_backend="file",
+            storage_root=str(root),
+            storage_small_document_lru_maxsize=caps.small_document_maxsize,
+            storage_large_document_lru_maxsize=caps.large_document_maxsize,
+        )
+    )
+    clear_backend_cache()
+    try:
+        get_storage()
+        lru = document_lru_for_root(root, caps)
+        assert lru.small_document_maxsize() == 32
+        assert lru.large_document_maxsize() == 4
+        with pytest.raises(ConflictError, match="small=32"):
+            document_lru_for_root(
+                root,
+                DocumentCacheCaps(small_document_maxsize=256, large_document_maxsize=16),
+            )
+    finally:
+        clear_backend_cache()
+        set_config(previous)
+
+
+def test_same_root_rejects_different_cache_caps(storage_root: Path) -> None:
+    caps = DocumentCacheCaps(small_document_maxsize=4, large_document_maxsize=2)
+    open_file_storage_backend(storage_root, cache_caps=caps)
+    open_file_storage_backend(storage_root.resolve(), cache_caps=caps)
+    with pytest.raises(ConflictError, match="small=4"):
+        open_file_storage_backend(
+            storage_root,
+            cache_caps=DocumentCacheCaps(small_document_maxsize=8, large_document_maxsize=2),
+        )
 
 
 def test_document_lru_evicts_past_small_maxsize(storage_root: Path) -> None:
-    previous = get_config()
     small_cap = 2
-    set_config(
-        ApiConfig(
-            storage_small_document_lru_maxsize=small_cap,
-            storage_large_document_lru_maxsize=2,
-        )
-    )
-    try:
-        backend = FileStorageBackend(storage_root)
-        keys = [f"games/628580/1/turns/1/analytics/doc-{index}" for index in range(small_cap + 1)]
-        for index, key in enumerate(keys):
-            backend.put(key, {"n": index})
-        lru = _lru(storage_root)
-        assert lru.small_document_count() == small_cap
-        assert lru.large_document_count() == 0
-        assert not lru.has_document(keys[0])
-        assert lru.has_document(keys[-1])
-        counts = FileIoCounts()
-        with count_file_backend_syscalls(counts):
-            assert backend.get(keys[0]) == {"n": 0}
-            assert backend.get(keys[-1]) == {"n": small_cap}
-        assert counts.json_load_calls == 1
-        assert counts.open_read_calls == 1
-    finally:
-        set_config(previous)
+    caps = DocumentCacheCaps(small_document_maxsize=small_cap, large_document_maxsize=2)
+    backend = open_file_storage_backend(storage_root, cache_caps=caps)
+    keys = [f"games/628580/1/turns/1/analytics/doc-{index}" for index in range(small_cap + 1)]
+    for index, key in enumerate(keys):
+        backend.put(key, {"n": index})
+    lru = _lru(storage_root, caps)
+    assert lru.small_document_count() == small_cap
+    assert lru.large_document_count() == 0
+    assert not lru.has_document(keys[0])
+    assert lru.has_document(keys[-1])
+    counts = FileIoCounts()
+    with count_file_backend_syscalls(counts):
+        assert backend.get(keys[0]) == {"n": 0}
+        assert backend.get(keys[-1]) == {"n": small_cap}
+    assert counts.json_load_calls == 1
+    assert counts.open_read_calls == 1
 
 
 def test_same_root_backends_share_hits(storage_root: Path) -> None:
-    first = FileStorageBackend(storage_root)
-    second = FileStorageBackend(storage_root.resolve())
+    first = open_file_storage_backend(storage_root)
+    second = open_file_storage_backend(storage_root.resolve())
     first.put(FLEET, {"shared": True})
     counts = FileIoCounts()
     with count_file_backend_syscalls(counts):
@@ -209,8 +247,8 @@ def test_same_root_backends_share_hits(storage_root: Path) -> None:
 def test_different_roots_do_not_share_entries(tmp_path: Path) -> None:
     root_a = tmp_path / "a"
     root_b = tmp_path / "b"
-    backend_a = FileStorageBackend(root_a)
-    backend_b = FileStorageBackend(root_b)
+    backend_a = open_file_storage_backend(root_a)
+    backend_b = open_file_storage_backend(root_b)
     backend_a.put(FLEET, {"root": "a"})
     backend_b.put(FLEET, {"root": "b"})
     assert backend_a.get(FLEET) == {"root": "a"}
@@ -323,7 +361,7 @@ def _json_string_file_size(text: str) -> int:
 
 
 def test_file_byte_size_selects_cache_and_put_can_cross(storage_root: Path) -> None:
-    backend = FileStorageBackend(storage_root)
+    backend = open_file_storage_backend(storage_root)
     under = "a" * (LARGE_DOCUMENT_MIN_BYTES - 4)
     at_threshold = "b" * (LARGE_DOCUMENT_MIN_BYTES - 3)
     assert _json_string_file_size(under) == LARGE_DOCUMENT_MIN_BYTES - 1
@@ -351,41 +389,32 @@ def test_file_byte_size_selects_cache_and_put_can_cross(storage_root: Path) -> N
 
 
 def test_small_roster_and_large_documents_do_not_evict_each_other(storage_root: Path) -> None:
-    previous = get_config()
-    set_config(
-        ApiConfig(
-            storage_small_document_lru_maxsize=2,
-            storage_large_document_lru_maxsize=1,
-        )
-    )
-    try:
-        backend = FileStorageBackend(storage_root)
-        large = "c" * (LARGE_DOCUMENT_MIN_BYTES - 3)
-        large_key = f"{ANALYTICS_PREFIX}/large"
-        small_keys = [f"{ANALYTICS_PREFIX}/small-{index}" for index in range(2)]
-        backend.put(large_key, large)
-        for key in small_keys:
-            backend.put(key, {"n": key})
-        lru = _lru(storage_root)
-        assert lru.large_document_count() == 1
-        assert lru.small_document_count() == 2
-        assert lru.has_large_document(large_key)
+    caps = DocumentCacheCaps(small_document_maxsize=2, large_document_maxsize=1)
+    backend = open_file_storage_backend(storage_root, cache_caps=caps)
+    large = "c" * (LARGE_DOCUMENT_MIN_BYTES - 3)
+    large_key = f"{ANALYTICS_PREFIX}/large"
+    small_keys = [f"{ANALYTICS_PREFIX}/small-{index}" for index in range(2)]
+    backend.put(large_key, large)
+    for key in small_keys:
+        backend.put(key, {"n": key})
+    lru = _lru(storage_root, caps)
+    assert lru.large_document_count() == 1
+    assert lru.small_document_count() == 2
+    assert lru.has_large_document(large_key)
 
-        backend.put(f"{ANALYTICS_PREFIX}/small-extra", {"n": "extra"})
-        assert lru.has_large_document(large_key)
-        assert lru.small_document_count() == 2
-        assert not lru.has_small_document(small_keys[0])
+    backend.put(f"{ANALYTICS_PREFIX}/small-extra", {"n": "extra"})
+    assert lru.has_large_document(large_key)
+    assert lru.small_document_count() == 2
+    assert not lru.has_small_document(small_keys[0])
 
-        second_large = f"{ANALYTICS_PREFIX}/large-2"
-        backend.put(second_large, large)
-        assert lru.has_large_document(second_large)
-        assert not lru.has_large_document(large_key)
-        assert lru.has_small_document(small_keys[1])
-        assert lru.has_small_document(f"{ANALYTICS_PREFIX}/small-extra")
-        counts = FileIoCounts()
-        with count_file_backend_syscalls(counts):
-            assert backend.get(small_keys[1]) == {"n": small_keys[1]}
-            assert backend.get(second_large) == large
-        assert counts.json_load_calls == 0
-    finally:
-        set_config(previous)
+    second_large = f"{ANALYTICS_PREFIX}/large-2"
+    backend.put(second_large, large)
+    assert lru.has_large_document(second_large)
+    assert not lru.has_large_document(large_key)
+    assert lru.has_small_document(small_keys[1])
+    assert lru.has_small_document(f"{ANALYTICS_PREFIX}/small-extra")
+    counts = FileIoCounts()
+    with count_file_backend_syscalls(counts):
+        assert backend.get(small_keys[1]) == {"n": small_keys[1]}
+        assert backend.get(second_large) == large
+    assert counts.json_load_calls == 0

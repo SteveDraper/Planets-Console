@@ -29,8 +29,9 @@ from api.serialization.inference_row_persistence import (
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.stack import build_service_stack
-from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
+
+from tests.file_storage_helpers import open_file_storage_backend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -83,7 +84,7 @@ def _cached_row(summary: str = "cached") -> PersistedInferenceRow:
 
 
 def test_delete_host_turn_document_removes_player_files_and_shared_document(tmp_path):
-    backend = FileStorageBackend(tmp_path)
+    backend = open_file_storage_backend(tmp_path)
     persistence = InferenceRowPersistenceService(backend)
     persistence.put_row(628580, 1, 111, 8, _cached_row())
     persistence.put_row(628580, 1, 111, 9, _cached_row("other"))
@@ -105,7 +106,7 @@ def test_delete_host_turn_document_removes_player_files_and_shared_document(tmp_
 
 
 def test_get_row_upgrades_legacy_row_in_that_players_file(tmp_path):
-    backend = FileStorageBackend(tmp_path)
+    backend = open_file_storage_backend(tmp_path)
     persistence = InferenceRowPersistenceService(backend)
     player_key = persistence.row_store_key(628580, 1, 111, 8)
     sibling_key = persistence.row_store_key(628580, 1, 111, 9)

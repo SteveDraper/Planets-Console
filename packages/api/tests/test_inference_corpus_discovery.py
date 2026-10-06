@@ -4,8 +4,8 @@ import json
 
 import pytest
 from api.services.store_service import StoreService
-from api.storage.file import FileStorageBackend
 
+from tests.file_storage_helpers import open_file_storage_backend
 from tests.inference_corpus.discovery import (
     discover_cases,
     discover_cases_for_game,
@@ -16,7 +16,7 @@ from tests.inference_corpus.manifest import FIXTURES_ROOT
 
 @pytest.fixture
 def discovery_storage(tmp_path):
-    backend = FileStorageBackend(tmp_path / "data")
+    backend = open_file_storage_backend(tmp_path / "data")
     fixture_game_root = FIXTURES_ROOT / "628580"
     info_src = fixture_game_root / "info.json"
     backend.put("games/628580/info", json.loads(info_src.read_text()))
@@ -39,7 +39,7 @@ def test_discover_cases_for_game_finds_consecutive_pairs(discovery_storage):
 
 
 def test_discover_cases_skips_non_consecutive_turn_gaps(tmp_path):
-    backend = FileStorageBackend(tmp_path / "data")
+    backend = open_file_storage_backend(tmp_path / "data")
     backend.put("games/99/info", {"settings": {}, "players": [{"id": 1}]})
     backend.put("games/99/1/turns/2", {"settings": {"turn": 2}})
     backend.put("games/99/1/turns/4", {"settings": {"turn": 4}})
@@ -71,7 +71,7 @@ def test_discover_cases_ignores_non_numeric_perspective_segments(discovery_stora
 
 
 def test_discover_cases_orders_host_turn_before_perspective(tmp_path):
-    backend = FileStorageBackend(tmp_path / "data")
+    backend = open_file_storage_backend(tmp_path / "data")
     backend.put("games/42/info", {"settings": {}, "players": [{"id": 1}, {"id": 2}]})
     for perspective in (1, 2):
         for turn_number in (1, 2, 3):

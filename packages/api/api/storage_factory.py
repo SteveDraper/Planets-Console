@@ -23,9 +23,10 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.scores.storage_migration import scores_inference_row_storage_migration
-from api.config import get_config
+from api.config import ApiConfig, get_config
 from api.services.stack import clear_process_service_stack
 from api.storage.base import StorageBackend
+from api.storage.document_lru import DocumentCacheCaps
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
 from api.storage.migrations import (
@@ -69,6 +70,14 @@ def _load_asset(path: Path | None) -> dict:
         return json.load(f)
 
 
+def document_cache_caps_from_config(cfg: ApiConfig) -> DocumentCacheCaps:
+    """Return the file-backend document cache caps declared on ``cfg``."""
+    return DocumentCacheCaps(
+        small_document_maxsize=cfg.storage_small_document_lru_maxsize,
+        large_document_maxsize=cfg.storage_large_document_lru_maxsize,
+    )
+
+
 def get_storage() -> StorageBackend:
     """Return the configured storage backend (cached per process)."""
     global _backend_cache
@@ -81,7 +90,11 @@ def get_storage() -> StorageBackend:
         initial = _load_asset(asset_path)
         _backend_cache = MemoryAssetBackend(initial=initial, storage_format=storage_format)
     elif cfg.storage_backend == "file":
-        _backend_cache = FileStorageBackend(Path(cfg.storage_root), storage_format=storage_format)
+        _backend_cache = FileStorageBackend(
+            Path(cfg.storage_root),
+            cache_caps=document_cache_caps_from_config(cfg),
+            storage_format=storage_format,
+        )
     else:
         raise ValueError(f"Unknown storage_backend: {cfg.storage_backend!r}")
     return _backend_cache

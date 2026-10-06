@@ -38,13 +38,17 @@ from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID  # no
 from api.analytics.fleet.constants import FLEET_EVIDENCE_MARK_SEGMENT  # noqa: E402
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService  # noqa: E402
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID  # noqa: E402
+from api.config import get_config  # noqa: E402
 from api.errors import NotFoundError  # noqa: E402
 from api.services.inference_row_persistence_service import (  # noqa: E402
     InferenceRowPersistenceService,
 )
 from api.storage.base import StorageBackend  # noqa: E402
 from api.storage.file import FileStorageBackend  # noqa: E402
-from api.storage_factory import production_storage_format  # noqa: E402
+from api.storage_factory import (  # noqa: E402
+    document_cache_caps_from_config,
+    production_storage_format,
+)
 
 WILDCARD = "*"
 _HULL_MASKS_KEY = "inference_hull_catalog_masks"
@@ -605,6 +609,7 @@ def main(
 
     storage = FileStorageBackend(
         storage_root.resolve(),
+        cache_caps=document_cache_caps_from_config(get_config()),
         storage_format=production_storage_format(),
     )
     result = clear_analytic_persistence(

@@ -66,8 +66,9 @@ from api.concepts.homeworld_layout import (
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_from_json
-from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
+
+from tests.file_storage_helpers import open_file_storage_backend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -248,7 +249,7 @@ def test_persistence_round_trip_ephemeral(persistence) -> None:
 
 
 def test_persistence_round_trip_file(tmp_path, sample_turn) -> None:
-    backend = FileStorageBackend(tmp_path)
+    backend = open_file_storage_backend(tmp_path)
     persistence = HomeworldLocatorPersistenceService(backend)
     state = HomeworldLocatorGameState(
         candidates=(
@@ -265,7 +266,7 @@ def test_persistence_round_trip_file(tmp_path, sample_turn) -> None:
     floor = HomeworldEvidenceAggregate(turn=1, baseline_turn=1)
     persistence.put_baseline(628580, 1, state, floor)
 
-    reloaded = HomeworldLocatorPersistenceService(FileStorageBackend(tmp_path))
+    reloaded = HomeworldLocatorPersistenceService(open_file_storage_backend(tmp_path))
     assert reloaded.get_game_state(628580) == state
     assert reloaded.get_evidence_aggregate(628580, 1, 1) == floor
 
