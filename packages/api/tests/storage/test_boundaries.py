@@ -6,6 +6,7 @@ import pytest
 from api.errors import ValidationError
 from api.storage.boundaries import (
     BREAKPOINT_PATTERNS,
+    FLEET_LEDGER_PATTERN,
     SCORES_INFERENCE_ROW_PATTERN,
     document_relpath,
     is_navigable_prefix,
@@ -139,7 +140,6 @@ def test_is_registered_path_rejects_unsafe_segments():
     assert not is_registered_path("games/../info")
 
 
-_FLEET_PLAYER_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "fleet", "*")
 _ANALYTICS_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "*")
 
 
@@ -147,7 +147,7 @@ def test_rehome_source_is_the_longest_registered_prefix():
     assert rehome_source_patterns(SCORES_INFERENCE_ROW_PATTERN, BREAKPOINT_PATTERNS) == (
         _ANALYTICS_PATTERN,
     )
-    assert rehome_source_patterns(_FLEET_PLAYER_PATTERN, BREAKPOINT_PATTERNS) == (
+    assert rehome_source_patterns(FLEET_LEDGER_PATTERN, BREAKPOINT_PATTERNS) == (
         _ANALYTICS_PATTERN,
     )
 
@@ -176,15 +176,15 @@ def test_rehome_candidate_excludes_ancestors_and_siblings():
         scores_sources,
     )
 
-    fleet_sources = rehome_source_patterns(_FLEET_PLAYER_PATTERN, BREAKPOINT_PATTERNS)
+    fleet_sources = rehome_source_patterns(FLEET_LEDGER_PATTERN, BREAKPOINT_PATTERNS)
     assert is_rehome_candidate(
         "games/1/1/turns/3/analytics/fleet",
-        _FLEET_PLAYER_PATTERN,
+        FLEET_LEDGER_PATTERN,
         fleet_sources,
     )
-    assert not is_rehome_candidate("games/1/1/turns/3", _FLEET_PLAYER_PATTERN, fleet_sources)
+    assert not is_rehome_candidate("games/1/1/turns/3", FLEET_LEDGER_PATTERN, fleet_sources)
     assert not is_rehome_candidate(
         "games/1/1/turns/3/analytics/scores",
-        _FLEET_PLAYER_PATTERN,
+        FLEET_LEDGER_PATTERN,
         fleet_sources,
     )

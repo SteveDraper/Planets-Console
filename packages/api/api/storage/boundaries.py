@@ -9,6 +9,19 @@ from pathlib import Path
 
 from api.errors import ValidationError
 
+# One fleet ledger. Longer than ``…/analytics/*``, so the player id is
+# the document, not a suffix of the shared turn fleet file.
+FLEET_LEDGER_PATTERN: tuple[str, ...] = (
+    "games",
+    "*",
+    "*",
+    "turns",
+    "*",
+    "analytics",
+    "fleet",
+    "*",
+)
+
 # One scores inference row. Longer than ``…/analytics/*``, so the player id is
 # the document, not a suffix of the shared turn scores file.
 SCORES_INFERENCE_ROW_PATTERN: tuple[str, ...] = (
@@ -31,7 +44,7 @@ BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("games", "*", "*", "analytics", "fleet-evidence", "*"),
     ("games", "*", "*", "turns", "*"),
     ("games", "*", "*", "turns", "*", "analytics", "*"),
-    ("games", "*", "*", "turns", "*", "analytics", "fleet", "*"),
+    FLEET_LEDGER_PATTERN,
     SCORES_INFERENCE_ROW_PATTERN,
     ("credentials", "accounts", "*"),
     ("league-teams", "*"),

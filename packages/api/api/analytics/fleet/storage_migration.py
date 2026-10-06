@@ -25,6 +25,7 @@ from api.analytics.fleet.serialization import (
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.exceptions import ValidationError
 from api.storage.base import JSONValue
+from api.storage.boundaries import FLEET_LEDGER_PATTERN
 from api.storage.migrations import MigrationContext, StorageMigration
 
 # Shared-turn document keys. ``ledgers`` is the map split into per-player files.
@@ -34,7 +35,6 @@ _FLEET_PLAYERS_KEY = "players"
 
 # Exact shared turn document, before the per-player breakpoint.
 _FLEET_PARENT_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "fleet")
-_FLEET_PLAYER_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "fleet", "*")
 
 
 def migrate_fleet_breakpoint(context: MigrationContext) -> None:
@@ -62,7 +62,7 @@ def fleet_storage_migration() -> StorageMigration:
     """Return the fleet step that brings a directory to storage version 1."""
     return StorageMigration(
         version=1,
-        introduced_pattern=_FLEET_PLAYER_PATTERN,
+        introduced_pattern=FLEET_LEDGER_PATTERN,
         structural_handler=migrate_fleet_breakpoint,
     )
 
