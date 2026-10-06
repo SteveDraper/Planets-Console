@@ -25,11 +25,11 @@ from api.analytics.fleet.types import (
 )
 from api.errors import NotFoundError
 from api.storage.breakpoint_backend import BreakpointDocumentBackend
-from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend, MemoryDocumentStore
 from api.storage.migrations import DEFAULT_STORAGE_FORMAT, open_store
 
 from tests.file_backend_io_accounting import CountingStorageBackend, FileIoCounts
+from tests.file_storage_helpers import open_file_storage_backend
 from tests.fleet_fixtures import legacy_fleet_ledgers_document, legacy_fleet_players_document
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -292,7 +292,7 @@ def test_delete_snapshot_removes_all_player_ledgers(persistence, memory_backend,
 
 def test_delete_last_ledger_prunes_empty_dirs_on_file_backend(tmp_path, sample_ledger):
     storage_root = tmp_path / "data"
-    backend = FileStorageBackend(storage_root)
+    backend = open_file_storage_backend(storage_root)
     persistence = FleetSnapshotPersistenceService(backend)
     other_ledger = FleetAcquisitionLedger(player_id=3, player_name="other")
     persistence.put_ledger(628580, 1, 111, 8, PersistedFleetLedger(ledger=sample_ledger))

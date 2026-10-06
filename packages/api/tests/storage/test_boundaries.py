@@ -6,6 +6,8 @@ import pytest
 from api.errors import ValidationError
 from api.storage.boundaries import (
     BREAKPOINT_PATTERNS,
+    FLEET_LEDGER_PATTERN,
+    SCORES_INFERENCE_ROW_PATTERN,
     document_relpath,
     is_navigable_prefix,
     is_registered_path,
@@ -58,9 +60,10 @@ def test_resolve_breakpoint_perspective_analytic_persistence():
 
 
 def test_resolve_breakpoint_turn_scoped_scores_inference_row():
-    bp, suffix = resolve_breakpoint("games/628580/1/turns/111/analytics/scores/inference_rows/8")
-    assert bp == "games/628580/1/turns/111/analytics/scores"
-    assert suffix == "inference_rows/8"
+    path = "games/628580/1/turns/111/analytics/scores/inference_rows/8"
+    bp, suffix = resolve_breakpoint(path)
+    assert bp == path
+    assert suffix is None
 
 
 def test_resolve_breakpoint_turn_scoped_fleet_snapshot():
@@ -137,60 +140,51 @@ def test_is_registered_path_rejects_unsafe_segments():
     assert not is_registered_path("games/../info")
 
 
-_SCORES_PLAYER_PATTERN = (
-    "games",
-    "*",
-    "*",
-    "turns",
-    "*",
-    "analytics",
-    "scores",
-    "inference_rows",
-    "*",
-)
-_FLEET_PLAYER_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "fleet", "*")
 _ANALYTICS_PATTERN = ("games", "*", "*", "turns", "*", "analytics", "*")
-_SCORES_PATTERNS = BREAKPOINT_PATTERNS + (_SCORES_PLAYER_PATTERN,)
 
 
 def test_rehome_source_is_the_longest_registered_prefix():
-    assert rehome_source_patterns(_SCORES_PLAYER_PATTERN, _SCORES_PATTERNS) == (_ANALYTICS_PATTERN,)
-    assert rehome_source_patterns(_FLEET_PLAYER_PATTERN, BREAKPOINT_PATTERNS) == (
+    assert rehome_source_patterns(SCORES_INFERENCE_ROW_PATTERN, BREAKPOINT_PATTERNS) == (
+        _ANALYTICS_PATTERN,
+    )
+    assert rehome_source_patterns(FLEET_LEDGER_PATTERN, BREAKPOINT_PATTERNS) == (
         _ANALYTICS_PATTERN,
     )
 
 
 def test_rehome_candidate_excludes_ancestors_and_siblings():
-    scores_sources = rehome_source_patterns(_SCORES_PLAYER_PATTERN, _SCORES_PATTERNS)
+    scores_sources = rehome_source_patterns(SCORES_INFERENCE_ROW_PATTERN, BREAKPOINT_PATTERNS)
     scores_parent = "games/7/1/turns/3/analytics/scores"
-    assert is_rehome_candidate(scores_parent, _SCORES_PLAYER_PATTERN, scores_sources)
-    assert not is_rehome_candidate("games/7/1/turns/9", _SCORES_PLAYER_PATTERN, scores_sources)
+    assert is_rehome_candidate(scores_parent, SCORES_INFERENCE_ROW_PATTERN, scores_sources)
+    assert not is_rehome_candidate(
+        "games/7/1/turns/9", SCORES_INFERENCE_ROW_PATTERN, scores_sources
+    )
     assert not is_rehome_candidate(
         "games/7/1/turns/3/analytics/fleet",
-        _SCORES_PLAYER_PATTERN,
+        SCORES_INFERENCE_ROW_PATTERN,
         scores_sources,
     )
     assert not is_rehome_candidate(
         f"{scores_parent}/inference_rows/4",
-        _SCORES_PLAYER_PATTERN,
+        SCORES_INFERENCE_ROW_PATTERN,
         scores_sources,
     )
-    assert not is_rehome_candidate("games/7/info", _SCORES_PLAYER_PATTERN, scores_sources)
+    assert not is_rehome_candidate("games/7/info", SCORES_INFERENCE_ROW_PATTERN, scores_sources)
     assert not is_rehome_candidate(
         "meta/storage-version",
-        _SCORES_PLAYER_PATTERN,
+        SCORES_INFERENCE_ROW_PATTERN,
         scores_sources,
     )
 
-    fleet_sources = rehome_source_patterns(_FLEET_PLAYER_PATTERN, BREAKPOINT_PATTERNS)
+    fleet_sources = rehome_source_patterns(FLEET_LEDGER_PATTERN, BREAKPOINT_PATTERNS)
     assert is_rehome_candidate(
         "games/1/1/turns/3/analytics/fleet",
-        _FLEET_PLAYER_PATTERN,
+        FLEET_LEDGER_PATTERN,
         fleet_sources,
     )
-    assert not is_rehome_candidate("games/1/1/turns/3", _FLEET_PLAYER_PATTERN, fleet_sources)
+    assert not is_rehome_candidate("games/1/1/turns/3", FLEET_LEDGER_PATTERN, fleet_sources)
     assert not is_rehome_candidate(
         "games/1/1/turns/3/analytics/scores",
-        _FLEET_PLAYER_PATTERN,
+        FLEET_LEDGER_PATTERN,
         fleet_sources,
     )

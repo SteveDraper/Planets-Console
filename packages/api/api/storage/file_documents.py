@@ -15,7 +15,7 @@ from pathlib import Path
 from api.errors import NotFoundError
 from api.storage.base import JSONValue
 from api.storage.boundaries import document_relpath
-from api.storage.document_lru import document_lru_for_root
+from api.storage.document_lru import DocumentCacheCaps, document_lru_for_root
 from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
@@ -23,14 +23,15 @@ class FileDocumentStore:
     """Breakpoint JSON files under one storage root.
 
     Owns atomic replace, delete and prune, directory listing, and the process
-    LRU for that root. ``read_document`` returns a copy. ``load_document``
+    LRU for that root. ``cache_caps`` is required and selects that LRU.
+    ``read_document`` returns a copy. ``load_document``
     returns the retained tree or the object just read from disk.
     ``replace_document`` persists the given object and keeps it in the LRU.
     """
 
-    def __init__(self, storage_root: Path) -> None:
+    def __init__(self, storage_root: Path, *, cache_caps: DocumentCacheCaps) -> None:
         self._root = storage_root
-        self._document_lru = document_lru_for_root(storage_root)
+        self._document_lru = document_lru_for_root(storage_root, cache_caps)
 
     def iter_document_paths(self) -> Iterator[str]:
         root = self._root
@@ -54,8 +55,13 @@ class FileDocumentStore:
 
     def replace_document(self, breakpoint_path: str, value: JSONValue) -> None:
         """Persist ``value`` and retain that same object in the LRU."""
-        self._atomic_write(self._document_file(breakpoint_path), value)
-        self._document_lru.remember_document(breakpoint_path, value)
+        file_path = self._document_file(breakpoint_path)
+        byte_size = self._atomic_write(file_path, value)
+        self._document_lru.remember_document(
+            breakpoint_path,
+            value,
+            byte_size=byte_size,
+        )
 
     def remove_document(self, breakpoint_path: str) -> None:
         file_path = self._document_file(breakpoint_path)
@@ -76,13 +82,19 @@ class FileDocumentStore:
             return cached
         file_path = self._document_file(breakpoint_path)
         try:
-            with open(file_path, encoding="utf-8") as handle:
-                loaded = json.load(handle)
+            with open(file_path, "rb") as handle:
+                raw = handle.read()
         except FileNotFoundError:
             # Concurrent delete/prune can unlink between a peer's write and this
             # open (same race as ``_ensure_dir`` after a persistence clear).
             raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
-        self._document_lru.fill_document(breakpoint_path, loaded, epoch=epoch)
+        loaded = json.loads(raw)
+        self._document_lru.fill_document(
+            breakpoint_path,
+            loaded,
+            epoch=epoch,
+            byte_size=len(raw),
+        )
         return loaded
 
     @contextmanager
@@ -125,36 +137,38 @@ class FileDocumentStore:
             raise last_error
         path.mkdir(parents=True, exist_ok=True)
 
-    def _write_replaced(self, file_path: Path, value: JSONValue) -> None:
+    def _write_replaced(self, file_path: Path, value: JSONValue) -> int:
+        """Atomically replace ``file_path`` and return its byte size."""
         self._ensure_dir(file_path.parent)
+        payload = (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
         temp_path = file_path.with_name(
             f".{file_path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
         )
         try:
-            with open(temp_path, "w", encoding="utf-8") as handle:
-                json.dump(value, handle, ensure_ascii=False)
-                handle.write("\n")
+            with open(temp_path, "wb") as handle:
+                handle.write(payload)
             os.replace(temp_path, file_path)
         finally:
             temp_path.unlink(missing_ok=True)
+        return len(payload)
 
-    def _atomic_write(self, file_path: Path, value: JSONValue, *, attempts: int = 8) -> None:
+    def _atomic_write(self, file_path: Path, value: JSONValue, *, attempts: int = 8) -> int:
         """Write ``value`` via temp + replace, retrying when a peer prunes the parent.
 
         After a persistence clear, concurrent fleet/scores puts share
         ``…/turns/N/analytics``. A pruner can remove that directory after
         ``_ensure_dir`` and before ``open`` / ``os.replace``, which raises
         ``FileNotFoundError`` with the destination path (e.g. ``fleet.json``).
+        Returns the byte size of the written file.
         """
         validate_no_reserved_at_keys(value)
-        for attempt in range(attempts):
+        for _ in range(attempts):
             try:
-                self._write_replaced(file_path, value)
-                return
+                return self._write_replaced(file_path, value)
             except FileNotFoundError:
-                if attempt + 1 >= attempts:
-                    relative_path = file_path.relative_to(self._root).as_posix()
-                    raise NotFoundError(f"Document not found: {relative_path!r}") from None
+                continue
+        relative_path = file_path.relative_to(self._root).as_posix()
+        raise NotFoundError(f"Document not found: {relative_path!r}")
 
     def _prune_empty_dirs(self, start: Path) -> None:
         current = start

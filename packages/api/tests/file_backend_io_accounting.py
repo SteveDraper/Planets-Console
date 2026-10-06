@@ -17,7 +17,8 @@ from typing import Any
 from unittest.mock import patch
 
 from api.storage.base import JSONValue, StorageBackend
-from api.storage.file import FileStorageBackend
+
+from tests.file_storage_helpers import open_file_storage_backend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -53,6 +54,7 @@ class FileIoCounts:
     open_write_calls: int = 0
     json_load_calls: int = 0
     json_dump_calls: int = 0
+    stat_calls: int = 0
     iterdir_calls: int = 0
     is_dir_calls: int = 0
     is_file_calls: int = 0
@@ -69,6 +71,7 @@ class FileIoCounts:
         self.open_write_calls = 0
         self.json_load_calls = 0
         self.json_dump_calls = 0
+        self.stat_calls = 0
         self.iterdir_calls = 0
         self.is_dir_calls = 0
         self.is_file_calls = 0
@@ -90,6 +93,7 @@ class FileIoCounts:
             "open_write": self.open_write_calls,
             "json_load": self.json_load_calls,
             "json_dump": self.json_dump_calls,
+            "stat": self.stat_calls,
             "iterdir": self.iterdir_calls,
             "is_dir": self.is_dir_calls,
             "is_file": self.is_file_calls,
@@ -165,11 +169,12 @@ def seed_file_store_tree(
 def count_file_backend_syscalls(counts: FileIoCounts) -> Iterator[FileIoCounts]:
     """Count open / json / iterdir / stat used by ``api.storage.file_documents``."""
     real_open = open
-    real_json_load = json.load
-    real_json_dump = json.dump
+    real_json_loads = json.loads
+    real_json_dumps = json.dumps
     real_iterdir = Path.iterdir
     real_is_dir = Path.is_dir
     real_is_file = Path.is_file
+    real_stat = Path.stat
 
     def counting_open(path: Any, *args: Any, **kwargs: Any) -> Any:
         counts.open_calls += 1
@@ -180,13 +185,17 @@ def count_file_backend_syscalls(counts: FileIoCounts) -> Iterator[FileIoCounts]:
             counts.open_read_calls += 1
         return real_open(path, *args, **kwargs)
 
-    def counting_json_load(*args: Any, **kwargs: Any) -> Any:
+    def counting_json_loads(*args: Any, **kwargs: Any) -> Any:
         counts.json_load_calls += 1
-        return real_json_load(*args, **kwargs)
+        return real_json_loads(*args, **kwargs)
 
-    def counting_json_dump(*args: Any, **kwargs: Any) -> Any:
+    def counting_json_dumps(*args: Any, **kwargs: Any) -> Any:
         counts.json_dump_calls += 1
-        return real_json_dump(*args, **kwargs)
+        return real_json_dumps(*args, **kwargs)
+
+    def counting_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        counts.stat_calls += 1
+        return real_stat(self, *args, **kwargs)
 
     def counting_iterdir(self: Path) -> Any:
         counts.iterdir_calls += 1
@@ -202,16 +211,17 @@ def count_file_backend_syscalls(counts: FileIoCounts) -> Iterator[FileIoCounts]:
 
     with (
         patch("api.storage.file_documents.open", counting_open),
-        patch("api.storage.file_documents.json.load", counting_json_load),
-        patch("api.storage.file_documents.json.dump", counting_json_dump),
+        patch("api.storage.file_documents.json.loads", counting_json_loads),
+        patch("api.storage.file_documents.json.dumps", counting_json_dumps),
         patch.object(Path, "iterdir", counting_iterdir),
         patch.object(Path, "is_dir", counting_is_dir),
         patch.object(Path, "is_file", counting_is_file),
+        patch.object(Path, "stat", counting_stat),
     ):
         yield counts
 
 
 def make_counting_file_backend(storage_root: Path) -> tuple[CountingStorageBackend, FileIoCounts]:
     counts = FileIoCounts()
-    inner = FileStorageBackend(storage_root)
+    inner = open_file_storage_backend(storage_root)
     return CountingStorageBackend(inner, counts), counts

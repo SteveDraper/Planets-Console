@@ -11,6 +11,7 @@ import pytest
 from api.errors import NotFoundError, ValidationError
 from api.storage.file import FileStorageBackend
 from api.storage.file_documents import FileDocumentStore
+from tests.file_storage_helpers import open_file_storage_backend
 
 GAME_INFO = "games/628580/info"
 TURN = "games/628580/1/turns/111"
@@ -23,7 +24,7 @@ def storage_root(tmp_path):
 
 @pytest.fixture
 def backend(storage_root):
-    return FileStorageBackend(storage_root)
+    return open_file_storage_backend(storage_root)
 
 
 def test_document_paths_on_disk(backend, storage_root):
@@ -38,23 +39,37 @@ def test_document_paths_on_disk(backend, storage_root):
     assert json.loads(turn_path.read_text(encoding="utf-8")) == {"turn": 111}
 
 
-def test_concurrent_nested_puts_keep_sibling_keys(storage_root):
-    """Overlapping read-modify-write of one breakpoint must not drop sibling keys.
-
-    Scores inference rows share one turn document. Map ensure writes many of
-    those rows at once; a stale replace used to delete a just-written admission
-    skip and fail scores tier_solve with no attachable RowRun.
-    """
-    first = FileStorageBackend(storage_root)
-    second = FileStorageBackend(storage_root.resolve())
+def test_scores_inference_row_put_does_not_rewrite_sibling_file(backend, storage_root):
+    """Each scores inference row is its own file. A put of one player leaves the other."""
     document = f"{TURN}/analytics/scores"
-    first.put(document, {"inference_rows": {}})
+    row_one = f"{document}/inference_rows/1"
+    row_two = f"{document}/inference_rows/2"
+    backend.put(row_one, {"status": "exact", "n": 1})
+    backend.put(row_two, {"status": "exact", "n": 2})
+    file_one = storage_root / f"{row_one}.json"
+    file_two = storage_root / f"{row_two}.json"
+    assert file_one.is_file()
+    assert file_two.is_file()
+    assert not (storage_root / f"{document}.json").exists()
+    sibling_bytes = file_two.read_bytes()
+    backend.put(row_one, {"status": "exact", "n": 1, "updated": True})
+    assert file_two.read_bytes() == sibling_bytes
+    assert backend.get(row_two) == {"status": "exact", "n": 2}
+    assert json.loads(file_one.read_text(encoding="utf-8"))["updated"] is True
+
+
+def test_concurrent_nested_puts_keep_sibling_keys(storage_root):
+    """Overlapping read-modify-write of one breakpoint must not drop sibling keys."""
+    first = open_file_storage_backend(storage_root)
+    second = open_file_storage_backend(storage_root.resolve())
+    document = f"{TURN}/analytics/homeworld-locator"
+    first.put(document, {})
     errors: list[BaseException] = []
 
     def write(storage: FileStorageBackend, player_id: int) -> None:
         try:
             storage.put(
-                f"{document}/inference_rows/{player_id}",
+                f"{document}/notes/{player_id}",
                 {"status": "full_alliance", "n": player_id},
             )
         except BaseException as exc:
@@ -74,7 +89,7 @@ def test_concurrent_nested_puts_keep_sibling_keys(storage_root):
 
     assert errors == []
     for player_id in range(48):
-        stored = first.get(f"{document}/inference_rows/{player_id}")
+        stored = first.get(f"{document}/notes/{player_id}")
         assert stored == {"status": "full_alliance", "n": player_id}
 
 

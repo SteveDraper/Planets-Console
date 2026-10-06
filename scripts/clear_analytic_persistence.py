@@ -38,17 +38,20 @@ from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID  # no
 from api.analytics.fleet.constants import FLEET_EVIDENCE_MARK_SEGMENT  # noqa: E402
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService  # noqa: E402
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID  # noqa: E402
+from api.config import get_config  # noqa: E402
 from api.errors import NotFoundError  # noqa: E402
 from api.services.inference_row_persistence_service import (  # noqa: E402
     InferenceRowPersistenceService,
 )
 from api.storage.base import StorageBackend  # noqa: E402
 from api.storage.file import FileStorageBackend  # noqa: E402
-from api.storage_factory import production_storage_format  # noqa: E402
+from api.storage_factory import (  # noqa: E402
+    document_cache_caps_from_config,
+    production_storage_format,
+)
 
 WILDCARD = "*"
 _HULL_MASKS_KEY = "inference_hull_catalog_masks"
-_INFERENCE_ROWS_KEY = "inference_rows"
 
 app = typer.Typer(
     add_completion=False,
@@ -243,12 +246,51 @@ def _clear_turn_analytics_for_all_players(
                     result=result,
                 )
                 continue
+            if analytic_id == SCORES_ANALYTIC_ID:
+                _clear_scores_turn(
+                    storage,
+                    game_id=game_id,
+                    perspective=perspective,
+                    turn_number=turn_number,
+                    dry_run=dry_run,
+                    result=result,
+                )
+                continue
             _delete_document(
                 storage,
                 f"{analytics_prefix}/{analytic_id}",
                 dry_run=dry_run,
                 result=result,
             )
+
+
+def _clear_scores_turn(
+    storage: StorageBackend,
+    *,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    dry_run: bool,
+    result: ClearAnalyticPersistenceResult,
+) -> None:
+    """Delete player row files and the shared scores breakpoint at one turn.
+
+    That path remains a writable document; migration removes it on open.
+    """
+    scores = InferenceRowPersistenceService(storage)
+    for row_key in scores.row_keys_for_host_turn(game_id, perspective, turn_number):
+        _delete_document(
+            storage,
+            row_key,
+            dry_run=dry_run,
+            result=result,
+        )
+    _delete_document(
+        storage,
+        scores.host_turn_document_key(game_id, perspective, turn_number),
+        dry_run=dry_run,
+        result=result,
+    )
 
 
 def _clear_scores_player_rows(
@@ -278,8 +320,7 @@ def _clear_scores_player_rows(
             continue
         scores.delete_row(game_id, perspective, turn_number, player_id)
         result.deleted_player_entries.append(row_key)
-        remaining = _list_segments(storage, f"{document_key}/{_INFERENCE_ROWS_KEY}")
-        if not remaining:
+        if not scores.row_keys_for_host_turn(game_id, perspective, turn_number):
             _delete_document(storage, document_key, dry_run=False, result=result)
 
 
@@ -567,6 +608,7 @@ def main(
 
     storage = FileStorageBackend(
         storage_root.resolve(),
+        cache_caps=document_cache_caps_from_config(get_config()),
         storage_format=production_storage_format(),
     )
     result = clear_analytic_persistence(

@@ -59,6 +59,18 @@ class ApiConfig:
     storage_asset_path: str | None = None
     """Optional path to JSON asset for ephemeral backend. If unset, store starts empty."""
 
+    storage_small_document_lru_maxsize: int = 256
+    """File-backend cache entries for breakpoint documents under 128 KB.
+
+    Absent YAML leaves this default. The cache is built with the resolved int.
+    """
+
+    storage_large_document_lru_maxsize: int = 16
+    """File-backend cache entries for breakpoint documents of 128 KB and above.
+
+    Absent YAML leaves this default. The cache is built with the resolved int.
+    """
+
     include_dummy_data: bool = False
     """Seed the store with sample game data on startup. For development/testing only."""
 

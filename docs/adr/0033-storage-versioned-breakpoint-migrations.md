@@ -6,7 +6,7 @@ Breakpoint layout is a property of the data directory, not of the analytic that 
 
 An empty directory is stamped with the current version and does not run migrations. A directory at an older supported version runs the remaining steps in order, then stamps the current version. A directory older than the minimum still supported raises an unhandled-format error and is left unchanged. Raising that minimum and deleting the step is how a migration is removed.
 
-A step either re-homes an unchanged logical key onto a longer breakpoint, or calls a structural handler registered by the analytic that owns the document shape. The handler sees JSON documents and keys. Fleet's `players` / `ledgers` turn document becomes per-player `.../analytics/fleet/{playerId}` documents in that handler. After the directory is current, fleet persistence does not probe the old key. Scores `inference_rows/{playerId}` is the shape a later generic re-home would use; this decision does not perform that move. Row-content stamps stay in the analytic.
+A step either re-homes an unchanged logical key onto a longer breakpoint, or calls a structural handler registered by the analytic that owns the document shape. The handler sees JSON documents and keys. Fleet's `players` / `ledgers` turn document becomes per-player `.../analytics/fleet/{playerId}` documents in that handler. After the directory is current, fleet persistence does not probe the old key. Scores `inference_rows/{playerId}` is a generic re-home of the unchanged logical key onto `.../analytics/scores/inference_rows/{playerId}` (storage version 2, after the fleet step). After the directory is current, scores persistence does not probe the shared document. Row-content stamps stay in the analytic.
 
 ## Considered options
 

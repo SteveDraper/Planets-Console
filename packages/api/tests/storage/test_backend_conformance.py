@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from api.errors import NotFoundError, ValidationError
 from api.storage.base import StorageBackend
-from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend
+from tests.file_storage_helpers import open_file_storage_backend
 
 GAME_INFO = "games/sample/info"
 GAME_NESTED = f"{GAME_INFO}/settings"
@@ -20,7 +20,7 @@ ACCOUNT_KEY = f"{ACCOUNT}/api_key"
 def backend(request, tmp_path) -> StorageBackend:
     if request.param == "ephemeral":
         return MemoryAssetBackend(initial={})
-    return FileStorageBackend(tmp_path / "data")
+    return open_file_storage_backend(tmp_path / "data")
 
 
 def test_put_get_delete_document(backend):

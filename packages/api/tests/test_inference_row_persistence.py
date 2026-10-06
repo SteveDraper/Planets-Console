@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.errors import NotFoundError
 from api.serialization.inference_row_persistence import (
     INFERENCE_ROW_PERSISTENCE_VERSION,
     PersistedInferenceRow,
@@ -29,6 +30,8 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
+
+from tests.file_storage_helpers import open_file_storage_backend
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -68,6 +71,98 @@ def test_persistence_row_round_trip(persistence):
     raw = persistence._storage.get(persistence.row_store_key(628580, 1, 111, 8))
     assert isinstance(raw, dict)
     assert "diagnostics" not in raw
+
+
+def _cached_row(summary: str = "cached") -> PersistedInferenceRow:
+    return PersistedInferenceRow(
+        status=STATUS_EXACT,
+        summary=summary,
+        solution_count=0,
+        is_complete=True,
+        solutions=[],
+    )
+
+
+def test_row_keys_for_host_turn_is_empty_when_none_stored(persistence):
+    assert persistence.row_keys_for_host_turn(628580, 1, 111) == []
+
+
+def test_row_keys_for_host_turn_lists_that_turn_only(persistence):
+    persistence.put_row(628580, 1, 111, 9, _cached_row("nine"))
+    persistence.put_row(628580, 1, 111, 8, _cached_row("eight"))
+    persistence.put_row(628580, 1, 110, 7, _cached_row("prior"))
+    persistence.put_row(628580, 2, 111, 8, _cached_row("other perspective"))
+
+    assert persistence.row_keys_for_host_turn(628580, 1, 111) == [
+        persistence.row_store_key(628580, 1, 111, 8),
+        persistence.row_store_key(628580, 1, 111, 9),
+    ]
+    assert persistence.row_keys_for_host_turn(628580, 1, 110) == [
+        persistence.row_store_key(628580, 1, 110, 7),
+    ]
+
+
+def test_delete_host_turn_document_removes_player_files_and_shared_document(tmp_path):
+    backend = open_file_storage_backend(tmp_path)
+    persistence = InferenceRowPersistenceService(backend)
+    persistence.put_row(628580, 1, 111, 8, _cached_row())
+    persistence.put_row(628580, 1, 111, 9, _cached_row("other"))
+    persistence.put_row(628580, 1, 110, 8, _cached_row("prior"))
+    parent = persistence.host_turn_document_key(628580, 1, 111)
+    backend.put(parent, {"leftover": True})
+
+    persistence.delete_host_turn_document(628580, 1, 111)
+
+    assert persistence.get_row(628580, 1, 111, 8) is None
+    assert persistence.get_row(628580, 1, 111, 9) is None
+    assert persistence.get_row(628580, 1, 110, 8) is not None
+    with pytest.raises(NotFoundError):
+        backend.get(parent)
+    assert not (tmp_path / f"{parent}.json").exists()
+    for player_id in (8, 9):
+        row_key = persistence.row_store_key(628580, 1, 111, player_id)
+        assert not (tmp_path / f"{row_key}.json").exists()
+
+
+def test_get_row_upgrades_legacy_row_in_that_players_file(tmp_path):
+    backend = open_file_storage_backend(tmp_path)
+    persistence = InferenceRowPersistenceService(backend)
+    player_key = persistence.row_store_key(628580, 1, 111, 8)
+    sibling_key = persistence.row_store_key(628580, 1, 111, 9)
+    backend.put(
+        player_key,
+        {
+            "status": STATUS_EXACT,
+            "summary": "old",
+            "solution_count": 0,
+            "is_complete": True,
+            "solutions": [],
+            "diagnostics": {"actionCatalog": {"note": True}},
+        },
+    )
+    backend.put(
+        sibling_key,
+        {
+            "status": STATUS_EXACT,
+            "summary": "keep",
+            "solution_count": 0,
+            "is_complete": True,
+            "solutions": [],
+            "persistence_version": INFERENCE_ROW_PERSISTENCE_VERSION,
+        },
+    )
+    sibling_bytes = (tmp_path / f"{sibling_key}.json").read_bytes()
+
+    loaded = persistence.get_row(628580, 1, 111, 8)
+
+    assert loaded is not None
+    assert loaded.persistence_version == INFERENCE_ROW_PERSISTENCE_VERSION
+    assert loaded.diagnostics is None
+    stored = backend.get(player_key)
+    assert isinstance(stored, dict)
+    assert stored["persistence_version"] == INFERENCE_ROW_PERSISTENCE_VERSION
+    assert "diagnostics" not in stored
+    assert (tmp_path / f"{sibling_key}.json").read_bytes() == sibling_bytes
 
 
 def test_put_row_notify_false_skips_on_row_persisted(persistence):

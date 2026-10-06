@@ -49,6 +49,7 @@ from tests.file_backend_io_accounting import (
     make_counting_file_backend,
     seed_file_store_tree,
 )
+from tests.file_storage_helpers import open_file_storage_backend
 from tests.scores_exports_helpers import first_player_id
 
 WORKER_COUNT = 8
@@ -61,7 +62,7 @@ FILE_MAX_THROUGHPUT_RATIO = 3.0
 def _file_backend(tmp_path: Path) -> FileStorageBackend:
     root = tmp_path / "data"
     root.mkdir()
-    backend = FileStorageBackend(root)
+    backend = open_file_storage_backend(root)
     seed_file_store_tree(backend)
     return backend
 

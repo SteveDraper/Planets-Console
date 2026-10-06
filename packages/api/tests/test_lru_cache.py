@@ -5,6 +5,7 @@ from api.lru_cache import LruCache
 
 def test_lru_evicts_least_recently_used() -> None:
     cache: LruCache[str, int] = LruCache(2)
+    assert cache.maxsize == 2
     cache.put("a", 1)
     cache.put("b", 2)
     cache.put("c", 3)

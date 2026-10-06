@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from api.storage.base import JSONValue, StorageBackend
+from api.storage.document_lru import DocumentCacheCaps
 from api.storage.file import FileStorageBackend
 from api.storage.path_utils import deep_copy_value
 
@@ -87,10 +88,10 @@ class LargeDocumentJobTiming:
         }
 
 
-def open_probe_file_backend(storage_root: Path) -> StorageBackend:
+def open_probe_file_backend(storage_root: Path, cache_caps: DocumentCacheCaps) -> StorageBackend:
     """File backend on a caller tmp tree. Probe code must not import ``FileStorageBackend``."""
     storage_root.mkdir(parents=True, exist_ok=True)
-    return FileStorageBackend(storage_root)
+    return FileStorageBackend(storage_root, cache_caps=cache_caps)
 
 
 def json_node_count(value: JSONValue) -> int:
@@ -135,6 +136,7 @@ def synthetic_large_fleet_document(
 def time_file_json_jobs(
     storage_root: Path,
     *,
+    cache_caps: DocumentCacheCaps,
     job_count: int = FILE_JSON_JOB_COUNT,
 ) -> FileJsonJobTiming:
     """Seed a tmp file store, then time ``job_count`` get/list/get cycles.
@@ -143,8 +145,7 @@ def time_file_json_jobs(
     mix as the worker-I/O convoy characterization. ``storage_root`` must be a
     tmp tree, not the OS console data directory.
     """
-    storage_root.mkdir(parents=True, exist_ok=True)
-    backend = FileStorageBackend(storage_root)
+    backend = open_probe_file_backend(storage_root, cache_caps)
     put_calls = 0
     backend.put(f"games/{_GAME_ID}/info", {"name": "probe"})
     put_calls += 1
@@ -179,6 +180,7 @@ def time_file_json_jobs(
 def time_large_document_jobs(
     storage_root: Path,
     *,
+    cache_caps: DocumentCacheCaps,
     document: dict[str, JSONValue] | None = None,
     iterations: int = LARGE_DOCUMENT_ITERATIONS,
     worker_count: int = LARGE_DOCUMENT_WORKER_COUNT,
@@ -203,8 +205,7 @@ def time_large_document_jobs(
     parsed = json.loads(encoded)
 
     large_fleet_key = f"{_FLEET_KEY}/{_PLAYER_ID}"
-    storage_root.mkdir(parents=True, exist_ok=True)
-    backend = FileStorageBackend(storage_root)
+    backend = open_probe_file_backend(storage_root, cache_caps)
     backend.put(f"games/{_GAME_ID}/info", {"name": "probe"})
     backend.put(_TURN_KEY, {"turn": _TURN_NUMBER})
     backend.put(large_fleet_key, payload)

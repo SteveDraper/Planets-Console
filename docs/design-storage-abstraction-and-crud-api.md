@@ -256,7 +256,7 @@ Breakpoints are declared in code (`packages/api/api/storage/boundaries.py`), not
 - **Writes:** Write to a temp file in the target directory, then `os.replace()` into place (atomic at the file level). v1 assumes single process / single worker; cross-process locking is out of scope.
 - **Document delete:** Remove the JSON file; prune empty parent directories upward until `storage_root` (do not remove `storage_root` itself).
 - **In-document delete:** Load document, mutate, rewrite whole file (same atomic replace).
-- **Document LRU:** The file backend may retain a bounded LRU of admitted breakpoint JSON, process-wide per resolved `storage_root`. Values stay `JSONValue`. Turn RST (`games/*/*/turns/*`) and credentials (`credentials/accounts/*`) are excluded so they are not kept beside the process TurnInfo LRU. Analytic documents (including `…/turns/*/analytics/*`) are admitted. Admission gates retain only: successful disk `put`/`delete` of any breakpoint (admitted or not) invalidates ancestor filesystem listings rather than patching name lists. Successful disk `put` write-throughs an admitted merged document; `get` still `deep_copy_value` on the way out; delete/prune drops the entry. Fill from I/O after a miss installs only when the mutation epoch captured at that miss is still current. External writers and a new process see a cold LRU.
+- **Document LRU:** The file backend retains admitted breakpoint JSON in two process-wide LRUs per resolved `storage_root`, selected by the file's byte size at put and fill. Documents under 128 KB use the small-document cap (`api.storage_small_document_lru_maxsize`, default 256). Documents of 128 KB and above use the large-document cap (`api.storage_large_document_lru_maxsize`, default 16). `get_storage()` and other production openers pass those resolved integers as a required `DocumentCacheCaps`. The storage package does not read global config. `FileStorageBackend`, `FileDocumentStore`, and the cache type do not default either cap. A later opener of the same resolved root with different caps raises `ConflictError`; equal caps share the cache. A later put that crosses 128 KB moves the entry. `get` finds the document in whichever cache holds it. Values stay `JSONValue`. Turn RST (`games/*/*/turns/*`) and credentials (`credentials/accounts/*`) are excluded so they are not kept beside the process TurnInfo LRU. Analytic documents (including `…/turns/*/analytics/*` and per-player scores inference rows) are admitted. Admission gates retain only: successful disk `put`/`delete` of any breakpoint (admitted or not) invalidates ancestor filesystem listings rather than patching name lists. Successful disk `put` write-throughs an admitted document; `get` still `deep_copy_value` on the way out; delete/prune drops the entry. Fill from I/O after a miss installs only when the mutation epoch captured at that miss is still current. External writers and a new process see a cold LRU. A full small-document roster does not evict a cached large document, and one large document does not evict the small-document roster.
 
 ### 15.4 Root path (`""`) — cross-backend invariant
 
@@ -274,6 +274,8 @@ There is no aggregate root document on disk. Implementations must stay semantica
 | `storage_backend` | `ephemeral` | `file` |
 | `storage_root` | `./.data` | `./.data` |
 | `storage_asset_path` | null | null (unused for file backend) |
+| `storage_small_document_lru_maxsize` | `256` | omitted (dataclass default) |
+| `storage_large_document_lru_maxsize` | `16` | omitted (dataclass default) |
 
 Code defaults stay `ephemeral` so tests and CI need no config file; repo `.config.yaml` uses `file` for durable local dev under `./.data/`.
 
@@ -308,7 +310,7 @@ An ephemeral seed (`initial`, including a `storage_asset_path` asset) is a logic
 
 Each step is keyed by the version it brings the directory to, and names the breakpoint it introduces:
 
-- **Generic re-home.** The logical key is unchanged. Children of a named in-document map become their own documents. Scores `inference_rows/{playerId}` is the shape this step is for; performing that breakpoint move is a later change.
+- **Generic re-home.** The logical key is unchanged. Children of a named in-document map become their own documents. Scores `inference_rows/{playerId}` is this step: storage version 2, after fleet, splits a shared `.../analytics/scores` document into `.../analytics/scores/inference_rows/{playerId}` files and removes the shared document when nothing else remains.
 - **Structural handler.** An analytic registers a JSON rewrite for a storage version. Fleet's `players` / `ledgers` document becomes `.../analytics/fleet/{playerId}` this way. The handler does not import `FileStorageBackend`. After the directory is current, fleet persistence does not probe or rewrite the legacy document.
 
 Documents introduced outside the app after the stamp are unsupported. A read that misses the current breakpoint document raises `NotFoundError`.
@@ -343,7 +345,7 @@ The storage implementation is covered by test modules under `packages/api/tests/
 
 **File backend (`test_file_backend.py`, `test_file_backend_document_lru.py`)**  
 - Document layout under `storage_root/`; atomic replace on write; prune empty dirs on document delete; unregistered paths fail without orphan files; unsafe path segments rejected before any filesystem access.
-- Bounded JSON-document LRU: second get of an admitted analytic document is a cache hit; put write-through; suffix put caches the merged document; delete drops the entry; turn RST and credentials are not retained; put of turn RST or credentials still invalidates ancestor listings; eviction past maxsize; two backends on the same root share hits and distinct roots do not; filesystem `list` of an analytics prefix is cached and invalidated on child put/delete; fill after a later delete or child put cannot resurrect a stale document or listing.
+- Bounded JSON-document LRUs: second get of an admitted analytic document is a cache hit; put write-through; suffix put caches the merged document; delete drops the entry; turn RST and credentials are not retained; put of turn RST or credentials still invalidates ancestor listings; file byte size selects the small (under 128 KB) or large cache; a put that crosses 128 KB moves the entry; a full small roster does not evict a large document and one large document does not evict the small roster; caps are injected from config (256 and 16 when YAML omits them); the backend, document store, and cache type have no default for either; two backends on the same root share hits when their caps match, and a later opener with different caps raises; distinct roots do not share entries; filesystem `list` of an analytics prefix is cached and invalidated on child put/delete; fill after a later delete or child put cannot resurrect a stale document or listing.
 
 **Store service (`test_store_service.py`)**  
 - **Create:** New path succeeds; existing path raises `ConflictError`; payload with reserved `@` key raises `ValidationError`.  

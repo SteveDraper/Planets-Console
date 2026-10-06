@@ -117,6 +117,16 @@ def _require_api_bool(api_dict: dict[str, Any], key: str, default: bool) -> bool
     return raw
 
 
+def _require_api_positive_int(api_dict: dict[str, Any], key: str, default: int) -> int:
+    """Return a positive ``api.<key>``; raise when the value is not an int >= 1."""
+    raw = api_dict.get(key, default)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise TypeError(f"api.{key} must be an int, got {type(raw).__name__}: {raw!r}")
+    if raw < 1:
+        raise ValueError(f"api.{key} must be >= 1, got {raw}")
+    return raw
+
+
 def _parse_api_storage_root(raw: object) -> str:
     """Return storage_root; null or missing uses ApiConfig default."""
     default = ApiConfig().storage_root
@@ -298,19 +308,21 @@ def load_config(
         "remap_interpreter_backend_to_thread",
         ApiConfig().remap_interpreter_backend_to_thread,
     )
-    raw_timeline_capacity = api_dict.get(
+    raw_timeline_capacity = _require_api_positive_int(
+        api_dict,
         "compute_diagnostics_timeline_capacity",
         ApiConfig().compute_diagnostics_timeline_capacity,
     )
-    if isinstance(raw_timeline_capacity, bool) or not isinstance(raw_timeline_capacity, int):
-        raise TypeError(
-            f"api.compute_diagnostics_timeline_capacity must be an int, got "
-            f"{type(raw_timeline_capacity).__name__}: {raw_timeline_capacity!r}"
-        )
-    if raw_timeline_capacity < 1:
-        raise ValueError(
-            f"api.compute_diagnostics_timeline_capacity must be >= 1, got {raw_timeline_capacity}"
-        )
+    small_document_lru_maxsize = _require_api_positive_int(
+        api_dict,
+        "storage_small_document_lru_maxsize",
+        ApiConfig().storage_small_document_lru_maxsize,
+    )
+    large_document_lru_maxsize = _require_api_positive_int(
+        api_dict,
+        "storage_large_document_lru_maxsize",
+        ApiConfig().storage_large_document_lru_maxsize,
+    )
     raw_cred_secret = api_dict.get(
         "credentials_obfuscation_secret",
         ApiConfig().credentials_obfuscation_secret,
@@ -328,6 +340,8 @@ def load_config(
         storage_backend=str(api_dict.get("storage_backend", ApiConfig().storage_backend)),
         storage_root=_parse_api_storage_root(api_dict.get("storage_root")),
         storage_asset_path=api_dict.get("storage_asset_path"),
+        storage_small_document_lru_maxsize=small_document_lru_maxsize,
+        storage_large_document_lru_maxsize=large_document_lru_maxsize,
         include_dummy_data=include_dummy,
         planets_api_base_url=str(
             api_dict.get("planets_api_base_url", ApiConfig().planets_api_base_url)

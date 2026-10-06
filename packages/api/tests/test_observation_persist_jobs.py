@@ -8,11 +8,13 @@ from api.storage.file_json_jobs import (
     synthetic_large_fleet_document,
 )
 
+from tests.file_storage_helpers import DEFAULT_DOCUMENT_CACHE_CAPS
+
 
 def test_time_observation_persist_jobs_reports_keys_and_small_document_walls(tmp_path):
     document = synthetic_large_fleet_document(min_bytes=8_000, min_nodes=400)
     timing = time_observation_persist_jobs(
-        open_probe_file_backend(tmp_path / "observation-persist"),
+        open_probe_file_backend(tmp_path / "observation-persist", DEFAULT_DOCUMENT_CACHE_CAPS),
         document=document,
     )
     assert timing.encoded_bytes >= 8_000

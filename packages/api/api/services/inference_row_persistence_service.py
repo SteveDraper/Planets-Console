@@ -123,10 +123,20 @@ class InferenceRowPersistenceService:
         host_turn: int,
         player_id: int,
     ) -> None:
+        self._delete_if_present(self.row_store_key(game_id, perspective, host_turn, player_id))
+
+    def row_keys_for_host_turn(self, game_id: int, perspective: int, host_turn: int) -> list[str]:
+        """Full store keys for inference rows at this host turn.
+
+        Order matches storage listing. Empty when the turn has no row files.
+        """
+        document_key = self.host_turn_document_key(game_id, perspective, host_turn)
+        prefix = f"{document_key}/{_INFERENCE_ROWS_KEY}"
         try:
-            self._storage.delete(self.row_store_key(game_id, perspective, host_turn, player_id))
+            segments = self._storage.list(prefix)
         except NotFoundError:
-            pass
+            return []
+        return [f"{prefix}/{segment}" for segment in segments]
 
     def delete_host_turn_document(
         self,
@@ -134,10 +144,22 @@ class InferenceRowPersistenceService:
         perspective: int,
         host_turn: int,
     ) -> None:
+        """Remove this turn's inference row files and the shared scores document.
+
+        ``.../analytics/scores`` remains a valid writable breakpoint document,
+        so a turn clear deletes it with the per-player files and leaves no mix
+        of the two layouts. Storage migration removes a shared document on open.
+        """
+        document_key = self.host_turn_document_key(game_id, perspective, host_turn)
+        for row_key in self.row_keys_for_host_turn(game_id, perspective, host_turn):
+            self._delete_if_present(row_key)
+        self._delete_if_present(document_key)
+
+    def _delete_if_present(self, key: str) -> None:
         try:
-            self._storage.delete(self.host_turn_document_key(game_id, perspective, host_turn))
+            self._storage.delete(key)
         except NotFoundError:
-            pass
+            return
 
     def invalidate_for_turn_write(
         self,

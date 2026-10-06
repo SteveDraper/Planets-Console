@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 from api.config import ApiConfig, get_config, set_config
 from api.errors import NotFoundError, ValidationError
+from api.storage.boundaries import FLEET_LEDGER_PATTERN
 from api.storage.memory_asset import MemoryAssetBackend
 from api.storage.migrations import (
     DEFAULT_STORAGE_FORMAT,
@@ -18,16 +19,6 @@ from api.storage_factory import clear_backend_cache, get_storage
 
 INFO = "games/sample/info"
 NESTED = f"{INFO}/nested"
-_FLEET_PLAYER_PATTERN = (
-    "games",
-    "*",
-    "*",
-    "turns",
-    "*",
-    "analytics",
-    "fleet",
-    "*",
-)
 
 
 def _fleet_step_format() -> tuple[list[int], StorageFormat]:
@@ -41,7 +32,7 @@ def _fleet_step_format() -> tuple[list[int], StorageFormat]:
         migrations=(
             StorageMigration(
                 version=1,
-                introduced_pattern=_FLEET_PLAYER_PATTERN,
+                introduced_pattern=FLEET_LEDGER_PATTERN,
                 structural_handler=handler,
             ),
         ),

@@ -158,6 +158,48 @@ def test_load_config_substructure_from_file():
     assert "http://localhost:3000" in root.bff.cors_origins
 
 
+def test_load_config_document_cache_caps_default_and_override():
+    base = FIXTURES_DIR / "base.yaml"
+    defaults = load_config(default_config_path=base)
+    assert defaults.api.storage_small_document_lru_maxsize == 256
+    assert defaults.api.storage_large_document_lru_maxsize == 16
+
+    overridden = load_config(
+        override_specs=[
+            "api.storage_small_document_lru_maxsize=32",
+            "api.storage_large_document_lru_maxsize=4",
+        ],
+        default_config_path=base,
+    )
+    assert overridden.api.storage_small_document_lru_maxsize == 32
+    assert overridden.api.storage_large_document_lru_maxsize == 4
+
+
+def test_load_config_document_cache_caps_from_yaml(tmp_path):
+    config_path = tmp_path / "cache.yaml"
+    config_path.write_text(
+        "api:\n  storage_small_document_lru_maxsize: 8\n  storage_large_document_lru_maxsize: 3\n",
+        encoding="utf-8",
+    )
+    root = load_config(default_config_path=config_path)
+    assert root.api.storage_small_document_lru_maxsize == 8
+    assert root.api.storage_large_document_lru_maxsize == 3
+
+
+def test_load_config_document_cache_caps_invalid_raises():
+    base = FIXTURES_DIR / "base.yaml"
+    with pytest.raises(TypeError, match="storage_small_document_lru_maxsize"):
+        load_config(
+            override_specs=["api.storage_small_document_lru_maxsize=nope"],
+            default_config_path=base,
+        )
+    with pytest.raises(ValueError, match="storage_large_document_lru_maxsize"):
+        load_config(
+            override_specs=["api.storage_large_document_lru_maxsize=0"],
+            default_config_path=base,
+        )
+
+
 def test_load_config_no_file_uses_internal_defaults():
     with patch("server.config._find_default_config", return_value=None):
         root = load_config(
@@ -168,6 +210,8 @@ def test_load_config_no_file_uses_internal_defaults():
     assert root.server.port == 8000
     assert root.api.storage_backend == "ephemeral"
     assert root.api.storage_asset_path is None
+    assert root.api.storage_small_document_lru_maxsize == 256
+    assert root.api.storage_large_document_lru_maxsize == 16
     assert "http://localhost:5173" in root.bff.cors_origins
 
 

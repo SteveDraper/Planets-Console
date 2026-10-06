@@ -14,12 +14,15 @@ from api.analytics.fleet.observation_persist_jobs import time_observation_persis
 from api.analytics.scores.tier_solve_jobs import time_scores_tier_solve_jobs
 from api.compute.backend_runtime import process_is_frozen
 from api.compute.sat_gil_overlap import SatGilOverlap, measure_sat_gil_overlap
+from api.config import get_config
+from api.storage.document_lru import DocumentCacheCaps
 from api.storage.file_json_jobs import (
     LargeDocumentJobTiming,
     open_probe_file_backend,
     time_file_json_jobs,
     time_large_document_jobs,
 )
+from api.storage_factory import document_cache_caps_from_config
 
 PROBE_FLAG = "--console-package-probe"
 OUTPUT_FLAG = "--output"
@@ -46,10 +49,14 @@ def run_packaged_runtime_probe(
     so a later ``NSApplication.run`` abort still leaves a JSON file.
     """
     gil = measure_sat_gil_overlap()
-    file_json = time_file_json_jobs(storage_root)
-    large_document = time_large_document_jobs(storage_root / "large-document")
+    cache_caps = _probe_document_cache_caps()
+    file_json = time_file_json_jobs(storage_root, cache_caps=cache_caps)
+    large_document = time_large_document_jobs(
+        storage_root / "large-document",
+        cache_caps=cache_caps,
+    )
     observation_persist = time_observation_persist_jobs(
-        open_probe_file_backend(storage_root / "observation-persist")
+        open_probe_file_backend(storage_root / "observation-persist", cache_caps)
     )
     scores_solve = _scores_solve_json(scores_solve_tree)
     payload: dict[str, Any] = {
@@ -125,10 +132,16 @@ def _gil_probe_json(gil: SatGilOverlap) -> dict[str, object]:
     }
 
 
+def _probe_document_cache_caps() -> DocumentCacheCaps:
+    return document_cache_caps_from_config(get_config())
+
+
 def _scores_solve_json(scores_solve_tree: Path | None) -> dict[str, object] | None:
     if scores_solve_tree is None:
         return None
-    timing = time_scores_tier_solve_jobs(open_probe_file_backend(scores_solve_tree))
+    timing = time_scores_tier_solve_jobs(
+        open_probe_file_backend(scores_solve_tree, _probe_document_cache_caps())
+    )
     return timing.to_probe_json()
 
 
@@ -158,7 +171,10 @@ def _app_kit_on_measurements(
     def measure() -> tuple[SatGilOverlap, LargeDocumentJobTiming, dict[str, object] | None]:
         return (
             measure_sat_gil_overlap(),
-            time_large_document_jobs(storage_root / "large-document"),
+            time_large_document_jobs(
+                storage_root / "large-document",
+                cache_caps=_probe_document_cache_caps(),
+            ),
             _scores_solve_json(scores_solve_tree),
         )
 

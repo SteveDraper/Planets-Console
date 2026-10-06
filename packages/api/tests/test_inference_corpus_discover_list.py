@@ -4,8 +4,8 @@ import json
 
 import pytest
 from api.services.store_service import StoreService
-from api.storage.file import FileStorageBackend
 
+from tests.file_storage_helpers import open_file_storage_backend
 from tests.inference_corpus.discover_list import discover_case_listings, format_listing_report
 from tests.inference_corpus.discovery import discover_cases_for_game
 from tests.inference_corpus.ground_truth import describe_inventory_activity
@@ -20,7 +20,7 @@ from tests.inference_corpus.storage_loader import (
 @pytest.fixture
 def listing_storage(tmp_path):
     storage_root = tmp_path / "data"
-    backend = FileStorageBackend(storage_root)
+    backend = open_file_storage_backend(storage_root)
     fixture_game_root = FIXTURES_ROOT / "628580"
     backend.put("games/628580/info", json.loads((fixture_game_root / "info.json").read_text()))
     for turn_number in (2, 3):

@@ -19,6 +19,11 @@ class LruCache(Generic[K, V]):
         self._maxsize = maxsize
         self._entries: OrderedDict[K, V] = OrderedDict()
 
+    @property
+    def maxsize(self) -> int:
+        """Entry cap fixed at construction."""
+        return self._maxsize
+
     def get(self, key: K) -> V | None:
         """Return cached value and mark key as recently used, or None if absent."""
         if key not in self._entries:

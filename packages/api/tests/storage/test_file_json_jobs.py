@@ -15,6 +15,7 @@ from api.storage.file_json_jobs import (
     time_file_json_jobs,
     time_large_document_jobs,
 )
+from tests.file_storage_helpers import DEFAULT_DOCUMENT_CACHE_CAPS
 
 FILE_MAX_THROUGHPUT_RATIO = 3.0
 
@@ -35,13 +36,17 @@ def test_synthetic_large_fleet_document_meets_683364_size_floors():
 
 
 def test_open_probe_file_backend_is_storage_protocol(tmp_path):
-    backend = open_probe_file_backend(tmp_path / "probe-backend")
+    backend = open_probe_file_backend(tmp_path / "probe-backend", DEFAULT_DOCUMENT_CACHE_CAPS)
     backend.put("games/628580/info", {"name": "probe"})
     assert backend.get("games/628580/info") == {"name": "probe"}
 
 
 def test_time_file_json_jobs_tiny_mix_counts(tmp_path):
-    timing = time_file_json_jobs(tmp_path / "tiny", job_count=3)
+    timing = time_file_json_jobs(
+        tmp_path / "tiny",
+        cache_caps=DEFAULT_DOCUMENT_CACHE_CAPS,
+        job_count=3,
+    )
     assert timing.job_count == 3
     assert timing.wall_seconds > 0.0
     assert timing.protocol_counts == {"get": 6, "list": 3, "put": 5}
@@ -52,6 +57,7 @@ def test_time_large_document_jobs_reports_gil_serial_get_and_loads(tmp_path):
     document = synthetic_large_fleet_document(min_bytes=8_000, min_nodes=400)
     timing = time_large_document_jobs(
         root,
+        cache_caps=DEFAULT_DOCUMENT_CACHE_CAPS,
         document=document,
         iterations=2,
         worker_count=8,
