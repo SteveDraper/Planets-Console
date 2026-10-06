@@ -115,9 +115,12 @@ def test_delete_then_get_raises_and_drops_entry(
     backend: FileStorageBackend, storage_root: Path
 ) -> None:
     backend.put(FLEET, {"ledgers": {}})
-    assert _lru(storage_root).has_document(FLEET)
+    lru = _lru(storage_root)
+    assert lru.has_small_document(FLEET)
+    assert not lru.has_large_document(FLEET)
     backend.delete(FLEET)
-    assert not _lru(storage_root).has_document(FLEET)
+    assert not lru.has_small_document(FLEET)
+    assert not lru.has_large_document(FLEET)
     with pytest.raises(NotFoundError):
         backend.get(FLEET)
 
@@ -125,26 +128,30 @@ def test_delete_then_get_raises_and_drops_entry(
 def test_turn_rst_is_not_retained(backend: FileStorageBackend, storage_root: Path) -> None:
     backend.put(TURN, {"turn": 111})
     lru = _lru(storage_root)
-    assert not lru.has_document(TURN)
+    assert not lru.has_small_document(TURN)
+    assert not lru.has_large_document(TURN)
     counts = FileIoCounts()
     with count_file_backend_syscalls(counts):
         backend.get(TURN)
         backend.get(TURN)
     assert counts.json_load_calls == 2
     assert counts.open_read_calls == 2
-    assert not lru.has_document(TURN)
+    assert not lru.has_small_document(TURN)
+    assert not lru.has_large_document(TURN)
 
 
 def test_credentials_are_not_retained(backend: FileStorageBackend, storage_root: Path) -> None:
     backend.put(ACCOUNT, {"api_key": "secret"})
     lru = _lru(storage_root)
-    assert not lru.has_document(ACCOUNT)
+    assert not lru.has_small_document(ACCOUNT)
+    assert not lru.has_large_document(ACCOUNT)
     counts = FileIoCounts()
     with count_file_backend_syscalls(counts):
         backend.get(ACCOUNT)
         backend.get(ACCOUNT)
     assert counts.json_load_calls == 2
-    assert not lru.has_document(ACCOUNT)
+    assert not lru.has_small_document(ACCOUNT)
+    assert not lru.has_large_document(ACCOUNT)
 
 
 def test_cache_caps_have_no_constructor_default() -> None:
@@ -159,14 +166,17 @@ def test_cache_caps_have_no_constructor_default() -> None:
 def test_get_storage_injects_config_cache_caps(tmp_path: Path) -> None:
     root = tmp_path / "data"
     previous = get_config()
-    defaults = document_cache_caps_from_config(ApiConfig())
-    set_config(ApiConfig(storage_backend="file", storage_root=str(root)))
+    config = ApiConfig(storage_backend="file", storage_root=str(root))
+    assert config.storage_small_document_lru_maxsize == 256
+    assert config.storage_large_document_lru_maxsize == 16
+    defaults = document_cache_caps_from_config(config)
+    assert defaults.small_document_maxsize == 256
+    assert defaults.large_document_maxsize == 16
+    set_config(config)
     clear_backend_cache()
     try:
         get_storage().put(FLEET, {"ledgers": {}})
         lru = document_lru_for_root(root, defaults)
-        assert lru.small_document_maxsize() == 256
-        assert lru.large_document_maxsize() == 16
         assert lru.has_small_document(FLEET)
         assert not lru.has_large_document(FLEET)
     finally:
@@ -189,10 +199,8 @@ def test_get_storage_injects_overridden_cache_caps(tmp_path: Path) -> None:
     clear_backend_cache()
     try:
         get_storage()
-        lru = document_lru_for_root(root, caps)
-        assert lru.small_document_maxsize() == 32
-        assert lru.large_document_maxsize() == 4
-        with pytest.raises(ConflictError, match="small=32"):
+        document_lru_for_root(root, caps)
+        with pytest.raises(ConflictError, match="already small=32 large=4"):
             document_lru_for_root(
                 root,
                 DocumentCacheCaps(small_document_maxsize=256, large_document_maxsize=16),
@@ -221,10 +229,12 @@ def test_document_lru_evicts_past_small_maxsize(storage_root: Path) -> None:
     for index, key in enumerate(keys):
         backend.put(key, {"n": index})
     lru = _lru(storage_root, caps)
-    assert lru.small_document_count() == small_cap
-    assert lru.large_document_count() == 0
-    assert not lru.has_document(keys[0])
-    assert lru.has_document(keys[-1])
+    evicted, *retained = keys
+    assert not lru.has_small_document(evicted)
+    assert not lru.has_large_document(evicted)
+    for key in retained:
+        assert lru.has_small_document(key)
+        assert not lru.has_large_document(key)
     counts = FileIoCounts()
     with count_file_backend_syscalls(counts):
         assert backend.get(keys[0]) == {"n": 0}
@@ -254,8 +264,10 @@ def test_different_roots_do_not_share_entries(tmp_path: Path) -> None:
     backend_b.put(FLEET, {"root": "b"})
     assert backend_a.get(FLEET) == {"root": "a"}
     assert backend_b.get(FLEET) == {"root": "b"}
-    assert _lru(root_a).has_document(FLEET)
-    assert _lru(root_b).has_document(FLEET)
+    assert _lru(root_a).has_small_document(FLEET)
+    assert not _lru(root_a).has_large_document(FLEET)
+    assert _lru(root_b).has_small_document(FLEET)
+    assert not _lru(root_b).has_large_document(FLEET)
     assert _lru(root_a) is not _lru(root_b)
 
 
@@ -343,7 +355,8 @@ def test_fill_document_after_delete_does_not_resurrect() -> None:
     lru.remember_document(FLEET, {"ledgers": {}}, byte_size=1)
     lru.drop_document(FLEET)
     lru.fill_document(FLEET, {"ledgers": {"ghost": True}}, epoch=epoch, byte_size=1)
-    assert not lru.has_document(FLEET)
+    assert not lru.has_small_document(FLEET)
+    assert not lru.has_large_document(FLEET)
 
 
 def test_fill_listing_after_child_put_does_not_install_stale_names() -> None:
@@ -444,21 +457,33 @@ def test_small_roster_and_large_documents_do_not_evict_each_other(storage_root: 
     for key in small_keys:
         backend.put(key, {"n": key})
     lru = _lru(storage_root, caps)
-    assert lru.large_document_count() == 1
-    assert lru.small_document_count() == 2
     assert lru.has_large_document(large_key)
+    assert not lru.has_small_document(large_key)
+    for key in small_keys:
+        assert lru.has_small_document(key)
+        assert not lru.has_large_document(key)
 
-    backend.put(f"{ANALYTICS_PREFIX}/small-extra", {"n": "extra"})
+    extra_small = f"{ANALYTICS_PREFIX}/small-extra"
+    backend.put(extra_small, {"n": "extra"})
     assert lru.has_large_document(large_key)
-    assert lru.small_document_count() == 2
+    assert not lru.has_small_document(large_key)
     assert not lru.has_small_document(small_keys[0])
+    assert not lru.has_large_document(small_keys[0])
+    assert lru.has_small_document(small_keys[1])
+    assert not lru.has_large_document(small_keys[1])
+    assert lru.has_small_document(extra_small)
+    assert not lru.has_large_document(extra_small)
 
     second_large = f"{ANALYTICS_PREFIX}/large-2"
     backend.put(second_large, large)
     assert lru.has_large_document(second_large)
+    assert not lru.has_small_document(second_large)
     assert not lru.has_large_document(large_key)
+    assert not lru.has_small_document(large_key)
     assert lru.has_small_document(small_keys[1])
-    assert lru.has_small_document(f"{ANALYTICS_PREFIX}/small-extra")
+    assert not lru.has_large_document(small_keys[1])
+    assert lru.has_small_document(extra_small)
+    assert not lru.has_large_document(extra_small)
     counts = FileIoCounts()
     with count_file_backend_syscalls(counts):
         assert backend.get(small_keys[1]) == {"n": small_keys[1]}

@@ -93,14 +93,15 @@ def document_lru_for_root(
             )
             _lrus_by_root[key] = created
             return created
-        if (
-            existing._small_document_maxsize != cache_caps.small_document_maxsize
-            or existing._large_document_maxsize != cache_caps.large_document_maxsize
-        ):
+        installed = DocumentCacheCaps(
+            small_document_maxsize=existing._small_documents.maxsize,
+            large_document_maxsize=existing._large_documents.maxsize,
+        )
+        if installed != cache_caps:
             raise ConflictError(
                 f"Document cache caps for storage root {key} are already "
-                f"small={existing._small_document_maxsize} "
-                f"large={existing._large_document_maxsize}; "
+                f"small={installed.small_document_maxsize} "
+                f"large={installed.large_document_maxsize}; "
                 "this opener requested "
                 f"small={cache_caps.small_document_maxsize} "
                 f"large={cache_caps.large_document_maxsize}"
@@ -131,8 +132,6 @@ class FileBackendDocumentLru:
         large_document_maxsize: int,
         listing_maxsize: int = FILE_LISTING_LRU_MAXSIZE,
     ) -> None:
-        self._small_document_maxsize = small_document_maxsize
-        self._large_document_maxsize = large_document_maxsize
         self._small_documents: LruCache[str, JSONValue] = LruCache(small_document_maxsize)
         self._large_documents: LruCache[str, JSONValue] = LruCache(large_document_maxsize)
         self._listings: LruCache[str, tuple[str, ...]] = LruCache(listing_maxsize)
@@ -142,14 +141,6 @@ class FileBackendDocumentLru:
         # replace each other from a stale copy. Shared with every backend on
         # this root, same as the document map.
         self._mutation_locks: dict[str, threading.Lock] = {}
-
-    def small_document_maxsize(self) -> int:
-        """Return the small-document entry cap (tests and startup checks)."""
-        return self._small_document_maxsize
-
-    def large_document_maxsize(self) -> int:
-        """Return the large-document entry cap (tests and startup checks)."""
-        return self._large_document_maxsize
 
     def document_lock(self, breakpoint_path: str) -> threading.Lock:
         """Return the mutation lock for one breakpoint document.
@@ -233,11 +224,6 @@ class FileBackendDocumentLru:
                 return
             self._listings.put(prefix, tuple(names))
 
-    def has_document(self, breakpoint_path: str) -> bool:
-        """Return whether ``breakpoint_path`` is currently retained (tests)."""
-        with self._lock:
-            return self._has_document_locked(breakpoint_path)
-
     def has_small_document(self, breakpoint_path: str) -> bool:
         """Return whether the small-document cache holds ``breakpoint_path`` (tests)."""
         with self._lock:
@@ -247,21 +233,6 @@ class FileBackendDocumentLru:
         """Return whether the large-document cache holds ``breakpoint_path`` (tests)."""
         with self._lock:
             return breakpoint_path in self._large_documents
-
-    def document_count(self) -> int:
-        """Return the number of retained documents (tests)."""
-        with self._lock:
-            return len(self._small_documents) + len(self._large_documents)
-
-    def small_document_count(self) -> int:
-        """Return how many documents the small-document cache holds (tests)."""
-        with self._lock:
-            return len(self._small_documents)
-
-    def large_document_count(self) -> int:
-        """Return how many documents the large-document cache holds (tests)."""
-        with self._lock:
-            return len(self._large_documents)
 
     def _retain_locked(
         self,
@@ -278,9 +249,6 @@ class FileBackendDocumentLru:
             other = self._small_documents
         other.drop(breakpoint_path)
         selected.put(breakpoint_path, document)
-
-    def _has_document_locked(self, breakpoint_path: str) -> bool:
-        return breakpoint_path in self._small_documents or breakpoint_path in self._large_documents
 
     def _record_mutation_locked(self, breakpoint_path: str) -> None:
         self._epoch += 1
