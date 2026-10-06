@@ -273,7 +273,10 @@ def _clear_scores_turn(
     dry_run: bool,
     result: ClearAnalyticPersistenceResult,
 ) -> None:
-    """Delete per-player inference row files at one turn, then any shared document."""
+    """Delete player row files and the shared scores breakpoint at one turn.
+
+    That path remains a writable document; migration removes it on open.
+    """
     scores = InferenceRowPersistenceService(storage)
     for row_key in scores.row_keys_for_host_turn(game_id, perspective, turn_number):
         _delete_document(

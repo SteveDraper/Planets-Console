@@ -144,10 +144,11 @@ class InferenceRowPersistenceService:
         perspective: int,
         host_turn: int,
     ) -> None:
-        """Remove this turn's inference row files and any leftover shared document.
+        """Remove this turn's inference row files and the shared scores document.
 
-        Player files and a shared ``…/analytics/scores`` document are both
-        removed, so a turn clear cannot leave a mix of the two layouts.
+        ``.../analytics/scores`` remains a valid writable breakpoint document,
+        so a turn clear deletes it with the per-player files and leaves no mix
+        of the two layouts. Storage migration removes a shared document on open.
         """
         document_key = self.host_turn_document_key(game_id, perspective, host_turn)
         for row_key in self.row_keys_for_host_turn(game_id, perspective, host_turn):
