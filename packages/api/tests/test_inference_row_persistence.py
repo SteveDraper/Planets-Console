@@ -83,6 +83,25 @@ def _cached_row(summary: str = "cached") -> PersistedInferenceRow:
     )
 
 
+def test_row_keys_for_host_turn_is_empty_when_none_stored(persistence):
+    assert persistence.row_keys_for_host_turn(628580, 1, 111) == []
+
+
+def test_row_keys_for_host_turn_lists_that_turn_only(persistence):
+    persistence.put_row(628580, 1, 111, 9, _cached_row("nine"))
+    persistence.put_row(628580, 1, 111, 8, _cached_row("eight"))
+    persistence.put_row(628580, 1, 110, 7, _cached_row("prior"))
+    persistence.put_row(628580, 2, 111, 8, _cached_row("other perspective"))
+
+    assert persistence.row_keys_for_host_turn(628580, 1, 111) == [
+        persistence.row_store_key(628580, 1, 111, 8),
+        persistence.row_store_key(628580, 1, 111, 9),
+    ]
+    assert persistence.row_keys_for_host_turn(628580, 1, 110) == [
+        persistence.row_store_key(628580, 1, 110, 7),
+    ]
+
+
 def test_delete_host_turn_document_removes_player_files_and_shared_document(tmp_path):
     backend = open_file_storage_backend(tmp_path)
     persistence = InferenceRowPersistenceService(backend)

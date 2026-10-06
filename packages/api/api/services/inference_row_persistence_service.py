@@ -125,6 +125,19 @@ class InferenceRowPersistenceService:
     ) -> None:
         self._delete_if_present(self.row_store_key(game_id, perspective, host_turn, player_id))
 
+    def row_keys_for_host_turn(self, game_id: int, perspective: int, host_turn: int) -> list[str]:
+        """Full store keys for inference rows at this host turn.
+
+        Order matches storage listing. Empty when the turn has no row files.
+        """
+        document_key = self.host_turn_document_key(game_id, perspective, host_turn)
+        prefix = f"{document_key}/{_INFERENCE_ROWS_KEY}"
+        try:
+            segments = self._storage.list(prefix)
+        except NotFoundError:
+            return []
+        return [f"{prefix}/{segment}" for segment in segments]
+
     def delete_host_turn_document(
         self,
         game_id: int,
@@ -137,17 +150,9 @@ class InferenceRowPersistenceService:
         removed, so a turn clear cannot leave a mix of the two layouts.
         """
         document_key = self.host_turn_document_key(game_id, perspective, host_turn)
-        for row_key in self._row_keys_under(document_key):
+        for row_key in self.row_keys_for_host_turn(game_id, perspective, host_turn):
             self._delete_if_present(row_key)
         self._delete_if_present(document_key)
-
-    def _row_keys_under(self, document_key: str) -> list[str]:
-        prefix = f"{document_key}/{_INFERENCE_ROWS_KEY}"
-        try:
-            segments = self._storage.list(prefix)
-        except NotFoundError:
-            return []
-        return [f"{prefix}/{segment}" for segment in segments]
 
     def _delete_if_present(self, key: str) -> None:
         try:

@@ -52,7 +52,6 @@ from api.storage_factory import (  # noqa: E402
 
 WILDCARD = "*"
 _HULL_MASKS_KEY = "inference_hull_catalog_masks"
-_INFERENCE_ROWS_KEY = "inference_rows"
 
 app = typer.Typer(
     add_completion=False,
@@ -276,18 +275,16 @@ def _clear_scores_turn(
 ) -> None:
     """Delete per-player inference row files at one turn, then any shared document."""
     scores = InferenceRowPersistenceService(storage)
-    document_key = scores.host_turn_document_key(game_id, perspective, turn_number)
-    prefix = f"{document_key}/{_INFERENCE_ROWS_KEY}"
-    for segment in _list_segments(storage, prefix):
+    for row_key in scores.row_keys_for_host_turn(game_id, perspective, turn_number):
         _delete_document(
             storage,
-            f"{prefix}/{segment}",
+            row_key,
             dry_run=dry_run,
             result=result,
         )
     _delete_document(
         storage,
-        document_key,
+        scores.host_turn_document_key(game_id, perspective, turn_number),
         dry_run=dry_run,
         result=result,
     )
@@ -320,8 +317,7 @@ def _clear_scores_player_rows(
             continue
         scores.delete_row(game_id, perspective, turn_number, player_id)
         result.deleted_player_entries.append(row_key)
-        remaining = _list_segments(storage, f"{document_key}/{_INFERENCE_ROWS_KEY}")
-        if not remaining:
+        if not scores.row_keys_for_host_turn(game_id, perspective, turn_number):
             _delete_document(storage, document_key, dry_run=False, result=result)
 
 
