@@ -197,12 +197,12 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
 
     ledger_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
     mark_key = persistence.evidence_mark_key(GAME_ID, PERSPECTIVE, player_id)
-    assert counts.protocol_counts() == {"get": 3, "put": 1, "list": 0, "delete": 0}, (
+    assert counts.protocol_counts() == {"get": 2, "put": 1, "list": 0, "delete": 0}, (
         counts.protocol_counts(),
         counts.get_keys,
         counts.list_prefixes,
     )
-    assert counts.get_keys == [ledger_key, FLEET_KEY, mark_key]
+    assert counts.get_keys == [ledger_key, mark_key]
     assert counts.json_load_calls == 0
     assert counts.json_dump_calls == 1
     assert counts.open_read_calls == 2
@@ -395,7 +395,7 @@ def test_scores_resolve_prior_skips_disk_when_dependency_outputs_has_final_prior
             overlay_ensure=False,
         )
 
-    prior_fleet_key = persistence.document_key(GAME_ID, PERSPECTIVE, prior_turn)
+    prior_fleet_key = persistence.ledger_prefix(GAME_ID, PERSPECTIVE, prior_turn)
     assert resolution.input_status == "applied"
     assert resolution.overlay is not None
     assert counts.list_calls == 0

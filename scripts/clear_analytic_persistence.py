@@ -44,6 +44,7 @@ from api.services.inference_row_persistence_service import (  # noqa: E402
 )
 from api.storage.base import StorageBackend  # noqa: E402
 from api.storage.file import FileStorageBackend  # noqa: E402
+from api.storage_factory import production_storage_format  # noqa: E402
 
 WILDCARD = "*"
 _HULL_MASKS_KEY = "inference_hull_catalog_masks"
@@ -183,9 +184,9 @@ def _clear_fleet_turn(
     dry_run: bool,
     result: ClearAnalyticPersistenceResult,
 ) -> None:
-    """Delete per-player fleet ledger files at one turn, plus a legacy shared document."""
+    """Delete per-player fleet ledger files at one turn."""
     fleet = FleetSnapshotPersistenceService(storage)
-    prefix = fleet.document_key(game_id, perspective, turn_number)
+    prefix = fleet.ledger_prefix(game_id, perspective, turn_number)
     for segment in _list_segments(storage, prefix):
         if not segment.isdigit():
             continue
@@ -195,7 +196,6 @@ def _clear_fleet_turn(
             dry_run=dry_run,
             result=result,
         )
-    _delete_document(storage, prefix, dry_run=dry_run, result=result)
 
 
 def _clear_fleet_evidence_marks(
@@ -565,7 +565,10 @@ def main(
         typer.echo(f"game storage not found: {game_prefix}", err=True)
         raise typer.Exit(code=2)
 
-    storage = FileStorageBackend(storage_root.resolve())
+    storage = FileStorageBackend(
+        storage_root.resolve(),
+        storage_format=production_storage_format(),
+    )
     result = clear_analytic_persistence(
         storage,
         game_id=game_id,

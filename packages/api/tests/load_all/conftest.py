@@ -13,7 +13,7 @@ from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.turn_load_service import TurnLoadService
-from api.storage import clear_backend_cache, get_storage
+from api.storage_factory import clear_backend_cache, get_storage
 from api.transport.game_info_update import RefreshGameInfoParams
 from api.transport.load_all_turns import LoadAllTurnsResponse
 

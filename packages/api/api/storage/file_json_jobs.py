@@ -21,17 +21,16 @@ LARGE_DOCUMENT_WORKER_COUNT = 8
 LARGE_DOCUMENT_ITERATIONS = 8
 _GAME_ID = 628580
 _PERSPECTIVE = 1
+_PLAYER_ID = 1
 _TURN_NUMBER = 111
 _TURN_KEY = f"games/{_GAME_ID}/{_PERSPECTIVE}/turns/{_TURN_NUMBER}"
 _ANALYTICS_PREFIX = f"{_TURN_KEY}/analytics"
 _FLEET_KEY = f"{_ANALYTICS_PREFIX}/fleet"
 _ANALYTIC_SIBLINGS = ("fleet", "scores", "homeworld-locator")
-_LARGE_FLEET_KEY = f"{_ANALYTICS_PREFIX}/fleet"
 PROBE_GAME_ID = _GAME_ID
 PROBE_PERSPECTIVE = _PERSPECTIVE
 PROBE_TURN_NUMBER = _TURN_NUMBER
 PROBE_TURN_KEY = _TURN_KEY
-PROBE_FLEET_KEY = _FLEET_KEY
 
 
 @dataclass(frozen=True)
@@ -186,6 +185,9 @@ def time_large_document_jobs(
 ) -> LargeDocumentJobTiming:
     """Time json.loads, deep_copy, get, and put of a 683364-sized fleet document.
 
+    The document is stored at the per-player ledger key
+    ``.../analytics/fleet/{playerId}``.
+
     ``storage_root`` must be a tmp tree. Default document is
     ``synthetic_large_fleet_document()``. Each timed op runs ``iterations``
     times on one thread and again on ``worker_count`` threads (same iteration
@@ -200,12 +202,13 @@ def time_large_document_jobs(
     encoded_bytes = len(encoded.encode("utf-8"))
     parsed = json.loads(encoded)
 
+    large_fleet_key = f"{_FLEET_KEY}/{_PLAYER_ID}"
     storage_root.mkdir(parents=True, exist_ok=True)
     backend = FileStorageBackend(storage_root)
     backend.put(f"games/{_GAME_ID}/info", {"name": "probe"})
     backend.put(_TURN_KEY, {"turn": _TURN_NUMBER})
-    backend.put(_LARGE_FLEET_KEY, payload)
-    backend.get(_LARGE_FLEET_KEY)
+    backend.put(large_fleet_key, payload)
+    backend.get(large_fleet_key)
 
     loads_single = _repeat_wall(iterations, lambda: json.loads(encoded))
     loads_eight = _parallel_wall(
@@ -215,15 +218,15 @@ def time_large_document_jobs(
     copy_eight = _parallel_wall(
         worker_count, lambda: _repeat_unreturned(iterations, lambda: deep_copy_value(parsed))
     )
-    get_single = _repeat_wall(iterations, lambda: backend.get(_LARGE_FLEET_KEY))
+    get_single = _repeat_wall(iterations, lambda: backend.get(large_fleet_key))
     get_eight = _parallel_wall(
         worker_count,
-        lambda: _repeat_unreturned(iterations, lambda: backend.get(_LARGE_FLEET_KEY)),
+        lambda: _repeat_unreturned(iterations, lambda: backend.get(large_fleet_key)),
     )
-    put_single = _repeat_wall(iterations, lambda: backend.put(_LARGE_FLEET_KEY, payload))
+    put_single = _repeat_wall(iterations, lambda: backend.put(large_fleet_key, payload))
     put_eight = _parallel_wall(
         worker_count,
-        lambda: _repeat_unreturned(iterations, lambda: backend.put(_LARGE_FLEET_KEY, payload)),
+        lambda: _repeat_unreturned(iterations, lambda: backend.put(large_fleet_key, payload)),
     )
     return LargeDocumentJobTiming(
         encoded_bytes=encoded_bytes,

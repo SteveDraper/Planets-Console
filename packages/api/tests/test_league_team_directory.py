@@ -14,7 +14,7 @@ from api.services.league_team_directory import (
     league_team_name_from_profile,
     league_team_store_key,
 )
-from api.storage import clear_backend_cache, get_storage
+from api.storage_factory import clear_backend_cache, get_storage
 from api.transport.league_teams import LeagueTeamName
 from fastapi.testclient import TestClient
 

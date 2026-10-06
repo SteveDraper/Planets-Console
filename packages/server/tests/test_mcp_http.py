@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
-from api.storage import clear_backend_cache
+from api.storage_factory import clear_backend_cache
 from fastapi.testclient import TestClient
 
 MCP_PROTOCOL_VERSION = "2026-07-28"

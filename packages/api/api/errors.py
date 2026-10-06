@@ -18,6 +18,7 @@ from api.exceptions import (
     LoginCredentialsRequiredError,
     NotFoundError,
     PlanetsConsoleError,
+    UnhandledFormatError,
     UpstreamPlanetsError,
     ValidationError,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "LoginCredentialsRequiredError",
     "NotFoundError",
     "PlanetsConsoleError",
+    "UnhandledFormatError",
     "UpstreamPlanetsError",
     "ValidationError",
     "make_http_exception_handler",

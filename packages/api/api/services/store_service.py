@@ -1,15 +1,41 @@
-"""Store service: CRUD over the logical JSON store with path semantics and merge rules."""
+"""Store service: CRUD over the logical JSON store with path semantics and merge rules.
+
+The storage-meta namespace (the first segment of ``STORAGE_VERSION_KEY`` and
+every path under it) is not part of this API. Create, read, update, delete,
+and shallow listing of that namespace raise ``ValidationError`` whether or not
+the path exists. A shallow listing of the store root omits that segment.
+Backends and migrations still read and write the version stamp directly.
+"""
 
 from __future__ import annotations
 
 from api.errors import ConflictError, NotFoundError, ValidationError
 from api.storage.base import JSONValue, StorageBackend
 from api.storage.boundaries import is_navigable_prefix, is_registered_path
+from api.storage.migrations import STORAGE_VERSION_KEY
 from api.storage.path_utils import (
     deep_copy_value,
     list_children,
+    normalize_store_key,
     validate_no_reserved_at_keys,
 )
+
+_STORAGE_META_NAMESPACE = STORAGE_VERSION_KEY.split("/", 1)[0]
+
+
+def _normalize_store_path(path: str) -> str:
+    """Return the logical path, rejecting the storage-meta namespace."""
+    path_norm = normalize_store_key(path)
+    if path_norm == _STORAGE_META_NAMESPACE or path_norm.startswith(f"{_STORAGE_META_NAMESPACE}/"):
+        raise ValidationError(f"Path is reserved for storage metadata: {path_norm!r}")
+    return path_norm
+
+
+def _children_visible_to_store(parent: str, children: list[str]) -> list[str]:
+    """Drop the storage-meta segment from a root listing. Backend ``list`` is unchanged."""
+    if parent != "":
+        return children
+    return [child for child in children if child != _STORAGE_META_NAMESPACE]
 
 
 def _deep_merge_object(target: dict[str, JSONValue], source: dict[str, JSONValue]) -> None:
@@ -34,8 +60,8 @@ class StoreService:
 
     def create(self, path: str, value: JSONValue) -> None:
         """Create a node at path. Path must not exist. Ancestor objects are created as needed."""
+        path_norm = _normalize_store_path(path)
         validate_no_reserved_at_keys(value)
-        path_norm = (path or "").strip().strip("/") or ""
         try:
             self._storage.get(path_norm)
             raise ConflictError(f"Path already exists: {path_norm!r}")
@@ -45,17 +71,17 @@ class StoreService:
 
     def read(self, path: str) -> JSONValue:
         """Return the node at path. Raises NotFoundError if path does not exist."""
-        path_norm = (path or "").strip().strip("/") or ""
+        path_norm = _normalize_store_path(path)
         return self._storage.get(path_norm)
 
     def read_shallow(self, path: str) -> dict:
         """Return shallow metadata: path, node_type, children, count."""
-        path_norm = (path or "").strip().strip("/") or ""
+        path_norm = _normalize_store_path(path)
         if not is_navigable_prefix(path_norm):
             raise ValidationError(f"Unregistered store path prefix: {path_norm!r}")
 
         if path_norm == "" or not is_registered_path(path_norm):
-            children = self._storage.list(path_norm)
+            children = _children_visible_to_store(path_norm, self._storage.list(path_norm))
             return {
                 "path": path_norm,
                 "node_type": "object",
@@ -104,8 +130,8 @@ class StoreService:
         merge_array: None = replace, 'append' = append, 'prepend' = prepend.
         Raises NotFoundError if path does not exist, ConflictError if type would change.
         """
+        path_norm = _normalize_store_path(path)
         validate_no_reserved_at_keys(value)
-        path_norm = (path or "").strip().strip("/") or ""
         existing = self._storage.get(path_norm)
 
         if isinstance(existing, dict):
@@ -152,5 +178,5 @@ class StoreService:
 
     def delete(self, path: str) -> None:
         """Remove the node at path. Raises NotFoundError if path does not exist."""
-        path_norm = (path or "").strip().strip("/") or ""
+        path_norm = _normalize_store_path(path)
         self._storage.delete(path_norm)

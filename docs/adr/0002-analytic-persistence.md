@@ -48,10 +48,10 @@ Hull catalog mask overrides remain game-global at `games/{gameId}/analytics/scor
 
 ## Fleet ledger persistence (ADR 0004)
 
-Logical path: `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet/{playerId}` (one file per player). A legacy shared `.../analytics/fleet` document is split on read.
+Logical path: `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet/{playerId}` (one file per player). A legacy shared `.../analytics/fleet` document is split into these files by the storage migration in [ADR 0033](0033-storage-versioned-breakpoint-migrations.md) when the directory opens, then removed. Fleet reads do not detect that shape.
 
 - **Provenance:** each ledger stores **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1)`. Ensure also requires the current materialization version and a matching **fleet evidence generation** (or a turn before the mark's `appliesFromTurn`).
-- **Migration:** legacy monolithic snapshot shape, then the shared per-turn document, are split on read into per-player files.
+- **Migration:** legacy monolithic snapshot shape, then the shared per-turn document, become per-player files in the storage-versioned breakpoint migration ([ADR 0033](0033-storage-versioned-breakpoint-migrations.md)), not on fleet read.
 - **Invalidation:** a durable scores evidence update for player P at host *H* bumps P's evidence mark and does not rewrite ledger files. Held admission bumps the in-memory epoch only. Turn `put` at *T* deletes ledger files at turns `>= T`.
 - **Stream:** fleet table NDJSON stream (F7.5) delivers per-player ledger updates; see [design-fleet-analytic.md](../design-fleet-analytic.md) section 15.
 

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from api.analytics.fleet.constants import FLEET_LEDGERS_KEY, FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.serialization import (
-    fleet_turn_snapshot_to_json,
-    persisted_fleet_ledger_to_json,
+from api.analytics.fleet.storage_migration import (
+    FLEET_LEDGERS_KEY,
+    fleet_storage_migration,
     upgrade_legacy_fleet_turn_document,
 )
 from api.analytics.fleet.types import (
@@ -22,15 +23,16 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
-from api.storage.memory_asset import MemoryAssetBackend
+from api.errors import NotFoundError
+from api.storage.breakpoint_backend import BreakpointDocumentBackend
+from api.storage.file import FileStorageBackend
+from api.storage.memory_asset import MemoryAssetBackend, MemoryDocumentStore
+from api.storage.migrations import DEFAULT_STORAGE_FORMAT, open_store
 
 from tests.file_backend_io_accounting import CountingStorageBackend, FileIoCounts
+from tests.fleet_fixtures import legacy_fleet_ledgers_document, legacy_fleet_players_document
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
-
-
-def _legacy_player_wire(ledger: FleetAcquisitionLedger) -> dict:
-    return persisted_fleet_ledger_to_json(PersistedFleetLedger(ledger=ledger))["ledger"]
 
 
 @pytest.fixture
@@ -102,8 +104,8 @@ def test_put_ledger_loads_document_once(memory_backend, sample_ledger):
     persisted = PersistedFleetLedger(ledger=sample_ledger)
 
     persistence.put_ledger(628580, 1, 111, 8, persisted)
-    # Player file miss, legacy shared-document miss, evidence-mark miss, then one put.
-    assert counts.get_calls == 3
+    # Player file miss, evidence-mark miss, then one put.
+    assert counts.get_calls == 2
     assert counts.put_calls == 1
     assert counts.list_calls == 0
 
@@ -155,74 +157,54 @@ def test_has_final_ledger_requires_both_provenance_flags(persistence, sample_led
     assert persistence.has_final_ledger(628580, 1, 111, 8) is True
 
 
-def test_legacy_monolithic_document_migrates_on_has_snapshot(
-    persistence,
-    memory_backend,
-    sample_ledger,
-):
-    legacy_document = {
-        "analyticId": "fleet",
-        "gameId": 628580,
-        "perspective": 1,
-        "turn": 111,
-        "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [_legacy_player_wire(sample_ledger)],
-    }
-    memory_backend.put(
-        persistence.document_key(628580, 1, 111),
-        legacy_document,
+def _legacy_players_document(sample_ledger: FleetAcquisitionLedger) -> dict:
+    return legacy_fleet_players_document(
+        FleetTurnSnapshot(
+            game_id=628580,
+            perspective=1,
+            turn=111,
+            materialization_version=FLEET_MATERIALIZATION_VERSION,
+            players=[sample_ledger],
+        ),
     )
 
-    assert persistence.has_snapshot(628580, 1, 111) is True
 
-    stored = memory_backend.get(persistence.ledger_key(628580, 1, 111, 8))
-    assert isinstance(stored, dict)
-    assert "players" not in stored
-    assert stored["ledger"]["playerId"] == 8
-    parent = memory_backend.get(persistence.document_key(628580, 1, 111))
-    assert isinstance(parent, dict)
-    assert "players" not in parent
-    assert FLEET_LEDGERS_KEY not in parent
-
-
-def test_legacy_monolithic_document_migrates_on_read(persistence, memory_backend, sample_ledger):
-    legacy_document = {
-        "analyticId": "fleet",
-        "gameId": 628580,
-        "perspective": 1,
-        "turn": 111,
-        "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [_legacy_player_wire(sample_ledger)],
-    }
-    memory_backend.put(
-        persistence.document_key(628580, 1, 111),
-        legacy_document,
-    )
+def test_unversioned_players_document_is_split_on_open(sample_ledger):
+    key = FleetSnapshotPersistenceService.ledger_prefix(628580, 1, 111)
+    storage_format = replace(DEFAULT_STORAGE_FORMAT, migrations=(fleet_storage_migration(),))
+    store = MemoryDocumentStore({key: _legacy_players_document(sample_ledger)})
+    open_store(store, storage_format)
+    backend = BreakpointDocumentBackend(store, storage_format)
+    persistence = FleetSnapshotPersistenceService(backend)
 
     loaded = persistence.get_ledger(628580, 1, 111, 8)
     assert loaded is not None
     assert loaded.ledger == sample_ledger
     assert loaded.provenance.is_final is False
-
-    stored = memory_backend.get(persistence.ledger_key(628580, 1, 111, 8))
+    stored = backend.get(persistence.ledger_key(628580, 1, 111, 8))
     assert isinstance(stored, dict)
-    assert "players" not in stored
     assert stored["ledger"]["playerId"] == 8
-    parent = memory_backend.get(persistence.document_key(628580, 1, 111))
-    assert isinstance(parent, dict)
-    assert "players" not in parent
-    assert FLEET_LEDGERS_KEY not in parent
+    with pytest.raises(NotFoundError):
+        backend.get(key)
+
+
+def test_fleet_does_not_rewrite_legacy_document_after_open(sample_ledger):
+    backend = MemoryAssetBackend(
+        initial={},
+        storage_format=replace(DEFAULT_STORAGE_FORMAT, migrations=(fleet_storage_migration(),)),
+    )
+    persistence = FleetSnapshotPersistenceService(backend)
+    legacy_document = _legacy_players_document(sample_ledger)
+    backend.put(persistence.ledger_prefix(628580, 1, 111), legacy_document)
+
+    assert persistence.get_ledger(628580, 1, 111, 8) is None
+
+    assert backend.get(persistence.ledger_prefix(628580, 1, 111)) == legacy_document
+    assert not backend._document_store.has_document(persistence.ledger_key(628580, 1, 111, 8))
 
 
 def test_upgrade_legacy_fleet_turn_document_maps_players_to_ledgers(sample_ledger):
-    legacy_document = {
-        "analyticId": "fleet",
-        "gameId": 628580,
-        "perspective": 1,
-        "turn": 111,
-        "materializationVersion": FLEET_MATERIALIZATION_VERSION,
-        "players": [_legacy_player_wire(sample_ledger)],
-    }
+    legacy_document = _legacy_players_document(sample_ledger)
     upgraded = upgrade_legacy_fleet_turn_document(legacy_document)
     assert "players" not in upgraded
     assert upgraded[FLEET_LEDGERS_KEY]["8"]["provenance"] == {
@@ -237,7 +219,7 @@ def test_stale_per_ledger_materialization_version_is_deleted_on_read(
     memory_backend,
     sample_ledger,
 ):
-    document = fleet_turn_snapshot_to_json(
+    document = legacy_fleet_ledgers_document(
         FleetTurnSnapshot(
             analytic_id="fleet",
             game_id=628580,
@@ -250,7 +232,7 @@ def test_stale_per_ledger_materialization_version_is_deleted_on_read(
     ledger_wire = document[FLEET_LEDGERS_KEY]["8"]
     assert isinstance(ledger_wire, dict)
     ledger_wire["materializationVersion"] = FLEET_MATERIALIZATION_VERSION - 1
-    memory_backend.put(persistence.document_key(628580, 1, 111), document)
+    memory_backend.put(persistence.ledger_key(628580, 1, 111, 8), ledger_wire)
     generation_before = persistence.player_invalidation_generation(628580, 1, 8)
 
     assert persistence.get_ledger(628580, 1, 111, 8) is None
@@ -288,6 +270,55 @@ def test_delete_ledger_removes_one_player_entry(persistence, sample_ledger):
 
     assert persistence.get_ledger(628580, 1, 111, 8) is None
     assert persistence.get_ledger(628580, 1, 111, 3) is not None
+    assert persistence.list_ledger_player_ids(628580, 1, 111) == [3]
+
+
+def test_delete_snapshot_removes_all_player_ledgers(persistence, memory_backend, sample_ledger):
+    other_ledger = FleetAcquisitionLedger(player_id=3, player_name="other")
+    persistence.put_ledger(628580, 1, 111, 8, PersistedFleetLedger(ledger=sample_ledger))
+    persistence.put_ledger(628580, 1, 111, 3, PersistedFleetLedger(ledger=other_ledger))
+    prefix = persistence.ledger_prefix(628580, 1, 111)
+
+    persistence.delete_snapshot(628580, 1, 111)
+
+    assert persistence.list_ledger_player_ids(628580, 1, 111) == []
+    assert persistence.get_snapshot(628580, 1, 111) is None
+    assert persistence.get_ledger(628580, 1, 111, 8) is None
+    assert persistence.get_ledger(628580, 1, 111, 3) is None
+    assert not memory_backend._document_store.has_document(prefix)
+    with pytest.raises(NotFoundError):
+        memory_backend.list(prefix)
+
+
+def test_delete_last_ledger_prunes_empty_dirs_on_file_backend(tmp_path, sample_ledger):
+    storage_root = tmp_path / "data"
+    backend = FileStorageBackend(storage_root)
+    persistence = FleetSnapshotPersistenceService(backend)
+    other_ledger = FleetAcquisitionLedger(player_id=3, player_name="other")
+    persistence.put_ledger(628580, 1, 111, 8, PersistedFleetLedger(ledger=sample_ledger))
+    persistence.put_ledger(628580, 1, 111, 3, PersistedFleetLedger(ledger=other_ledger))
+    prefix = persistence.ledger_prefix(628580, 1, 111)
+    fleet_dir = storage_root / "games" / "628580" / "1" / "turns" / "111" / "analytics" / "fleet"
+    assert (fleet_dir / "8.json").is_file()
+    assert (fleet_dir / "3.json").is_file()
+
+    persistence.delete_ledger(628580, 1, 111, 8)
+    assert persistence.list_ledger_player_ids(628580, 1, 111) == [3]
+    assert (fleet_dir / "3.json").is_file()
+    assert not (fleet_dir / "8.json").exists()
+
+    persistence.delete_snapshot(628580, 1, 111)
+
+    assert persistence.list_ledger_player_ids(628580, 1, 111) == []
+    assert persistence.get_snapshot(628580, 1, 111) is None
+    assert not backend._document_store.has_document(prefix)
+    assert not fleet_dir.exists()
+    parent_document = (
+        storage_root / "games" / "628580" / "1" / "turns" / "111" / "analytics" / "fleet.json"
+    )
+    assert not parent_document.exists()
+    with pytest.raises(NotFoundError):
+        backend.list(prefix)
 
 
 def test_put_ledger_does_not_invoke_on_snapshot_persisted(persistence, sample_ledger):

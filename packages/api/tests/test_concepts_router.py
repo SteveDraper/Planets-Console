@@ -2,7 +2,7 @@
 
 import pytest
 from api.config import ApiConfig, set_config
-from api.storage import clear_backend_cache
+from api.storage_factory import clear_backend_cache
 from fastapi.testclient import TestClient
 
 

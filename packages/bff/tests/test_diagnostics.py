@@ -3,7 +3,7 @@
 import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
-from api.storage import clear_backend_cache
+from api.storage_factory import clear_backend_cache
 from bff.app import app
 from bff.config import BffConfig
 from bff.config import set_config as set_bff_config

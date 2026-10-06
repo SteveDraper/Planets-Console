@@ -23,6 +23,7 @@ packages/api/
 ├── transport/    # Optional request/response contract models when HTTP contracts differ from domain models
 ├── serialization/ # Explicit codecs for persistence of non-JSON-native field types
 ├── storage/      # StorageBackend protocol + implementations (see storage.mdc)
+├── storage_factory.py  # Process opener: production migrations + get_storage()
 ├── config.py     # AppConfig dataclass + load_config() (see python-tooling.mdc)
 └── app.py        # Core REST API FastAPI sub-app assembly — mounts API routers only
 ```

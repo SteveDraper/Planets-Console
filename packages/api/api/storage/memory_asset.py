@@ -1,111 +1,120 @@
-"""In-memory StorageBackend initialized from a JSON asset; supports full CRUD for testing.
+"""In-memory StorageBackend.
 
-Backed by a deep copy of the initial data so all operations (get/put/delete/list) are
-implemented and can be unit tested. Not read-only.
+Documents are keyed by breakpoint path, matching the file backend. A put of a
+longer breakpoint does not nest inside the shorter document. ``initial`` is a
+logical JSON tree in the current layout, including a ``storage_asset_path``
+asset. It is partitioned with the current registry and stamped at the current
+version. Migrations do not run over that seed. A tree that contains the
+``meta`` namespace raises ``ValidationError``.
 """
 
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from api.errors import NotFoundError, ValidationError
 from api.storage.base import JSONValue
-from api.storage.boundaries import is_navigable_prefix, is_registered_path, resolve_breakpoint
-from api.storage.path_utils import (
-    deep_copy_value,
-    ensure_ancestors,
-    list_children,
-    parse_index_segment,
-    resolve_parent_and_segment,
-    resolve_path,
-    validate_no_reserved_at_keys,
-)
+from api.storage.breakpoint_backend import BreakpointDocumentBackend, resolve_storage_format
+from api.storage.documents import child_names_for_prefix, partition_logical_tree
+from api.storage.migrations import STORAGE_VERSION_KEY, StorageFormat, stamp_version
+from api.storage.path_utils import deep_copy_value, validate_no_reserved_at_keys
 
 
-class MemoryAssetBackend:
-    """Storage backend that holds a logical JSON tree in memory.
+class MemoryDocumentStore:
+    """In-memory breakpoint documents.
 
-    Initialized from an initial payload (e.g. loaded from a test JSON asset).
-    All mutations modify the in-memory dict; no persistence.
+    Owns the document map and its lock. ``read_document`` returns a copy.
+    Logical updates take ``document_lock`` for the whole read-modify-write;
+    store methods re-enter that lock. ``replace_document`` rejects reserved
+    ``@`` object keys.
     """
 
-    def __init__(self, initial: dict[str, JSONValue] | None = None) -> None:
-        """Initialize with a deep copy of initial. Root is always a dict."""
-        self._root: dict[str, JSONValue] = (
-            deep_copy_value(initial or {}) if initial is not None else {}
-        )
+    def __init__(self, documents: dict[str, JSONValue]) -> None:
         self._lock = threading.RLock()
+        self._documents = documents
 
-    def get(self, key: str) -> JSONValue:
-        """Return a deep copy of the value at path. Raises NotFoundError if path does not exist."""
-        with self._lock:
-            path = (key or "").strip().strip("/") or ""
-            if path == "":
-                raise ValidationError("Cannot get root path")
-            if not is_registered_path(path):
-                raise ValidationError(f"Unregistered store path: {path!r}")
-            node = resolve_path(self._root, path)
-            return deep_copy_value(node)
+    @contextmanager
+    def document_lock(self, breakpoint_path: str) -> Iterator[None]:
+        """Hold the document map lock for one logical read-modify-write.
 
-    def put(self, key: str, value: JSONValue) -> None:
-        """Store value at path. Creates object ancestors as needed. Overwrites if path exists."""
+        One lock covers every breakpoint, including ``breakpoint_path``.
+        """
         with self._lock:
-            path = (key or "").strip().strip("/") or ""
-            if path == "":
-                raise ValidationError("Cannot put root path")
-            resolve_breakpoint(path)
-            validate_no_reserved_at_keys(value)
-            value_copy = deep_copy_value(value)
-            parent, segment, is_array_index = ensure_ancestors(self._root, path)
-            if is_array_index:
-                idx = parse_index_segment(segment)
-                if idx == len(parent):
-                    parent.append(value_copy)
-                elif 0 <= idx < len(parent):
-                    parent[idx] = value_copy
-                else:
-                    n = len(parent)
-                    if idx < 0:
-                        idx += n
-                    if idx == n:
-                        parent.append(value_copy)
-                    elif 0 <= idx < n:
-                        parent[idx] = value_copy
-                    else:
-                        raise NotFoundError(f"Array index out of range: {segment}")
-            else:
-                assert isinstance(parent, dict)
-                parent[segment] = value_copy
+            yield
 
-    def delete(self, key: str) -> None:
-        """Remove the node at path. Raises NotFoundError if path does not exist."""
+    def iter_document_paths(self) -> Iterator[str]:
         with self._lock:
-            path = (key or "").strip().strip("/") or ""
-            if path == "":
-                raise ValidationError("Cannot delete root path")
-            resolve_breakpoint(path)
-            parent, segment, is_array_index = resolve_parent_and_segment(self._root, path)
-            if is_array_index:
-                idx = parse_index_segment(segment)
-                arr = parent
-                if idx < 0:
-                    idx += len(arr)
-                if idx < 0 or idx >= len(arr):
-                    raise NotFoundError(f"Array index out of range: {segment}")
-                arr.pop(idx)
-            else:
-                assert isinstance(parent, dict)
-                if segment not in parent:
-                    raise NotFoundError(f"Path does not exist: {segment!r}")
-                del parent[segment]
+            paths = tuple(self._documents)
+        yield from paths
 
-    def list(self, prefix: str) -> list[str]:
-        """Return next-hop segment names under the prefix."""
+    def has_document(self, breakpoint_path: str) -> bool:
         with self._lock:
-            path = (prefix or "").strip().strip("/") or ""
-            if not is_navigable_prefix(path):
-                raise ValidationError(f"Unregistered store path prefix: {path!r}")
-            if path == "":
-                return list_children(self._root)
-            node = resolve_path(self._root, path)
-            return list_children(node)
+            return breakpoint_path in self._documents
+
+    def load_document(self, breakpoint_path: str) -> JSONValue:
+        """Return the stored object. Do not mutate the result."""
+        with self._lock:
+            return self._stored(breakpoint_path)
+
+    def read_document(self, breakpoint_path: str) -> JSONValue:
+        with self._lock:
+            return deep_copy_value(self._stored(breakpoint_path))
+
+    def replace_document(self, breakpoint_path: str, value: JSONValue) -> None:
+        """Store ``value`` as this breakpoint document."""
+        validate_no_reserved_at_keys(value)
+        with self._lock:
+            self._documents[breakpoint_path] = value
+
+    def write_document(self, breakpoint_path: str, value: JSONValue) -> None:
+        self.replace_document(breakpoint_path, deep_copy_value(value))
+
+    def remove_document(self, breakpoint_path: str) -> None:
+        with self._lock:
+            try:
+                del self._documents[breakpoint_path]
+            except KeyError:
+                raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
+
+    def child_names(self, prefix: str) -> list[str]:
+        with self._lock:
+            return child_names_for_prefix(self._documents, prefix)
+
+    def _stored(self, breakpoint_path: str) -> JSONValue:
+        """Return the stored object. Caller holds ``_lock``."""
+        try:
+            return self._documents[breakpoint_path]
+        except KeyError:
+            raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
+
+
+def _reject_seed_meta(root: dict[str, JSONValue]) -> None:
+    """Raise when ``root`` contains the storage-meta namespace."""
+    namespace = STORAGE_VERSION_KEY.split("/", 1)[0]
+    if namespace in root:
+        raise ValidationError(f"Seed must not contain the {namespace!r} namespace")
+
+
+class MemoryAssetBackend(BreakpointDocumentBackend):
+    """Storage backend that holds breakpoint documents in memory.
+
+    ``initial`` is a current-layout logical tree. It is partitioned and stamped
+    at the bound format's current version. The document map and its lock live
+    on the composed ``MemoryDocumentStore``.
+    """
+
+    def __init__(
+        self,
+        initial: dict[str, JSONValue] | None = None,
+        *,
+        storage_format: StorageFormat | None = None,
+    ) -> None:
+        resolved_format = resolve_storage_format(storage_format)
+        tree = {} if initial is None else initial
+        _reject_seed_meta(tree)
+        seeded = partition_logical_tree(tree, resolved_format.patterns)
+        document_store = MemoryDocumentStore(seeded)
+        stamp_version(document_store, resolved_format.current_version)
+        super().__init__(document_store, resolved_format)

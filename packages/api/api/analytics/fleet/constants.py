@@ -2,8 +2,6 @@
 
 ANALYTIC_ID = "fleet"
 
-FLEET_LEDGERS_KEY = "ledgers"
-
 # Perspective-scoped breakpoint segment for one player's fleet evidence mark.
 FLEET_EVIDENCE_MARK_SEGMENT = "fleet-evidence"
 

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from api.analytics.military_score_inference.inference_scheduler import (
+    get_inference_row_scheduler,
+    inference_row_scheduler_if_initialized,
+    reset_inference_row_scheduler_for_tests,
+)
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.stack import (
@@ -10,8 +15,8 @@ from api.services.stack import (
     clear_process_service_stack,
     get_process_service_stack,
 )
-from api.storage import clear_backend_cache
 from api.storage.memory_asset import MemoryAssetBackend
+from api.storage_factory import clear_backend_cache
 
 
 def test_build_game_credential_services_returns_games_and_credentials(monkeypatch):
@@ -44,7 +49,7 @@ def test_build_game_credential_services_returns_games_and_credentials(monkeypatc
 
 def test_build_default_game_credential_services_uses_process_storage(monkeypatch):
     storage = MemoryAssetBackend(initial={})
-    monkeypatch.setattr("api.storage.get_storage", lambda: storage)
+    monkeypatch.setattr("api.storage_factory.get_storage", lambda: storage)
     constructed: list[str] = []
 
     class TrackingTurnAnalyticService:
@@ -65,7 +70,7 @@ def test_build_default_game_credential_services_uses_process_storage(monkeypatch
 
 def test_get_process_service_stack_is_a_singleton(monkeypatch):
     storage = MemoryAssetBackend(initial={})
-    monkeypatch.setattr("api.storage.get_storage", lambda: storage)
+    monkeypatch.setattr("api.storage_factory.get_storage", lambda: storage)
     clear_process_service_stack()
     try:
         first = get_process_service_stack()
@@ -79,7 +84,7 @@ def test_get_process_service_stack_is_a_singleton(monkeypatch):
 
 def test_clear_backend_cache_drops_process_service_stack(monkeypatch):
     storage = MemoryAssetBackend(initial={})
-    monkeypatch.setattr("api.storage.get_storage", lambda: storage)
+    monkeypatch.setattr("api.storage_factory.get_storage", lambda: storage)
     clear_process_service_stack()
     try:
         first = get_process_service_stack()
@@ -98,4 +103,17 @@ def test_clear_backend_cache_drops_process_service_stack(monkeypatch):
         assert rebuilt.games is not first.games
         assert rebuilt.turns is not first.turns
     finally:
+        clear_process_service_stack()
+
+
+def test_clear_backend_cache_resets_analytic_singletons():
+    reset_inference_row_scheduler_for_tests()
+    scheduler = get_inference_row_scheduler()
+    try:
+        clear_process_service_stack()
+        assert inference_row_scheduler_if_initialized() is scheduler
+        clear_backend_cache()
+        assert inference_row_scheduler_if_initialized() is None
+    finally:
+        reset_inference_row_scheduler_for_tests()
         clear_process_service_stack()

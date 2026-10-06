@@ -40,7 +40,7 @@ def run_startup_seed_if_configured() -> None:
     must call this from its own lifespan in addition to ``api.app`` doing so when run alone.
     """
     from api.config import get_config
-    from api.storage import get_storage
+    from api.storage_factory import get_storage
 
     if get_config().include_dummy_data:
         seed_dummy_data(get_storage())

@@ -7,8 +7,8 @@ from starlette.responses import Response
 
 from api.errors import ValidationError
 from api.services.store_service import StoreService
-from api.storage import get_storage
 from api.storage.base import StorageBackend
+from api.storage_factory import get_storage
 
 router = APIRouter(prefix="/v1/store", tags=["store"])
 

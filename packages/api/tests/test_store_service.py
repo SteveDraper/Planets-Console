@@ -6,32 +6,36 @@ import pytest
 from api.errors import ConflictError, NotFoundError, ValidationError
 from api.services.store_service import StoreService
 from api.storage.memory_asset import MemoryAssetBackend
+from api.storage.migrations import STORAGE_VERSION_KEY
 
 INFO = "games/sample/info"
 NESTED = f"{INFO}/nested"
 
 
 @pytest.fixture
-def service():
-    return StoreService(
-        storage=MemoryAssetBackend(
-            initial=copy.deepcopy(
-                {
-                    "games": {
-                        "sample": {
-                            "info": {
-                                "turn": 2,
-                                "nested": {
-                                    "earth": {"name": "Earth"},
-                                    "arr": [1, 2, 3],
-                                },
-                            }
+def storage():
+    return MemoryAssetBackend(
+        initial=copy.deepcopy(
+            {
+                "games": {
+                    "sample": {
+                        "info": {
+                            "turn": 2,
+                            "nested": {
+                                "earth": {"name": "Earth"},
+                                "arr": [1, 2, 3],
+                            },
                         }
                     }
-                }
-            )
+                },
+            }
         )
     )
+
+
+@pytest.fixture
+def service(storage):
+    return StoreService(storage=storage)
 
 
 def test_create_new_path(service):
@@ -67,11 +71,43 @@ def test_read_shallow_object(service):
     assert shallow["count"] == 2
 
 
+def test_in_document_meta_key_is_not_storage_meta(service):
+    service.create(f"{INFO}/meta", {"x": 1})
+    assert service.read(f"{INFO}/meta") == {"x": 1}
+    shallow = service.read_shallow(INFO)
+    assert "meta" in shallow["children"]
+
+
 def test_read_shallow_root_returns_empty_path(service):
     shallow = service.read_shallow("")
     assert shallow["path"] == ""
     assert shallow["node_type"] == "object"
     assert "games" in shallow["children"]
+    assert STORAGE_VERSION_KEY.split("/", 1)[0] not in shallow["children"]
+    assert shallow["count"] == len(shallow["children"])
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        STORAGE_VERSION_KEY.split("/", 1)[0],
+        STORAGE_VERSION_KEY,
+        f"{STORAGE_VERSION_KEY}/version",
+    ],
+)
+def test_storage_meta_namespace_is_rejected(service, storage, path):
+    stamp = storage.get(STORAGE_VERSION_KEY)
+    with pytest.raises(ValidationError, match="reserved for storage metadata"):
+        service.read(path)
+    with pytest.raises(ValidationError, match="reserved for storage metadata"):
+        service.read_shallow(path)
+    with pytest.raises(ValidationError, match="reserved for storage metadata"):
+        service.create(path, {"version": 99})
+    with pytest.raises(ValidationError, match="reserved for storage metadata"):
+        service.update(path, {"version": 99})
+    with pytest.raises(ValidationError, match="reserved for storage metadata"):
+        service.delete(path)
+    assert storage.get(STORAGE_VERSION_KEY) == stamp
 
 
 def test_read_shallow_array(service):

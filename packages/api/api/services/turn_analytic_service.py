@@ -60,7 +60,7 @@ class TurnAnalyticService:
         self._turns = turns
         self._planets_client_factory = planets_client_factory or PlanetsNuClient.from_config
         if storage is None:
-            from api.storage import get_storage
+            from api.storage_factory import get_storage
 
             storage = get_storage()
         if hull_catalog_masks is not None:

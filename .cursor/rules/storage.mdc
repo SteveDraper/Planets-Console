@@ -6,9 +6,11 @@ alwaysApply: false
 
 # Storage Sub-layer Conventions
 
-The storage sub-layer sits at the bottom of the Core REST API layer (`packages/api/api/storage/`, import `api.storage`). It owns the `StorageBackend` protocol and all concrete implementations. Nothing outside this sub-package may reference a concrete implementation.
+The storage sub-layer sits at the bottom of the Core REST API layer (`packages/api/api/storage/`, import `api.storage`). It owns the `StorageBackend` protocol and all concrete implementations. Nothing outside this sub-package may reference a concrete implementation, except the process factory in `api.storage_factory`.
 
 Storage operates on JSON-compatible values (`JSONValue`). It does not know about dataclasses or field-specific codecs; those belong to the service and serialization layers above.
+
+`api.storage` must not import `api.analytics`, `api.services`, or `api.storage_factory` (not even lazily).
 
 ## The Protocol
 
@@ -24,15 +26,13 @@ class StorageBackend(Protocol):
     def list(self, prefix: str) -> list[str]: ...
 ```
 
-- **Never** import a concrete implementation (`FileStorageBackend`, `MemoryAssetBackend`, etc.) outside `api.storage`
+- **Never** import a concrete implementation (`FileStorageBackend`, `MemoryAssetBackend`, etc.) outside `api.storage`, except from `api.storage_factory`
 - The active backend is injected via dependency injection (FastAPI `Depends`) — never instantiated inline in routers or services
 
 ```python
 # ✅ Correct — injected
-def get_storage() -> StorageBackend:
-    return _storage_instance
+from api.storage_factory import get_storage
 
-@router.get("/planets/{id}")
 def get_planet(id: str, storage: StorageBackend = Depends(get_storage)):
     ...
 
@@ -69,20 +69,23 @@ The file backend persists **documents** at **breakpoints** from a code registry 
 - Nested paths without a deeper breakpoint are stored **inside** that JSON file
 - Unregistered paths → `ValidationError` (fail fast)
 - Document writes: temp file + atomic `replace`; document delete: remove file + prune empty parent dirs
+- The ephemeral backend uses the same breakpoint resolution. A `put` of a longer breakpoint does not nest inside the shorter document. An ephemeral `initial` tree, including a `storage_asset_path` asset, is a logical JSON tree in the current layout. It is partitioned with the current registry and stamped at the current version; migrations do not run over that seed. A seed that contains the `meta` namespace raises `ValidationError`
+- One **storage version** document per directory (`meta/storage-version`). Empty directories are stamped current. Older supported directories run registered migrations on open. Documents introduced outside the app after the stamp are unsupported. See [ADR 0033](../../docs/adr/0033-storage-versioned-breakpoint-migrations.md). `production_storage_format()` in `api.storage_factory` is the only place analytic steps are bound (that module may import analytics) and is the format the process uses to open a backend. `current_version` is the highest registered step, or 0 when the format registers none. Construction requires those steps to be versions `1..N` in order, each introducing a registered breakpoint, and `minimum_version` not above that current version. `minimum_version` of `None` means an unversioned directory is still supported. Backends take one optional `storage_format`; omitted means `DEFAULT_STORAGE_FORMAT`, which registers no steps. An empty directory opened with that default is stamped 0. An unversioned directory is already at version 0, so open leaves it unchanged. `FileStorageBackend` and `MemoryAssetBackend` are thin constructors over `BreakpointDocumentBackend` (`breakpoint_backend.py`), which implements `get` / `put` / `delete` / `list` once. They differ by the document store they open (`FileDocumentStore` in `file_documents.py`, `MemoryDocumentStore` in `memory_asset.py`). `read_document` returns a copy. Migrations use that store through `DocumentStore` in `document_store.py`. `StorageBackend` stays `get` / `put` / `delete` / `list`.
+- Generic store CRUD (`StoreService`) rejects reads, listings, and writes of the `meta` namespace with `ValidationError`. A shallow root listing omits that segment. Backend `list` / `get` / `put` / `delete` of the stamp are unchanged so migrations can still write it.
 
-**V1 patterns:** `games/*/info`, `games/*/*/turns/*`, `games/*/*/turns/*/analytics/fleet/*`, `games/*/*/analytics/fleet-evidence/*`, `credentials/accounts/*`
+**V1 patterns:** `games/*/info`, `games/*/*/turns/*`, `games/*/*/turns/*/analytics/*`, `games/*/*/turns/*/analytics/fleet/*`, `games/*/*/analytics/fleet-evidence/*`, `credentials/accounts/*`, `meta/storage-version`
 
 ## Adding a New Implementation
 
-1. Create `packages/api/api/storage/<name>.py` implementing `StorageBackend`
+1. Create `packages/api/api/storage/<name>.py`. A breakpoint-document backend subclasses `BreakpointDocumentBackend` and supplies a document store; it does not reimplement `get` / `put` / `delete` / `list`.
 2. Add a config flag in `ApiConfig` to select the backend (e.g. `storage_backend: str = "file"`)
-3. Update the `get_storage()` factory in `packages/api/api/storage/__init__.py` — nowhere else
+3. Update the `get_storage()` factory in `packages/api/api/storage_factory.py` -- nowhere else
 4. Add the implementation to the shared conformance test parametrization
-5. Write backend-specific unit tests under `packages/api/tests/` — never tests against the concrete class from outside storage
+5. Write backend-specific unit tests under `packages/api/tests/` -- never tests against the concrete class from outside storage (the factory is the allowed production opener)
 
 ## Current Implementations
 
 | Name | Config id | Module | Notes |
 |---|---|---|---|
-| Ephemeral | `ephemeral` | `storage/memory_asset.py` | In-memory; optional JSON asset seed at startup; for tests and CI |
+| Ephemeral | `ephemeral` | `storage/memory_asset.py` | In-memory; optional current-layout JSON asset seed at startup; for tests and CI |
 | File | `file` | `storage/file.py` | Breakpoint JSON documents under `storage_root/` (default `./.data`) |

@@ -21,4 +21,4 @@ We persist **documents** at **breakpoints** declared in a code registry (`packag
 - Shared parametrized conformance tests must pass for every `StorageBackend` implementation.
 - Multi-worker uvicorn on one `storage_root` may need advisory file locking in a follow-up ADR.
 
-See also: [CONTEXT.md](../../CONTEXT.md), [design-storage-abstraction-and-crud-api.md](../design-storage-abstraction-and-crud-api.md) §15.
+See also: [CONTEXT.md](../../CONTEXT.md), [design-storage-abstraction-and-crud-api.md](../design-storage-abstraction-and-crud-api.md) §15, [ADR 0033](0033-storage-versioned-breakpoint-migrations.md).

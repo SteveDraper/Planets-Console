@@ -14,7 +14,7 @@ from api.services.load_all_final_turns import (
     iter_final_turn_load_progress,
 )
 from api.services.turn_load_service import TurnLoadService
-from api.storage import clear_backend_cache, get_storage
+from api.storage_factory import clear_backend_cache, get_storage
 from api.transport.game_info_update import RefreshGameInfoParams
 from api.transport.load_all_turns import LoadAllProgressUpdate
 

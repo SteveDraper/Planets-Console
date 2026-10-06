@@ -10,7 +10,7 @@ from api.config import set_config as set_api_config
 from api.errors import UpstreamPlanetsError
 from api.planets_nu import PlanetsNuClient
 from api.services.game_service import clear_sector_title_cache
-from api.storage import clear_backend_cache, get_storage
+from api.storage_factory import clear_backend_cache, get_storage
 from bff.app import app
 from bff.config import BffConfig
 from bff.config import set_config as set_bff_config

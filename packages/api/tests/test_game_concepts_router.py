@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from api.config import ApiConfig, set_config
-from api.storage import clear_backend_cache, get_storage
+from api.storage_factory import clear_backend_cache, get_storage
 from fastapi.testclient import TestClient
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"

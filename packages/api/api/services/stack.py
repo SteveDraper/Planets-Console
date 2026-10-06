@@ -120,7 +120,7 @@ _process_stack: ServiceStack | None = None
 
 def build_default_service_stack() -> ServiceStack:
     """Service graph for the active process storage backend (BFF in-process adapter, tests)."""
-    from api.storage import get_storage
+    from api.storage_factory import get_storage
 
     return build_service_stack(get_storage())
 
@@ -138,7 +138,7 @@ def get_process_service_stack() -> ServiceStack:
 
 
 def clear_process_service_stack() -> None:
-    """Drop the cached stack (tests after storage or config change)."""
+    """Drop the cached stack and shut down its background workers."""
     global _process_stack
     stack = _process_stack
     _process_stack = None
@@ -157,6 +157,6 @@ def build_game_credential_services(
 
 def build_default_game_credential_services() -> tuple[GameService, CredentialService]:
     """CredentialService and GameService for the active process storage backend."""
-    from api.storage import get_storage
+    from api.storage_factory import get_storage
 
     return build_game_credential_services(get_storage())

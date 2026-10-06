@@ -58,6 +58,48 @@ class ValidationError(CoreAPIError):
     http_error: int = 422
 
 
+class UnhandledFormatError(CoreAPIError):
+    """Stored data is outside the layouts this code can open."""
+
+    http_error: int = 422
+
+    def __init__(
+        self,
+        found: str,
+        detail: str,
+        *,
+        minimum_version: str | None = None,
+        maximum_version: str | None = None,
+    ) -> None:
+        self.found_version = found
+        self.minimum_version = minimum_version
+        self.maximum_version = maximum_version
+        super().__init__(f"Unhandled storage format: {detail}")
+
+    @classmethod
+    def below_minimum(cls, found: str, minimum: str) -> UnhandledFormatError:
+        return cls(
+            found,
+            f"found version {found}, minimum supported version {minimum}",
+            minimum_version=minimum,
+        )
+
+    @classmethod
+    def above_maximum(cls, found: str, maximum: str) -> UnhandledFormatError:
+        return cls(
+            found,
+            f"found version {found}, maximum supported version {maximum}",
+            maximum_version=maximum,
+        )
+
+    @classmethod
+    def unreadable_stamp(cls) -> UnhandledFormatError:
+        return cls(
+            "unreadable",
+            "storage version stamp is not an object with an integer version",
+        )
+
+
 class LoginCredentialsRequiredError(CoreAPIError):
     """Stored API key is missing and no password was supplied for refresh."""
 

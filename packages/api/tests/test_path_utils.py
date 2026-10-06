@@ -5,10 +5,19 @@ from api.errors import NotFoundError, ValidationError
 from api.storage.path_utils import (
     deep_copy_value,
     list_children,
+    normalize_store_key,
     parse_index_segment,
     resolve_path,
     validate_no_reserved_at_keys,
 )
+
+
+def test_normalize_store_key_strips_whitespace_and_slashes():
+    assert normalize_store_key("  /games/1/info/  ") == "games/1/info"
+    assert normalize_store_key("games/1/info/") == "games/1/info"
+    assert normalize_store_key("") == ""
+    assert normalize_store_key("/") == ""
+    assert normalize_store_key("///") == ""
 
 
 def test_parse_index_segment_valid():

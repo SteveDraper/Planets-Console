@@ -27,12 +27,12 @@ The system is layered so each piece only depends on the layer(s) below it. The *
 | BFF | `packages/bff` | SPA-optimized endpoints. Aggregates/reshapes Core REST API responses. No business logic. |
 | MCP adapter | `packages/mcp_adapter` | Agent Streamable HTTP at `/mcp`. Thin wrap of Core in-process APIs. No domain logic. Import `mcp_adapter`, never `mcp`. |
 | Core REST API | `packages/api` | Data model + business logic. No UI semantics. No knowledge of the SPA. |
-| Storage | `packages/api/storage/` | Abstract `StorageBackend` protocol + concrete implementations. Never referenced directly outside this sub-package. |
+| Storage | `packages/api/storage/` | Abstract `StorageBackend` protocol + concrete implementations. Instantiated only inside the sub-package and by `api.storage_factory`. |
 
 **Do not leak UI concerns into the Core REST API layer.**
 **Do not put business logic in the BFF layer.**
 **Do not put business logic in the MCP adapter.** It must not import `bff.*`, `api.storage.*`, Core routers / `api.app`, or `api.handlers.*`. Only `server` may import `mcp_adapter`.
-**Do not reference a concrete storage implementation outside `packages/api/storage/`.**
+**Do not reference a concrete storage implementation outside `packages/api/storage/`.** The process factory in `api.storage_factory` is the sole exception: it instantiates the configured backend. Routers and services still receive `StorageBackend` via injection.
 **Shared primitives live below features.** If two analytics need the same lookup, codec, or scope filter, extract to `concepts/`, `serialization/`, or a dedicated shared module -- never import analytic A from analytic B for convenience.
 **One policy, one encoding.** Branching precedence, export classification, and similar policy must not be duplicated in parallel functions; share a decision record or table.
 
