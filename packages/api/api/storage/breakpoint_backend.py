@@ -56,8 +56,7 @@ class BreakpointDocumentBackend:
         breakpoint_path, suffix = resolve_breakpoint(path, self._patterns)
         value_copy = deep_copy_value(value)
         # Nested keys of one breakpoint share a JSON document. Concurrent
-        # read-modify-write otherwise drops sibling keys (scores inference rows
-        # during map ensure).
+        # read-modify-write otherwise drops sibling keys.
         with self._document_store.document_lock(breakpoint_path):
             self._put_document(breakpoint_path, suffix, value_copy)
 

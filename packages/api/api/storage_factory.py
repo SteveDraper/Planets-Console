@@ -22,6 +22,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     reset_inference_table_stream_registry_for_tests,
 )
+from api.analytics.scores.storage_migration import scores_inference_row_storage_migration
 from api.config import get_config
 from api.services.stack import clear_process_service_stack
 from api.storage.base import StorageBackend
@@ -38,7 +39,10 @@ _backend_cache: StorageBackend | None = None
 
 def production_migrations() -> tuple[StorageMigration, ...]:
     """Return the steps a process or maintenance script binds when opening a data directory."""
-    return (fleet_storage_migration(),)
+    return (
+        fleet_storage_migration(),
+        scores_inference_row_storage_migration(),
+    )
 
 
 def production_storage_format() -> StorageFormat:

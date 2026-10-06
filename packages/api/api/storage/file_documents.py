@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from api.config import get_config
 from api.errors import NotFoundError
 from api.storage.base import JSONValue
 from api.storage.boundaries import document_relpath
@@ -30,7 +31,12 @@ class FileDocumentStore:
 
     def __init__(self, storage_root: Path) -> None:
         self._root = storage_root
-        self._document_lru = document_lru_for_root(storage_root)
+        cfg = get_config()
+        self._document_lru = document_lru_for_root(
+            storage_root,
+            small_document_maxsize=cfg.storage_small_document_lru_maxsize,
+            large_document_maxsize=cfg.storage_large_document_lru_maxsize,
+        )
 
     def iter_document_paths(self) -> Iterator[str]:
         root = self._root
@@ -54,8 +60,13 @@ class FileDocumentStore:
 
     def replace_document(self, breakpoint_path: str, value: JSONValue) -> None:
         """Persist ``value`` and retain that same object in the LRU."""
-        self._atomic_write(self._document_file(breakpoint_path), value)
-        self._document_lru.remember_document(breakpoint_path, value)
+        file_path = self._document_file(breakpoint_path)
+        self._atomic_write(file_path, value)
+        self._document_lru.remember_document(
+            breakpoint_path,
+            value,
+            byte_size=file_path.stat().st_size,
+        )
 
     def remove_document(self, breakpoint_path: str) -> None:
         file_path = self._document_file(breakpoint_path)
@@ -82,7 +93,16 @@ class FileDocumentStore:
             # Concurrent delete/prune can unlink between a peer's write and this
             # open (same race as ``_ensure_dir`` after a persistence clear).
             raise NotFoundError(f"Document not found: {breakpoint_path!r}") from None
-        self._document_lru.fill_document(breakpoint_path, loaded, epoch=epoch)
+        try:
+            byte_size = file_path.stat().st_size
+        except FileNotFoundError:
+            return loaded
+        self._document_lru.fill_document(
+            breakpoint_path,
+            loaded,
+            epoch=epoch,
+            byte_size=byte_size,
+        )
         return loaded
 
     @contextmanager

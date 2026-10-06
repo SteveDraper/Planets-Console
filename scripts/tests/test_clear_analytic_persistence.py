@@ -126,9 +126,11 @@ def test_clear_perspective_all_players_removes_turn_docs(storage: MemoryAssetBac
 
     assert "games/628580/11/turns/3/analytics/fleet/8" in result.deleted_documents
     assert "games/628580/11/turns/3/analytics/fleet/9" in result.deleted_documents
-    assert "games/628580/11/turns/3/analytics/scores" in result.deleted_documents
+    assert "games/628580/11/turns/3/analytics/scores/inference_rows/8" in result.deleted_documents
     with pytest.raises(NotFoundError):
         storage.get("games/628580/11/turns/3/analytics/fleet/8")
+    with pytest.raises(NotFoundError):
+        storage.get("games/628580/11/turns/3/analytics/scores/inference_rows/8")
     # Other perspective untouched.
     assert storage.get("games/628580/1/turns/3/analytics/fleet/8")["ledger"]["playerId"] == 8
 

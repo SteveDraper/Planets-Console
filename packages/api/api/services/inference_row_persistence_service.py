@@ -123,10 +123,7 @@ class InferenceRowPersistenceService:
         host_turn: int,
         player_id: int,
     ) -> None:
-        try:
-            self._storage.delete(self.row_store_key(game_id, perspective, host_turn, player_id))
-        except NotFoundError:
-            pass
+        self._delete_if_present(self.row_store_key(game_id, perspective, host_turn, player_id))
 
     def delete_host_turn_document(
         self,
@@ -134,10 +131,29 @@ class InferenceRowPersistenceService:
         perspective: int,
         host_turn: int,
     ) -> None:
+        """Remove this turn's inference row files and any leftover shared document.
+
+        Player files and a shared ``…/analytics/scores`` document are both
+        removed, so a turn clear cannot leave a mix of the two layouts.
+        """
+        document_key = self.host_turn_document_key(game_id, perspective, host_turn)
+        for row_key in self._row_keys_under(document_key):
+            self._delete_if_present(row_key)
+        self._delete_if_present(document_key)
+
+    def _row_keys_under(self, document_key: str) -> list[str]:
+        prefix = f"{document_key}/{_INFERENCE_ROWS_KEY}"
         try:
-            self._storage.delete(self.host_turn_document_key(game_id, perspective, host_turn))
+            segments = self._storage.list(prefix)
         except NotFoundError:
-            pass
+            return []
+        return [f"{prefix}/{segment}" for segment in segments]
+
+    def _delete_if_present(self, key: str) -> None:
+        try:
+            self._storage.delete(key)
+        except NotFoundError:
+            return
 
     def invalidate_for_turn_write(
         self,

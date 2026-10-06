@@ -243,12 +243,50 @@ def _clear_turn_analytics_for_all_players(
                     result=result,
                 )
                 continue
+            if analytic_id == SCORES_ANALYTIC_ID:
+                _clear_scores_turn(
+                    storage,
+                    game_id=game_id,
+                    perspective=perspective,
+                    turn_number=turn_number,
+                    dry_run=dry_run,
+                    result=result,
+                )
+                continue
             _delete_document(
                 storage,
                 f"{analytics_prefix}/{analytic_id}",
                 dry_run=dry_run,
                 result=result,
             )
+
+
+def _clear_scores_turn(
+    storage: StorageBackend,
+    *,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    dry_run: bool,
+    result: ClearAnalyticPersistenceResult,
+) -> None:
+    """Delete per-player inference row files at one turn, then any shared document."""
+    scores = InferenceRowPersistenceService(storage)
+    document_key = scores.host_turn_document_key(game_id, perspective, turn_number)
+    prefix = f"{document_key}/{_INFERENCE_ROWS_KEY}"
+    for segment in _list_segments(storage, prefix):
+        _delete_document(
+            storage,
+            f"{prefix}/{segment}",
+            dry_run=dry_run,
+            result=result,
+        )
+    _delete_document(
+        storage,
+        document_key,
+        dry_run=dry_run,
+        result=result,
+    )
 
 
 def _clear_scores_player_rows(

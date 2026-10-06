@@ -13,8 +13,9 @@ class FileStorageBackend(BreakpointDocumentBackend):
     """Persist the logical JSON store as breakpoint JSON files under ``storage_root``.
 
     Admitted breakpoint documents (not turn RST, not credentials) are retained
-    in a process-wide LRU keyed by resolved root. Successful put/delete
-    invalidates ancestor listings even when the document is not retained.
+    in process-wide small and large LRUs keyed by resolved root. File byte size
+    at put and fill selects the cache. Successful put/delete invalidates
+    ancestor listings even when the document is not retained.
     ``get`` returns a deep copy. Breakpoint file I/O lives on the composed
     ``FileDocumentStore``. The directory is opened before logical reads and
     writes.

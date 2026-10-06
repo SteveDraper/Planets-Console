@@ -16,9 +16,10 @@ from api.analytics.fleet.storage_migration import (
     upgrade_legacy_fleet_turn_document,
 )
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetTurnSnapshot
+from api.analytics.scores.storage_migration import scores_inference_row_storage_migration
 from api.config import ApiConfig, get_config, set_config
 from api.errors import NotFoundError, UnhandledFormatError, ValidationError
-from api.storage.boundaries import BREAKPOINT_PATTERNS
+from api.storage.boundaries import BREAKPOINT_PATTERNS, SCORES_INFERENCE_ROW_PATTERN
 from api.storage.breakpoint_backend import BreakpointDocumentBackend
 from api.storage.file import FileStorageBackend
 from api.storage.memory_asset import MemoryAssetBackend, MemoryDocumentStore
@@ -45,17 +46,6 @@ _BACKEND_METHODS = frozenset({"get", "put", "delete", "list"})
 
 SCORES = "games/7/1/turns/3/analytics/scores"
 SCORES_ROW = f"{SCORES}/inference_rows/4"
-SCORES_PLAYER_PATTERN = (
-    "games",
-    "*",
-    "*",
-    "turns",
-    "*",
-    "analytics",
-    "scores",
-    "inference_rows",
-    "*",
-)
 ROW = {"status": "exact", "playerId": 4}
 FLEET = "games/1/1/turns/3/analytics/fleet"
 FLEET_PLAYER = f"{FLEET}/8"
@@ -95,14 +85,11 @@ def _opened_memory(
     return BreakpointDocumentBackend(store, resolved)
 
 
-def _scores_patterns() -> tuple[tuple[str, ...], ...]:
-    return BREAKPOINT_PATTERNS + (SCORES_PLAYER_PATTERN,)
-
-
 def _scores_migration() -> StorageMigration:
+    """Isolated generic re-home of the scores row breakpoint, as its own version 1."""
     return StorageMigration(
         version=1,
-        introduced_pattern=SCORES_PLAYER_PATTERN,
+        introduced_pattern=SCORES_INFERENCE_ROW_PATTERN,
     )
 
 
@@ -115,7 +102,7 @@ def _open_scores(kind: str, root: Path, monkeypatch: pytest.MonkeyPatch):
         return real(*args, **kwargs)
 
     monkeypatch.setattr("api.storage.migrations.generic_rehome", wrapped)
-    patterns = _scores_patterns()
+    patterns = BREAKPOINT_PATTERNS
     migrations = (_scores_migration(),)
     if kind == "memory":
         backend = _opened_memory(
@@ -169,7 +156,7 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
         FileStorageBackend(
             root,
             storage_format=_storage_format(
-                patterns=_scores_patterns(),
+                patterns=BREAKPOINT_PATTERNS,
                 migrations=(_scores_migration(),),
             ),
         )
@@ -177,7 +164,7 @@ def test_generic_rehome_keeps_logical_get(kind, tmp_path, monkeypatch):
         _opened_memory(
             _document_map(backend),
             _storage_format(
-                patterns=_scores_patterns(),
+                patterns=BREAKPOINT_PATTERNS,
                 migrations=(_scores_migration(),),
             ),
         )
@@ -235,7 +222,7 @@ def test_generic_rehome_does_not_read_unrelated_documents():
         STORAGE_VERSION_KEY: {"version": 0},
     }
     store = _CountingStore(documents)
-    generic_rehome(store, _scores_patterns(), SCORES_PLAYER_PATTERN)
+    generic_rehome(store, BREAKPOINT_PATTERNS, SCORES_INFERENCE_ROW_PATTERN)
     assert store.reads == [SCORES]
     assert documents[SCORES] == {"kept": True}
     assert documents[SCORES_ROW] == ROW
@@ -625,14 +612,19 @@ def test_storage_package_does_not_import_analytics_services_or_factory():
     assert offenders == []
 
 
-def test_production_migrations_bind_fleet_step():
+def test_production_migrations_bind_fleet_then_scores_rehome():
     storage_format = production_storage_format()
     steps = storage_format.migrations
     assert steps == production_migrations()
-    assert len(steps) == 1
-    step = steps[0]
-    assert step.version == storage_format.current_version == fleet_storage_migration().version
-    assert step.structural_handler is migrate_fleet_breakpoint
+    assert len(steps) == 2
+    fleet_step, scores_step = steps
+    assert fleet_step.version == fleet_storage_migration().version == 1
+    assert fleet_step.structural_handler is migrate_fleet_breakpoint
+    assert scores_step == scores_inference_row_storage_migration()
+    assert scores_step.version == 2
+    assert scores_step.structural_handler is None
+    assert scores_step.introduced_pattern == SCORES_INFERENCE_ROW_PATTERN
+    assert storage_format.current_version == 2
 
 
 def test_get_storage_file_open_runs_fleet_migration(tmp_path):
@@ -660,6 +652,52 @@ def test_get_storage_file_open_runs_fleet_migration(tmp_path):
     finally:
         clear_backend_cache()
         set_config(previous)
+
+
+def test_production_open_splits_shared_scores_document(tmp_path):
+    """A shared scores document becomes one file per player and is removed."""
+    root = tmp_path / "data"
+    scores_file = root / f"{SCORES}.json"
+    scores_file.parent.mkdir(parents=True)
+    other = {"status": "exact", "playerId": 5}
+    scores_file.write_text(
+        json.dumps({"inference_rows": {"4": ROW, "5": other}}),
+        encoding="utf-8",
+    )
+    fleet_file = root / f"{FLEET}.json"
+    fleet_file.parent.mkdir(parents=True)
+    fleet_file.write_text(json.dumps({"ledgers": {"8": LEDGER_WIRE}}), encoding="utf-8")
+    backend = FileStorageBackend(root, storage_format=production_storage_format())
+    assert backend.get(SCORES_ROW) == ROW
+    assert backend.get(f"{SCORES}/inference_rows/5") == other
+    with pytest.raises(NotFoundError):
+        backend.get(SCORES)
+    assert not scores_file.exists()
+    assert (root / f"{SCORES_ROW}.json").is_file()
+    assert backend.get(FLEET_PLAYER) == LEDGER_WIRE
+    assert backend.get(STORAGE_VERSION_KEY) == {
+        "version": production_storage_format().current_version
+    }
+
+
+def test_version_one_directory_splits_scores_without_rerunning_fleet(tmp_path):
+    """A directory already at the fleet step only runs the scores re-home."""
+    root = tmp_path / "data"
+    scores_file = root / f"{SCORES}.json"
+    scores_file.parent.mkdir(parents=True)
+    scores_file.write_text(json.dumps({"inference_rows": {"4": ROW}}), encoding="utf-8")
+    fleet_file = root / f"{FLEET}.json"
+    fleet_file.parent.mkdir(parents=True)
+    fleet_parent = {"ledgers": {"8": LEDGER_WIRE}, "kept": True}
+    fleet_file.write_text(json.dumps(fleet_parent), encoding="utf-8")
+    version_file = root / "meta" / "storage-version.json"
+    version_file.parent.mkdir(parents=True)
+    version_file.write_text(json.dumps({"version": 1}), encoding="utf-8")
+    backend = FileStorageBackend(root, storage_format=production_storage_format())
+    assert backend.get(SCORES_ROW) == ROW
+    assert not scores_file.exists()
+    assert backend.get(FLEET) == fleet_parent
+    assert backend.get(STORAGE_VERSION_KEY) == {"version": 2}
 
 
 def test_default_format_opens_an_unversioned_directory(tmp_path):

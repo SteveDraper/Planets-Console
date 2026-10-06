@@ -9,6 +9,20 @@ from pathlib import Path
 
 from api.errors import ValidationError
 
+# One scores inference row. Longer than ``…/analytics/*``, so the player id is
+# the document, not a suffix of the shared turn scores file.
+SCORES_INFERENCE_ROW_PATTERN: tuple[str, ...] = (
+    "games",
+    "*",
+    "*",
+    "turns",
+    "*",
+    "analytics",
+    "scores",
+    "inference_rows",
+    "*",
+)
+
 # V1 patterns aligned with service store paths (ADR 0001).
 BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("games", "*", "info"),
@@ -18,6 +32,7 @@ BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("games", "*", "*", "turns", "*"),
     ("games", "*", "*", "turns", "*", "analytics", "*"),
     ("games", "*", "*", "turns", "*", "analytics", "fleet", "*"),
+    SCORES_INFERENCE_ROW_PATTERN,
     ("credentials", "accounts", "*"),
     ("league-teams", "*"),
     ("meta", "storage-version"),
