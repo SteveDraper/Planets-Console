@@ -18,17 +18,15 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceSolution,
-    ShipBuildCombo,
 )
 from api.analytics.military_score_inference.near_best_structural_search import (
+    member_combo_id_to_merged_id,
     merged_assignment_from_solution,
 )
 from api.analytics.military_score_inference.solver import (
     expand_structural_hits_to_top_k,
     merge_score_equivalent_combos,
 )
-
-ScoreClassKey = tuple[int, int, int]
 
 
 def relabel_held_score_equivalent_solutions(
@@ -49,9 +47,6 @@ def relabel_held_score_equivalent_solutions(
     if not held_solutions or not added_combo_ids:
         return
     held_snapshot = tuple(held_solutions)
-    combos_by_id = {combo.combo_id: combo for combo in catalog.ship_build_combos}
-    if not _added_combo_joins_held_class(held_snapshot, combos_by_id, added_combo_ids):
-        return
 
     problem = build_inference_problem(
         observation,
@@ -60,7 +55,10 @@ def relabel_held_score_equivalent_solutions(
         max_solutions=max_solutions,
     )
     merged = merge_score_equivalent_combos(problem.ship_build_combos)
-    affected_merged_ids = _merged_ids_for_combos(merged.members_by_merged_id, added_combo_ids)
+    member_to_merged = member_combo_id_to_merged_id(merged)
+    affected_merged_ids = {
+        member_to_merged[combo_id] for combo_id in added_combo_ids if combo_id in member_to_merged
+    }
     if not affected_merged_ids:
         return
 
@@ -91,39 +89,3 @@ def relabel_held_score_equivalent_solutions(
         max_solutions=max_solutions,
     ):
         admit(expansion)
-
-
-def _added_combo_joins_held_class(
-    held_solutions: Sequence[InferenceSolution],
-    combos_by_id: dict[str, ShipBuildCombo],
-    added_combo_ids: frozenset[str],
-) -> bool:
-    held_keys: set[ScoreClassKey] = set()
-    for solution in held_solutions:
-        for ship_build in solution.ship_builds:
-            combo = combos_by_id.get(ship_build.combo_id)
-            if combo is None:
-                continue
-            held_keys.add(_score_class_key(combo))
-    if not held_keys:
-        return False
-    for combo_id in added_combo_ids:
-        combo = combos_by_id.get(combo_id)
-        if combo is not None and _score_class_key(combo) in held_keys:
-            return True
-    return False
-
-
-def _score_class_key(combo: ShipBuildCombo) -> ScoreClassKey:
-    return (combo.score_delta_2x, combo.warship_delta, combo.freighter_delta)
-
-
-def _merged_ids_for_combos(
-    members_by_merged_id: dict[str, tuple[ShipBuildCombo, ...]],
-    combo_ids: frozenset[str],
-) -> set[str]:
-    merged_ids: set[str] = set()
-    for merged_id, members in members_by_merged_id.items():
-        if any(member.combo_id in combo_ids for member in members):
-            merged_ids.add(merged_id)
-    return merged_ids
