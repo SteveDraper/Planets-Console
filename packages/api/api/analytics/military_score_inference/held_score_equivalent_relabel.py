@@ -1,15 +1,16 @@
-"""Admit newly widened labels for a score class the ladder already holds.
+"""Return newly widened labels for a score class the ladder already holds.
 
 Search merges fittings that share military score and ship counts into one
 variable, and a held solution no-goods that variable so later tiers look for a
 new structure. Expansion is what chooses the hull label. When a later tier
 adds fittings to a class that is already held, expand the held assignment
-again and admit any new label the current catalog ranks into the top K.
+again and return any new label the current catalog ranks into the top K.
+The caller admits those labels.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Collection, Sequence
 
 from api.analytics.military_score_inference.actions import (
     ActionCatalog,
@@ -33,31 +34,29 @@ from api.analytics.military_score_inference.solver import (
 )
 
 
-def relabel_held_score_equivalent_solutions(
+def relabeled_solutions_for_widened_classes(
     held_solutions: Sequence[InferenceSolution],
     catalog: ActionCatalog,
     observation: InferenceObservation,
     *,
     added_combo_ids: frozenset[str],
     overshoot_signatures: Collection[SolutionSignature],
-    admit: Callable[[InferenceSolution], None],
-    race_id: int | None = None,
+    race_id: int,
     max_solutions: int,
-) -> None:
+) -> list[InferenceSolution]:
     """Re-expand held score classes that gained members in ``added_combo_ids``.
 
-    ``admit`` may insert into ``held_solutions``. Expansion walks a snapshot so
-    those inserts are not visited as further held rows. Signatures in
-    ``overshoot_signatures`` stay on the leftover-ranked buffer.
+    Returns the label expansions. Does not insert into ``held_solutions``.
+    Signatures in ``overshoot_signatures`` stay on the leftover-ranked buffer.
     """
     if not held_solutions or not added_combo_ids:
-        return
+        return []
     # Leftover-ranked overshoot holds are not exact top-K rows.
     held_snapshot = tuple(
         held for held in held_solutions if solution_signature(held) not in overshoot_signatures
     )
     if not held_snapshot:
-        return
+        return []
 
     problem = build_inference_problem(
         observation,
@@ -71,7 +70,7 @@ def relabel_held_score_equivalent_solutions(
         member_to_merged[combo_id] for combo_id in added_combo_ids if combo_id in member_to_merged
     }
     if not affected_merged_ids:
-        return
+        return []
 
     seen_assignments: set[tuple[tuple[str, int], ...]] = set()
     structural_hits: list[tuple[dict[str, int], dict[str, int]]] = []
@@ -93,10 +92,9 @@ def relabel_held_score_equivalent_solutions(
         seen_assignments.add(assignment_key)
         structural_hits.append((action_counts, combo_counts))
 
-    for expansion in expand_structural_hits_to_top_k(
+    return expand_structural_hits_to_top_k(
         problem,
         structural_hits,
         merged,
         max_solutions=max_solutions,
-    ):
-        admit(expansion)
+    )

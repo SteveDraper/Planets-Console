@@ -5,7 +5,7 @@ from __future__ import annotations
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.held_score_equivalent_relabel import (
-    relabel_held_score_equivalent_solutions,
+    relabeled_solutions_for_widened_classes,
 )
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
@@ -25,8 +25,9 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
 from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 
-# Game 686688 turn 2, Birds: both fittings score exactly 2580 (2x = 5160).
+# Game 686688 turn 2, Birds (raceid 3): both fittings score exactly 2580 (2x = 5160).
 EXACT_MILITARY_2X = 5160
+BIRDS_RACE_ID = 3
 FEARLESS_COMBO_ID = "combo_28_8_6_7_6_1"
 ENLIGHTEN_COMBO_ID = "combo_106_9_3_6_5_1"
 
@@ -122,15 +123,16 @@ def test_wider_catalog_admits_higher_weight_label_of_held_score() -> None:
             on_admitted=admitted.append,
         )
 
-    relabel_held_score_equivalent_solutions(
+    for expansion in relabeled_solutions_for_widened_classes(
         held,
         _catalog(fearless, enlighten),
         _observation(),
         added_combo_ids=frozenset({ENLIGHTEN_COMBO_ID}),
         overshoot_signatures=frozenset(),
-        admit=admit,
+        race_id=BIRDS_RACE_ID,
         max_solutions=20,
-    )
+    ):
+        admit(expansion)
 
     assert [build.combo_id for solution in held for build in solution.ship_builds] == [
         ENLIGHTEN_COMBO_ID,
@@ -158,15 +160,16 @@ def test_inserting_a_better_label_still_relabels_later_held_classes() -> None:
         max_solutions=20,
     )
 
-    relabel_held_score_equivalent_solutions(
+    for expansion in relabeled_solutions_for_widened_classes(
         held,
         _catalog(fearless, enlighten, weak, strong),
         _observation(),
         added_combo_ids=frozenset({ENLIGHTEN_COMBO_ID, strong.combo_id}),
         overshoot_signatures=frozenset(),
-        admit=lambda solution: admit_ranked_solution(held, seen, solution, max_solutions=20),
+        race_id=BIRDS_RACE_ID,
         max_solutions=20,
-    )
+    ):
+        admit_ranked_solution(held, seen, expansion, max_solutions=20)
 
     admitted_ids = {solution.ship_builds[0].combo_id for solution in held}
     assert {ENLIGHTEN_COMBO_ID, "combo_strong"} <= admitted_ids
@@ -182,15 +185,16 @@ def test_added_combo_outside_held_score_class_is_ignored() -> None:
     )
     held, seen = _hold(held_fearless, max_solutions=20)
 
-    relabel_held_score_equivalent_solutions(
+    for expansion in relabeled_solutions_for_widened_classes(
         held,
         _catalog(fearless, other_score),
         _observation(),
         added_combo_ids=frozenset({other_score.combo_id}),
         overshoot_signatures=frozenset(),
-        admit=lambda solution: admit_ranked_solution(held, seen, solution, max_solutions=20),
+        race_id=BIRDS_RACE_ID,
         max_solutions=20,
-    )
+    ):
+        admit_ranked_solution(held, seen, expansion, max_solutions=20)
 
     assert [solution.ship_builds[0].combo_id for solution in held] == [FEARLESS_COMBO_ID]
 
@@ -205,15 +209,16 @@ def test_full_buffer_keeps_worse_new_label_out() -> None:
     )
     held, seen = _hold(held_enlighten, max_solutions=1)
 
-    relabel_held_score_equivalent_solutions(
+    for expansion in relabeled_solutions_for_widened_classes(
         held,
         _catalog(enlighten, fearless),
         _observation(),
         added_combo_ids=frozenset({FEARLESS_COMBO_ID}),
         overshoot_signatures=frozenset(),
-        admit=lambda solution: admit_ranked_solution(held, seen, solution, max_solutions=1),
+        race_id=BIRDS_RACE_ID,
         max_solutions=1,
-    )
+    ):
+        admit_ranked_solution(held, seen, expansion, max_solutions=1)
 
     assert [solution.ship_builds[0].combo_id for solution in held] == [ENLIGHTEN_COMBO_ID]
 
@@ -240,21 +245,22 @@ def test_overshoot_tagged_held_row_is_not_relabeled() -> None:
     admit_ranked_solution(held, seen, held_weak, max_solutions=20)
     admitted: list[InferenceSolution] = []
 
-    relabel_held_score_equivalent_solutions(
+    for expansion in relabeled_solutions_for_widened_classes(
         held,
         _catalog(fearless, enlighten, weak, strong),
         _observation(),
         added_combo_ids=frozenset({ENLIGHTEN_COMBO_ID, strong.combo_id}),
         overshoot_signatures={solution_signature(held_fearless)},
-        admit=lambda solution: admit_ranked_solution(
+        race_id=BIRDS_RACE_ID,
+        max_solutions=20,
+    ):
+        admit_ranked_solution(
             held,
             seen,
-            solution,
+            expansion,
             max_solutions=20,
             on_admitted=admitted.append,
-        ),
-        max_solutions=20,
-    )
+        )
 
     held_ids = [solution.ship_builds[0].combo_id for solution in held]
     assert [solution.ship_builds[0].combo_id for solution in admitted] == ["combo_strong"]
