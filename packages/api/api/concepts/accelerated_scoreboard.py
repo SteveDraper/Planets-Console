@@ -176,18 +176,32 @@ def reported_scoreboard_deltas(score: Score, turn: TurnInfo) -> ReportedScoreboa
     )
 
 
-def starting_inventory_counts_for_score(score: Score, turn: TurnInfo) -> tuple[int, int]:
-    """Freighter and warship counts in the baseline a seed turn subtracts.
+def homeworld_starting_inventory_counts(settings: GameSettings) -> tuple[int, int]:
+    """(freighters, warships) on the settings homeworld snapshot.
 
-    The non-accelerated opening reveal uses the owner's baseline, so a Horwasp
-    still has the starting freighter when the homeworld has no starbase.
-    Accelerated seeding uses the settings snapshot.
+    Ship-id bounds use this per-player count. It is 0 when the snapshot has
+    no starting ships. Opening-reveal seed counts can differ by owner; those
+    come from ``homeworld_seed_counts``.
     """
-    if is_non_accelerated_opening_reveal(turn.settings.turn, turn.settings):
-        baseline = _opening_reveal_baseline(score, turn)
-    else:
-        baseline = starting_scoreboard_snapshot(turn.settings)
+    baseline = starting_scoreboard_snapshot(settings)
     return baseline.freighters, baseline.capitalships
+
+
+def homeworld_seed_counts(score: Score, turn: TurnInfo) -> tuple[int, int] | None:
+    """Freighter and warship counts to seed, or None when this turn does not seed.
+
+    Seed turns are the non-accelerated opening reveal and the first reliable
+    accelerated scoreboard turn. The opening reveal uses the owner's baseline,
+    so a Horwasp still has the starting freighter when the homeworld has no
+    starbase. Accelerated seeding uses the settings snapshot.
+    """
+    turn_number = turn.settings.turn
+    if is_non_accelerated_opening_reveal(turn_number, turn.settings):
+        baseline = _opening_reveal_baseline(score, turn)
+        return baseline.freighters, baseline.capitalships
+    if is_first_reliable_scoreboard_turn(turn_number, turn.settings):
+        return homeworld_starting_inventory_counts(turn.settings)
+    return None
 
 
 def homeworld_baseline_military_2x(settings: GameSettings) -> int:

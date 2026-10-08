@@ -18,6 +18,7 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
 )
+from api.concepts.accelerated_scoreboard import homeworld_seed_counts
 from api.models.game import TurnInfo
 from api.models.player import Score
 
@@ -60,15 +61,16 @@ def ingest_player_inferred_acquisitions(
     if score is not None:
         from api.analytics.fleet.scoreboard_placeholder_targets import (
             scoreboard_placeholder_targets,
-            should_seed_homeworld_starting_inventory,
         )
 
-        if should_seed_homeworld_starting_inventory(turn):
+        seed_counts = homeworld_seed_counts(score, turn)
+        if seed_counts is not None:
+            freighters, warships = seed_counts
             _ensure_homeworld_starting_inventory_rows(
                 ledger,
-                turn=turn,
-                score=score,
                 shell_turn=turn_number,
+                freighters=freighters,
+                warships=warships,
             )
         targets = scoreboard_placeholder_targets(score, turn)
         if targets is not None:
@@ -103,14 +105,11 @@ def _score_for_player(turn: TurnInfo, player_id: int) -> Score | None:
 def _ensure_homeworld_starting_inventory_rows(
     ledger: FleetAcquisitionLedger,
     *,
-    turn: TurnInfo,
-    score: Score,
     shell_turn: int,
+    freighters: int,
+    warships: int,
 ) -> None:
     """Seed homeworld starting ships the build deltas on this shell turn omit."""
-    from api.concepts.accelerated_scoreboard import starting_inventory_counts_for_score
-
-    freighters, warships = starting_inventory_counts_for_score(score, turn)
     _ensure_starting_inventory_rows(
         ledger,
         shell_turn=shell_turn,

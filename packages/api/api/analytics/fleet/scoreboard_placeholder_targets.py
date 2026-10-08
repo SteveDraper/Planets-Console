@@ -9,9 +9,7 @@ from api.concepts.accelerated_scoreboard import (
     HOMEBASE_STARTING_FREIGHTER_HULL_ID,
     accelerated_inference_segments,
     is_first_reliable_scoreboard_turn,
-    is_non_accelerated_opening_reveal,
     reported_scoreboard_deltas,
-    starting_scoreboard_snapshot,
 )
 from api.models.game import TurnInfo
 from api.models.player import Score
@@ -34,28 +32,9 @@ def homeworld_starting_freighter_engine_id() -> int:
     return HOMEBASE_STARTING_FREIGHTER_ENGINE_ID
 
 
-def homeworld_starting_inventory_counts(turn: TurnInfo) -> tuple[int, int]:
-    """Return (freighters, warships) from the settings snapshot, same for every owner."""
-    baseline = starting_scoreboard_snapshot(turn.settings)
-    return baseline.freighters, baseline.capitalships
-
-
 def is_first_reliable_accelerated_shell_turn(shell_turn: int, turn: TurnInfo) -> bool:
     """Return whether this shell turn is the first reliable accelerated scoreboard row."""
     return is_first_reliable_scoreboard_turn(shell_turn, turn.settings)
-
-
-def should_seed_homeworld_starting_inventory(turn: TurnInfo) -> bool:
-    """Return whether this shell turn subtracts homeworld ships from build deltas.
-
-    That is the first reliable accelerated scoreboard turn, and turn 2 when
-    accelerated start is off. Both turns remove the starter from the build
-    count, so fleet inserts it here.
-    """
-    turn_number = turn.settings.turn
-    return is_first_reliable_accelerated_shell_turn(
-        turn_number, turn
-    ) or is_non_accelerated_opening_reveal(turn_number, turn.settings)
 
 
 def scoreboard_placeholder_targets(
