@@ -79,7 +79,7 @@ There is **no slack** on warship or freighter count. Military slack is score-onl
 
 ### 2.1 Generic combo is not merged/expanded
 
-[`solver.py`](../../packages/api/api/analytics/military_score_inference/solver.py) `_merge_score_equivalent_combos` **excludes** `combo_freighter` from score-equivalent groups. Extraction emits a single `InferenceSolutionShipBuild` with the sentinel tuple; it does not expand into named freighter hulls.
+[`solver.py`](../../packages/api/api/analytics/military_score_inference/solver.py) `merge_score_equivalent_combos` **excludes** `combo_freighter` from score-equivalent groups. Extraction emits a single `InferenceSolutionShipBuild` with the sentinel tuple; it does not expand into named freighter hulls.
 
 Freighter-only rows (`military_delta_2x == 0`, `warship_delta == 0`, `freighter_delta > 0`) take a CP-SAT skip (`FREIGHTER_ONLY_FAST_PATH`) that assigns `count = freighter_delta` on `combo_freighter` when `upper_bound` allows. That fast path is refused only if PP equality is **enforced** and `priority_point_delta != 0` -- which production does not do.
 

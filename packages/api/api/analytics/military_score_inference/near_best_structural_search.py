@@ -104,9 +104,10 @@ def add_no_good_cut(
     model.add_at_least_one(differs)
 
 
-def _member_combo_id_to_merged_id(
+def member_combo_id_to_merged_id(
     merged_combo_catalog: SupportsMergedComboCatalog,
 ) -> dict[str, str]:
+    """Map each member combo id, and each merged id, to its merged variable id."""
     mapping: dict[str, str] = {}
     for merged_id, members in merged_combo_catalog.members_by_merged_id.items():
         mapping[merged_id] = merged_id
@@ -126,7 +127,7 @@ def merged_assignment_from_solution(
     Returns full action/combo count vectors including zeros, or ``None`` when the
     solution cannot be expressed in this catalog (unknown combo or aggregate).
     """
-    member_to_merged = _member_combo_id_to_merged_id(merged_combo_catalog)
+    member_to_merged = member_combo_id_to_merged_id(merged_combo_catalog)
     action_ids = {action.id for action in problem.aggregate_actions}
     action_counts = {action.id: 0 for action in problem.aggregate_actions}
     for action in solution.actions:
