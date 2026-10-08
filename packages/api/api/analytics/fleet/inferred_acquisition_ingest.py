@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
 from api.analytics.fleet.field_constraints import known_built_turn_value
-from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.scoreboard_placeholder_targets import (
     ScoreboardPlaceholderTarget,
     scoreboard_placeholder_targets,
@@ -30,6 +30,10 @@ from api.concepts.accelerated_scoreboard import (
 )
 from api.models.game import TurnInfo
 from api.models.player import Score
+
+if TYPE_CHECKING:
+    # Runtime import would load the scores transport stack into the compute leg.
+    from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 
 SCOREBOARD_SOURCE = "scoreboard"
 
