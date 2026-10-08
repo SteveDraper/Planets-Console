@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
 
 from api.analytics.fleet.field_constraints import known_built_turn_value
+from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
+from api.analytics.fleet.scoreboard_placeholder_targets import (
+    ScoreboardPlaceholderTarget,
+    scoreboard_placeholder_targets,
+)
 from api.analytics.fleet.scoreboard_ship_totals import iter_current_turn_scores
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
@@ -18,13 +22,13 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
 )
-from api.concepts.accelerated_scoreboard import homeworld_seed_counts
+from api.concepts.accelerated_scoreboard import (
+    HOMEBASE_STARTING_FREIGHTER_ENGINE_ID,
+    HOMEBASE_STARTING_FREIGHTER_HULL_ID,
+    homeworld_seed_counts,
+)
 from api.models.game import TurnInfo
 from api.models.player import Score
-
-if TYPE_CHECKING:
-    from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
-    from api.analytics.fleet.scoreboard_placeholder_targets import ScoreboardPlaceholderTarget
 
 SCOREBOARD_SOURCE = "scoreboard"
 
@@ -59,10 +63,6 @@ def ingest_player_inferred_acquisitions(
     turn_number = turn.settings.turn
     score = _score_for_player(turn, ledger.player_id)
     if score is not None:
-        from api.analytics.fleet.scoreboard_placeholder_targets import (
-            scoreboard_placeholder_targets,
-        )
-
         seed_counts = homeworld_seed_counts(score, turn)
         if seed_counts is not None:
             freighters, warships = seed_counts
@@ -169,15 +169,11 @@ def _starting_slots_already_filled(
     when turn 1 already saw it. Other built-turn-1 hulls stay separate: an
     accelerated window build is not the starter.
     """
-    from api.analytics.fleet.scoreboard_placeholder_targets import (
-        homeworld_starting_freighter_hull_id,
-    )
-
     tagged = _homeworld_starting_inventory_rows(ledger, shell_turn, ship_class=ship_class)
     if ship_class != "freighter":
         return len(tagged)
     tagged_ids = {record.record_id for record in tagged}
-    starter_hull = FleetFieldKnown(homeworld_starting_freighter_hull_id())
+    starter_hull = FleetFieldKnown(HOMEBASE_STARTING_FREIGHTER_HULL_ID)
     filled = len(tagged)
     for record in ledger.records:
         if record.disposition != "active" or record.record_id in tagged_ids:
@@ -219,13 +215,8 @@ def _starting_inventory_fields_and_option_sets(
     can use a standard lock-compatible option set rather than an empty pool.
     """
     if ship_class == "freighter":
-        from api.analytics.fleet.scoreboard_placeholder_targets import (
-            homeworld_starting_freighter_engine_id,
-            homeworld_starting_freighter_hull_id,
-        )
-
-        hull_id = homeworld_starting_freighter_hull_id()
-        engine_id = homeworld_starting_freighter_engine_id()
+        hull_id = HOMEBASE_STARTING_FREIGHTER_HULL_ID
+        engine_id = HOMEBASE_STARTING_FREIGHTER_ENGINE_ID
         return (
             FleetShipRecordFields(
                 built_turn=FleetFieldKnown(1),
