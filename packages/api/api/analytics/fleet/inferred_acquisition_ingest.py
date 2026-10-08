@@ -180,7 +180,7 @@ def _fills_starting_inventory_slot(
     for event in record.events:
         if event.kind != "scoreboard_delta" or event.turn != shell_turn:
             continue
-        if not event.payload.get("homeworldStartingInventory"):
+        if not is_homeworld_starting_inventory_event(event):
             continue
         if event.payload.get("shipClass") == ship_class:
             return True
@@ -222,6 +222,11 @@ def _starting_inventory_fields_and_option_sets(
         FleetShipRecordFields(built_turn=FleetFieldKnown(1)),
         [],
     )
+
+
+def is_homeworld_starting_inventory_event(event: FleetEvidenceEvent) -> bool:
+    """Return whether this evidence event seeds homeworld starting inventory."""
+    return event.payload.get("homeworldStartingInventory") is True
 
 
 def _homeworld_starting_inventory_event(

@@ -7,7 +7,10 @@ from dataclasses import replace
 from api.analytics.fleet.chain import apply_fleet_turn_delta, ensure_fleet_baseline
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
-from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
+from api.analytics.fleet.inferred_acquisition_ingest import (
+    ingest_turn_inferred_acquisitions,
+    is_homeworld_starting_inventory_event,
+)
 from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
 from api.analytics.fleet.serialization import (
     fleet_ship_record_from_json,
@@ -1153,8 +1156,7 @@ def _homeworld_starting_freighter_rows(ledger, *, shell_turn: int):
         record
         for record in _inferred_freighter_rows(ledger, shell_turn=shell_turn)
         if any(
-            event.kind == "scoreboard_delta"
-            and event.payload.get("homeworldStartingInventory") is True
+            event.kind == "scoreboard_delta" and is_homeworld_starting_inventory_event(event)
             for event in record.events
         )
     ]

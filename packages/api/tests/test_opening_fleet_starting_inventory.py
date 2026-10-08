@@ -11,31 +11,22 @@ from api.analytics.fleet.chain import (
     apply_fleet_turn_delta,
     ensure_fleet_baseline,
 )
-from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
+from api.analytics.fleet.inferred_acquisition_ingest import (
+    ingest_turn_inferred_acquisitions,
+    is_homeworld_starting_inventory_event,
+)
 from api.analytics.fleet.types import FleetFieldKnown, FleetShipRecord, FleetShipRecordFields
 from api.concepts.races import HORWASP_RACE_ID
 
-from tests.fixtures.military_score_inference import with_score_owners_in_roster
+from tests.fixtures.military_score_inference import (
+    score_with_cleared_columns,
+    turn_with_scoreboard,
+)
 from tests.fleet_fixtures import ledger_for_player
 
 _STARTER_HULL_ID = 16
 _STARTER_ENGINE_ID = 9
 _OWNER_ID = 35
-
-
-def _score(template, **fields):
-    return replace(
-        template,
-        prioritypoints=0,
-        prioritypointchange=0,
-        inventoryscore=0,
-        inventorychange=0,
-        percent=0.0,
-        percentchange=0.0,
-        victoryscore=0,
-        victoryscorechange=0,
-        **fields,
-    )
 
 
 def _opening_turn(
@@ -48,9 +39,8 @@ def _opening_turn(
     race_id: int | None = None,
     ships: tuple | None = None,
 ):
-    template = sample_turn.scores[0]
-    score = _score(
-        template,
+    score = score_with_cleared_columns(
+        sample_turn.scores[0],
         ownerid=_OWNER_ID,
         turn=turn_number,
         militaryscore=2110 if homeworld_has_starbase else 0,
@@ -64,18 +54,13 @@ def _opening_turn(
         planets=1,
         planetchange=1,
     )
-    turn = with_score_owners_in_roster(
-        replace(
-            sample_turn,
-            settings=replace(
-                sample_turn.settings,
-                turn=turn_number,
-                acceleratedturns=0,
-                homeworldhasstarbase=homeworld_has_starbase,
-            ),
-            scores=(score,),
-            ships=sample_turn.ships if ships is None else ships,
-        )
+    turn = turn_with_scoreboard(
+        sample_turn,
+        turn_number=turn_number,
+        acceleratedturns=0,
+        scores=(score,),
+        homeworld_has_starbase=homeworld_has_starbase,
+        ships=ships,
     )
     if race_id is not None:
         turn = replace(
@@ -110,7 +95,7 @@ def _active(ledger):
 
 def _is_starting_freighter(record) -> bool:
     return any(
-        event.kind == "scoreboard_delta" and event.payload.get("homeworldStartingInventory") is True
+        event.kind == "scoreboard_delta" and is_homeworld_starting_inventory_event(event)
         for event in record.events
     )
 
@@ -120,7 +105,7 @@ def _is_turn_freighter_placeholder(record, *, shell_turn: int) -> bool:
         event.kind == "scoreboard_delta"
         and event.turn == shell_turn
         and event.payload.get("shipClass") == "freighter"
-        and event.payload.get("homeworldStartingInventory") is not True
+        and not is_homeworld_starting_inventory_event(event)
         for event in record.events
     )
 
