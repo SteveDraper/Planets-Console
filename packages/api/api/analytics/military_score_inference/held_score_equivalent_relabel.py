@@ -24,9 +24,8 @@ from api.analytics.military_score_inference.near_best_structural_search import (
     merged_assignment_from_solution,
 )
 from api.analytics.military_score_inference.solver import (
-    _expand_score_equivalent_solutions,
-    _full_expansion_limit_for_combo_counts,
-    _merge_score_equivalent_combos,
+    expand_structural_hits_to_top_k,
+    merge_score_equivalent_combos,
 )
 
 ScoreClassKey = tuple[int, int, int]
@@ -60,12 +59,13 @@ def relabel_held_score_equivalent_solutions(
         race_id=race_id,
         max_solutions=max_solutions,
     )
-    merged = _merge_score_equivalent_combos(problem.ship_build_combos)
+    merged = merge_score_equivalent_combos(problem.ship_build_combos)
     affected_merged_ids = _merged_ids_for_combos(merged.members_by_merged_id, added_combo_ids)
     if not affected_merged_ids:
         return
 
     seen_assignments: set[tuple[tuple[str, int], ...]] = set()
+    structural_hits: list[tuple[dict[str, int], dict[str, int]]] = []
     for held in held_snapshot:
         mapped = merged_assignment_from_solution(
             held,
@@ -82,15 +82,15 @@ def relabel_held_score_equivalent_solutions(
         if assignment_key in seen_assignments:
             continue
         seen_assignments.add(assignment_key)
-        expansions = _expand_score_equivalent_solutions(
-            problem,
-            action_counts,
-            combo_counts,
-            merged,
-            max_expansions=_full_expansion_limit_for_combo_counts(combo_counts, merged),
-        )
-        for expansion in expansions:
-            admit(expansion)
+        structural_hits.append((action_counts, combo_counts))
+
+    for expansion in expand_structural_hits_to_top_k(
+        problem,
+        structural_hits,
+        merged,
+        max_solutions=max_solutions,
+    ):
+        admit(expansion)
 
 
 def _added_combo_joins_held_class(

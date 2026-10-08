@@ -140,7 +140,7 @@ def _validate_problem(problem: InferenceProblem) -> str | None:
     return None
 
 
-def _merge_score_equivalent_combos(
+def merge_score_equivalent_combos(
     combos: tuple[ShipBuildCombo, ...],
 ) -> _MergedComboCatalog:
     """Merge score-equivalent combos for CP-SAT feasibility; members kept for extraction."""
@@ -576,7 +576,7 @@ def solve_inference_problem(
             },
         )
 
-    merged_combo_catalog = _merge_score_equivalent_combos(problem.ship_build_combos)
+    merged_combo_catalog = merge_score_equivalent_combos(problem.ship_build_combos)
     built_model = _build_model(problem, merged_combo_catalog)
     build_diagnostics = _solver_build_diagnostics(problem, built_model)
     started_at = time.monotonic()

@@ -13,7 +13,7 @@ from api.analytics.military_score_inference.analytic import build_inference_obse
 from api.analytics.military_score_inference.models import InferenceProblem
 from api.analytics.military_score_inference.solver import (
     _build_model,
-    _merge_score_equivalent_combos,
+    merge_score_equivalent_combos,
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.compute.sat_gil_overlap import (
@@ -67,7 +67,7 @@ def _early_game_corpus_problem() -> InferenceProblem:
 
 def _time_sat_leaf_split(problem: InferenceProblem) -> SatLeafSplit:
     merge_started = time.perf_counter()
-    merged_catalog = _merge_score_equivalent_combos(problem.ship_build_combos)
+    merged_catalog = merge_score_equivalent_combos(problem.ship_build_combos)
     merge_seconds = time.perf_counter() - merge_started
 
     build_started = time.perf_counter()
