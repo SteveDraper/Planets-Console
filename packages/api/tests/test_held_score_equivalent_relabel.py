@@ -127,6 +127,7 @@ def test_wider_catalog_admits_higher_weight_label_of_held_score() -> None:
         _catalog(fearless, enlighten),
         _observation(),
         added_combo_ids=frozenset({ENLIGHTEN_COMBO_ID}),
+        overshoot_signatures=frozenset(),
         admit=admit,
         max_solutions=20,
     )
@@ -162,6 +163,7 @@ def test_inserting_a_better_label_still_relabels_later_held_classes() -> None:
         _catalog(fearless, enlighten, weak, strong),
         _observation(),
         added_combo_ids=frozenset({ENLIGHTEN_COMBO_ID, strong.combo_id}),
+        overshoot_signatures=frozenset(),
         admit=lambda solution: admit_ranked_solution(held, seen, solution, max_solutions=20),
         max_solutions=20,
     )
@@ -185,6 +187,7 @@ def test_added_combo_outside_held_score_class_is_ignored() -> None:
         _catalog(fearless, other_score),
         _observation(),
         added_combo_ids=frozenset({other_score.combo_id}),
+        overshoot_signatures=frozenset(),
         admit=lambda solution: admit_ranked_solution(held, seen, solution, max_solutions=20),
         max_solutions=20,
     )
@@ -207,11 +210,64 @@ def test_full_buffer_keeps_worse_new_label_out() -> None:
         _catalog(enlighten, fearless),
         _observation(),
         added_combo_ids=frozenset({FEARLESS_COMBO_ID}),
+        overshoot_signatures=frozenset(),
         admit=lambda solution: admit_ranked_solution(held, seen, solution, max_solutions=1),
         max_solutions=1,
     )
 
     assert [solution.ship_builds[0].combo_id for solution in held] == [ENLIGHTEN_COMBO_ID]
+
+
+def test_overshoot_tagged_held_row_is_not_relabeled() -> None:
+    fearless = _combo(FEARLESS_COMBO_ID, 28, weight=-1128)
+    enlighten = _combo(ENLIGHTEN_COMBO_ID, 106, weight=-641)
+    weak = _combo("combo_weak", 31, weight=-200, score_delta_2x=1000)
+    strong = _combo("combo_strong", 33, weight=-10, score_delta_2x=1000)
+    held_fearless = InferenceSolution(
+        objective_value=-668,
+        actions=(),
+        ship_builds=(_ship(fearless),),
+        ship_first_family="mine_overshoot",
+    )
+    # Family tag alone does not exclude a row; only overshoot_signatures does.
+    held_weak = InferenceSolution(
+        objective_value=-100,
+        actions=(),
+        ship_builds=(_ship(weak),),
+        ship_first_family="ammo_top_up",
+    )
+    held, seen = _hold(held_fearless, max_solutions=20)
+    admit_ranked_solution(held, seen, held_weak, max_solutions=20)
+    admitted: list[InferenceSolution] = []
+
+    relabel_held_score_equivalent_solutions(
+        held,
+        _catalog(fearless, enlighten, weak, strong),
+        _observation(),
+        added_combo_ids=frozenset({ENLIGHTEN_COMBO_ID, strong.combo_id}),
+        overshoot_signatures={solution_signature(held_fearless)},
+        admit=lambda solution: admit_ranked_solution(
+            held,
+            seen,
+            solution,
+            max_solutions=20,
+            on_admitted=admitted.append,
+        ),
+        max_solutions=20,
+    )
+
+    held_ids = [solution.ship_builds[0].combo_id for solution in held]
+    assert [solution.ship_builds[0].combo_id for solution in admitted] == ["combo_strong"]
+    assert ENLIGHTEN_COMBO_ID not in held_ids
+    assert {FEARLESS_COMBO_ID, "combo_weak", "combo_strong"} <= set(held_ids)
+    fearless_row = next(
+        solution for solution in held if solution.ship_builds[0].combo_id == FEARLESS_COMBO_ID
+    )
+    weak_row = next(
+        solution for solution in held if solution.ship_builds[0].combo_id == "combo_weak"
+    )
+    assert fearless_row.ship_first_family == "mine_overshoot"
+    assert weak_row.ship_first_family == "ammo_top_up"
 
 
 def test_tier_step_relabels_before_search(sample_turn, monkeypatch) -> None:

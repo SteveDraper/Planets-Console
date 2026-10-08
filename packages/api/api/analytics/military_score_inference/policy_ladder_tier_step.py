@@ -510,6 +510,7 @@ def run_policy_ladder_tier_step(
         catalog,
         observation,
         added_combo_ids=added_combo_ids,
+        overshoot_signatures=state.overshoot_signatures,
         admit=admit_solution,
         race_id=player_race_id,
         max_solutions=catalog_solve_max,

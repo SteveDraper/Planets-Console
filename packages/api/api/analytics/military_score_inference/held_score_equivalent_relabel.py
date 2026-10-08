@@ -9,7 +9,7 @@ again and admit any new label the current catalog ranks into the top K.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 
 from api.analytics.military_score_inference.actions import (
     ActionCatalog,
@@ -23,6 +23,10 @@ from api.analytics.military_score_inference.near_best_structural_search import (
     member_combo_id_to_merged_id,
     merged_assignment_from_solution,
 )
+from api.analytics.military_score_inference.ranked_solution_buffer import (
+    SolutionSignature,
+    solution_signature,
+)
 from api.analytics.military_score_inference.solver import (
     expand_structural_hits_to_top_k,
     merge_score_equivalent_combos,
@@ -35,6 +39,7 @@ def relabel_held_score_equivalent_solutions(
     observation: InferenceObservation,
     *,
     added_combo_ids: frozenset[str],
+    overshoot_signatures: Collection[SolutionSignature],
     admit: Callable[[InferenceSolution], None],
     race_id: int | None = None,
     max_solutions: int,
@@ -42,11 +47,17 @@ def relabel_held_score_equivalent_solutions(
     """Re-expand held score classes that gained members in ``added_combo_ids``.
 
     ``admit`` may insert into ``held_solutions``. Expansion walks a snapshot so
-    those inserts are not visited as further held rows.
+    those inserts are not visited as further held rows. Signatures in
+    ``overshoot_signatures`` stay on the leftover-ranked buffer.
     """
     if not held_solutions or not added_combo_ids:
         return
-    held_snapshot = tuple(held_solutions)
+    # Leftover-ranked overshoot holds are not exact top-K rows.
+    held_snapshot = tuple(
+        held for held in held_solutions if solution_signature(held) not in overshoot_signatures
+    )
+    if not held_snapshot:
+        return
 
     problem = build_inference_problem(
         observation,
