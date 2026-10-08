@@ -40,7 +40,7 @@ Computed at `(game_id, turn T, perspective P)`.
 | **Players tracked** | Every **Player** in **GameInfo** (not limited to viewpoint) |
 | **Direct evidence** | Ships in `turn.ships` on those snapshots |
 | **Build evidence** | **Scores** held solutions per `player_id` on host turns in `1..T` |
-| **Turn 1 baseline** | **Fleet ensure baseline**: implicit empty fleet per **Player**; also seed from turn-1 sightings when present. On the first reliable accelerated scoreboard row, also seed **homeworld starting inventory** rows (starting freighter and any baseline warships from Starmap settings) before accelerated segment placeholders |
+| **Turn 1 baseline** | **Fleet ensure baseline**: implicit empty fleet per **Player**; also seed from turn-1 sightings when present. On the first reliable accelerated scoreboard row, and on the non-accelerated opening reveal (turn 2 when `acceleratedturns` is 0), seed **homeworld starting inventory** rows for the ships that row's baseline subtracts from the build deltas (starting freighter, and any baseline warships). Counts on the opening reveal come from the owner's baseline (Horwasp keeps the freighter with no starbase). A built-turn-1 sighting of the starting freighter hull already on the ledger fills that slot. Accelerated seeding still uses the settings snapshot |
 | **Cross-perspective** | Out of scope -- no union across stored perspective slots |
 
 ---
@@ -156,6 +156,8 @@ On the first reliable accelerated row (`turn == acceleratedturns`), apply **buil
 | Inferred row with `builtTurn < shellTurn - 1` (accelerated window host turn) | Global ship total at end of host turn `N-2` (prior totals from row `N` before reported host-turn deltas) |
 | Inferred row with `builtTurn == shellTurn - 1` (reported host turn on row `N`) | Current shell-turn bound (`total - net + builds` on row `N`) |
 | Normal scoreboard-delta rows | Current shell-turn bound |
+
+Opening-reveal starting-inventory rows use that same homeworld id bound (settings snapshot times roster size). The per-owner seed count is separate: a Horwasp freighter is still seeded when `homeworldhasstarbase` is false, and the bound stays 0 when the settings snapshot has no starting ships.
 
 Missing or stale bounds are not re-tightened to a looser value when a row already has a tighter `lte` bound.
 

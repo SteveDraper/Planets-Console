@@ -67,6 +67,7 @@ def ingest_player_inferred_acquisitions(
             _ensure_homeworld_starting_inventory_rows(
                 ledger,
                 turn=turn,
+                score=score,
                 shell_turn=turn_number,
             )
         targets = scoreboard_placeholder_targets(score, turn)
@@ -103,14 +104,13 @@ def _ensure_homeworld_starting_inventory_rows(
     ledger: FleetAcquisitionLedger,
     *,
     turn: TurnInfo,
+    score: Score,
     shell_turn: int,
 ) -> None:
-    """Seed homeworld starting ships not represented in accelerated scoreboard deltas."""
-    from api.analytics.fleet.scoreboard_placeholder_targets import (
-        homeworld_starting_inventory_counts,
-    )
+    """Seed homeworld starting ships the build deltas on this shell turn omit."""
+    from api.concepts.accelerated_scoreboard import starting_inventory_counts_for_score
 
-    freighters, warships = homeworld_starting_inventory_counts(turn)
+    freighters, warships = starting_inventory_counts_for_score(score, turn)
     _ensure_starting_inventory_rows(
         ledger,
         shell_turn=shell_turn,
@@ -134,8 +134,12 @@ def _ensure_starting_inventory_rows(
 ) -> None:
     if expected_count <= 0:
         return
-    existing = _homeworld_starting_inventory_rows(ledger, shell_turn, ship_class=ship_class)
-    for _ in range(expected_count - len(existing)):
+    existing_count = _starting_slots_already_filled(
+        ledger,
+        shell_turn=shell_turn,
+        ship_class=ship_class,
+    )
+    for _ in range(expected_count - existing_count):
         fields, option_sets = _starting_inventory_fields_and_option_sets(ship_class)
         record = FleetShipRecord(
             record_id=str(uuid.uuid4()),
@@ -151,6 +155,39 @@ def _ensure_starting_inventory_rows(
             ),
         )
         ledger.records.append(record)
+
+
+def _starting_slots_already_filled(
+    ledger: FleetAcquisitionLedger,
+    *,
+    shell_turn: int,
+    ship_class: FleetShipClass,
+) -> int:
+    """Rows that already account for one homeworld starting ship of this class.
+
+    A prior seed on this shell turn counts. A built-turn-1 sighting of the
+    starting freighter hull counts too, so turn 2 does not insert a second MDSF
+    when turn 1 already saw it. Other built-turn-1 hulls stay separate: an
+    accelerated window build is not the starter.
+    """
+    from api.analytics.fleet.scoreboard_placeholder_targets import (
+        homeworld_starting_freighter_hull_id,
+    )
+
+    tagged = _homeworld_starting_inventory_rows(ledger, shell_turn, ship_class=ship_class)
+    if ship_class != "freighter":
+        return len(tagged)
+    tagged_ids = {record.record_id for record in tagged}
+    starter_hull = FleetFieldKnown(homeworld_starting_freighter_hull_id())
+    filled = len(tagged)
+    for record in ledger.records:
+        if record.disposition != "active" or record.record_id in tagged_ids:
+            continue
+        if known_built_turn_value(record) != 1:
+            continue
+        if record.fields.hull == starter_hull:
+            filled += 1
+    return filled
 
 
 def _homeworld_starting_inventory_rows(

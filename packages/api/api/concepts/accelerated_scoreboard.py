@@ -176,6 +176,20 @@ def reported_scoreboard_deltas(score: Score, turn: TurnInfo) -> ReportedScoreboa
     )
 
 
+def starting_inventory_counts_for_score(score: Score, turn: TurnInfo) -> tuple[int, int]:
+    """Freighter and warship counts in the baseline a seed turn subtracts.
+
+    The non-accelerated opening reveal uses the owner's baseline, so a Horwasp
+    still has the starting freighter when the homeworld has no starbase.
+    Accelerated seeding uses the settings snapshot.
+    """
+    if is_non_accelerated_opening_reveal(turn.settings.turn, turn.settings):
+        baseline = _opening_reveal_baseline(score, turn)
+    else:
+        baseline = starting_scoreboard_snapshot(turn.settings)
+    return baseline.freighters, baseline.capitalships
+
+
 def homeworld_baseline_military_2x(settings: GameSettings) -> int:
     if not settings.homeworldhasstarbase:
         return 0
