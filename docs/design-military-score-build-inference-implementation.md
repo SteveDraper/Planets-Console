@@ -758,6 +758,8 @@ For **top-K enumeration**, equal score does **not** imply equal probability. Dis
 
 Do not treat score-equivalent combos as interchangeable in the UI ranking solely because the military score constraint cannot distinguish them.
 
+A held solution seeds a no-good on the merged assignment so later tiers search for a new structure. That cut stays on the score class. Before the tier solves, if the widened catalog adds fittings to a class that is already held, expand that held assignment against the current member list and admit any new label whose current-catalog objective enters the top K. The label chosen when the class was first found can then sit beside a higher-weight fitting that the earlier hull or component band could not express.
+
 ### 8.7 Inference tier policy overlay (#78) -- cancelled
 
 **#78** global resolve-time `TierPolicyOverlay` merge was cancelled and removed. Use step-local widens (`includeComponentIds` for collision twins; section 8.5.7) and fleet torp overlay (section 8.8) instead. See `CONTEXT.md` **Inference tier policy asset**.

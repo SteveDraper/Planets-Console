@@ -22,6 +22,9 @@ from api.analytics.military_score_inference.component_eligibility import (
 from api.analytics.military_score_inference.degrade_aggregate_probe import (
     probe_degrade_aggregate_rewrites,
 )
+from api.analytics.military_score_inference.held_score_equivalent_relabel import (
+    relabel_held_score_equivalent_solutions,
+)
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.military_sat_admission import (
     military_sat_admission_from_turn,
@@ -501,9 +504,17 @@ def run_policy_ladder_tier_step(
 
     admit_solution = make_incremental_admitter(state, track_admitted)
     catalog_solve_max = state.resolved_max_solutions
-    held_no_goods: tuple[InferenceSolution, ...] = tuple(state.merged_solutions)
-
     new_exact_before_step = len(state.merged_solutions)
+    relabel_held_score_equivalent_solutions(
+        state.merged_solutions,
+        catalog,
+        observation,
+        added_combo_ids=added_combo_ids,
+        admit=admit_solution,
+        race_id=player_race_id,
+        max_solutions=catalog_solve_max,
+    )
+    held_no_goods: tuple[InferenceSolution, ...] = tuple(state.merged_solutions)
     overlay = state.ship_first_overshoot
     overlay_mode = overlay.mode if overlay is not None else "off"
     skip_leftover_0 = overlay_mode == "overshoot_only"
