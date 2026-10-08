@@ -1,7 +1,7 @@
 """Non-accelerated turn 2 seeds the starting freighter the baseline subtracts.
 
-A built-turn-1 sighting of that hull already fills the slot. Accelerated
-first-reliable seeding is covered in test_fleet_inference_ingest.py.
+A built-turn-1 sighting of that hull fills the slot on the opening reveal.
+On the accelerated first-reliable row the same record leaves the seed in place.
 """
 
 from dataclasses import replace
@@ -12,7 +12,7 @@ from api.analytics.fleet.chain import (
     ensure_fleet_baseline,
 )
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
-from api.analytics.fleet.types import FleetFieldKnown
+from api.analytics.fleet.types import FleetFieldKnown, FleetShipRecord, FleetShipRecordFields
 from api.concepts.races import HORWASP_RACE_ID
 
 from tests.fixtures.military_score_inference import with_score_owners_in_roster
@@ -212,6 +212,28 @@ def test_opening_reveal_turn1_sighting_fills_the_starting_freighter(sample_turn)
     ]
     assert len(sighted) == 1
     assert sighted[0].fields.built_turn == FleetFieldKnown(1)
+
+
+def test_accelerated_first_reliable_built_turn_one_freighter_still_seeds(sample_turn):
+    opening = _opening_turn(sample_turn, turn_number=3, freighters=1, capitalships=0)
+    turn = replace(opening, settings=replace(opening.settings, acceleratedturns=3))
+    snapshot = ensure_fleet_baseline(sample_turn.game.id, 1, turn)
+    ledger = ledger_for_player(snapshot, _OWNER_ID)
+    ledger.records.append(
+        FleetShipRecord(
+            record_id="window-mdsf",
+            fields=FleetShipRecordFields(
+                built_turn=FleetFieldKnown(1),
+                hull=FleetFieldKnown(_STARTER_HULL_ID),
+            ),
+        )
+    )
+
+    ingest_turn_inferred_acquisitions(snapshot, turn)
+
+    starters = [record for record in ledger.records if _is_starting_freighter(record)]
+    assert len(starters) == 1
+    assert starters[0].record_id != "window-mdsf"
 
 
 def test_opening_reveal_horwasp_without_starbase_still_gets_the_starting_freighter(sample_turn):
