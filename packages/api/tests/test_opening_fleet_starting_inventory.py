@@ -1,7 +1,9 @@
 """Non-accelerated turn 2 seeds the starting freighter the baseline subtracts.
 
-A built-turn-1 sighting of that hull fills the slot on the opening reveal.
-On the accelerated first-reliable row the same record leaves the seed in place.
+A built-turn-1 sighting of that hull fills the slot on the opening reveal,
+including a Horwasp whose homeworld has no starbase. Re-ingesting that turn
+does not duplicate the seed or its placeholders. On the accelerated
+first-reliable row the same record leaves the seed in place.
 """
 
 from dataclasses import replace
@@ -219,6 +221,80 @@ def test_accelerated_first_reliable_built_turn_one_freighter_still_seeds(sample_
     starters = [record for record in ledger.records if _is_starting_freighter(record)]
     assert len(starters) == 1
     assert starters[0].record_id != "window-mdsf"
+
+
+def test_opening_reveal_reingest_keeps_one_starter_and_one_placeholder(sample_turn):
+    turn = _opening_turn(sample_turn, turn_number=2, freighters=2, capitalships=0)
+    snapshot = _ingest(sample_turn, turn)
+    ledger = ledger_for_player(snapshot, _OWNER_ID)
+    before = [
+        (record.record_id, [event.event_id for event in record.events]) for record in ledger.records
+    ]
+
+    ingest_turn_inferred_acquisitions(snapshot, turn)
+
+    after = [
+        (record.record_id, [event.event_id for event in record.events]) for record in ledger.records
+    ]
+    assert after == before
+    starters = [record for record in _active(ledger) if _is_starting_freighter(record)]
+    placeholders = [
+        record for record in _active(ledger) if _is_turn_freighter_placeholder(record, shell_turn=2)
+    ]
+    assert len(starters) == 1
+    assert len(placeholders) == 1
+
+
+def test_opening_reveal_horwasp_sighted_mdsf_does_not_seed_a_second_starter(sample_turn):
+    ship = _starter_ship(sample_turn)
+    turn1 = _opening_turn(
+        sample_turn,
+        turn_number=1,
+        freighters=0,
+        capitalships=0,
+        homeworld_has_starbase=False,
+        race_id=HORWASP_RACE_ID,
+        ships=(ship,),
+    )
+    carried = apply_fleet_turn_delta(
+        ensure_fleet_baseline(sample_turn.game.id, 1, turn1),
+        turn1,
+    )
+    turn2 = _opening_turn(
+        sample_turn,
+        turn_number=2,
+        freighters=1,
+        capitalships=0,
+        homeworld_has_starbase=False,
+        race_id=HORWASP_RACE_ID,
+        ships=(),
+    )
+    snapshot = ingest_turn_inferred_acquisitions(
+        advance_snapshot_to_turn(
+            carried,
+            turn2,
+            game_id=sample_turn.game.id,
+            perspective=1,
+        ),
+        turn2,
+    )
+    ledger = ledger_for_player(snapshot, _OWNER_ID)
+
+    assert not any(_is_starting_freighter(record) for record in ledger.records)
+    sighted = [
+        record
+        for record in _active(ledger)
+        if record.fields.hull == FleetFieldKnown(_STARTER_HULL_ID)
+        and record.fields.built_turn == FleetFieldKnown(1)
+        and record.fields.ship_id == FleetFieldKnown(ship.id)
+    ]
+    assert len(sighted) == 1
+    hull_matches = [
+        record
+        for record in _active(ledger)
+        if record.fields.hull == FleetFieldKnown(_STARTER_HULL_ID)
+    ]
+    assert hull_matches == sighted
 
 
 def test_opening_reveal_horwasp_without_starbase_still_gets_the_starting_freighter(sample_turn):
