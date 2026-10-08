@@ -6,6 +6,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from api.analytics.fleet.field_constraints import known_built_turn_value
+from api.analytics.fleet.inferred_acquisition_ingest import is_homeworld_starting_inventory_event
 from api.analytics.fleet.serialization import append_fleet_evidence_event
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -57,7 +58,7 @@ def tighten_inferred_ship_id_bounds(
             turn,
             shell_turn=shell_turn,
             built_turn=known_built_turn_value(record),
-            is_starting_inventory=_is_homeworld_starting_inventory_event(event),
+            is_starting_inventory=is_homeworld_starting_inventory_event(event),
         )
         if max_bound is None:
             continue
@@ -96,7 +97,7 @@ def _scoreboard_acquisition_event(
     for event in record.events:
         if event.kind != "scoreboard_delta" or event.turn != shell_turn:
             continue
-        if _is_homeworld_starting_inventory_event(event):
+        if is_homeworld_starting_inventory_event(event):
             return event
         warship_delta = event.payload.get("warshipDelta", 0)
         freighter_delta = event.payload.get("freighterDelta", 0)
@@ -107,7 +108,3 @@ def _scoreboard_acquisition_event(
         if warship_delta > 0 or freighter_delta > 0:
             return event
     return None
-
-
-def _is_homeworld_starting_inventory_event(event: FleetEvidenceEvent) -> bool:
-    return event.payload.get("homeworldStartingInventory") is True

@@ -176,6 +176,59 @@ def reported_scoreboard_deltas(score: Score, turn: TurnInfo) -> ReportedScoreboa
     )
 
 
+def homeworld_starting_inventory_counts(settings: GameSettings) -> tuple[int, int]:
+    """(freighters, warships) on the settings homeworld snapshot.
+
+    Ship-id bounds use this per-player count. It is 0 when the snapshot has
+    no starting ships. Opening-reveal seed counts can differ by owner; those
+    come from ``homeworld_seed_counts``.
+    """
+    baseline = starting_scoreboard_snapshot(settings)
+    return baseline.freighters, baseline.capitalships
+
+
+@dataclass(frozen=True)
+class HomeworldSeedCounts:
+    """Ships to seed on a homeworld seed turn.
+
+    ``sighting_fills_starting_freighter`` is true on the non-accelerated opening
+    reveal: an active built-turn-1 starting-freighter hull already on the ledger
+    fills that slot. It is false on the accelerated first-reliable row, where
+    only a previously seeded row fills the slot.
+    """
+
+    freighters: int
+    warships: int
+    sighting_fills_starting_freighter: bool
+
+
+def homeworld_seed_counts(score: Score, turn: TurnInfo) -> HomeworldSeedCounts | None:
+    """Seed counts for this turn, or None when this turn does not seed.
+
+    Seed turns are the non-accelerated opening reveal and the first reliable
+    accelerated scoreboard turn. The opening reveal uses the owner's baseline,
+    so a Horwasp still has the starting freighter when the homeworld has no
+    starbase, and a starter sighting fills that freighter slot. Accelerated
+    seeding uses the settings snapshot and does not treat a sighting as the slot.
+    """
+    turn_number = turn.settings.turn
+    if is_non_accelerated_opening_reveal(turn_number, turn.settings):
+        baseline = _opening_reveal_baseline(score, turn)
+        return HomeworldSeedCounts(
+            freighters=baseline.freighters,
+            warships=baseline.capitalships,
+            sighting_fills_starting_freighter=True,
+        )
+    if is_first_reliable_scoreboard_turn(turn_number, turn.settings):
+        freighters, warships = homeworld_starting_inventory_counts(turn.settings)
+        return HomeworldSeedCounts(
+            freighters=freighters,
+            warships=warships,
+            sighting_fills_starting_freighter=False,
+        )
+    return None
+
+
 def homeworld_baseline_military_2x(settings: GameSettings) -> int:
     if not settings.homeworldhasstarbase:
         return 0

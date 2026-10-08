@@ -1,6 +1,7 @@
 """Shared fixtures and helpers for military score inference tests."""
 
 import json
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpO
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.models.components import Beam, Engine, Hull, Torpedo
 from api.models.game import TurnInfo
+from api.models.player import Score
+from api.models.ship import Ship
 from api.serialization.turn import turn_info_from_json
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "api" / "storage" / "assets"
@@ -69,6 +72,50 @@ def with_score_owners_in_roster(turn: TurnInfo) -> TurnInfo:
             *(replace(template, id=owner_id) for owner_id in missing_owner_ids),
         ),
     )
+
+
+def score_with_cleared_columns(template: Score, **fields) -> Score:
+    """Copy a sample score with point columns zeroed, then apply ``fields``."""
+    return replace(
+        template,
+        prioritypoints=0,
+        prioritypointchange=0,
+        inventoryscore=0,
+        inventorychange=0,
+        percent=0.0,
+        percentchange=0.0,
+        victoryscore=0,
+        victoryscorechange=0,
+        **fields,
+    )
+
+
+def turn_with_scoreboard(
+    sample_turn: TurnInfo,
+    *,
+    turn_number: int,
+    acceleratedturns: int,
+    scores: Iterable[Score],
+    homeworld_has_starbase: bool = True,
+    ships: Sequence[Ship] | None = None,
+) -> TurnInfo:
+    """Settings, scores, and roster owners for an opening-scoreboard test turn.
+
+    Pass ``ships`` to replace the sample ship list. Omit it to keep that list.
+    """
+    updated = replace(
+        sample_turn,
+        settings=replace(
+            sample_turn.settings,
+            turn=turn_number,
+            acceleratedturns=acceleratedturns,
+            homeworldhasstarbase=homeworld_has_starbase,
+        ),
+        scores=tuple(scores),
+    )
+    if ships is not None:
+        updated = replace(updated, ships=ships)
+    return with_score_owners_in_roster(updated)
 
 
 @pytest.fixture

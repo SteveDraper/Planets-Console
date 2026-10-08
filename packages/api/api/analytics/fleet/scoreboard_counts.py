@@ -7,6 +7,7 @@ from api.analytics.fleet.scoreboard_ship_totals import (
     iter_current_turn_scores,
 )
 from api.analytics.turn_roster import iter_turn_players
+from api.concepts.accelerated_scoreboard import homeworld_starting_inventory_counts
 from api.concepts.ship_limit import total_reported_ships
 from api.models.game import TurnInfo
 
@@ -47,12 +48,12 @@ def global_ship_count_at_synthetic_prior(turn: TurnInfo) -> int | None:
 
 
 def global_homeworld_starting_ship_id_bound(turn: TurnInfo) -> int:
-    """Upper bound on ids after each player receives homeworld starting ships."""
-    from api.analytics.fleet.scoreboard_placeholder_targets import (
-        homeworld_starting_inventory_counts,
-    )
+    """Upper bound on ids after each player receives homeworld starting ships.
 
-    freighters, warships = homeworld_starting_inventory_counts(turn)
+    Per-player count is the settings snapshot. Zero when that snapshot has no
+    starting ships, including when a race baseline still seeds a freighter.
+    """
+    freighters, warships = homeworld_starting_inventory_counts(turn.settings)
     per_player = warships + freighters
     if per_player <= 0:
         return 0
