@@ -16,7 +16,8 @@ from bff.routers.diagnostics import recent_diagnostics_response
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from mcp_adapter.app import create_mcp_mount
-from starlette.staticfiles import StaticFiles
+from starlette.datastructures import Headers
+from starlette.staticfiles import NotModifiedResponse, StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 # Starlette Mount("/mcp") only matches ``/mcp/...``, not ``/mcp``. Cursor's mcp.json URL is
@@ -53,6 +54,40 @@ class NormalizeMcpMountPath:
             if scope.get("raw_path") == b"/mcp":
                 scope["raw_path"] = b"/mcp/"
         await self.app(scope, receive, send)
+
+
+# Module scripts are rejected unless the response is a JavaScript MIME type.
+# On Windows the MIME database comes from the registry, which often maps .js
+# to text/plain, so the built SPA sets the type itself for these suffixes.
+_MODULE_SCRIPT_MEDIA_TYPE = "text/javascript"
+_MODULE_SCRIPT_SUFFIXES = frozenset({".js", ".mjs"})
+
+
+def _module_script_media_type(path: str | os.PathLike[str]) -> str | None:
+    if Path(path).suffix.lower() in _MODULE_SCRIPT_SUFFIXES:
+        return _MODULE_SCRIPT_MEDIA_TYPE
+    return None
+
+
+class _FrontendStaticFiles(StaticFiles):
+    """Static files for the built SPA, with a fixed type for module scripts."""
+
+    def file_response(
+        self,
+        full_path: str | os.PathLike[str],
+        stat_result: os.stat_result,
+        scope: Scope,
+        status_code: int = 200,
+    ) -> FileResponse | NotModifiedResponse:
+        response = FileResponse(
+            full_path,
+            status_code=status_code,
+            stat_result=stat_result,
+            media_type=_module_script_media_type(full_path),
+        )
+        if self.is_not_modified(response.headers, Headers(scope=scope)):
+            return NotModifiedResponse(response.headers)
+        return response
 
 
 def _frontend_dist() -> Path | None:
@@ -105,7 +140,11 @@ def create_app() -> FastAPI:
     if frontend is not None:
         assets = frontend / "assets"
         if assets.is_dir():
-            root.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
+            root.mount(
+                "/assets",
+                _FrontendStaticFiles(directory=str(assets)),
+                name="assets",
+            )
 
         index = frontend / "index.html"
         if index.is_file():
