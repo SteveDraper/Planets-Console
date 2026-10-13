@@ -34,11 +34,85 @@ class WindowsHostCallbacks(Protocol):
 
 def apply_app_user_model_id(app_id: str = APP_USER_MODEL_ID) -> None:
     """Set the process AppUserModelID before creating windows."""
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    set_app_id = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+    set_app_id.argtypes = [ctypes.c_wchar_p]
+    set_app_id.restype = ctypes.c_long
+    set_app_id(app_id)
 
 
 def _sys_command(wparam: int) -> int:
     return int(wparam) & 0xFFF0
+
+
+def declare_win32_prototypes(
+    user32: object,
+    kernel32: object,
+    *,
+    wndclass_type: type,
+    msg_type: type,
+) -> None:
+    """Declare ``argtypes`` / ``restype`` for every Win32 call the host makes.
+
+    ctypes defaults to 32-bit ``int`` for arguments and return values. Handles,
+    ``WPARAM`` and ``LPARAM`` are pointer-sized on x64, so undeclared calls raise
+    ``OverflowError`` or truncate the value.
+    """
+    from ctypes import wintypes
+
+    lresult = ctypes.c_ssize_t
+
+    kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+    kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+
+    user32.RegisterClassW.argtypes = [ctypes.POINTER(wndclass_type)]
+    user32.RegisterClassW.restype = wintypes.ATOM
+
+    user32.CreateWindowExW.argtypes = [
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.HWND,
+        wintypes.HMENU,
+        wintypes.HINSTANCE,
+        wintypes.LPVOID,
+    ]
+    user32.CreateWindowExW.restype = wintypes.HWND
+
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+
+    user32.DestroyWindow.argtypes = [wintypes.HWND]
+    user32.DestroyWindow.restype = wintypes.BOOL
+
+    user32.DefWindowProcW.argtypes = [
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    ]
+    user32.DefWindowProcW.restype = lresult
+
+    user32.PostQuitMessage.argtypes = [ctypes.c_int]
+    user32.PostQuitMessage.restype = None
+
+    user32.GetMessageW.argtypes = [
+        ctypes.POINTER(msg_type),
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.UINT,
+    ]
+    user32.GetMessageW.restype = wintypes.BOOL
+
+    user32.TranslateMessage.argtypes = [ctypes.POINTER(msg_type)]
+    user32.TranslateMessage.restype = wintypes.BOOL
+
+    user32.DispatchMessageW.argtypes = [ctypes.POINTER(msg_type)]
+    user32.DispatchMessageW.restype = lresult
 
 
 def run_win32_loop(callbacks: WindowsHostCallbacks) -> None:
@@ -47,6 +121,7 @@ def run_win32_loop(callbacks: WindowsHostCallbacks) -> None:
 
     apply_app_user_model_id()
     user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
     lresult = ctypes.c_ssize_t
     wndproc_type = ctypes.WINFUNCTYPE(
         lresult, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
@@ -77,10 +152,11 @@ def run_win32_loop(callbacks: WindowsHostCallbacks) -> None:
         ]
 
     class_name = "PlanetsConsoleProcessHost"
+    declare_win32_prototypes(user32, kernel32, wndclass_type=WNDCLASSW, msg_type=MSG)
     wndproc = wndproc_type(_make_wnd_proc(callbacks, user32))
     wc = WNDCLASSW()
     wc.lpfnWndProc = wndproc
-    wc.hInstance = ctypes.windll.kernel32.GetModuleHandleW(None)
+    wc.hInstance = kernel32.GetModuleHandleW(None)
     wc.lpszClassName = class_name
     atom = user32.RegisterClassW(ctypes.byref(wc))
     if not atom:
