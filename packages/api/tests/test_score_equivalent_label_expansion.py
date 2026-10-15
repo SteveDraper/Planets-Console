@@ -1,5 +1,6 @@
 """Label expansion ranks each ship class, then sums only the top labelings."""
 
+from api.analytics.military_score_inference import solver
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -151,6 +152,84 @@ def test_top_k_labelings_omit_fittings_outside_each_class_prefix() -> None:
     assert _combo_ids(solutions[0]) == frozenset({"a0", "b0", "c0"})
     held_ids = {combo_id for solution in solutions for combo_id in _combo_ids(solution)}
     assert held_ids.isdisjoint({"a4", "b4", "c4", "a7", "b7", "c7"})
+    assert all(
+        solution.objective_value == solution_rank_objective(problem, solution)
+        for solution in solutions
+    )
+
+
+def test_top_k_expansion_scores_each_fitting_and_keeps_only_k_solutions(monkeypatch) -> None:
+    """Rank each score class on its own and build K labelings, not their product.
+
+    Three merged classes hold 155, 46, and 30 fittings. Expansion scores each
+    fitting once, returns 20 solutions in descending objective order, and the
+    first solution is the best fitting of every class.
+    """
+    class_sizes = (155, 46, 30)
+    top_k = 20
+    weight_base = 50_000_000
+    weight_strides = (1, 1_000, 1_000_000)
+    score_deltas = (400, 600, 800)
+    fittings = []
+    best_combo_ids = []
+    for class_index, class_size in enumerate(class_sizes):
+        best_combo_ids.append(f"c{class_index}-0")
+        for member_index in range(class_size):
+            fittings.append(
+                _combo(
+                    f"c{class_index}-{member_index}",
+                    hull_id=class_index * 10_000 + member_index,
+                    score_delta_2x=score_deltas[class_index],
+                    probability_weight=weight_base - member_index * weight_strides[class_index],
+                )
+            )
+    problem = InferenceProblem(
+        observation=_observation(),
+        aggregate_actions=(),
+        ship_build_combos=tuple(fittings),
+        max_solutions=top_k,
+    )
+    merged = merge_score_equivalent_combos(problem.ship_build_combos)
+    assert sorted(len(members) for members in merged.members_by_merged_id.values()) == sorted(
+        class_sizes
+    )
+    combo_counts = dict.fromkeys(merged.members_by_merged_id, 1)
+
+    scoring_calls = 0
+    solutions_materialized = 0
+    original_contribution = solver._ship_build_objective_contribution
+    original_solution = solver.InferenceSolution
+
+    def _counting_contribution(*args, **kwargs):
+        nonlocal scoring_calls
+        scoring_calls += 1
+        return original_contribution(*args, **kwargs)
+
+    def _counting_solution(*args, **kwargs):
+        nonlocal solutions_materialized
+        solutions_materialized += 1
+        return original_solution(*args, **kwargs)
+
+    monkeypatch.setattr(solver, "_ship_build_objective_contribution", _counting_contribution)
+    monkeypatch.setattr(solver, "InferenceSolution", _counting_solution)
+    solutions = _expand_score_equivalent_solutions(
+        problem,
+        {},
+        combo_counts,
+        merged,
+        max_expansions=top_k,
+    )
+    member_count = sum(class_sizes)
+    cross_product = class_sizes[0] * class_sizes[1] * class_sizes[2]
+    assert scoring_calls == member_count
+    assert scoring_calls * 100 < cross_product
+    assert solutions_materialized <= top_k
+    assert len(solutions) == top_k
+    assert _combo_ids(solutions[0]) == frozenset(best_combo_ids)
+    assert all(
+        solutions[index].objective_value > solutions[index + 1].objective_value
+        for index in range(top_k - 1)
+    )
     assert all(
         solution.objective_value == solution_rank_objective(problem, solution)
         for solution in solutions
