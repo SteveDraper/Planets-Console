@@ -85,6 +85,10 @@ TURN3_PLAYER10_LOADED_WALL_SECONDS = 31.59
 TURN10_PLAYER51_ADMIT_LOADED_WALL_SECONDS = 30.81
 TURN10_PLAYER51_THROUGH_TIER_INDEX = 6
 
+# Largest modest_planet_defense step in local/diagnostics_late3.json.
+TURN15_PLAYER38_MODEST_LOADED_WALL_SECONDS = 20.81
+TURN15_PLAYER38_MODEST_TIER_INDEX = 5
+
 _active_tier: ContextVar[str] = ContextVar("outlier_repro_tier", default="")
 _active_phase: ContextVar[str] = ContextVar("outlier_repro_phase", default="other")
 
@@ -143,6 +147,9 @@ class OutlierReproduction:
     builds: list[BuildSample] = field(default_factory=list)
     solves: list[SolveSample] = field(default_factory=list)
     spans: list[SpanSample] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    band_callbacks: int = 0
+    band_callback_seconds: float = 0.0
 
     def tier(self, index: int) -> TierSample | None:
         for sample in self.tiers:
@@ -272,16 +279,34 @@ class _PhaseProbe:
             return wrapped
 
         original_catalog = policy_ladder_tier_step.build_action_catalog_from_turn
+
+        def timed_catalog(*args, **kwargs):
+            started = time.perf_counter()
+            catalog = original_catalog(*args, **kwargs)
+            report.spans.append(
+                SpanSample(
+                    tier=_active_tier.get(),
+                    name="catalog",
+                    wall_seconds=time.perf_counter() - started,
+                )
+            )
+            actions = ", ".join(
+                f"{action.id} score={action.score_delta_2x} ub={action.upper_bound}"
+                for action in catalog.aggregate_actions
+            )
+            report.notes.append(
+                f"{_active_tier.get()} combos={len(catalog.ship_build_combos)} "
+                f"aggregates={len(catalog.aggregate_actions)} [{actions}]"
+            )
+            return catalog
+
         original_merge = solver.merge_score_equivalent_combos
         original_expand = solver.expand_structural_hits_to_top_k
         cp_model.CpSolver.solve = timed_solve
         solver._build_model = timed_build
         policy_ladder_tier_step.probe_degrade_aggregate_rewrites = timed_probe
         policy_ladder_tier_step.solve_inference_problem = timed_solve_problem
-        policy_ladder_tier_step.build_action_catalog_from_turn = timed_span(
-            "catalog",
-            original_catalog,
-        )
+        policy_ladder_tier_step.build_action_catalog_from_turn = timed_catalog
         solver.merge_score_equivalent_combos = timed_span("merge", original_merge)
         solver.expand_structural_hits_to_top_k = timed_span("expand", original_expand)
         original_build_problem = policy_ladder_tier_step.build_inference_problem
@@ -289,6 +314,21 @@ class _PhaseProbe:
         original_validate = solver._validate_problem
         original_collect = solver.collect_near_best_structural_hits
         from api.analytics.military_score_inference import near_best_structural_search as near_best
+
+        band_collector = near_best._ObjectiveBandCollector
+        original_on_solution = band_collector.on_solution_callback
+
+        def timed_on_solution(callback_self, *args, **kwargs):
+            started = time.perf_counter()
+            try:
+                return original_on_solution(callback_self, *args, **kwargs)
+            finally:
+                report.band_callbacks += 1
+                report.band_callback_seconds += time.perf_counter() - started
+
+        band_collector.on_solution_callback = timed_on_solution
+        self._band_collector_type = band_collector
+        self._original_on_solution = original_on_solution
 
         original_read_combos = near_best._read_combo_counts
         original_seed_cuts = near_best.seed_no_good_cuts_for_held_solutions
@@ -337,6 +377,52 @@ class _PhaseProbe:
             "non_torp_lookup",
             original_non_torp,
         )
+        from api.analytics.military_score_inference import (
+            analytic,
+            inference_row_runner,
+            row_complete_factory,
+        )
+
+        completion_bindings = (
+            (inference_row_runner, "run_policy_ladder_tier_step", "tier_step"),
+            (inference_row_runner, "_outcome_after_ladder_complete", "ladder_complete"),
+            (inference_row_runner, "finalize_policy_ladder_result", "finalize"),
+            (inference_row_runner, "row_complete_from_ladder_finalize", "row_complete"),
+            (policy_ladder_tier_step, "finish_tier_step", "finish_step"),
+            (policy_ladder, "leftover_0_solutions", "leftover_0"),
+            (policy_ladder, "worthwhile_remainder_bound_for_turn", "remainder_bound"),
+            (row_complete_factory, "inference_result_to_api_payload", "api_payload"),
+            (row_complete_factory, "row_complete_wire_payload_from_api_payload", "wire_from_api"),
+            (analytic, "build_inference_solver_diagnostics", "solver_diagnostics"),
+            (analytic, "catalog_to_actions_payload", "catalog_payload"),
+            (inference_api_payload, "inference_api_payload", "wire_payload"),
+            (inference_api_payload, "_serialize_solution_with_arithmetic", "serialize_solution"),
+            (
+                inference_api_payload,
+                "solution_military_score_arithmetic_payload",
+                "score_arithmetic",
+            ),
+        )
+        from api.analytics.military_score_inference import worthwhile_remainder_bound
+        from api.analytics.military_score_inference.prior_mining import mine_stock
+
+        completion_bindings = (
+            *completion_bindings,
+            (worthwhile_remainder_bound, "load_mine_stock_for_category", "mine_stock_load"),
+            (
+                worthwhile_remainder_bound,
+                "compute_worthwhile_remainder_bound",
+                "remainder_compute",
+            ),
+            (mine_stock, "load_mine_stock_asset", "mine_stock_asset"),
+            (mine_stock, "parse_mine_stock_document", "histogram_parse"),
+        )
+        completion_patches: list[tuple[object, str, object]] = []
+        for module, attr, name in completion_bindings:
+            original = getattr(module, attr)
+            setattr(module, attr, timed_span(name, original))
+            completion_patches.append((module, attr, original))
+        self._completion_patches = completion_patches
         self._solver_module = solver
         self._original_build = original_build
         self._tier_step_module = policy_ladder_tier_step
@@ -386,6 +472,9 @@ class _PhaseProbe:
         self._solver_module.collect_near_best_structural_hits = self._original_collect
         self._near_best_module._read_combo_counts = self._original_read_combos
         self._near_best_module.seed_no_good_cuts_for_held_solutions = self._original_seed_cuts
+        self._band_collector_type.on_solution_callback = self._original_on_solution
+        for module, attr, original in self._completion_patches:
+            setattr(module, attr, original)
         self._installed = False
 
 
@@ -626,6 +715,12 @@ def format_outlier_report(
         f"degrade_wall={sum(sample.wall_seconds for sample in degrade):.2f}s "
         f"build_wall={sum(sample.wall_seconds for sample in report.builds):.2f}s"
     )
+    if report.notes:
+        lines.append("catalogs:")
+        lines.extend(f"  {note}" for note in report.notes)
+    lines.append(
+        f"band callbacks: n={report.band_callbacks} wall={report.band_callback_seconds:.3f}s"
+    )
     lines.append("spans:")
     span_totals: dict[tuple[str, str], float] = {}
     span_counts: dict[tuple[str, str], int] = {}
@@ -783,3 +878,52 @@ def test_turn10_player51_solve_reproduces_late_outlier() -> None:
     full_components = report.tier(TURN10_PLAYER51_THROUGH_TIER_INDEX)
     assert full_components is not None, f"ladder stopped before tier 6\n{rendered}"
     assert full_components.tier_id == "full_components", rendered
+
+
+def test_turn15_player38_modest_planet_defense_reproduces_late3_outlier() -> None:
+    """Turn 15 player 38 planet defense does not enumerate a negative score band.
+
+    The loaded step was 20.8 s while 8 workers were busy. The catalog has no
+    ship combos and the observed military score is negative, so the under-explain
+    band is skipped instead of searched.
+    """
+    if os.environ.get("SCORES_OUTLIER_REPRO") != "1":
+        pytest.skip("set SCORES_OUTLIER_REPRO=1 to reproduce the local late-window row")
+    storage_root = Path(os.environ.get("SCORES_OUTLIER_STORAGE", DEFAULT_STORAGE_ROOT))
+    if not storage_root.is_dir():
+        pytest.skip(f"storage root not found: {storage_root}")
+
+    from tests.inference_corpus.storage_loader import configure_file_storage
+
+    previous_config = get_config()
+    reset_tier_row_run_registry_for_tests()
+    try:
+        storage = configure_file_storage(storage_root=storage_root)
+        report = reproduce_admit_ship_outlier(
+            storage,
+            turn_number=15,
+            player_id=38,
+            through_tier_index=TURN15_PLAYER38_MODEST_TIER_INDEX,
+        )
+    finally:
+        reset_tier_row_run_registry_for_tests()
+        set_config(previous_config)
+        clear_backend_cache()
+
+    rendered = format_outlier_report(
+        report,
+        diagnostic_loaded_wall_seconds=TURN15_PLAYER38_MODEST_LOADED_WALL_SECONDS,
+    )
+    print(rendered)
+    modest = report.tier(TURN15_PLAYER38_MODEST_TIER_INDEX)
+    assert modest is not None, f"ladder stopped before tier 5\n{rendered}"
+    assert modest.tier_id == "modest_planet_defense", rendered
+    assert modest.combo_count == 0, rendered
+    assert modest.structural_hits == 0, rendered
+    assert modest.outcome == "continue", rendered
+    heavy = [
+        sample
+        for sample in report.solves
+        if sample.tier.startswith("5:") and sample.branches >= 10_000
+    ]
+    assert not heavy, rendered

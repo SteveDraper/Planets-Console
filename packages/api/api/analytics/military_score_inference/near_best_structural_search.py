@@ -306,7 +306,7 @@ class _ObjectiveBandCollector(cp_model.CpSolverSolutionCallback):
 def _solver_effort(solver: cp_model.CpSolver) -> float:
     try:
         return max(0.0, float(solver.deterministic_time))
-    except (RuntimeError, TypeError, ValueError):
+    except RuntimeError, TypeError, ValueError:
         return 0.0
 
 

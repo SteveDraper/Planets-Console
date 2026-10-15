@@ -123,9 +123,10 @@ def test_seed_first_hit_and_band_enumeration_match_successive_results() -> None:
     enumerated = solve_inference_problem(problem)
     assert int(successive.diagnostics["structural_hit_count"]) > 1
     assert _ranked(enumerated.solutions) == _ranked(successive.solutions)
-    assert enumerated.diagnostics["structural_hit_count"] == successive.diagnostics[
-        "structural_hit_count"
-    ]
+    assert (
+        enumerated.diagnostics["structural_hit_count"]
+        == successive.diagnostics["structural_hit_count"]
+    )
     assert enumerated.diagnostics["stopped_reason"] == successive.diagnostics["stopped_reason"]
 
     baseline_held, baseline_seed_hits = _pipeline(successive_search=True)

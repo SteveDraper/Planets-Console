@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.military_score_window import (
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
+    ShipBuildCombo,
     candidate_military_subtotal_bounds_2x,
 )
 from api.analytics.military_score_inference.solver import CatalogMergePlan, _MergeGroup
@@ -19,6 +20,91 @@ from api.analytics.military_score_inference.solver import CatalogMergePlan, _Mer
 # Neighborhood domains are tiny (a pin, or pin +/- 1). Past this many combinations
 # the screen uses an independent range box instead of enumerating counts.
 _MAX_PINNED_ASSIGNMENTS = 256
+
+
+def negative_band_upper_bound_is_unreachable(
+    observation: InferenceObservation,
+    aggregate_actions: tuple[CandidateAction, ...],
+    ship_build_combos: tuple[ShipBuildCombo, ...] = (),
+) -> bool:
+    """True when a negative band ceiling cannot be reached by a legal assignment.
+
+    The ceiling is the observed military score. Freighter departures contribute
+    no military score, so only a warship decrease, or an action that scores
+    negative without changing the warship count, can reach it. A warship loss
+    is not selectable when the warship count did not decrease and nothing in
+    the catalog builds one back.
+    """
+    if observation.military_delta_2x >= 0:
+        return False
+    warship_supply = _positive_class_capacity(
+        aggregate_actions,
+        ship_build_combos,
+        "warship_delta",
+    )
+    for action in aggregate_actions:
+        if _negative_action_can_be_selected(
+            action,
+            observation,
+            warship_supply=warship_supply,
+        ):
+            return False
+    for combo in ship_build_combos:
+        if combo.score_delta_2x >= 0 or combo.upper_bound <= 0:
+            continue
+        if _warship_decrease_is_admissible(
+            combo.warship_delta,
+            observation,
+            warship_supply=warship_supply,
+        ):
+            return False
+    return True
+
+
+def _positive_class_capacity(
+    aggregate_actions: tuple[CandidateAction, ...],
+    ship_build_combos: tuple[ShipBuildCombo, ...],
+    attribute: str,
+) -> int:
+    total = 0
+    for action in aggregate_actions:
+        delta = getattr(action, attribute)
+        if delta > 0 and action.upper_bound > 0:
+            total += delta * action.upper_bound
+    for combo in ship_build_combos:
+        delta = getattr(combo, attribute)
+        if delta > 0 and combo.upper_bound > 0:
+            total += delta * combo.upper_bound
+    return total
+
+
+def _negative_action_can_be_selected(
+    action: CandidateAction,
+    observation: InferenceObservation,
+    *,
+    warship_supply: int,
+) -> bool:
+    if action.upper_bound <= 0:
+        return False
+    military_low, _military_high = candidate_military_subtotal_bounds_2x(action, 1)
+    if military_low >= 0:
+        return False
+    return _warship_decrease_is_admissible(
+        action.warship_delta,
+        observation,
+        warship_supply=warship_supply,
+    )
+
+
+def _warship_decrease_is_admissible(
+    warship_delta: int,
+    observation: InferenceObservation,
+    *,
+    warship_supply: int,
+) -> bool:
+    if warship_delta < 0 and observation.warship_delta >= 0 and warship_supply < -warship_delta:
+        return False
+    return True
 
 
 def pinned_counts_cannot_explain(
@@ -81,8 +167,7 @@ def pinned_counts_cannot_explain(
             )
 
     count_axes = [
-        range(lower_bound, upper_bound + 1)
-        for _group, lower_bound, upper_bound in open_domains
+        range(lower_bound, upper_bound + 1) for _group, lower_bound, upper_bound in open_domains
     ]
     for counts in product(*count_axes):
         ship_military = 0

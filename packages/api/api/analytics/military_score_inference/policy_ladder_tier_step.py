@@ -42,6 +42,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
 )
 from api.analytics.military_score_inference.pinned_seed_screen import (
+    negative_band_upper_bound_is_unreachable,
     pinned_counts_cannot_explain,
 )
 from api.analytics.military_score_inference.policy_ladder_admission import (
@@ -756,6 +757,12 @@ def run_policy_ladder_tier_step(
         if exact_result.solutions or policy_step.alpha <= 0:
             return False
         if budget_exhausted() or run.remaining_allowance() <= 0:
+            return False
+        if negative_band_upper_bound_is_unreachable(
+            observation,
+            catalog.aggregate_actions,
+            catalog.ship_build_combos,
+        ):
             return False
         band_result, band_problem = _solve_catalog(
             observation,
