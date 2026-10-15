@@ -9,9 +9,8 @@ and full. That catalog is about 38k combos, and the tier fills its solution
 cap before the 1.0 deterministic-time budget. Catalog score indexes are built
 once per catalog.
 
-Opt-in. The case reads the local file store and runs several CP-SAT tiers,
-including one that takes around ten seconds. Default
-``make test`` skips it.
+Opt-in. Each case reads the local file store and runs several CP-SAT tiers.
+Default ``make test`` skips them. Select one with ``-k``.
 
     SCORES_OUTLIER_REPRO=1 uv run pytest \\
         tests/test_scores_admit_ship_outlier_repro.py -s
@@ -76,6 +75,10 @@ DIAGNOSTIC_LOADED_WALL_SECONDS = 95.96
 # solution cap before the 1.0 deterministic-time budget.
 IDLE_MINIMUM_WALL_SECONDS = 5.0
 
+# Early-sweep outlier from local/diagnostics_early.json. Loaded wall is the
+# completed step while 8 workers were busy.
+TURN3_PLAYER10_LOADED_WALL_SECONDS = 31.59
+
 _active_tier: ContextVar[str] = ContextVar("outlier_repro_tier", default="")
 _active_phase: ContextVar[str] = ContextVar("outlier_repro_phase", default="other")
 
@@ -126,6 +129,10 @@ class TierSample:
 class OutlierReproduction:
     fleet_input_status: str
     record_count: int
+    military_delta_2x: int = 0
+    warship_delta: int = 0
+    freighter_delta: int = 0
+    starbases_owned: int = 0
     tiers: list[TierSample] = field(default_factory=list)
     builds: list[BuildSample] = field(default_factory=list)
     solves: list[SolveSample] = field(default_factory=list)
@@ -160,6 +167,7 @@ class _PhaseProbe:
 
     def install(self) -> None:
         from api.analytics.military_score_inference import (
+            actions,
             inference_api_payload,
             policy_ladder,
             policy_ladder_tier_step,
@@ -228,9 +236,17 @@ class _PhaseProbe:
 
         def timed_solve_problem(*args, **kwargs):
             token = _active_phase.set("structural")
+            started = time.perf_counter()
             try:
                 return original_solve_problem(*args, **kwargs)
             finally:
+                report.spans.append(
+                    SpanSample(
+                        tier=_active_tier.get(),
+                        name="solve_problem",
+                        wall_seconds=time.perf_counter() - started,
+                    )
+                )
                 _active_phase.reset(token)
 
         def timed_span(name: str, fn):
@@ -262,6 +278,29 @@ class _PhaseProbe:
         )
         solver.merge_score_equivalent_combos = timed_span("merge", original_merge)
         solver.expand_structural_hits_to_top_k = timed_span("expand", original_expand)
+        original_build_problem = policy_ladder_tier_step.build_inference_problem
+        original_constrain = actions._apply_combo_count_constraints
+        original_validate = solver._validate_problem
+        original_collect = solver.collect_near_best_structural_hits
+        from api.analytics.military_score_inference import near_best_structural_search as near_best
+
+        original_read_combos = near_best._read_combo_counts
+        original_seed_cuts = near_best.seed_no_good_cuts_for_held_solutions
+        policy_ladder_tier_step.build_inference_problem = timed_span(
+            "build_problem",
+            original_build_problem,
+        )
+        actions._apply_combo_count_constraints = timed_span(
+            "constrain_combos",
+            original_constrain,
+        )
+        solver._validate_problem = timed_span("validate", original_validate)
+        solver.collect_near_best_structural_hits = timed_span("collect_hits", original_collect)
+        near_best._read_combo_counts = timed_span("read_combos", original_read_combos)
+        near_best.seed_no_good_cuts_for_held_solutions = timed_span(
+            "seed_cuts",
+            original_seed_cuts,
+        )
         original_step_leftover = policy_ladder_tier_step.leftover_military_2x
         original_family_leftover = ship_first_family.leftover_military_2x
         original_non_torp = ship_first_family.non_torp_military_2x
@@ -309,6 +348,14 @@ class _PhaseProbe:
         self._original_step_lookups = original_step_lookups
         self._original_ladder_lookups = original_ladder_lookups
         self._original_payload_lookups = original_payload_lookups
+        self._actions_module = actions
+        self._original_build_problem = original_build_problem
+        self._original_constrain = original_constrain
+        self._original_validate = original_validate
+        self._original_collect = original_collect
+        self._near_best_module = near_best
+        self._original_read_combos = original_read_combos
+        self._original_seed_cuts = original_seed_cuts
         self._installed = True
 
     def restore(self) -> None:
@@ -327,6 +374,12 @@ class _PhaseProbe:
         self._tier_step_module.catalog_score_lookups = self._original_step_lookups
         self._ladder_module.catalog_score_lookups = self._original_ladder_lookups
         self._payload_module.catalog_score_lookups = self._original_payload_lookups
+        self._tier_step_module.build_inference_problem = self._original_build_problem
+        self._actions_module._apply_combo_count_constraints = self._original_constrain
+        self._solver_module._validate_problem = self._original_validate
+        self._solver_module.collect_near_best_structural_hits = self._original_collect
+        self._near_best_module._read_combo_counts = self._original_read_combos
+        self._near_best_module.seed_no_good_cuts_for_held_solutions = self._original_seed_cuts
         self._installed = False
 
 
@@ -441,10 +494,6 @@ def reproduce_admit_ship_outlier(
             player_id=player_id,
             prior_turn=prior_turn,
         )
-    report = OutlierReproduction(
-        fleet_input_status=resolution.input_status,
-        record_count=len(resolution.records),
-    )
     session = InferenceRowStreamSession(
         player_id=player_id,
         observation=build_inference_observation(
@@ -457,6 +506,15 @@ def reproduce_admit_ship_outlier(
         perspective=perspective,
         turn_number=turn.settings.turn,
         load_scoreboard_turn=load_scoreboard_turn,
+    )
+    observation = session.observation
+    report = OutlierReproduction(
+        fleet_input_status=resolution.input_status,
+        record_count=len(resolution.records),
+        military_delta_2x=observation.military_delta_2x,
+        warship_delta=observation.warship_delta,
+        freighter_delta=observation.freighter_delta,
+        starbases_owned=observation.starbases_owned,
     )
     run = RowRun(session)
     _apply_fleet_resolution_to_row_run(run, resolution)
@@ -515,12 +573,18 @@ def _as_float(value: object) -> float:
     return float(value)
 
 
-def format_outlier_report(report: OutlierReproduction) -> str:
+def format_outlier_report(
+    report: OutlierReproduction,
+    *,
+    diagnostic_loaded_wall_seconds: float = DIAGNOSTIC_LOADED_WALL_SECONDS,
+) -> str:
     lines = [
         (
-            f"diagnostic_loaded_wall={DIAGNOSTIC_LOADED_WALL_SECONDS:.2f}s "
+            f"diagnostic_loaded_wall={diagnostic_loaded_wall_seconds:.2f}s "
             "(8 busy workers) "
-            f"fleet_input_status={report.fleet_input_status} records={report.record_count}"
+            f"fleet_input_status={report.fleet_input_status} records={report.record_count} "
+            f"military_2x={report.military_delta_2x} warships={report.warship_delta} "
+            f"freighters={report.freighter_delta} starbases={report.starbases_owned}"
         ),
         "tiers:",
     ]
@@ -617,3 +681,50 @@ def test_turn10_player46_admit_ship_torpedoes_reproduces_diagnostic_outlier() ->
     assert outlier.wall_seconds >= IDLE_MINIMUM_WALL_SECONDS, rendered
     tier4_solves = [sample for sample in report.solves if sample.tier.startswith("4:")]
     assert len(tier4_solves) >= 10, rendered
+
+
+def test_turn3_player10_admit_ship_torpedoes_reproduces_early_outlier() -> None:
+    """Idle reproduction of the loaded 31.6 s admit-ship step on turn 3 player 10.
+
+    The loaded duration was this step while 8 workers were busy. An idle run
+    checks the partial-slot catalog, that the tier still searches, and that it
+    stops by filling its solution cap.
+    """
+    if os.environ.get("SCORES_OUTLIER_REPRO") != "1":
+        pytest.skip("set SCORES_OUTLIER_REPRO=1 to reproduce the local early-sweep tier")
+    storage_root = Path(os.environ.get("SCORES_OUTLIER_STORAGE", DEFAULT_STORAGE_ROOT))
+    if not storage_root.is_dir():
+        pytest.skip(f"storage root not found: {storage_root}")
+
+    from tests.inference_corpus.storage_loader import configure_file_storage
+
+    previous_config = get_config()
+    reset_tier_row_run_registry_for_tests()
+    try:
+        storage = configure_file_storage(storage_root=storage_root)
+        report = reproduce_admit_ship_outlier(
+            storage,
+            turn_number=3,
+            player_id=10,
+            through_tier_index=OUTLIER_TIER_INDEX,
+        )
+    finally:
+        reset_tier_row_run_registry_for_tests()
+        set_config(previous_config)
+        clear_backend_cache()
+
+    rendered = format_outlier_report(
+        report,
+        diagnostic_loaded_wall_seconds=TURN3_PLAYER10_LOADED_WALL_SECONDS,
+    )
+    print(rendered)
+    outlier = report.tier(OUTLIER_TIER_INDEX)
+    assert outlier is not None, f"ladder stopped before tier 4\n{rendered}"
+    assert outlier.tier_id == OUTLIER_TIER_ID, rendered
+    assert outlier.wall_seconds >= 0.5, rendered
+    assert outlier.combo_count >= 10_000, rendered
+    assert outlier.outcome == "continue", rendered
+    assert outlier.stopped_reason == "max_solutions", rendered
+    assert outlier.structural_hits == 5, rendered
+    tier4_solves = [sample for sample in report.solves if sample.tier.startswith("4:")]
+    assert len(tier4_solves) >= 5, rendered

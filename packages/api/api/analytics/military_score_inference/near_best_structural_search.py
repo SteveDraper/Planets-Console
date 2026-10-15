@@ -121,13 +121,16 @@ def merged_assignment_from_solution(
     *,
     problem: InferenceProblem,
     merged_combo_catalog: SupportsMergedComboCatalog,
+    member_to_merged: dict[str, str] | None = None,
 ) -> tuple[dict[str, int], dict[str, int]] | None:
     """Map a held (possibly labeled) solution onto current CP-SAT count vars.
 
     Returns full action/combo count vectors including zeros, or ``None`` when the
     solution cannot be expressed in this catalog (unknown combo or aggregate).
+    ``member_to_merged`` is the catalog map; pass one built for the whole held set.
     """
-    member_to_merged = member_combo_id_to_merged_id(merged_combo_catalog)
+    if member_to_merged is None:
+        member_to_merged = member_combo_id_to_merged_id(merged_combo_catalog)
     action_ids = {action.id for action in problem.aggregate_actions}
     action_counts = {action.id: 0 for action in problem.aggregate_actions}
     for action in solution.actions:
@@ -161,11 +164,13 @@ def seed_no_good_cuts_for_held_solutions(
     applied = 0
     skipped = 0
     seen_assignments: set[tuple[tuple[str, int], ...]] = set()
+    member_to_merged = member_combo_id_to_merged_id(merged_combo_catalog)
     for seed in seed_solutions:
         mapped = merged_assignment_from_solution(
             seed,
             problem=problem,
             merged_combo_catalog=merged_combo_catalog,
+            member_to_merged=member_to_merged,
         )
         if mapped is None:
             skipped += 1
@@ -250,14 +255,17 @@ def collect_near_best_structural_hits(
     no-good cuts and optional ``[Z*-T, current_max]`` banding until the budget,
     cancel, infeasibility, or band exhaustion stops search.
     """
-    seed_no_goods_applied, seed_no_goods_skipped = seed_no_good_cuts_for_held_solutions(
-        model,
-        problem=problem,
-        merged_combo_catalog=merged_combo_catalog,
-        action_count_vars=action_count_vars,
-        combo_count_vars=combo_count_vars,
-        seed_solutions=seed_no_good_solutions,
-    )
+    if seed_no_good_solutions:
+        seed_no_goods_applied, seed_no_goods_skipped = seed_no_good_cuts_for_held_solutions(
+            model,
+            problem=problem,
+            merged_combo_catalog=merged_combo_catalog,
+            action_count_vars=action_count_vars,
+            combo_count_vars=combo_count_vars,
+            seed_solutions=seed_no_good_solutions,
+        )
+    else:
+        seed_no_goods_applied, seed_no_goods_skipped = 0, 0
     solver = cp_model.CpSolver()
     structural_hits: list[tuple[dict[str, int], dict[str, int]]] = []
     started_at = time.monotonic()

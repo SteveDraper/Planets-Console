@@ -41,6 +41,9 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
 )
+from api.analytics.military_score_inference.pinned_seed_screen import (
+    pinned_counts_cannot_explain,
+)
 from api.analytics.military_score_inference.policy_ladder_admission import (
     held_leftover_0_solutions,
     make_incremental_admitter,
@@ -86,8 +89,10 @@ from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
+    build_catalog_merge_plan,
     solve_inference_problem,
 )
+from api.analytics.military_score_inference.tier_solve_cache import TierSolveCache
 from api.models.game import TurnInfo
 
 
@@ -120,7 +125,10 @@ def _solve_catalog(
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
+    tier_solve_cache: TierSolveCache | None = None,
 ) -> tuple[InferenceResult, InferenceProblem]:
+    # The tier cache applies pins on the shared merge plan. Copying every combo
+    # here would rebuild that catalog on each neighborhood pass.
     problem = build_inference_problem(
         observation,
         catalog,
@@ -129,14 +137,17 @@ def _solve_catalog(
         time_limit_seconds=solve_clip.problem_time_limit_seconds(),
         solve_clip=solve_clip,
         military_score_window=military_score_window,
-        fixed_combo_counts=fixed_combo_counts,
-        combo_count_neighborhood=combo_count_neighborhood,
+        fixed_combo_counts=None if tier_solve_cache is not None else fixed_combo_counts,
+        combo_count_neighborhood=0 if tier_solve_cache is not None else combo_count_neighborhood,
     )
     result = solve_inference_problem(
         problem,
         cancel_token=cancel_token,
         on_solution=on_solution,
         seed_no_good_solutions=seed_no_good_solutions,
+        tier_solve_cache=tier_solve_cache,
+        fixed_combo_counts=fixed_combo_counts if tier_solve_cache is not None else None,
+        combo_count_neighborhood=combo_count_neighborhood if tier_solve_cache is not None else 0,
     )
     _charge_effort_budget(budget_run, result)
     return result, problem
@@ -179,6 +190,7 @@ def _solve_seed_progression(
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
+    tier_solve_cache: TierSolveCache | None = None,
 ) -> tuple[InferenceResult | None, InferenceProblem | None]:
     """Run neighborhood then unfixed catalog solves under one shared clip.
 
@@ -203,6 +215,14 @@ def _solve_seed_progression(
         return clip
 
     for neighborhood in (0, 1):
+        if tier_solve_cache is not None and pinned_counts_cannot_explain(
+            tier_solve_cache.plan,
+            observation,
+            catalog.aggregate_actions,
+            fixed_counts,
+            neighborhood,
+        ):
+            continue
         clip = _solve_cap()
         if clip is None:
             return None, None
@@ -218,6 +238,7 @@ def _solve_seed_progression(
             on_solution=on_solution,
             seed_no_good_solutions=seed_no_good_solutions,
             budget_run=budget_run,
+            tier_solve_cache=tier_solve_cache,
         )
         if result.status == STATUS_STOPPED:
             return result, problem
@@ -238,6 +259,7 @@ def _solve_seed_progression(
         on_solution=on_solution,
         budget_run=budget_run,
         seed_no_good_solutions=seed_no_good_solutions,
+        tier_solve_cache=tier_solve_cache,
     )
     if result.solutions or result.status == STATUS_STOPPED:
         return result, problem
@@ -490,6 +512,7 @@ def run_policy_ladder_tier_step(
     )
     state.catalog = catalog
     score_lookups = catalog_score_lookups(catalog)
+    tier_solve_cache = TierSolveCache(build_catalog_merge_plan(catalog.ship_build_combos))
     current_combo_ids = frozenset(combo.combo_id for combo in catalog.ship_build_combos)
     added_combo_ids = (
         current_combo_ids
@@ -632,6 +655,7 @@ def run_policy_ladder_tier_step(
             on_solution=admit_solution,
             seed_no_good_solutions=held_no_goods,
             budget_run=run,
+            tier_solve_cache=tier_solve_cache,
         )
         if seed_result is None or seed_problem is None:
             continue
@@ -664,6 +688,7 @@ def run_policy_ladder_tier_step(
             cancel_token=cancel_token,
             on_solution=admit_overshoot,
             seed_no_good_solutions=tuple(state.merged_solutions),
+            tier_solve_cache=tier_solve_cache,
         )
         return record_solve(overshoot_result, overshoot_problem)
 
@@ -699,6 +724,7 @@ def run_policy_ladder_tier_step(
             cancel_token=cancel_token,
             on_solution=admit_solution,
             seed_no_good_solutions=held_no_goods,
+            tier_solve_cache=tier_solve_cache,
         )
         if record_solve(exact_result, problem):
             return True
@@ -727,6 +753,7 @@ def run_policy_ladder_tier_step(
             military_score_window=BandMilitaryScoreWindow(alpha=policy_step.alpha),
             cancel_token=cancel_token,
             seed_no_good_solutions=tuple(state.merged_solutions),
+            tier_solve_cache=tier_solve_cache,
         )
         state.problem = band_problem
         state.last_diagnostics = dict(band_result.diagnostics)

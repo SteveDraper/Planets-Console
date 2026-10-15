@@ -5,7 +5,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from ortools.sat.python import cp_model
 
@@ -74,6 +74,31 @@ class _BuiltModel:
     diversity_caps_applied: tuple[dict[str, object], ...]
 
 
+def clone_built_model(built: _BuiltModel) -> _BuiltModel:
+    """Copy a model that has not been solved. IntVar indexes stay valid on the clone."""
+    return _BuiltModel(
+        model=built.model.clone(),
+        action_count_vars=built.action_count_vars,
+        combo_count_vars=built.combo_count_vars,
+        objective_var=built.objective_var,
+        merged_combo_catalog=built.merged_combo_catalog,
+        diversity_caps_applied=built.diversity_caps_applied,
+    )
+
+
+class _TierSolveModelSource(Protocol):
+    """Tier-scoped model cache. Solves clone a prepared model instead of rebuilding it."""
+
+    def fresh_model(
+        self,
+        problem: InferenceProblem,
+        fixed_combo_counts: dict[str, int] | None,
+        combo_count_neighborhood: int,
+        seed_solutions: Sequence[InferenceSolution],
+    ) -> tuple[_BuiltModel, int, int]:
+        """Return an unsolved clone, plus seed no-goods applied and skipped."""
+
+
 def _solver_build_diagnostics(
     problem: InferenceProblem,
     built_model: _BuiltModel,
@@ -140,51 +165,181 @@ def _validate_problem(problem: InferenceProblem) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class _MergeGroup:
+    """One CP-SAT combo variable and the labeled members that share its score."""
+
+    members: tuple[ShipBuildCombo, ...]
+    representative_index: int
+    prototype: ShipBuildCombo
+
+
+@dataclass(frozen=True)
+class CatalogMergePlan:
+    """Score-equivalence groups for one catalog, built once per tier.
+
+    Neighborhood pins change merged count bounds only. Group membership and the
+    member-id map stay fixed, so later solves reuse this plan.
+    """
+
+    groups: tuple[_MergeGroup, ...]
+    member_group_index: dict[str, int]
+    combos_by_id: dict[str, ShipBuildCombo]
+    unconstrained: _MergedComboCatalog
+
+    def catalog_for_pins(
+        self,
+        fixed_combo_counts: dict[str, int] | None,
+        neighborhood: int,
+    ) -> _MergedComboCatalog:
+        """Merged catalog after a seed pin. Unpinned passes return the shared catalog."""
+        if not fixed_combo_counts:
+            return self.unconstrained
+        touched = self._groups_touched_by(fixed_combo_counts)
+        merged: list[ShipBuildCombo] = []
+        for index, group in enumerate(self.groups):
+            if index not in touched:
+                merged.append(replace(group.prototype, lower_bound=0, upper_bound=0))
+                continue
+            lower_bound, upper_bound = self.merged_count_bounds(
+                group,
+                fixed_combo_counts,
+                neighborhood,
+            )
+            if (
+                lower_bound == group.prototype.lower_bound
+                and upper_bound == group.prototype.upper_bound
+            ):
+                merged.append(group.prototype)
+                continue
+            merged.append(
+                replace(group.prototype, lower_bound=lower_bound, upper_bound=upper_bound)
+            )
+        return _MergedComboCatalog(
+            combos=tuple(merged),
+            members_by_merged_id=self.unconstrained.members_by_merged_id,
+        )
+
+    def merged_count_bounds(
+        self,
+        group: _MergeGroup,
+        fixed_combo_counts: dict[str, int] | None,
+        neighborhood: int,
+    ) -> tuple[int, int]:
+        """Representative lower bound and max member upper bound after a pin."""
+        representative = group.members[group.representative_index]
+        representative_lower, representative_upper = _pinned_member_bounds(
+            representative,
+            fixed_combo_counts,
+            neighborhood,
+        )
+        merged_upper = representative_upper
+        if not fixed_combo_counts:
+            return representative_lower, merged_upper
+        for member in group.members:
+            if member is representative or member.combo_id not in fixed_combo_counts:
+                continue
+            _lower, upper = _pinned_member_bounds(member, fixed_combo_counts, neighborhood)
+            if upper > merged_upper:
+                merged_upper = upper
+        return representative_lower, merged_upper
+
+    def _groups_touched_by(self, fixed_combo_counts: dict[str, int]) -> set[int]:
+        touched: set[int] = set()
+        for combo_id in fixed_combo_counts:
+            index = self.member_group_index.get(combo_id)
+            if index is not None:
+                touched.add(index)
+        return touched
+
+
+def _pinned_member_bounds(
+    combo: ShipBuildCombo,
+    fixed_combo_counts: dict[str, int] | None,
+    neighborhood: int,
+) -> tuple[int, int]:
+    """Count bounds matching ``_apply_combo_count_constraints`` for one combo."""
+    if not fixed_combo_counts:
+        return combo.lower_bound, combo.upper_bound
+    if combo.combo_id not in fixed_combo_counts:
+        return 0, 0
+    seed_count = fixed_combo_counts[combo.combo_id]
+    if neighborhood <= 0:
+        return seed_count, seed_count
+    lower_bound = max(combo.lower_bound, max(0, seed_count - neighborhood))
+    upper_bound = min(combo.upper_bound, seed_count + neighborhood)
+    return lower_bound, upper_bound
+
+
+def _prototype_for_members(members: tuple[ShipBuildCombo, ...]) -> tuple[ShipBuildCombo, int]:
+    representative = max(members, key=lambda combo: (combo.probability_weight, combo.combo_id))
+    representative_index = members.index(representative)
+    if len(members) == 1:
+        return representative, representative_index
+    merged_id = (
+        f"combo_equiv_{representative.score_delta_2x}_"
+        f"{representative.warship_delta}_{representative.freighter_delta}"
+    )
+    prototype = replace(
+        representative,
+        combo_id=merged_id,
+        labels=tuple(label for member in members for label in member.labels),
+        probability_weight=max(member.probability_weight for member in members),
+        upper_bound=max(member.upper_bound for member in members),
+    )
+    return prototype, representative_index
+
+
+def build_catalog_merge_plan(combos: tuple[ShipBuildCombo, ...]) -> CatalogMergePlan:
+    """Group score-equivalent combos once. Pins reuse the groups."""
+    score_groups: dict[tuple[int, int, int], list[ShipBuildCombo]] = defaultdict(list)
+    generic_groups: list[_MergeGroup] = []
+    for combo in combos:
+        if is_generic_zero_military_score_combo_id(combo.combo_id):
+            generic_groups.append(
+                _MergeGroup(members=(combo,), representative_index=0, prototype=combo)
+            )
+            continue
+        score_groups[(combo.score_delta_2x, combo.warship_delta, combo.freighter_delta)].append(
+            combo
+        )
+
+    groups: list[_MergeGroup] = list(generic_groups)
+    for members_list in score_groups.values():
+        sorted_members = tuple(sorted(members_list, key=lambda combo: combo.combo_id))
+        prototype, representative_index = _prototype_for_members(sorted_members)
+        groups.append(
+            _MergeGroup(
+                members=sorted_members,
+                representative_index=representative_index,
+                prototype=prototype,
+            )
+        )
+
+    member_group_index: dict[str, int] = {}
+    members_by_merged_id: dict[str, tuple[ShipBuildCombo, ...]] = {}
+    merged: list[ShipBuildCombo] = []
+    for index, group in enumerate(groups):
+        merged.append(group.prototype)
+        members_by_merged_id[group.prototype.combo_id] = group.members
+        for member in group.members:
+            member_group_index[member.combo_id] = index
+    return CatalogMergePlan(
+        groups=tuple(groups),
+        member_group_index=member_group_index,
+        combos_by_id={combo.combo_id: combo for combo in combos},
+        unconstrained=_MergedComboCatalog(
+            combos=tuple(merged),
+            members_by_merged_id=members_by_merged_id,
+        ),
+    )
+
+
 def merge_score_equivalent_combos(
     combos: tuple[ShipBuildCombo, ...],
 ) -> _MergedComboCatalog:
     """Merge score-equivalent combos for CP-SAT feasibility; members kept for extraction."""
-    groups: dict[tuple[int, int, int], list[ShipBuildCombo]] = defaultdict(list)
-    merged: list[ShipBuildCombo] = []
-    members_by_merged_id: dict[str, tuple[ShipBuildCombo, ...]] = {}
-    for combo in combos:
-        if is_generic_zero_military_score_combo_id(combo.combo_id):
-            merged.append(combo)
-            members_by_merged_id[combo.combo_id] = (combo,)
-            continue
-        groups[(combo.score_delta_2x, combo.warship_delta, combo.freighter_delta)].append(combo)
-
-    for members in groups.values():
-        sorted_members = tuple(sorted(members, key=lambda combo: combo.combo_id))
-        if len(sorted_members) == 1:
-            combo = sorted_members[0]
-            merged.append(combo)
-            members_by_merged_id[combo.combo_id] = sorted_members
-            continue
-
-        representative = max(
-            sorted_members,
-            key=lambda combo: (combo.probability_weight, combo.combo_id),
-        )
-        merged_id = (
-            f"combo_equiv_{representative.score_delta_2x}_"
-            f"{representative.warship_delta}_{representative.freighter_delta}"
-        )
-        merged.append(
-            replace(
-                representative,
-                combo_id=merged_id,
-                labels=tuple(label for member in sorted_members for label in member.labels),
-                probability_weight=max(member.probability_weight for member in sorted_members),
-                upper_bound=max(member.upper_bound for member in sorted_members),
-            )
-        )
-        members_by_merged_id[merged_id] = sorted_members
-
-    return _MergedComboCatalog(
-        combos=tuple(merged),
-        members_by_merged_id=members_by_merged_id,
-    )
+    return build_catalog_merge_plan(combos).unconstrained
 
 
 def _freighter_only_zero_military_solution(
@@ -588,6 +743,9 @@ def solve_inference_problem(
     on_solution: Callable[[InferenceSolution], None] | None = None,
     cancel_token: InferenceCancelToken | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
+    tier_solve_cache: _TierSolveModelSource | None = None,
+    fixed_combo_counts: dict[str, int] | None = None,
+    combo_count_neighborhood: int = 0,
 ) -> InferenceResult:
     """Return up to max_solutions ranked feasible explanations for one player turn.
 
@@ -640,8 +798,21 @@ def solve_inference_problem(
             },
         )
 
-    merged_combo_catalog = merge_score_equivalent_combos(problem.ship_build_combos)
-    built_model = _build_model(problem, merged_combo_catalog)
+    prepared_seed_counts: tuple[int, int] | None = None
+    if tier_solve_cache is not None:
+        built_model, seed_applied, seed_skipped = tier_solve_cache.fresh_model(
+            problem,
+            fixed_combo_counts,
+            combo_count_neighborhood,
+            seed_no_good_solutions,
+        )
+        merged_combo_catalog = built_model.merged_combo_catalog
+        search_seeds: Sequence[InferenceSolution] = ()
+        prepared_seed_counts = (seed_applied, seed_skipped)
+    else:
+        merged_combo_catalog = merge_score_equivalent_combos(problem.ship_build_combos)
+        built_model = _build_model(problem, merged_combo_catalog)
+        search_seeds = seed_no_good_solutions
     build_diagnostics = _solver_build_diagnostics(problem, built_model)
     started_at = time.monotonic()
     search = collect_near_best_structural_hits(
@@ -651,7 +822,7 @@ def solve_inference_problem(
         combo_count_vars=built_model.combo_count_vars,
         objective_var=built_model.objective_var,
         merged_combo_catalog=merged_combo_catalog,
-        seed_no_good_solutions=seed_no_good_solutions,
+        seed_no_good_solutions=search_seeds,
         cancel_token=cancel_token,
     )
 
@@ -688,8 +859,12 @@ def solve_inference_problem(
     if search.tier_max_objective is not None:
         diagnostics["tierMaxObjective"] = search.tier_max_objective
     if seed_no_good_solutions:
-        diagnostics["seedNoGoodCount"] = search.seed_no_goods_applied
-        diagnostics["seedNoGoodSkippedCount"] = search.seed_no_goods_skipped
+        if prepared_seed_counts is not None:
+            diagnostics["seedNoGoodCount"] = prepared_seed_counts[0]
+            diagnostics["seedNoGoodSkippedCount"] = prepared_seed_counts[1]
+        else:
+            diagnostics["seedNoGoodCount"] = search.seed_no_goods_applied
+            diagnostics["seedNoGoodSkippedCount"] = search.seed_no_goods_skipped
     if search.hang_fuse_hit:
         diagnostics["hangFuseHit"] = True
     elif search.time_limited:
