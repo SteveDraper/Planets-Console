@@ -234,3 +234,65 @@ def test_top_k_expansion_scores_each_fitting_and_keeps_only_k_solutions(monkeypa
         solution.objective_value == solution_rank_objective(problem, solution)
         for solution in solutions
     )
+
+
+def _emitted_combo_ids(solutions) -> list[tuple[str, ...]]:
+    return [tuple(build.combo_id for build in solution.ship_builds) for solution in solutions]
+
+
+def test_equal_sum_labelings_emit_in_ascending_index_tuple_order() -> None:
+    """Tied sums emit in ascending index-tuple order.
+
+    Class A (score 400) then class B (score 600) are the combo_counts axes.
+    Equal probability weights on A sort by combo id, so that axis is c, a, b
+    and B is y, x, w. The three equal sums are index tuples (0, 2), (1, 0),
+    and (2, 0): (c, w), (a, y), (b, y). A second expansion returns the same
+    order.
+    """
+    class_a = (
+        _combo("b", hull_id=1, score_delta_2x=400, probability_weight=50),
+        _combo("c", hull_id=2, score_delta_2x=400, probability_weight=100),
+        _combo("a", hull_id=3, score_delta_2x=400, probability_weight=50),
+    )
+    class_b = (
+        _combo("w", hull_id=4, score_delta_2x=600, probability_weight=50),
+        _combo("y", hull_id=5, score_delta_2x=600, probability_weight=100),
+        _combo("x", hull_id=6, score_delta_2x=600, probability_weight=80),
+    )
+    problem = InferenceProblem(
+        observation=_observation(),
+        aggregate_actions=(),
+        ship_build_combos=class_a + class_b,
+        max_solutions=5,
+    )
+    merged = merge_score_equivalent_combos(problem.ship_build_combos)
+    combo_counts = dict.fromkeys(merged.members_by_merged_id, 1)
+    expected = [
+        ("c", "y"),
+        ("c", "x"),
+        ("c", "w"),
+        ("a", "y"),
+        ("b", "y"),
+    ]
+
+    def expand_labelings():
+        return _expand_score_equivalent_solutions(
+            problem,
+            {},
+            combo_counts,
+            merged,
+            max_labelings=5,
+        )
+
+    solutions = expand_labelings()
+    repeat = expand_labelings()
+    tied = solutions[2:]
+
+    assert _emitted_combo_ids(solutions) == expected
+    assert _emitted_combo_ids(repeat) == expected
+    assert solutions[0].objective_value > solutions[1].objective_value > tied[0].objective_value
+    assert len({solution.objective_value for solution in tied}) == 1
+    assert all(
+        solution.objective_value == solution_rank_objective(problem, solution)
+        for solution in solutions
+    )

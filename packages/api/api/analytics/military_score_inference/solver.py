@@ -339,8 +339,20 @@ def _ship_build_from_member(
     )
 
 
-# One scored fitting of a merged class: contribution, then the concrete label.
-_RankedFitting = tuple[int, InferenceSolutionShipBuild]
+@dataclass(frozen=True, slots=True)
+class _RankedFitting:
+    """One scored fitting of a merged class."""
+
+    contribution: int
+    ship_build: InferenceSolutionShipBuild
+
+
+@dataclass(frozen=True, slots=True)
+class _RankedLabeling:
+    """One labeling and the sum of its per-ship contributions."""
+
+    contribution: int
+    ship_builds: tuple[InferenceSolutionShipBuild, ...]
 
 
 def _fittings_for_merged_count(
@@ -352,11 +364,12 @@ def _fittings_for_merged_count(
     max_combo_weight: int,
     heuristics: InferenceRankingHeuristics,
 ) -> tuple[_RankedFitting, ...]:
-    """Best-first fittings of one class that can appear in a top-K labeling.
+    """Fittings of one class, contribution descending then combo id ascending.
 
-    A repeated class (count other than 1) keeps its single best fitting. A
-    count of 1 keeps the first ``max_labelings`` fittings: any labeling that
-    uses a later fitting is outside the top K once ties break in this order.
+    A repeated class (count other than 1) keeps its best fitting. A count of
+    1 keeps the first ``max_labelings`` fittings. That prefix is the only one
+    a top-K labeling can use: equal-sum labelings emit in ascending
+    index-tuple order over axes in ``combo_counts`` order.
     """
     members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
     if is_generic_zero_military_score_combo_id(merged_combo_id):
@@ -366,23 +379,32 @@ def _fittings_for_merged_count(
             max_combo_weight=max_combo_weight,
             heuristics=heuristics,
         )
-        return ((coefficient * count, _ship_build_from_member(member, count)),)
-
-    scored: list[tuple[int, ShipBuildCombo]] = []
-    for member in members:
-        coefficient = ship_build_objective_coefficient(
-            member,
-            max_combo_weight=max_combo_weight,
-            heuristics=heuristics,
+        return (
+            _RankedFitting(
+                contribution=coefficient * count,
+                ship_build=_ship_build_from_member(member, count),
+            ),
         )
-        scored.append((coefficient * count, member))
-    scored.sort(key=lambda item: (-item[0], item[1].combo_id))
-    if count != 1:
-        scored = scored[:1]
-    else:
-        scored = scored[:max_labelings]
+
+    fittings = [
+        _RankedFitting(
+            contribution=ship_build_objective_coefficient(
+                member,
+                max_combo_weight=max_combo_weight,
+                heuristics=heuristics,
+            )
+            * count,
+            ship_build=_ship_build_from_member(member, count),
+        )
+        for member in members
+    ]
+    keep_count = 1 if count != 1 else max_labelings
     return tuple(
-        (contribution, _ship_build_from_member(member, count)) for contribution, member in scored
+        heapq.nsmallest(
+            keep_count,
+            fittings,
+            key=lambda fitting: (-fitting.contribution, fitting.ship_build.combo_id),
+        )
     )
 
 
@@ -390,25 +412,33 @@ def _best_label_combinations(
     axes: Sequence[Sequence[_RankedFitting]],
     *,
     max_labelings: int,
-) -> list[tuple[int, tuple[InferenceSolutionShipBuild, ...]]]:
-    """Top ``max_labelings`` labelings by the sum of per-ship contributions.
+) -> list[_RankedLabeling]:
+    """Top ``max_labelings`` labelings by summed per-ship contribution.
 
-    Each axis is sorted best-first. Walk index tuples best-first and stop
-    after ``max_labelings`` sums; the cartesian product is not materialized.
+    Axes are in ``combo_counts`` order, each ordered by contribution
+    descending then combo id ascending. Equal-sum labelings are emitted in
+    ascending index-tuple order. The cartesian product is not materialized.
     """
     if max_labelings <= 0 or not axes:
         return []
     start = tuple(0 for _ in axes)
-    start_score = sum(axis[0][0] for axis in axes)
+    start_score = sum(axis[0].contribution for axis in axes)
+    # Min-heap of (-score, index tuple). Equal scores pop in ascending index order.
     pending: list[tuple[int, tuple[int, ...]]] = [(-start_score, start)]
     seen = {start}
-    chosen: list[tuple[int, tuple[InferenceSolutionShipBuild, ...]]] = []
-    while pending and len(chosen) < max_labelings:
+    labelings: list[_RankedLabeling] = []
+    while pending and len(labelings) < max_labelings:
         negative_score, indexes = heapq.heappop(pending)
-        builds = tuple(
-            axes[axis_index][member_index][1] for axis_index, member_index in enumerate(indexes)
+        parent_score = -negative_score
+        labelings.append(
+            _RankedLabeling(
+                contribution=parent_score,
+                ship_builds=tuple(
+                    axes[axis_index][member_index].ship_build
+                    for axis_index, member_index in enumerate(indexes)
+                ),
+            )
         )
-        chosen.append((-negative_score, builds))
         for axis_index, axis in enumerate(axes):
             next_member = indexes[axis_index] + 1
             if next_member >= len(axis):
@@ -417,9 +447,13 @@ def _best_label_combinations(
             if neighbor in seen:
                 continue
             seen.add(neighbor)
-            neighbor_score = sum(axes[index][neighbor[index]][0] for index in range(len(axes)))
+            neighbor_score = (
+                parent_score
+                - axis[indexes[axis_index]].contribution
+                + axis[next_member].contribution
+            )
             heapq.heappush(pending, (-neighbor_score, neighbor))
-    return chosen
+    return labelings
 
 
 def _expand_score_equivalent_solutions(
@@ -471,15 +505,15 @@ def _expand_score_equivalent_solutions(
             )
         ]
     solutions: list[InferenceSolution] = []
-    for ship_contribution, ship_builds in _best_label_combinations(
+    for labeling in _best_label_combinations(
         ship_build_axes,
         max_labelings=max_labelings,
     ):
         solutions.append(
             InferenceSolution(
-                objective_value=action_constant + ship_contribution,
+                objective_value=action_constant + labeling.contribution,
                 actions=tuple(solution_actions),
-                ship_builds=ship_builds,
+                ship_builds=labeling.ship_builds,
             )
         )
     return solutions
