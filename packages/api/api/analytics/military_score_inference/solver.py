@@ -746,6 +746,8 @@ def solve_inference_problem(
     tier_solve_cache: _TierSolveModelSource | None = None,
     fixed_combo_counts: dict[str, int] | None = None,
     combo_count_neighborhood: int = 0,
+    structural_hit_limit: int | None = None,
+    successive_structural_search: bool = False,
 ) -> InferenceResult:
     """Return up to max_solutions ranked feasible explanations for one player turn.
 
@@ -824,6 +826,8 @@ def solve_inference_problem(
         merged_combo_catalog=merged_combo_catalog,
         seed_no_good_solutions=search_seeds,
         cancel_token=cancel_token,
+        structural_hit_limit=structural_hit_limit,
+        successive_search=successive_structural_search,
     )
 
     # Hang fuse: drop solutions before admission. Charge path raises after this.

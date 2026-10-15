@@ -126,6 +126,8 @@ def _solve_catalog(
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
     tier_solve_cache: TierSolveCache | None = None,
+    structural_hit_limit: int | None = None,
+    successive_structural_search: bool = False,
 ) -> tuple[InferenceResult, InferenceProblem]:
     # The tier cache applies pins on the shared merge plan. Copying every combo
     # here would rebuild that catalog on each neighborhood pass.
@@ -148,6 +150,8 @@ def _solve_catalog(
         tier_solve_cache=tier_solve_cache,
         fixed_combo_counts=fixed_combo_counts if tier_solve_cache is not None else None,
         combo_count_neighborhood=combo_count_neighborhood if tier_solve_cache is not None else 0,
+        structural_hit_limit=structural_hit_limit,
+        successive_structural_search=successive_structural_search,
     )
     _charge_effort_budget(budget_run, result)
     return result, problem
@@ -191,15 +195,20 @@ def _solve_seed_progression(
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
     tier_solve_cache: TierSolveCache | None = None,
+    successive_structural_search: bool = False,
 ) -> tuple[InferenceResult | None, InferenceProblem | None]:
     """Run neighborhood then unfixed catalog solves under one shared clip.
 
     Each sub-solve samples ``next_solve_clip()`` at call time so successive
-    passes cannot each claim the full tier allowance independently.
+    passes cannot each claim the full tier allowance independently. A seed pass
+    stops at its first structural hit; the tier's own catalog search collects
+    the near-best set. ``successive_structural_search`` restores the full
+    per-hit walk for comparison tests.
     """
     fixed_counts = _combo_counts_from_solution(seed)
     if not fixed_counts:
         return None, None
+    seed_hit_limit = None if successive_structural_search else 1
 
     def _abort() -> bool:
         if should_stop is not None and should_stop():
@@ -239,6 +248,8 @@ def _solve_seed_progression(
             seed_no_good_solutions=seed_no_good_solutions,
             budget_run=budget_run,
             tier_solve_cache=tier_solve_cache,
+            structural_hit_limit=seed_hit_limit,
+            successive_structural_search=successive_structural_search,
         )
         if result.status == STATUS_STOPPED:
             return result, problem
@@ -260,6 +271,8 @@ def _solve_seed_progression(
         budget_run=budget_run,
         seed_no_good_solutions=seed_no_good_solutions,
         tier_solve_cache=tier_solve_cache,
+        structural_hit_limit=seed_hit_limit,
+        successive_structural_search=successive_structural_search,
     )
     if result.solutions or result.status == STATUS_STOPPED:
         return result, problem

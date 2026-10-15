@@ -1,6 +1,6 @@
 """Near-best structural search: objective banding and held seed no-goods.
 
-Owns the CP-SAT iteration that collects distinct merged signatures within the
+Owns the CP-SAT search that collects distinct merged signatures within the
 near-best objective band, plus no-good cuts for prior-tier held solutions so
 search discovers new structures instead of rediscovering held ones.
 """
@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceSolution,
     ShipBuildCombo,
+    SolveClip,
     effective_solve_clip,
 )
 from api.compute.sat_gil_overlap import invoke_cp_sat_solve
@@ -238,6 +239,209 @@ class _StopSearchOnCancel(cp_model.CpSolverSolutionCallback):
             self.StopSearch()
 
 
+def _assignment_key(
+    action_counts: dict[str, int], combo_counts: dict[str, int]
+) -> tuple[tuple[str, int], ...]:
+    return tuple(sorted(action_counts.items()) + sorted(combo_counts.items()))
+
+
+class _ObjectiveBandCollector(cp_model.CpSolverSolutionCallback):
+    """Keep the best ``hit_cap`` assignments seen while enumerating the band."""
+
+    def __init__(
+        self,
+        problem: InferenceProblem,
+        merged_combo_catalog: SupportsMergedComboCatalog,
+        action_count_vars: dict[str, cp_model.IntVar],
+        combo_count_vars: dict[str, cp_model.IntVar],
+        objective_var: cp_model.IntVar,
+        *,
+        first_objective: int,
+        first_hit: tuple[dict[str, int], dict[str, int]],
+        hit_cap: int,
+        cancel_token: InferenceCancelToken | None,
+    ) -> None:
+        super().__init__()
+        self._problem = problem
+        self._merged_combo_catalog = merged_combo_catalog
+        self._action_count_vars = action_count_vars
+        self._combo_count_vars = combo_count_vars
+        self._objective_var = objective_var
+        self._hit_cap = hit_cap
+        self._cancel_token = cancel_token
+        self.cancelled = False
+        self.found = 1
+        self._seen = {_assignment_key(first_hit[0], first_hit[1])}
+        self.best: list[tuple[int, dict[str, int], dict[str, int]]] = [
+            (first_objective, first_hit[0], first_hit[1])
+        ]
+
+    def on_solution_callback(self) -> None:
+        if self._cancel_token is not None and self._cancel_token.is_cancelled():
+            self.cancelled = True
+            self.StopSearch()
+            return
+        action_counts = {
+            action.id: int(self.value(self._action_count_vars[action.id]))
+            for action in self._problem.aggregate_actions
+        }
+        combo_counts = {
+            combo.combo_id: int(self.value(self._combo_count_vars[combo.combo_id]))
+            for combo in self._merged_combo_catalog.combos
+        }
+        key = _assignment_key(action_counts, combo_counts)
+        if key in self._seen:
+            return
+        self._seen.add(key)
+        self.found += 1
+        objective = int(self.value(self._objective_var))
+        if len(self.best) >= self._hit_cap and objective <= self.best[-1][0]:
+            return
+        self.best.append((objective, action_counts, combo_counts))
+        self.best.sort(key=lambda item: item[0], reverse=True)
+        if len(self.best) > self._hit_cap:
+            self.best.pop()
+
+
+def _solver_effort(solver: cp_model.CpSolver) -> float:
+    try:
+        return max(0.0, float(solver.deterministic_time))
+    except (RuntimeError, TypeError, ValueError):
+        return 0.0
+
+
+def _enumerate_objective_band(
+    problem: InferenceProblem,
+    *,
+    model: cp_model.CpModel,
+    action_count_vars: dict[str, cp_model.IntVar],
+    combo_count_vars: dict[str, cp_model.IntVar],
+    objective_var: cp_model.IntVar,
+    merged_combo_catalog: SupportsMergedComboCatalog,
+    base_clip: SolveClip,
+    started_at: float,
+    effort_spent: float,
+    solve_wall_seconds: float,
+    first_objective: int,
+    first_hit: tuple[dict[str, int], dict[str, int]],
+    hit_cap: int,
+    cancel_token: InferenceCancelToken | None,
+    last_solver_status: int,
+) -> tuple[
+    list[tuple[dict[str, int], dict[str, int]]],
+    str,
+    bool,
+    bool,
+    int,
+    float,
+    float,
+    dict[str, tuple[int, ...]],
+]:
+    """Enumerate ``[Z*-T, Z*]`` once and keep the best ``hit_cap`` signatures.
+
+    The caller has already maximized once and posted the band plus a no-good for
+    that first assignment. Clearing the objective makes the follow-up a
+    satisfiability enumeration of the remaining band.
+    """
+    advance = base_clip.next_solve(
+        effort_spent=effort_spent,
+        elapsed_seconds=time.monotonic() - started_at,
+        solve_wall_seconds=solve_wall_seconds,
+    )
+    first_only = [first_hit]
+    first_bins = _ranking_bin_indicators_by_action_id(problem, first_hit[0])
+    if advance.clip is None or advance.hang_fuse:
+        return (
+            [] if advance.hang_fuse else first_only,
+            "hang_fuse" if advance.hang_fuse else "time_budget",
+            False if advance.hang_fuse else True,
+            bool(advance.hang_fuse),
+            last_solver_status,
+            effort_spent,
+            solve_wall_seconds,
+            {} if advance.hang_fuse else first_bins,
+        )
+
+    model.clear_objective()
+    collector = _ObjectiveBandCollector(
+        problem,
+        merged_combo_catalog,
+        action_count_vars,
+        combo_count_vars,
+        objective_var,
+        first_objective=first_objective,
+        first_hit=first_hit,
+        hit_cap=hit_cap,
+        cancel_token=cancel_token,
+    )
+    solver = cp_model.CpSolver()
+    advance.clip.apply_to_solver(solver)
+    solver.parameters.num_workers = configured_sat_search_workers()
+    solver.parameters.enumerate_all_solutions = True
+    wall_before = time.monotonic()
+    status = invoke_cp_sat_solve(solver, model, collector)
+    wall_delta = time.monotonic() - wall_before
+    effort_spent += _solver_effort(solver)
+    solve_wall_seconds += wall_delta
+    hits = [(actions, combos) for _objective, actions, combos in collector.best]
+    best_bins = _ranking_bin_indicators_by_action_id(problem, hits[0][0]) if hits else {}
+
+    if collector.cancelled or (cancel_token is not None and cancel_token.is_cancelled()):
+        return (
+            hits,
+            "cancelled",
+            False,
+            False,
+            status,
+            effort_spent,
+            solve_wall_seconds,
+            best_bins,
+        )
+
+    decision = base_clip.after_solve(
+        solver_status=status,
+        effort_spent=effort_spent,
+        solve_wall_seconds=solve_wall_seconds,
+        elapsed_seconds=time.monotonic() - started_at,
+        has_structural_hits=bool(hits),
+    )
+    if decision.hang_fuse:
+        return (
+            [],
+            "hang_fuse",
+            False,
+            True,
+            status,
+            effort_spent,
+            solve_wall_seconds,
+            {},
+        )
+    # OPTIMAL/INFEASIBLE means the band was fully enumerated. A clip that also
+    # happens to be numerically spent does not discard that completed set.
+    if status not in (cp_model.OPTIMAL, cp_model.INFEASIBLE):
+        return (
+            hits,
+            "time_budget",
+            True,
+            False,
+            status,
+            effort_spent,
+            solve_wall_seconds,
+            best_bins,
+        )
+    stopped = "max_solutions" if collector.found > hit_cap else "near_best_band_exhausted"
+    return (
+        hits,
+        stopped,
+        False,
+        False,
+        status,
+        effort_spent,
+        solve_wall_seconds,
+        best_bins,
+    )
+
+
 def collect_near_best_structural_hits(
     problem: InferenceProblem,
     *,
@@ -248,12 +452,16 @@ def collect_near_best_structural_hits(
     merged_combo_catalog: SupportsMergedComboCatalog,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     cancel_token: InferenceCancelToken | None = None,
+    structural_hit_limit: int | None = None,
+    successive_search: bool = False,
 ) -> NearBestStructuralSearchOutcome:
     """Collect distinct merged signatures within the near-best objective band.
 
-    Seeds prior-tier held solutions as no-goods, then iteratively maximizes under
-    no-good cuts and optional ``[Z*-T, current_max]`` banding until the budget,
-    cancel, infeasibility, or band exhaustion stops search.
+    One maximization learns the best ranking ``Z*``. When more than one hit is
+    wanted, the rest of the band ``[Z*-T, Z*]`` is enumerated in that same model
+    instead of re-solving once per hit. ``structural_hit_limit`` stops after that
+    many hits (seed passes pass 1). ``successive_search`` keeps the per-hit
+    re-solve walk so tests can compare it with the band enumeration.
     """
     if seed_no_good_solutions:
         seed_no_goods_applied, seed_no_goods_skipped = seed_no_good_cuts_for_held_solutions(
@@ -284,8 +492,18 @@ def collect_near_best_structural_hits(
     tier_max_objective: int | None = None
     max_objective: int | None = None
     near_best_band_applied = False
+    # Seed passes ask for one hit. A completed free search enumerates the band
+    # after that first maximization instead of restarting once per hit.
+    enumerate_band = (
+        structural_hit_limit is None and not successive_search and problem.max_solutions > 1
+    )
+    if structural_hit_limit is None:
+        search_cap = 1 if enumerate_band else problem.max_solutions
+    else:
+        search_cap = min(problem.max_solutions, structural_hit_limit)
+    final_hit_cap = problem.max_solutions if enumerate_band else search_cap
 
-    while len(structural_hits) < problem.max_solutions:
+    while len(structural_hits) < search_cap:
         if cancel_token is not None and cancel_token.is_cancelled():
             stopped_reason = "cancelled"
             break
@@ -376,9 +594,44 @@ def collect_near_best_structural_hits(
             len(structural_hits),
         )
 
-        if len(structural_hits) >= problem.max_solutions:
+        if len(structural_hits) >= search_cap:
             stopped_reason = "max_solutions"
             break
+
+    if (
+        enumerate_band
+        and structural_hits
+        and tier_max_objective is not None
+        and not hang_fuse_hit
+        and stopped_reason != "cancelled"
+        and not time_limited
+    ):
+        (
+            structural_hits,
+            stopped_reason,
+            time_limited,
+            hang_fuse_hit,
+            last_solver_status,
+            effort_spent,
+            solve_wall_seconds,
+            top_solution_bucket_counts,
+        ) = _enumerate_objective_band(
+            problem,
+            model=model,
+            action_count_vars=action_count_vars,
+            combo_count_vars=combo_count_vars,
+            objective_var=objective_var,
+            merged_combo_catalog=merged_combo_catalog,
+            base_clip=base_clip,
+            started_at=started_at,
+            effort_spent=effort_spent,
+            solve_wall_seconds=solve_wall_seconds,
+            first_objective=tier_max_objective,
+            first_hit=structural_hits[0],
+            hit_cap=final_hit_cap,
+            cancel_token=cancel_token,
+            last_solver_status=last_solver_status,
+        )
 
     if hang_fuse_hit:
         # Fuse fails closed: earlier hits in this search must not be admitted.

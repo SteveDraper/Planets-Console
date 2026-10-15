@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections import Counter
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,6 +79,11 @@ IDLE_MINIMUM_WALL_SECONDS = 5.0
 # Early-sweep outlier from local/diagnostics_early.json. Loaded wall is the
 # completed step while 8 workers were busy.
 TURN3_PLAYER10_LOADED_WALL_SECONDS = 31.59
+
+# Late-window outlier from local/diagnostics_late2.json. The row stopped on
+# full_components. Loaded walls are the completed steps while 8 workers were busy.
+TURN10_PLAYER51_ADMIT_LOADED_WALL_SECONDS = 30.81
+TURN10_PLAYER51_THROUGH_TIER_INDEX = 6
 
 _active_tier: ContextVar[str] = ContextVar("outlier_repro_tier", default="")
 _active_phase: ContextVar[str] = ContextVar("outlier_repro_phase", default="other")
@@ -629,12 +635,17 @@ def format_outlier_report(
         span_counts[key] = span_counts.get(key, 0) + 1
     for (tier, name), wall in sorted(span_totals.items(), key=lambda item: item[1], reverse=True):
         lines.append(f"  {tier:32} {name:10} n={span_counts[(tier, name)]:3d} wall={wall:8.2f}s")
-    tier4_solves = [sample for sample in report.solves if sample.tier.startswith("4:")]
-    if tier4_solves:
-        tier4_wall = sum(sample.wall_seconds for sample in tier4_solves)
+    for prefix in ("4:", "5:", "6:"):
+        tier_solves = [sample for sample in report.solves if sample.tier.startswith(prefix)]
+        if not tier_solves:
+            continue
+        tier_wall = sum(sample.wall_seconds for sample in tier_solves)
+        det = sum(sample.deterministic_time for sample in tier_solves)
+        statuses = Counter(sample.status for sample in tier_solves)
+        status_text = " ".join(f"{status}={count}" for status, count in statuses.most_common())
         lines.append(
-            f"tier4 solves: n={len(tier4_solves)} wall={tier4_wall:.2f}s "
-            f"mean={tier4_wall / len(tier4_solves):.2f}s"
+            f"tier {prefix[0]} solves: n={len(tier_solves)} wall={tier_wall:.2f}s "
+            f"mean={tier_wall / len(tier_solves):.2f}s det_sum={det:.3f} {status_text}"
         )
     lines.append("slowest solves:")
     for sample in solves[:12]:
@@ -728,3 +739,47 @@ def test_turn3_player10_admit_ship_torpedoes_reproduces_early_outlier() -> None:
     assert outlier.structural_hits == 5, rendered
     tier4_solves = [sample for sample in report.solves if sample.tier.startswith("4:")]
     assert len(tier4_solves) >= 5, rendered
+
+
+def test_turn10_player51_solve_reproduces_late_outlier() -> None:
+    """Idle reproduction of the turn 10 player 51 ladder through full_components.
+
+    Loaded walls while 8 workers were busy: admit_ship 30.8 s, planet defense
+    12.0 s, full_components 13.0 s. The row's completed node stopped on tier 6.
+    """
+    if os.environ.get("SCORES_OUTLIER_REPRO") != "1":
+        pytest.skip("set SCORES_OUTLIER_REPRO=1 to reproduce the local late-window row")
+    storage_root = Path(os.environ.get("SCORES_OUTLIER_STORAGE", DEFAULT_STORAGE_ROOT))
+    if not storage_root.is_dir():
+        pytest.skip(f"storage root not found: {storage_root}")
+
+    from tests.inference_corpus.storage_loader import configure_file_storage
+
+    previous_config = get_config()
+    reset_tier_row_run_registry_for_tests()
+    try:
+        storage = configure_file_storage(storage_root=storage_root)
+        report = reproduce_admit_ship_outlier(
+            storage,
+            turn_number=10,
+            player_id=51,
+            through_tier_index=TURN10_PLAYER51_THROUGH_TIER_INDEX,
+        )
+    finally:
+        reset_tier_row_run_registry_for_tests()
+        set_config(previous_config)
+        clear_backend_cache()
+
+    rendered = format_outlier_report(
+        report,
+        diagnostic_loaded_wall_seconds=TURN10_PLAYER51_ADMIT_LOADED_WALL_SECONDS,
+    )
+    print(rendered)
+    admit = report.tier(OUTLIER_TIER_INDEX)
+    assert admit is not None, f"ladder stopped before tier 4\n{rendered}"
+    assert admit.tier_id == OUTLIER_TIER_ID, rendered
+    assert admit.wall_seconds >= 1.0, rendered
+    assert admit.combo_count >= 10_000, rendered
+    full_components = report.tier(TURN10_PLAYER51_THROUGH_TIER_INDEX)
+    assert full_components is not None, f"ladder stopped before tier 6\n{rendered}"
+    assert full_components.tier_id == "full_components", rendered

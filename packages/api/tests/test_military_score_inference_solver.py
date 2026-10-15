@@ -388,7 +388,8 @@ def test_top_k_surfaces_time_limited_status(monkeypatch):
     solve_calls = {"count": 0}
     original_solve = inference_solver.cp_model.CpSolver.solve
 
-    def solve_once_then_time_out(self, model):
+    def solve_once_then_time_out(self, model, *args, **kwargs):
+        del args, kwargs
         solve_calls["count"] += 1
         if solve_calls["count"] == 1:
             return original_solve(self, model)
@@ -443,7 +444,8 @@ def test_effort_clip_unknown_with_hits_is_time_limited_when_spent_short_of_limit
     solve_calls = {"count": 0}
     original_solve = inference_solver.cp_model.CpSolver.solve
 
-    def solve_once_then_unknown(self, model):
+    def solve_once_then_unknown(self, model, *args, **kwargs):
+        del args, kwargs
         solve_calls["count"] += 1
         if solve_calls["count"] == 1:
             return original_solve(self, model)
@@ -513,7 +515,8 @@ def test_repeated_solves_each_spend_their_own_deterministic_time(monkeypatch):
             max_solutions=3,
             time_limit_seconds=1.0,
             solve_clip=EffortSolveClip(max_deterministic_time=100.0),
-        )
+        ),
+        successive_structural_search=True,
     )
 
     one_solve = calls["one_solve"]
