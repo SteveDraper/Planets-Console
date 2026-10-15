@@ -7,11 +7,14 @@ from api.analytics.military_score_inference.actions import (
     build_inference_problem,
 )
 from api.analytics.military_score_inference.models import (
+    CandidateAction,
     InferenceObservation,
     InferenceProblem,
     ShipBuildCombo,
+    candidate_action_has_military_interval,
 )
 from api.analytics.military_score_inference.public_scoreboard_pairing import (
+    PublicScoreboardRow,
     public_scoreboard_row_from_observation,
     transfer_budget_for_row,
 )
@@ -245,6 +248,74 @@ def test_group_departure_capacity_allows_two_records_in_same_group(
             f"{GIFT_ACTION_PREFIX}warship:to:3:point:{first_military}",
         }
         assert sum(action.count for action in solution.actions) == 2
+
+
+def _pp_gap_excess_out_peer(player_id: int, military_delta_2x: int) -> PublicScoreboardRow:
+    """Idle-dock peer with one unbuilt slot and a flat ship count, so excess_out is 1."""
+    return PublicScoreboardRow(
+        player_id=player_id,
+        warship_delta=0,
+        freighter_delta=0,
+        military_delta_2x=military_delta_2x,
+        starbases=1,
+        priority_point_delta=0,
+    )
+
+
+def test_pp_gap_pinned_freighter_cannot_explain_the_military_rise(
+    sample_turn, synthetic_catalog_context
+):
+    """Freighter +1 and military +1704, with peers whose military rose and fell.
+
+    Priority points say nothing was built, so the extra freighter is an
+    acquisition. That action is a point 0. A handful of torpedo loads cannot
+    close the military score by borrowing the rise from the freighter.
+    """
+    military_delta_2x = 1704
+    observation = replace(
+        _observation(
+            military_delta_2x=military_delta_2x,
+            warship_delta=0,
+            freighter_delta=1,
+            starbases_owned=3,
+            military_partition_slack_2x=1,
+        ),
+        player_id=9,
+        priority_point_delta=6,
+    )
+    fragment = build_ship_transfer_catalog_fragment(
+        observation,
+        peer_rows=(
+            _pp_gap_excess_out_peer(14, 12872),
+            _pp_gap_excess_out_peer(21, -1562),
+        ),
+        prior_fleet_records=(),
+        settings=sample_turn.settings,
+        **_transfer_catalog_kwargs(synthetic_catalog_context),
+    )
+    acquired = [
+        action for action in fragment.actions if action.id.startswith(ACQUIRED_SHIP_ACTION_PREFIX)
+    ]
+    assert {action.counterparty_player_id for action in acquired} == {14, 21}
+    assert all(action.freighter_delta == 1 and action.warship_delta == 0 for action in acquired)
+    assert all(action.score_delta_2x == 0 for action in acquired)
+    assert all(not candidate_action_has_military_interval(action) for action in acquired)
+    torpedo_load = CandidateAction(
+        id="ship_torps_loaded_6",
+        label="Ship torpedoes loaded (Mark 4 Photon)",
+        score_delta_2x=56,
+        upper_bound=7,
+    )
+    result = solve_inference_problem(
+        InferenceProblem(
+            observation=observation,
+            aggregate_actions=(*fragment.actions, torpedo_load),
+            max_solutions=5,
+            time_limit_seconds=2.0,
+        )
+    )
+    assert result.status == STATUS_NO_EXACT_SOLUTION
+    assert result.solutions == ()
 
 
 def test_catalog_solver_two_ship_acquired_is_exact(synthetic_catalog_context):

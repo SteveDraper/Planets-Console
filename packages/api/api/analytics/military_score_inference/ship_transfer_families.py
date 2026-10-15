@@ -518,17 +518,23 @@ def _incoming_military_envelope(match: PairingMatch, this_military_delta_2x: int
 
 
 def _incoming_military_bounds(incoming_military_2x: int) -> tuple[int, int | None, int | None]:
-    """Per-unit military for one acquired ship. Returns point, min, max.
+    """Per-unit military for one acquired warship. Returns point, min, max.
 
-    The counterparty's drop is a total over all transferred ships, so each unit
-    carries any share of it: an envelope [0, total] admits the true total for
-    any incoming count >= 1. A non-positive total stays a point. This is the
-    catalog search domain; emitted solution arithmetic tightens it against the
-    other elements of that solution.
+    The counterparty's drop, or this row's own rise on a priority-point gap, is
+    a total over the transferred warships, so each unit carries any share of it:
+    an envelope [0, total] admits the true total for any incoming count >= 1.
+    A non-positive total stays a point. This is the catalog search domain;
+    emitted solution arithmetic tightens it against the other elements of that
+    solution. A freighter scores no military and does not use this envelope.
     """
     if incoming_military_2x <= 0:
         return incoming_military_2x, None, None
     return 0, 0, incoming_military_2x
+
+
+def _freighter_acquisition_military() -> tuple[int, None, None]:
+    """An acquired freighter contributes no military score."""
+    return 0, None, None
 
 
 def _gift_class_counts(match: PairingMatch) -> tuple[tuple[FleetShipClass, int], ...]:
@@ -576,22 +582,32 @@ def _acquired_actions(
         if match.family != "acquired":
             continue
         incoming_military = _incoming_military_envelope(match, this_military_delta_2x)
-        point, min_2x, max_2x = _incoming_military_bounds(incoming_military)
+        warship_point, warship_min, warship_max = _incoming_military_bounds(incoming_military)
+        freighter_point, freighter_min, freighter_max = _freighter_acquisition_military()
         if match.is_unpinned_class_choice():
             group = f"acquired:{match.counterparty_player_id}"
-            unpinned_classes: tuple[FleetShipClass, ...] = ("warship", "freighter")
-            for ship_class in unpinned_classes:
-                actions.append(
-                    _acquired_class_action(
-                        match,
-                        ship_class=ship_class,
-                        upper_bound=match.transfer_count,
-                        point=point,
-                        min_2x=min_2x,
-                        max_2x=max_2x,
-                        exclusive_class_group=group,
-                    )
+            actions.append(
+                _acquired_class_action(
+                    match,
+                    ship_class="warship",
+                    upper_bound=match.transfer_count,
+                    point=warship_point,
+                    min_2x=warship_min,
+                    max_2x=warship_max,
+                    exclusive_class_group=group,
                 )
+            )
+            actions.append(
+                _acquired_class_action(
+                    match,
+                    ship_class="freighter",
+                    upper_bound=match.transfer_count,
+                    point=freighter_point,
+                    min_2x=freighter_min,
+                    max_2x=freighter_max,
+                    exclusive_class_group=group,
+                )
+            )
             continue
         if match.warship_delta > 0:
             actions.append(
@@ -599,17 +615,13 @@ def _acquired_actions(
                     match,
                     ship_class="warship",
                     upper_bound=match.warship_delta,
-                    point=point,
-                    min_2x=min_2x,
-                    max_2x=max_2x,
+                    point=warship_point,
+                    min_2x=warship_min,
+                    max_2x=warship_max,
                     exclusive_class_group=None,
                 )
             )
         if match.freighter_delta > 0:
-            freighter_military = 0 if match.warship_delta > 0 else incoming_military
-            freighter_point, freighter_min, freighter_max = _incoming_military_bounds(
-                freighter_military
-            )
             actions.append(
                 _acquired_class_action(
                     match,
