@@ -3,12 +3,14 @@
 Fingerprint from the 2026-10-15 game 686674 / perspective 21 / shell turn 16
 compute snapshot: ``scores@g686674@p21@t10@pl46`` ``tier_solve`` step 4
 ``admit_ship_torpedoes`` took 95.96 s on the thread pool while 8 workers were
-busy. An idle run of that same step is shorter. It still spends the tier's
-1.0 deterministic-time budget on repeated ``Solve()`` calls over a ~200k combo
-catalog. Catalog score indexes are built once per catalog.
+busy. An idle run of that same step is shorter. Partial slot fills admit an
+empty or full launcher bank, and beam counts of empty, one, one short of full,
+and full. That catalog is about 38k combos, and the tier fills its solution
+cap before the 1.0 deterministic-time budget. Catalog score indexes are built
+once per catalog.
 
 Opt-in. The case reads the local file store and runs several CP-SAT tiers,
-including one that is expected to take on the order of a minute. Default
+including one that takes around ten seconds. Default
 ``make test`` skips it.
 
     SCORES_OUTLIER_REPRO=1 uv run pytest \\
@@ -68,10 +70,11 @@ TURN = 10
 PLAYER_ID = 46
 OUTLIER_TIER_INDEX = 4
 OUTLIER_TIER_ID = "admit_ship_torpedoes"
-# Orchestrator wall while 8 workers were busy. An idle run of the same step
-# is shorter; the assertion checks that idle slow-class floor.
+# Orchestrator wall while 8 workers were busy.
 DIAGNOSTIC_LOADED_WALL_SECONDS = 95.96
-IDLE_MINIMUM_WALL_SECONDS = 15.0
+# Idle floor after partial slot counts are limited. The tier fills its
+# solution cap before the 1.0 deterministic-time budget.
+IDLE_MINIMUM_WALL_SECONDS = 5.0
 
 _active_tier: ContextVar[str] = ContextVar("outlier_repro_tier", default="")
 _active_phase: ContextVar[str] = ContextVar("outlier_repro_phase", default="other")
@@ -608,9 +611,9 @@ def test_turn10_player46_admit_ship_torpedoes_reproduces_diagnostic_outlier() ->
     outlier = report.tier(OUTLIER_TIER_INDEX)
     assert outlier is not None, f"ladder stopped before tier 4\n{rendered}"
     assert outlier.tier_id == OUTLIER_TIER_ID, rendered
-    assert outlier.stopped_reason == "time_budget", rendered
-    assert outlier.deterministic_time >= 0.9, rendered
-    assert outlier.combo_count >= 100_000, rendered
+    assert outlier.stopped_reason == "max_solutions", rendered
+    assert outlier.deterministic_time < 0.9, rendered
+    assert 30_000 <= outlier.combo_count <= 50_000, rendered
     assert outlier.wall_seconds >= IDLE_MINIMUM_WALL_SECONDS, rendered
     tier4_solves = [sample for sample in report.solves if sample.tier.startswith("4:")]
     assert len(tier4_solves) >= 10, rendered

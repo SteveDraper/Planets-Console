@@ -68,18 +68,27 @@ def ship_build_combo_label(
 
 
 def beam_count_options_for_slot_mode(hull: Hull, slot_mode: SlotCountMode) -> tuple[int, ...]:
+    """Beam counts admitted for ``slot_mode``.
+
+    ``none`` is an empty bank or a full bank. ``partial`` also admits one beam
+    and a bank one short of full.
+    """
     if hull.beams == 0:
         return (0,)
     if slot_mode == "partial":
-        return tuple(range(0, hull.beams + 1))
+        return tuple(sorted({0, 1, hull.beams - 1, hull.beams}))
     return (0, hull.beams)
 
 
 def launcher_count_options_for_slot_mode(hull: Hull, slot_mode: SlotCountMode) -> tuple[int, ...]:
+    """Launcher counts admitted for ``slot_mode``.
+
+    Both modes admit an empty bank or a full bank.
+    """
     if hull.launchers == 0:
         return (0,)
     if slot_mode == "partial":
-        return tuple(range(0, hull.launchers + 1))
+        return (0, hull.launchers)
     return (0, hull.launchers)
 
 
