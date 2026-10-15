@@ -31,6 +31,7 @@ from api.analytics.military_score_inference.policy_ladder_tier_step import (
 )
 from api.analytics.military_score_inference.ship_first_overshoot import (
     SHIP_FIRST_PREFIX_STOP_REASON,
+    catalog_score_lookups,
     leftover_military_2x,
     resolve_ship_first_overshoot_plan,
 )
@@ -132,10 +133,11 @@ def finalize_policy_ladder_result(
     if leftover_0 and not skip_leftover_0:
         merged_solutions = leftover_0
     if plan is not None and plan.is_in_regime:
+        score_lookups = catalog_score_lookups(catalog)
         merged_solutions.sort(
             key=lambda solution: (
                 -solution.objective_value,
-                leftover_military_2x(solution, observation, catalog),
+                leftover_military_2x(solution, observation, score_lookups),
             )
         )
     else:

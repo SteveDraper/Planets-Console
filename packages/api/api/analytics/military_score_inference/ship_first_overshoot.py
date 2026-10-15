@@ -6,6 +6,7 @@ Runtime plan for prefix steps through ``admit_ship_torpedoes``: military window
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -15,8 +16,10 @@ from api.analytics.military_score_inference.military_score_window import (
     OvershootMilitaryScoreWindow,
 )
 from api.analytics.military_score_inference.models import (
+    CandidateAction,
     InferenceObservation,
     InferenceSolution,
+    ShipBuildCombo,
 )
 from api.analytics.military_score_inference.prior_mining.mine_stock import owned_active_minefields
 from api.analytics.military_score_inference.score_arithmetic import (
@@ -102,17 +105,36 @@ def resolve_ship_first_overshoot_plan(
     )
 
 
+@dataclass(frozen=True)
+class CatalogScoreLookups:
+    """Action and ship-combo indexes for one catalog.
+
+    Callers build this once per catalog and pass it into leftover scoring.
+    """
+
+    actions_by_id: Mapping[str, CandidateAction]
+    combos_by_id: Mapping[str, ShipBuildCombo]
+
+
+def catalog_score_lookups(catalog: ActionCatalog) -> CatalogScoreLookups:
+    """Index ``catalog`` for military-score lookups."""
+    return CatalogScoreLookups(
+        actions_by_id={action.id: action for action in catalog.aggregate_actions},
+        combos_by_id={combo.combo_id: combo for combo in catalog.ship_build_combos},
+    )
+
+
 def leftover_military_2x(
     solution: InferenceSolution,
     observation: InferenceObservation,
-    catalog: ActionCatalog,
+    lookups: CatalogScoreLookups,
 ) -> int:
     """Raw overshoot ``explained - observed`` in solver 2x (post-sort leftover)."""
     return (
         catalog_explained_military_delta_2x(
             solution,
-            {action.id: action for action in catalog.aggregate_actions},
-            {combo.combo_id: combo for combo in catalog.ship_build_combos},
+            lookups.actions_by_id,
+            lookups.combos_by_id,
         )
         - observation.military_delta_2x
     )

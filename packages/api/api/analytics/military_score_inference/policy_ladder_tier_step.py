@@ -77,7 +77,9 @@ from api.analytics.military_score_inference.ship_first_family import (
     tag_ship_first_near_solution,
 )
 from api.analytics.military_score_inference.ship_first_overshoot import (
+    CatalogScoreLookups,
     ShipFirstOvershootPlan,
+    catalog_score_lookups,
     leftover_military_2x,
 )
 from api.analytics.military_score_inference.solver import (
@@ -95,12 +97,12 @@ def _combo_counts_from_solution(solution: InferenceSolution) -> dict[str, int]:
 
 def _explained_military_score_2x(
     solution: InferenceSolution,
-    catalog: ActionCatalog,
+    lookups: CatalogScoreLookups,
 ) -> int:
     return catalog_explained_military_delta_2x(
         solution,
-        {action.id: action for action in catalog.aggregate_actions},
-        {combo.combo_id: combo for combo in catalog.ship_build_combos},
+        lookups.actions_by_id,
+        lookups.combos_by_id,
     )
 
 
@@ -487,6 +489,7 @@ def run_policy_ladder_tier_step(
         catalog_reuse=state.catalog_reuse,
     )
     state.catalog = catalog
+    score_lookups = catalog_score_lookups(catalog)
     current_combo_ids = frozenset(combo.combo_id for combo in catalog.ship_build_combos)
     added_combo_ids = (
         current_combo_ids
@@ -601,13 +604,13 @@ def run_policy_ladder_tier_step(
         return False
 
     def admit_overshoot(solution: InferenceSolution) -> None:
-        tagged = tag_ship_first_near_solution(solution, observation, catalog)
+        tagged = tag_ship_first_near_solution(solution, observation, score_lookups)
         admitted = admit_ship_first_ranked_solution(
             state.merged_solutions,
             state.seen_signatures,
             tagged,
             max_solutions=state.resolved_max_solutions,
-            leftover_2x=lambda held: leftover_military_2x(held, observation, catalog),
+            leftover_2x=lambda held: leftover_military_2x(held, observation, score_lookups),
             on_admitted=None,
         )
         if admitted:
@@ -735,7 +738,7 @@ def run_policy_ladder_tier_step(
         if band_result.solutions:
             state.band_seeds = list(band_result.solutions[: policy_step.max_seeds])
             best_solution = band_result.solutions[0]
-            explained = _explained_military_score_2x(best_solution, catalog)
+            explained = _explained_military_score_2x(best_solution, score_lookups)
             band_residual_2x = observation.military_delta_2x - explained
             if (
                 state.best_band_residual_2x is None
