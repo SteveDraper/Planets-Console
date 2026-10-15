@@ -37,9 +37,8 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     InferenceRankingHeuristics,
     compute_bin_penalty_objective_contribution,
     compute_overflow_objective_contribution,
-    partial_weapon_slot_penalty_for_fit,
     ranking_heuristics_diagnostics_payload,
-    ranking_penalty_from_marginal_weight,
+    ship_build_objective_coefficient,
 )
 from api.analytics.military_score_inference.ship_build_combos import (
     is_generic_zero_military_score_combo_id,
@@ -287,32 +286,6 @@ def _build_model(
     )
 
 
-def _ship_build_objective_contribution(
-    combo: ShipBuildCombo,
-    count: int,
-    *,
-    max_combo_weight: int,
-    heuristics: InferenceRankingHeuristics,
-) -> int:
-    """Objective terms that depend on one chosen fitting.
-
-    Action-bin and overflow terms do not depend on the label. The prior-weight
-    penalty and the partial-slot penalty both scale with ``count``.
-    """
-    penalty = ranking_penalty_from_marginal_weight(
-        combo.probability_weight,
-        max_marginal_weight=max_combo_weight,
-    )
-    slot_penalty = partial_weapon_slot_penalty_for_fit(
-        beam_count=combo.beam_count,
-        launcher_count=combo.launcher_count,
-        hull_beam_slots=combo.hull_beam_slots,
-        hull_launcher_slots=combo.hull_launcher_slots,
-        heuristics=heuristics,
-    )
-    return (-penalty + slot_penalty) * count
-
-
 def _objective_value(
     problem: InferenceProblem,
     action_counts: dict[str, int],
@@ -331,12 +304,12 @@ def _objective_value(
     )
     combo_by_id = {combo.combo_id: combo for combo in problem.ship_build_combos}
     for ship_build in ship_builds:
-        objective_value += _ship_build_objective_contribution(
+        coefficient = ship_build_objective_coefficient(
             combo_by_id[ship_build.combo_id],
-            ship_build.count,
             max_combo_weight=max_combo_weight,
             heuristics=problem.ranking_heuristics,
         )
+        objective_value += coefficient * ship_build.count
     return objective_value
 
 
@@ -388,26 +361,21 @@ def _fittings_for_merged_count(
     members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
     if is_generic_zero_military_score_combo_id(merged_combo_id):
         member = members[0]
-        contribution = _ship_build_objective_contribution(
+        coefficient = ship_build_objective_coefficient(
             member,
-            count,
             max_combo_weight=max_combo_weight,
             heuristics=heuristics,
         )
-        return ((contribution, _ship_build_from_member(member, count)),)
+        return ((coefficient * count, _ship_build_from_member(member, count)),)
 
-    scored = [
-        (
-            _ship_build_objective_contribution(
-                member,
-                count,
-                max_combo_weight=max_combo_weight,
-                heuristics=heuristics,
-            ),
+    scored: list[tuple[int, ShipBuildCombo]] = []
+    for member in members:
+        coefficient = ship_build_objective_coefficient(
             member,
+            max_combo_weight=max_combo_weight,
+            heuristics=heuristics,
         )
-        for member in members
-    ]
+        scored.append((coefficient * count, member))
     scored.sort(key=lambda item: (-item[0], item[1].combo_id))
     if count != 1:
         scored = scored[:1]

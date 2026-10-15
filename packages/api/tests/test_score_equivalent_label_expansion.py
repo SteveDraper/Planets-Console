@@ -197,20 +197,20 @@ def test_top_k_expansion_scores_each_fitting_and_keeps_only_k_solutions(monkeypa
 
     scoring_calls = 0
     solutions_materialized = 0
-    original_contribution = solver._ship_build_objective_contribution
+    original_coefficient = solver.ship_build_objective_coefficient
     original_solution = solver.InferenceSolution
 
-    def _counting_contribution(*args, **kwargs):
+    def _counting_coefficient(*args, **kwargs):
         nonlocal scoring_calls
         scoring_calls += 1
-        return original_contribution(*args, **kwargs)
+        return original_coefficient(*args, **kwargs)
 
     def _counting_solution(*args, **kwargs):
         nonlocal solutions_materialized
         solutions_materialized += 1
         return original_solution(*args, **kwargs)
 
-    monkeypatch.setattr(solver, "_ship_build_objective_contribution", _counting_contribution)
+    monkeypatch.setattr(solver, "ship_build_objective_coefficient", _counting_coefficient)
     monkeypatch.setattr(solver, "InferenceSolution", _counting_solution)
     solutions = _expand_score_equivalent_solutions(
         problem,
