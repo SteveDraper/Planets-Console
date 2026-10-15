@@ -1,10 +1,11 @@
 """OR-Tools CP-SAT adapter for military score build inference."""
 
+import heapq
 import time
 from collections import defaultdict
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from itertools import product
 from typing import TYPE_CHECKING
 
 from ortools.sat.python import cp_model
@@ -34,9 +35,10 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
     solution_signature,  # noqa: F401 -- re-export for stable solver import path
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
+    InferenceRankingHeuristics,
     compute_bin_penalty_objective_contribution,
     compute_overflow_objective_contribution,
-    compute_partial_weapon_slot_penalty_contribution,
+    partial_weapon_slot_penalty_for_fit,
     ranking_heuristics_diagnostics_payload,
     ranking_penalty_from_marginal_weight,
 )
@@ -238,19 +240,59 @@ def _problem_has_catalog_entries(problem: InferenceProblem) -> bool:
     return bool(problem.aggregate_actions or problem.ship_build_combos)
 
 
+@dataclass(frozen=True, slots=True)
+class ModelConstructionSample:
+    """One progress snapshot from an instrumented CP-SAT model build."""
+
+    phase: str
+    index: int
+    total: int
+
+
+model_construction_progress: ContextVar[Callable[[ModelConstructionSample], None] | None] = (
+    ContextVar(
+        "model_construction_progress",
+        default=None,
+    )
+)
+_MODEL_BUILD_REPORT_EVERY = 1_000
+
+
 def _build_model(
     problem: InferenceProblem,
     merged_combo_catalog: _MergedComboCatalog,
 ) -> _BuiltModel:
+    progress = model_construction_progress.get()
     model = cp_model.CpModel()
     action_count_vars = {
         action.id: model.new_int_var(action.lower_bound, action.upper_bound, action.id)
         for action in problem.aggregate_actions
     }
-    combo_count_vars = {
-        combo.combo_id: model.new_int_var(combo.lower_bound, combo.upper_bound, combo.combo_id)
-        for combo in merged_combo_catalog.combos
-    }
+    merged_combos = merged_combo_catalog.combos
+    combo_total = len(merged_combos)
+    if progress is None:
+        combo_count_vars = {
+            combo.combo_id: model.new_int_var(combo.lower_bound, combo.upper_bound, combo.combo_id)
+            for combo in merged_combos
+        }
+    else:
+        progress(ModelConstructionSample(phase="combo_vars", index=0, total=combo_total))
+        combo_count_vars = {}
+        for index, combo in enumerate(merged_combos, start=1):
+            combo_count_vars[combo.combo_id] = model.new_int_var(
+                combo.lower_bound,
+                combo.upper_bound,
+                combo.combo_id,
+            )
+            if index % _MODEL_BUILD_REPORT_EVERY == 0 or index == combo_total:
+                progress(
+                    ModelConstructionSample(
+                        phase="combo_vars",
+                        index=index,
+                        total=combo_total,
+                    )
+                )
+        progress(ModelConstructionSample(phase="objective", index=0, total=combo_total))
     objective_terms = build_inference_objective_terms(
         model,
         problem,
@@ -258,6 +300,14 @@ def _build_model(
         combo_count_vars,
         ship_build_combos=merged_combo_catalog.combos,
     )
+    if progress is not None:
+        progress(
+            ModelConstructionSample(
+                phase="constraints",
+                index=len(objective_terms),
+                total=combo_total,
+            )
+        )
 
     merged_problem = replace(problem, ship_build_combos=merged_combo_catalog.combos)
     diversity_caps_applied = InferenceHardConstraints.from_problem(merged_problem).add_to_model(
@@ -266,6 +316,14 @@ def _build_model(
         action_count_vars,
         combo_count_vars,
     )
+    if progress is not None:
+        progress(
+            ModelConstructionSample(
+                phase="objective_sum",
+                index=len(objective_terms),
+                total=combo_total,
+            )
+        )
     objective_var = model.new_int_var(
         _RANKING_OBJECTIVE_VAR_LB,
         _RANKING_OBJECTIVE_VAR_UB,
@@ -276,6 +334,8 @@ def _build_model(
     else:
         model.add(objective_var == 0)
     model.maximize(objective_var)
+    if progress is not None:
+        progress(ModelConstructionSample(phase="done", index=combo_total, total=combo_total))
     return _BuiltModel(
         model=model,
         action_count_vars=action_count_vars,
@@ -284,6 +344,32 @@ def _build_model(
         merged_combo_catalog=merged_combo_catalog,
         diversity_caps_applied=tuple(diversity_caps_applied),
     )
+
+
+def _ship_build_objective_contribution(
+    combo: ShipBuildCombo,
+    count: int,
+    *,
+    max_combo_weight: int,
+    heuristics: InferenceRankingHeuristics,
+) -> int:
+    """Objective terms that depend on one chosen fitting.
+
+    Action-bin and overflow terms do not depend on the label. The prior-weight
+    penalty and the partial-slot penalty both scale with ``count``.
+    """
+    penalty = ranking_penalty_from_marginal_weight(
+        combo.probability_weight,
+        max_marginal_weight=max_combo_weight,
+    )
+    slot_penalty = partial_weapon_slot_penalty_for_fit(
+        beam_count=combo.beam_count,
+        launcher_count=combo.launcher_count,
+        hull_beam_slots=combo.hull_beam_slots,
+        hull_launcher_slots=combo.hull_launcher_slots,
+        heuristics=heuristics,
+    )
+    return (-penalty + slot_penalty) * count
 
 
 def _objective_value(
@@ -304,17 +390,12 @@ def _objective_value(
     )
     combo_by_id = {combo.combo_id: combo for combo in problem.ship_build_combos}
     for ship_build in ship_builds:
-        combo = combo_by_id[ship_build.combo_id]
-        combo_penalty = ranking_penalty_from_marginal_weight(
-            combo.probability_weight,
-            max_marginal_weight=max_combo_weight,
+        objective_value += _ship_build_objective_contribution(
+            combo_by_id[ship_build.combo_id],
+            ship_build.count,
+            max_combo_weight=max_combo_weight,
+            heuristics=problem.ranking_heuristics,
         )
-        objective_value -= combo_penalty * ship_build.count
-    objective_value += compute_partial_weapon_slot_penalty_contribution(
-        ship_builds,
-        combo_by_id,
-        problem.ranking_heuristics,
-    )
     return objective_value
 
 
@@ -344,49 +425,92 @@ def _ship_build_from_member(
     )
 
 
-def _ranked_merged_members(members: tuple[ShipBuildCombo, ...]) -> tuple[ShipBuildCombo, ...]:
-    """Order equivalent combos for expansion: highest probability first, then combo id."""
-    return tuple(sorted(members, key=lambda member: (-member.probability_weight, member.combo_id)))
+# One scored fitting of a merged class: contribution, then the concrete label.
+_RankedFitting = tuple[int, InferenceSolutionShipBuild]
 
 
-def _ship_build_variants_for_merged_count(
+def _fittings_for_merged_count(
     merged_combo_id: str,
     count: int,
     merged_combo_catalog: _MergedComboCatalog,
     *,
     max_expansions: int,
-) -> tuple[InferenceSolutionShipBuild, ...]:
+    max_combo_weight: int,
+    heuristics: InferenceRankingHeuristics,
+) -> tuple[_RankedFitting, ...]:
+    """Best-first fittings of one class that can appear in a top-K labeling.
+
+    A repeated class (count other than 1) keeps its single best fitting. A
+    count of 1 keeps the first ``max_expansions`` fittings: any labeling that
+    uses a later fitting is outside the top K once ties break in this order.
+    """
     members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
     if is_generic_zero_military_score_combo_id(merged_combo_id):
-        return (_ship_build_from_member(members[0], count),)
-    if len(members) == 1:
-        return (_ship_build_from_member(members[0], count),)
+        member = members[0]
+        contribution = _ship_build_objective_contribution(
+            member,
+            count,
+            max_combo_weight=max_combo_weight,
+            heuristics=heuristics,
+        )
+        return ((contribution, _ship_build_from_member(member, count)),)
 
+    scored = [
+        (
+            _ship_build_objective_contribution(
+                member,
+                count,
+                max_combo_weight=max_combo_weight,
+                heuristics=heuristics,
+            ),
+            member,
+        )
+        for member in members
+    ]
+    scored.sort(key=lambda item: (-item[0], item[1].combo_id))
     if count != 1:
-        best_member = _ranked_merged_members(members)[0]
-        return (_ship_build_from_member(best_member, count),)
-
-    ranked_members = _ranked_merged_members(members)
-    expansion_limit = max(1, max_expansions)
+        scored = scored[:1]
+    else:
+        scored = scored[: max(1, max_expansions)]
     return tuple(
-        _ship_build_from_member(member, count) for member in ranked_members[:expansion_limit]
+        (contribution, _ship_build_from_member(member, count)) for contribution, member in scored
     )
 
 
-def _full_expansion_limit_for_combo_counts(
-    combo_counts: dict[str, int],
-    merged_combo_catalog: _MergedComboCatalog,
-) -> int:
-    """Upper bound on label variants for one structural hit (product of group sizes)."""
-    limit = 1
-    for merged_combo_id, count in combo_counts.items():
-        if count <= 0:
-            continue
-        members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
-        if is_generic_zero_military_score_combo_id(merged_combo_id) or count != 1:
-            continue
-        limit *= max(1, len(members))
-    return max(1, limit)
+def _best_label_combinations(
+    axes: Sequence[Sequence[_RankedFitting]],
+    *,
+    limit: int,
+) -> list[tuple[int, tuple[InferenceSolutionShipBuild, ...]]]:
+    """Top ``limit`` labelings by the sum of per-ship contributions.
+
+    Each axis is sorted best-first. Walk index tuples best-first and stop
+    after ``limit`` sums; the cartesian product is not materialized.
+    """
+    if limit <= 0 or not axes:
+        return []
+    start = tuple(0 for _ in axes)
+    start_score = sum(axis[0][0] for axis in axes)
+    pending: list[tuple[int, tuple[int, ...]]] = [(-start_score, start)]
+    seen = {start}
+    chosen: list[tuple[int, tuple[InferenceSolutionShipBuild, ...]]] = []
+    while pending and len(chosen) < limit:
+        negative_score, indexes = heapq.heappop(pending)
+        builds = tuple(
+            axes[axis_index][member_index][1] for axis_index, member_index in enumerate(indexes)
+        )
+        chosen.append((-negative_score, builds))
+        for axis_index, axis in enumerate(axes):
+            next_member = indexes[axis_index] + 1
+            if next_member >= len(axis):
+                continue
+            neighbor = indexes[:axis_index] + (next_member,) + indexes[axis_index + 1 :]
+            if neighbor in seen:
+                continue
+            seen.add(neighbor)
+            neighbor_score = sum(axes[index][neighbor[index]][0] for index in range(len(axes)))
+            heapq.heappush(pending, (-neighbor_score, neighbor))
+    return chosen
 
 
 def _expand_score_equivalent_solutions(
@@ -411,19 +535,24 @@ def _expand_score_equivalent_solutions(
                 counterparty_player_id=action.counterparty_player_id,
             )
         )
-    ship_build_variant_lists = [
-        _ship_build_variants_for_merged_count(
+    limit = max(1, max_expansions)
+    max_combo_weight = max_combo_probability_weight(problem)
+    heuristics = problem.ranking_heuristics
+    ship_build_axes = [
+        _fittings_for_merged_count(
             merged_combo_id,
             count,
             merged_combo_catalog,
-            max_expansions=max_expansions,
+            max_expansions=limit,
+            max_combo_weight=max_combo_weight,
+            heuristics=heuristics,
         )
         for merged_combo_id, count in combo_counts.items()
         if count > 0
     ]
     # Idle exact (all-zero counts) is a valid structural hit when observation deltas
     # are zero; keep it instead of dropping the expansion.
-    if not ship_build_variant_lists and not solution_actions:
+    if not ship_build_axes and not solution_actions:
         return [
             InferenceSolution(
                 objective_value=_objective_value(problem, action_counts, ()),
@@ -431,25 +560,25 @@ def _expand_score_equivalent_solutions(
                 ship_builds=(),
             )
         ]
-    # Action-only hits have no ship-build axes; synthesize one empty combination.
-    ship_build_combinations: list[tuple[InferenceSolutionShipBuild, ...]]
-    if not ship_build_variant_lists:
-        ship_build_combinations = [()]
-    else:
-        ship_build_combinations = [
-            tuple(ship_build_variant) for ship_build_variant in product(*ship_build_variant_lists)
+    action_constant = _objective_value(problem, action_counts, ())
+    if not ship_build_axes:
+        return [
+            InferenceSolution(
+                objective_value=action_constant,
+                actions=tuple(solution_actions),
+                ship_builds=(),
+            )
         ]
     solutions: list[InferenceSolution] = []
-    for ship_builds in ship_build_combinations:
+    for ship_contribution, ship_builds in _best_label_combinations(ship_build_axes, limit=limit):
         solutions.append(
             InferenceSolution(
-                objective_value=_objective_value(problem, action_counts, ship_builds),
+                objective_value=action_constant + ship_contribution,
                 actions=tuple(solution_actions),
                 ship_builds=ship_builds,
             )
         )
-    solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
-    return solutions[: max(1, max_expansions)]
+    return solutions
 
 
 def expand_structural_hits_to_top_k(
@@ -461,9 +590,9 @@ def expand_structural_hits_to_top_k(
 ) -> list[InferenceSolution]:
     """Expand distinct CP-SAT hits into label variants; keep a streaming top-K.
 
-    Solve-loop budget is structural (merged signatures). Label variants of the same
-    military arithmetic are expanded here and culled so at most ``max_solutions``
-    rows are retained, ranked by objective.
+    Solve-loop budget is structural (merged signatures). A hit's objective is the
+    sum of one contribution per ship, so each class is ranked on its own and only
+    the top ``max_solutions`` labelings of that sum are admitted.
     """
     if max_solutions <= 0 or not structural_hits:
         return []
@@ -497,10 +626,7 @@ def expand_structural_hits_to_top_k(
             action_counts,
             combo_counts,
             merged_combo_catalog,
-            max_expansions=_full_expansion_limit_for_combo_counts(
-                combo_counts,
-                merged_combo_catalog,
-            ),
+            max_expansions=max_solutions,
         )
         for expansion in expansions:
             if kth_objective is not None and expansion.objective_value <= kth_objective:
