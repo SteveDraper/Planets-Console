@@ -1,8 +1,5 @@
 """Factored ship build combo generation for military score inference."""
 
-import time
-from collections.abc import Callable
-from contextvars import ContextVar
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.models import InferenceObservation, ShipBuildCombo
@@ -27,31 +24,6 @@ __all__ = [
 
 def is_generic_zero_military_score_combo_id(combo_id: str) -> bool:
     return combo_id == GENERIC_FREIGHTER_COMBO_ID
-
-
-@dataclass(frozen=True, slots=True)
-class ShipBuildEnumerationSample:
-    """One progress snapshot from an instrumented combo enumeration."""
-
-    candidates: int
-    kept: int
-    skipped_bound: int
-    skipped_zero_score: int
-    seconds_bound: float
-    seconds_score: float
-    seconds_weight: float
-    seconds_construct: float
-    hull_id: int
-    engine_id: int
-
-
-ship_build_enumeration_progress: ContextVar[Callable[[ShipBuildEnumerationSample], None] | None] = (
-    ContextVar(
-        "ship_build_enumeration_progress",
-        default=None,
-    )
-)
-_ENUMERATION_REPORT_EVERY = 1_000
 
 
 @dataclass(frozen=True)
@@ -256,50 +228,17 @@ def generate_ship_build_combos(
     combos: list[ShipBuildCombo] = []
     freighter_upper_bound = 0
     retained_by_key = _retained_combos_by_key(retained_combos)
-    progress = ship_build_enumeration_progress.get()
-    candidates = 0
-    skipped_bound = 0
-    skipped_zero_score = 0
-    seconds_bound = 0.0
-    seconds_score = 0.0
-    seconds_weight = 0.0
-    seconds_construct = 0.0
-    last_hull_id = 0
-    last_engine_id = 0
-
-    def emit_progress() -> None:
-        if progress is None:
-            return
-        progress(
-            ShipBuildEnumerationSample(
-                candidates=candidates,
-                kept=len(combos),
-                skipped_bound=skipped_bound,
-                skipped_zero_score=skipped_zero_score,
-                seconds_bound=seconds_bound,
-                seconds_score=seconds_score,
-                seconds_weight=seconds_weight,
-                seconds_construct=seconds_construct,
-                hull_id=last_hull_id,
-                engine_id=last_engine_id,
-            )
-        )
-
-    if progress is not None:
-        emit_progress()
 
     for hull_id in sorted(buildable_hull_ids):
         hull = hulls_by_id.get(hull_id)
         if hull is None:
             continue
-        last_hull_id = hull_id
 
         beam_count_options = beam_count_options_for_slot_mode(hull, beam_slot_counts)
         launcher_count_options = launcher_count_options_for_slot_mode(hull, launcher_slot_counts)
 
         for engine_id in sorted(eligible_engine_ids):
             engine = engines_by_id.get(engine_id)
-            last_engine_id = engine_id
             if engine is None:
                 continue
 
@@ -331,9 +270,6 @@ def generate_ship_build_combos(
 
                     for beam in beam_choices:
                         for torpedo in torp_choices:
-                            if progress is not None:
-                                candidates += 1
-                                bound_started = time.perf_counter()
                             counts_as_warship = ship_build_counts_as_warship(
                                 hull,
                                 beam_count=beam_count,
@@ -349,17 +285,9 @@ def generate_ship_build_combos(
                                 reserved_incoming_warships=reserved_incoming_warships,
                                 reserved_incoming_freighters=reserved_incoming_freighters,
                             )
-                            if progress is not None:
-                                seconds_bound += time.perf_counter() - bound_started
                             if build_upper_bound <= 0:
-                                if progress is not None:
-                                    skipped_bound += 1
-                                    if candidates % _ENUMERATION_REPORT_EVERY == 0:
-                                        emit_progress()
                                 continue
 
-                            if progress is not None:
-                                score_started = time.perf_counter()
                             score_delta_2x = ship_build_military_score_delta_2x(
                                 hull,
                                 engine,
@@ -368,16 +296,10 @@ def generate_ship_build_combos(
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
                             )
-                            if progress is not None:
-                                seconds_score += time.perf_counter() - score_started
                             if score_delta_2x == 0:
                                 freighter_upper_bound = max(
                                     freighter_upper_bound, build_upper_bound
                                 )
-                                if progress is not None:
-                                    skipped_zero_score += 1
-                                    if candidates % _ENUMERATION_REPORT_EVERY == 0:
-                                        emit_progress()
                                 continue
 
                             beam_id = beam.id if beam is not None else None
@@ -413,15 +335,8 @@ def generate_ship_build_combos(
                                 launcher_count=launcher_count,
                             ):
                                 combos.append(retained)
-                                if (
-                                    progress is not None
-                                    and candidates % _ENUMERATION_REPORT_EVERY == 0
-                                ):
-                                    emit_progress()
                                 continue
 
-                            if progress is not None:
-                                weight_started = time.perf_counter()
                             combo_id = ship_build_combo_id(
                                 hull_id=hull_id,
                                 engine_id=engine_id,
@@ -439,9 +354,6 @@ def generate_ship_build_combos(
                                 beam_count=beam_count,
                                 launcher_count=launcher_count,
                             )
-                            if progress is not None:
-                                seconds_weight += time.perf_counter() - weight_started
-                                construct_started = time.perf_counter()
                             combos.append(
                                 ShipBuildCombo(
                                     combo_id=combo_id,
@@ -470,13 +382,6 @@ def generate_ship_build_combos(
                                     probability_weight=probability_weight,
                                 )
                             )
-                            if progress is not None:
-                                seconds_construct += time.perf_counter() - construct_started
-                                if candidates % _ENUMERATION_REPORT_EVERY == 0:
-                                    emit_progress()
-
-    if progress is not None:
-        emit_progress()
 
     if freighter_upper_bound > 0:
         freighter_weight = prior_catalog.freighter_probability_weight(

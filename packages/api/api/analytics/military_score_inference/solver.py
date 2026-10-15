@@ -4,7 +4,6 @@ import heapq
 import time
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -240,59 +239,19 @@ def _problem_has_catalog_entries(problem: InferenceProblem) -> bool:
     return bool(problem.aggregate_actions or problem.ship_build_combos)
 
 
-@dataclass(frozen=True, slots=True)
-class ModelConstructionSample:
-    """One progress snapshot from an instrumented CP-SAT model build."""
-
-    phase: str
-    index: int
-    total: int
-
-
-model_construction_progress: ContextVar[Callable[[ModelConstructionSample], None] | None] = (
-    ContextVar(
-        "model_construction_progress",
-        default=None,
-    )
-)
-_MODEL_BUILD_REPORT_EVERY = 1_000
-
-
 def _build_model(
     problem: InferenceProblem,
     merged_combo_catalog: _MergedComboCatalog,
 ) -> _BuiltModel:
-    progress = model_construction_progress.get()
     model = cp_model.CpModel()
     action_count_vars = {
         action.id: model.new_int_var(action.lower_bound, action.upper_bound, action.id)
         for action in problem.aggregate_actions
     }
-    merged_combos = merged_combo_catalog.combos
-    combo_total = len(merged_combos)
-    if progress is None:
-        combo_count_vars = {
-            combo.combo_id: model.new_int_var(combo.lower_bound, combo.upper_bound, combo.combo_id)
-            for combo in merged_combos
-        }
-    else:
-        progress(ModelConstructionSample(phase="combo_vars", index=0, total=combo_total))
-        combo_count_vars = {}
-        for index, combo in enumerate(merged_combos, start=1):
-            combo_count_vars[combo.combo_id] = model.new_int_var(
-                combo.lower_bound,
-                combo.upper_bound,
-                combo.combo_id,
-            )
-            if index % _MODEL_BUILD_REPORT_EVERY == 0 or index == combo_total:
-                progress(
-                    ModelConstructionSample(
-                        phase="combo_vars",
-                        index=index,
-                        total=combo_total,
-                    )
-                )
-        progress(ModelConstructionSample(phase="objective", index=0, total=combo_total))
+    combo_count_vars = {
+        combo.combo_id: model.new_int_var(combo.lower_bound, combo.upper_bound, combo.combo_id)
+        for combo in merged_combo_catalog.combos
+    }
     objective_terms = build_inference_objective_terms(
         model,
         problem,
@@ -300,14 +259,6 @@ def _build_model(
         combo_count_vars,
         ship_build_combos=merged_combo_catalog.combos,
     )
-    if progress is not None:
-        progress(
-            ModelConstructionSample(
-                phase="constraints",
-                index=len(objective_terms),
-                total=combo_total,
-            )
-        )
 
     merged_problem = replace(problem, ship_build_combos=merged_combo_catalog.combos)
     diversity_caps_applied = InferenceHardConstraints.from_problem(merged_problem).add_to_model(
@@ -316,14 +267,6 @@ def _build_model(
         action_count_vars,
         combo_count_vars,
     )
-    if progress is not None:
-        progress(
-            ModelConstructionSample(
-                phase="objective_sum",
-                index=len(objective_terms),
-                total=combo_total,
-            )
-        )
     objective_var = model.new_int_var(
         _RANKING_OBJECTIVE_VAR_LB,
         _RANKING_OBJECTIVE_VAR_UB,
@@ -334,8 +277,6 @@ def _build_model(
     else:
         model.add(objective_var == 0)
     model.maximize(objective_var)
-    if progress is not None:
-        progress(ModelConstructionSample(phase="done", index=combo_total, total=combo_total))
     return _BuiltModel(
         model=model,
         action_count_vars=action_count_vars,
