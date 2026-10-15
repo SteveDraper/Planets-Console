@@ -106,7 +106,7 @@ def test_partial_slot_penalty_outranks_a_higher_prior_in_the_best_pair() -> None
         {},
         combo_counts,
         merged,
-        max_expansions=2,
+        max_labelings=2,
     )
 
     assert [_combo_ids(solution) for solution in solutions] == [
@@ -145,7 +145,7 @@ def test_top_k_labelings_omit_fittings_outside_each_class_prefix() -> None:
         {},
         combo_counts,
         merged,
-        max_expansions=3,
+        max_labelings=3,
     )
 
     assert len(solutions) == 3
@@ -217,7 +217,7 @@ def test_top_k_expansion_scores_each_fitting_and_keeps_only_k_solutions(monkeypa
         {},
         combo_counts,
         merged,
-        max_expansions=top_k,
+        max_labelings=top_k,
     )
     member_count = sum(class_sizes)
     cross_product = class_sizes[0] * class_sizes[1] * class_sizes[2]

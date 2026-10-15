@@ -348,14 +348,14 @@ def _fittings_for_merged_count(
     count: int,
     merged_combo_catalog: _MergedComboCatalog,
     *,
-    max_expansions: int,
+    max_labelings: int,
     max_combo_weight: int,
     heuristics: InferenceRankingHeuristics,
 ) -> tuple[_RankedFitting, ...]:
     """Best-first fittings of one class that can appear in a top-K labeling.
 
     A repeated class (count other than 1) keeps its single best fitting. A
-    count of 1 keeps the first ``max_expansions`` fittings: any labeling that
+    count of 1 keeps the first ``max_labelings`` fittings: any labeling that
     uses a later fitting is outside the top K once ties break in this order.
     """
     members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
@@ -380,7 +380,7 @@ def _fittings_for_merged_count(
     if count != 1:
         scored = scored[:1]
     else:
-        scored = scored[: max(1, max_expansions)]
+        scored = scored[:max_labelings]
     return tuple(
         (contribution, _ship_build_from_member(member, count)) for contribution, member in scored
     )
@@ -389,21 +389,21 @@ def _fittings_for_merged_count(
 def _best_label_combinations(
     axes: Sequence[Sequence[_RankedFitting]],
     *,
-    limit: int,
+    max_labelings: int,
 ) -> list[tuple[int, tuple[InferenceSolutionShipBuild, ...]]]:
-    """Top ``limit`` labelings by the sum of per-ship contributions.
+    """Top ``max_labelings`` labelings by the sum of per-ship contributions.
 
     Each axis is sorted best-first. Walk index tuples best-first and stop
-    after ``limit`` sums; the cartesian product is not materialized.
+    after ``max_labelings`` sums; the cartesian product is not materialized.
     """
-    if limit <= 0 or not axes:
+    if max_labelings <= 0 or not axes:
         return []
     start = tuple(0 for _ in axes)
     start_score = sum(axis[0][0] for axis in axes)
     pending: list[tuple[int, tuple[int, ...]]] = [(-start_score, start)]
     seen = {start}
     chosen: list[tuple[int, tuple[InferenceSolutionShipBuild, ...]]] = []
-    while pending and len(chosen) < limit:
+    while pending and len(chosen) < max_labelings:
         negative_score, indexes = heapq.heappop(pending)
         builds = tuple(
             axes[axis_index][member_index][1] for axis_index, member_index in enumerate(indexes)
@@ -428,7 +428,7 @@ def _expand_score_equivalent_solutions(
     combo_counts: dict[str, int],
     merged_combo_catalog: _MergedComboCatalog,
     *,
-    max_expansions: int,
+    max_labelings: int,
 ) -> list[InferenceSolution]:
     action_by_id = {action.id: action for action in problem.aggregate_actions}
     solution_actions: list[InferenceSolutionAction] = []
@@ -444,7 +444,7 @@ def _expand_score_equivalent_solutions(
                 counterparty_player_id=action.counterparty_player_id,
             )
         )
-    limit = max(1, max_expansions)
+    max_labelings = max(1, max_labelings)
     max_combo_weight = max_combo_probability_weight(problem)
     heuristics = problem.ranking_heuristics
     ship_build_axes = [
@@ -452,24 +452,16 @@ def _expand_score_equivalent_solutions(
             merged_combo_id,
             count,
             merged_combo_catalog,
-            max_expansions=limit,
+            max_labelings=max_labelings,
             max_combo_weight=max_combo_weight,
             heuristics=heuristics,
         )
         for merged_combo_id, count in combo_counts.items()
         if count > 0
     ]
-    # Idle exact (all-zero counts) is a valid structural hit when observation deltas
-    # are zero; keep it instead of dropping the expansion.
-    if not ship_build_axes and not solution_actions:
-        return [
-            InferenceSolution(
-                objective_value=_objective_value(problem, action_counts, ()),
-                actions=(),
-                ship_builds=(),
-            )
-        ]
     action_constant = _objective_value(problem, action_counts, ())
+    # Idle exact (all-zero counts) and action-only hits are valid structural hits.
+    # Both yield exactly one solution with no ship builds.
     if not ship_build_axes:
         return [
             InferenceSolution(
@@ -479,7 +471,10 @@ def _expand_score_equivalent_solutions(
             )
         ]
     solutions: list[InferenceSolution] = []
-    for ship_contribution, ship_builds in _best_label_combinations(ship_build_axes, limit=limit):
+    for ship_contribution, ship_builds in _best_label_combinations(
+        ship_build_axes,
+        max_labelings=max_labelings,
+    ):
         solutions.append(
             InferenceSolution(
                 objective_value=action_constant + ship_contribution,
@@ -513,7 +508,7 @@ def expand_structural_hits_to_top_k(
             action_counts,
             combo_counts,
             merged_combo_catalog,
-            max_expansions=1,
+            max_labelings=1,
         )
         if not best_only:
             continue
@@ -535,7 +530,7 @@ def expand_structural_hits_to_top_k(
             action_counts,
             combo_counts,
             merged_combo_catalog,
-            max_expansions=max_solutions,
+            max_labelings=max_solutions,
         )
         for expansion in expansions:
             if kth_objective is not None and expansion.objective_value <= kth_objective:
