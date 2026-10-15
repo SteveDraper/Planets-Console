@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from api.analytics.fleet.types import FleetShipRecord
@@ -66,6 +67,7 @@ class PolicyLadderState:
     fleet_torp_overlay: FleetTorpOverlay | None = None
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None
     prior_fleet_records: tuple[FleetShipRecord, ...] = ()
+    load_counterparty_fleet: Callable[[int], tuple[FleetShipRecord, ...]] | None = None
     hull_collision_twins: HullCollisionTwinsAsset | None = None
     hull_collision_twins_path: str | None = None
     hull_collision_twins_fell_back: bool = False

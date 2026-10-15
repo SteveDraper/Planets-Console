@@ -89,6 +89,10 @@ TURN10_PLAYER51_THROUGH_TIER_INDEX = 6
 TURN15_PLAYER38_MODEST_LOADED_WALL_SECONDS = 20.81
 TURN15_PLAYER38_MODEST_TIER_INDEX = 5
 
+# Empty-catalog acquired-warship admit from local/diagnostics_late5.json.
+# Loaded wall is the persisted tier emission while 8 workers were busy.
+TURN8_PLAYER9_ADMIT_LOADED_WALL_SECONDS = 125.88
+
 _active_tier: ContextVar[str] = ContextVar("outlier_repro_tier", default="")
 _active_phase: ContextVar[str] = ContextVar("outlier_repro_phase", default="other")
 
@@ -150,6 +154,8 @@ class OutlierReproduction:
     notes: list[str] = field(default_factory=list)
     band_callbacks: int = 0
     band_callback_seconds: float = 0.0
+    solution_action_ids: list[tuple[str, ...]] = field(default_factory=list)
+    solution_families: list[str | None] = field(default_factory=list)
 
     def tier(self, index: int) -> TierSample | None:
         for sample in self.tiers:
@@ -557,6 +563,7 @@ def reproduce_admit_ship_outlier(
     turn_number: int = TURN,
     player_id: int = PLAYER_ID,
     through_tier_index: int = OUTLIER_TIER_INDEX,
+    load_counterparty_fleets: bool = False,
 ) -> OutlierReproduction:
     """Run scores tiers 0..``through_tier_index`` for one stored row.
 
@@ -602,6 +609,26 @@ def reproduce_admit_ship_outlier(
         turn_number=turn.settings.turn,
         load_scoreboard_turn=load_scoreboard_turn,
     )
+    if load_counterparty_fleets:
+        from api.analytics.export_context import make_analytic_query_context
+        from api.analytics.fleet.compute_services import FleetComputeServices
+        from api.analytics.options import TurnAnalyticsOptions
+
+        session.query_context = make_analytic_query_context(
+            turn,
+            TurnAnalyticsOptions(),
+            game_id=game_id,
+            perspective=perspective,
+            load_turn=load_scoreboard_turn,
+            export_services={
+                FLEET_ANALYTIC_ID: FleetComputeServices(
+                    persistence=FleetSnapshotPersistenceService(storage),
+                    game_id=game_id,
+                    perspective=perspective,
+                    load_turn=load_scoreboard_turn,
+                )
+            },
+        )
     observation = session.observation
     report = OutlierReproduction(
         fleet_input_status=resolution.input_status,
@@ -653,6 +680,15 @@ def reproduce_admit_ship_outlier(
                 break
     finally:
         probe.restore()
+    finished = run.ladder_state
+    if finished is not None:
+        report.solution_action_ids = [
+            tuple(action.action_id for action in solution.actions)
+            for solution in finished.merged_solutions
+        ]
+        report.solution_families = [
+            solution.ship_first_family for solution in finished.merged_solutions
+        ]
     return report
 
 
@@ -695,6 +731,14 @@ def format_outlier_report(
             f"stop={tier.stopped_reason} "
             f"outcome={tier.outcome}"
         )
+    if report.solution_action_ids:
+        lines.append("solutions:")
+        for action_ids, family in zip(
+            report.solution_action_ids,
+            report.solution_families,
+            strict=True,
+        ):
+            lines.append(f"  {family} {', '.join(action_ids)}")
     lines.append("builds:")
     for build in report.builds:
         lines.append(
@@ -927,3 +971,56 @@ def test_turn15_player38_modest_planet_defense_reproduces_late3_outlier() -> Non
         if sample.tier.startswith("5:") and sample.branches >= 10_000
     ]
     assert not heavy, rendered
+
+
+def test_turn8_player9_incoming_warship_floor_skips_torpedo_plateau() -> None:
+    """Turn 8 player 9 emits donor transfers from hull floors and does not search.
+
+    The loaded admit step was 125.9 s on a saturated pool. Idle, that same
+    search spent the full 1.0 deterministic allowance (about 0.39 s, 50692
+    branches, 20 torpedo-plateau hits). With donor hull floors the ladder
+    stops on the first tier.
+    """
+    if os.environ.get("SCORES_OUTLIER_REPRO") != "1":
+        pytest.skip("set SCORES_OUTLIER_REPRO=1 to reproduce the local late-window row")
+    storage_root = Path(os.environ.get("SCORES_OUTLIER_STORAGE", DEFAULT_STORAGE_ROOT))
+    if not storage_root.is_dir():
+        pytest.skip(f"storage root not found: {storage_root}")
+
+    from tests.inference_corpus.storage_loader import configure_file_storage
+
+    previous_config = get_config()
+    reset_tier_row_run_registry_for_tests()
+    try:
+        storage = configure_file_storage(storage_root=storage_root)
+        report = reproduce_admit_ship_outlier(
+            storage,
+            turn_number=8,
+            player_id=9,
+            through_tier_index=OUTLIER_TIER_INDEX,
+            load_counterparty_fleets=True,
+        )
+    finally:
+        reset_tier_row_run_registry_for_tests()
+        set_config(previous_config)
+        clear_backend_cache()
+
+    rendered = format_outlier_report(
+        report,
+        diagnostic_loaded_wall_seconds=TURN8_PLAYER9_ADMIT_LOADED_WALL_SECONDS,
+    )
+    print(rendered)
+    assert len(report.tiers) == 1, rendered
+    first = report.tiers[0]
+    assert first.index == 0, rendered
+    assert first.combo_count == 0, rendered
+    assert first.stopped_reason == "incoming_warship_floor", rendered
+    assert first.deterministic_time == 0.0, rendered
+    assert first.wall_seconds < 1.0, rendered
+    assert report.solves == [], rendered
+    assert report.solution_action_ids == [
+        ("acquired:warship:from:14",),
+        ("acquired:warship:from:16",),
+        ("acquired:warship:from:48",),
+    ], rendered
+    assert report.solution_families == ["mine_overshoot", "mine_overshoot", "mine_overshoot"]

@@ -16,6 +16,9 @@ from api.analytics.military_score_inference.hopeless_classifier import (
     hopeless_row_facts_from_session,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
+from api.analytics.military_score_inference.incoming_warship_floor import (
+    counterparty_fleet_loader,
+)
 from api.analytics.military_score_inference.inference_accelerated import (
     AcceleratedSegmentResult,
     build_accelerated_backfill_stream_row_complete,
@@ -84,6 +87,7 @@ def new_ladder_state(
             session.turn,
             hopeless_context=hopeless_context,
         )
+        state.load_counterparty_fleet = counterparty_fleet_loader(session)
     return state
 
 

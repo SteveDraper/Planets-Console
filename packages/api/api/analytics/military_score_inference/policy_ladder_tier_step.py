@@ -25,6 +25,10 @@ from api.analytics.military_score_inference.degrade_aggregate_probe import (
 from api.analytics.military_score_inference.held_score_equivalent_relabel import (
     relabeled_solutions_for_widened_classes,
 )
+from api.analytics.military_score_inference.incoming_warship_floor import (
+    INCOMING_WARSHIP_FLOOR_STOP_REASON,
+    fitting_incoming_warship_transfers,
+)
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.military_sat_admission import (
     military_sat_admission_from_turn,
@@ -88,6 +92,7 @@ from api.analytics.military_score_inference.ship_first_overshoot import (
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
+    STATUS_MINE_SCORE_RESIDUAL,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
     build_catalog_merge_plan,
@@ -706,10 +711,70 @@ def run_policy_ladder_tier_step(
         )
         return record_solve(overshoot_result, overshoot_problem)
 
+    def _admit_incoming_warship_floors() -> bool:
+        """Emit fitting donor transfers and skip the torpedo plateau.
+
+        Only when this catalog has no ship-build combos, so a row that already
+        has build explanations keeps the existing search.
+        """
+        if len(catalog.ship_build_combos) != 0:
+            return False
+        solutions = fitting_incoming_warship_transfers(
+            military_delta_2x=observation.military_delta_2x,
+            warship_delta=observation.warship_delta,
+            actions=catalog.aggregate_actions,
+            records_for_player=state.load_counterparty_fleet,
+            hulls_by_id={hull.id: hull for hull in turn.hulls},
+            engines_by_id={engine.id: engine for engine in turn.engines},
+            beams_by_id={beam.id: beam for beam in turn.beams},
+            torpedos_by_id={torpedo.id: torpedo for torpedo in turn.torpedos},
+            max_solutions=state.resolved_max_solutions,
+        )
+        if not solutions:
+            return False
+        admitted_any = False
+        for solution in solutions:
+            admitted = admit_ship_first_ranked_solution(
+                state.merged_solutions,
+                state.seen_signatures,
+                solution,
+                max_solutions=state.resolved_max_solutions,
+                leftover_2x=lambda held: leftover_military_2x(held, observation, score_lookups),
+                on_admitted=on_admitted,
+            )
+            if not admitted:
+                continue
+            admitted_any = True
+            newly_admitted.append(solution)
+            state.overshoot_signatures.add(solution_signature(solution))
+        if not admitted_any:
+            return False
+        state.last_status = STATUS_MINE_SCORE_RESIDUAL
+        state.time_limited = False
+        state.last_diagnostics = {
+            "stopped_reason": INCOMING_WARSHIP_FLOOR_STOP_REASON,
+            "structural_hit_count": len(state.merged_solutions),
+            "deterministicTime": 0.0,
+            "solveWallSeconds": 0.0,
+        }
+        finish_step(
+            finish_mode=TierStepFinishMode.COMPLETE,
+            new_exact_before_step=new_exact_before_step,
+        )
+        state.ladder_complete = True
+        state.ladder_early_stop_reason = INCOMING_WARSHIP_FLOOR_STOP_REASON
+        if state.step_diagnostics:
+            state.step_diagnostics[-1]["ladderEarlyStopReason"] = (
+                INCOMING_WARSHIP_FLOOR_STOP_REASON
+            )
+        return True
+
     def _solve_military_window() -> bool:
         """Exact, overshoot, or band for this step. True aborts the tier."""
         nonlocal band_residual_2x
         if overlay_mode == "overshoot_only" and overlay is not None:
+            if _admit_incoming_warship_floors():
+                return True
             if (
                 overlay.should_solve_overshoot
                 and not budget_exhausted()
