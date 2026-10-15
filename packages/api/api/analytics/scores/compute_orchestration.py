@@ -109,10 +109,15 @@ def build_scores_tier_solve_job_wire(
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
-    Skip sentinel (``runId: None``, ``evidenceClosed: True``) is allowed only when
-    turn evidence is already closed (persisted / durable terminal under the same
-    materialization probe fleet uses). Admission skips (full alliance, viewpoint
-    owner, dead, Horwasp, no prior turn) close that evidence because admit
+    Horwasp production is not modeled. That classification writes the skip row
+    and returns the evidence-closed sentinel before RowRun lookup, scheduler
+    adopt, fleet resolution, or the satisfaction probe. The persisted row is
+    the mark fleet's materialization probe reads.
+
+    Other skip sentinels (``runId: None``, ``evidenceClosed: True``) are allowed
+    only when turn evidence is already closed (persisted / durable terminal under
+    the same materialization probe fleet uses). Admission skips (full alliance,
+    viewpoint owner, dead, no prior turn) close that evidence because admit
     rewrites the skip row when it is missing; they do not need a ``RowRun``.
 
     Invariant: when ensure is satisfied and evidence is still open, this dispatch
@@ -126,6 +131,10 @@ def build_scores_tier_solve_job_wire(
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
         raise ValueError("scores tier_solve requires concrete scores scope")
+
+    horwasp_skip = _horwasp_evidence_closed_skip_wire(ctx, scope, export_scope)
+    if horwasp_skip is not None:
+        return horwasp_skip
 
     run = get_row_run_for_scope(scope)
     ensure_satisfied = True
@@ -144,14 +153,7 @@ def build_scores_tier_solve_job_wire(
         run = _adopt_scheduler_row_run_for_tier_wire(ctx, export_scope)
     if run is None:
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
-            return {
-                "runId": None,
-                "evidenceClosed": True,
-                "gameId": scope.game_id,
-                "perspective": scope.perspective,
-                "turn": scope.turn,
-                "playerId": scope.player_id,
-            }
+            return _evidence_closed_skip_wire(scope)
         raise RuntimeError(
             "scores tier_solve invariant broken: ensure "
             f"{'satisfied' if ensure_satisfied else 'unsatisfied'} but no attachable "
@@ -186,6 +188,71 @@ def build_scores_tier_solve_job_wire(
         "turn": scope.turn,
         "playerId": scope.player_id,
     }
+
+
+def _evidence_closed_skip_wire(scope: ComputeScope) -> dict[str, Any]:
+    """Tier wire that completes with no CP-SAT once turn evidence is closed."""
+    return {
+        "runId": None,
+        "evidenceClosed": True,
+        "gameId": scope.game_id,
+        "perspective": scope.perspective,
+        "turn": scope.turn,
+        "playerId": scope.player_id,
+    }
+
+
+def _horwasp_evidence_closed_skip_wire(
+    ctx: AnalyticQueryContext,
+    scope: ComputeScope,
+    export_scope: ExportScope,
+) -> dict[str, Any] | None:
+    """Return the skip wire once a Horwasp row is stored, before any solve work.
+
+    Fleet finalization reads the persisted inference row and ignores the
+    in-memory admission. Returning the sentinel without that row leaves fleet
+    evidence open. A Horwasp whose stored row is some other status falls
+    through so this path does not claim evidence the probe will reject.
+    """
+    player_id = export_scope.player_id
+    if player_id is None or export_scope.turn <= 1:
+        return None
+    turn = ctx.load_turn(export_scope.turn)
+    if turn is None:
+        return None
+
+    from api.analytics.military_score_inference.inference_admission import (
+        is_build_inference_available,
+        resolve_inference_admission_skip,
+    )
+    from api.analytics.military_score_inference.inference_api_payload import STATUS_HORWASP
+    from api.analytics.scores.exports import persist_missing_admission_skip
+
+    if not is_build_inference_available(turn):
+        return None
+    skip = resolve_inference_admission_skip(
+        turn,
+        player_id,
+        perspective=export_scope.perspective,
+        load_scoreboard_turn=ctx.load_turn,
+    )
+    if skip is None or skip.status != STATUS_HORWASP:
+        return None
+    if not persist_missing_admission_skip(ctx, export_scope):
+        return None
+
+    services = resolve_scores_services(ctx)
+    if services.persistence is None:
+        return None
+    stored = services.persistence.get_row(
+        export_scope.game_id,
+        export_scope.perspective,
+        export_scope.turn,
+        player_id,
+    )
+    if stored is None or stored.status != STATUS_HORWASP:
+        return None
+    return _evidence_closed_skip_wire(scope)
 
 
 def _adopt_scheduler_row_run_for_tier_wire(
