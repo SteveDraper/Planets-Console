@@ -717,7 +717,7 @@ def run_policy_ladder_tier_step(
         Only when this catalog has no ship-build combos, so a row that already
         has build explanations keeps the existing search.
         """
-        if len(catalog.ship_build_combos) != 0:
+        if overlay is None or len(catalog.ship_build_combos) != 0:
             return False
         solutions = fitting_incoming_warship_transfers(
             military_delta_2x=observation.military_delta_2x,
@@ -757,6 +757,16 @@ def run_policy_ladder_tier_step(
             "deterministicTime": 0.0,
             "solveWallSeconds": 0.0,
         }
+        clip = run.solve_clip_or_exhausted()
+        state.problem = build_inference_problem(
+            observation,
+            catalog,
+            race_id=player_race_id,
+            max_solutions=catalog_solve_max,
+            time_limit_seconds=clip.problem_time_limit_seconds(),
+            solve_clip=clip,
+            military_score_window=overlay.overshoot_window(),
+        )
         finish_step(
             finish_mode=TierStepFinishMode.COMPLETE,
             new_exact_before_step=new_exact_before_step,
@@ -764,9 +774,7 @@ def run_policy_ladder_tier_step(
         state.ladder_complete = True
         state.ladder_early_stop_reason = INCOMING_WARSHIP_FLOOR_STOP_REASON
         if state.step_diagnostics:
-            state.step_diagnostics[-1]["ladderEarlyStopReason"] = (
-                INCOMING_WARSHIP_FLOOR_STOP_REASON
-            )
+            state.step_diagnostics[-1]["ladderEarlyStopReason"] = INCOMING_WARSHIP_FLOOR_STOP_REASON
         return True
 
     def _solve_military_window() -> bool:

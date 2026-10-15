@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from api.analytics.fleet.types import FleetFieldKnown, FleetShipRecord, FleetShipRecordFields
+from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.incoming_warship_floor import (
     fitting_incoming_warship_transfers,
 )
+from api.analytics.military_score_inference.inference_api_payload import (
+    inference_result_to_api_payload,
+)
 from api.analytics.military_score_inference.models import CandidateAction
+from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
+from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.policy_ladder_tier_step import (
+    run_policy_ladder_tier_step,
+)
+from api.analytics.military_score_inference.ship_first_overshoot import ShipFirstOvershootPlan
+from api.analytics.military_score_inference.solver import STATUS_MINE_SCORE_RESIDUAL
+from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.models.components import Beam, Engine, Hull
+
+from tests.fixtures.military_score_inference import _observation
 
 
 def _hull(*, hull_id: int, beams: int, fighter_bays: int = 0) -> Hull:
@@ -140,3 +156,73 @@ def test_freighter_hull_does_not_count_as_a_warship_floor() -> None:
 def test_missing_donor_ledger_keeps_the_search() -> None:
     assert _transfers(records_for_player=lambda _player_id: ()) is None
     assert _transfers(records_for_player=None) is None
+
+
+def test_floor_row_finalizes_as_mine_residual_without_a_solve(sample_turn, monkeypatch) -> None:
+    def fail_solve(*_args, **_kwargs):
+        raise AssertionError("hull floor path must not call the solver")
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.solve_inference_problem",
+        fail_solve,
+    )
+
+    def catalog_from_turn(_observation, _turn, **kwargs):
+        policy_step = kwargs.get("policy_step")
+        return ActionCatalog(
+            aggregate_actions=(_action(16),),
+            ship_build_combos=(),
+            probability_buckets_by_action_id={},
+            policy_step_id=policy_step.id if policy_step is not None else "",
+            policy_step_index=kwargs.get("policy_step_index", 0),
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step.build_action_catalog_from_turn",
+        catalog_from_turn,
+    )
+    hulls, engines, beams, torpedos = _tables()
+    turn = replace(
+        sample_turn,
+        hulls=list(hulls.values()),
+        engines=list(engines.values()),
+        beams=list(beams.values()),
+        torpedos=list(torpedos.values()),
+    )
+    observation = _observation(military_delta_2x=2000, warship_delta=1)
+    state = PolicyLadderState(
+        policy_steps=tuple(resolve_tier_policies(None)[:1]),
+        ship_first_overshoot=ShipFirstOvershootPlan(
+            mode="overshoot_only",
+            cap_2x=4000,
+            overshoot_window_empty=False,
+        ),
+        load_counterparty_fleet=lambda player_id: (_record(24),) if player_id == 16 else (),
+    )
+    run_policy_ladder_tier_step(state, observation, turn, time_limit_seconds=1.0)
+    result, catalog, problem, _attempted, steps = finalize_policy_ladder_result(
+        state,
+        observation,
+        turn,
+    )
+    assert result.status == STATUS_MINE_SCORE_RESIDUAL
+    assert problem is not None
+    assert problem.military_overshoot_cap_2x == 4000
+    assert [action.action_id for action in result.solutions[0].actions] == [
+        "acquired:warship:from:16"
+    ]
+    assert catalog is not None
+    payload = inference_result_to_api_payload(
+        result,
+        catalog,
+        observation,
+        turn,
+        problem,
+        step_diagnostics=steps,
+    )
+    assert payload["summary"] == "Mine-score leftover (-1000)"
+    assert payload["status"] == STATUS_MINE_SCORE_RESIDUAL
+    emissions = payload["tierEmissions"]
+    assert isinstance(emissions, list) and emissions
+    assert emissions[0]["ladderEarlyStopReason"] == "incoming_warship_floor"
+    assert emissions[0]["timeLimited"] is False
