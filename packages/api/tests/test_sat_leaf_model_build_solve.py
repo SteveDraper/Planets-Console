@@ -10,11 +10,11 @@ from api.analytics.military_score_inference.actions import (
     build_inference_problem,
 )
 from api.analytics.military_score_inference.analytic import build_inference_observation
-from api.analytics.military_score_inference.models import InferenceProblem
-from api.analytics.military_score_inference.solver import (
-    _build_model,
+from api.analytics.military_score_inference.catalog_model import (
+    build_model,
     merge_score_equivalent_combos,
 )
+from api.analytics.military_score_inference.models import InferenceProblem
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.compute.sat_gil_overlap import (
     GIL_MIN_OVERLAP_FRACTION,
@@ -71,7 +71,7 @@ def _time_sat_leaf_split(problem: InferenceProblem) -> SatLeafSplit:
     merge_seconds = time.perf_counter() - merge_started
 
     build_started = time.perf_counter()
-    built = _build_model(problem, merged_catalog)
+    built = build_model(problem, merged_catalog)
     build_seconds = time.perf_counter() - build_started
 
     solver = cp_model.CpSolver()

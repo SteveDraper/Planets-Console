@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import gc
 from dataclasses import replace
 from unittest.mock import MagicMock
 
+from api.analytics.military_score_inference import catalog_model
+from api.analytics.military_score_inference import near_best_structural_search as near_best
 from api.analytics.military_score_inference.actions import (
     ActionCatalog,
     _apply_combo_count_constraints,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.catalog_model import (
+    build_catalog_merge_plan,
+    merge_score_equivalent_combos,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
+    InferenceProblem,
     InferenceResult,
     InferenceSolution,
     InferenceSolutionShipBuild,
@@ -25,8 +33,6 @@ from api.analytics.military_score_inference.ship_build_combos import GENERIC_FRE
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_NO_EXACT_SOLUTION,
-    build_catalog_merge_plan,
-    merge_score_equivalent_combos,
     solve_inference_problem,
 )
 from api.analytics.military_score_inference.tier_solve_cache import TierSolveCache
@@ -258,20 +264,14 @@ def test_cache_matches_direct_solves_and_builds_the_model_once(monkeypatch) -> N
     direct_blocked = solve_inference_problem(problem, seed_no_good_solutions=(held,))
     cache = TierSolveCache(build_catalog_merge_plan(catalog.ship_build_combos))
     builds = 0
-    real_build = __import__(
-        "api.analytics.military_score_inference.solver",
-        fromlist=["_build_model"],
-    )._build_model
+    real_build = catalog_model.build_model
 
     def counting_build(*args, **kwargs):
         nonlocal builds
         builds += 1
         return real_build(*args, **kwargs)
 
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.solver._build_model",
-        counting_build,
-    )
+    monkeypatch.setattr(catalog_model, "build_model", counting_build)
     first = solve_inference_problem(problem, tier_solve_cache=cache)
     blocked = solve_inference_problem(
         problem,
@@ -324,3 +324,86 @@ def test_cached_pin_matches_a_problem_with_copied_combo_bounds() -> None:
     assert [solution.ship_builds for solution in via_cache.solutions] == [
         solution.ship_builds for solution in direct.solutions
     ]
+
+
+def _open_ship_problem() -> tuple[InferenceProblem, ActionCatalog]:
+    ship = _combo("seed-ship", score=400, warship=1, upper=1)
+    catalog = _catalog(ship)
+    problem = build_inference_problem(
+        _observation(military_delta_2x=400, warship_delta=1),
+        catalog,
+        max_solutions=1,
+        time_limit_seconds=1.0,
+    )
+    return problem, catalog
+
+
+def _held_solution() -> InferenceSolution:
+    return InferenceSolution(objective_value=1, actions=())
+
+
+def _cache_with_build_counts(monkeypatch, catalog: ActionCatalog):
+    cache = TierSolveCache(build_catalog_merge_plan(catalog.ship_build_combos))
+    counts = {"builds": 0, "seeds": 0}
+    real_build = catalog_model.build_model
+    real_seed = near_best.seed_no_good_cuts_for_held_solutions
+
+    def counting_build(*args, **kwargs):
+        counts["builds"] += 1
+        return real_build(*args, **kwargs)
+
+    def counting_seed(*args, **kwargs):
+        counts["seeds"] += 1
+        return real_seed(*args, **kwargs)
+
+    monkeypatch.setattr(catalog_model, "build_model", counting_build)
+    monkeypatch.setattr(near_best, "seed_no_good_cuts_for_held_solutions", counting_seed)
+    return cache, counts
+
+
+def test_same_held_solutions_reuse_the_built_model(monkeypatch) -> None:
+    problem, catalog = _open_ship_problem()
+    cache, counts = _cache_with_build_counts(monkeypatch, catalog)
+    held = _held_solution()
+    cache.fresh_model(problem, None, 0, (held,))
+    cache.fresh_model(problem, None, 0, (held,))
+    assert counts == {"builds": 1, "seeds": 1}
+
+
+def test_different_held_solutions_miss_the_seeded_model(monkeypatch) -> None:
+    problem, catalog = _open_ship_problem()
+    cache, counts = _cache_with_build_counts(monkeypatch, catalog)
+    cache.fresh_model(problem, None, 0, (_held_solution(),))
+    cache.fresh_model(problem, None, 0, (_held_solution(),))
+    assert counts == {"builds": 1, "seeds": 2}
+
+
+def test_replaced_solution_misses_the_seeded_model(monkeypatch) -> None:
+    problem, catalog = _open_ship_problem()
+    cache, counts = _cache_with_build_counts(monkeypatch, catalog)
+    held = _held_solution()
+    cache.fresh_model(problem, None, 0, (held,))
+    replaced = replace(held, objective_value=held.objective_value)
+    assert replaced == held
+    assert replaced.solution_id != held.solution_id
+    cache.fresh_model(problem, None, 0, (replaced,))
+    assert counts == {"builds": 1, "seeds": 2}
+
+
+def test_reallocated_solution_misses_the_seeded_model(monkeypatch) -> None:
+    problem, catalog = _open_ship_problem()
+    cache, counts = _cache_with_build_counts(monkeypatch, catalog)
+    held = _held_solution()
+    address = id(held)
+    original_id = held.solution_id
+    cache.fresh_model(problem, None, 0, (held,))
+    del held
+    gc.collect()
+    reborn = _held_solution()
+    for _ in range(1000):
+        if id(reborn) == address:
+            break
+        reborn = _held_solution()
+    assert reborn.solution_id != original_id
+    cache.fresh_model(problem, None, 0, (reborn,))
+    assert counts == {"builds": 1, "seeds": 2}

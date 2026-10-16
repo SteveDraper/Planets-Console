@@ -1,6 +1,7 @@
 """Label expansion ranks each ship class, then sums only the top labelings."""
 
 from api.analytics.military_score_inference import solver
+from api.analytics.military_score_inference.catalog_model import merge_score_equivalent_combos
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -8,7 +9,6 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.solver import (
     _expand_score_equivalent_solutions,
-    merge_score_equivalent_combos,
     solution_rank_objective,
 )
 

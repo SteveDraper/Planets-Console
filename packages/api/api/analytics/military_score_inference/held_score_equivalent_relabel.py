@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.actions import (
     ActionCatalog,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.catalog_model import merge_score_equivalent_combos
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceSolution,
@@ -28,10 +29,7 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
     SolutionSignature,
     solution_signature,
 )
-from api.analytics.military_score_inference.solver import (
-    expand_structural_hits_to_top_k,
-    merge_score_equivalent_combos,
-)
+from api.analytics.military_score_inference.solver import expand_structural_hits_to_top_k
 
 
 def relabeled_solutions_for_widened_classes(

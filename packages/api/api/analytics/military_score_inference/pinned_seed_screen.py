@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from itertools import product
 
+from api.analytics.military_score_inference.catalog_model import CatalogMergePlan, MergeGroup
 from api.analytics.military_score_inference.military_score_window import (
     ExactMilitaryScoreWindow,
     MilitaryWindowBounds,
@@ -15,7 +16,6 @@ from api.analytics.military_score_inference.models import (
     ShipBuildCombo,
     candidate_military_subtotal_bounds_2x,
 )
-from api.analytics.military_score_inference.solver import CatalogMergePlan, _MergeGroup
 
 # Neighborhood domains are tiny (a pin, or pin +/- 1). Past this many combinations
 # the screen uses an independent range box instead of enumerating counts.
@@ -123,7 +123,7 @@ def pinned_counts_cannot_explain(
     if not fixed_combo_counts:
         return False
 
-    open_domains: list[tuple[_MergeGroup, int, int]] = []
+    open_domains: list[tuple[MergeGroup, int, int]] = []
     seen_groups: set[int] = set()
     for combo_id in fixed_combo_counts:
         index = plan.member_group_index.get(combo_id)
@@ -197,7 +197,7 @@ def pinned_counts_cannot_explain(
 
 
 def _range_box_cannot_explain(
-    open_domains: list[tuple[_MergeGroup, int, int]],
+    open_domains: list[tuple[MergeGroup, int, int]],
     observation: InferenceObservation,
     window: MilitaryWindowBounds,
     aggregate_warships: tuple[int, int],
@@ -237,7 +237,7 @@ def _range_box_cannot_explain(
 
 
 def _sum_scaled(
-    open_domains: list[tuple[_MergeGroup, int, int]],
+    open_domains: list[tuple[MergeGroup, int, int]],
     attribute: str,
 ) -> tuple[int, int]:
     lower = 0

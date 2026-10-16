@@ -11,6 +11,7 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog_from_turn,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.catalog_model import build_catalog_merge_plan
 from api.analytics.military_score_inference.collision_hull_widen import (
     CollisionHullWidenPlan,
     load_twins_for_turn,
@@ -95,7 +96,6 @@ from api.analytics.military_score_inference.solver import (
     STATUS_MINE_SCORE_RESIDUAL,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
-    build_catalog_merge_plan,
     solve_inference_problem,
 )
 from api.analytics.military_score_inference.tier_solve_cache import TierSolveCache

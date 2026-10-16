@@ -197,6 +197,7 @@ class _PhaseProbe:
     def install(self) -> None:
         from api.analytics.military_score_inference import (
             actions,
+            catalog_model,
             inference_api_payload,
             policy_ladder,
             policy_ladder_tier_step,
@@ -233,7 +234,7 @@ class _PhaseProbe:
             )
             return status
 
-        original_build = solver._build_model
+        original_build = catalog_model.build_model
 
         def timed_build(problem, merged_combo_catalog):
             started = time.perf_counter()
@@ -316,14 +317,14 @@ class _PhaseProbe:
             )
             return catalog
 
-        original_merge = solver.merge_score_equivalent_combos
+        original_merge = catalog_model.merge_score_equivalent_combos
         original_expand = solver.expand_structural_hits_to_top_k
         cp_model.CpSolver.solve = timed_solve
-        solver._build_model = timed_build
+        catalog_model.build_model = timed_build
         policy_ladder_tier_step.probe_degrade_aggregate_rewrites = timed_probe
         policy_ladder_tier_step.solve_inference_problem = timed_solve_problem
         policy_ladder_tier_step.build_action_catalog_from_turn = timed_catalog
-        solver.merge_score_equivalent_combos = timed_span("merge", original_merge)
+        catalog_model.merge_score_equivalent_combos = timed_span("merge", original_merge)
         solver.expand_structural_hits_to_top_k = timed_span("expand", original_expand)
         original_build_problem = policy_ladder_tier_step.build_inference_problem
         original_constrain = actions._apply_combo_count_constraints
@@ -440,6 +441,7 @@ class _PhaseProbe:
             completion_patches.append((module, attr, original))
         self._completion_patches = completion_patches
         self._solver_module = solver
+        self._catalog_model = catalog_model
         self._original_build = original_build
         self._tier_step_module = policy_ladder_tier_step
         self._original_probe = original_probe
@@ -470,11 +472,11 @@ class _PhaseProbe:
         if not self._installed:
             return
         cp_model.CpSolver.solve = self._original_solve
-        self._solver_module._build_model = self._original_build
+        self._catalog_model.build_model = self._original_build
         self._tier_step_module.probe_degrade_aggregate_rewrites = self._original_probe
         self._tier_step_module.solve_inference_problem = self._original_solve_problem
         self._tier_step_module.build_action_catalog_from_turn = self._original_catalog
-        self._solver_module.merge_score_equivalent_combos = self._original_merge
+        self._catalog_model.merge_score_equivalent_combos = self._original_merge
         self._solver_module.expand_structural_hits_to_top_k = self._original_expand
         self._tier_step_module.leftover_military_2x = self._original_step_leftover
         self._family_module.leftover_military_2x = self._original_family_leftover
