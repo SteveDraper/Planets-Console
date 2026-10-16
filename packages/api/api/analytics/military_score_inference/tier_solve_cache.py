@@ -12,12 +12,6 @@ from api.analytics.military_score_inference.catalog_model import (
     CatalogMergePlan,
     ComboPins,
 )
-from api.analytics.military_score_inference.military_score_window import (
-    BandMilitaryScoreWindow,
-    ExactMilitaryScoreWindow,
-    MilitaryScoreWindow,
-    OvershootMilitaryScoreWindow,
-)
 from api.analytics.military_score_inference.models import InferenceProblem, InferenceSolution
 
 
@@ -41,7 +35,7 @@ class TierSolveCache:
     ) -> tuple[BuiltModel, int, int]:
         """Return an unsolved clone plus the seed no-good counts baked into it."""
         clean_key = (
-            _window_key(problem.military_score_window),
+            problem.military_score_window,
             ("open",) if pins is None else pins.cache_key(),
         )
         clean = self._clean.get(clean_key)
@@ -79,13 +73,3 @@ class TierSolve:
 
     cache: TierSolveCache
     pins: ComboPins | None = None
-
-
-def _window_key(window: MilitaryScoreWindow) -> tuple[object, ...]:
-    if isinstance(window, BandMilitaryScoreWindow):
-        return ("band", window.alpha)
-    if isinstance(window, OvershootMilitaryScoreWindow):
-        return ("overshoot", window.cap_2x)
-    if isinstance(window, ExactMilitaryScoreWindow):
-        return ("exact",)
-    return ("exact",)

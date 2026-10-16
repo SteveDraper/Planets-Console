@@ -230,13 +230,6 @@ def build_catalog_merge_plan(combos: tuple[ShipBuildCombo, ...]) -> CatalogMerge
     )
 
 
-def merge_score_equivalent_combos(
-    combos: tuple[ShipBuildCombo, ...],
-) -> MergedComboCatalog:
-    """Merge score-equivalent combos for CP-SAT feasibility; members kept for extraction."""
-    return build_catalog_merge_plan(combos).unconstrained
-
-
 def build_model(
     problem: InferenceProblem,
     merged_combo_catalog: MergedComboCatalog,

@@ -516,7 +516,7 @@ def test_repeated_solves_each_spend_their_own_deterministic_time(monkeypatch):
             time_limit_seconds=1.0,
             solve_clip=EffortSolveClip(max_deterministic_time=100.0),
         ),
-        successive_structural_search=True,
+        search_mode=nbs.StructuralSearchMode.SUCCESSIVE,
     )
 
     one_solve = calls["one_solve"]

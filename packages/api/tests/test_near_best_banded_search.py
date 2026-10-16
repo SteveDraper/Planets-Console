@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.models import (
     WallSolveClip,
 )
 from api.analytics.military_score_inference.near_best_structural_search import (
+    StructuralSearchMode,
     StructuralSearchProgress,
     sparse_assignment_key,
 )
@@ -83,7 +84,7 @@ def _ranked(
     )
 
 
-def _pipeline(*, successive_search: bool) -> tuple[list[InferenceSolution], int]:
+def _pipeline(*, successive_walk: bool) -> tuple[list[InferenceSolution], int]:
     observation = _observation()
     catalog = _catalog()
     held: list[InferenceSolution] = []
@@ -98,6 +99,14 @@ def _pipeline(*, successive_search: bool) -> tuple[list[InferenceSolution], int]
         ship_builds=(InferenceSolutionShipBuild(combo_id="partial", label="partial", count=1),),
     )
     cache = TierSolveCache(build_catalog_merge_plan(catalog.ship_build_combos))
+    seed_mode = (
+        StructuralSearchMode.SUCCESSIVE if successive_walk else StructuralSearchMode.FIRST_HIT_ONLY
+    )
+    catalog_mode = (
+        StructuralSearchMode.SUCCESSIVE
+        if successive_walk
+        else StructuralSearchMode.BAND_ENUMERATION
+    )
     seed_result, _seed_problem = _solve_seed_progression(
         observation,
         catalog,
@@ -106,7 +115,7 @@ def _pipeline(*, successive_search: bool) -> tuple[list[InferenceSolution], int]
         next_solve_clip=lambda: WallSolveClip(max_time_in_seconds=5.0),
         on_solution=admit,
         tier_solve_cache=cache,
-        successive_structural_search=successive_search,
+        search_mode=seed_mode,
     )
     assert seed_result is not None
     _solve_catalog(
@@ -116,7 +125,7 @@ def _pipeline(*, successive_search: bool) -> tuple[list[InferenceSolution], int]
         solve_clip=WallSolveClip(max_time_in_seconds=5.0),
         on_solution=admit,
         tier_solve_cache=cache,
-        successive_structural_search=successive_search,
+        search_mode=catalog_mode,
     )
     return held, int(seed_result.diagnostics["structural_hit_count"])
 
@@ -128,7 +137,10 @@ def test_seed_first_hit_and_band_enumeration_match_successive_results() -> None:
     a seed at its first structural hit and enumerates the free-search band once.
     """
     problem = build_inference_problem(_observation(), _catalog(), max_solutions=20)
-    successive = solve_inference_problem(problem, successive_structural_search=True)
+    successive = solve_inference_problem(
+        problem,
+        search_mode=StructuralSearchMode.SUCCESSIVE,
+    )
     enumerated = solve_inference_problem(problem)
     assert int(successive.diagnostics["structural_hit_count"]) > 1
     assert _ranked(enumerated.solutions) == _ranked(successive.solutions)
@@ -138,8 +150,8 @@ def test_seed_first_hit_and_band_enumeration_match_successive_results() -> None:
     )
     assert enumerated.diagnostics["stopped_reason"] == successive.diagnostics["stopped_reason"]
 
-    baseline_held, baseline_seed_hits = _pipeline(successive_search=True)
-    optimized_held, optimized_seed_hits = _pipeline(successive_search=False)
+    baseline_held, baseline_seed_hits = _pipeline(successive_walk=True)
+    optimized_held, optimized_seed_hits = _pipeline(successive_walk=False)
     assert baseline_seed_hits > 1
     assert optimized_seed_hits == 1
     assert _ranked(optimized_held) == _ranked(baseline_held)

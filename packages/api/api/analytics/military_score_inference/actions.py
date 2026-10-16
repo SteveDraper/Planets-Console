@@ -424,7 +424,6 @@ def build_action_catalog(
             config=combo_config,
             prior_catalog=prior_catalog,
             beam_slot_counts=resolved_policy_step.beam_slot_counts,
-            launcher_slot_counts=resolved_policy_step.launcher_slot_counts,
             extra_warship_capacity=transfer_fragment.extra_warship_capacity,
             extra_freighter_capacity=transfer_fragment.extra_freighter_capacity,
             reserved_incoming_warships=transfer_fragment.reserved_incoming_warships,

@@ -244,14 +244,14 @@ class PhaseProbe:
             )
             return catalog
 
-        original_merge = catalog_model.merge_score_equivalent_combos
+        original_merge = catalog_model.build_catalog_merge_plan
         original_expand = solver.expand_structural_hits_to_top_k
         cp_model.CpSolver.solve = timed_solve
         catalog_model.build_model = timed_build
         policy_ladder_tier_step.probe_degrade_aggregate_rewrites = timed_probe
         policy_ladder_tier_step.solve_inference_problem = timed_solve_problem
         policy_ladder_tier_step.build_action_catalog_from_turn = timed_catalog
-        catalog_model.merge_score_equivalent_combos = timed_span("merge", original_merge)
+        catalog_model.build_catalog_merge_plan = timed_span("merge", original_merge)
         solver.expand_structural_hits_to_top_k = timed_span("expand", original_expand)
         original_build_problem = policy_ladder_tier_step.build_inference_problem
         original_validate = solver._validate_problem
@@ -385,7 +385,7 @@ class PhaseProbe:
         self._tier_step_module.probe_degrade_aggregate_rewrites = self._original_probe
         self._tier_step_module.solve_inference_problem = self._original_solve_problem
         self._tier_step_module.build_action_catalog_from_turn = self._original_catalog
-        self._catalog_model.merge_score_equivalent_combos = self._original_merge
+        self._catalog_model.build_catalog_merge_plan = self._original_merge
         self._solver_module.expand_structural_hits_to_top_k = self._original_expand
         self._tier_step_module.leftover_military_2x = self._original_step_leftover
         self._family_module.leftover_military_2x = self._original_family_leftover

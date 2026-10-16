@@ -1,7 +1,7 @@
 """Label expansion ranks each ship class, then sums only the top labelings."""
 
 from api.analytics.military_score_inference import solver
-from api.analytics.military_score_inference.catalog_model import merge_score_equivalent_combos
+from api.analytics.military_score_inference.catalog_model import build_catalog_merge_plan
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceProblem,
@@ -99,7 +99,7 @@ def test_partial_slot_penalty_outranks_a_higher_prior_in_the_best_pair() -> None
         ),
         max_solutions=2,
     )
-    merged = merge_score_equivalent_combos(problem.ship_build_combos)
+    merged = build_catalog_merge_plan(problem.ship_build_combos).unconstrained
     combo_counts = dict.fromkeys(merged.members_by_merged_id, 1)
     solutions = _expand_score_equivalent_solutions(
         problem,
@@ -138,7 +138,7 @@ def test_top_k_labelings_omit_fittings_outside_each_class_prefix() -> None:
         ship_build_combos=tuple(classes),
         max_solutions=3,
     )
-    merged = merge_score_equivalent_combos(problem.ship_build_combos)
+    merged = build_catalog_merge_plan(problem.ship_build_combos).unconstrained
     combo_counts = dict.fromkeys(merged.members_by_merged_id, 1)
     solutions = _expand_score_equivalent_solutions(
         problem,
@@ -189,7 +189,7 @@ def test_top_k_expansion_scores_each_fitting_and_keeps_only_k_solutions(monkeypa
         ship_build_combos=tuple(fittings),
         max_solutions=top_k,
     )
-    merged = merge_score_equivalent_combos(problem.ship_build_combos)
+    merged = build_catalog_merge_plan(problem.ship_build_combos).unconstrained
     assert sorted(len(members) for members in merged.members_by_merged_id.values()) == sorted(
         class_sizes
     )
@@ -265,7 +265,7 @@ def test_equal_sum_labelings_emit_in_ascending_index_tuple_order() -> None:
         ship_build_combos=class_a + class_b,
         max_solutions=5,
     )
-    merged = merge_score_equivalent_combos(problem.ship_build_combos)
+    merged = build_catalog_merge_plan(problem.ship_build_combos).unconstrained
     combo_counts = dict.fromkeys(merged.members_by_merged_id, 1)
     expected = [
         ("c", "y"),

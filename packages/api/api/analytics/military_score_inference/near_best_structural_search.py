@@ -11,6 +11,7 @@ import os
 import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Protocol
 
 from ortools.sat.python import cp_model
@@ -596,22 +597,48 @@ def _maximize_structural_hits(
     return tier_max_objective
 
 
+class StructuralSearchMode(Enum):
+    """How one catalog solve collects structural hits.
+
+    ``BAND_ENUMERATION`` maximizes once, then enumerates the near-best band.
+    ``FIRST_HIT_ONLY`` stops after the first structural hit (seed passes).
+    ``SUCCESSIVE`` re-solves after every no-good so comparison tests have a
+    reference walk.
+    """
+
+    BAND_ENUMERATION = "band_enumeration"
+    FIRST_HIT_ONLY = "first_hit_only"
+    SUCCESSIVE = "successive"
+
+
+def _structural_search_limits(
+    mode: StructuralSearchMode,
+    *,
+    max_solutions: int,
+) -> tuple[bool, int, int]:
+    """Band flag, maximize cap, and final hit cap for ``mode``."""
+    if mode is StructuralSearchMode.FIRST_HIT_ONLY:
+        cap = min(max_solutions, 1)
+        return False, cap, cap
+    if mode is StructuralSearchMode.BAND_ENUMERATION and max_solutions > 1:
+        return True, 1, max_solutions
+    return False, max_solutions, max_solutions
+
+
 def collect_near_best_structural_hits(
     problem: InferenceProblem,
     *,
     built: BuiltModel,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     cancel_token: InferenceCancelToken | None = None,
-    structural_hit_limit: int | None = None,
-    successive_search: bool = False,
+    search_mode: StructuralSearchMode = StructuralSearchMode.BAND_ENUMERATION,
 ) -> NearBestStructuralSearchOutcome:
     """Collect distinct merged signatures within the near-best objective band.
 
-    One maximization learns the best ranking ``Z*``. When more than one hit is
-    wanted, the rest of the band ``[Z*-T, Z*]`` is enumerated in that same model
-    instead of re-solving once per hit. ``structural_hit_limit`` stops after that
-    many hits (seed passes pass 1). ``successive_search`` keeps the per-hit
-    re-solve walk so tests can compare it with the band enumeration.
+    One maximization learns the best ranking ``Z*``. ``BAND_ENUMERATION`` then
+    enumerates ``[Z*-T, Z*]`` in that same model when more than one hit is
+    wanted. ``FIRST_HIT_ONLY`` stops after the first hit. ``SUCCESSIVE``
+    re-solves once per hit.
     """
     if seed_no_good_solutions:
         seed_no_goods_applied, seed_no_goods_skipped = seed_no_good_cuts_for_held_solutions(
@@ -633,16 +660,10 @@ def collect_near_best_structural_hits(
         ),
         started_at=time.monotonic(),
     )
-    # Seed passes ask for one hit. A completed free search enumerates the band
-    # after that first maximization instead of restarting once per hit.
-    enumerate_band = (
-        structural_hit_limit is None and not successive_search and problem.max_solutions > 1
+    enumerate_band, search_cap, hit_cap = _structural_search_limits(
+        search_mode,
+        max_solutions=problem.max_solutions,
     )
-    if structural_hit_limit is None:
-        search_cap = 1 if enumerate_band else problem.max_solutions
-    else:
-        search_cap = min(problem.max_solutions, structural_hit_limit)
-    hit_cap = problem.max_solutions if enumerate_band else search_cap
 
     tier_max_objective = _maximize_structural_hits(
         problem,

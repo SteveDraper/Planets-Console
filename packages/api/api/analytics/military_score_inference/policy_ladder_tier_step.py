@@ -52,6 +52,9 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
 )
+from api.analytics.military_score_inference.near_best_structural_search import (
+    StructuralSearchMode,
+)
 from api.analytics.military_score_inference.pinned_seed_screen import (
     negative_band_upper_bound_is_unreachable,
     pinned_counts_cannot_explain,
@@ -138,8 +141,7 @@ def _solve_catalog(
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
     tier_solve_cache: TierSolveCache,
-    structural_hit_limit: int | None = None,
-    successive_structural_search: bool = False,
+    search_mode: StructuralSearchMode = StructuralSearchMode.BAND_ENUMERATION,
 ) -> tuple[InferenceResult, InferenceProblem]:
     problem = build_inference_problem(
         observation,
@@ -156,8 +158,7 @@ def _solve_catalog(
         on_solution=on_solution,
         seed_no_good_solutions=seed_no_good_solutions,
         tier_solve=TierSolve(cache=tier_solve_cache, pins=pins),
-        structural_hit_limit=structural_hit_limit,
-        successive_structural_search=successive_structural_search,
+        search_mode=search_mode,
     )
     _charge_effort_budget(budget_run, result)
     return result, problem
@@ -201,20 +202,18 @@ def _solve_seed_progression(
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
     tier_solve_cache: TierSolveCache,
-    successive_structural_search: bool = False,
+    search_mode: StructuralSearchMode = StructuralSearchMode.FIRST_HIT_ONLY,
 ) -> tuple[InferenceResult | None, InferenceProblem | None]:
     """Run neighborhood then unfixed catalog solves under one shared clip.
 
-    Each sub-solve samples ``next_solve_clip()`` at call time so successive
-    passes cannot each claim the full tier allowance independently. A seed pass
-    stops at its first structural hit; the tier's own catalog search collects
-    the near-best set. ``successive_structural_search`` restores the full
-    per-hit walk for comparison tests.
+    Each sub-solve samples ``next_solve_clip()`` at call time so later passes
+    cannot each claim the full tier allowance independently. Seed passes
+    default to ``StructuralSearchMode.FIRST_HIT_ONLY``. ``SUCCESSIVE`` keeps
+    the per-hit re-solve walk used by comparison tests.
     """
     fixed_counts = _combo_counts_from_solution(seed)
     if not fixed_counts:
         return None, None
-    seed_hit_limit = None if successive_structural_search else 1
 
     def _abort() -> bool:
         if should_stop is not None and should_stop():
@@ -253,8 +252,7 @@ def _solve_seed_progression(
             seed_no_good_solutions=seed_no_good_solutions,
             budget_run=budget_run,
             tier_solve_cache=tier_solve_cache,
-            structural_hit_limit=seed_hit_limit,
-            successive_structural_search=successive_structural_search,
+            search_mode=search_mode,
         )
         if result.status == STATUS_STOPPED:
             return result, problem
@@ -276,8 +274,7 @@ def _solve_seed_progression(
         budget_run=budget_run,
         seed_no_good_solutions=seed_no_good_solutions,
         tier_solve_cache=tier_solve_cache,
-        structural_hit_limit=seed_hit_limit,
-        successive_structural_search=successive_structural_search,
+        search_mode=search_mode,
     )
     if result.solutions or result.status == STATUS_STOPPED:
         return result, problem

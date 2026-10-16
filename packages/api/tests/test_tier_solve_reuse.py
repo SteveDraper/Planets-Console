@@ -15,8 +15,12 @@ from api.analytics.military_score_inference.actions import (
 from api.analytics.military_score_inference.catalog_model import (
     ComboPins,
     build_catalog_merge_plan,
-    merge_score_equivalent_combos,
     pinned_member_bounds,
+)
+from api.analytics.military_score_inference.military_score_window import (
+    BandMilitaryScoreWindow,
+    ExactMilitaryScoreWindow,
+    OvershootMilitaryScoreWindow,
 )
 from api.analytics.military_score_inference.models import (
     CandidateAction,
@@ -30,7 +34,6 @@ from api.analytics.military_score_inference.models import (
 )
 from api.analytics.military_score_inference.pinned_seed_screen import pinned_counts_cannot_explain
 from api.analytics.military_score_inference.policy_ladder_tier_step import _solve_seed_progression
-from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_NO_EXACT_SOLUTION,
@@ -98,36 +101,6 @@ def _group_bounds(plan, catalog, member_id: str) -> tuple[int, int]:
     prototype_id = group.prototype.combo_id
     match = next(combo for combo in catalog.combos if combo.combo_id == prototype_id)
     return match.lower_bound, match.upper_bound
-
-
-def _merged_signature(catalog) -> list[tuple[object, ...]]:
-    return [
-        (
-            combo.combo_id,
-            combo.lower_bound,
-            combo.upper_bound,
-            combo.probability_weight,
-            combo.labels,
-            tuple(member.combo_id for member in catalog.members_by_merged_id[combo.combo_id]),
-        )
-        for combo in catalog.combos
-    ]
-
-
-def test_merge_plan_matches_score_equivalent_merge() -> None:
-    freighter = replace(
-        _combo(GENERIC_FREIGHTER_COMBO_ID, score=0, freighter=1, upper=3, weight=5, hull_id=0),
-        labels=("Freighter",),
-    )
-    light = _combo("light", score=10, warship=1, upper=4, weight=1, hull_id=2)
-    heavy_label = _combo("heavy", score=10, warship=1, upper=6, weight=9, hull_id=3)
-    capital = _combo("capital", score=20, warship=1, upper=2, weight=3, hull_id=4)
-    combos = (light, freighter, heavy_label, capital)
-    plan = build_catalog_merge_plan(combos)
-
-    assert _merged_signature(plan.unconstrained) == _merged_signature(
-        merge_score_equivalent_combos(combos)
-    )
 
 
 def test_catalog_for_pins_bounds_follow_the_neighborhood_rule() -> None:
@@ -439,3 +412,26 @@ def test_reallocated_solution_misses_the_seeded_model(monkeypatch) -> None:
     assert reborn.solution_id != original_id
     cache.fresh_model(problem, None, (reborn,))
     assert counts == {"builds": 1, "seeds": 2}
+
+
+def test_equal_windows_share_a_built_model_and_different_windows_do_not(monkeypatch) -> None:
+    problem, catalog = _open_ship_problem()
+    cache, counts = _cache_with_build_counts(monkeypatch, catalog)
+
+    def with_window(window):
+        return replace(problem, military_score_window=window)
+
+    cache.fresh_model(with_window(ExactMilitaryScoreWindow()), None, ())
+    cache.fresh_model(with_window(ExactMilitaryScoreWindow()), None, ())
+    assert counts["builds"] == 1
+
+    cache.fresh_model(with_window(BandMilitaryScoreWindow(alpha=10)), None, ())
+    cache.fresh_model(with_window(BandMilitaryScoreWindow(alpha=10)), None, ())
+    cache.fresh_model(with_window(BandMilitaryScoreWindow(alpha=40)), None, ())
+    assert counts["builds"] == 3
+
+    cache.fresh_model(with_window(OvershootMilitaryScoreWindow(cap_2x=20)), None, ())
+    cache.fresh_model(with_window(OvershootMilitaryScoreWindow(cap_2x=20)), None, ())
+    cache.fresh_model(with_window(OvershootMilitaryScoreWindow(cap_2x=None)), None, ())
+    cache.fresh_model(with_window(OvershootMilitaryScoreWindow()), None, ())
+    assert counts["builds"] == 5

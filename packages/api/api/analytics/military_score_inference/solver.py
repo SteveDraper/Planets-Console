@@ -23,6 +23,7 @@ from api.analytics.military_score_inference.models import (
     ShipBuildCombo,
 )
 from api.analytics.military_score_inference.near_best_structural_search import (
+    StructuralSearchMode,
     collect_near_best_structural_hits,
     merged_assignment_from_solution,  # noqa: F401 -- re-export for stable solver import path
 )
@@ -474,8 +475,7 @@ def solve_inference_problem(
     cancel_token: InferenceCancelToken | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     tier_solve: TierSolve | None = None,
-    structural_hit_limit: int | None = None,
-    successive_structural_search: bool = False,
+    search_mode: StructuralSearchMode = StructuralSearchMode.BAND_ENUMERATION,
 ) -> InferenceResult:
     """Return up to max_solutions ranked feasible explanations for one player turn.
 
@@ -539,9 +539,9 @@ def solve_inference_problem(
         search_seeds: Sequence[InferenceSolution] = ()
         prepared_seed_counts = (seed_applied, seed_skipped)
     else:
-        merged_combo_catalog = catalog_model.merge_score_equivalent_combos(
+        merged_combo_catalog = catalog_model.build_catalog_merge_plan(
             problem.ship_build_combos
-        )
+        ).unconstrained
         built_model = catalog_model.build_model(problem, merged_combo_catalog)
         merged_combo_catalog = built_model.merged_combo_catalog
         search_seeds = seed_no_good_solutions
@@ -552,8 +552,7 @@ def solve_inference_problem(
         built=built_model,
         seed_no_good_solutions=search_seeds,
         cancel_token=cancel_token,
-        structural_hit_limit=structural_hit_limit,
-        successive_search=successive_structural_search,
+        search_mode=search_mode,
     )
 
     # Hang fuse: drop solutions before admission. Charge path raises after this.
