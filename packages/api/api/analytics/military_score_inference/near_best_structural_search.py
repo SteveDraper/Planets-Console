@@ -10,11 +10,12 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from ortools.sat.python import cp_model
 
+from api.analytics.military_score_inference.catalog_model import BuiltModel
 from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceSolution,
@@ -54,6 +55,29 @@ class NearBestStructuralSearchOutcome:
     deterministic_time: float = 0.0
     # Sum of ``invoke_cp_sat_solve`` wall only -- hang-fuse / row charge clock.
     solve_wall_seconds: float = 0.0
+
+
+@dataclass
+class StructuralSearchProgress:
+    """Hits, stop, and effort shared by maximization and band enumeration."""
+
+    structural_hits: list[tuple[dict[str, int], dict[str, int]]] = field(default_factory=list)
+    stopped_reason: str = "exhausted"
+    time_limited: bool = False
+    hang_fuse_hit: bool = False
+    last_solver_status: int = cp_model.UNKNOWN
+    effort_spent: float = 0.0
+    solve_wall_seconds: float = 0.0
+    top_solution_bucket_counts: dict[str, tuple[int, ...]] = field(default_factory=dict)
+
+    def apply_hang_fuse_fail_closed(self) -> None:
+        """A hang fuse admits nothing found during this search."""
+        if not self.hang_fuse_hit:
+            return
+        self.structural_hits = []
+        self.top_solution_bucket_counts = {}
+        self.time_limited = False
+        self.stopped_reason = "hang_fuse"
 
 
 def configured_sat_search_workers() -> int:
@@ -347,67 +371,68 @@ def _solver_effort(solver: cp_model.CpSolver) -> float:
         return 0.0
 
 
+@dataclass(frozen=True)
+class _SearchClock:
+    """Clip and monotonic start that budget each ``Solve()``."""
+
+    base_clip: SolveClip
+    started_at: float
+
+    def elapsed_seconds(self) -> float:
+        return time.monotonic() - self.started_at
+
+
+@dataclass(frozen=True)
+class _BandOrigin:
+    """Maximization hit that anchors the near-best objective band."""
+
+    objective: int
+    hit: tuple[dict[str, int], dict[str, int]]
+
+
 def _enumerate_objective_band(
     problem: InferenceProblem,
+    built: BuiltModel,
+    progress: StructuralSearchProgress,
+    clock: _SearchClock,
+    origin: _BandOrigin,
     *,
-    model: cp_model.CpModel,
-    action_count_vars: dict[str, cp_model.IntVar],
-    combo_count_vars: dict[str, cp_model.IntVar],
-    objective_var: cp_model.IntVar,
-    merged_combo_catalog: SupportsMergedComboCatalog,
-    base_clip: SolveClip,
-    started_at: float,
-    effort_spent: float,
-    solve_wall_seconds: float,
-    first_objective: int,
-    first_hit: tuple[dict[str, int], dict[str, int]],
     hit_cap: int,
     cancel_token: InferenceCancelToken | None,
-    last_solver_status: int,
-) -> tuple[
-    list[tuple[dict[str, int], dict[str, int]]],
-    str,
-    bool,
-    bool,
-    int,
-    float,
-    float,
-    dict[str, tuple[int, ...]],
-]:
+) -> None:
     """Enumerate ``[Z*-T, Z*]`` once and keep the best ``hit_cap`` signatures.
 
     The caller has already maximized once and posted the band plus a no-good for
     that first assignment. Clearing the objective makes the follow-up a
-    satisfiability enumeration of the remaining band.
+    satisfiability enumeration of the remaining band. Stop, effort, and hits
+    are recorded on ``progress``.
     """
-    advance = base_clip.next_solve(
-        effort_spent=effort_spent,
-        elapsed_seconds=time.monotonic() - started_at,
-        solve_wall_seconds=solve_wall_seconds,
+    advance = clock.base_clip.next_solve(
+        effort_spent=progress.effort_spent,
+        elapsed_seconds=clock.elapsed_seconds(),
+        solve_wall_seconds=progress.solve_wall_seconds,
     )
-    first_only = [first_hit]
-    first_bins = _ranking_bin_indicators_by_action_id(problem, first_hit[0])
     if advance.clip is None or advance.hang_fuse:
-        return (
-            [] if advance.hang_fuse else first_only,
-            "hang_fuse" if advance.hang_fuse else "time_budget",
-            False if advance.hang_fuse else True,
-            bool(advance.hang_fuse),
-            last_solver_status,
-            effort_spent,
-            solve_wall_seconds,
-            {} if advance.hang_fuse else first_bins,
+        if advance.hang_fuse:
+            progress.hang_fuse_hit = True
+            return
+        progress.structural_hits = [origin.hit]
+        progress.stopped_reason = "time_budget"
+        progress.time_limited = True
+        progress.top_solution_bucket_counts = _ranking_bin_indicators_by_action_id(
+            problem, origin.hit[0]
         )
+        return
 
-    model.clear_objective()
+    built.model.clear_objective()
     collector = _ObjectiveBandCollector(
         problem,
-        merged_combo_catalog,
-        action_count_vars,
-        combo_count_vars,
-        objective_var,
-        first_objective=first_objective,
-        first_hit=first_hit,
+        built.merged_combo_catalog,
+        built.action_count_vars,
+        built.combo_count_vars,
+        built.objective_var,
+        first_objective=origin.objective,
+        first_hit=origin.hit,
         hit_cap=hit_cap,
         cancel_token=cancel_token,
     )
@@ -416,77 +441,165 @@ def _enumerate_objective_band(
     solver.parameters.num_workers = configured_sat_search_workers()
     solver.parameters.enumerate_all_solutions = True
     wall_before = time.monotonic()
-    status = invoke_cp_sat_solve(solver, model, collector)
+    status = invoke_cp_sat_solve(solver, built.model, collector)
     wall_delta = time.monotonic() - wall_before
-    effort_spent += _solver_effort(solver)
-    solve_wall_seconds += wall_delta
+    progress.last_solver_status = status
+    progress.effort_spent += _solver_effort(solver)
+    progress.solve_wall_seconds += wall_delta
     hits = [(actions, combos) for _objective, actions, combos in collector.best]
-    best_bins = _ranking_bin_indicators_by_action_id(problem, hits[0][0]) if hits else {}
+    progress.structural_hits = hits
+    progress.top_solution_bucket_counts = (
+        _ranking_bin_indicators_by_action_id(problem, hits[0][0]) if hits else {}
+    )
 
     if collector.cancelled or (cancel_token is not None and cancel_token.is_cancelled()):
-        return (
-            hits,
-            "cancelled",
-            False,
-            False,
-            status,
-            effort_spent,
-            solve_wall_seconds,
-            best_bins,
-        )
+        progress.stopped_reason = "cancelled"
+        progress.time_limited = False
+        return
 
-    decision = base_clip.after_solve(
+    decision = clock.base_clip.after_solve(
         solver_status=status,
-        effort_spent=effort_spent,
-        solve_wall_seconds=solve_wall_seconds,
-        elapsed_seconds=time.monotonic() - started_at,
+        effort_spent=progress.effort_spent,
+        solve_wall_seconds=progress.solve_wall_seconds,
+        elapsed_seconds=clock.elapsed_seconds(),
         has_structural_hits=bool(hits),
     )
     if decision.hang_fuse:
-        return (
-            [],
-            "hang_fuse",
-            False,
-            True,
-            status,
-            effort_spent,
-            solve_wall_seconds,
-            {},
-        )
+        progress.hang_fuse_hit = True
+        return
     # OPTIMAL/INFEASIBLE means the band was fully enumerated. A clip that also
     # happens to be numerically spent does not discard that completed set.
     if status not in (cp_model.OPTIMAL, cp_model.INFEASIBLE):
-        return (
-            hits,
-            "time_budget",
-            True,
-            False,
-            status,
-            effort_spent,
-            solve_wall_seconds,
-            best_bins,
-        )
-    stopped = "max_solutions" if collector.found > hit_cap else "near_best_band_exhausted"
-    return (
-        hits,
-        stopped,
-        False,
-        False,
-        status,
-        effort_spent,
-        solve_wall_seconds,
-        best_bins,
+        progress.stopped_reason = "time_budget"
+        progress.time_limited = True
+        return
+    progress.stopped_reason = (
+        "max_solutions" if collector.found > hit_cap else "near_best_band_exhausted"
     )
+    progress.time_limited = False
+
+
+def _maximize_structural_hits(
+    problem: InferenceProblem,
+    built: BuiltModel,
+    progress: StructuralSearchProgress,
+    clock: _SearchClock,
+    *,
+    search_cap: int,
+    cancel_token: InferenceCancelToken | None,
+) -> int | None:
+    """Maximize until ``search_cap`` hits. Returns the first objective, if any."""
+    solver = cp_model.CpSolver()
+    tier_max_objective: int | None = None
+    max_objective: int | None = None
+    near_best_band_applied = False
+    near_best_threshold = problem.near_best_objective_threshold
+
+    while len(progress.structural_hits) < search_cap:
+        if cancel_token is not None and cancel_token.is_cancelled():
+            progress.stopped_reason = "cancelled"
+            break
+
+        advance = clock.base_clip.next_solve(
+            effort_spent=progress.effort_spent,
+            elapsed_seconds=clock.elapsed_seconds(),
+            solve_wall_seconds=progress.solve_wall_seconds,
+        )
+        if advance.clip is None:
+            if advance.hang_fuse:
+                progress.hang_fuse_hit = True
+                progress.stopped_reason = "hang_fuse"
+            else:
+                progress.time_limited = True
+                progress.stopped_reason = "time_budget"
+            break
+        advance.clip.apply_to_solver(solver)
+        # Set only ``num_workers``. Setting both ``num_workers`` and the deprecated
+        # ``num_search_workers`` to non-zero values makes OR-Tools return
+        # MODEL_INVALID on this model (empty search; fleet warships stay "?").
+        solver.parameters.num_workers = configured_sat_search_workers()
+        callback = _StopSearchOnCancel(cancel_token) if cancel_token is not None else None
+        wall_before = time.monotonic()
+        progress.last_solver_status = invoke_cp_sat_solve(solver, built.model, callback)
+        wall_delta = time.monotonic() - wall_before
+        # Each Solve() reports only its own deterministic time.
+        try:
+            solve_effort = max(0.0, float(solver.deterministic_time))
+        except RuntimeError:
+            solve_effort = 0.0
+        progress.effort_spent += solve_effort
+        progress.solve_wall_seconds += wall_delta
+
+        if cancel_token is not None and cancel_token.is_cancelled():
+            progress.stopped_reason = "cancelled"
+            break
+        decision = clock.base_clip.after_solve(
+            solver_status=progress.last_solver_status,
+            effort_spent=progress.effort_spent,
+            solve_wall_seconds=progress.solve_wall_seconds,
+            elapsed_seconds=clock.elapsed_seconds(),
+            has_structural_hits=bool(progress.structural_hits),
+        )
+        if decision.hang_fuse:
+            progress.hang_fuse_hit = True
+            progress.time_limited = False
+            progress.stopped_reason = "hang_fuse"
+            break
+        if decision.time_limited:
+            progress.time_limited = True
+            progress.stopped_reason = "time_budget"
+
+        if progress.last_solver_status not in _SUCCESS_STATUSES:
+            if progress.time_limited:
+                progress.stopped_reason = "time_budget"
+            elif near_best_band_applied and progress.structural_hits:
+                progress.stopped_reason = "near_best_band_exhausted"
+            else:
+                progress.stopped_reason = "infeasible"
+            break
+
+        action_counts = _read_action_counts(problem, built.action_count_vars, solver)
+        combo_counts = _read_combo_counts(
+            built.merged_combo_catalog, built.combo_count_vars, solver
+        )
+        progress.structural_hits.append((action_counts, combo_counts))
+        progress.top_solution_bucket_counts = _ranking_bin_indicators_by_action_id(
+            problem, action_counts
+        )
+
+        found_objective = int(solver.ObjectiveValue())
+        if tier_max_objective is None:
+            tier_max_objective = found_objective
+            max_objective = found_objective
+            built.model.add(built.objective_var >= tier_max_objective - near_best_threshold)
+            near_best_band_applied = True
+        else:
+            max_objective = found_objective
+
+        if near_best_band_applied and max_objective is not None:
+            # Sliding ceiling: next maximize walks next-best inside [Z*-T, max].
+            built.model.add(built.objective_var <= max_objective)
+
+        add_no_good_cut(
+            built.model,
+            built.action_count_vars,
+            built.combo_count_vars,
+            action_counts,
+            combo_counts,
+            len(progress.structural_hits),
+        )
+
+        if len(progress.structural_hits) >= search_cap:
+            progress.stopped_reason = "max_solutions"
+            break
+
+    return tier_max_objective
 
 
 def collect_near_best_structural_hits(
     problem: InferenceProblem,
     *,
-    model: cp_model.CpModel,
-    action_count_vars: dict[str, cp_model.IntVar],
-    combo_count_vars: dict[str, cp_model.IntVar],
-    objective_var: cp_model.IntVar,
-    merged_combo_catalog: SupportsMergedComboCatalog,
+    built: BuiltModel,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     cancel_token: InferenceCancelToken | None = None,
     structural_hit_limit: int | None = None,
@@ -502,33 +615,24 @@ def collect_near_best_structural_hits(
     """
     if seed_no_good_solutions:
         seed_no_goods_applied, seed_no_goods_skipped = seed_no_good_cuts_for_held_solutions(
-            model,
+            built.model,
             problem=problem,
-            merged_combo_catalog=merged_combo_catalog,
-            action_count_vars=action_count_vars,
-            combo_count_vars=combo_count_vars,
+            merged_combo_catalog=built.merged_combo_catalog,
+            action_count_vars=built.action_count_vars,
+            combo_count_vars=built.combo_count_vars,
             seed_solutions=seed_no_good_solutions,
         )
     else:
         seed_no_goods_applied, seed_no_goods_skipped = 0, 0
-    solver = cp_model.CpSolver()
-    structural_hits: list[tuple[dict[str, int], dict[str, int]]] = []
-    started_at = time.monotonic()
-    last_solver_status = cp_model.UNKNOWN
-    stopped_reason = "exhausted"
-    time_limited = False
-    hang_fuse_hit = False
-    base_clip = effective_solve_clip(
-        solve_clip=problem.solve_clip,
-        time_limit_seconds=problem.time_limit_seconds,
+
+    progress = StructuralSearchProgress()
+    clock = _SearchClock(
+        base_clip=effective_solve_clip(
+            solve_clip=problem.solve_clip,
+            time_limit_seconds=problem.time_limit_seconds,
+        ),
+        started_at=time.monotonic(),
     )
-    effort_spent = 0.0
-    solve_wall_seconds = 0.0
-    top_solution_bucket_counts: dict[str, tuple[int, ...]] = {}
-    near_best_threshold = problem.near_best_objective_threshold
-    tier_max_objective: int | None = None
-    max_objective: int | None = None
-    near_best_band_applied = False
     # Seed passes ask for one hit. A completed free search enumerates the band
     # after that first maximization instead of restarting once per hit.
     enumerate_band = (
@@ -538,156 +642,47 @@ def collect_near_best_structural_hits(
         search_cap = 1 if enumerate_band else problem.max_solutions
     else:
         search_cap = min(problem.max_solutions, structural_hit_limit)
-    final_hit_cap = problem.max_solutions if enumerate_band else search_cap
+    hit_cap = problem.max_solutions if enumerate_band else search_cap
 
-    while len(structural_hits) < search_cap:
-        if cancel_token is not None and cancel_token.is_cancelled():
-            stopped_reason = "cancelled"
-            break
-
-        advance = base_clip.next_solve(
-            effort_spent=effort_spent,
-            elapsed_seconds=time.monotonic() - started_at,
-            solve_wall_seconds=solve_wall_seconds,
-        )
-        if advance.clip is None:
-            if advance.hang_fuse:
-                hang_fuse_hit = True
-                stopped_reason = "hang_fuse"
-            else:
-                time_limited = True
-                stopped_reason = "time_budget"
-            break
-        advance.clip.apply_to_solver(solver)
-        # Set only ``num_workers``. Setting both ``num_workers`` and the deprecated
-        # ``num_search_workers`` to non-zero values makes OR-Tools return
-        # MODEL_INVALID on this model (empty search; fleet warships stay "?").
-        solver.parameters.num_workers = configured_sat_search_workers()
-        callback = _StopSearchOnCancel(cancel_token) if cancel_token is not None else None
-        wall_before = time.monotonic()
-        last_solver_status = invoke_cp_sat_solve(solver, model, callback)
-        wall_delta = time.monotonic() - wall_before
-        # Each Solve() reports only its own deterministic time.
-        try:
-            solve_effort = max(0.0, float(solver.deterministic_time))
-        except RuntimeError:
-            solve_effort = 0.0
-        effort_spent += solve_effort
-        solve_wall_seconds += wall_delta
-
-        if cancel_token is not None and cancel_token.is_cancelled():
-            stopped_reason = "cancelled"
-            break
-        decision = base_clip.after_solve(
-            solver_status=last_solver_status,
-            effort_spent=effort_spent,
-            solve_wall_seconds=solve_wall_seconds,
-            elapsed_seconds=time.monotonic() - started_at,
-            has_structural_hits=bool(structural_hits),
-        )
-        if decision.hang_fuse:
-            hang_fuse_hit = True
-            time_limited = False
-            stopped_reason = "hang_fuse"
-            break
-        if decision.time_limited:
-            time_limited = True
-            stopped_reason = "time_budget"
-
-        if last_solver_status not in _SUCCESS_STATUSES:
-            if time_limited:
-                stopped_reason = "time_budget"
-            elif near_best_band_applied and structural_hits:
-                stopped_reason = "near_best_band_exhausted"
-            else:
-                stopped_reason = "infeasible"
-            break
-
-        action_counts = _read_action_counts(problem, action_count_vars, solver)
-        combo_counts = _read_combo_counts(merged_combo_catalog, combo_count_vars, solver)
-        ranking_bin_indicators = _ranking_bin_indicators_by_action_id(problem, action_counts)
-        structural_hits.append((action_counts, combo_counts))
-        top_solution_bucket_counts = ranking_bin_indicators
-
-        found_objective = int(solver.ObjectiveValue())
-        if tier_max_objective is None:
-            tier_max_objective = found_objective
-            max_objective = found_objective
-            model.add(objective_var >= tier_max_objective - near_best_threshold)
-            near_best_band_applied = True
-        else:
-            max_objective = found_objective
-
-        if near_best_band_applied and max_objective is not None:
-            # Sliding ceiling: next maximize walks next-best inside [Z*-T, max].
-            model.add(objective_var <= max_objective)
-
-        add_no_good_cut(
-            model,
-            action_count_vars,
-            combo_count_vars,
-            action_counts,
-            combo_counts,
-            len(structural_hits),
-        )
-
-        if len(structural_hits) >= search_cap:
-            stopped_reason = "max_solutions"
-            break
-
+    tier_max_objective = _maximize_structural_hits(
+        problem,
+        built,
+        progress,
+        clock,
+        search_cap=search_cap,
+        cancel_token=cancel_token,
+    )
     if (
         enumerate_band
-        and structural_hits
+        and progress.structural_hits
         and tier_max_objective is not None
-        and not hang_fuse_hit
-        and stopped_reason != "cancelled"
-        and not time_limited
+        and not progress.hang_fuse_hit
+        and progress.stopped_reason != "cancelled"
+        and not progress.time_limited
     ):
-        (
-            structural_hits,
-            stopped_reason,
-            time_limited,
-            hang_fuse_hit,
-            last_solver_status,
-            effort_spent,
-            solve_wall_seconds,
-            top_solution_bucket_counts,
-        ) = _enumerate_objective_band(
+        _enumerate_objective_band(
             problem,
-            model=model,
-            action_count_vars=action_count_vars,
-            combo_count_vars=combo_count_vars,
-            objective_var=objective_var,
-            merged_combo_catalog=merged_combo_catalog,
-            base_clip=base_clip,
-            started_at=started_at,
-            effort_spent=effort_spent,
-            solve_wall_seconds=solve_wall_seconds,
-            first_objective=tier_max_objective,
-            first_hit=structural_hits[0],
-            hit_cap=final_hit_cap,
+            built,
+            progress,
+            clock,
+            _BandOrigin(objective=tier_max_objective, hit=progress.structural_hits[0]),
+            hit_cap=hit_cap,
             cancel_token=cancel_token,
-            last_solver_status=last_solver_status,
         )
-
-    if hang_fuse_hit:
-        # Fuse fails closed: earlier hits in this search must not be admitted.
-        structural_hits = []
-        top_solution_bucket_counts = {}
-        time_limited = False
-        stopped_reason = "hang_fuse"
+    # Fuse fails closed: earlier hits in this search must not be admitted.
+    progress.apply_hang_fuse_fail_closed()
 
     return NearBestStructuralSearchOutcome(
-        structural_hits=structural_hits,
-        last_solver_status=last_solver_status,
-        stopped_reason=stopped_reason,
-        time_limited=time_limited,
-        hang_fuse_hit=hang_fuse_hit,
-        deterministic_time=effort_spent,
-        solve_wall_seconds=solve_wall_seconds,
+        structural_hits=progress.structural_hits,
+        last_solver_status=progress.last_solver_status,
+        stopped_reason=progress.stopped_reason,
+        time_limited=progress.time_limited,
+        hang_fuse_hit=progress.hang_fuse_hit,
+        deterministic_time=progress.effort_spent,
+        solve_wall_seconds=progress.solve_wall_seconds,
         tier_max_objective=tier_max_objective,
-        near_best_threshold=near_best_threshold,
+        near_best_threshold=problem.near_best_objective_threshold,
         seed_no_goods_applied=seed_no_goods_applied,
         seed_no_goods_skipped=seed_no_goods_skipped,
-        top_solution_bucket_counts=top_solution_bucket_counts,
+        top_solution_bucket_counts=progress.top_solution_bucket_counts,
     )

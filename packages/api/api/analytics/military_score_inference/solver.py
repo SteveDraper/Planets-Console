@@ -549,11 +549,7 @@ def solve_inference_problem(
     started_at = time.monotonic()
     search = collect_near_best_structural_hits(
         problem,
-        model=built_model.model,
-        action_count_vars=built_model.action_count_vars,
-        combo_count_vars=built_model.combo_count_vars,
-        objective_var=built_model.objective_var,
-        merged_combo_catalog=merged_combo_catalog,
+        built=built_model,
         seed_no_good_solutions=search_seeds,
         cancel_token=cancel_token,
         structural_hit_limit=structural_hit_limit,

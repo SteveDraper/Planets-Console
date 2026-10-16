@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.models import (
     WallSolveClip,
 )
 from api.analytics.military_score_inference.near_best_structural_search import (
+    StructuralSearchProgress,
     sparse_assignment_key,
 )
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
@@ -142,6 +143,41 @@ def test_seed_first_hit_and_band_enumeration_match_successive_results() -> None:
     assert baseline_seed_hits > 1
     assert optimized_seed_hits == 1
     assert _ranked(optimized_held) == _ranked(baseline_held)
+
+
+def test_hang_fuse_fail_closed_drops_hits_and_keeps_effort() -> None:
+    """A tripped fuse admits nothing; an open search is left as recorded."""
+    fused = StructuralSearchProgress(
+        structural_hits=[({"build": 1}, {"combo": 2})],
+        stopped_reason="max_solutions",
+        time_limited=True,
+        hang_fuse_hit=True,
+        last_solver_status=4,
+        effort_spent=1.5,
+        solve_wall_seconds=2.25,
+        top_solution_bucket_counts={"build": (1, 0)},
+    )
+    fused.apply_hang_fuse_fail_closed()
+    assert fused.structural_hits == []
+    assert fused.top_solution_bucket_counts == {}
+    assert fused.time_limited is False
+    assert fused.stopped_reason == "hang_fuse"
+    assert fused.hang_fuse_hit is True
+    assert fused.last_solver_status == 4
+    assert fused.effort_spent == 1.5
+    assert fused.solve_wall_seconds == 2.25
+
+    open_search = StructuralSearchProgress(
+        structural_hits=[({"build": 1}, {})],
+        stopped_reason="time_budget",
+        time_limited=True,
+        top_solution_bucket_counts={"build": (0,)},
+    )
+    open_search.apply_hang_fuse_fail_closed()
+    assert open_search.structural_hits == [({"build": 1}, {})]
+    assert open_search.top_solution_bucket_counts == {"build": (0,)}
+    assert open_search.time_limited is True
+    assert open_search.stopped_reason == "time_budget"
 
 
 def test_sparse_assignment_key_drops_zeros_in_model_order() -> None:
