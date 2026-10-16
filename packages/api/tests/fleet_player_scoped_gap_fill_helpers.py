@@ -8,7 +8,8 @@ from dataclasses import replace
 from typing import Any
 
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.compute_services import FleetComputeServices, turn_chain_through
+from api.analytics.fleet.compute_services import turn_chain_through
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.turn_roster import iter_turn_players

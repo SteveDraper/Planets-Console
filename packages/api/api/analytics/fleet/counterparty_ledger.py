@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.fleet.compute_services import lookup_fleet_compute_services
+from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.fleet.types import CounterpartyFleetLoader, FleetShipRecord
 
 

@@ -35,8 +35,8 @@ from pathlib import Path
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import (
     fleet_evidence_mark_from_json,

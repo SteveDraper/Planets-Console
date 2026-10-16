@@ -9,8 +9,8 @@ from api.analytics import TurnAnalyticsOptions
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.fleet import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID

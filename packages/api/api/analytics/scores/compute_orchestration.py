@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
+from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
@@ -19,10 +20,7 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.exports import stored_closed_horwasp_skip
-from api.analytics.scores.prior_fleet_resolution import (
-    fleet_compute_services,
-    resolve_prior_fleet_for_scores,
-)
+from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
@@ -503,7 +501,7 @@ class ScoresPersistencePolicy:
         if export_scope.turn <= 1:
             return 0
 
-        fleet_services = fleet_compute_services(ctx)
+        fleet_services = lookup_fleet_compute_services(ctx)
         if fleet_services is None:
             return 0
 

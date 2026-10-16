@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.counterparty_ledger import counterparty_fleet_loader
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,

@@ -6,16 +6,14 @@ import json
 from pathlib import Path
 
 import pytest
-from api.analytics.fleet.compute_services import (
-    FleetComputeServices,
-    build_ephemeral_fleet_compute_services,
-)
+from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
     _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,

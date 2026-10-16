@@ -12,7 +12,6 @@ from api.analytics.fleet.chain import (
     _materialize_fleet_snapshot_chain,
 )
 from api.analytics.fleet.compute_services import (
-    FleetComputeServices,
     build_ephemeral_fleet_compute_services,
     turn_chain_through,
 )
@@ -20,6 +19,7 @@ from api.analytics.fleet.held_solutions import (
     FleetInferenceMaterialization,
     FleetInferenceSupport,
 )
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.solver import STATUS_EXACT

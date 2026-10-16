@@ -6,7 +6,6 @@ import threading
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
-from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.fleet_table_player_run import (
     FleetLedgerWireProgressTracker,
@@ -17,6 +16,7 @@ from api.analytics.fleet.fleet_table_player_run import (
 )
 from api.analytics.fleet.fleet_table_stream_registry import wake_fleet_table_stream_multiplex
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import PersistedFleetLedger

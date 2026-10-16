@@ -10,8 +10,8 @@ from typing import Any
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
 from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
-from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
