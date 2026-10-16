@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -239,14 +239,42 @@ class _StopSearchOnCancel(cp_model.CpSolverSolutionCallback):
             self.StopSearch()
 
 
-def _assignment_key(
-    action_counts: dict[str, int], combo_counts: dict[str, int]
-) -> tuple[tuple[str, int], ...]:
-    return tuple(sorted(action_counts.items()) + sorted(combo_counts.items()))
+# Actions, then combos. Each side is the positive ``(id, count)`` pairs in model order.
+SparseAssignmentKey = tuple[tuple[tuple[str, int], ...], tuple[tuple[str, int], ...]]
+
+
+def sparse_assignment_key(
+    action_counts_in_model_order: Iterable[tuple[str, int]],
+    combo_counts_in_model_order: Iterable[tuple[str, int]],
+) -> SparseAssignmentKey:
+    """Seen-set identity of one assignment, with zero counts omitted.
+
+    Both sequences must list every variable exactly once, in model order:
+    ``problem.aggregate_actions`` for actions and ``merged_combo_catalog.combos``
+    for combos. Those are the orders of ``action_count_vars`` and
+    ``combo_count_vars``. Building the scan list once from those dicts, and
+    reading every entry, keeps this key equal to a dense ``(id, count)`` tuple
+    that includes the zeros.
+
+    A count of zero is omitted. An id left out of a sequence is stored the same
+    way as a zero, so two assignments that differ only on a skipped id share a
+    key.
+    """
+    return (
+        tuple((name, count) for name, count in action_counts_in_model_order if count != 0),
+        tuple((name, count) for name, count in combo_counts_in_model_order if count != 0),
+    )
 
 
 class _ObjectiveBandCollector(cp_model.CpSolverSolutionCallback):
-    """Keep the best ``hit_cap`` assignments seen while enumerating the band."""
+    """Keep the best ``hit_cap`` assignments seen while enumerating the band.
+
+    Proto indexes are snapshotted from ``action_count_vars`` and
+    ``combo_count_vars`` at construction, in ``problem.aggregate_actions`` order
+    and ``merged_combo_catalog.combos`` order. Each callback reads every
+    snapshotted index via ``SolutionIntegerValue`` and dedups with
+    ``sparse_assignment_key``.
+    """
 
     def __init__(
         self,
@@ -262,42 +290,51 @@ class _ObjectiveBandCollector(cp_model.CpSolverSolutionCallback):
         cancel_token: InferenceCancelToken | None,
     ) -> None:
         super().__init__()
-        self._problem = problem
-        self._merged_combo_catalog = merged_combo_catalog
-        self._action_count_vars = action_count_vars
-        self._combo_count_vars = combo_count_vars
-        self._objective_var = objective_var
+        self._action_reads = tuple(
+            (action.id, action_count_vars[action.id].index) for action in problem.aggregate_actions
+        )
+        self._combo_reads = tuple(
+            (combo.combo_id, combo_count_vars[combo.combo_id].index)
+            for combo in merged_combo_catalog.combos
+        )
+        self._objective_index = objective_var.index
         self._hit_cap = hit_cap
         self._cancel_token = cancel_token
         self.cancelled = False
         self.found = 1
-        self._seen = {_assignment_key(first_hit[0], first_hit[1])}
+        action_counts, combo_counts = first_hit
+        self._seen = {
+            sparse_assignment_key(
+                ((name, action_counts[name]) for name, _index in self._action_reads),
+                ((name, combo_counts[name]) for name, _index in self._combo_reads),
+            )
+        }
         self.best: list[tuple[int, dict[str, int], dict[str, int]]] = [
-            (first_objective, first_hit[0], first_hit[1])
+            (first_objective, action_counts, combo_counts)
         ]
+
+    def _read_counts(self, reads: tuple[tuple[str, int], ...]) -> Iterable[tuple[str, int]]:
+        for name, index in reads:
+            yield name, int(self.SolutionIntegerValue(index))
 
     def on_solution_callback(self) -> None:
         if self._cancel_token is not None and self._cancel_token.is_cancelled():
             self.cancelled = True
             self.StopSearch()
             return
-        action_counts = {
-            action.id: int(self.value(self._action_count_vars[action.id]))
-            for action in self._problem.aggregate_actions
-        }
-        combo_counts = {
-            combo.combo_id: int(self.value(self._combo_count_vars[combo.combo_id]))
-            for combo in self._merged_combo_catalog.combos
-        }
-        key = _assignment_key(action_counts, combo_counts)
+        key = sparse_assignment_key(
+            self._read_counts(self._action_reads),
+            self._read_counts(self._combo_reads),
+        )
         if key in self._seen:
             return
         self._seen.add(key)
         self.found += 1
-        objective = int(self.value(self._objective_var))
+        objective = int(self.SolutionIntegerValue(self._objective_index))
         if len(self.best) >= self._hit_cap and objective <= self.best[-1][0]:
             return
-        self.best.append((objective, action_counts, combo_counts))
+        action_pairs, combo_pairs = key
+        self.best.append((objective, dict(action_pairs), dict(combo_pairs)))
         self.best.sort(key=lambda item: item[0], reverse=True)
         if len(self.best) > self._hit_cap:
             self.best.pop()

@@ -93,6 +93,16 @@ TURN15_PLAYER38_MODEST_TIER_INDEX = 5
 # Loaded wall is the persisted tier emission while 8 workers were busy.
 TURN8_PLAYER9_ADMIT_LOADED_WALL_SECONDS = 125.88
 
+# Longest admit_ship_torpedoes complete in local/diagnostics_late6.json.
+# Worker execution time while 8 workers were busy, not queue wait.
+TURN15_PLAYER28_ADMIT_LOADED_WALL_SECONDS = 13.38
+
+# Median admit_ship_torpedoes emission in the late-8 persisted run.
+# 530 steps, median 1.684s. This row is one of the two central observations:
+# time-limited, ship-first prefix, 13,365 combos, one newly admitted solution.
+TURN10_PLAYER4_ADMIT_LOADED_WALL_SECONDS = 1.684
+TURN10_PLAYER4_ADMIT_COMBO_COUNT = 13_365
+
 _active_tier: ContextVar[str] = ContextVar("outlier_repro_tier", default="")
 _active_phase: ContextVar[str] = ContextVar("outlier_repro_phase", default="other")
 
@@ -1024,3 +1034,91 @@ def test_turn8_player9_incoming_warship_floor_skips_torpedo_plateau() -> None:
         ("acquired:warship:from:48",),
     ], rendered
     assert report.solution_families == ["mine_overshoot", "mine_overshoot", "mine_overshoot"]
+
+
+def test_turn15_player28_admit_ship_torpedoes_reproduces_late6_outlier() -> None:
+    """Idle reproduction of the longest admit step in the late-6 tail.
+
+    diagnostics_late6.json records turn 15 player 28 ``admit_ship_torpedoes``
+    at 13.38 s of worker time. An idle run of the same step is 11.57 s, still
+    spending the full 1.0 deterministic allowance on 57,780 ship combos.
+    """
+    if os.environ.get("SCORES_OUTLIER_REPRO") != "1":
+        pytest.skip("set SCORES_OUTLIER_REPRO=1 to reproduce the local late-window row")
+    storage_root = Path(os.environ.get("SCORES_OUTLIER_STORAGE", DEFAULT_STORAGE_ROOT))
+    if not storage_root.is_dir():
+        pytest.skip(f"storage root not found: {storage_root}")
+
+    from tests.inference_corpus.storage_loader import configure_file_storage
+
+    previous_config = get_config()
+    reset_tier_row_run_registry_for_tests()
+    try:
+        storage = configure_file_storage(storage_root=storage_root)
+        report = reproduce_admit_ship_outlier(
+            storage,
+            turn_number=15,
+            player_id=28,
+            through_tier_index=OUTLIER_TIER_INDEX,
+        )
+    finally:
+        reset_tier_row_run_registry_for_tests()
+        set_config(previous_config)
+        clear_backend_cache()
+
+    rendered = format_outlier_report(
+        report,
+        diagnostic_loaded_wall_seconds=TURN15_PLAYER28_ADMIT_LOADED_WALL_SECONDS,
+    )
+    print(rendered)
+    admit = report.tier(OUTLIER_TIER_INDEX)
+    assert admit is not None, f"ladder stopped before tier 4\n{rendered}"
+    assert admit.tier_id == OUTLIER_TIER_ID, rendered
+    assert admit.combo_count == 57_780, rendered
+    assert admit.stopped_reason == "time_budget", rendered
+    assert admit.wall_seconds >= 5.0, rendered
+    assert admit.deterministic_time >= 0.9, rendered
+
+
+def test_turn10_player4_admit_ship_torpedoes_reproduces_late8_median() -> None:
+    """Idle reproduction of a median late-8 admit_ship_torpedoes step.
+
+    The persisted emission is 1.684s, time-limited, on 13,365 ship combos.
+    The two central observations of the 530-step distribution are this row
+    and turn 11 player 20 at 1.692s.
+    """
+    if os.environ.get("SCORES_OUTLIER_REPRO") != "1":
+        pytest.skip("set SCORES_OUTLIER_REPRO=1 to reproduce the local late-window row")
+    storage_root = Path(os.environ.get("SCORES_OUTLIER_STORAGE", DEFAULT_STORAGE_ROOT))
+    if not storage_root.is_dir():
+        pytest.skip(f"storage root not found: {storage_root}")
+
+    from tests.inference_corpus.storage_loader import configure_file_storage
+
+    previous_config = get_config()
+    reset_tier_row_run_registry_for_tests()
+    try:
+        storage = configure_file_storage(storage_root=storage_root)
+        report = reproduce_admit_ship_outlier(
+            storage,
+            turn_number=10,
+            player_id=4,
+            through_tier_index=OUTLIER_TIER_INDEX,
+        )
+    finally:
+        reset_tier_row_run_registry_for_tests()
+        set_config(previous_config)
+        clear_backend_cache()
+
+    rendered = format_outlier_report(
+        report,
+        diagnostic_loaded_wall_seconds=TURN10_PLAYER4_ADMIT_LOADED_WALL_SECONDS,
+    )
+    print(rendered)
+    admit = report.tier(OUTLIER_TIER_INDEX)
+    assert admit is not None, f"ladder stopped before tier 4\n{rendered}"
+    assert admit.tier_id == OUTLIER_TIER_ID, rendered
+    assert admit.combo_count == TURN10_PLAYER4_ADMIT_COMBO_COUNT, rendered
+    assert admit.stopped_reason == "time_budget", rendered
+    assert admit.deterministic_time >= 0.9, rendered
+    assert 0.5 <= admit.wall_seconds <= 6.0, rendered

@@ -12,6 +12,9 @@ from api.analytics.military_score_inference.models import (
     ShipBuildCombo,
     WallSolveClip,
 )
+from api.analytics.military_score_inference.near_best_structural_search import (
+    sparse_assignment_key,
+)
 from api.analytics.military_score_inference.policy_ladder_tier_step import (
     _solve_catalog,
     _solve_seed_progression,
@@ -134,3 +137,48 @@ def test_seed_first_hit_and_band_enumeration_match_successive_results() -> None:
     assert baseline_seed_hits > 1
     assert optimized_seed_hits == 1
     assert _ranked(optimized_held) == _ranked(baseline_held)
+
+
+def test_sparse_assignment_key_drops_zeros_in_model_order() -> None:
+    """A full scan with explicit zeros matches the positive counts alone.
+
+    The sequences are the model order of ``action_count_vars`` and
+    ``combo_count_vars``. Reading every entry is what keeps an omitted zero
+    equal to a dense key that stores that zero.
+    """
+    actions = (("load_a", 0), ("load_b", 4), ("load_c", 0))
+    combos = (("full", 0), ("partial", 1), ("other", 0))
+    assert sparse_assignment_key(actions, combos) == (
+        (("load_b", 4),),
+        (("partial", 1),),
+    )
+    assert sparse_assignment_key(actions, combos) == sparse_assignment_key(
+        (("load_b", 4),),
+        (("partial", 1),),
+    )
+
+
+def test_sparse_assignment_key_distinguishes_positive_counts() -> None:
+    shared_actions = (("load_a", 32),)
+    assert sparse_assignment_key(shared_actions, (("partial", 1),)) != sparse_assignment_key(
+        shared_actions,
+        (("partial", 1), ("other", 1)),
+    )
+    assert sparse_assignment_key((("load_a", 32),), (("partial", 1),)) != sparse_assignment_key(
+        (("load_a", 35),),
+        (("partial", 1),),
+    )
+
+
+def test_sparse_assignment_key_treats_a_skipped_id_as_zero() -> None:
+    """An id left out of the scan collapses into the assignment where it is zero.
+
+    ``sparse_assignment_key`` cannot tell a skipped variable from a zero count.
+    Callers have to pass every id from ``action_count_vars`` and
+    ``combo_count_vars``.
+    """
+    visited = sparse_assignment_key((("load_a", 0),), (("partial", 1), ("other", 0)))
+    skipped = sparse_assignment_key((("load_a", 0),), (("partial", 1),))
+    assert visited == skipped
+    differs = sparse_assignment_key((("load_a", 0),), (("partial", 1), ("other", 2)))
+    assert visited != differs
