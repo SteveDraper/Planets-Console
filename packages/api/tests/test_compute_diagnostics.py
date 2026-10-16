@@ -1375,6 +1375,7 @@ def test_snapshot_wire_shape_includes_required_sections(sample_turn):
         "readyQueue",
         "nextSingleStep",
         "completionHistory",
+        "recentFailures",
         "serverStreams",
         "remotePool",
         "liveOccupancy",
@@ -1828,6 +1829,99 @@ def test_completion_history_via_orchestrator_step_complete(sample_turn):
     assert entry["durationMs"] is not None
     assert entry["durationMs"] >= 0
     datetime.fromisoformat(entry["completedAt"])
+
+
+def test_recent_failures_record_the_step_exception(sample_turn):
+    """A failed step keeps its exception type, message, and traceback."""
+    from dataclasses import replace
+
+    from api.analytics.exports.catalog import AnalyticExportCatalog
+    from api.analytics.exports.registry import merge_export_registry
+    from api.analytics.scores.compute_orchestration import SCORES_MATERIALIZE
+
+    def explode(_job: object) -> object:
+        raise RuntimeError("scores materialize exploded")
+
+    scores_stub_export = AnalyticExportCatalog(
+        analytic_id="scores",
+        is_ensure_satisfied=lambda _ctx, _scope: True,
+    )
+    registration = replace(
+        _scores_inline_materialize_registration(),
+        run_steps=(("materialize", explode),),
+    )
+    compute_registry = build_compute_registry((registration,))
+    ctx = make_fixture_query_context(
+        sample_turn,
+        registry=merge_export_registry(scores_stub_export),
+    )
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    orchestrator = ComputeOrchestrator(
+        compute_registry=compute_registry,
+        worker_pool=pool,
+    )
+    controller = get_compute_diagnostics_controller()
+    controller.bind_orchestrator(orchestrator, ctx)
+    shell = ShellContextKey(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=ctx.ambient_turn,
+    )
+    controller.on_shell_context(shell)
+    scope = normalize_export_scope_to_compute_scope(
+        ExportScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=ctx.ambient_turn,
+            player_id=sample_turn.scores[0].ownerid,
+        ),
+        analytic_id="scores",
+        scope_key_spec=compute_registry["scores"].scope_key_spec,
+    )
+
+    handle = orchestrator.submit(
+        ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_MATERIALIZE),
+    )
+    assert handle.state == "failed"
+
+    failures = snapshot_to_wire(controller.snapshot(shell))["recentFailures"]
+    assert len(failures) == 1
+    failure = failures[0]
+    assert set(failure) == {
+        "scopeKey",
+        "stepKind",
+        "stepIndex",
+        "exceptionType",
+        "message",
+        "traceback",
+        "failedAt",
+    }
+    assert failure["scopeKey"] == format_compute_scope_key(scope)
+    assert failure["stepKind"] == "materialize"
+    assert failure["stepIndex"] == 0
+    assert failure["exceptionType"] == "RuntimeError"
+    assert failure["message"] == "scores materialize exploded"
+    assert "RuntimeError: scores materialize exploded" in failure["traceback"]
+    assert "explode" in failure["traceback"]
+
+
+def test_failure_log_keeps_the_most_recent_twenty() -> None:
+    from api.compute.diagnostics.failures import ComputeFailureLog
+
+    log = ComputeFailureLog()
+    for index in range(25):
+        log.append(
+            scope_key=f"scope-{index}",
+            step_kind="tier_solve",
+            step_index=index,
+            error=RuntimeError(f"fail-{index}"),
+        )
+    recent = log.recent()
+    assert len(recent) == 20
+    assert recent[0].message == "fail-5"
+    assert recent[-1].message == "fail-24"
+    assert recent[-1].exception_type == "RuntimeError"
+    assert "fail-24" in recent[-1].traceback
 
 
 def test_concurrency_timeline_records_inline_lifecycle_and_shares_finish_sink(sample_turn):

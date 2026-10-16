@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from api.analytics.exports.registry import EXPORT_REGISTRY
 from api.compute.diagnostics.bindings import BoundOrchestrator
 from api.compute.diagnostics.concurrency_recorder import ConcurrencyTimelineRecorder
+from api.compute.diagnostics.failures import ComputeFailureLog
 from api.compute.diagnostics.freeze import (
     ComputeDiagnosticsFreezeState,
     ShellContextKey,
@@ -82,6 +83,7 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
     def __init__(self) -> None:
         self._freeze_state = ComputeDiagnosticsFreezeState()
         self._histories: dict[ShellContextKey, ComputeCompletionHistory] = {}
+        self._failure_logs: dict[ShellContextKey, ComputeFailureLog] = {}
         self._in_flight: list[InFlightPoolExecution] = []
         self._bound_orchestrators: list[BoundOrchestrator] = []
         self._lock = threading.Lock()
@@ -176,6 +178,7 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             next_single_step=preview,
             single_step_disabled_reason=disabled_reason,
             completion_history=self._history_for_shell(shell).recent(),
+            recent_failures=self._failure_log_for_shell(shell).recent(),
             concurrency_timeline=self._timeline.recent(shell),
             global_in_flight_count=len(self._in_flight_snapshot()),
             configured_workers=self._configured_workers(),
@@ -318,6 +321,14 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             self._pool.set_on_item_finished(None)
         self._pool = None
         self._wired = False
+
+    def _failure_log_for_shell(self, shell: ShellContextKey) -> ComputeFailureLog:
+        with self._lock:
+            log = self._failure_logs.get(shell)
+            if log is None:
+                log = ComputeFailureLog()
+                self._failure_logs[shell] = log
+            return log
 
     def _history_for_shell(self, shell: ShellContextKey) -> ComputeCompletionHistory:
         with self._lock:

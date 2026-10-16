@@ -250,6 +250,10 @@ export interface components {
             completionHistory: {
                 [key: string]: unknown;
             }[];
+            /** Recentfailures */
+            recentFailures: {
+                [key: string]: unknown;
+            }[];
             /** Serverstreams */
             serverStreams: {
                 [key: string]: unknown;

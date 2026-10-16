@@ -15,9 +15,9 @@ from api.compute.diagnostics.bindings import BoundOrchestrator
 from api.compute.diagnostics.history import CompletionSurface, CompletionTerminalState
 from api.compute.diagnostics.profile_steps import profile_step_at, profile_step_is_inline
 from api.compute.orchestrator import ComputeOrchestrator
-from api.compute.orchestrator_observers import LifecycleEventKind
+from api.compute.orchestrator_observers import LifecycleEventKind, ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeNodeRun
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.config import get_config
 
 if TYPE_CHECKING:
@@ -123,6 +123,9 @@ class DiagnosticsOrchestratorBindMixin:
                 orchestrator_id=_orch_id,
             )
         )
+        unregister_scope_outcome = orchestrator.observers.register_scope_outcome_listener(
+            self._on_scope_outcome
+        )
         unregister_lifecycle = orchestrator.observers.register_lifecycle_listener(
             lambda kind, scope, node, step_kind, step_index, detail, _orch_id=registration_id: (
                 self._on_lifecycle(
@@ -146,6 +149,7 @@ class DiagnosticsOrchestratorBindMixin:
                     unregister_ready_queue()
                     unregister_inline_start()
                     unregister_lifecycle()
+                    unregister_scope_outcome()
                     return
             self._bound_orchestrators.append(
                 BoundOrchestrator(
@@ -160,6 +164,7 @@ class DiagnosticsOrchestratorBindMixin:
                     unregister_ready_queue_listener=unregister_ready_queue,
                     unregister_inline_start_listener=unregister_inline_start,
                     unregister_lifecycle_listener=unregister_lifecycle,
+                    unregister_scope_outcome_listener=unregister_scope_outcome,
                 )
             )
 
@@ -195,6 +200,7 @@ class DiagnosticsOrchestratorBindMixin:
         bound.unregister_ready_queue_listener()
         bound.unregister_inline_start_listener()
         bound.unregister_lifecycle_listener()
+        bound.unregister_scope_outcome_listener()
         orch_key = registration_id if registration_id is not None else id(orchestrator)
         self._timeline.clear_orchestrator_ready_depth(orch_key)
 
@@ -321,6 +327,28 @@ class DiagnosticsOrchestratorBindMixin:
             terminal_state=terminal_state,
             orchestrator_id=orchestrator_id,
             backend=backend,
+        )
+
+    def _on_scope_outcome(
+        self: ComputeDiagnosticsController,
+        snapshot: ScopeLifecycleSnapshot,
+    ) -> None:
+        """Record a failed node's exception on the shell's recent-failure ring."""
+        if snapshot.state != "failed" or snapshot.error is None:
+            return
+        shell = self._scope_matches_active_shell(snapshot.scope)
+        if shell is None:
+            return
+        step_kind: str | None = None
+        if snapshot.profile_step_index is not None:
+            step_spec = profile_step_at(snapshot.scope.analytic_id, snapshot.profile_step_index)
+            if step_spec is not None:
+                step_kind = step_spec.step_kind
+        self._failure_log_for_shell(shell).append(
+            scope_key=format_compute_scope_key(snapshot.scope),
+            step_kind=step_kind,
+            step_index=snapshot.step_index,
+            error=snapshot.error,
         )
 
     def _on_node_ready(

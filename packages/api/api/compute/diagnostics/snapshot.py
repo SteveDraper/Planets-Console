@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from api.compute.diagnostics.bindings import BoundOrchestrator, bound_matches_shell
+from api.compute.diagnostics.failures import ComputeFailureRecord
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import ComputeCompletionRecord
 from api.compute.diagnostics.in_flight import InFlightPoolExecution, in_flight_to_wire
@@ -94,6 +95,7 @@ class ComputeDiagnosticsSnapshot:
     ready_queue: tuple[dict[str, Any], ...]
     next_single_step: dict[str, Any]
     completion_history: tuple[dict[str, Any], ...]
+    recent_failures: tuple[dict[str, Any], ...]
     server_streams: tuple[dict[str, Any], ...]
     remote_pool: dict[str, Any]
     live_occupancy: dict[str, Any]
@@ -162,6 +164,7 @@ def build_compute_diagnostics_snapshot(
     next_single_step: SingleStepPreview | None,
     single_step_disabled_reason: SingleStepDisabledReason | None,
     completion_history: tuple[ComputeCompletionRecord, ...],
+    recent_failures: tuple[ComputeFailureRecord, ...] = (),
     concurrency_timeline: tuple[ComputeConcurrencyEvent, ...] = (),
     global_in_flight_count: int = 0,
     configured_workers: int = 0,
@@ -287,6 +290,7 @@ def build_compute_diagnostics_snapshot(
             disabled_reason=single_step_disabled_reason,
         ),
         completion_history=tuple(asdict(record) for record in completion_history),
+        recent_failures=tuple(asdict(record) for record in recent_failures),
         server_streams=server_streams,
         remote_pool=remote_pool,
         live_occupancy=live_occupancy,
@@ -318,6 +322,18 @@ def snapshot_to_wire(snapshot: ComputeDiagnosticsSnapshot) -> dict[str, Any]:
         }
         for record in snapshot.completion_history
     ]
+    recent_failures = [
+        {
+            "scopeKey": record["scope_key"],
+            "stepKind": record["step_kind"],
+            "stepIndex": record["step_index"],
+            "exceptionType": record["exception_type"],
+            "message": record["message"],
+            "traceback": record["traceback"],
+            "failedAt": record["failed_at"],
+        }
+        for record in snapshot.recent_failures
+    ]
     return {
         "shell": {
             "gameId": snapshot.shell.game_id,
@@ -332,6 +348,7 @@ def snapshot_to_wire(snapshot: ComputeDiagnosticsSnapshot) -> dict[str, Any]:
         "readyQueue": list(snapshot.ready_queue),
         "nextSingleStep": snapshot.next_single_step,
         "completionHistory": completion_history,
+        "recentFailures": recent_failures,
         "serverStreams": list(snapshot.server_streams),
         "remotePool": snapshot.remote_pool,
         "liveOccupancy": snapshot.live_occupancy,

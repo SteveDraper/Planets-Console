@@ -30,6 +30,9 @@ class ScopeLifecycleSnapshot:
     # Analytic park site string (e.g. SoftTerminalReason.value); None when not parked.
     # Soft-stream policy coerces to SoftTerminalReason at the scores adapter boundary.
     park_reason: str | None = None
+    # Profile position at settlement, so diagnostics can name the failed step.
+    step_index: int | None = None
+    profile_step_index: int | None = None
 
 
 ScopeOutcomeListener = Callable[[ScopeLifecycleSnapshot], None]
@@ -256,6 +259,8 @@ class OrchestratorObservers:
             result_wire=node.result_wire,
             error=node.error,
             park_reason=node.park_reason if node.state == "parked" else None,
+            step_index=node.step_index,
+            profile_step_index=node.profile_step_index,
         )
         for listener in tuple(self._scope_outcome_listeners):
             self._post_lock_callbacks.append(

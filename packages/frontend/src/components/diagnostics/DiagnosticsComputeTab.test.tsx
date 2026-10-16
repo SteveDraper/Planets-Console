@@ -90,6 +90,7 @@ function snapshotFixture(
       disabledReason: null,
     },
     completionHistory: [],
+    recentFailures: [],
     serverStreams: [],
     remotePool: emptyRemotePool(),
     liveOccupancy: emptyLiveOccupancy(),
