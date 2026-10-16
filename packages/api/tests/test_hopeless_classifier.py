@@ -426,6 +426,7 @@ def _finish_full_components(
     finish_mode: TierStepFinishMode,
     skipped: bool = False,
     new_exact_before_step: int | None = None,
+    early_stop_reason: str | None = None,
 ) -> tuple[PolicyLadderState, int]:
     """Close ``full_components`` on a ladder that would abort if the classifier ran."""
     steps = tuple(resolve_tier_policies())
@@ -451,6 +452,7 @@ def _finish_full_components(
         skipped=skipped,
         finish_mode=finish_mode,
         new_exact_before_step=new_exact_before_step,
+        early_stop_reason=early_stop_reason,
     )
     return state, full_index
 
@@ -493,6 +495,20 @@ def test_complete_of_full_components_still_aborts_when_classifier_fires(sample_t
         new_exact_before_step=0,
     )
     assert state.ladder_early_stop_reason == "expensive_tier_abort"
+    assert state.last_status == STATUS_MINE_SCORE_RESIDUAL
+    assert state.ladder_complete is True
+
+
+def test_explicit_early_stop_reason_replaces_expensive_abort_reason(sample_turn) -> None:
+    """A terminal reason wins, and the abort can still update last_status."""
+    state, _full_index = _finish_full_components(
+        sample_turn,
+        finish_mode=TierStepFinishMode.COMPLETE,
+        new_exact_before_step=0,
+        early_stop_reason="incoming_warship_floor",
+    )
+    assert state.ladder_early_stop_reason == "incoming_warship_floor"
+    assert state.step_diagnostics[-1]["ladderEarlyStopReason"] == "incoming_warship_floor"
     assert state.last_status == STATUS_MINE_SCORE_RESIDUAL
     assert state.ladder_complete is True
 
