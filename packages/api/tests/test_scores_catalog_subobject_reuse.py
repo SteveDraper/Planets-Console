@@ -324,15 +324,14 @@ def test_ladder_rungs_share_the_row_combo_tuple(sample_turn, monkeypatch) -> Non
         max_solutions,
         solve_clip,
         military_score_window=None,
-        fixed_combo_counts=None,
-        combo_count_neighborhood=0,
+        pins=None,
         cancel_token=None,
         on_solution=None,
         seed_no_good_solutions=(),
         **_budget,
     ):
         del race_id, max_solutions, solve_clip, military_score_window
-        del fixed_combo_counts, combo_count_neighborhood, cancel_token, on_solution
+        del pins, cancel_token, on_solution
         del seed_no_good_solutions
         problem = build_inference_problem(observation, catalog, max_solutions=1)
         return (

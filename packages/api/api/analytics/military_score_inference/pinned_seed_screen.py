@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from itertools import product
 
-from api.analytics.military_score_inference.catalog_model import CatalogMergePlan, MergeGroup
+from api.analytics.military_score_inference.catalog_model import (
+    CatalogMergePlan,
+    ComboPins,
+    MergeGroup,
+)
 from api.analytics.military_score_inference.military_score_window import (
     ExactMilitaryScoreWindow,
     MilitaryWindowBounds,
@@ -111,8 +115,7 @@ def pinned_counts_cannot_explain(
     plan: CatalogMergePlan,
     observation: InferenceObservation,
     aggregate_actions: tuple[CandidateAction, ...],
-    fixed_combo_counts: dict[str, int],
-    neighborhood: int,
+    pins: ComboPins,
 ) -> bool:
     """True when every pinned count assignment misses the exact military window.
 
@@ -120,22 +123,18 @@ def pinned_counts_cannot_explain(
     Aggregate actions stay free, so the check uses their count ranges. A pass that
     might still be feasible is left to the solver.
     """
-    if not fixed_combo_counts:
+    if not pins.counts:
         return False
 
     open_domains: list[tuple[MergeGroup, int, int]] = []
     seen_groups: set[int] = set()
-    for combo_id in fixed_combo_counts:
+    for combo_id in pins.counts:
         index = plan.member_group_index.get(combo_id)
         if index is None or index in seen_groups:
             continue
         seen_groups.add(index)
         group = plan.groups[index]
-        lower_bound, upper_bound = plan.merged_count_bounds(
-            group,
-            fixed_combo_counts,
-            neighborhood,
-        )
+        lower_bound, upper_bound = plan.merged_count_bounds(group, pins)
         if lower_bound > upper_bound:
             return True
         if lower_bound == 0 and upper_bound == 0:

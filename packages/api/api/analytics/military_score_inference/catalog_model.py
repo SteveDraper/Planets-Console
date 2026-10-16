@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from ortools.sat.python import cp_model
@@ -20,6 +21,20 @@ from api.analytics.military_score_inference.ship_build_combos import (
 # Ranking objective domain for the exposed IntVar used by near-best banding.
 _RANKING_OBJECTIVE_VAR_LB = -10_000_000
 _RANKING_OBJECTIVE_VAR_UB = 1_000_000
+
+
+@dataclass(frozen=True)
+class ComboPins:
+    """Seed combo counts and the neighborhood those counts may move within."""
+
+    counts: Mapping[str, int]
+    neighborhood: int
+
+    def cache_key(self) -> tuple[object, ...]:
+        """Identity of this pin in the tier model cache. Empty counts are unpinned."""
+        if not self.counts:
+            return ("open",)
+        return ("pin", self.neighborhood, tuple(sorted(self.counts.items())))
 
 
 @dataclass(frozen=True)
@@ -76,25 +91,17 @@ class CatalogMergePlan:
     combos_by_id: dict[str, ShipBuildCombo]
     unconstrained: MergedComboCatalog
 
-    def catalog_for_pins(
-        self,
-        fixed_combo_counts: dict[str, int] | None,
-        neighborhood: int,
-    ) -> MergedComboCatalog:
+    def catalog_for_pins(self, pins: ComboPins | None) -> MergedComboCatalog:
         """Merged catalog after a seed pin. Unpinned passes return the shared catalog."""
-        if not fixed_combo_counts:
+        if pins is None or not pins.counts:
             return self.unconstrained
-        touched = self._groups_touched_by(fixed_combo_counts)
+        touched = self._groups_touched_by(pins.counts)
         merged: list[ShipBuildCombo] = []
         for index, group in enumerate(self.groups):
             if index not in touched:
                 merged.append(replace(group.prototype, lower_bound=0, upper_bound=0))
                 continue
-            lower_bound, upper_bound = self.merged_count_bounds(
-                group,
-                fixed_combo_counts,
-                neighborhood,
-            )
+            lower_bound, upper_bound = self.merged_count_bounds(group, pins)
             if (
                 lower_bound == group.prototype.lower_bound
                 and upper_bound == group.prototype.upper_bound
@@ -112,30 +119,25 @@ class CatalogMergePlan:
     def merged_count_bounds(
         self,
         group: MergeGroup,
-        fixed_combo_counts: dict[str, int] | None,
-        neighborhood: int,
+        pins: ComboPins | None,
     ) -> tuple[int, int]:
         """Representative lower bound and max member upper bound after a pin."""
         representative = group.members[group.representative_index]
-        representative_lower, representative_upper = pinned_member_bounds(
-            representative,
-            fixed_combo_counts,
-            neighborhood,
-        )
+        representative_lower, representative_upper = pinned_member_bounds(representative, pins)
         merged_upper = representative_upper
-        if not fixed_combo_counts:
+        if pins is None or not pins.counts:
             return representative_lower, merged_upper
         for member in group.members:
-            if member is representative or member.combo_id not in fixed_combo_counts:
+            if member is representative or member.combo_id not in pins.counts:
                 continue
-            _lower, upper = pinned_member_bounds(member, fixed_combo_counts, neighborhood)
+            _lower, upper = pinned_member_bounds(member, pins)
             if upper > merged_upper:
                 merged_upper = upper
         return representative_lower, merged_upper
 
-    def _groups_touched_by(self, fixed_combo_counts: dict[str, int]) -> set[int]:
+    def _groups_touched_by(self, counts: Mapping[str, int]) -> set[int]:
         touched: set[int] = set()
-        for combo_id in fixed_combo_counts:
+        for combo_id in counts:
             index = self.member_group_index.get(combo_id)
             if index is not None:
                 touched.add(index)
@@ -144,19 +146,23 @@ class CatalogMergePlan:
 
 def pinned_member_bounds(
     combo: ShipBuildCombo,
-    fixed_combo_counts: dict[str, int] | None,
-    neighborhood: int,
+    pins: ComboPins | None,
 ) -> tuple[int, int]:
-    """Count bounds matching ``_apply_combo_count_constraints`` for one combo."""
-    if not fixed_combo_counts:
+    """Count bounds for one combo under a seed pin.
+
+    With no pins the combo keeps its catalog bounds. A pin closes every other
+    combo to zero and holds this combo at the seed count, or within
+    ``pins.neighborhood`` of that count when the neighborhood is positive.
+    """
+    if pins is None or not pins.counts:
         return combo.lower_bound, combo.upper_bound
-    if combo.combo_id not in fixed_combo_counts:
+    if combo.combo_id not in pins.counts:
         return 0, 0
-    seed_count = fixed_combo_counts[combo.combo_id]
-    if neighborhood <= 0:
+    seed_count = pins.counts[combo.combo_id]
+    if pins.neighborhood <= 0:
         return seed_count, seed_count
-    lower_bound = max(combo.lower_bound, max(0, seed_count - neighborhood))
-    upper_bound = min(combo.upper_bound, seed_count + neighborhood)
+    lower_bound = max(combo.lower_bound, max(0, seed_count - pins.neighborhood))
+    upper_bound = min(combo.upper_bound, seed_count + pins.neighborhood)
     return lower_bound, upper_bound
 
 

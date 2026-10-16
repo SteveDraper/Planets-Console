@@ -40,7 +40,7 @@ from api.analytics.military_score_inference.ranking_heuristics import (
 from api.analytics.military_score_inference.ship_build_combos import (
     is_generic_zero_military_score_combo_id,
 )
-from api.analytics.military_score_inference.tier_solve_cache import TierSolveCache
+from api.analytics.military_score_inference.tier_solve_cache import TierSolve
 from api.concepts.races import is_horwasp
 
 STATUS_EXACT = "exact"
@@ -473,9 +473,7 @@ def solve_inference_problem(
     on_solution: Callable[[InferenceSolution], None] | None = None,
     cancel_token: InferenceCancelToken | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
-    tier_solve_cache: TierSolveCache | None = None,
-    fixed_combo_counts: dict[str, int] | None = None,
-    combo_count_neighborhood: int = 0,
+    tier_solve: TierSolve | None = None,
     structural_hit_limit: int | None = None,
     successive_structural_search: bool = False,
 ) -> InferenceResult:
@@ -531,11 +529,10 @@ def solve_inference_problem(
         )
 
     prepared_seed_counts: tuple[int, int] | None = None
-    if tier_solve_cache is not None:
-        built_model, seed_applied, seed_skipped = tier_solve_cache.fresh_model(
+    if tier_solve is not None:
+        built_model, seed_applied, seed_skipped = tier_solve.cache.fresh_model(
             problem,
-            fixed_combo_counts,
-            combo_count_neighborhood,
+            tier_solve.pins,
             seed_no_good_solutions,
         )
         merged_combo_catalog = built_model.merged_combo_catalog

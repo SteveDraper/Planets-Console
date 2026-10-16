@@ -11,7 +11,10 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog_from_turn,
     build_inference_problem,
 )
-from api.analytics.military_score_inference.catalog_model import build_catalog_merge_plan
+from api.analytics.military_score_inference.catalog_model import (
+    ComboPins,
+    build_catalog_merge_plan,
+)
 from api.analytics.military_score_inference.collision_hull_widen import (
     CollisionHullWidenPlan,
     load_twins_for_turn,
@@ -98,7 +101,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_TIME_LIMITED,
     solve_inference_problem,
 )
-from api.analytics.military_score_inference.tier_solve_cache import TierSolveCache
+from api.analytics.military_score_inference.tier_solve_cache import TierSolve, TierSolveCache
 from api.models.game import TurnInfo
 
 
@@ -125,18 +128,15 @@ def _solve_catalog(
     max_solutions: int,
     solve_clip: SolveClip,
     military_score_window: MilitaryScoreWindow | None = None,
-    fixed_combo_counts: dict[str, int] | None = None,
-    combo_count_neighborhood: int = 0,
+    pins: ComboPins | None = None,
     cancel_token: InferenceCancelToken | None = None,
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
-    tier_solve_cache: TierSolveCache | None = None,
+    tier_solve_cache: TierSolveCache,
     structural_hit_limit: int | None = None,
     successive_structural_search: bool = False,
 ) -> tuple[InferenceResult, InferenceProblem]:
-    # The tier cache applies pins on the shared merge plan. Copying every combo
-    # here would rebuild that catalog on each neighborhood pass.
     problem = build_inference_problem(
         observation,
         catalog,
@@ -145,17 +145,13 @@ def _solve_catalog(
         time_limit_seconds=solve_clip.problem_time_limit_seconds(),
         solve_clip=solve_clip,
         military_score_window=military_score_window,
-        fixed_combo_counts=None if tier_solve_cache is not None else fixed_combo_counts,
-        combo_count_neighborhood=0 if tier_solve_cache is not None else combo_count_neighborhood,
     )
     result = solve_inference_problem(
         problem,
         cancel_token=cancel_token,
         on_solution=on_solution,
         seed_no_good_solutions=seed_no_good_solutions,
-        tier_solve_cache=tier_solve_cache,
-        fixed_combo_counts=fixed_combo_counts if tier_solve_cache is not None else None,
-        combo_count_neighborhood=combo_count_neighborhood if tier_solve_cache is not None else 0,
+        tier_solve=TierSolve(cache=tier_solve_cache, pins=pins),
         structural_hit_limit=structural_hit_limit,
         successive_structural_search=successive_structural_search,
     )
@@ -200,7 +196,7 @@ def _solve_seed_progression(
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
-    tier_solve_cache: TierSolveCache | None = None,
+    tier_solve_cache: TierSolveCache,
     successive_structural_search: bool = False,
 ) -> tuple[InferenceResult | None, InferenceProblem | None]:
     """Run neighborhood then unfixed catalog solves under one shared clip.
@@ -230,12 +226,12 @@ def _solve_seed_progression(
         return clip
 
     for neighborhood in (0, 1):
-        if tier_solve_cache is not None and pinned_counts_cannot_explain(
+        pins = ComboPins(counts=fixed_counts, neighborhood=neighborhood)
+        if pinned_counts_cannot_explain(
             tier_solve_cache.plan,
             observation,
             catalog.aggregate_actions,
-            fixed_counts,
-            neighborhood,
+            pins,
         ):
             continue
         clip = _solve_cap()
@@ -247,8 +243,7 @@ def _solve_seed_progression(
             race_id=race_id,
             max_solutions=max_solutions,
             solve_clip=clip,
-            fixed_combo_counts=fixed_counts,
-            combo_count_neighborhood=neighborhood,
+            pins=pins,
             cancel_token=cancel_token,
             on_solution=on_solution,
             seed_no_good_solutions=seed_no_good_solutions,

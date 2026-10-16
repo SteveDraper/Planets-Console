@@ -4,6 +4,7 @@ from api.analytics.military_score_inference.actions import (
     ActionCatalog,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.catalog_model import build_catalog_merge_plan
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -25,6 +26,7 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
     solution_signature,
 )
 from api.analytics.military_score_inference.solver import solve_inference_problem
+from api.analytics.military_score_inference.tier_solve_cache import TierSolveCache
 
 
 def _combo(combo_id: str, *, hull_id: int, score_delta_2x: int) -> ShipBuildCombo:
@@ -94,6 +96,7 @@ def _pipeline(*, successive_search: bool) -> tuple[list[InferenceSolution], int]
         actions=(),
         ship_builds=(InferenceSolutionShipBuild(combo_id="partial", label="partial", count=1),),
     )
+    cache = TierSolveCache(build_catalog_merge_plan(catalog.ship_build_combos))
     seed_result, _seed_problem = _solve_seed_progression(
         observation,
         catalog,
@@ -101,6 +104,7 @@ def _pipeline(*, successive_search: bool) -> tuple[list[InferenceSolution], int]
         max_solutions=20,
         next_solve_clip=lambda: WallSolveClip(max_time_in_seconds=5.0),
         on_solution=admit,
+        tier_solve_cache=cache,
         successive_structural_search=successive_search,
     )
     assert seed_result is not None
@@ -110,6 +114,7 @@ def _pipeline(*, successive_search: bool) -> tuple[list[InferenceSolution], int]
         max_solutions=20,
         solve_clip=WallSolveClip(max_time_in_seconds=5.0),
         on_solution=admit,
+        tier_solve_cache=cache,
         successive_structural_search=successive_search,
     )
     return held, int(seed_result.diagnostics["structural_hit_count"])

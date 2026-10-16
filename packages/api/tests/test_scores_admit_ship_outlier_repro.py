@@ -196,7 +196,6 @@ class _PhaseProbe:
 
     def install(self) -> None:
         from api.analytics.military_score_inference import (
-            actions,
             catalog_model,
             inference_api_payload,
             policy_ladder,
@@ -327,7 +326,6 @@ class _PhaseProbe:
         catalog_model.merge_score_equivalent_combos = timed_span("merge", original_merge)
         solver.expand_structural_hits_to_top_k = timed_span("expand", original_expand)
         original_build_problem = policy_ladder_tier_step.build_inference_problem
-        original_constrain = actions._apply_combo_count_constraints
         original_validate = solver._validate_problem
         original_collect = solver.collect_near_best_structural_hits
         from api.analytics.military_score_inference import near_best_structural_search as near_best
@@ -352,10 +350,6 @@ class _PhaseProbe:
         policy_ladder_tier_step.build_inference_problem = timed_span(
             "build_problem",
             original_build_problem,
-        )
-        actions._apply_combo_count_constraints = timed_span(
-            "constrain_combos",
-            original_constrain,
         )
         solver._validate_problem = timed_span("validate", original_validate)
         solver.collect_near_best_structural_hits = timed_span("collect_hits", original_collect)
@@ -458,9 +452,7 @@ class _PhaseProbe:
         self._original_step_lookups = original_step_lookups
         self._original_ladder_lookups = original_ladder_lookups
         self._original_payload_lookups = original_payload_lookups
-        self._actions_module = actions
         self._original_build_problem = original_build_problem
-        self._original_constrain = original_constrain
         self._original_validate = original_validate
         self._original_collect = original_collect
         self._near_best_module = near_best
@@ -485,7 +477,6 @@ class _PhaseProbe:
         self._ladder_module.catalog_score_lookups = self._original_ladder_lookups
         self._payload_module.catalog_score_lookups = self._original_payload_lookups
         self._tier_step_module.build_inference_problem = self._original_build_problem
-        self._actions_module._apply_combo_count_constraints = self._original_constrain
         self._solver_module._validate_problem = self._original_validate
         self._solver_module.collect_near_best_structural_hits = self._original_collect
         self._near_best_module._read_combo_counts = self._original_read_combos

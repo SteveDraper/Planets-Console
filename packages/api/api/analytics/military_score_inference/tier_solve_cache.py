@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from api.analytics.military_score_inference import catalog_model
 from api.analytics.military_score_inference import near_best_structural_search as near_best
-from api.analytics.military_score_inference.catalog_model import BuiltModel, CatalogMergePlan
+from api.analytics.military_score_inference.catalog_model import (
+    BuiltModel,
+    CatalogMergePlan,
+    ComboPins,
+)
 from api.analytics.military_score_inference.military_score_window import (
     BandMilitaryScoreWindow,
     ExactMilitaryScoreWindow,
@@ -31,18 +36,17 @@ class TierSolveCache:
     def fresh_model(
         self,
         problem: InferenceProblem,
-        fixed_combo_counts: dict[str, int] | None,
-        combo_count_neighborhood: int,
+        pins: ComboPins | None,
         seed_solutions: Sequence[InferenceSolution],
     ) -> tuple[BuiltModel, int, int]:
         """Return an unsolved clone plus the seed no-good counts baked into it."""
         clean_key = (
             _window_key(problem.military_score_window),
-            _pins_key(fixed_combo_counts, combo_count_neighborhood),
+            ("open",) if pins is None else pins.cache_key(),
         )
         clean = self._clean.get(clean_key)
         if clean is None:
-            merged = self.plan.catalog_for_pins(fixed_combo_counts, combo_count_neighborhood)
+            merged = self.plan.catalog_for_pins(pins)
             clean = catalog_model.build_model(problem, merged)
             self._clean[clean_key] = clean
 
@@ -69,6 +73,14 @@ class TierSolveCache:
         return catalog_model.clone_built_model(model), applied, skipped
 
 
+@dataclass(frozen=True)
+class TierSolve:
+    """Model cache and optional seed pins for one catalog solve."""
+
+    cache: TierSolveCache
+    pins: ComboPins | None = None
+
+
 def _window_key(window: MilitaryScoreWindow) -> tuple[object, ...]:
     if isinstance(window, BandMilitaryScoreWindow):
         return ("band", window.alpha)
@@ -77,12 +89,3 @@ def _window_key(window: MilitaryScoreWindow) -> tuple[object, ...]:
     if isinstance(window, ExactMilitaryScoreWindow):
         return ("exact",)
     return ("exact",)
-
-
-def _pins_key(
-    fixed_combo_counts: dict[str, int] | None,
-    neighborhood: int,
-) -> tuple[object, ...]:
-    if not fixed_combo_counts:
-        return ("open",)
-    return ("pin", neighborhood, tuple(sorted(fixed_combo_counts.items())))

@@ -1,6 +1,6 @@
 """Bounded aggregate action catalog for military score build inference."""
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from api.analytics.fleet.types import FleetShipRecord
@@ -147,22 +147,12 @@ def build_inference_problem(
     time_limit_seconds: float = DEFAULT_INFERENCE_TIME_LIMIT_SECONDS,
     solve_clip: EffortSolveClip | WallSolveClip | None = None,
     military_score_window: MilitaryScoreWindow | None = None,
-    fixed_combo_counts: dict[str, int] | None = None,
-    combo_count_neighborhood: int = 0,
 ) -> InferenceProblem:
-    aggregate_actions = catalog.aggregate_actions
-    ship_build_combos = catalog.ship_build_combos
-    if fixed_combo_counts:
-        ship_build_combos = _apply_combo_count_constraints(
-            ship_build_combos,
-            fixed_combo_counts=fixed_combo_counts,
-            neighborhood=combo_count_neighborhood,
-        )
     return InferenceProblem(
         observation=observation,
-        aggregate_actions=aggregate_actions,
+        aggregate_actions=catalog.aggregate_actions,
         race_id=race_id,
-        ship_build_combos=ship_build_combos,
+        ship_build_combos=catalog.ship_build_combos,
         policy_step_id=catalog.policy_step_id,
         policy_step_index=catalog.policy_step_index,
         probability_buckets_by_action_id=catalog.probability_buckets_by_action_id,
@@ -488,27 +478,6 @@ def build_action_catalog(
         acquired_freighter_cap=transfer_fragment.acquired_freighter_cap,
         acquired_ship_cap=transfer_fragment.acquired_ship_cap,
     )
-
-
-def _apply_combo_count_constraints(
-    combos: tuple[ShipBuildCombo, ...],
-    *,
-    fixed_combo_counts: dict[str, int],
-    neighborhood: int,
-) -> tuple[ShipBuildCombo, ...]:
-    constrained: list[ShipBuildCombo] = []
-    for combo in combos:
-        if combo.combo_id not in fixed_combo_counts:
-            constrained.append(replace(combo, lower_bound=0, upper_bound=0))
-            continue
-        seed_count = fixed_combo_counts[combo.combo_id]
-        if neighborhood <= 0:
-            constrained.append(replace(combo, lower_bound=seed_count, upper_bound=seed_count))
-            continue
-        lower_bound = max(combo.lower_bound, max(0, seed_count - neighborhood))
-        upper_bound = min(combo.upper_bound, seed_count + neighborhood)
-        constrained.append(replace(combo, lower_bound=lower_bound, upper_bound=upper_bound))
-    return tuple(constrained)
 
 
 def _evil_empire_free_starbase_fighter_actions(
