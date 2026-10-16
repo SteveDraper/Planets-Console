@@ -113,6 +113,7 @@ While the list of analytics is loading from the server, the main area may show *
   - **Do not show flares** -- only **direct** warp-well links; pairs reachable **only** via a flare **do not** appear.
   - **Show flares** -- direct links (solid gray) **plus** flare-only links where applicable (**dashed yellow**).
   - **Show only flares** -- only flare-assisted pairs.
+- **Flares** stays on the last choice after a page refresh. **Depth**, **Warp**, and **Gravitonic movement** reset when you refresh.
 
 Technical detail, API query parameters, and merge rules live in [design-connections-analytic.md](design-connections-analytic.md).
 

@@ -13,7 +13,7 @@ This document describes the **Connections** analytic: **one-turn ship reachabili
 | Core analytics adapter | `packages/api/api/analytics/connections.py` |
 | BFF map route + handler | `packages/bff/bff/routers/analytics.py`, `packages/bff/bff/analytics/connections.py` |
 | SPA: fetch, merge with base map, styling | `packages/frontend/src/api/bff.ts`, `packages/frontend/src/analytics/mapLayers.ts`, `MapGraph.tsx` |
-| SPA: enable + parameters | `packages/frontend/src/analytics/connections/connectionsMapParamsStore.ts` (ephemeral Zustand), `packages/frontend/src/analytics/connections/ConnectionsMapTile.tsx`, `packages/frontend/src/analytics/connections/shell.tsx` |
+| SPA: enable + parameters | `packages/frontend/src/analytics/connections/connectionsMapParamsStore.ts` (Zustand; **Flares** persisted, other knobs session-only), `packages/frontend/src/analytics/connections/ConnectionsMapTile.tsx`, `packages/frontend/src/analytics/connections/shell.tsx` |
 | Tests | `packages/api/tests/test_planet_connections.py`, `packages/bff/tests/test_analytics.py` |
 
 Related: [Warp wells on the map](design-warp-wells-map.md) (well drawing and concept HTTP), [vga-planets-domain-context.md](vga-planets-domain-context.md) (domain), [Frontend and backend state](design-frontend-and-backend-state.md) (query keys and gating).
@@ -101,11 +101,13 @@ The BFF does not recompute logic; it forwards to Core **`get_turn_analytics`** w
 ### 6.1 Enabling and parameters
 
 - **Connections** appears in the **Analytics** sidebar as a **checkbox** (map mode). It must be **enabled** for the map request to run (together with the always-included **base map** layer when map mode is active).
-- **`connectionsMapParams`** in the ephemeral Zustand store `connectionsMapParamsStore.ts` (not persisted; not `App.tsx` state) holds:
-  - **`warpSpeed`** (1--9),
-  - **`gravitonicMovement`**,
-  - **`flareMode`** (`off` \| `include` \| `only`),
-  - **`flareDepth`** (1--3; hop budget / annulus cap as above; **Depth** in the UI).
+- **`connectionsMapParams`** in the Zustand store `connectionsMapParamsStore.ts` (not `App.tsx` state) holds:
+  - **`warpSpeed`** (1--9), session-only,
+  - **`gravitonicMovement`**, session-only,
+  - **`flareMode`** (`off` \| `include` \| `only`), persisted in `localStorage` under `planets-console-connections-map-params`,
+  - **`flareDepth`** (1--3; hop budget / annulus cap as above; **Depth** in the UI), session-only.
+
+**Flares** is restored after a reload. A missing or invalid stored `flareMode` falls back to **`include`** (Show flares). **Depth**, **Warp**, and **Gravitonic movement** reset to the in-memory defaults (`flareDepth` 2, warp 9, gravitonic off) on reload.
 
 Controls live in the shared sidebar chevron pane on **`ConnectionsMapTile`**: **Flares**, **Depth**, **Warp**, and **Gravitonic**. The pane opens only while Connections is enabled.
 
