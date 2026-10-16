@@ -300,6 +300,7 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             bound = list(self._bound_orchestrators)
             self._bound_orchestrators.clear()
             self._histories.clear()
+            self._failure_logs.clear()
             self._in_flight.clear()
             self._single_step.clear()
             self._active_game_id = None

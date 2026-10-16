@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
     ShipBuildCombo,
+    action_military_range_2x,
     candidate_military_subtotal_bounds_2x,
 )
 
@@ -312,13 +313,7 @@ def _summed_military_range(actions: tuple[CandidateAction, ...]) -> tuple[int, i
     lower = 0
     upper = 0
     for action in actions:
-        if action.lower_bound > action.upper_bound:
-            continue
-        endpoints: list[int] = []
-        for count in (action.lower_bound, action.upper_bound):
-            count_lower, count_upper = candidate_military_subtotal_bounds_2x(action, count)
-            endpoints.append(count_lower)
-            endpoints.append(count_upper)
-        lower += min(endpoints)
-        upper += max(endpoints)
+        action_lower, action_upper = action_military_range_2x(action)
+        lower += action_lower
+        upper += action_upper
     return lower, upper

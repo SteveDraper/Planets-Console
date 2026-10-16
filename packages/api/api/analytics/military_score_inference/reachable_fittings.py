@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceProblem,
     ShipBuildCombo,
+    action_military_range_2x,
     candidate_military_subtotal_bounds_2x,
 )
 
@@ -129,7 +130,7 @@ def _free_aggregate_military_range(
     for action in actions:
         if action.warship_delta != 0 or action.freighter_delta != 0:
             continue
-        action_low, action_high = _action_military_range(action)
+        action_low, action_high = action_military_range_2x(action)
         low += action_low
         high += action_high
     return low, high
@@ -183,14 +184,3 @@ def _freighter_military(
     if not lows:
         return 0, 0
     return min(lows) * required, max(highs) * required
-
-
-def _action_military_range(action: CandidateAction) -> tuple[int, int]:
-    if action.lower_bound > action.upper_bound:
-        return 0, 0
-    low, high = candidate_military_subtotal_bounds_2x(action, action.lower_bound)
-    for count in range(action.lower_bound + 1, action.upper_bound + 1):
-        count_low, count_high = candidate_military_subtotal_bounds_2x(action, count)
-        low = min(low, count_low)
-        high = max(high, count_high)
-    return low, high

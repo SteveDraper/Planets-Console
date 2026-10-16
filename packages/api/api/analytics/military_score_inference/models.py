@@ -272,6 +272,23 @@ def candidate_military_subtotal_bounds_2x(action: CandidateAction, count: int) -
     return point, point
 
 
+def action_military_range_2x(action: CandidateAction) -> tuple[int, int]:
+    """Inclusive military 2x over the action's count bounds.
+
+    Each subtotal bound is a constant times the count, so on an inclusive
+    count interval the extremes are the endpoint bounds. An inverted count
+    interval contributes nothing.
+    """
+    if action.lower_bound > action.upper_bound:
+        return 0, 0
+    bounds = [
+        bound
+        for count in (action.lower_bound, action.upper_bound)
+        for bound in candidate_military_subtotal_bounds_2x(action, count)
+    ]
+    return min(bounds), max(bounds)
+
+
 class MagnitudeCountBounds(Protocol):
     """Structural type for magnitude-bin count ranges (bounds or full buckets)."""
 

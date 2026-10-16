@@ -1905,6 +1905,32 @@ def test_recent_failures_record_the_step_exception(sample_turn):
     assert "explode" in failure["traceback"]
 
 
+def test_reset_for_tests_clears_failure_logs_with_completion_history() -> None:
+    controller = get_compute_diagnostics_controller()
+    shell = ShellContextKey(game_id=1, perspective=2, turn=3)
+    controller._history_for_shell(shell).append(
+        scope_key="scope",
+        surface="inline",
+        terminal_state="failed",
+        step_kind="tier_solve",
+        step_index=0,
+        priority_band="background",
+    )
+    controller._failure_log_for_shell(shell).append(
+        scope_key="scope",
+        step_kind="tier_solve",
+        step_index=0,
+        error=RuntimeError("boom"),
+    )
+    assert controller._history_for_shell(shell).recent()
+    assert controller._failure_log_for_shell(shell).recent()
+
+    controller.reset_for_tests()
+
+    assert controller._history_for_shell(shell).recent() == ()
+    assert controller._failure_log_for_shell(shell).recent() == ()
+
+
 def test_failure_log_keeps_the_most_recent_twenty() -> None:
     from api.compute.diagnostics.failures import ComputeFailureLog
 
