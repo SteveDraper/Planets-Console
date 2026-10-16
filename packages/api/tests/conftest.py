@@ -34,7 +34,10 @@ from tests.fixtures.military_score_inference_prior_weights import (  # noqa: F40
     minimal_prior_catalog,
 )
 
-pytest_plugins = ["tests.scores_exports_helpers"]
+pytest_plugins = [
+    "tests.scores_exports_helpers",
+    "tests.scores_outlier_repro_harness",
+]
 
 
 @pytest.fixture(autouse=True)
