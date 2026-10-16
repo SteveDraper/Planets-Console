@@ -8,13 +8,10 @@ fitted onto those ships.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from api.analytics.fleet.field_constraints import known_positive_component_id
-from api.analytics.fleet.types import FleetShipRecord
-from api.analytics.military_score_inference.inference_stream_session import (
-    InferenceRowStreamSession,
-)
+from api.analytics.fleet.types import CounterpartyFleetLoader, FleetShipRecord
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceSolution,
@@ -26,40 +23,6 @@ from api.models.components import Beam, Engine, Hull, Torpedo
 
 ACQUIRED_WARSHIP_ACTION_PREFIX = "acquired:warship:"
 INCOMING_WARSHIP_FLOOR_STOP_REASON = "incoming_warship_floor"
-
-CounterpartyFleetLoader = Callable[[int], tuple[FleetShipRecord, ...]]
-
-
-def counterparty_fleet_loader(
-    session: InferenceRowStreamSession,
-) -> CounterpartyFleetLoader | None:
-    """Load each donor's prior-turn active ships through fleet persistence.
-
-    Returns None when this row has no query context, so the caller keeps the
-    existing search.
-    """
-    query_context = session.query_context
-    if query_context is None or session.turn_number <= 1:
-        return None
-    from api.analytics.scores.prior_fleet_resolution import fleet_compute_services
-
-    services = fleet_compute_services(query_context)
-    if services is None:
-        return None
-    game_id = session.game_id
-    perspective = session.perspective
-    prior_turn = session.turn_number - 1
-    persistence = services.persistence
-
-    def load(player_id: int) -> tuple[FleetShipRecord, ...]:
-        persisted = persistence.get_ledger(game_id, perspective, prior_turn, player_id)
-        if persisted is None:
-            return ()
-        return tuple(
-            record for record in persisted.ledger.records if record.disposition == "active"
-        )
-
-    return load
 
 
 def fitting_incoming_warship_transfers(

@@ -9,10 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from api.analytics.fleet.types import CounterpartyFleetLoader
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.incoming_warship_floor import (
     INCOMING_WARSHIP_FLOOR_STOP_REASON,
-    CounterpartyFleetLoader,
     fitting_incoming_warship_transfers,
 )
 from api.analytics.military_score_inference.models import (

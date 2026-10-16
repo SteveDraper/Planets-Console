@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
+from api.analytics.scores.exports import stored_closed_horwasp_skip
 from api.analytics.scores.prior_fleet_resolution import (
     fleet_compute_services,
     resolve_prior_fleet_for_scores,
@@ -210,47 +211,9 @@ def _horwasp_evidence_closed_skip_wire(
     """Return the skip wire once a Horwasp row is stored, before any solve work.
 
     Fleet finalization reads the persisted inference row and ignores the
-    in-memory admission. Returning the sentinel without that row leaves fleet
-    evidence open. A Horwasp whose stored row is some other status falls
-    through so this path does not claim evidence the probe will reject.
+    in-memory admission. The stored-row rule is ``closed_horwasp_skip_row``.
     """
-    player_id = export_scope.player_id
-    if player_id is None or export_scope.turn <= 1:
-        return None
-    turn = ctx.load_turn(export_scope.turn)
-    if turn is None:
-        return None
-
-    from api.analytics.military_score_inference.inference_admission import (
-        is_build_inference_available,
-        resolve_inference_admission_skip,
-    )
-    from api.analytics.military_score_inference.inference_api_payload import STATUS_HORWASP
-    from api.analytics.scores.exports import persist_missing_admission_skip
-
-    if not is_build_inference_available(turn):
-        return None
-    skip = resolve_inference_admission_skip(
-        turn,
-        player_id,
-        perspective=export_scope.perspective,
-        load_scoreboard_turn=ctx.load_turn,
-    )
-    if skip is None or skip.status != STATUS_HORWASP:
-        return None
-    if not persist_missing_admission_skip(ctx, export_scope):
-        return None
-
-    services = resolve_scores_services(ctx)
-    if services.persistence is None:
-        return None
-    stored = services.persistence.get_row(
-        export_scope.game_id,
-        export_scope.perspective,
-        export_scope.turn,
-        player_id,
-    )
-    if stored is None or stored.status != STATUS_HORWASP:
+    if stored_closed_horwasp_skip(ctx, export_scope) is None:
         return None
     return _evidence_closed_skip_wire(scope)
 

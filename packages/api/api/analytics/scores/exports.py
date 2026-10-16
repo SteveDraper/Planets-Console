@@ -11,7 +11,9 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_admission import (
+    admission_skip_complete_event,
     is_build_inference_available,
+    resolve_inference_admission_skip,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
     ImmediateRowAdmission,
@@ -26,6 +28,8 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
     ScoresExportResolved,
+    closed_horwasp_skip_row,
+    horwasp_skip_closes_turn_evidence,
     is_scores_export_authoritatively_persisted,
     is_scores_export_ensure_satisfied_from_snapshot,
     is_scores_export_in_progress_from_snapshot,
@@ -424,13 +428,14 @@ def persist_missing_admission_skip(
     sees open turn evidence. Rewriting the skip row closes evidence so
     ``tier_solve`` can skip and fleet finalization can persist.
 
-    ``admit_scores_export_work`` is the only caller; job-wire builders reach it
-    through admit. Returns True when this scope is an admission skip.
+    ``admit_scores_export_work`` calls this. The Horwasp early path stores
+    through ``stored_closed_horwasp_skip`` so that scope is classified once.
+    Other job-wire builders reach admission skips through admit. Returns True
+    when this scope is an admission skip.
     """
     if scope.player_id is None or scope.turn <= 1:
         return False
 
-    services = resolve_scores_services(ctx)
     turn = ctx.load_turn(scope.turn)
     if turn is None or not is_build_inference_available(turn):
         return False
@@ -443,7 +448,58 @@ def persist_missing_admission_skip(
     )
     if immediate is None:
         return False
+    return _store_admission_skip(ctx, scope, immediate)
 
+
+def stored_closed_horwasp_skip(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> PersistedInferenceRow | None:
+    """Store this scope's Horwasp skip and return the row when it closes evidence.
+
+    Viewpoint, dead, and full-alliance classifications stay ahead of Horwasp
+    and return None so those rows stay on the admit path. A stored row with a
+    different status returns None.
+    """
+    player_id = scope.player_id
+    if player_id is None or scope.turn <= 1:
+        return None
+    turn = ctx.load_turn(scope.turn)
+    if turn is None or not is_build_inference_available(turn):
+        return None
+    skip = resolve_inference_admission_skip(
+        turn,
+        player_id,
+        perspective=scope.perspective,
+        load_scoreboard_turn=ctx.load_turn,
+    )
+    if skip is None or not horwasp_skip_closes_turn_evidence(skip.status):
+        return None
+    if not _store_admission_skip(ctx, scope, (admission_skip_complete_event(skip),)):
+        return None
+    services = resolve_scores_services(ctx)
+    if services.persistence is None:
+        return None
+    return closed_horwasp_skip_row(
+        services.persistence.get_row(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            player_id,
+        )
+    )
+
+
+def _store_admission_skip(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    immediate: tuple[dict[str, object], ...],
+) -> bool:
+    """Record an admission skip and write the inference row when storage lacks one."""
+    player_id = scope.player_id
+    if player_id is None:
+        return False
+    services = resolve_scores_services(ctx)
     admission = ImmediateRowAdmission(events=immediate)
     ctx.record_ensure_ephemeral(ANALYTIC_ID, scope, admission)
     if services.persistence is not None and (
@@ -451,7 +507,7 @@ def persist_missing_admission_skip(
             scope.game_id,
             scope.perspective,
             scope.turn,
-            scope.player_id,
+            player_id,
         )
         is not None
     ):

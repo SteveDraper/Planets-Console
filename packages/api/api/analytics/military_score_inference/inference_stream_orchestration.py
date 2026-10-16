@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from api.analytics.fleet.types import FleetShipRecord
+from api.analytics.fleet.types import CounterpartyFleetLoader, FleetShipRecord
 from api.analytics.military_score_inference.accelerated_start import (
     AcceleratedInferenceSegment,
     scoreboard_host_turn,
@@ -16,9 +16,6 @@ from api.analytics.military_score_inference.hopeless_classifier import (
     hopeless_row_facts_from_session,
 )
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.incoming_warship_floor import (
-    counterparty_fleet_loader,
-)
 from api.analytics.military_score_inference.inference_accelerated import (
     AcceleratedSegmentResult,
     build_accelerated_backfill_stream_row_complete,
@@ -59,8 +56,14 @@ def new_ladder_state(
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
     hopeless_context: HopelessRowFacts | None = None,
+    load_counterparty_fleet: CounterpartyFleetLoader | None = None,
 ) -> PolicyLadderState:
-    """Build a fresh ladder snapshot. Session, when given, owns fact assembly."""
+    """Build a fresh ladder snapshot. Session, when given, owns fact assembly.
+
+    ``load_counterparty_fleet`` is the donor-ledger loader for the incoming
+    warship floor. The scores tier registry supplies it when the session has a
+    query context; continuations pass the loader already on the previous state.
+    """
     if session is not None:
         if resolved_mask is None:
             resolved_mask = session.resolved_mask
@@ -87,7 +90,7 @@ def new_ladder_state(
             session.turn,
             hopeless_context=hopeless_context,
         )
-        state.load_counterparty_fleet = counterparty_fleet_loader(session)
+    state.load_counterparty_fleet = load_counterparty_fleet
     return state
 
 
@@ -162,6 +165,7 @@ class InferenceStreamOrchestration:
         fleet_torp_overlay: FleetTorpOverlay | None = None,
         prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
         hopeless_context: HopelessRowFacts | None = None,
+        load_counterparty_fleet: CounterpartyFleetLoader | None = None,
     ) -> PolicyLadderState:
         return new_ladder_state(
             session,
@@ -169,6 +173,7 @@ class InferenceStreamOrchestration:
             fleet_torp_overlay=fleet_torp_overlay,
             prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
             hopeless_context=hopeless_context,
+            load_counterparty_fleet=load_counterparty_fleet,
         )
 
     def record_segment_ladder_complete(

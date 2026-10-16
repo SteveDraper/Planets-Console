@@ -109,6 +109,7 @@ def _outcome_after_ladder_complete(
                 next_ladder_state=orchestration.new_ladder_state(
                     run.session,
                     hopeless_context=state.hopeless_context,
+                    load_counterparty_fleet=state.load_counterparty_fleet,
                 ),
             )
         if advance.row_complete is not None:

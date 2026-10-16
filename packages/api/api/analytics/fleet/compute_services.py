@@ -64,8 +64,19 @@ def build_ephemeral_fleet_compute_services(
     )
 
 
+def lookup_fleet_compute_services(ctx: AnalyticQueryContext) -> FleetComputeServices | None:
+    """Return fleet compute services when this query context has them."""
+    services = export_service_for(ctx, ANALYTIC_ID, FleetComputeServices)
+    if services is not None:
+        return services
+    injected = ctx.export_services.get(ANALYTIC_ID)
+    if isinstance(injected, FleetComputeServices):
+        return injected
+    return None
+
+
 def resolve_fleet_services(exports: AnalyticQueryContext) -> FleetComputeServices:
-    services = export_service_for(exports, ANALYTIC_ID, FleetComputeServices)
+    services = lookup_fleet_compute_services(exports)
     if services is not None:
         return services
 

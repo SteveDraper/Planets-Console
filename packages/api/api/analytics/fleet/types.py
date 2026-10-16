@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -163,6 +164,9 @@ class FleetShipRecord:
     display_default_option_set_index: int | None = None
     last_seen: FleetLastSeen | None = None
     events: list[FleetEvidenceEvent] = field(default_factory=list)
+
+
+CounterpartyFleetLoader = Callable[[int], tuple[FleetShipRecord, ...]]
 
 
 @dataclass(frozen=True)

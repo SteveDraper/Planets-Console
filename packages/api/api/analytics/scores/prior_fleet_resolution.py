@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from api.analytics.export_context import AnalyticQueryContext, export_service_for
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.prior_selection import resolve_fleet_prior_persisted
@@ -26,16 +26,14 @@ if TYPE_CHECKING:
 
 
 def fleet_compute_services(ctx: AnalyticQueryContext) -> FleetComputeServices | None:
-    """Resolve fleet compute services from export registration or injected map."""
-    from api.analytics.fleet.compute_services import FleetComputeServices
+    """Resolve fleet compute services from export registration or injected map.
 
-    fleet_services = export_service_for(ctx, FLEET_ANALYTIC_ID, FleetComputeServices)
-    if fleet_services is not None:
-        return fleet_services
-    injected = ctx.export_services.get(FLEET_ANALYTIC_ID)
-    if isinstance(injected, FleetComputeServices):
-        return injected
-    return None
+    The fleet module import stays inside this function. Loading fleet compute
+    services also loads scores exports, and a module-level import here cycles.
+    """
+    from api.analytics.fleet.compute_services import lookup_fleet_compute_services
+
+    return lookup_fleet_compute_services(ctx)
 
 
 def prior_fleet_compute_scope(
