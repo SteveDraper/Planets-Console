@@ -65,12 +65,19 @@ def build_inference_objective_terms(
     combo_count_vars: dict[str, cp_model.IntVar],
     *,
     ship_build_combos: tuple[ShipBuildCombo, ...],
+    max_combo_weight: int | None = None,
 ) -> list[cp_model.LinearExpr]:
-    """Assemble CP-SAT linear objective terms for one inference solve."""
+    """Assemble CP-SAT linear objective terms for one inference solve.
+
+    ``max_combo_weight`` is the scale for ship penalties. Pass the weight from
+    the catalog before fittings outside the military window are removed, so a
+    dropped fitting still sets the penalty of the ships that remain.
+    """
     objective_terms: list[cp_model.LinearExpr] = []
-    max_combo_weight = (
-        max(combo.probability_weight for combo in ship_build_combos) if ship_build_combos else 0
-    )
+    if max_combo_weight is None:
+        max_combo_weight = (
+            max(combo.probability_weight for combo in ship_build_combos) if ship_build_combos else 0
+        )
 
     for action in problem.aggregate_actions:
         count_var = action_count_vars[action.id]

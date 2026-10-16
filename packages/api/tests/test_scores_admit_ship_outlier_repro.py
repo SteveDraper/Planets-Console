@@ -1085,7 +1085,9 @@ def test_turn10_player4_admit_ship_torpedoes_reproduces_late8_median() -> None:
 
     The persisted emission is 1.684s, time-limited, on 13,365 ship combos.
     The two central observations of the 530-step distribution are this row
-    and turn 11 player 20 at 1.692s.
+    and turn 11 player 20 at 1.692s. Unfiltered, the idle step spent the
+    deterministic budget in presolve. Reachable fittings leave a model that
+    finishes the band and stops at the solution cap.
     """
     if os.environ.get("SCORES_OUTLIER_REPRO") != "1":
         pytest.skip("set SCORES_OUTLIER_REPRO=1 to reproduce the local late-window row")
@@ -1119,6 +1121,7 @@ def test_turn10_player4_admit_ship_torpedoes_reproduces_late8_median() -> None:
     assert admit is not None, f"ladder stopped before tier 4\n{rendered}"
     assert admit.tier_id == OUTLIER_TIER_ID, rendered
     assert admit.combo_count == TURN10_PLAYER4_ADMIT_COMBO_COUNT, rendered
-    assert admit.stopped_reason == "time_budget", rendered
-    assert admit.deterministic_time >= 0.9, rendered
-    assert 0.5 <= admit.wall_seconds <= 6.0, rendered
+    assert admit.stopped_reason == "max_solutions", rendered
+    assert admit.structural_hits == 20, rendered
+    assert admit.deterministic_time < 0.5, rendered
+    assert admit.wall_seconds < 0.75, rendered

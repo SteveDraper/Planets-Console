@@ -40,6 +40,7 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     ranking_heuristics_diagnostics_payload,
     ship_build_objective_coefficient,
 )
+from api.analytics.military_score_inference.reachable_fittings import reachable_ship_fittings
 from api.analytics.military_score_inference.ship_build_combos import (
     is_generic_zero_military_score_combo_id,
 )
@@ -72,6 +73,8 @@ class _BuiltModel:
     objective_var: cp_model.IntVar
     merged_combo_catalog: _MergedComboCatalog
     diversity_caps_applied: tuple[dict[str, object], ...]
+    catalog_ship_fits: int = 0
+    reachable_ship_fits: int = 0
 
 
 def clone_built_model(built: _BuiltModel) -> _BuiltModel:
@@ -83,6 +86,8 @@ def clone_built_model(built: _BuiltModel) -> _BuiltModel:
         objective_var=built.objective_var,
         merged_combo_catalog=built.merged_combo_catalog,
         diversity_caps_applied=built.diversity_caps_applied,
+        catalog_ship_fits=built.catalog_ship_fits,
+        reachable_ship_fits=built.reachable_ship_fits,
     )
 
 
@@ -110,6 +115,8 @@ def _solver_build_diagnostics(
             admission_caps_by_action_id=problem.admission_caps_by_action_id,
         ),
         "diversityCapsApplied": list(built_model.diversity_caps_applied),
+        "catalogShipFitCount": built_model.catalog_ship_fits,
+        "reachableShipFitCount": built_model.reachable_ship_fits,
     }
 
 
@@ -397,6 +404,22 @@ def _build_model(
     problem: InferenceProblem,
     merged_combo_catalog: _MergedComboCatalog,
 ) -> _BuiltModel:
+    catalog_ship_fits = len(merged_combo_catalog.combos)
+    max_combo_weight = max(
+        (combo.probability_weight for combo in merged_combo_catalog.combos),
+        default=0,
+    )
+    reachable = reachable_ship_fittings(problem, merged_combo_catalog.combos)
+    if len(reachable) != catalog_ship_fits:
+        reachable_ids = {combo.combo_id for combo in reachable}
+        merged_combo_catalog = _MergedComboCatalog(
+            combos=reachable,
+            members_by_merged_id={
+                combo_id: members
+                for combo_id, members in merged_combo_catalog.members_by_merged_id.items()
+                if combo_id in reachable_ids
+            },
+        )
     model = cp_model.CpModel()
     action_count_vars = {
         action.id: model.new_int_var(action.lower_bound, action.upper_bound, action.id)
@@ -412,6 +435,7 @@ def _build_model(
         action_count_vars,
         combo_count_vars,
         ship_build_combos=merged_combo_catalog.combos,
+        max_combo_weight=max_combo_weight,
     )
 
     merged_problem = replace(problem, ship_build_combos=merged_combo_catalog.combos)
@@ -438,6 +462,8 @@ def _build_model(
         objective_var=objective_var,
         merged_combo_catalog=merged_combo_catalog,
         diversity_caps_applied=tuple(diversity_caps_applied),
+        catalog_ship_fits=catalog_ship_fits,
+        reachable_ship_fits=len(merged_combo_catalog.combos),
     )
 
 
@@ -814,6 +840,7 @@ def solve_inference_problem(
     else:
         merged_combo_catalog = merge_score_equivalent_combos(problem.ship_build_combos)
         built_model = _build_model(problem, merged_combo_catalog)
+        merged_combo_catalog = built_model.merged_combo_catalog
         search_seeds = seed_no_good_solutions
     build_diagnostics = _solver_build_diagnostics(problem, built_model)
     started_at = time.monotonic()
